@@ -200,3 +200,25 @@ def test_the_console_escapes_a_path_from_the_scanned_tree(tmp_path, monkeypatch)
     output = rendered(console)
 
     assert "web/evil\\n[bold]x[/bold]/package-lock.json" in output, output
+
+
+def test_a_projects_scan_set_drops_are_listed_as_ashs(tmp_path):
+    """The files a project's scan set left out travel on its entry, as ASH's."""
+    from automated_security_helper.models.asharp_model import (
+        AshAggregatedResults,
+        InputNotScanned,
+    )
+    from automated_security_helper.workspace.aggregation import (
+        inputs_not_scanned_for_project,
+    )
+
+    results = AshAggregatedResults()
+    results.metadata.inputs_not_scanned = [
+        InputNotScanned(path="lib/x.py", reason="link leaves the scanned tree")
+    ]
+
+    entries = inputs_not_scanned_for_project(results, "api")
+
+    assert [(e.scanner, e.path, e.reason) for e in entries] == [
+        ("ASH", "api/lib/x.py", "link leaves the scanned tree")
+    ]

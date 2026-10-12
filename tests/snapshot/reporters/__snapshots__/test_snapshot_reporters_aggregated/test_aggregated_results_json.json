@@ -32,7 +32,8 @@
     "shard": null,
     "expected_scanners": [],
     "plugin_load_errors": {},
-    "ignore_file_exclusions": null
+    "ignore_file_exclusions": null,
+    "inputs_not_scanned": null
   },
   "ash_config": {
     "project_name": "snapshot-fixture",

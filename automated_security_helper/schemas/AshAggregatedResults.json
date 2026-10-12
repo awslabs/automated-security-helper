@@ -8878,6 +8878,27 @@
       "title": "Importance",
       "type": "string"
     },
+    "InputNotScanned": {
+      "description": "One input that was found and not scanned, and why.\n\nA scanner records its own in its report (``ScanResultsContainer.\ninputs_not_scanned``); ASH records the ones it left out of the scan set, which\nevery reader of the scan set therefore did not scan, in\n``ReportMetadata.inputs_not_scanned``.",
+      "properties": {
+        "path": {
+          "description": "The input's path relative to the scanned tree, with '/' separators.",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it was not scanned.",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "InputNotScanned",
+      "type": "object"
+    },
     "InputOutputMLParameters": {
       "additionalProperties": false,
       "properties": {
@@ -14010,6 +14031,22 @@
           ],
           "default": null,
           "description": "Whether the scanned repository's .gitignore and .ignore files were honored when ASH built its scan set, and how many files they removed from it, in total and per ignore file. Written by every scan that runs the convert or scan phase. Absent from results that did not build a scan set, and from results older ASH versions wrote."
+        },
+        "inputs_not_scanned": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/InputNotScanned"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files ASH left out of its scan set, so that no reader of the scan set scanned them, each with the reason: a link to a file whose target, every link resolved, is outside the scanned tree ('link leaves the scanned tree'). The summaries list them under 'Inputs not scanned' as ASH's. Null when there were none.",
+          "title": "Inputs Not Scanned"
         },
         "plugin_load_errors": {
           "additionalProperties": {

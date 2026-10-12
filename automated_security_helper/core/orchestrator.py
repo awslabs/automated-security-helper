@@ -29,7 +29,10 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import (
     ASHValidationError,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    InputNotScanned,
+)
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
@@ -626,12 +629,14 @@ class ASHScanOrchestrator(BaseModel):
             elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 exclusions: Dict[str, Any] = {}
+                links_not_scanned: List[Dict[str, str]] = []
                 self.source_scan_set = scan_set(
                     source=str(self.source_dir),
                     output=str(self.output_dir),
                     debug=self.debug,
                     honor_ignore_files=honors_ignore_files(self.config),
                     exclusions=exclusions,
+                    links_not_scanned=links_not_scanned,
                 )
                 # Recorded on the results the phases build on, so the aggregated
                 # JSON and every summary say whether the repository's ignore files
@@ -642,6 +647,15 @@ class ASHScanOrchestrator(BaseModel):
                     self.execution_engine._asharp_model.metadata.ignore_file_exclusions = IgnoreFileExclusions.model_validate(
                         exclusions
                     )
+                # The links the scan set left out, which no reader of it scanned:
+                # listed as ASH's inputs not scanned in the results, the summaries
+                # and the console (unified_metrics.inputs_not_scanned). Set only when
+                # there are some, so other results keep their exact shape.
+                if links_not_scanned and self.execution_engine is not None:
+                    self.execution_engine._asharp_model.metadata.inputs_not_scanned = [
+                        InputNotScanned.model_validate(entry)
+                        for entry in links_not_scanned
+                    ]
                 ASH_LOGGER.info(
                     f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
                 )

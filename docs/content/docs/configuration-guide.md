@@ -329,7 +329,11 @@ A link to a file is in the scan set only when its target, with every link on the
 resolved, is inside the source directory. A link that leaves the tree (to an absolute
 path elsewhere, up through `..`, or through a link to a directory outside) is not
 scanned: a warning names it, as `Not scanning 'vendor/config.py': link leaves the
-scanned tree`, and names only the link, not where it points. A link to a file inside
+scanned tree`, and names only the link, not where it points. Each one is also listed
+as an input not scanned, under `ASH`: in `ash_aggregated_results.json` under
+`metadata.inputs_not_scanned` (`path` and `reason`), in the console summary, and in
+the "Inputs not scanned" section of `ash.summary.md` and `ash.summary.txt`; in a
+workspace scan, in that project's `inputs_not_scanned` entry. A link to a file inside
 the tree stays in the scan set, and a source directory that is itself reached through
 a link is scanned as given. This applies to the readers of the scan set listed above.
 The scanners that walk the source directory themselves, and snyk-code, do not read

@@ -209,6 +209,12 @@ def coverage_shortfalls(
     return shortfalls
 
 
+#: The name :func:`inputs_not_scanned` gives the inputs ASH itself left out of its scan
+#: set, in place of a scanner's: every scanner that reads the scan set did not scan
+#: them.
+SCAN_SET_OWNER = "ASH"
+
+
 def inputs_not_scanned(
     asharp_model: AshAggregatedResults,
 ) -> list[tuple[str, str, str]]:
@@ -219,11 +225,17 @@ def inputs_not_scanned(
     nothing about it in its findings, and its status cannot say which input it was, so
     the summaries list them beside the table, as they do coverage shortfalls.
 
+    The files ASH left out of its scan set come first, under :data:`SCAN_SET_OWNER`
+    (``ReportMetadata.inputs_not_scanned``): no reader of the scan set scanned them.
+
     For a workspace scan, whose unified results carry no per-target reports, they are
     read off each project's entry (``WorkspaceProjectResult.inputs_not_scanned``,
     workspace-relative paths), in workspace order, after any per-target ones.
     """
     entries = []
+    metadata = getattr(asharp_model, "metadata", None)
+    for item in getattr(metadata, "inputs_not_scanned", None) or []:
+        entries.append((SCAN_SET_OWNER, item.path, item.reason))
     for scanner_name in sorted(asharp_model.additional_reports or {}):
         reports = asharp_model.additional_reports.get(scanner_name)
         if not isinstance(reports, dict):

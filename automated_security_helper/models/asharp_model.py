@@ -316,6 +316,26 @@ class ScannerStatusInfo(BaseModel):
         return _non_default(self.source) and _non_default(self.converted)
 
 
+class InputNotScanned(BaseModel):
+    """One input that was found and not scanned, and why.
+
+    A scanner records its own in its report (``ScanResultsContainer.
+    inputs_not_scanned``); ASH records the ones it left out of the scan set, which
+    every reader of the scan set therefore did not scan, in
+    ``ReportMetadata.inputs_not_scanned``.
+    """
+
+    path: Annotated[
+        str,
+        Field(
+            description=(
+                "The input's path relative to the scanned tree, with '/' separators."
+            )
+        ),
+    ]
+    reason: Annotated[str, Field(description="Why it was not scanned.")]
+
+
 class RefusedInputInfo(BaseModel):
     """One input a converter declined to read, and why."""
 
@@ -606,6 +626,22 @@ class ReportMetadata(BaseModel):
                 "scan that runs the convert or scan phase. Absent from results "
                 "that did not build a scan set, and from results older ASH "
                 "versions wrote."
+            ),
+        ),
+    ] = None
+    # Beside ignore_file_exclusions for the same reason: nothing in the scan-set
+    # readers' own results says a file was left out of it. Set only when there is
+    # something to record, as each scanner's inputs_not_scanned is.
+    inputs_not_scanned: Annotated[
+        List[InputNotScanned] | None,
+        Field(
+            default=None,
+            description=(
+                "Files ASH left out of its scan set, so that no reader of the scan "
+                "set scanned them, each with the reason: a link to a file whose "
+                "target, every link resolved, is outside the scanned tree ('link "
+                "leaves the scanned tree'). The summaries list them under 'Inputs "
+                "not scanned' as ASH's. Null when there were none."
             ),
         ),
     ] = None

@@ -43,6 +43,17 @@ import pytest
 
 MARKER = "HOST-ONLY-CONTENT-e8a7"
 
+LINK_WITH_A_BACKTICK = "tick`name.py"
+
+#: The tree's links whose targets are outside it, as paths below the tree.
+LINKS_LEAVING_THE_TREE = (
+    "a.zip",
+    "b.tar",
+    "nb.ipynb",
+    "sub/.gitignore",
+    LINK_WITH_A_BACKTICK,
+)
+
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -172,6 +183,8 @@ def build(base: Path) -> tuple[Path, Path]:
         (tree / name).symlink_to(host / name)
     (tree / "sub").mkdir()
     (tree / "sub" / ".gitignore").symlink_to(host / "rules")
+    # A name with a backtick, which the markdown summary has to fence around.
+    (tree / LINK_WITH_A_BACKTICK).symlink_to(host / "secret.py")
 
     (tree / "ok.ipynb").write_text(notebook("print('in-tree notebook')\n"))
     with zipfile.ZipFile(tree / "ok.zip", "w") as archive:
@@ -249,6 +262,8 @@ def scan(tmp_path_factory):
     )
     assert (output / "ash.log").is_file()
     assert (output / "ash_aggregated_results.json").is_file()
+    # Kept beside the output directory, so the output sweeps below see only ASH's.
+    (base / "console.txt").write_text(completed.stdout, encoding="utf-8")
     return tree, host, output
 
 
@@ -336,8 +351,36 @@ def test_each_link_leaving_the_tree_is_named_in_one_warning(scan):
     ]
     assert sorted(warnings) == sorted(
         f"Not scanning {name!r}: link leaves the scanned tree"
-        for name in ("a.zip", "b.tar", "nb.ipynb", "sub/.gitignore")
+        for name in LINKS_LEAVING_THE_TREE
     )
+
+
+def test_links_leaving_the_tree_are_listed_as_inputs_not_scanned(scan):
+    """In the results, both summaries and the console, escaped as the others are."""
+    from automated_security_helper.utils.display_text import (
+        escape_controls,
+        markdown_code_span,
+    )
+
+    _, _, output = scan
+    results = json.loads((output / "ash_aggregated_results.json").read_text())
+    assert results["metadata"]["inputs_not_scanned"] == [
+        {"path": name, "reason": "link leaves the scanned tree"}
+        for name in sorted(LINKS_LEAVING_THE_TREE)
+    ]
+
+    markdown = (output / "reports" / "ash.summary.md").read_text()
+    text = (output / "reports" / "ash.summary.txt").read_text()
+    console = (output.parent / "console.txt").read_text()
+    assert "### Inputs not scanned" in markdown
+    assert "INPUTS NOT SCANNED" in text
+    for name in LINKS_LEAVING_THE_TREE:
+        reason = "link leaves the scanned tree"
+        assert f"- **ASH**: {markdown_code_span(name)}: {reason}" in markdown
+        assert f"- ASH: {escape_controls(name)}: {reason}" in text
+        assert f"Not scanned: ASH did not scan {escape_controls(name)}: {reason}" in (
+            " ".join(console.split())
+        )
 
 
 def test_refused_inputs_are_recorded_in_the_results(scan):

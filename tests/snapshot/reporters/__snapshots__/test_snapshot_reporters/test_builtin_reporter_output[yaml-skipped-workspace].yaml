@@ -28,6 +28,7 @@ metadata:
   expected_scanners: []
   generated_at: '2026-01-15T12:00:42+00:00'
   ignore_file_exclusions: null
+  inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: workspace
   report_id: ASH-WORKSPACE-snapshot-with-skipped

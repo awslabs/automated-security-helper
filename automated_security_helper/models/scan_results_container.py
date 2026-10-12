@@ -9,21 +9,15 @@ from typing import Annotated, Any, Dict, Literal, List, Optional
 from pydantic import BaseModel, Field
 
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.models.asharp_model import ScannerSeverityCount
 
+# InputNotScanned is defined beside ReportMetadata, which records the scan-level ones;
+# imported here, where each scanner's own are recorded, under the name it always had.
+from automated_security_helper.models.asharp_model import (
+    InputNotScanned,
+    ScannerSeverityCount,
+)
 
-class InputNotScanned(BaseModel):
-    """One input a scanner did not scan, and why."""
-
-    path: Annotated[
-        str,
-        Field(
-            description=(
-                "The input's path relative to the scanned tree, with '/' separators."
-            )
-        ),
-    ]
-    reason: Annotated[str, Field(description="Why the scanner did not scan it.")]
+__all__ = ["InputNotScanned", "ScanResultsContainer"]
 
 
 class ScanResultsContainer(BaseModel):
