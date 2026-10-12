@@ -1338,7 +1338,7 @@ VERDICT_FLAGS: Dict[str, Tuple[str, str]] = {
 }
 
 
-def _decided_by_flags(cli_values: Optional[Dict[str, Optional[bool]]]) -> set:
+def _decided_by_flags(cli_values: Optional[Dict[str, Optional[bool]]]) -> set[str]:
     """The verdict settings a flag given on the command line decides."""
     return {key for key, value in (cli_values or {}).items() if value is not None}
 
