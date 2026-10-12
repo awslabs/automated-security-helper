@@ -167,9 +167,12 @@ def _delivered_config_env_error(
         ASHConfigEnvNotResolvedError,
     )
 
+    permit_base = config_base_gate(session_id)
     try:
         if config_path is None:
-            selected = discover_config_source(target).selected
+            # Under the session's gate, as the scan discovers it: a source that
+            # links outside the grant is refused before anything opens it.
+            selected = discover_config_source(target, permit=permit_base).selected
             if selected is None:
                 return None
             path, confine_to = selected.path, target
@@ -181,7 +184,7 @@ def _delivered_config_env_error(
         resolve_config_document(
             path,
             confine_to=confine_to,
-            permit_base=config_base_gate(session_id),
+            permit_base=permit_base,
             refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
         )
     except ASHConfigEnvNotResolvedError as exc:
@@ -221,12 +224,14 @@ def _discovered_config_refusal(
         ASHConfigInputNotPermittedError,
     )
 
+    permit = config_base_gate(session_id)
     try:
-        check_discovery_candidates(target, config_base_gate(session_id))
+        check_discovery_candidates(target, permit)
     except ASHConfigInputNotPermittedError as exc:
         return config_chain_refusal(target, exc)
     try:
-        selected = discover_config_source(target).selected
+        # Under the gate again: a source can change after the check above.
+        selected = discover_config_source(target, permit=permit).selected
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         _logger.debug(f"Config not discovered before the scan ({exc})")
         return None
@@ -315,7 +320,8 @@ def _client_config_denial(
             path = Path(config_path)
             confine = default_confinement_root(path, source_dir)
         else:
-            selected = discover_config_source(source_dir).selected
+            # Under the session's gate, as the scan discovers it.
+            selected = discover_config_source(source_dir, permit=permit_base).selected
             if selected is None:
                 return None
             path, confine = selected.path, source_dir
