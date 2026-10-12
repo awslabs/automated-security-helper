@@ -232,6 +232,32 @@ def test_the_stage_is_built_by_its_lower_case_name(written, commands, monkeypatc
     assert f"automated-security-helper:{written.lower()}" in build
 
 
+@pytest.mark.parametrize(
+    ("container_uid", "container_gid", "id_flag"),
+    [
+        pytest.param(None, None, "--container-uid", id="uid-0"),
+        pytest.param("1000", "0", "--container-gid", id="gid-0"),
+    ],
+)
+def test_the_refusal_names_ci_first_and_other_ids_only_with_a_writable_output(
+    container_uid, container_gid, id_flag, commands
+):
+    """On a root host the output directory is root's, so another UID can scan only
+    when that directory is writable by it; ``ci`` works as it is."""
+    result = rac.run_ash_container(
+        source_dir="src",
+        output_dir="out",
+        ash_revision_to_install="v3.7.0",
+        container_uid=container_uid,
+        container_gid=container_gid,
+    )
+
+    # The advice starts with ci; the cause before it may name the flag as given.
+    advice = result.stderr[result.stderr.index("Pass --build-target ci") :]
+    assert id_flag in advice
+    assert "output directory is writable" in advice[advice.index(id_flag) :]
+
+
 def test_the_gid_has_no_default():
     """A caller that leaves the GID out gets an error, not a GID check skipped."""
     with pytest.raises(TypeError):

@@ -284,11 +284,11 @@ if [[ "${NO_BUILD}" = "NO" && "${TARGET_STAGE}" = "non-root" ]]; then
     BUILD_GID="${CONTAINER_GID}"
   fi
   if [[ "${BUILD_UID}" =~ ^0+$ ]]; then
-    echo "ERROR: The non-root image stage creates a user with UID 0, which is root: ASH is running as root, or --container-uid 0 was given. Pass --build-target ci to build the image that runs as root, or --container-uid and --container-gid with the IDs the non-root user should have." >&2
+    echo "ERROR: The non-root image stage creates a user with UID 0, which is root: ASH is running as root, or --container-uid 0 was given. Pass --build-target ci to build the image that runs as root. Another --container-uid and --container-gid work only when the output directory is writable by that UID: the container runs as that user and writes its reports there." >&2
     exit 1
   fi
   if [[ "${BUILD_GID}" =~ ^0+$ ]]; then
-    echo "ERROR: The non-root image stage gives its user GID 0, which is root's group: ASH is running with GID 0, or --container-gid 0 was given. Pass --build-target ci to build the image that runs as root, or --container-gid with the GID the non-root user should have." >&2
+    echo "ERROR: The non-root image stage gives its user GID 0, which is root's group: ASH is running with GID 0, or --container-gid 0 was given. Pass --build-target ci to build the image that runs as root. Another --container-gid works only when the output directory is writable by the container's user, which writes its reports there." >&2
     exit 1
   fi
 fi

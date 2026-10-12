@@ -185,6 +185,32 @@ def test_an_unprivileged_caller_builds_non_root(host):
 
 
 @pytestmark_posix
+@pytest.mark.parametrize(
+    ("arguments", "uid", "id_flag"),
+    [
+        pytest.param("-NoRun", "0", "-ContainerUID", id="uid-0"),
+        pytest.param(
+            "-NoRun -ContainerUID 1000 -ContainerGID 0",
+            "1000",
+            "-ContainerGID",
+            id="gid-0",
+        ),
+    ],
+)
+def test_the_refusal_names_ci_first_and_other_ids_only_with_a_writable_output(
+    arguments, uid, id_flag, host
+):
+    result, calls = host(arguments, uid=uid)
+
+    assert result.returncode == 3 and calls == [], result.stdout + result.stderr
+    message = " ".join(result.stderr.split())
+    # The advice starts with ci; the cause before it may name the flag as given.
+    advice = message[message.index("Pass -BuildTarget ci") :]
+    assert id_flag in advice
+    assert "output directory is writable" in advice[advice.index(id_flag) :]
+
+
+@pytestmark_posix
 @pytest.mark.parametrize("written", ["NON-ROOT", "Ci"])
 def test_the_stage_is_built_by_its_lower_case_name(written, host):
     result, calls = host(f"-NoRun -BuildTarget {written}", uid="1000")

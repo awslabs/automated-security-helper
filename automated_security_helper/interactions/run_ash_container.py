@@ -510,15 +510,17 @@ def _non_root_stage_uid_refusal(
         return (
             "The non-root image stage creates a user with UID 0, which is root: ASH "
             "is running as root, or --container-uid 0 was given. Pass --build-target "
-            "ci to build the image that runs as root, or --container-uid and "
-            "--container-gid with the IDs the non-root user should have."
+            "ci to build the image that runs as root. Another --container-uid and "
+            "--container-gid work only when the output directory is writable by that "
+            "UID: the container runs as that user and writes its reports there."
         )
     if int(container_gid) == 0:
         return (
             "The non-root image stage gives its user GID 0, which is root's group: "
             "ASH is running with GID 0, or --container-gid 0 was given. Pass "
-            "--build-target ci to build the image that runs as root, or "
-            "--container-gid with the GID the non-root user should have."
+            "--build-target ci to build the image that runs as root. Another "
+            "--container-gid works only when the output directory is writable by the "
+            "container's user, which writes its reports there."
         )
     return None
 

@@ -639,6 +639,28 @@ class TestANonRootBuildAsUid0IsRefused:
         assert calls == []
         assert "must be a numeric value" in output
 
+    @pytest.mark.parametrize(
+        ("host_ids", "args", "id_flag"),
+        [
+            pytest.param(("0", "0"), [], "--container-uid", id="uid-0"),
+            pytest.param(
+                ("1000", "0"), [], "--container-gid", id="gid-0-from-the-host"
+            ),
+        ],
+    )
+    def test_the_refusal_names_ci_first_and_other_ids_only_with_a_writable_output(
+        self, host_ids, args, id_flag, fake_runner, project
+    ):
+        rc, output, calls = _run_ash_status(
+            fake_runner, project, ["--no-run", *args], host_ids=host_ids
+        )
+
+        assert rc != 0 and calls == [], output
+        # The advice starts with ci; the cause before it may name the flag as given.
+        advice = output[output.index("Pass --build-target ci") :]
+        assert id_flag in advice
+        assert "output directory is writable" in advice[advice.index(id_flag) :]
+
     @pytest.mark.parametrize("written", ["NON-ROOT", "Non-Root"])
     def test_the_stage_name_in_any_case_is_refused_as_root(
         self, written, fake_runner, project

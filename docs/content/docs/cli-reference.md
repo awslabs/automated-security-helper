@@ -286,8 +286,10 @@ The image stage is the one `--build-target` names; when it is not given, `non-ro
 `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` variables do not change it;
 `--custom-containerfile` builds on `ci`. A `non-root` build is refused when the
 container user's UID or GID would be 0, which happens when ASH itself runs as root
-(common in CI jobs): pass `--build-target ci` (`-BuildTarget ci` for `Invoke-ASH`), or
-`--container-uid` and `--container-gid`. In AWS CodeBuild, for example:
+(common in CI jobs): pass `--build-target ci` (`-BuildTarget ci` for `Invoke-ASH`).
+Another `--container-uid` and `--container-gid` work only when the output directory is
+writable by that UID, which a directory ASH created as root is not. In AWS CodeBuild, for
+example:
 
 ```bash
 ash --mode container --build-target ci

@@ -61,8 +61,10 @@ or with `--container-uid` and `--container-gid`. A UID of 0 is root and cannot b
 user, and a GID of 0 is root's group, so a `non-root` build with UID 0 or GID 0 is refused
 before anything is built, and so is a UID or GID that is not a number. That is the
 case when ASH itself runs as root, as many CI jobs do (AWS CodeBuild, container-based
-GitLab and Jenkins jobs): pass `--build-target ci` there, or give the non-root user its
-IDs explicitly. `./ash` refuses it the same way, and so does `Invoke-ASH`, run as root
+GitLab and Jenkins jobs): pass `--build-target ci` there. Another `--container-uid` and
+`--container-gid` work only when the output directory is writable by that UID, since the
+container runs as that user and writes its reports there; on a root host ASH creates the
+output directory as root. `./ash` refuses it the same way, and so does `Invoke-ASH`, run as root
 or given `-ContainerUID 0` or `-ContainerGID 0`; its opt-in is `-BuildTarget ci`.
 Without `-ContainerUID`, `Invoke-ASH` builds an unprivileged caller's image with the
 Dockerfile's own UID.

@@ -400,10 +400,10 @@ function Invoke-ASH {
                             $buildUid = "$(& id -u)".Trim()
                         }
                         if ($buildUid -match '^0+$') {
-                            Stop-AshRefusal 3 "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root, or -ContainerUID and -ContainerGID with the IDs the non-root user should have."
+                            Stop-AshRefusal 3 "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerUID and -ContainerGID work only when the output directory is writable by that UID: the container runs as that user and writes its reports there."
                         }
                         if ($ContainerGID -match '^0+$') {
-                            Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root, or -ContainerGID with the GID the non-root user should have."
+                            Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
                         }
                     }
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
