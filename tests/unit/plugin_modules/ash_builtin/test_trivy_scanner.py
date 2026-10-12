@@ -77,11 +77,11 @@ from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREF
 PluginContext.model_rebuild()
 
 
-def _ashs_own(scanner: TrivyScanner, value: str) -> bool:
-    """Whether ``value`` is a file ASH wrote for this run's trivy.
+def _ashs_own(scanner: TrivyScanner | TrivyRepoScanner, value: str) -> bool:
+    """Whether ``value`` is a file, or empty directory, ASH made for this run's trivy.
 
-    ``config/tool_config_trust.empty_tool_config`` writes it in a directory of the
-    scanner run's own, outside the scanned tree.
+    ``config/tool_config_trust.empty_tool_config`` and ``empty_tool_directory`` make
+    it in a directory of the scanner run's own, outside the scanned tree.
     """
     path = Path(value)
     return not path.resolve().is_relative_to(
@@ -255,8 +255,9 @@ def test_default_argv(tmp_path):
     results = scanner.results_dir / "source" / "results_sarif.sarif"
     written = {
         flag: next(a for a in argv if a.startswith(f"{flag}="))[len(flag) + 1 :]
-        for flag in ("--ignorefile", "--secret-config")
+        for flag in ("--config", "--ignorefile", "--secret-config")
     }
+    assert Path(written["--config"]).name == "trivy-config.yaml"
     assert Path(written["--ignorefile"]).name == "trivyignore-empty"
     assert Path(written["--secret-config"]).name == "trivy-secret-empty.yaml"
     assert all(_ashs_own(scanner, value) for value in written.values())
@@ -272,7 +273,7 @@ def test_default_argv(tmp_path):
         "--skip-version-check",
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
-        f"--config={(scanner.results_dir / 'trivy-config.yaml').resolve().as_posix()}",
+        f"--config={written['--config']}",
         f"--ignorefile={written['--ignorefile']}",
         f"--secret-config={written['--secret-config']}",
         source.as_posix(),
@@ -322,10 +323,7 @@ def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
     ):
         value = next(a for a in argv if a.startswith(flag))[len(flag) :]
         assert Path(value).is_file() and Path(value).read_text() == content
-        if flag == "--config=":
-            assert Path(value).is_relative_to(scanner.results_dir.resolve())
-        else:
-            assert _ashs_own(scanner, value)
+        assert _ashs_own(scanner, value)
 
 
 @pytest.mark.parametrize(
@@ -485,11 +483,9 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
 
     assert (outside / "trivy.yaml").resolve().as_posix() not in " ".join(argv)
     (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
+    assert _ashs_own(scanner, value)
     if ash_name is not None:
-        assert Path(value).is_relative_to(scanner.results_dir.resolve())
         assert value.endswith(f"/{ash_name}")
-    else:
-        assert _ashs_own(scanner, value)
     assert f"Ignoring scanners.trivy.options.{option}" in caplog.text
     assert "symbolic link" in caplog.text
 
@@ -1362,12 +1358,11 @@ def test_trivy_repo_passes_its_own_config_and_an_empty_modules_dir(
 
     scanner, source, argv = _repo_scan_argv(tmp_path, monkeypatch)
 
-    results = Path(scanner.results_dir) / "source"
     config = _flag(argv, "--config")
     modules = _flag(argv, "--module-dir")
-    assert config == (results / "trivy-config.yaml").resolve()
+    assert config.name == "trivy-config.yaml" and _ashs_own(scanner, str(config))
     assert config.read_text() == ""
-    assert modules == (results / "trivy-modules").resolve()
+    assert modules.name == "trivy-modules" and _ashs_own(scanner, str(modules))
     assert list(modules.iterdir()) == []
     assert planted.resolve().as_posix() not in " ".join(argv)
     # Both flags precede the target, which trivy reads as its last positional. The
@@ -1377,7 +1372,11 @@ def test_trivy_repo_passes_its_own_config_and_an_empty_modules_dir(
     assert argv.index(f"--module-dir={modules.as_posix()}") < argv.index(target)
 
 
-def test_trivy_repo_empties_a_modules_dir_left_in_the_output(tmp_path, monkeypatch):
+def test_trivy_repo_does_not_use_a_modules_dir_left_in_the_output(
+    tmp_path, monkeypatch
+):
+    """A directory at the name ASH once used, in the output inside the tree, is not
+    the one passed: ASH's is new for each run, outside the tree."""
     probe = _repo_scanner(tmp_path)
     left = Path(probe.results_dir) / "source" / "trivy-modules"
     left.mkdir(parents=True)
@@ -1385,7 +1384,9 @@ def test_trivy_repo_empties_a_modules_dir_left_in_the_output(tmp_path, monkeypat
 
     _, _, argv = _repo_scan_argv(tmp_path, monkeypatch)
 
-    assert list(_flag(argv, "--module-dir").iterdir()) == []
+    passed = _flag(argv, "--module-dir")
+    assert passed.resolve() != left.resolve()
+    assert list(passed.iterdir()) == []
 
 
 def test_trivy_repo_ignores_a_config_file_the_scanned_tree_sets(

@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Where utils/tool_config_dir puts a scanner run's config files, and how it writes them.
+"""Where utils/tool_config_dir puts a scanner run's config files and empty
+directories, and how it writes them.
 
 tests/unit/config/test_generated_tool_configs_are_outside_the_tree.py runs the
 scanners that use it through the scanner executor; these cover the directory's
@@ -25,6 +26,7 @@ import pytest
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.tool_config_dir import (
     active_tool_config_dir,
+    make_tool_config_directory,
     tool_config_scope,
     write_tool_config,
 )
@@ -489,3 +491,32 @@ def test_each_run_gets_a_new_directory_whose_name_is_not_known_in_advance(
         assert third.read_text(encoding="utf-8") == "{}\n"
     assert (planted / "x.yaml").read_text(encoding="utf-8") == "planted\n"
     assert sorted(path.name for path in planted.iterdir()) == ["x.yaml"]
+
+
+def test_an_empty_directory_shares_the_runs_directory_and_goes_with_it(tree) -> None:
+    with tool_config_scope(_context(tree.source, tree.inside)):
+        config = write_tool_config("trivy-config.yaml", "")
+        modules = make_tool_config_directory("trivy-modules")
+        assert modules.is_dir() and list(modules.iterdir()) == []
+        assert modules.parent == config.parent == active_tool_config_dir()
+        assert not in_scanned_tree(modules, tree.source)
+        if os.name != "nt":
+            assert (modules.stat().st_mode & 0o777) == 0o700
+    assert not modules.exists()
+    assert not modules.parent.exists()
+
+
+def test_the_same_directory_name_twice_gives_two_empty_directories(tree) -> None:
+    with tool_config_scope(_context(tree.source, tree.inside)):
+        first = make_tool_config_directory("trivy-modules")
+        (first / "left.wasm").write_bytes(b"\0asm")
+        second = make_tool_config_directory("trivy-modules")
+        assert first != second and first.name == second.name == "trivy-modules"
+        assert list(second.iterdir()) == []
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "a/b", "../x"])
+def test_a_directory_name_that_is_not_a_name_is_refused(tree, name: str) -> None:
+    with tool_config_scope(_context(tree.source, tree.inside)):
+        with pytest.raises(ValueError):
+            make_tool_config_directory(name)

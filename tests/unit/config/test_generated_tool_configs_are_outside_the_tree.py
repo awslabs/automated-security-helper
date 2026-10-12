@@ -5,7 +5,8 @@
 
 bandit, grype, syft, trivy, trivy-repo and ferret-scan each get a config file ASH
 writes when the operator names none, one that sets nothing, so the tool does not read one
-from the tree on its own (``config/tool_config_trust.empty_tool_config``). The
+from the tree on its own (``config/tool_config_trust.empty_tool_config``), and
+trivy-repo an empty modules directory (``empty_tool_directory``). The
 output directory defaults to ``<source>/.ash/ash_output``, so the scanner's results
 directory, where these files used to be written, is inside the tree.
 
@@ -54,19 +55,33 @@ _EMPTY_SARIF = json.dumps({"version": "2.1.0", "runs": []})
 
 @dataclass(frozen=True)
 class Case:
-    """One file ASH writes for one scanner's tool."""
+    """One file, or empty directory, ASH writes for one scanner's tool."""
 
     scanner: str
     flag: str
-    #: Its name in the scanner's results directory, where it used to be written.
+    #: Its path under the scanner's results directory, where it used to be written.
     old_name: str
     content: str
     #: The tool's results file, relative to the results directory.
     results_file: str
     options: Dict[str, Any] = field(default_factory=dict)
+    #: An empty directory the tool reads files from, rather than a file.
+    directory: bool = False
 
     def __str__(self) -> str:
         return f"{self.scanner}{self.flag}"
+
+    @property
+    def expected(self) -> Any:
+        """What the tool finds: the file's text, or the directory's (no) entries."""
+        return () if self.directory else self.content
+
+
+def _read(path: Path) -> Any:
+    """``path``'s text, or the names in it when it is a directory."""
+    if path.is_dir():
+        return tuple(sorted(os.listdir(path)))
+    return path.read_text(encoding="utf-8")
 
 
 CASES = [
@@ -88,6 +103,21 @@ CASES = [
         "source/results_sarif.sarif",
     ),
     Case(
+        "trivy-repo",
+        "--config",
+        "source/trivy-config.yaml",
+        "",
+        "source/results_sarif.sarif",
+    ),
+    Case(
+        "trivy-repo",
+        "--module-dir",
+        "source/trivy-modules",
+        "",
+        "source/results_sarif.sarif",
+        directory=True,
+    ),
+    Case(
         "trivy", "--ignorefile", "trivyignore-empty", "", "source/results_sarif.sarif"
     ),
     Case(
@@ -97,6 +127,7 @@ CASES = [
         "{}\n",
         "source/results_sarif.sarif",
     ),
+    Case("trivy", "--config", "trivy-config.yaml", "", "source/results_sarif.sarif"),
     Case(
         "ferret-scan",
         "--config",
@@ -209,7 +240,7 @@ class _Tool:
             SimpleNamespace(
                 argv=argv,
                 path=path,
-                text=path.read_text(encoding="utf-8"),
+                text=_read(path),
                 directory_mode=stat.S_IMODE(os.lstat(path.parent).st_mode),
                 directory_is_link=path.parent.is_symlink(),
             )
@@ -248,7 +279,7 @@ def test_the_config_is_outside_the_scanned_tree_and_holds_what_ash_writes(
     (run,) = tool.runs
     assert not in_scanned_tree(run.path, context.source_dir), run.path
     assert not run.path.is_relative_to(Path(context.output_dir).resolve())
-    assert run.text == case.content
+    assert run.text == case.expected
     assert not (Path(scanner.results_dir) / case.old_name).exists()
 
 
@@ -277,24 +308,26 @@ def test_a_link_at_the_old_path_is_not_written_through(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: Case
 ) -> None:
     context = _context(tmp_path)
-    elsewhere = tmp_path / "elsewhere" / "kept.txt"
-    elsewhere.parent.mkdir()
-    elsewhere.write_text("not ASH's\n", encoding="utf-8")
+    kept = tmp_path / "elsewhere" / "kept.txt"
+    kept.parent.mkdir()
+    kept.write_text("not ASH's\n", encoding="utf-8")
     # Committed with the repository, at the name ASH used to write, so it is
-    # there before the scanner is even constructed.
+    # there before the scanner is even constructed. A directory ASH used to
+    # make there is planted as a link to a directory holding a file.
     planted = Path(context.output_dir) / "scanners" / case.scanner / case.old_name
     planted.parent.mkdir(parents=True)
-    planted.symlink_to(elsewhere)
+    planted.symlink_to(kept.parent if case.directory else kept)
 
     scanner = _scanner(case, context, monkeypatch)
-    assert Path(scanner.results_dir) == planted.parent
+    assert planted == Path(scanner.results_dir) / case.old_name
     tool = _Tool(case, scanner)
     with patch.object(scanner, "_run_subprocess", side_effect=tool):
         _run_through_the_executor(context, case, scanner)
 
-    assert elsewhere.read_text(encoding="utf-8") == "not ASH's\n"
+    assert kept.read_text(encoding="utf-8") == "not ASH's\n"
+    assert sorted(os.listdir(kept.parent)) == ["kept.txt"]
     (run,) = tool.runs
-    assert run.text == case.content
+    assert run.text == case.expected
     assert run.path.parent != planted.parent
 
 
@@ -309,8 +342,15 @@ class _RecordingBackend:
 
     def plan(self, argv, env, policy) -> SpawnPlan:
         argv = [str(a) for a in argv]
+        # trivy's database probe (`trivy version --config <its own empty file>`)
+        # runs in the same scope after the scan; it is not the scan's spawn.
+        is_probe = argv[1:2] == ["version"]
         self.spawns.append(
-            SimpleNamespace(argv=argv, policy=policy, path=_config_arg(argv, self.flag))
+            SimpleNamespace(
+                argv=argv,
+                policy=policy,
+                path=None if is_probe else _config_arg(argv, self.flag),
+            )
         )
         return SpawnPlan(argv=[sys.executable, "-c", "pass"], env=dict(env))
 
@@ -373,6 +413,31 @@ def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
     ]
     assert [_real(p) for p in granted] == [_real(directory)]
     assert not directory.exists()
+
+
+@pytest.mark.parametrize("scanner_name", ["trivy", "trivy-repo"])
+def test_trivy_s_database_probe_names_no_config_its_run_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scanner_name: str
+) -> None:
+    """The next probe of trivy's database must not name the removed empty config.
+
+    The probe (``trivy version --config``) reads the database through the config
+    the last scan passed, and the scanner's dependency check runs it again before
+    each later target, offline. trivy 0.75.0 exits with "config file ... loading
+    error: ... no such file or directory" when that file is gone, which would
+    read as "no usable database".
+    """
+    (case,) = [c for c in CASES if c.scanner == scanner_name and c.flag == "--config"]
+    context = _context(tmp_path)
+    scanner = _scanner(case, context, monkeypatch)
+    tool = _Tool(case, scanner)
+    with patch.object(scanner, "_run_subprocess", side_effect=tool):
+        _run_through_the_executor(context, case, scanner)
+
+    (run,) = tool.runs
+    assert not run.path.exists()
+    probed = scanner.content_database_probe_context().config_file
+    assert probed is None or Path(probed).is_file(), probed
 
 
 def test_constructing_ferret_scan_writes_no_config(

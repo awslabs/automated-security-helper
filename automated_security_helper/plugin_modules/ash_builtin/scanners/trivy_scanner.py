@@ -161,8 +161,8 @@ from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     set_by_operator,
 )
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
@@ -496,8 +496,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # trivy reads trivy.yaml and .trivyignore from its working directory, which
         # is the scanned repository. Either can drop findings with nothing in the
         # report saying so, so ASH passes its own unless the operator chose one.
-        self._scan_config_file = self._trivy_file("config_file", "trivy-config.yaml")
-        extra.append(f"--config={self._scan_config_file}")
+        config_file, operators = self._trivy_file("config_file", "trivy-config.yaml")
+        # Recorded for the staleness probe only when it is the operator's: ASH's
+        # empty one is removed with the run, and trivy fails on a --config that
+        # is missing (TrivyScannerBase._scan_config_file).
+        self._scan_config_file = config_file if operators else None
+        extra.append(f"--config={config_file}")
         # .trivyignore and trivy-secret.yaml as trivy-repo passes them
         # (TrivyScannerBase._trivy_input_file).
         extra.append(f"--ignorefile={self._ignore_file()}")
@@ -511,13 +515,16 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
         return final_args, results_file, subprocess_env
 
-    def _trivy_file(self, option: str, ash_name: str, ash_content: str = "") -> str:
-        """The trivy config file to pass, as an absolute POSIX path.
+    def _trivy_file(
+        self, option: str, ash_name: str, ash_content: str = ""
+    ) -> Tuple[str, bool]:
+        """The trivy config file to pass, as an absolute POSIX path, and whether it is the operator's.
 
         The operator's (see ``_operator_path``), which must exist: a missing file
         would otherwise mean scanning without the rules the operator asked for.
-        Otherwise an empty one ASH writes next to its results, so nothing in the
-        scanned repository is read as trivy configuration.
+        Otherwise an empty one ASH writes outside the scanned tree for this run
+        (``empty_tool_config``), so nothing in the scanned repository is read as
+        trivy configuration.
         """
         value = getattr(self._options(), option)
         # The path _operator_path checked, never one rebuilt from ``value``: the
@@ -539,14 +546,9 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                     f"a file (resolved to {path.as_posix()}). Fix the path or "
                     "unset the option; trivy is not run without it."
                 )
-            return path.as_posix()
-        if self.results_dir is None:
-            raise ScannerError("TrivyScanner has no results directory")
-        empty = self.results_dir.joinpath(ash_name)
-        empty.parent.mkdir(parents=True, exist_ok=True)
-        with open_for_write(empty) as handle:
-            handle.write(ash_content)
-        return empty.resolve().as_posix()
+            return path.as_posix(), True
+        empty = empty_tool_config(ash_name, ash_content, context=self.context)
+        return empty.resolve().as_posix(), False
 
     def _read_results_file(self, results_file: Path) -> Optional[Dict[str, Any]]:
         """Refuse the report of a run trivy did not finish (any exit but 0)."""

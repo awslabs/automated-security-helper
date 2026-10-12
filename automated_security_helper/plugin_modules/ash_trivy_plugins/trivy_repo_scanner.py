@@ -4,7 +4,6 @@
 import json
 import re
 import shlex
-import shutil
 import logging
 import threading
 from pathlib import Path
@@ -13,6 +12,10 @@ from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.config.tool_config_trust import (
+    empty_tool_config,
+    empty_tool_directory,
+)
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     TrivyScannerBase,
@@ -36,7 +39,6 @@ from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
 
 #: The trivy misconfiguration scanner that downloads the module sources a .tf file
@@ -305,7 +307,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             self._plugin_log(message, level=logging.WARNING)
         return args
 
-    def _pinned_config_args(self, results_dir: Path) -> List[str]:
+    def _pinned_config_args(self) -> List[str]:
         """``--config`` and ``--module-dir``, so trivy loads neither from where it runs.
 
         trivy runs with the scan target as its working directory and loads a
@@ -313,7 +315,8 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         modules in ``--module-dir`` (or the config's ``module.dir``). Both are
         always passed: the operator's, when ``_operator_path`` accepts them, and
         otherwise an empty config file and an empty modules directory that ASH
-        creates in this run's results directory.
+        creates outside the scanned tree for this run (``empty_tool_config``,
+        ``empty_tool_directory``), new each time and removed when the run ends.
         """
         options = self.config.options
         config_file: Optional[Path] = None
@@ -329,10 +332,16 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     f"{str(options.config_file)!r}, which is not a file (resolved to "
                     f"{config_file.as_posix()}). Fix the path or unset the option."
                 )
+        # Recorded for the staleness probe only when it is the operator's: ASH's
+        # empty one is removed with the run, and trivy fails on a --config that
+        # is missing (TrivyScannerBase._scan_config_file).
+        self._scan_config_file = (
+            config_file.resolve().as_posix() if config_file is not None else None
+        )
         if config_file is None:
-            config_file = results_dir / "trivy-config.yaml"
-            with open_for_write(config_file) as handle:
-                handle.write("")
+            config_file = empty_tool_config(
+                "trivy-config.yaml", "", context=self.context
+            )
         module_dir: Optional[Path] = None
         if options.module_dir:
             module_dir = self._operator_path(
@@ -348,17 +357,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     "the option."
                 )
         if module_dir is None:
-            module_dir = results_dir / "trivy-modules"
-            # Fresh and empty every run: the output directory usually sits inside
-            # the scanned tree, so whatever is already at this path is not ASH's.
-            if module_dir.is_symlink() or module_dir.is_file():
-                module_dir.unlink()
-            elif module_dir.is_dir():
-                shutil.rmtree(module_dir)
-            module_dir.mkdir()
-        self._scan_config_file = config_file.resolve().as_posix()
+            module_dir = empty_tool_directory("trivy-modules", context=self.context)
         return [
-            f"--config={self._scan_config_file}",
+            f"--config={config_file.resolve().as_posix()}",
             f"--module-dir={module_dir.resolve().as_posix()}",
         ]
 
@@ -460,7 +461,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             final_args[insert_at:insert_at] = [
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file()}",
-                *self._pinned_config_args(target_results_dir),
+                *self._pinned_config_args(),
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore. In the joined form, since a
                 # path can start with "-". See utils/link_exclusions.py.

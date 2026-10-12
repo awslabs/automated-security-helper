@@ -139,8 +139,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # The cache directory the last online scan was pointed at (--cache-dir), so
     # the staleness probe reads the same one (content_database_probe_context).
     _pinned_cache_dir: Optional[str] = PrivateAttr(default=None)
-    # The --config file the last scan passed trivy, for the same reason: a
-    # trivy.yaml can name the cache (``cache.dir``).
+    # The operator's --config file the last scan passed trivy, for the same
+    # reason: a trivy.yaml can name the cache (``cache.dir``). None when trivy got
+    # ASH's empty config, which sets nothing and is removed when its run ends;
+    # trivy exits with an error when --config names a file that is not there
+    # (measured with 0.75.0), so a later probe must not be handed it.
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
 
     def _ignore_file(self) -> str:

@@ -520,3 +520,23 @@ def empty_tool_config(name: str, content: str, *, context: Any) -> Path:
     from automated_security_helper.utils.tool_config_dir import write_tool_config
 
     return write_tool_config(name, content, context=context)
+
+
+def empty_tool_directory(name: str, *, context: Any) -> Path:
+    """An empty directory, for a tool that reads what a directory it is given holds.
+
+    ``empty_tool_config``'s counterpart for a directory (trivy-repo's
+    ``--module-dir``, gitleaks' ``--gitleaks-ignore-path``): made new, so nothing
+    is in it, in the same directory of the scanner run's own outside the scanned
+    tree, and removed with it.
+
+    Args:
+        name: The directory's name (``trivy-modules``).
+        context: The scanner's PluginContext, whose scanned tree the directory is
+            kept out of.
+    """
+    from automated_security_helper.utils.tool_config_dir import (
+        make_tool_config_directory,
+    )
+
+    return make_tool_config_directory(name, context=context)

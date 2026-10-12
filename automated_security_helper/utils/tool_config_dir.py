@@ -8,7 +8,9 @@ Why this exists
 bandit, grype, syft, trivy and ferret-scan each read a config file of their own
 from the scanned tree unless they are given one, so ASH always gives one: the
 operator's, or a file ASH writes that sets nothing
-(``config/tool_config_trust.empty_tool_config``). Those files used to be written in
+(``config/tool_config_trust.empty_tool_config``). A tool that loads what a
+directory holds (trivy-repo's modules directory) gets an empty one the same way
+(``empty_tool_directory``, :func:`make_tool_config_directory`). Those used to be written in
 the scanner's results directory. That is under the output directory, which
 defaults to ``<source>/.ash/ash_output``, so the file sat inside the tree being
 scanned, at a path the scanned repository could already occupy with a committed
@@ -263,6 +265,26 @@ def active_tool_config_dir() -> Optional[Path]:
     return holder.path if holder is not None else None
 
 
+def _run_directory(name: str, context: Any) -> Path:
+    """The directory of the run in progress, made if needed, for an entry ``name``.
+
+    Outside a scope, a directory of its own, outside ``context``'s scanned tree and
+    removed when the process exits.
+    """
+    if Path(name).name != name or name in ("", ".", ".."):
+        raise ValueError(f"not a file name: {name!r}")
+    global _unscoped_cleanup_registered
+    holder = _ACTIVE.get()
+    if holder is None:
+        holder = _ToolConfigDir(context)
+        with _unscoped_lock:
+            if not _unscoped_cleanup_registered:
+                atexit.register(_remove_unscoped)
+                _unscoped_cleanup_registered = True
+            _unscoped.append(holder)
+    return holder.directory()
+
+
 def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
     """Write ``content`` as ``name`` in the run's directory and return its path.
 
@@ -278,18 +300,7 @@ def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
             then gets a directory of its own, outside that context's scanned tree,
             removed when the process exits.
     """
-    if Path(name).name != name or name in ("", ".", ".."):
-        raise ValueError(f"not a file name: {name!r}")
-    global _unscoped_cleanup_registered
-    holder = _ACTIVE.get()
-    if holder is None:
-        holder = _ToolConfigDir(context)
-        with _unscoped_lock:
-            if not _unscoped_cleanup_registered:
-                atexit.register(_remove_unscoped)
-                _unscoped_cleanup_registered = True
-            _unscoped.append(holder)
-    directory = holder.directory()
+    directory = _run_directory(name, context)
     path = directory / name
     try:
         fd = os.open(path, _CREATE_FLAGS, 0o600)
@@ -298,4 +309,28 @@ def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
         fd = os.open(path, _CREATE_FLAGS, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
         handle.write(content)
+    return path
+
+
+def make_tool_config_directory(name: str, *, context: Any = None) -> Path:
+    """Make an empty directory ``name`` in the run's directory and return its path.
+
+    For a tool that reads whatever a directory it is given holds (trivy's
+    ``--module-dir``, gitleaks' ``--gitleaks-ignore-path``). The directory is
+    created, never an existing one reused, so it is empty, and a second one of
+    the same name in one run gets a new subdirectory, as a file does in
+    :func:`write_tool_config`.
+
+    Args:
+        name: The directory's name (``trivy-modules``).
+        context: The scanner's PluginContext, for a run outside a scope, as for
+            :func:`write_tool_config`.
+    """
+    directory = _run_directory(name, context)
+    path = directory / name
+    try:
+        os.mkdir(path, 0o700)
+    except FileExistsError:
+        path = Path(tempfile.mkdtemp(dir=directory)) / name
+        os.mkdir(path, 0o700)
     return path

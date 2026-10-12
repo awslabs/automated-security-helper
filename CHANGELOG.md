@@ -1252,8 +1252,8 @@
   has terminal escape sequences removed and other control characters escaped.
 - **trivy-repo names its own config file and modules directory.** It always passes
   `--config` and `--module-dir`: by default an empty config file and an empty
-  directory in its results directory, so trivy does not load a `trivy.yaml` from the
-  scanned repository. New options `scanners.trivy-repo.options.config_file` and
+  directory that ASH makes outside the scanned tree for each run and removes when
+  the run ends, so trivy does not load a `trivy.yaml` from the scanned repository. New options `scanners.trivy-repo.options.config_file` and
   `module_dir` name others; they are honored when set through `--config-overrides`
   or a config file outside the scanned tree, for paths outside that tree, and are
   ignored with a warning otherwise.
@@ -1303,7 +1303,8 @@
     is not passed to the tool. A link outside the tree, and a path that leaves by
     `..`, are followed as before.
   - The empty config files ASH passes bandit, grype, syft, ferret-scan, trivy and
-    trivy-repo when the operator names none are written in a new directory
+    trivy-repo when the operator names none, and trivy-repo's empty modules
+    directory, are written in a new directory
     outside the scanned tree, one per scanner run, made with mode 0700 and
     removed when the run ends, instead of in `<output>/scanners/<name>/`, which
     is inside the tree with the default output directory. What the tools report
