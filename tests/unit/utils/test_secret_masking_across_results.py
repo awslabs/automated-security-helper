@@ -720,6 +720,193 @@ class TestTokenBoundaries:
         assert region.snippet.binary == "AAAA"
 
 
+def _context_neighbor(uri="app.py"):
+    """A B404 whose context, lines 1-2, holds the assignment on line 2."""
+    return _result(
+        "B404",
+        uri,
+        1,
+        "import",
+        context=(1, OTHER_LINE + ASSIGN_LINE),
+        scanner="bandit",
+    )
+
+
+class TestEachRecognitionRule:
+    """Each way of recognizing a secret finding, on an input only it recognizes."""
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            # checkov's secrets framework, by its rule prefix alone.
+            {
+                "ruleId": "CKV_SECRET_6",
+                "message": {"text": "Base64 High Entropy String"},
+                "properties": {"scanner_name": "checkov"},
+            },
+            # Any scanner, by a "secret" tag on the result.
+            {
+                "ruleId": "ACME-7",
+                "message": {"text": "Acme finding"},
+                "properties": {"scanner_name": "acme", "tags": ["acme", "secret"]},
+            },
+            # bandit's rule ids, with no value in the message.
+            {
+                "ruleId": "B105",
+                "message": {"text": "Possible hardcoded " + NAME},
+                "properties": {"scanner_name": "acme"},
+            },
+        ],
+        ids=["checkov-secret-prefix", "secret-tag", "bandit-rule-id"],
+    )
+    def test_the_rule_masks_its_line_in_a_neighbors_context(self, secret):
+        result = _result("X", "app.py", 2, "x")
+        result.update(secret)
+        model = _results(result, _context_neighbor())
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            OTHER_LINE + MASKED_LINE + "\n"
+        )
+
+    def test_a_message_that_quotes_a_value_masks_it_where_it_is_reused(self):
+        model = _results(
+            _result(
+                "ACME-8",
+                "app.py",
+                1,
+                "Acme match. Matched text: '" + VALUE + "'",
+                scanner="acme",
+            ),
+            _reuse(REUSE_LINE),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert VALUE not in _region_text(model.sarif.runs[0].results[1])
+
+    def test_a_secret_tag_on_the_rule_in_the_tools_metadata(self):
+        """trivy tags its secret rules, not its results."""
+        import json
+
+        dumped = json.loads(
+            _results(
+                _result("aws-access-key-id", "app.py", 2, "AWS key", scanner="acme"),
+                _context_neighbor(),
+            ).model_dump_json(by_alias=True)
+        )
+        dumped["sarif"]["runs"][0]["tool"]["driver"]["rules"] = [
+            {"id": "aws-access-key-id", "properties": {"tags": ["secret", "security"]}}
+        ]
+        model = AshAggregatedResults.model_validate(dumped)
+
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            OTHER_LINE + MASKED_LINE + "\n"
+        )
+
+
+class TestEachMaskingStep:
+    """Each step that keeps a value out of the output, on an input only it handles."""
+
+    def _secret(self, region):
+        result = _result(
+            "SECRET-KEYWORD", "app.py", 2, "Secret detected", scanner="detect-secrets"
+        )
+        result["locations"][0]["physicalLocation"]["region"] = region
+        return result
+
+    def test_a_secret_finding_with_no_line_masks_the_whole_file(self):
+        model = _results(self._secret({}), _context_neighbor())
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            (MASKED_LINE + "\n") * 2
+        )
+
+    def test_every_line_of_a_multi_line_secret_region_is_masked(self):
+        neighbor = _result(
+            "B404",
+            "app.py",
+            3,
+            "import",
+            context=(3, ASSIGN_LINE + OTHER_LINE),
+            scanner="bandit",
+        )
+        model = _results(self._secret({"startLine": 2, "endLine": 3}), neighbor)
+
+        mask_secrets_in_results(model)
+
+        # Line 3 is the region's last line; line 4 is outside it.
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            MASKED_LINE + "\n" + OTHER_LINE
+        )
+
+    def test_a_snippet_with_no_first_line_is_masked_whole(self):
+        neighbor = _context_neighbor()
+        del neighbor["locations"][0]["physicalLocation"]["contextRegion"]["startLine"]
+        model = _results(self._secret({"startLine": 2, "endLine": 2}), neighbor)
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            (MASKED_LINE + "\n") * 2
+        )
+
+    def test_rendered_text_and_markdown_are_masked(self):
+        neighbor = _context_neighbor()
+        neighbor["locations"][0]["physicalLocation"]["contextRegion"]["snippet"] = {
+            "text": OTHER_LINE + ASSIGN_LINE,
+            "rendered": {
+                "text": OTHER_LINE + ASSIGN_LINE,
+                "markdown": OTHER_LINE + ASSIGN_LINE,
+            },
+        }
+        model = _results(self._secret({"startLine": 2, "endLine": 2}), neighbor)
+
+        mask_secrets_in_results(model)
+
+        snippet = (
+            model.sarif.runs[0]
+            .results[1]
+            .locations[0]
+            .physicalLocation.root.contextRegion.snippet
+        )
+        assert VALUE not in snippet.rendered.text
+        assert VALUE not in snippet.rendered.markdown
+
+    def test_a_files_contents_embedded_in_the_run_are_masked(self):
+        import json
+
+        dumped = json.loads(
+            _results(self._secret({"startLine": 2, "endLine": 2})).model_dump_json(
+                by_alias=True
+            )
+        )
+        dumped["sarif"]["runs"][0]["artifacts"] = [
+            {
+                "location": {"uri": "app.py"},
+                "contents": {"text": OTHER_LINE + ASSIGN_LINE},
+            }
+        ]
+        model = AshAggregatedResults.model_validate(dumped)
+
+        contents = model.sarif.runs[0].artifacts[0].contents.text
+        assert contents == OTHER_LINE + MASKED_LINE + "\n"
+
+    def test_a_value_in_a_property_bag_entry_is_masked(self):
+        reuse = _reuse(OTHER_LINE)
+        reuse["properties"]["command"] = f"login --token {VALUE}"
+        model = _results(_b105(VALUE), reuse)
+
+        mask_secrets_in_results(model)
+
+        properties = model.sarif.runs[0].results[1].properties
+        assert VALUE not in properties.model_dump_json()
+        assert properties.model_dump()["command"].startswith("login --token ")
+
+
 class TestLineSeparators:
     """Snippets are split into lines the way scanners count them.
 
