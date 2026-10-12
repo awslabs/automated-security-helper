@@ -58,6 +58,8 @@ class ScannerSeverityCount(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
     suppressed: int = (
         0  # Suppressed findings take precedence over other severity levels
@@ -122,6 +124,8 @@ class SummaryStats(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
@@ -248,6 +252,8 @@ class ScannerTargetStatusInfo(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     status: ScannerStatus = ScannerStatus.PASSED
@@ -287,6 +293,8 @@ class ScannerStatusInfo(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     severity_threshold: str | None = None
@@ -325,6 +333,10 @@ class InputNotScanned(BaseModel):
     ``ReportMetadata.inputs_not_scanned``.
     """
 
+    # Read from a scanner's report or a results file, whose values an error does
+    # not quote.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     path: Annotated[
         str,
         Field(
@@ -339,7 +351,10 @@ class InputNotScanned(BaseModel):
 class RefusedInputInfo(BaseModel):
     """One input a converter declined to read, and why."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="allow", hide_input_in_errors=True
+    )
 
     path: Annotated[
         str,
@@ -392,7 +407,10 @@ class RefusedInputInfo(BaseModel):
 class FailedInputInfo(BaseModel):
     """One input a converter set out to convert and could not."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="allow", hide_input_in_errors=True
+    )
 
     path: Annotated[
         str,
@@ -412,6 +430,8 @@ class ConverterStatusInfo(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     dependencies_satisfied: bool = True
@@ -516,6 +536,8 @@ class ReportMetadata(BaseModel):
             datetime: lambda v: v.isoformat(),
             ExportFormat: lambda v: str(v),
         },
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     report_id: Annotated[
@@ -683,6 +705,9 @@ class AshAggregatedResults(BaseModel):
         extra="ignore",
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
+        # The stored config's values can be secrets, and the rest is read from a
+        # results file: an error does not quote them.
+        hide_input_in_errors=True,
     )
 
     name: str = Field(default="ASH Scan Report", description="Name of the report")

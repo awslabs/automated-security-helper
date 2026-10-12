@@ -384,7 +384,7 @@
       ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': 1 validation error
       for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config
       lint' to identify and fix issues.
   
@@ -512,11 +512,11 @@
     'stderr': '''
       Configuration validation failed: 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
       Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash/.ash.yaml': 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
   
     ''',

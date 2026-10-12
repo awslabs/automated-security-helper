@@ -116,14 +116,16 @@ def _detect_secrets_api():
 
 
 class DetectSecretsScanSettingsPluginsUsed(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Built from detect-secrets' output, whose values an error does not quote.
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
     name: str | None = None
     limit: float | None = None
     keyword_exclude: str | None = None
 
 
 class DetectSecretsScanSettingsFiltersUsed(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Built from detect-secrets' output, whose values an error does not quote.
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
     path: str | None = None
     min_level: int | None = None
     keyword_exclude: str | None = None

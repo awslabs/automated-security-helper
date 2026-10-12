@@ -122,13 +122,22 @@ def report_file_name(key: str) -> WrapValidator:
 class BuilderOptionsBase(BaseModel):
     """Base class for builder options."""
 
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="allow", arbitrary_types_allowed=True, hide_input_in_errors=True
+    )
 
 
 class PluginOptionsBase(BaseModel):
     """Base class for plugin options."""
 
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="allow",
+        arbitrary_types_allowed=True,
+        # A refused value can be a secret read from the environment, and an
+        # error's text goes wherever the error is shown. Every options class
+        # inherits this, as pydantic merges a subclass's settings with its base's.
+        hide_input_in_errors=True,
+    )
 
 
 class ConverterOptionsBase(PluginOptionsBase):

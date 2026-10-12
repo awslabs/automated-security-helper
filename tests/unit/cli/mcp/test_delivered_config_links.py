@@ -522,7 +522,9 @@ def test_positive_control_the_validators_message_quotes_the_value(_server) -> No
 def test_positive_control_an_operator_file_keeps_the_detailed_error(
     _server,
 ) -> None:
-    """The operator's own file is reported with the validator's full detail."""
+    """The operator's own file is reported with the validator's full detail: the
+    model and the kind of problem. Not the value: no model's error quotes its
+    input, since a config value can be a secret read from the environment."""
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.core.exceptions import ASHConfigValidationError
 
@@ -533,7 +535,10 @@ def test_positive_control_an_operator_file_keeps_the_detailed_error(
     with pytest.raises(ASHConfigValidationError) as raised:
         resolve_config(config_path=host_file, source_dir=elsewhere)
 
-    assert CANARY in str(raised.value)
+    message = str(raised.value)
+    assert "validation error for AshConfig" in message, message
+    assert "[type=model_type]" in message, message
+    assert CANARY not in message, message
 
 
 # ---------------------------------------------------------------------------

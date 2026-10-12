@@ -166,7 +166,7 @@
     'result': dict({
       'error': '''
         Failed to parse result file: 1 validation error for AshAggregatedResults
-          Input should be an object [type=model_type, input_value=[], input_type=list]
+          Input should be an object [type=model_type]
             For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
       ''',
       'success': False,
@@ -1917,7 +1917,7 @@
     'result': dict({
       'error': '''
         Failed to parse results file: 1 validation error for AshAggregatedResults
-          Invalid JSON: key must be a string at line 1 column 2 [type=json_invalid, input_value='{not json', input_type=str]
+          Invalid JSON: key must be a string at line 1 column 2 [type=json_invalid]
             For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
       ''',
       'success': False,

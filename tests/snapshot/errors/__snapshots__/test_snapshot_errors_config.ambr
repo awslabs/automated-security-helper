@@ -143,7 +143,7 @@
                                 For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
       Invalid configuration: Configuration validation failed for 'ash.yaml': 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
   
     ''',
@@ -173,7 +173,7 @@
     'stdout': '''
       Error loading config file: 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
   
     ''',
@@ -190,7 +190,7 @@
                                 For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
       Config file '<TMP>/ash.yaml' is not valid: Configuration validation failed for 'ash.yaml': 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
   
     ''',
@@ -234,7 +234,7 @@
       [<LOG_TIME>] INFO     Applied modification: fail_on_findings=sometimes
       Failed to validate config after applying modifications: 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='sometimes', input_type=str]
+        Input should be a valid boolean, unable to interpret input [type=bool_parsing]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_parsing
   
     ''',

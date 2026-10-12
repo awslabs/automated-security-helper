@@ -201,6 +201,17 @@
   written, as a reference to an unlisted name is. The warning names the
   variable, never its value. Every other `ASH_` name, and `AWS_REGION`,
   `AWS_DEFAULT_REGION` and `AWS_PROFILE`, resolves as before.
+- **A validation error no longer repeats the value it refused.** pydantic's text for
+  one quoted every refused input (`input_value='...'`). A config value can be a
+  secret read from the environment, and the text reached the console, `ash.log`,
+  results files and MCP responses wherever an error was shown. These models now hide
+  inputs in their errors: the config, results and workspace models, every plugin
+  class and its config and options classes, and the SARIF, CycloneDX and other
+  models ASH validates on their own. The field and the problem are still named. A
+  workspace policy file's refusal still shows the value the file wrote, since nothing
+  in it is read from the environment. A client's runtime patch that the patched
+  config refuses is answered without the inputs, which hold the registered
+  profile's values.
 - **Only the operator turns trivy-repo's telemetry on.** A config file inside a git
   checkout or the scanned directory could set
   `scanners.trivy-repo.options.disable_telemetry: false`, and trivy then sent

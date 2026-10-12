@@ -110,7 +110,8 @@ class SecretValueShape(BaseModel):
     a digest of a short value can be reversed by trying values.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
 
     prefix: str
     suffix: str

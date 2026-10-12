@@ -186,6 +186,11 @@ class PluginBase(UVToolMixin, BaseModel):
         extra="allow",
         arbitrary_types_allowed=True,
         use_enum_values=True,
+        # A phase builds a plugin from its config section, which a config model
+        # may not type (a plugin module's section), so the plugin's own error is
+        # the one raised. A refused value can be a secret read from the
+        # environment, and an error's text goes wherever the error is shown.
+        hide_input_in_errors=True,
     )
     context: PluginContext | None = None
     config: PluginConfigBase | None = None

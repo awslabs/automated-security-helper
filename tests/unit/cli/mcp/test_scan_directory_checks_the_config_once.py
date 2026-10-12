@@ -217,12 +217,13 @@ def test_a_client_named_file_that_does_not_validate_quotes_no_value(target, capl
 
 
 @pytest.mark.parametrize("source", ["client", "repository", "operator"])
-def test_the_load_check_repeats_only_an_operators_values(
+def test_the_load_check_repeats_no_value_it_found(
     target, tmp_path, monkeypatch, source
 ):
-    """check_config_input's result for a file the client named outside the config
-    roots, and for one in the scanned directory, gives no value it found; an
-    operator's file in a config root outside the tree keeps pydantic's text."""
+    """check_config_input's result gives no value it found: for a file the client
+    named outside the config roots, for one in the scanned directory, and for an
+    operator's file in a config root outside the tree. The operator's keeps
+    pydantic's text, which names the field and the problem but not the input."""
     from automated_security_helper.cli.mcp.sandbox import check_config_input
 
     if source == "client":
@@ -240,11 +241,10 @@ def test_the_load_check_repeats_only_an_operators_values(
     checked = check_config_input(str(config), source_dir=target)
 
     assert checked.load_error is not None
+    _no_canary_anywhere(checked.load_error)
+    assert "ignore_paths" in str(checked.load_error)
     if source == "operator":
-        assert CANARY in str(checked.load_error)
-    else:
-        _no_canary_anywhere(checked.load_error)
-        assert "ignore_paths" in str(checked.load_error)
+        assert "validation error for AshConfig" in str(checked.load_error)
 
 
 @pytest.mark.parametrize(

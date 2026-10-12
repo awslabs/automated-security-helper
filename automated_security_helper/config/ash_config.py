@@ -1135,7 +1135,8 @@ class SandboxConfig(BaseModel):
     See docs/content/docs/scanner-sandbox.md for the policy each scanner gets.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Validated on its own too; see AshConfig.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     mode: Annotated[
         Literal["off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"],
@@ -1253,6 +1254,8 @@ class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         validate_default=True,
+        # Validated on its own too; see AshConfig.
+        hide_input_in_errors=True,
     )
 
     severity_threshold: Annotated[
@@ -1513,6 +1516,10 @@ class AshConfig(BaseModel):
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
         extra="ignore",
+        # A refused value can be a secret read from the environment, and an
+        # error's text goes wherever the error is shown: the console, ash.log,
+        # an MCP response. The input stays in errors().
+        hide_input_in_errors=True,
         # Accept BOTH the alias (e.g., 'mcp-resource-management') and the
         # Python field name (e.g., 'mcp_resource_management') as input.
         # Pydantic v2 default is alias-only when an alias is declared,

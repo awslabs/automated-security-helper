@@ -359,6 +359,22 @@ def load_workspace_policy(
     return _load_policy(named.resolve(), named, quote_values)
 
 
+def _policy_problems(error: ValidationError) -> str:
+    """Each problem of a policy file, with the value the file wrote.
+
+    The model hides inputs in its errors, since a config value can be a secret
+    read from the environment. This loader substitutes nothing from the
+    environment, so each value is the file's own text, and an operator whose CI
+    templating left ``${THRESH}`` unexpanded has to see it. ``repr`` shows a
+    control character in it as an escape.
+    """
+    return "; ".join(
+        f"{'.'.join(str(part) for part in item['loc']) or '(top level)'}: "
+        f"{item['msg']} (the file has {item.get('input')!r})"
+        for item in error.errors()
+    )
+
+
 def _load_policy(path: Path, named: Path, quote_values: bool) -> AshWorkspaceConfig:
     """``load_workspace_policy`` for the file ``path``, reached by ``named``."""
     label = f"workspace policy file '{named.as_posix()}'"
@@ -385,7 +401,7 @@ def _load_policy(path: Path, named: Path, quote_values: bool) -> AshWorkspaceCon
         return AshWorkspaceConfig.model_validate(document)
     except ValidationError as exc:
         if quote_values:
-            raise _refuse(f"{label} is not valid: {exc}") from exc
+            raise _refuse(f"{label} is not valid: {_policy_problems(exc)}") from exc
         from automated_security_helper.config.resolve_config import (
             unquoted_validation_problems,
         )

@@ -44,6 +44,10 @@ class ToolExtraArg(BaseModel):
 class IgnorePathWithReason(BaseModel):
     """Represents a path exclusion entry."""
 
+    # Validated on its own from a config or a results file: a refused value can
+    # be a secret, and an error's text goes wherever the error is shown.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
     expiration: Annotated[
@@ -78,6 +82,9 @@ class IgnoreFileExclusions(BaseModel):
     or ``--no-honor-ignore-files``. A scanner that read fewer files cannot say so in
     its own results, so the scan records it here and the summaries print it.
     """
+
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     honored: Annotated[
         bool,

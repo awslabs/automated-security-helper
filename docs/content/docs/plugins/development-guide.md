@@ -62,6 +62,8 @@ class MyCustomScanner(ScannerPluginBase):
         # Implement cleanup logic
 ```
 
+A plugin class, and a config or options class derived from ASH's bases, inherits `hide_input_in_errors=True`. A validation error then names the field and the problem but not the value it refused: a config value can be a secret read from the environment, and the error's text can reach the console, the log and an MCP response. Keep that setting if a class sets its own `model_config`. pydantic merges a subclass's settings with its base's, so leaving the key out keeps it.
+
 ### Plugin Registration
 
 Plugins must be registered with ASH to be discovered:

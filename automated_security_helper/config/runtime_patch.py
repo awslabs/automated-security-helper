@@ -1027,7 +1027,12 @@ def apply_runtime_patch(
         return AshConfig.model_validate(patched)
     except ValidationError as exc:
         raise RuntimePatchDeniedError(
-            None, f"patched config failed validation: {exc.errors()}"
+            None,
+            # The client is told the field and the problem, not the input: the
+            # patched config holds the registered profile's values, and an
+            # error at a section or the top level quotes all of it.
+            "patched config failed validation: "
+            f"{exc.errors(include_input=False, include_url=False)}",
         ) from exc
 
 
