@@ -750,10 +750,10 @@ class TestEachRecognitionRule:
                 "message": {"text": "Acme finding"},
                 "properties": {"scanner_name": "acme", "tags": ["acme", "secret"]},
             },
-            # bandit's rule ids, with no value in the message.
+            # bandit's rule ids, with a message no other rule recognizes.
             {
                 "ruleId": "B105",
-                "message": {"text": "Possible hardcoded " + NAME},
+                "message": {"text": "Bandit finding"},
                 "properties": {"scanner_name": "acme"},
             },
         ],
