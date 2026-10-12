@@ -695,12 +695,23 @@ def _ash_paths() -> List[Path]:
         return any(real == root or root in real.parents for root in interpreter_roots)
 
     import_path = [Path(entry) for entry in sys.path if _importable(entry)]
-    interpreter_dirs = [
-        Path(sys.prefix),
-        Path(sys.base_prefix),
-        Path(sys.exec_prefix),
-        Path(os.path.realpath(sys.executable)).parent.parent,
-    ]
+    interpreter_dirs = [Path(sys.prefix), Path(sys.base_prefix), Path(sys.exec_prefix)]
+    # The real interpreter's install prefix, read from where its binary is. For a
+    # binary directly in a top-level directory that is the filesystem root, which
+    # names no installation. Where that directory is already a system read path
+    # (/bin without a merged /usr, /opt), the root is left out: the binary's
+    # directory is mounted as a link directory below, and that grants nothing new.
+    # Anywhere else (/mnt/python3, /srv/python3) it stays in and is refused, since
+    # leaving it out would mount that whole top-level directory for every scanner.
+    # A sys prefix of "/" is refused either way.
+    real_binary_dir = Path(os.path.realpath(sys.executable)).parent
+    real_prefix = real_binary_dir.parent
+    system_paths = [Path(path) for path in SYSTEM_READ_PATHS]
+    system_paths += [Path(os.path.realpath(path)) for path in system_paths]
+    if real_prefix.parent != real_prefix or not _inside_any(
+        real_binary_dir, system_paths
+    ):
+        interpreter_dirs.append(real_prefix)
     link_dirs = [hop.parent for hop in _symlink_hops(Path(sys.executable))]
     bin_path = _bin_path()
     _refuse_a_home_among(

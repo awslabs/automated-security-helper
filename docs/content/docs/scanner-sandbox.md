@@ -112,7 +112,12 @@ it needs.
   directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). When `HOME`
   names a directory other than your account's passwd entry's home, both directories
   are screened this way. ASH's own Python is mounted where it is installed, and
-  `ASH_BIN_PATH` with it. The scanner is refused rather than given the home when
+  `ASH_BIN_PATH` with it. A Python whose binary sits directly in a top-level system
+  directory (`/opt/python3`, or `/bin/python3` where `/bin` is not merged into
+  `/usr`) gets that directory, which is already mounted, and never `/`. One directly
+  in any other top-level directory (`/mnt/python3`, `/srv/python3`) is refused, since
+  it would mount that whole directory, and so is a Python whose `sys.prefix` is `/`.
+  The scanner is refused rather than given the home when
   the Python's prefix is a home directory or a directory directly in one that is
   not a virtual environment or conda installation (`~/.local`), when the Python is
   reached through a link kept directly in a home (a virtual environment made with

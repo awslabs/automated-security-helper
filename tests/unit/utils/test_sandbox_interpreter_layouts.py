@@ -8,8 +8,9 @@ when those paths would mount a home directory. Each case here fakes one
 installation layout, with its files and links, and points sys.prefix,
 sys.base_prefix, sys.exec_prefix and sys.executable at it. The scanner's policy
 then has to build without a refusal, and no home directory may be among its
-read-only paths, nor any directory holding one. The two controls are layouts the
-refusal exists for.
+read-only paths, nor any directory holding one. The controls are layouts the
+refusal exists for. An interpreter directly in a top-level directory has "/" above
+its bin directory; that is left out, while a sys.prefix of "/" is still refused.
 """
 
 from __future__ import annotations
@@ -262,11 +263,39 @@ def case_mise(world):
     return minor / "bin" / "python3.12", minor, None
 
 
+def case_a_sys_prefix_that_names_no_directory(world):
+    """An installation moved after it was built, whose sys.prefix names the old,
+    missing directory: only the real binary's install prefix mounts its library."""
+    prefix = world.root / "moved" / "python3.12"
+    real = _python(prefix / "bin" / "python3.12")
+    (prefix / "lib" / "python3.12").mkdir(parents=True)
+    return real, world.root / "build" / "install", None
+
+
 LAYOUTS = {
     name[len("case_") :]: function
     for name, function in dict(globals()).items()
     if name.startswith("case_")
 }
+
+
+def _assert_interpreter_mounted(policy, executable, prefix, base_prefix):
+    """Positive: the interpreter's own directories are granted, not only no home.
+
+    Its real install prefix (above the real binary's bin directory) is covered, and
+    so is every sys prefix that exists. A policy that grants too little fails here.
+    """
+    granted = _real_grants(policy)
+
+    def covered(path):
+        real = Path(os.path.realpath(path))
+        return any(real == grant or grant in real.parents for grant in granted)
+
+    real_prefix = Path(os.path.realpath(executable)).parent.parent
+    assert covered(real_prefix), (real_prefix, sorted(map(str, granted)))
+    for named in (prefix, base_prefix or prefix):
+        if os.path.isdir(named):
+            assert covered(named), (named, sorted(map(str, granted)))
 
 
 @pytest.mark.parametrize("layout_name", sorted(LAYOUTS))
@@ -281,6 +310,7 @@ def test_a_common_interpreter_layout_is_mounted_without_a_home(
         pytest.fail(f"{layout_name} was refused: {refused}")
 
     _assert_no_home_mounted(world, policy)
+    _assert_interpreter_mounted(policy, executable, prefix, base_prefix)
 
 
 def test_a_python_linked_straight_into_the_home_is_refused_with_a_remedy(
@@ -309,3 +339,86 @@ def test_a_prefix_directly_in_the_home_that_is_no_venv_is_refused(world, monkeyp
         _build(world, monkeypatch, executable, prefix)
 
     assert repr(prefix.as_posix()) in str(refused.value), str(refused.value)
+
+
+def _a_real_file_at(monkeypatch, executable):
+    """Model a real interpreter file at ``executable``, with no link on the way.
+
+    As on a system without a merged /usr, where /bin is a directory of its own. The
+    tests cannot create a file directly in a top-level directory, so that one path
+    resolves to itself and is no symlink; every other path resolves as usual.
+    """
+    real_realpath = os.path.realpath
+    real_hops = policy_module._symlink_hops
+
+    def realpath(path, *args, **kwargs):
+        if os.fspath(path) == executable:
+            return executable
+        return real_realpath(path, *args, **kwargs)
+
+    def symlink_hops(path):
+        if os.fspath(path) == executable:
+            return [Path(executable)]
+        return real_hops(path)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+    monkeypatch.setattr(policy_module, "_symlink_hops", symlink_hops)
+
+
+def _real_grants(policy):
+    return {Path(os.path.realpath(path)) for path in policy.read_only}
+
+
+@pytest.mark.parametrize("executable", ["/bin/python3", "/opt/python3"])
+def test_an_interpreter_directly_in_a_system_directory_grants_nothing_new(
+    world, monkeypatch, executable
+):
+    """Above such an interpreter's bin directory is "/", which names no installation.
+
+    Its own directory is already a system read path, so the "/" read from it is left
+    out, and the policy grants nothing that an interpreter elsewhere would not: the
+    binary's directory, and the system read paths.
+    """
+    prefix = world.root / "prefix"
+    prefix.mkdir()
+    _usr, ordinary = _system_python(world)
+    baseline = _real_grants(_build(world, monkeypatch, ordinary, prefix))
+    _a_real_file_at(monkeypatch, executable)
+
+    try:
+        policy = _build(world, monkeypatch, executable, prefix)
+    except SandboxUnavailable as refused:
+        pytest.fail(f"{executable} was refused: {refused}")
+
+    granted = _real_grants(policy)
+    system = {Path(os.path.realpath(p)) for p in policy_module.SYSTEM_READ_PATHS}
+    assert Path("/") not in granted, sorted(map(str, granted))
+    assert Path(os.path.realpath(Path(executable).parent)) in granted
+    assert granted - baseline <= system, sorted(map(str, granted - baseline - system))
+    _assert_no_home_mounted(world, policy)
+
+
+@pytest.mark.parametrize("executable", ["/mnt/python3", "/srv/python3"])
+def test_an_interpreter_directly_in_another_top_level_directory_is_refused(
+    world, monkeypatch, executable
+):
+    """Leaving out the "/" here would mount the binary's whole directory, /mnt or
+    /srv, for every scanner, and nothing marks either as a system directory."""
+    prefix = world.root / "prefix"
+    prefix.mkdir()
+    _a_real_file_at(monkeypatch, executable)
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, executable, prefix)
+
+    assert repr("/") in str(refused.value), str(refused.value)
+
+
+def test_a_sys_prefix_of_root_is_still_refused(world, monkeypatch):
+    """Control: "/" named by sys.prefix itself would mount every directory."""
+    _a_real_file_at(monkeypatch, "/opt/python3")
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, "/opt/python3", Path("/"), world.root / "usr")
+
+    assert repr("/") in str(refused.value), str(refused.value)
