@@ -207,17 +207,23 @@ def test_an_empty_variable_grants_nothing(layout, backend, monkeypatch):
     assert Path("/") not in readable
 
 
-@pytest.mark.parametrize("value", ["root", "home"])
+@pytest.mark.parametrize("value", ["root", "home", "holding-home"])
 def test_a_variable_naming_a_root_or_the_home_directory_grants_nothing(
     layout, backend, monkeypatch, value
 ):
     """A value that would expose far more than a rules directory is not mounted.
 
-    Online, so the scanner does not search that directory for rules files first.
+    The filesystem root, $HOME, and a directory holding $HOME, which would mount
+    $HOME with everything else under it. Online, so the scanner does not search that
+    directory for rules files first.
     """
     _tmp, home, _source, _output = layout
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    named = Path(Path.cwd().anchor) if value == "root" else home
+    named = {
+        "root": Path(Path.cwd().anchor),
+        "home": home,
+        "holding-home": home.parent,
+    }[value]
     monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
 
     policy = _policy(layout, backend, "semgrep")
