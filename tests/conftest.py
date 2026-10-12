@@ -330,8 +330,18 @@ def _enter_session_tmpdir() -> Path:
 # TMPDIR: the controller makes one private HOME (and USERPROFILE, which Windows
 # reads) before xdist starts workers and before collection imports core.constants,
 # workers inherit it through ASH_TEST_SESSION_HOME, and the creating process restores
-# the original values and removes it at the end. XDG variables and UV_CACHE_DIR are
-# left as the caller set them, so a cache the operator chose is still the one used.
+# the original values and removes it at the end.
+#
+# HOME alone does not move what tools keep under XDG_CONFIG_HOME, XDG_DATA_HOME and
+# XDG_STATE_HOME when a contributor has set them: uv's tool environments and Python
+# installs, gem and pnpm data, and semgrep's settings would still be written into the
+# contributor's own directories. Measured with the three set: a unit run wrote
+# semgrep's settings and log under XDG_CONFIG_HOME, and uv's tool directory, gem's
+# spec cache and pnpm's store under XDG_DATA_HOME, all from child processes the
+# audit-hook guard cannot see; nothing under XDG_STATE_HOME. The session points those
+# three at their default places inside the private home too. XDG_CACHE_HOME and
+# UV_CACHE_DIR stay as the caller set them, so a cache the operator chose is still the
+# one used and nothing is downloaded again.
 #
 # It sits beside the session temp directory, not inside it, so a test that looks at
 # what was left in TMPDIR does not count the home's contents, and HOME and TMPDIR stay
@@ -339,15 +349,64 @@ def _enter_session_tmpdir() -> Path:
 _SESSION_HOME_ENV = "ASH_TEST_SESSION_HOME"
 _PRE_SESSION_HOME_ENV = "ASH_TEST_PRE_SESSION_HOME"
 _HOME_VARS = ("HOME", "USERPROFILE")
+#: Each XDG directory the session moves, and its default place under a home.
+_PRIVATE_XDG_DIRS = {
+    "XDG_CONFIG_HOME": (".config",),
+    "XDG_DATA_HOME": (".local", "share"),
+    "XDG_STATE_HOME": (".local", "state"),
+}
+_RECORDED_VARS = _HOME_VARS + tuple(_PRIVATE_XDG_DIRS)
+#: Shared on purpose; writes under them are not the guard's business.
+_SHARED_CACHE_VARS = ("XDG_CACHE_HOME", "UV_CACHE_DIR")
 _created_session_home: Optional[Path] = None
 
 
 def _pre_session_home_env() -> dict:
-    """HOME/USERPROFILE as they were before the session override; unset ones absent."""
+    """HOME, USERPROFILE and the moved XDG variables as they were before the session.
+
+    Unset ones are absent.
+    """
     recorded = os.environ.get(_PRE_SESSION_HOME_ENV)
     if recorded:
         return json.loads(recorded)
-    return {var: os.environ[var] for var in _HOME_VARS if os.environ.get(var)}
+    return {var: os.environ[var] for var in _RECORDED_VARS if os.environ.get(var)}
+
+
+def _real_home_guard_roots(previous: dict) -> List[str]:
+    """What the guard watches, given the variables as they were before the session.
+
+    ``~/.ash`` of the passwd home and of the original HOME/USERPROFILE, and each XDG
+    directory the session moved: the caller's value, or its default place under the
+    original HOME when the caller left it unset.
+    """
+    homes = [real_home_guard.passwd_home()]
+    homes += [Path(previous[var]) for var in _HOME_VARS if previous.get(var)]
+    roots = set(real_home_guard.guarded_roots(homes))
+    original_home = previous.get("HOME")
+    for var, parts in _PRIVATE_XDG_DIRS.items():
+        if previous.get(var):
+            roots.update(real_home_guard.both_spellings(Path(previous[var])))
+        elif original_home:
+            roots.update(
+                real_home_guard.both_spellings(Path(original_home).joinpath(*parts))
+            )
+    return sorted(roots)
+
+
+def _real_home_guard_exclusions(rootdir: Path) -> List[str]:
+    """Paths under a guarded root that tests may write to.
+
+    The interpreter's own installation (uv installs Python under XDG_DATA_HOME, and
+    importing a module can write its bytecode there), the shared caches, and the
+    checkout under test.
+    """
+    paths = {sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix}
+    paths.update(os.environ[var] for var in _SHARED_CACHE_VARS if os.environ.get(var))
+    paths.add(str(rootdir))
+    excluded = set()
+    for path in paths:
+        excluded.update(real_home_guard.both_spellings(Path(path)))
+    return sorted(excluded)
 
 
 def _enter_session_home(session_tmpdir: Path) -> Path:
@@ -365,18 +424,22 @@ def _enter_session_home(session_tmpdir: Path) -> Path:
         _created_session_home = home
     for var in _HOME_VARS:
         os.environ[var] = str(home)
+    for var, parts in _PRIVATE_XDG_DIRS.items():
+        private = home.joinpath(*parts)
+        private.mkdir(parents=True, exist_ok=True)
+        os.environ[var] = str(private)
     return home
 
 
 def _leave_session_home() -> None:
-    """Restore HOME/USERPROFILE and remove the session home, in the creating process."""
+    """Restore the moved variables and remove the session home, in the creating process."""
     global _created_session_home
     home = _created_session_home
     if home is None:
         return
     _created_session_home = None
     previous = _pre_session_home_env()
-    for var in _HOME_VARS:
+    for var in _RECORDED_VARS:
         if var in previous:
             os.environ[var] = previous[var]
         else:
@@ -433,12 +496,8 @@ def pytest_configure(config):
     # the operator's home) and before collection imports core.constants.
     _enter_session_home(session_tmpdir)
     real_home_guard.install(
-        real_home_guard.guarded_roots(
-            [
-                real_home_guard.passwd_home(),
-                *(Path(v) for v in _pre_session_home_env().values()),
-            ]
-        )
+        _real_home_guard_roots(_pre_session_home_env()),
+        exclude=_real_home_guard_exclusions(Path(config.rootpath)),
     )
 
     # Register custom markers
@@ -470,7 +529,9 @@ def pytest_configure(config):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Fail a test that wrote under the real ~/.ash (see tests/utils/real_home_guard.py).
+    """Fail a test that wrote under the real ~/.ash or an XDG directory the session moved.
+
+    See tests/utils/real_home_guard.py.
 
     Checked on the teardown report, after every fixture has finished, so a write from
     a fixture's teardown is charged to the test that used it. Writes recorded before
@@ -485,8 +546,8 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     report.outcome = "failed"
     report.longrepr = (
-        "wrote under the real user's ~/.ash, which the session's private HOME "
-        "exists to keep tests out of:\n"
+        "wrote under the real user's ~/.ash or XDG directories, which the "
+        "session's private HOME exists to keep tests out of:\n"
         + "\n".join(f"  {event}: {path}" for event, path in writes)
     )
 

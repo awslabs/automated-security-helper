@@ -1,15 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Record every write a test process makes under the real user's ``~/.ash``.
+"""Record every write a test process makes under the real user's ``~/.ash`` or XDG dirs.
 
-tests/conftest.py gives each session a private HOME, so anything that finds the home
-through ``$HOME`` or ``Path.home()`` -- install receipts, the default ASH_BIN_PATH --
-lands in a directory the session removes. What a private HOME cannot stop is code
-that finds the home some other way: ``pwd.getpwuid()``, ``expanduser("~user")``, a
-path computed before the session moved HOME, or a literal. That is the class this
-watches for. An audit hook records each write under the guarded roots, and
-tests/conftest.py fails the test it happened in.
+tests/conftest.py gives each session a private HOME, and points XDG_CONFIG_HOME,
+XDG_DATA_HOME and XDG_STATE_HOME inside it, so anything that finds those directories
+through the environment -- install receipts, the default ASH_BIN_PATH, uv's tool
+environments -- lands in a directory the session removes. What that cannot stop is
+code that finds them some other way: ``pwd.getpwuid()``, ``expanduser("~user")``, a
+path computed before the session moved them, or a literal. That is the class this
+watches for. An audit hook records each write under the guarded roots, except under
+the excluded paths (the interpreter's own installation, the shared caches, the
+checkout), and tests/conftest.py fails the test it happened in.
 
 Recorded rather than raised. The receipt writer catches ``OSError`` on purpose
 (receipts are best-effort), so an exception raised from here would be swallowed and
@@ -53,6 +55,7 @@ _PATH_ARGS = {
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
 _roots: List[str] = []
+_excluded: List[str] = []
 _writes: List[Tuple[str, str]] = []
 _lock = threading.Lock()
 _installed = False
@@ -69,16 +72,23 @@ def passwd_home() -> Optional[Path]:
         return None
 
 
+def both_spellings(path: Path) -> List[str]:
+    """``path`` as given (made absolute) and resolved, so a symlinked home matches."""
+    return sorted({os.path.abspath(path), os.path.realpath(path)})
+
+
 def guarded_roots(homes: Iterable[Optional[Path]]) -> List[str]:
     """``<home>/.ash`` for each home, in both its given and its resolved spelling."""
     roots = set()
     for home in homes:
         if home is None or not str(home):
             continue
-        ash = Path(home) / ".ash"
-        roots.add(os.path.abspath(ash))
-        roots.add(os.path.realpath(ash))
+        roots.update(both_spellings(Path(home) / ".ash"))
     return sorted(roots)
+
+
+def _within(path: str, roots: Iterable[str]) -> bool:
+    return any(path == root or path.startswith(root + os.sep) for root in roots)
 
 
 def _under_a_root(raw: object) -> Optional[str]:
@@ -88,9 +98,8 @@ def _under_a_root(raw: object) -> Optional[str]:
         path = os.path.abspath(os.fsdecode(raw))
     except (TypeError, ValueError):
         return None
-    for root in _roots:
-        if path == root or path.startswith(root + os.sep):
-            return path
+    if _within(path, _roots) and not _within(path, _excluded):
+        return path
     return None
 
 
@@ -125,13 +134,19 @@ def _hook(event: str, args: tuple) -> None:
         _inside.active = False
 
 
-def install(roots: Iterable[str]) -> None:
-    """Start watching ``roots``. Idempotent; an audit hook cannot be removed."""
+def install(roots: Iterable[str], exclude: Iterable[str] = ()) -> None:
+    """Start watching ``roots``, except under ``exclude``.
+
+    Idempotent; an audit hook cannot be removed.
+    """
     global _installed
     with _lock:
         for root in roots:
             if root not in _roots:
                 _roots.append(root)
+        for path in exclude:
+            if path not in _excluded:
+                _excluded.append(path)
     if not _installed:
         sys.addaudithook(_hook)
         _installed = True
@@ -146,15 +161,23 @@ def drain() -> List[Tuple[str, str]]:
 
 
 @contextlib.contextmanager
-def watching(root: Path) -> Iterator[None]:
-    """Also watch ``root`` for the body of the block (for the guard's own control)."""
-    extra = [os.path.abspath(root), os.path.realpath(root)]
+def watching(root: Path, exclude: Iterable[Path] = ()) -> Iterator[None]:
+    """Also watch ``root``, except under ``exclude``, for the body of the block.
+
+    For the guard's own controls.
+    """
     with _lock:
-        added = [r for r in extra if r not in _roots]
+        added = [r for r in both_spellings(root) if r not in _roots]
         _roots.extend(added)
+        skipped = [
+            p for path in exclude for p in both_spellings(path) if p not in _excluded
+        ]
+        _excluded.extend(skipped)
     try:
         yield
     finally:
         with _lock:
             for r in added:
                 _roots.remove(r)
+            for p in skipped:
+                _excluded.remove(p)

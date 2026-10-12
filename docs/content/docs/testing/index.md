@@ -120,8 +120,11 @@ The framework provides several common fixtures to simplify test setup:
 
 For environment variables, use pytest's built-in `monkeypatch.setenv`, which puts the
 previous value back when the test ends. Every test session also runs with a private
-`HOME`, so a test that installs a tool or writes an install receipt never touches the
-real user's `~/.ash`; a test whose own process writes there anyway fails.
+`HOME`, and with `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_STATE_HOME` pointed inside
+it, so a test that installs a tool or writes an install receipt never touches the real
+user's `~/.ash` or those directories; a test whose own process writes there anyway
+fails. `XDG_CACHE_HOME` and `UV_CACHE_DIR` are left as you set them, so caches are
+shared.
 
 Example:
 ```python
