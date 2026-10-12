@@ -1349,8 +1349,11 @@
     added to its prompts; `exclude_scanner_types`, which keeps secret findings out
     by default, `actionable_only`, `max_findings_to_analyze`,
     `max_findings_per_severity`, `summarize_findings` and `batch_processing`, which
-    choose which findings are sent and how many; and `enable_fallback_models`,
-    which lets a model other than `model_id` receive them. A repository that set
+    choose which findings are sent and how many; `enable_fallback_models`,
+    which lets a model other than `model_id` receive them; and
+    `add_section_headers`, `output_markdown`, `include_sections`,
+    `exclude_sections` and `group_by_severity`, which choose which of the
+    reporter's calls are made, each sending findings. A repository that set
     one of these in its own config sets it with `--config-overrides` or in a config
     file outside the tree instead. A repository config that repeats the operator's
     value is unchanged and not warned about. An operator-only option of any AWS

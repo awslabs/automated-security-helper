@@ -7,8 +7,11 @@ The reporter's options that choose which findings are sent (``exclude_scanner_ty
 ``actionable_only``, ``max_findings_*``, ``summarize_findings``,
 ``batch_processing``), what text goes with them (``industry_context``,
 ``compliance_frameworks``, ``custom_context``, ``custom_prompt``,
-``include_code_snippets``) and which model receives them
-(``enable_fallback_models``) are the operator's (config/reporter_trust.py). These
+``include_code_snippets``), which model receives them
+(``enable_fallback_models``) and which of the reporter's calls are made
+(``add_section_headers``, ``output_markdown``, ``include_sections``,
+``exclude_sections``, ``group_by_severity``) are the operator's
+(config/reporter_trust.py). These
 tests take the path a scan takes: the config is resolved from a file inside the
 scanned tree, the reporter is built from the section ``get_plugin_config``
 returns, as ``ReportPhase`` builds it, and its ``converse`` calls are captured.
@@ -80,8 +83,22 @@ MARKERS = (
     "SUPPRESSED-FINDING-MARKER",
 )
 
-#: Options both configs set, so the reporter writes no files and builds a simple
-#: report; neither is the operator's.
+#: The options that decide which of the reporter's model calls are made, each
+#: sending findings: the simple report or the sectioned one
+#: (``add_section_headers``), the files written with their own calls
+#: (``output_markdown``), the sections asked for (``include_sections``,
+#: ``exclude_sections``) and one call per severity (``group_by_severity``).
+#: Values other than the defaults, which make fewer calls.
+SHAPE: Dict[str, Any] = {
+    "add_section_headers": False,
+    "output_markdown": False,
+    "include_sections": ["executive_summary"],
+    "exclude_sections": ["technical_analysis"],
+    "group_by_severity": False,
+}
+
+#: Written with the content options, so the reporter writes no files and builds a
+#: simple report where the config they are in applies.
 SHARED = {"output_markdown": False, "add_section_headers": False}
 
 
@@ -168,8 +185,66 @@ def _report(config, test_plugin_context, monkeypatch) -> tuple:
 
 
 def test_every_option_here_is_the_operators():
-    """The list above is the ruling's, and each one is in the table."""
-    assert set(CONTENT) <= set(REPORTER_DESTINATION_OPTIONS[REPORTER])
+    """The lists above are the ruling's, and each one is in the table."""
+    assert set(CONTENT) | set(SHAPE) <= set(REPORTER_DESTINATION_OPTIONS[REPORTER])
+
+
+def _calls(config, test_plugin_context, monkeypatch) -> List[str]:
+    """The system prompt of each model call, in order."""
+    runtime = RuntimeDouble()
+    monkeypatch.setattr(f"{MODULE}.boto3.Session", lambda **kw: SessionDouble(runtime))
+    BedrockSummaryReporter(
+        context=test_plugin_context,
+        config=config.get_plugin_config("reporter", REPORTER),
+    ).report(_results())
+    return [json.dumps(call.get("system"), default=str) for call in runtime.calls]
+
+
+def _shape_only(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump({"reporters": {REPORTER: {"options": SHAPE}}}), encoding="utf-8"
+    )
+    return path
+
+
+def test_a_repository_does_not_choose_which_calls_are_made(
+    tmp_path, test_plugin_context, monkeypatch
+):
+    source = tmp_path / "repo"
+    source.mkdir()
+    unconfigured = _calls(
+        resolve_config(source_dir=source), test_plugin_context, monkeypatch
+    )
+    _shape_only(source / ".ash" / ".ash.yaml")
+
+    config = resolve_config(source_dir=source)
+    calls = _calls(config, test_plugin_context, monkeypatch)
+
+    options = config.get_plugin_config("reporter", REPORTER)["options"]
+    assert not set(SHAPE) & set(options), options
+    assert calls == unconfigured
+
+
+def test_the_operator_chooses_which_calls_are_made(
+    tmp_path, test_plugin_context, monkeypatch
+):
+    """Positive control: the operator's values change the calls."""
+    source = tmp_path / "repo"
+    source.mkdir()
+    unconfigured = _calls(
+        resolve_config(source_dir=source), test_plugin_context, monkeypatch
+    )
+    operator = _shape_only(tmp_path / "operator" / "ash.yaml")
+
+    calls = _calls(
+        resolve_config(config_path=operator, source_dir=source),
+        test_plugin_context,
+        monkeypatch,
+    )
+
+    assert calls and calls != unconfigured
+    assert len(calls) < len(unconfigured)
 
 
 def test_a_repository_value_never_reaches_the_model_call(

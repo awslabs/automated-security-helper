@@ -95,8 +95,12 @@ _RETRY_OPTIONS: Tuple[str, ...] = ("max_retries", "base_delay", "max_delay")
 #: ``compliance_frameworks``, ``custom_context``), which findings and how many
 #: (``exclude_scanner_types``, which keeps secret findings out by default,
 #: ``actionable_only``, ``max_findings_to_analyze``, ``max_findings_per_severity``,
-#: ``summarize_findings``, ``batch_processing``), and whether another model than
-#: ``model_id`` may receive them (``enable_fallback_models``).
+#: ``summarize_findings``, ``batch_processing``), whether another model than
+#: ``model_id`` may receive them (``enable_fallback_models``), and which of the
+#: reporter's calls, each sending findings, are made: the simple report or the
+#: sectioned one (``add_section_headers``), the files written with calls of their
+#: own (``output_markdown``), the sections asked for (``include_sections``,
+#: ``exclude_sections``) and a call per severity (``group_by_severity``).
 _BEDROCK_CONTENT_OPTIONS: Tuple[str, ...] = (
     "include_code_snippets",
     "custom_prompt",
@@ -110,6 +114,11 @@ _BEDROCK_CONTENT_OPTIONS: Tuple[str, ...] = (
     "compliance_frameworks",
     "custom_context",
     "enable_fallback_models",
+    "add_section_headers",
+    "output_markdown",
+    "include_sections",
+    "exclude_sections",
+    "group_by_severity",
 )
 
 #: The options of each built-in reporter that pick where findings go or which

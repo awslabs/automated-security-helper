@@ -73,6 +73,11 @@ _REPO_VALUES: Dict[str, Any] = {
     "compliance_frameworks": ["Repo framework"],
     "custom_context": "Repo context.",
     "enable_fallback_models": False,
+    "add_section_headers": False,
+    "output_markdown": False,
+    "include_sections": ["executive_summary"],
+    "exclude_sections": ["technical_analysis"],
+    "group_by_severity": False,
     "archive_resolved_findings": True,
     "findings_scope": "repo-scope",
 }

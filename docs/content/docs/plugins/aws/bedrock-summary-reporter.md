@@ -92,6 +92,11 @@ These options are the operator's:
   how many.
 - `enable_fallback_models` chooses whether a model other than `model_id` may
   receive them.
+- `add_section_headers`, `output_markdown`, `include_sections`, `exclude_sections`
+  and `group_by_severity` choose which of the reporter's calls are made, and each
+  of those calls sends findings: the single summary call or the sectioned report,
+  the calls behind the executive and technical files, the call for each section,
+  and a call for each severity.
 - `max_retries`, `base_delay` and `max_delay` choose how long the reporter keeps
   calling Bedrock when it is refused. `max_retries` is at most 10, `max_delay` at
   most 60 seconds, and `base_delay` at most `max_delay`.
@@ -104,8 +109,9 @@ are ignored with a warning, under either spelling of the name (`exclude-scanner-
 is the same option as `exclude_scanner_types`), and under the MCP server they are
 default `denied_paths` entries, so a delivered config that changes one is refused. A
 repository config that repeats the operator's value is no change, and is not warned
-about. The model parameters (`temperature`, `top_p`, `max_tokens`) and the options
-that shape the summary ASH writes still apply from the tree.
+about. The model parameters (`temperature`, `top_p`, `max_tokens`),
+`add_table_of_contents`, `summary_style` and `enable_caching` still apply from the
+tree.
 
 Whether the reporter runs is the operator's too: where the operator's settings have
 it off, a config file inside the scanned tree does not turn it on (see

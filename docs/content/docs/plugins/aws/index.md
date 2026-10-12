@@ -51,13 +51,13 @@ profile with `select_profile` load it. A config an MCP client delivered cannot a
 These reporter options choose where findings are sent or written, which
 credentials send them, which findings Security Hub imports and archives, what the
 Bedrock reporter sends to the model (which findings, how many, the text added to the
-prompts, and which model may receive them), and how long a reporter keeps calling
-its service when it is refused:
+prompts, which model may receive them, and which of its calls are made), and how
+long a reporter keeps calling its service when it is refused:
 
 | Reporter section           | Options                                                                                                 |
 |----------------------------|---------------------------------------------------------------------------------------------------------|
 | `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`, `findings_scope`, `archive_resolved_findings`                |
-| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file`, `include_code_snippets`, `custom_prompt`, `exclude_scanner_types`, `actionable_only`, `max_findings_to_analyze`, `max_findings_per_severity`, `summarize_findings`, `batch_processing`, `industry_context`, `compliance_frameworks`, `custom_context`, `enable_fallback_models`, `max_retries`, `base_delay`, `max_delay` |
+| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file`, `include_code_snippets`, `custom_prompt`, `exclude_scanner_types`, `actionable_only`, `max_findings_to_analyze`, `max_findings_per_severity`, `summarize_findings`, `batch_processing`, `industry_context`, `compliance_frameworks`, `custom_context`, `enable_fallback_models`, `add_section_headers`, `output_markdown`, `include_sections`, `exclude_sections`, `group_by_severity`, `max_retries`, `base_delay`, `max_delay` |
 | `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`, `max_retries`, `base_delay`, `max_delay`             |
 | `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`, `max_retries`, `base_delay`, `max_delay`      |
 

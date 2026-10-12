@@ -122,8 +122,9 @@ def test_security_hubs_import_scope_and_archiving_are_the_operators(
     assert f"reporters.aws-security-hub.options.{name}" in warnings, warnings
 
 
-#: What the Bedrock reporter sends to the model with the findings, and which
-#: findings and how many, each with a value other than its default.
+#: What the Bedrock reporter sends to the model with the findings, which
+#: findings and how many, and which of its calls are made, each with a value
+#: other than its default.
 _BEDROCK_CONTENT = {
     "include_code_snippets": True,
     "custom_prompt": "Repo prompt.",
@@ -137,6 +138,11 @@ _BEDROCK_CONTENT = {
     "compliance_frameworks": ["Repo framework"],
     "custom_context": "Repo context.",
     "enable_fallback_models": False,
+    "add_section_headers": False,
+    "output_markdown": False,
+    "include_sections": ["executive_summary"],
+    "exclude_sections": ["technical_analysis"],
+    "group_by_severity": False,
 }
 
 
@@ -944,7 +950,7 @@ _MODEL_PARAMETER = (
     "a model parameter: how the model writes the summary, not what it is sent"
 )
 _SUMMARY_SHAPE = (
-    "the shape of the summary ASH writes locally, or which sections it asks for"
+    "the shape of the summary ASH writes locally, with no model call of its own"
 )
 
 #: Options of the off-host reporters that a repository's config may still set,
@@ -960,13 +966,10 @@ _OPEN_OFF_HOST_OPTIONS: Dict[Tuple[str, str], str] = {
     ("bedrock-summary-reporter", "temperature"): _MODEL_PARAMETER,
     ("bedrock-summary-reporter", "top_p"): _MODEL_PARAMETER,
     ("bedrock-summary-reporter", "max_tokens"): _MODEL_PARAMETER,
-    ("bedrock-summary-reporter", "summary_style"): _SUMMARY_SHAPE,
-    ("bedrock-summary-reporter", "group_by_severity"): _SUMMARY_SHAPE,
-    ("bedrock-summary-reporter", "add_section_headers"): _SUMMARY_SHAPE,
+    ("bedrock-summary-reporter", "summary_style"): (
+        "read by nothing: the reporter's prompts do not use it"
+    ),
     ("bedrock-summary-reporter", "add_table_of_contents"): _SUMMARY_SHAPE,
-    ("bedrock-summary-reporter", "output_markdown"): _SUMMARY_SHAPE,
-    ("bedrock-summary-reporter", "include_sections"): _SUMMARY_SHAPE,
-    ("bedrock-summary-reporter", "exclude_sections"): _SUMMARY_SHAPE,
     ("bedrock-summary-reporter", "enable_caching"): (
         "whether ASH reuses a response it already has for the same request"
     ),
