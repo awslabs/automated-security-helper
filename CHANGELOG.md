@@ -1159,23 +1159,29 @@
   `scanners.trivy.options.ignore_file` or `scanners.trivy-repo.options.ignore_file`
   from a delivered config is not passed to trivy; the IDs in it are applied the
   same way, to that scanner's findings, when the file is a regular file inside
-  the scanned tree, read without following a link. The operator's own entries apply as before. The scanner
-  options that drop findings by rule ID, by a baseline or by category join the
-  default `denied_paths`, so a delivered config that changes one is refused:
-  bandit's `confidence_level`, cdk-nag's `AwsSolutionsChecks` pack, checkov's
-  `frameworks` and
-  `skip_frameworks`, detect-secrets' `baseline_file` and `scan_settings`,
-  ferret-scan's `checks`, `confidence_levels`, `disable_ip_types`,
-  `enable_preprocessors`, `finding_limit`, `profile`, `recursive`,
-  `respect_gitignore`, `use_default_config` and `validator_budget`, opengrep's
-  `config`, `exclude_rule`, `patterns` and `severity`, semgrep's `config`,
-  `exclude_rule` and `severity`, trivy-repo's `license_full` and `scanners`,
-  ferret-scan's `max_live_bytes`, and every scanner's `offline` (npm audit
-  offline reports no advisories). So do each scanner's own config file
-  (`config_file` of bandit, checkov, ferret-scan, grype and syft, and
-  trivy-repo's `secret_config_file`), every `tool_version`, opengrep's `version`
-  and `sha256`, the AWS reporters' destinations and credentials, and the GitLab
-  SAST reporter's `exclude_suppressed`. Left at its default, each still scans.
+  the scanned tree, read without following a link. The operator's own entries
+  apply as before. The scanner options that drop findings by rule ID, by a
+  baseline or by category join the default `denied_paths`, so a delivered config
+  that changes one is refused: bandit's `confidence_level`, cdk-nag's
+  `AwsSolutionsChecks` pack, cfn-guard's `rule_sets`, cfn-lint's `ignore_checks`
+  and `regions`, checkov's `frameworks` and `skip_frameworks`, detect-secrets'
+  `baseline_file` and `scan_settings`, ferret-scan's `checks`,
+  `confidence_levels`, `disable_ip_types`, `enable_preprocessors`,
+  `finding_limit`, `profile`, `recursive`, `respect_gitignore`,
+  `use_default_config` and `validator_budget`, gitleaks' `baseline_path`,
+  opengrep's `config`, `exclude_rule`, `patterns` and `severity`, semgrep's
+  `config`, `exclude_rule` and `severity`, trivy's `scanners` and
+  `ignore_unfixed`, trivy-repo's `license_full` and `scanners`, ferret-scan's
+  `max_live_bytes`, gitleaks' `max_target_megabytes`, and every scanner's
+  `offline` (npm audit offline reports no advisories). So do each scanner's own
+  config file (`config_file` of actionlint, bandit, cfn-lint, checkov,
+  ferret-scan, gitleaks, grype, syft, trivy, trivy-repo and zizmor, and trivy's
+  and trivy-repo's `secret_config_file`), trivy-repo's `module_dir`, cfn-guard's
+  `rules_paths`, actionlint's `shellcheck` and `pyflakes`, zizmor's
+  `online_audits`, the `honor_inline_ignores` of cfn-lint, gitleaks and zizmor,
+  every `tool_version`, opengrep's `version` and `sha256`, the AWS reporters'
+  destinations and credentials, and the GitLab SAST reporter's
+  `exclude_suppressed`. Left at its default, each still scans.
 
 - **A default scan runs six more scanners.** actionlint, cfn-lint, cfn-guard,
   gitleaks, trivy and zizmor are builtin and on by default, so a scan with an existing
@@ -1222,8 +1228,9 @@
     `trivy.yaml`, `.trivyignore` or `trivy-secret.yaml`.
 
   Each of those scanners' `config_file` options and gitleaks' `baseline_path`, set
-  by an ASH config inside the scanned tree or by an MCP client, are ignored with a
-  warning, and so are trivy's and trivy-repo's `ignore_file` and
+  by an ASH config inside the scanned tree, are ignored with a warning (a config
+  an MCP client delivered that sets one is refused, as a default `denied_paths`
+  entry), and so are trivy's and trivy-repo's `ignore_file` and
   `secret_config_file` and cfn-guard's `rules_paths` (cfn-guard prints a rules
   file it cannot parse, so a path the repository chose could put any readable file
   into the report); `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` still apply, for a

@@ -79,8 +79,10 @@ Known limitations
   ferret-scan's config files, detect-secrets' plugin files and trivy-repo's
   secret file are honored only from outside the scanned tree
   (``config/path_trust.py``), bandit's, grype's and syft's come only from the
-  trusted config (``config/tool_config_trust.py``), and the default
-  ``denied_paths`` refuse a delivered config that names one. An ignore file a
+  trusted config (``config/tool_config_trust.py``), those of actionlint,
+  cfn-guard, cfn-lint, gitleaks, trivy and zizmor only from the operator
+  (``utils/config_trust.py``), and the default ``denied_paths`` refuse a
+  delivered config that names one. An ignore file a
   tool reads from the tree on its own (such as a ``.semgrepignore``) is not
   re-applied here.
 * The glob matching above is an approximation of each tool's own rules. A

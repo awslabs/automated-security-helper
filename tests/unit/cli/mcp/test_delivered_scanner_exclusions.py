@@ -1028,6 +1028,14 @@ NON_PATH_EXCLUSIONS = [
     ("grype", "offline", True),
     ("trivy-repo", "offline", True),
     ("ferret-scan", "max_live_bytes", "1KB"),
+    ("cfn-guard", "rule_sets", []),
+    ("cfn-lint", "ignore_checks", ["W2001"]),
+    ("cfn-lint", "regions", ["eu-west-1"]),
+    ("gitleaks", "baseline_path", "gitleaks-baseline.json"),
+    ("gitleaks", "max_target_megabytes", 1),
+    ("trivy", "scanners", ["license"]),
+    ("trivy", "ignore_unfixed", True),
+    ("trivy", "offline", True),
 ]
 _NON_PATH_IDS = [f"{scanner}.{option}" for scanner, option, _ in NON_PATH_EXCLUSIONS]
 
@@ -1064,11 +1072,27 @@ def _option_defaults() -> Dict[tuple, Any]:
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
+        CfnGuardScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+        CfnLintScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+        GitleaksScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScannerConfigOptions,
+    )
 
     models = {
         "bandit": BanditScannerConfigOptions(),
         "cdk-nag": CdkNagScannerConfigOptions(),
+        "cfn-guard": CfnGuardScannerConfigOptions(),
+        "cfn-lint": CfnLintScannerConfigOptions(),
         "checkov": CheckovScannerConfigOptions(),
+        "gitleaks": GitleaksScannerConfigOptions(),
+        "trivy": TrivyScannerConfigOptions(),
         "detect-secrets": DetectSecretsScannerConfigOptions(),
         "grype": GrypeScannerConfigOptions(),
         "npm-audit": NpmAuditScannerConfigOptions(),
@@ -1198,6 +1222,12 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
     ("ferret-scan", "explain"): "annotates findings; reports no fewer",
     ("ferret-scan", "ferret_debug"): "ferret-scan's own log level",
     ("ferret-scan", "ferret_verbose"): "ferret-scan's own log level",
+    ("cfn-lint", "include_checks"): "enables rules beyond the defaults; reports more",
+    ("trivy", "license_full"): "off by default; on reports more license findings",
+    ("trivy", "disable_telemetry"): "telemetry, not findings",
+    ("zizmor", "persona"): (
+        "regular, the default, reports the fewest; pedantic and auditor report more"
+    ),
 }
 
 

@@ -985,9 +985,14 @@ on which:
   - What chooses a scanner's own config, which version of a tool ASH installs, or
     where findings go is in the default `denied_paths` too, so a file that sets
     one is refused rather than scanned without it: each scanner's own config file
-    (`config_file` for bandit, checkov, ferret-scan, grype and syft, and
-    trivy-repo's `secret_config_file`), snyk-code's
-    `honor_tree_exclusions`, every scanner's and the jupyter converter's
+    (`config_file` for actionlint, bandit, cfn-lint, checkov, ferret-scan,
+    gitleaks, grype, syft, trivy, trivy-repo and zizmor, and trivy's and
+    trivy-repo's `secret_config_file`), trivy-repo's `module_dir`, cfn-guard's
+    `rules_paths`, the programs actionlint runs (`shellcheck`, `pyflakes`),
+    zizmor's `online_audits` (which lets the GitHub token reach zizmor),
+    snyk-code's `honor_tree_exclusions`, the `honor_inline_ignores` of cfn-lint,
+    gitleaks and zizmor (which honor the ignore comments in the scanned files),
+    every scanner's and the jupyter converter's
     `tool_version`, opengrep's `version` and `sha256`, opengrep's and semgrep's
     `metrics` (their `config` is in the table below), the AWS reporters'
     destinations and credentials listed in the table above, whether
@@ -1035,17 +1040,23 @@ on which:
     |---|---|
     | bandit | `confidence_level` |
     | cdk-nag | `nag_packs.AwsSolutionsChecks` (turning on another pack reports more, and is allowed) |
+    | cfn-guard | `rule_sets` |
+    | cfn-lint | `ignore_checks`, `regions` (a finding one region raises is dropped by validating for another) |
     | checkov | `frameworks`, `skip_frameworks` |
     | detect-secrets | `baseline_file`, `scan_settings` |
     | ferret-scan | `checks`, `confidence_levels`, `disable_ip_types`, `enable_preprocessors`, `finding_limit`, `max_live_bytes` (which bounds how much extracted content it holds), `profile`, `recursive`, `respect_gitignore`, `use_default_config`, `validator_budget` |
+    | gitleaks | `baseline_path`, `max_target_megabytes` (files larger than it are skipped) |
     | opengrep | `config`, `exclude_rule`, `patterns`, `severity` |
     | semgrep | `config`, `exclude_rule`, `severity` |
+    | trivy | `scanners`, `ignore_unfixed` |
     | trivy-repo | `license_full`, `scanners` |
     | every scanner | `offline`: a scanner set offline runs on cached data, and npm audit offline reports no advisories at all |
 
     Options that only tune output or performance, or whose default already
     reports the least they can (trivy-repo's `ignore_unfixed`, bandit's
-    `ignore_nosec`, detect-secrets' `skip_generated_lockfiles`), are not listed.
+    `ignore_nosec`, detect-secrets' `skip_generated_lockfiles`, trivy's
+    `license_full`, zizmor's `persona`, cfn-lint's `include_checks`), are not
+    listed.
     `scan_timeout` and `install_timeout` are not either: a scanner that runs out
     of time or cannot be installed is reported as not completing.
 

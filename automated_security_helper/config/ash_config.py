@@ -1058,12 +1058,24 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/ferret-scan/options/validator_budget",
         "/scanners/trivy-repo/options/license_full",
         "/scanners/trivy-repo/options/scanners",
+        # The same for the builtin scanners: cfn-guard's rule sets, the cfn-lint
+        # rules it skips and the regions it validates for, a gitleaks baseline,
+        # and trivy's scanners and ignore_unfixed (off by default; on, it
+        # withholds every vulnerability that has no fixed version).
+        "/scanners/cfn-guard/options/rule_sets",
+        "/scanners/cfn-lint/options/ignore_checks",
+        "/scanners/cfn-lint/options/regions",
+        "/scanners/gitleaks/options/baseline_path",
+        "/scanners/trivy/options/scanners",
+        "/scanners/trivy/options/ignore_unfixed",
         # Options that can leave findings out without naming them. A scanner
         # set offline runs on whatever data is cached, and npm audit offline
         # reports no advisories at all (npm 10.9, exit 0). max_live_bytes bounds
-        # how much extracted content ferret-scan holds at once.
+        # how much extracted content ferret-scan holds at once, and gitleaks
+        # skips every file larger than max_target_megabytes.
         "/scanners/*/options/offline",
         "/scanners/ferret-scan/options/max_live_bytes",
+        "/scanners/gitleaks/options/max_target_megabytes",
         # A scanner's own config file, and which version of its tool runs. From a
         # config file inside the scanned tree the config file comes only from the
         # operator (config/tool_config_trust.py), and so does every scanner's and
@@ -1078,9 +1090,32 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/grype/options/config_file",
         "/scanners/syft/options/config_file",
         "/scanners/trivy-repo/options/secret_config_file",
+        # And the builtin scanners' own config files, trivy-repo's config file
+        # and modules directory, cfn-guard's rules files, the programs actionlint
+        # runs, and zizmor's online audits, which let the GitHub token in ASH's
+        # environment reach zizmor. From a config inside the scanned tree each
+        # is the operator's alone (utils/config_trust.py).
+        "/scanners/trivy-repo/options/config_file",
+        "/scanners/trivy-repo/options/module_dir",
+        "/scanners/trivy/options/config_file",
+        "/scanners/trivy/options/secret_config_file",
+        "/scanners/actionlint/options/config_file",
+        "/scanners/actionlint/options/shellcheck",
+        "/scanners/actionlint/options/pyflakes",
+        "/scanners/cfn-guard/options/rules_paths",
+        "/scanners/cfn-lint/options/config_file",
+        "/scanners/gitleaks/options/config_file",
+        "/scanners/zizmor/options/config_file",
+        "/scanners/zizmor/options/online_audits",
         # Whether snyk code test may apply the .snyk and .dcignore files in the
         # tree it tests, which leave files out of its analysis.
         "/scanners/snyk-code/options/honor_tree_exclusions",
+        # Whether cfn-lint, gitleaks and zizmor honor the ignore comments and
+        # template metadata in the files they scan, which drop findings before
+        # ASH's suppressions see them.
+        "/scanners/cfn-lint/options/honor_inline_ignores",
+        "/scanners/gitleaks/options/honor_inline_ignores",
+        "/scanners/zizmor/options/honor_inline_ignores",
         "/scanners/*/options/tool_version",
         "/converters/jupyter/options/tool_version",
         "/scanners/opengrep/options/version",

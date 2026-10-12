@@ -100,8 +100,9 @@ variables from zizmor's environment.
 unchanged, which enables the audits that query the GitHub API (for example
 known-vulnerable actions and impostor commits). It is honored only when the
 operator sets it, with `--config-overrides` or an ASH config file outside the
-scanned tree; set by a config in the scanned tree, or by an MCP client, it is
-ignored with a warning and zizmor runs offline without the tokens. ASH never
+scanned tree; set by a config in the scanned tree, it is ignored with a warning
+and zizmor runs offline without the tokens, and a config an MCP client
+delivered that sets it is refused, since it is a default `denied_paths` entry. ASH never
 reads, copies or logs the token and never puts it on zizmor's command line.
 ASH's own offline mode (`ASH_OFFLINE=true` or `ash scan --offline`) overrides
 `online_audits`. Under `--sandbox`, zizmor never gets the token: the sandbox

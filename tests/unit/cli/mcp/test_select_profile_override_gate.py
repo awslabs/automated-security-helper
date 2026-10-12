@@ -635,10 +635,18 @@ _CATEGORY_DENIALS: Dict[str, Any] = {
     "/scanners/ferret-scan/options/validator_budget": "all=1ms",
     "/scanners/trivy-repo/options/license_full": False,
     "/scanners/trivy-repo/options/scanners": ["vuln"],
+    "/scanners/cfn-guard/options/rule_sets": [],
+    "/scanners/cfn-lint/options/ignore_checks": ["W2001"],
+    "/scanners/cfn-lint/options/regions": ["eu-west-1"],
+    "/scanners/gitleaks/options/baseline_path": "gitleaks-baseline.json",
+    "/scanners/trivy/options/scanners": ["license"],
+    "/scanners/trivy/options/ignore_unfixed": True,
     "/scanners/ferret-scan/options/max_live_bytes": "1KB",
+    "/scanners/gitleaks/options/max_target_megabytes": 1,
 }
 #: Entries with the pointer each case writes and a value other than the
-#: default: a scanner's own config file, which version of a tool runs, and
+#: default: a scanner's own config file, the programs it runs, whether it honors
+#: the ignore comments in the files it scans, which version of a tool runs, and
 #: offline. A glob entry is written at one scanner it covers.
 _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
     "/scanners/*/options/offline": (
@@ -671,6 +679,66 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
     ),
     "/scanners/snyk-code/options/honor_tree_exclusions": (
         "/scanners/snyk-code/options/honor_tree_exclusions",
+        True,
+    ),
+    "/scanners/cfn-lint/options/honor_inline_ignores": (
+        "/scanners/cfn-lint/options/honor_inline_ignores",
+        True,
+    ),
+    "/scanners/gitleaks/options/honor_inline_ignores": (
+        "/scanners/gitleaks/options/honor_inline_ignores",
+        True,
+    ),
+    "/scanners/zizmor/options/honor_inline_ignores": (
+        "/scanners/zizmor/options/honor_inline_ignores",
+        True,
+    ),
+    "/scanners/trivy-repo/options/config_file": (
+        "/scanners/trivy-repo/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/trivy-repo/options/module_dir": (
+        "/scanners/trivy-repo/options/module_dir",
+        "/etc/other-modules",
+    ),
+    "/scanners/trivy/options/config_file": (
+        "/scanners/trivy/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/trivy/options/secret_config_file": (
+        "/scanners/trivy/options/secret_config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/actionlint/options/config_file": (
+        "/scanners/actionlint/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/actionlint/options/shellcheck": (
+        "/scanners/actionlint/options/shellcheck",
+        "/opt/other/shellcheck",
+    ),
+    "/scanners/actionlint/options/pyflakes": (
+        "/scanners/actionlint/options/pyflakes",
+        "/opt/other/pyflakes",
+    ),
+    "/scanners/cfn-guard/options/rules_paths": (
+        "/scanners/cfn-guard/options/rules_paths",
+        ["/etc/other.guard"],
+    ),
+    "/scanners/cfn-lint/options/config_file": (
+        "/scanners/cfn-lint/options/config_file",
+        "/etc/other.yaml",
+    ),
+    "/scanners/gitleaks/options/config_file": (
+        "/scanners/gitleaks/options/config_file",
+        "/etc/other.toml",
+    ),
+    "/scanners/zizmor/options/config_file": (
+        "/scanners/zizmor/options/config_file",
+        "/etc/other.yml",
+    ),
+    "/scanners/zizmor/options/online_audits": (
+        "/scanners/zizmor/options/online_audits",
         True,
     ),
     "/scanners/*/options/tool_version": (

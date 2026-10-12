@@ -25,7 +25,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 from unittest.mock import patch
 
 import pytest
@@ -568,6 +568,34 @@ _OPERATOR_CHOICES = [
         ),
         "reporters.bedrock-summary-reporter.options.custom_prompt",
     ),
+]
+#: The builtin scanners' and trivy-repo's operator-only options: a config file,
+#: a program or modules directory the tool loads, online audits, and whether the
+#: tool honors the ignore comments in the files it scans. Each value differs
+#: from the option's default.
+_SCANNER_OPERATOR_CHOICES: Dict[Tuple[str, str], Any] = {
+    ("actionlint", "config_file"): "other.yaml",
+    ("actionlint", "shellcheck"): "/opt/other/shellcheck",
+    ("actionlint", "pyflakes"): "/opt/other/pyflakes",
+    ("cfn-guard", "rules_paths"): ["other.guard"],
+    ("cfn-lint", "config_file"): "/etc/other.cfnlintrc",
+    ("cfn-lint", "honor_inline_ignores"): True,
+    ("gitleaks", "config_file"): "other.toml",
+    ("gitleaks", "honor_inline_ignores"): True,
+    ("trivy", "config_file"): "/etc/other.yaml",
+    ("trivy", "secret_config_file"): "/etc/other.yaml",
+    ("trivy-repo", "config_file"): "/etc/other.yaml",
+    ("trivy-repo", "module_dir"): "/etc/other-modules",
+    ("zizmor", "config_file"): "other.yml",
+    ("zizmor", "online_audits"): True,
+    ("zizmor", "honor_inline_ignores"): True,
+}
+_OPERATOR_CHOICES += [
+    (
+        yaml.safe_dump({"scanners": {scanner: {"options": {option: value}}}}),
+        f"scanners.{scanner}.options.{option}",
+    )
+    for (scanner, option), value in _SCANNER_OPERATOR_CHOICES.items()
 ]
 
 
