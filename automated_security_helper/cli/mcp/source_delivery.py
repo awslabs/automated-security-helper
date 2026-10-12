@@ -434,8 +434,11 @@ def set_source_git(
         url,
         str(target),
     ]
+    # stdin is never the server's: under the stdio transport it carries the MCP
+    # client's messages.
     result = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, url validated by _validate_clone_url and fenced behind "--"
         cmd,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         env=env,
@@ -461,7 +464,12 @@ def set_source_git(
             ref,
         ]
         fetch_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
-            fetch_cmd, capture_output=True, text=True, env=env, check=False
+            fetch_cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
         if fetch_res.returncode != 0:
             # Not all refs need an explicit fetch (e.g. a tag already in the
@@ -471,7 +479,12 @@ def set_source_git(
 
         checkout_cmd = [git, "-C", str(target), "checkout", "--detach", ref]
         co_res = subprocess.run(  # nosec B603 - list-form argv, git resolved by _git_executable, ref validated by _reject_option_like
-            checkout_cmd, capture_output=True, text=True, env=env, check=False
+            checkout_cmd,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
         if co_res.returncode != 0:
             shutil.rmtree(target, ignore_errors=True)

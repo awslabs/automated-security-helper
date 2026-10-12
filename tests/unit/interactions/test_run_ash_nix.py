@@ -242,9 +242,10 @@ class TestRunAshNix:
 
         captured = {}
 
-        def fake_run(cmd, env=None, check=None, text=None):
+        def fake_run(cmd, env=None, check=None, text=None, stdin=None):
             captured["cmd"] = cmd
             captured["env"] = env
+            captured["stdin"] = stdin
             return subprocess.CompletedProcess(cmd, 0)
 
         monkeypatch.setattr(
@@ -263,6 +264,8 @@ class TestRunAshNix:
         # And the inner invocation must be a local scan, not another nix one.
         assert "--mode" in captured["cmd"]
         assert captured["cmd"][captured["cmd"].index("--mode") + 1] == "local"
+        # Not this process's standard input.
+        assert captured["stdin"] is subprocess.DEVNULL
 
     def test_child_environment_carries_the_outer_run_id(self, monkeypatch):
         """The inner run writes it into its results file (utils/inner_run_outcome.py)."""
@@ -274,7 +277,7 @@ class TestRunAshNix:
         )
         captured = {}
 
-        def fake_run(cmd, env=None, check=None, text=None):
+        def fake_run(cmd, env=None, check=None, text=None, stdin=None):
             captured["env"] = env
             return subprocess.CompletedProcess(cmd, 0)
 
@@ -300,8 +303,8 @@ class TestRunAshNix:
         )
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: subprocess.CompletedProcess(
-                cmd, 2
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
+                subprocess.CompletedProcess(cmd, 2)
             ),
         )
         result = run_ash_nix(argv=["scan"])
@@ -319,8 +322,8 @@ class TestRunAshNix:
         )
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: subprocess.CompletedProcess(
-                cmd, 0
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
+                subprocess.CompletedProcess(cmd, 0)
             ),
         )
 
@@ -343,7 +346,7 @@ class TestRunAshNix:
 
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: (
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
                 captured.update(cmd=cmd) or subprocess.CompletedProcess(cmd, 0)
             ),
         )

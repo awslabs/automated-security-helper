@@ -59,6 +59,7 @@ class TestGetChangedFiles:
         # for through PATH entries that may be relative to the scanned repo.
         mock_run.assert_called_once_with(
             [GIT, "diff", "--name-only", "origin/main...HEAD"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,
@@ -116,6 +117,7 @@ class TestGetChangedFiles:
 
         mock_run.assert_called_once_with(
             [GIT, "diff", "--name-only", "origin/develop...HEAD"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,

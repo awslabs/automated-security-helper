@@ -471,6 +471,7 @@ def uv_tool_dir() -> Path:
     try:
         result = subprocess.run(  # nosec B603 - uv is on PATH in every stage that runs this
             [uv, "--color", "never", "tool", "dir"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=_VERSION_TIMEOUT_SECONDS,
@@ -740,6 +741,7 @@ def version_output(executable: str) -> str:
         )
         result = subprocess.run(  # nosec B603 - executable from the pinned table, resolved on PATH
             [executable, "--version"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=_VERSION_TIMEOUT_SECONDS,

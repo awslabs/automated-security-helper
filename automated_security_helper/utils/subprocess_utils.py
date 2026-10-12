@@ -461,6 +461,13 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
     timeout = kwargs.pop("timeout", None)
     check = kwargs.pop("check", False)
     input_data = kwargs.pop("input", None)
+    if input_data is not None:
+        # As subprocess.run does: input is written to a pipe the child reads.
+        if "stdin" in kwargs:
+            raise ValueError("stdin and input arguments may not both be used.")
+        kwargs["stdin"] = subprocess.PIPE
+    else:
+        kwargs.setdefault("stdin", subprocess.DEVNULL)
     if kwargs.pop("capture_output", False):
         if "stdout" in kwargs or "stderr" in kwargs:
             raise ValueError(
@@ -509,7 +516,13 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     ``TimeoutExpired`` propagating) and so cannot move to :func:`run_command`.
     The program is resolved first, and refused where :func:`_resolve_for_spawn`
     refuses it, raising the ``FileNotFoundError`` ``subprocess.run`` would.
+
+    Standard input is ``subprocess.DEVNULL`` unless the caller passes ``input`` or
+    ``stdin``: ASH's own standard input is the MCP client's channel under
+    ``ash mcp``, and a terminal under the CLI, and neither belongs to the tool.
     """
+    if kwargs.get("input") is None:
+        kwargs.setdefault("stdin", subprocess.DEVNULL)
     if args and not kwargs.get("shell", False):
         args = list(args)
         refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
@@ -589,6 +602,8 @@ def run_command(
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
+            # Not ASH's own standard input; see spawn_run.
+            stdin=subprocess.DEVNULL,
             capture_output=capture_output,
             text=text,
             check=check,
@@ -780,6 +795,8 @@ def run_command_with_output_handling(
             runner = _run_stoppable if sandbox_plan is not None else subprocess.run
             result = runner(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
                 spawn_command,
+                # Not ASH's own standard input; see spawn_run.
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 shell=shell,
@@ -945,6 +962,8 @@ def run_command_stream_output(
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
+            # Not ASH's own standard input; see spawn_run.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -1099,6 +1118,9 @@ def create_process_with_pipes(
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
+            # Not ASH's own standard input; see spawn_run. The caller gets no
+            # stdin pipe to write to.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=text,

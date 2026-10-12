@@ -163,6 +163,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         try:
             result = subprocess.run(  # nosec B603 — list args, program from resolve_command
                 resolve_command(["jupyter", "nbconvert", "--version"]),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -395,6 +396,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             )
         result = subprocess.run(  # nosec B603 — list args, program from resolve_command
             resolve_command(cmd, cwd=run_dir),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=60,

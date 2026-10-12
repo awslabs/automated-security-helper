@@ -558,6 +558,7 @@ class TestJupyterConverter:
             "subprocess",
             types.SimpleNamespace(
                 run=mock_subprocess_run,
+                DEVNULL=subprocess.DEVNULL,
                 CalledProcessError=subprocess.CalledProcessError,
                 SubprocessError=subprocess.SubprocessError,
                 TimeoutExpired=subprocess.TimeoutExpired,

@@ -52,7 +52,9 @@ class FakeNixShell:
         self.commands: list[list[str]] = []
         self.environments: list[dict[str, str]] = []
 
-    def run(self, cmd, env=None, check=False, text=True):
+    def run(self, cmd, env=None, check=False, text=True, stdin=None):
+        # The shell gets an empty standard input, never the host process's.
+        assert stdin is subprocess.DEVNULL
         self.commands.append(list(cmd))
         self.environments.append(dict(env or {}))
         if self.results_json is not None:
@@ -86,7 +88,11 @@ def nix_shell(monkeypatch) -> FakeNixShell:
     monkeypatch.setattr(
         run_ash_nix, "find_executable", lambda name: FAKE_NIX if name == "nix" else None
     )
-    monkeypatch.setattr(run_ash_nix, "subprocess", SimpleNamespace(run=shell.run))
+    monkeypatch.setattr(
+        run_ash_nix,
+        "subprocess",
+        SimpleNamespace(run=shell.run, DEVNULL=subprocess.DEVNULL),
+    )
     return shell
 
 

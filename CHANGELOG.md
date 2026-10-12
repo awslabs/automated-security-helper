@@ -1389,6 +1389,16 @@
 
 ### Fixes
 
+- Scanners and the other tools ASH starts get an empty standard input. They used to
+  inherit ASH's own: under `ash mcp` over stdio that is the client's message stream,
+  and in a terminal a tool that asked a question stopped the scan. Every spawn route
+  now passes `subprocess.DEVNULL`, so a tool that reads standard input gets
+  end-of-file at once: the spawn helpers and the scanner runner, git for
+  `--changed-files-only` and MCP source delivery, the Jupyter converter, nix mode,
+  the scanner sandbox's probes, and the image build's checks. A call that passes
+  `input=` still writes it to the tool, and that now also holds when the tool runs
+  under the scanner sandbox.
+
 - `ash mcp --profile NAME=path/to/ash.yaml` works. The server registered profiles
   given with `--profile`, but `ash mcp` did not accept the option and exited 2 with
   `No such option: --profile`, so `list_profiles` always returned an empty list.

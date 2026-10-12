@@ -751,6 +751,7 @@ def git_repository_root(path: Path) -> Optional[Path]:
     try:
         result = subprocess.run(
             [git, "rev-parse", "--show-toplevel"],  # nosec B603
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,
@@ -797,6 +798,7 @@ def get_changed_files(
     try:
         result = subprocess.run(
             [git, "diff", "--name-only", f"{base_ref}...HEAD"],  # nosec B603
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,

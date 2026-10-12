@@ -240,6 +240,9 @@ def run_ash_nix(
     # into an error.
     return subprocess.run(  # nosec B603 - argument list is built here, not shell-parsed
         cmd,
+        # The inner scan reads nothing from standard input; nix and the scanners
+        # it starts get an empty one, not this process's.
+        stdin=subprocess.DEVNULL,
         env=env,
         check=False,
         text=True,

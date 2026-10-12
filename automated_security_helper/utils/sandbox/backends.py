@@ -141,6 +141,7 @@ def _probe_process(
     """Run ``argv`` with its output captured, as a probe."""
     return subprocess.run(  # nosec B603 - fixed argv built in this module
         list(argv),
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=PROBE_TIMEOUT_SECONDS,
@@ -557,14 +558,7 @@ class LandlockBackend(SandboxBackend):
         )
         if failure:
             return f"Landlock is not available ({failure})"
-        result = subprocess.run(  # nosec B603 - fixed argv
-            [sys.executable, "-I", str(LANDLOCK_EXEC), "--abi"],
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT_SECONDS,
-            env={"PATH": os.environ.get("PATH", "")},
-            check=False,
-        )
+        result = _probe_process([sys.executable, "-I", str(LANDLOCK_EXEC), "--abi"])
         self._abi = int(result.stdout.strip() or 0)
         policy = json.dumps({"read_only": ["/"], "writable": [], "network": False})
         failure = _probe_run(
@@ -770,6 +764,7 @@ def _system_trust_roots() -> Optional[str]:
         try:
             result = subprocess.run(  # nosec B603 - fixed argv, run by ASH itself
                 ["/usr/bin/security", "find-certificate", "-a", "-p", keychain],
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=PROBE_TIMEOUT_SECONDS,
