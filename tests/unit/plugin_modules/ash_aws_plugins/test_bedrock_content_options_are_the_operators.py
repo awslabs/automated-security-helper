@@ -123,7 +123,9 @@ class SessionDouble:
         return self._runtime
 
 
-def _finding(rule_id: str, text: str, scanner_type: str = "SAST", **extra) -> Result:
+def _finding(rule_id: str, text: str, scanner_name: str = "bandit", **extra) -> Result:
+    """A result as a scanner's would be. Its type (``SECRETS`` for detect-secrets)
+    comes from the ``scanner_name`` the engine writes on every result."""
     return Result.model_validate(
         {
             "ruleId": rule_id,
@@ -137,7 +139,7 @@ def _finding(rule_id: str, text: str, scanner_type: str = "SAST", **extra) -> Re
                     }
                 }
             ],
-            "properties": {"scanner_type": scanner_type},
+            "properties": {"scanner_name": scanner_name},
             **extra,
         }
     )
@@ -152,7 +154,9 @@ def _results() -> AshAggregatedResults:
                 tool=Tool(driver=ToolComponent(name="ASH")),
                 results=[
                     _finding("R1", "an ordinary finding"),
-                    _finding("R2", "SECRET-FINDING-MARKER", scanner_type="SECRET"),
+                    _finding(
+                        "R2", "SECRET-FINDING-MARKER", scanner_name="detect-secrets"
+                    ),
                     _finding(
                         "R3",
                         "SUPPRESSED-FINDING-MARKER",
