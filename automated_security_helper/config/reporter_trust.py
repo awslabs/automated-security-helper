@@ -166,10 +166,10 @@ REPORTER_DESTINATION_OPTIONS: Dict[str, Tuple[str, ...]] = {
 #: tests/unit/config/test_reporter_destinations_from_repo_config.py holds each
 #: value equal to the reporter's config model.
 REPORTER_ENABLED_DEFAULTS: Dict[str, bool] = {
-    "aws-security-hub": True,
-    "bedrock-summary-reporter": True,
-    "cloudwatch-logs": True,
-    "s3": True,
+    "aws-security-hub": False,
+    "bedrock-summary-reporter": False,
+    "cloudwatch-logs": False,
+    "s3": False,
 }
 
 _MISSING = object()

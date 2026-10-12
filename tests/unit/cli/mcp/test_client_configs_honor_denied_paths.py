@@ -677,7 +677,9 @@ def test_a_clients_enabled_false_is_accepted_and_ignored(
 ) -> None:
     """Not refused, but whether the reporter runs is the operator's in both
     directions: the server's ``enabled``, or the reporter's default where the
-    server sets none, applies, and the client's value is named in a warning."""
+    server sets none, applies, and the client's value is named in a warning
+    when it differs. Each of these reporters is off by default, so with no server
+    setting the client's ``false`` changes nothing and is not named."""
     from automated_security_helper.config.reporter_trust import (
         REPORTER_ENABLED_DEFAULTS,
     )
@@ -700,7 +702,7 @@ def test_a_clients_enabled_false_is_accepted_and_ignored(
     assert not isinstance(config, Exception), config
     expected = True if server == "on" else REPORTER_ENABLED_DEFAULTS[reporter]
     assert _enabled_under(config, reporter) is expected
-    assert _warned(ash_log, f"reporters.{reporter}.enabled")
+    assert _warned(ash_log, f"reporters.{reporter}.enabled") is expected
 
 
 @pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)

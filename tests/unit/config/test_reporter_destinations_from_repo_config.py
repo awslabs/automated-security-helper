@@ -482,7 +482,9 @@ def test_the_operators_ash_config_turning_one_off_holds_too(
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, operator):
     """Whether it runs is the operator's in both directions, so the tree's
-    ``enabled: false`` is ignored with a warning, as its ``true`` is."""
+    ``enabled: false`` is ignored with a warning, as its ``true`` is. Each of
+    these reporters is off by default, so with no operator setting the tree's
+    ``false`` changes nothing and is not named."""
     source = tmp_path / "repo"
     project = _write_config(
         source / ".ash" / ".ash.yaml", {reporter: {"enabled": False}}
@@ -500,7 +502,7 @@ def test_an_in_tree_config_cannot_turn_one_off(tmp_path, ash_log, reporter, oper
     )
     assert _enabled(config, reporter) is expected
     warnings = "\n".join(_warnings(ash_log))
-    assert f"reporters.{reporter}.enabled" in warnings, warnings
+    assert (f"reporters.{reporter}.enabled" in warnings) is expected, warnings
 
 
 @pytest.mark.parametrize("value", [0, "no", "false"])
@@ -946,12 +948,17 @@ def walk(model, prefix, out, seen):
 out = {}
 for cls in ash_plugin_manager.plugin_modules("reporter"):
     configs = models(cls.model_fields["config"].annotation)
+    # The annotation can name a base config model beside the reporter's own; the
+    # reporter is built with the most-derived one, so only its default counts.
+    derived = [c for c in configs
+               if not any(o is not c and issubclass(o, c) for o in configs)]
     section, options, enabled_defaults = set(), [], []
     refuses_paths = True
     for config in configs:
         section |= set(config.model_fields)
-        enabled_defaults.append(
-            config.model_fields["enabled"].get_default(call_default_factory=True))
+        if config in derived:
+            enabled_defaults.append(
+                config.model_fields["enabled"].get_default(call_default_factory=True))
         for options_model in models(config.model_fields["options"].annotation):
             walk(options_model, "", options, frozenset())
         try:
