@@ -461,7 +461,10 @@ Results that are read back from an existing `ash_aggregated_results.json` are
 masked the same way as they are loaded, whatever wrote the file (an older ASH, or
 another tool): `ash report`, `ash scan --use-existing`, `ash merge`, the MCP tools
 that read stored results (`explain_finding`, `diff_scan_results`, `get_scan_results`),
-the findings browser and a workspace's unified reports.
+the findings browser and a workspace's unified reports. For a finding with no
+snippet, the findings browser shows the lines around it read from the file on
+disk, and masks them the same way: lines a secret finding reports, and every value
+the results' masking found.
 
 Masking also crosses result sets. `ash merge` masks the merged results by location
 against the secret findings of every shard, since a secret one shard's scanner

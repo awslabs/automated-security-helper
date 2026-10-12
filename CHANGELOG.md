@@ -1887,6 +1887,11 @@
   values on to the reports and responses rendered from it. `ash merge` masks the
   merged results against every shard's secret findings before it writes them.
 
+- **The findings browser masks the source lines it reads from disk.** For a
+  finding with no snippet, `ash inspect findings` shows the five lines either side
+  of it from the file, which were not masked: a secret on a neighboring line was
+  shown in clear. Those lines are now masked as the results' snippets are.
+
 - **checkov's and cfn-nag's hard-coded credential rules are secret findings.**
   checkov's `CKV_AWS_41`, `CKV_AWS_45`, `CKV_AWS_46` and the other "hard-coded"
   checks, and cfn-nag's "... must not be a plaintext string" password rules, were

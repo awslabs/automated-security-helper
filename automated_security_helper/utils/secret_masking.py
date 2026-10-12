@@ -1137,6 +1137,33 @@ def mask_secrets_in_results(
     return results
 
 
+def source_snippet_masker(results: Any) -> Callable[[Any, Optional[int], str], str]:
+    """A function that masks lines read from a source file as ``results``' snippets are.
+
+    For a reader that shows a finding's file from disk when the results hold no
+    snippet for it (the findings browser): the lines at a location a secret
+    finding of ``results`` reports, and every value and shape the masking of
+    ``results`` found, are masked. ``results`` is read, never changed. The
+    function takes the file's URI as the finding names it, the line number of
+    the text's first line, and the text.
+    """
+    sarif_report = getattr(results, "sarif", None)
+    has_runs = sarif_report is not None and bool(getattr(sarif_report, "runs", None))
+    index = _index_secrets(sarif_report) if has_runs else _SecretIndex()
+    index.add_values(exposed_secret_values(results))
+    index.add_shapes(getattr(results, "secret_value_shapes", None) or [])
+    index.add_shapes(secret_value_shape(value) for value in index.values)
+
+    def mask(uri: Any, first_line: Optional[int], text: str) -> str:
+        placed = index.lines_for(uri)
+        if placed is not None:
+            whole, lines = placed
+            text = _mask_lines(text, first_line, whole, lines)
+        return index.mask_values(text)
+
+    return mask
+
+
 def mask_secret_values_in_tree(
     tree: Any, values: Iterable[str], shapes: Iterable[Any] = ()
 ) -> Any:
