@@ -350,9 +350,12 @@ class TestTrivyRepoOffline:
             assert spawn.has_flag(flag), (flag, spawn.command)
 
     def test_control_online_scan_is_not_offline(self, online, context):
+        """trivy gets ``--offline-scan`` in every run, online too, which keeps it off
+        package registries, so the control looks for what only offline mode sets:
+        the offline tool environment's ``TRIVY_SKIP_VERSION_CHECK``."""
         spawn = _record_scan(_trivy(context), context, "source", online)
 
-        assert not spawn.has_flag("--offline-scan"), spawn.command
+        assert not spawn.env_is("TRIVY_SKIP_VERSION_CHECK", _TRUE), spawn.command
 
 
 # ---------------------------------------------------------------------------
