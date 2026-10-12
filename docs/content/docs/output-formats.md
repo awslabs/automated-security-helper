@@ -418,9 +418,12 @@ above, the Bedrock summary and MCP responses get the masked results:
 - **By location.** Each snippet line, in any finding, at a file and line that a
   secret finding reports is replaced with
   `[masked: a secret finding reports this line]`. Its indentation and line ending
-  are kept. A snippet whose line numbers are unknown, in a file with a secret
-  finding, is masked whole, and a base64 (`binary`) snippet at such a line is
-  dropped.
+  are kept. Lines are counted the way scanners count them, at `\n`, `\r\n` and
+  `\r`. A snippet in a file with a secret finding is masked whole when its line
+  numbers are unknown, or when it holds a character only some line counts break
+  at (a form feed, a vertical tab, NEL, U+2028, U+2029, an information separator
+  or a lone `\r`), since its lines cannot be placed. A base64 (`binary`) snippet
+  at a reported line is dropped.
 - **By value.** Each value a secret finding's message quotes
   (`Possible hardcoded password: '...'`, `Matched text: '...'`) is masked wherever
   it occurs as a whole token, in any string of any finding, including on lines no
