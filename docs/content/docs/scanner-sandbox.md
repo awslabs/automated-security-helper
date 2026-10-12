@@ -78,9 +78,10 @@ it needs.
   or not, since they share the cache. Nothing from the scanned repository reaches
   these, or ASH's check of the database's age after the scan: they run from a
   directory outside the scanned tree or any other checkout, with an explicit config
-  file (an empty one ASH ships, or for trivy the operator's `config_file` once it
-  passes the rule for that option), against the cache directory the scan reads. A
-  lock in that cache directory makes
+  file (an empty one ASH ships, or for trivy the config the scan passes: the
+  operator's `config_file` once it passes the rule for that option, else
+  `TRIVY_CONFIG` for a file outside the scanned tree), against the cache directory
+  the scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
@@ -108,8 +109,8 @@ it needs.
 - The config files ASH writes for a scanner's tool (the empty config bandit, grype,
   syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name
   none, gitleaks' default-rules config, trivy's and trivy-repo's empty ignore file
-  and secret config, the empty directories ASH passes trivy-repo as its modules
-  directory and gitleaks as its ignore path, the copies of your `rules_paths`
+  and secret config, the empty directories ASH passes trivy and trivy-repo as their
+  modules directory and gitleaks as its ignore path, the copies of your `rules_paths`
   files ASH gives cfn-guard, and the copies of the files a `.gitleaksignore` names
   that gitleaks re-scans) are in a directory of that scanner run's own, outside the
   scanned tree (normally in the system temporary directory, never under one another
