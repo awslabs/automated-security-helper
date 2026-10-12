@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 import pytest
 
 from tests.utils.git_fixture import run_git
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = [
     pytest.mark.integration,
@@ -43,14 +44,17 @@ RULE = """rules:
     pattern: subprocess.call(..., shell=True)
 """
 
-DRIVER = textwrap.dedent(
-    """
-    import sys
-    from automated_security_helper.cli.main import app
+#: The child imports ASH from this checkout (see importing_this_checkout).
+DRIVER = importing_this_checkout(
+    textwrap.dedent(
+        """
+        import sys
+        from automated_security_helper.cli.main import app
 
-    sys.argv = ["ash", "scan", *sys.argv[1:]]
-    app()
-    """
+        sys.argv = ["ash", "scan", *sys.argv[1:]]
+        app()
+        """
+    )
 )
 
 

@@ -50,22 +50,88 @@ PLUGIN_MODULES = Path(__file__).resolve().parents[3] / (
     "automated_security_helper/plugin_modules"
 )
 
-#: How each registered scanner is kept off a link that leaves its target.
+#: Its inputs are ASH's scan set, which leaves the link out.
+READS_THE_SCAN_SET = "reads the scan set"
+#: Its command names the link in its exclusion option. bandit, checkov and
+#: ferret-scan read such a link, and refuse the target when the option cannot carry
+#: its name (test_scanners_skip_links_leaving_the_tree.py and the ferret test);
+#: grype, syft and trivy follow none, and are given it all the same.
+EXCLUDES_THE_LINK = "names the link in its exclusion option"
+#: It follows no link, and its command names none.
+FOLLOWS_NO_LINK = "follows no link and is given no exclusion"
+#: It is not run on a target holding such a link.
+REFUSES_THE_TARGET = "refuses the target"
+
+#: How each registered scanner is kept off a link that leaves its target, which
+#: test_each_scanners_link_handling_holds checks for each of them.
 LINK_HANDLING = {
-    "detect-secrets": "reads the scan set",
-    "cfn-nag": "reads the scan set",
-    "cdk-nag": "reads the scan set",
-    "npm-audit": "reads the scan set",
-    "bandit": "excluded, or the target refused",
-    "checkov": "excluded, or the target refused",
-    "ferret-scan": "excluded, or the target refused",
-    "grype": "follows no such link; excluded too",
-    "syft": "follows no such link; excluded too",
-    "trivy-repo": "follows no link; excluded too",
-    "semgrep": "follows no link; not excluded",
-    "opengrep": "follows no link; not excluded",
-    "snyk-code": "the target refused",
+    "detect-secrets": READS_THE_SCAN_SET,
+    "cfn-nag": READS_THE_SCAN_SET,
+    "cdk-nag": READS_THE_SCAN_SET,
+    "npm-audit": READS_THE_SCAN_SET,
+    "bandit": EXCLUDES_THE_LINK,
+    "checkov": EXCLUDES_THE_LINK,
+    "ferret-scan": EXCLUDES_THE_LINK,
+    "grype": EXCLUDES_THE_LINK,
+    "syft": EXCLUDES_THE_LINK,
+    "trivy-repo": EXCLUDES_THE_LINK,
+    "semgrep": FOLLOWS_NO_LINK,
+    "opengrep": FOLLOWS_NO_LINK,
+    "snyk-code": REFUSES_THE_TARGET,
 }
+
+_SCANNERS = "automated_security_helper.plugin_modules"
+#: Where each registered scanner's class and config class live.
+SCANNER_CLASSES = {
+    "bandit": ("ash_builtin.scanners.bandit_scanner", "BanditScanner", "Bandit"),
+    "cdk-nag": ("ash_builtin.scanners.cdk_nag_scanner", "CdkNagScanner", "CdkNag"),
+    "cfn-nag": ("ash_builtin.scanners.cfn_nag_scanner", "CfnNagScanner", "CfnNag"),
+    "checkov": (
+        "ash_builtin.scanners.checkov_scanner",
+        "CheckovScanner",
+        "Checkov",
+    ),
+    "detect-secrets": (
+        "ash_builtin.scanners.detect_secrets_scanner",
+        "DetectSecretsScanner",
+        "DetectSecrets",
+    ),
+    "grype": ("ash_builtin.scanners.grype_scanner", "GrypeScanner", "Grype"),
+    "npm-audit": (
+        "ash_builtin.scanners.npm_audit_scanner",
+        "NpmAuditScanner",
+        "NpmAudit",
+    ),
+    "opengrep": (
+        "ash_builtin.scanners.opengrep_scanner",
+        "OpengrepScanner",
+        "Opengrep",
+    ),
+    "semgrep": (
+        "ash_builtin.scanners.semgrep_scanner",
+        "SemgrepScanner",
+        "Semgrep",
+    ),
+    "syft": ("ash_builtin.scanners.syft_scanner", "SyftScanner", "Syft"),
+    "ferret-scan": (
+        "ash_ferret_plugins.ferret_scanner",
+        "FerretScanScanner",
+        "Ferret",
+    ),
+    "snyk-code": (
+        "ash_snyk_plugins.snyk_code_scanner",
+        "SnykCodeScanner",
+        "SnykCode",
+    ),
+    "trivy-repo": (
+        "ash_trivy_plugins.trivy_repo_scanner",
+        "TrivyRepoScanner",
+        "TrivyRepo",
+    ),
+}
+#: The scanners whose own scan() resolves the command, rather than the template
+#: scan() calling _execute_scan.
+_OWN_SCAN = {"syft", "trivy-repo", "ferret-scan", "snyk-code"}
 
 
 class _Stop(Exception):
@@ -155,7 +221,98 @@ def _registered_scanner_names() -> set[str]:
 
 
 def test_every_registered_scanner_has_a_link_handling():
-    assert _registered_scanner_names() == set(LINK_HANDLING)
+    assert _registered_scanner_names() == set(LINK_HANDLING) == set(SCANNER_CLASSES)
+
+
+def _scanner_for(name: str, source: Path, base: Path):
+    import importlib
+
+    module_name, class_name, config_prefix = SCANNER_CLASSES[name]
+    module = importlib.import_module(f"{_SCANNERS}.{module_name}")
+    scanner_class = getattr(module, class_name)
+    config_class = getattr(module, f"{config_prefix}ScannerConfig")
+    return module, scanner_class(context=_context(source, base), config=config_class())
+
+
+#: Links that leave the tree, one for each kind of file a scanner reads; every name
+#: holds "link_out", which no other path in the tree or its argv does.
+HANDLING_LINKS = {
+    "link_out.py": "outside/secret.py",
+    "link_out.tf": "outside/main.tf",
+    "link_out.txt": "outside/requirements.txt",
+    "link_out.yml": "outside/config.yml",
+}
+HANDLING_FILES = {
+    "app.py": "x = 1\n",
+    "main.tf": "",
+    "requirements.txt": "six==1.0.0\n",
+    "settings.yml": "a: 1\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(LINK_HANDLING))
+def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
+    """What LINK_HANDLING says of each scanner, checked on a tree with such links."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
+    if name == "trivy-repo":
+        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+            trivy_repo_scanner,
+        )
+
+        monkeypatch.setattr(
+            trivy_repo_scanner, "sandboxed_online", lambda offline: False
+        )
+    source = _tree(tmp_path, HANDLING_FILES, HANDLING_LINKS)
+    module, scanner = _scanner_for(name, source, tmp_path)
+    handling = LINK_HANDLING[name]
+
+    if handling == READS_THE_SCAN_SET:
+        seen: list[list[str]] = []
+        real = module.scan_set
+
+        def _spy(*args, **kwargs):
+            seen.append([str(path) for path in real(*args, **kwargs)])
+            raise _Stop
+
+        scanner.dependencies_satisfied = True
+        with (
+            patch.object(module, "scan_set", side_effect=_spy),
+            patch.object(scanner, "_pre_scan", return_value=True),
+            patch.object(scanner, "_post_scan"),
+            patch.object(scanner, "_run_subprocess", side_effect=_Stop),
+        ):
+            try:
+                scanner.scan(target=source, target_type="source")
+            except (_Stop, ScannerError):
+                pass
+        assert seen, f"{name} did not take its inputs from the scan set"
+        assert any(path.endswith("/app.py") for path in seen[0]), seen[0]
+        assert not [path for path in seen[0] if "link_out" in path]
+        return
+
+    if handling == REFUSES_THE_TARGET:
+        scanner.dependencies_satisfied = True
+        with (
+            patch.object(scanner, "_pre_scan", return_value=True),
+            patch.object(scanner, "_post_scan"),
+            patch.object(scanner, "_run_subprocess") as run,
+        ):
+            with pytest.raises(ScannerError, match="link leaves the scanned tree"):
+                scanner.scan(target=source, target_type="source")
+        run.assert_not_called()
+        return
+
+    if name in _OWN_SCAN:
+        argv = _recorded_argv(scanner, source)
+    else:
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+    naming_the_link = [str(arg) for arg in argv if "link_out" in str(arg)]
+    if handling == EXCLUDES_THE_LINK:
+        assert naming_the_link, argv
+    else:
+        assert handling == FOLLOWS_NO_LINK
+        assert naming_the_link == [], argv
 
 
 # ---------------------------------------------------------------------------

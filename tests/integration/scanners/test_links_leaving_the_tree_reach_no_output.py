@@ -10,32 +10,40 @@ holding a marker string; the ``.py`` and the ``.yml`` also hold secret-shaped
 strings. Measured before the change, bandit's snippet of the outside ``.py`` reached
 ash.sarif, ash_aggregated_results.json, the CSV, flat JSON and GitLab SAST reports
 and ash.summary.md, and checkov's results held the outside ``.tf``. The scan enables
-every plugin module, so every registered scanner takes part; the ones whose tool is
-not installed where the test runs are MISSING. Every file the scan wrote is checked,
-and no finding may sit at a link's path.
+every plugin module, so every registered scanner is in its results. Every file the
+scan wrote is checked, and no finding may sit at a link's path.
 
-In-tree controls show the scanners ran: ``real.py`` and ``real.tf`` hold what bandit,
-checkov and the semgrep rule report, and ``in_tree_link.py`` is a link to
-``real.py``, which is still scanned.
+That proves something only for the scanners that ran, so each one that can run here
+must also have scanned the tree: be PASSED, or FAILED on its findings, and report
+the in-tree finding ``CONTROLS`` names (``real.py`` for bandit and the semgrep
+rule, ``real.tf`` for checkov, and so on). ``in_tree_link.py`` is a link to
+``real.py``, which is still scanned. A scanner that cannot run here (its tool or
+database is absent, or it needs the network) does not count as taking part: its
+test is skipped with its status and what it lacks, so the run's report lists it.
 
 Tools the test can use when the environment provides them, none required: the
-grype and trivy databases (``GRYPE_DB_CACHE_DIR``, ``TRIVY_CACHE_DIR``), and the
-scanner binaries on ``PATH``. semgrep and opengrep get an offline rule cache the
-test writes.
+grype and trivy databases (``GRYPE_DB_CACHE_DIR`` naming grype's ``db`` directory,
+``TRIVY_CACHE_DIR``), and the scanner binaries on ``PATH``. semgrep and opengrep
+get an offline rule cache the test writes.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 -- runs this interpreter's ASH on a fixture tree
 import sys
 import textwrap
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = [
     pytest.mark.integration,
@@ -98,14 +106,18 @@ SHELL_TRUE_RULE = """rules:
     pattern: subprocess.call(..., shell=True)
 """
 
-DRIVER = textwrap.dedent(
-    """
-    import sys
-    from automated_security_helper.cli.main import app
+#: The child imports ASH from this checkout, not from wherever the interpreter's
+#: installed copy points (see importing_this_checkout).
+DRIVER = importing_this_checkout(
+    textwrap.dedent(
+        """
+        import sys
+        from automated_security_helper.cli.main import app
 
-    sys.argv = ["ash", "scan", *sys.argv[1:]]
-    app()
-    """
+        sys.argv = ["ash", "scan", *sys.argv[1:]]
+        app()
+        """
+    )
 )
 
 PLUGIN_MODULES = [
@@ -343,47 +355,165 @@ def test_each_link_leaving_the_tree_is_listed_as_not_scanned(scan):
     assert {row["reason"] for row in rows} == {"link leaves the scanned tree"}
 
 
-@pytest.mark.parametrize(
-    "scanner, command, in_tree_uri",
-    [
-        ("bandit", "bandit", "real.py"),
-        ("checkov", "checkov", "real.tf"),
-        ("detect-secrets", "detect-secrets", "settings.yml"),
-    ],
+@dataclass(frozen=True)
+class Control:
+    """When a scanner can run in this scan, and what it must find in the tree.
+
+    ``commands`` must all be found, on PATH or beside this interpreter, ``module``
+    importable and ``database`` set in the environment. ``offline`` says why the
+    scanner never runs in this offline scan. ``in_tree`` is a path a finding of
+    the scanner's must sit at; None with no ``sbom_package`` means any finding at
+    a path in the tree.
+    """
+
+    commands: tuple[str, ...] = ()
+    module: str | None = None
+    database: str | None = None
+    offline: str | None = None
+    in_tree: str | None = None
+    sbom_package: str | None = None
+
+
+#: One for every registered scanner. The in-tree findings were measured with
+#: bandit 1.9.4, checkov 3.3.26, detect-secrets, semgrep 1.180.0, opengrep 1.30.2,
+#: cfn-nag, cdk-nag, grype 0.120.1, trivy 0.75.0 and syft 1.54.1; ferret-scan's
+#: has not been measured.
+CONTROLS = {
+    "bandit": Control(commands=("bandit",), in_tree="real.py"),
+    "checkov": Control(commands=("checkov",), in_tree="real.tf"),
+    "detect-secrets": Control(commands=("detect-secrets",), in_tree="settings.yml"),
+    "semgrep": Control(commands=("semgrep",), in_tree="real.py"),
+    "opengrep": Control(commands=("opengrep",), in_tree="real.py"),
+    "cfn-nag": Control(
+        commands=("cfn_nag_scan",), in_tree="templates/real.template.json"
+    ),
+    "cdk-nag": Control(module="cdk_nag", in_tree="templates/real.template.json"),
+    "grype": Control(
+        commands=("grype",), database="GRYPE_DB_CACHE_DIR", in_tree="requirements.txt"
+    ),
+    "trivy-repo": Control(
+        commands=("trivy",), database="TRIVY_CACHE_DIR", in_tree="requirements.txt"
+    ),
+    "syft": Control(commands=("syft",), sbom_package="django"),
+    "ferret-scan": Control(commands=("ferret-scan",)),
+    "npm-audit": Control(
+        offline="npm audit asks the package registry, which an offline scan does "
+        "not reach"
+    ),
+    "snyk-code": Control(
+        offline="Snyk Code analyzes on Snyk's service, which an offline scan does "
+        "not reach"
+    ),
+}
+
+TOOK_PART = ("PASSED", "FAILED")
+PLUGIN_ROOT = Path(__file__).resolve().parents[3] / (
+    "automated_security_helper/plugin_modules"
 )
-def test_the_measured_readers_ran_and_still_scan_the_tree(
-    scan, scanner, command, in_tree_uri
-):
-    """The control: each ran, and found what is in the tree."""
-    if shutil.which(command) is None:
-        pytest.skip(f"{command} is not installed here")
+
+
+def _registered_scanner_names() -> set[str]:
+    names = set()
+    for path in PLUGIN_ROOT.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "@ash_scanner_plugin" in text:
+            names.update(re.findall(r'name: Literal\["([^"]+)"\] = "', text))
+    return names
+
+
+def _why_it_cannot_run(control: Control) -> str | None:
+    """None when the scanner can run here; otherwise what it lacks."""
+    if control.offline:
+        return control.offline
+    path = os.pathsep.join(
+        [os.environ.get("PATH", ""), str(Path(sys.executable).parent)]
+    )
+    missing = [
+        command for command in control.commands if not shutil.which(command, path=path)
+    ]
+    if missing:
+        return f"{', '.join(missing)} is not installed here"
+    if control.module and importlib.util.find_spec(control.module) is None:
+        return f"the {control.module} module is not installed here"
+    if control.database and not os.environ.get(control.database):
+        return f"{control.database} names no database here"
+    return None
+
+
+def _sbom_packages(output: Path, scanner: str) -> set[str]:
+    names = set()
+    for sbom in (output / "scanners" / scanner).rglob("*.cdx.json"):
+        document = json.loads(sbom.read_text(encoding="utf-8"))
+        names.update(c.get("name") for c in document.get("components") or [])
+    return names
+
+
+def test_every_registered_scanner_has_a_control():
+    assert _registered_scanner_names() == set(CONTROLS)
+
+
+@pytest.mark.parametrize("scanner", sorted(CONTROLS))
+def test_each_scanner_that_can_run_here_scanned_the_tree(scan, scanner):
+    """Ran (PASSED, or FAILED on its findings), and found what is in the tree.
+
+    A scanner that cannot run here is skipped with what it lacks and the status the
+    scan gave it, so the run's report lists every scanner that did not take part.
+    """
     output, results, _ = scan
     status = _statuses(results).get(scanner)
-    # FAILED is a scanner that ran and reported findings over the threshold.
-    assert status in ("PASSED", "FAILED"), status
-    if in_tree_uri is not None:
-        assert any(in_tree_uri in uri for uri in _uris(output).get(scanner, set())), (
-            _uris(output)
-        )
+    control = CONTROLS[scanner]
+    reason = _why_it_cannot_run(control)
+    if reason is not None:
+        assert status not in TOOK_PART, (scanner, status, reason)
+        pytest.skip(f"{scanner} did not take part ({status}): {reason}")
+
+    assert status in TOOK_PART, (scanner, status)
+    if control.sbom_package is not None:
+        assert control.sbom_package in _sbom_packages(output, scanner)
+        return
+    uris = _uris(output).get(scanner, set())
+    if control.in_tree is not None:
+        assert any(uri.endswith(control.in_tree) for uri in uris), uris
+    else:
+        assert uris, f"{scanner} reported nothing in the tree"
 
 
-def test_every_registered_scanner_took_part(scan):
+def test_the_scanners_that_took_part_are_the_ones_that_can_run_here(scan):
+    """Every registered scanner is in the results, and only those that can run took part.
+
+    The ones that did not take part are each listed by the skipped test above.
+    """
     _, results, _ = scan
-    assert set(_statuses(results)) >= {
-        "bandit",
-        "cdk-nag",
-        "cfn-nag",
-        "checkov",
-        "detect-secrets",
-        "ferret-scan",
-        "grype",
-        "npm-audit",
-        "opengrep",
-        "semgrep",
-        "snyk-code",
-        "syft",
-        "trivy-repo",
+    statuses = _statuses(results)
+    can_run = {name for name, c in CONTROLS.items() if _why_it_cannot_run(c) is None}
+    took_part = {name for name, status in statuses.items() if status in TOOK_PART}
+    not_taking_part = {
+        name: f"{statuses.get(name)}: {_why_it_cannot_run(CONTROLS[name])}"
+        for name in sorted(set(CONTROLS) - took_part)
     }
+
+    assert set(statuses) == set(CONTROLS)
+    assert took_part == can_run, not_taking_part
+
+
+def test_npm_audit_finds_the_package_whose_manifest_links_out(scan):
+    """pkg/package.json leaves the tree; npm-audit still finds pkg by its lockfile.
+
+    Offline it audits nothing and is MISSING, and the lockfile it would have
+    audited is listed as not scanned, with the reason.
+    """
+    _, results, _ = scan
+    reports = (results.get("additional_reports") or {}).get("npm-audit") or {}
+    rows = [
+        row
+        for report in reports.values()
+        if isinstance(report, dict)
+        for row in report.get("inputs_not_scanned") or []
+    ]
+
+    assert _statuses(results).get("npm-audit") == "MISSING"
+    assert [row["path"] for row in rows] == ["pkg/package-lock.json"]
+    assert "offline" in rows[0]["reason"]
 
 
 def test_an_in_tree_link_is_still_scanned_by_bandit(scan):

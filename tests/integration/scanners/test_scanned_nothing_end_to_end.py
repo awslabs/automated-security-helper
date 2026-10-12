@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = [pytest.mark.integration]
 
 SCANNERS = ["semgrep", "opengrep", "bandit"]
@@ -42,14 +44,17 @@ RULE = """rules:
     pattern: subprocess.call(..., shell=True)
 """
 
-DRIVER = textwrap.dedent(
-    """
-    import sys
-    from automated_security_helper.cli.main import app
+#: The child imports ASH from this checkout (see importing_this_checkout).
+DRIVER = importing_this_checkout(
+    textwrap.dedent(
+        """
+        import sys
+        from automated_security_helper.cli.main import app
 
-    sys.argv = ["ash", "scan", *sys.argv[1:]]
-    app()
-    """
+        sys.argv = ["ash", "scan", *sys.argv[1:]]
+        app()
+        """
+    )
 )
 
 PY = "import subprocess\nsubprocess.call('x', shell=True)\n"
