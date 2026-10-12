@@ -160,9 +160,10 @@ a run ASH itself failed to carry out (the scanner's errors name ASH's error).
 | snyk-code | 0, 1 (issues found) | 2: an error; 3: no supported project (`src/cli/exit-codes.ts`) |
 
 trivy exits 0 for a run with findings unless its `exit-code` setting names another
-code. ASH never passes one, but trivy also reads it from a `trivy.yaml` in the
-directory it runs in, which is the scanned directory, and from `TRIVY_EXIT_CODE`. With
-`exit-code: 1` set there, every trivy-repo run that finds something exits 1, and the
+code. ASH never passes one, but trivy also reads it from the config file
+`TRIVY_CONFIG` names and from `TRIVY_EXIT_CODE`; a `trivy.yaml` in the scanned
+directory is not read. With `exit-code: 1` set in either of those, every trivy-repo
+run that finds something exits 1, and the
 scanner is `ERROR` rather than reporting those findings: ASH cannot tell that exit
 from trivy's own error exit. Remove the setting; ASH decides the scan's exit code
 from the findings itself.

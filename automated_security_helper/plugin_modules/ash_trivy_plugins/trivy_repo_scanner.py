@@ -215,10 +215,10 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     # trivy exits 0 for a completed run, findings or not, unless --exit-code names
     # another code for findings (default 0, pkg/flag/report_flags.go), and 1 from
     # log.Fatal on any error (cmd/trivy/main.go). ASH passes no --exit-code, so 1 is
-    # an error. An exit-code set in a trivy.yaml in the scanned directory (trivy
-    # reads it from its working directory) or in TRIVY_EXIT_CODE makes a run with
-    # findings exit with that code, and it is then recorded as a failed run: 1 is
-    # indistinguishable from trivy's own error exit.
+    # an error. An exit-code set in the TRIVY_CONFIG file or in TRIVY_EXIT_CODE
+    # makes a run with findings exit with that code, and it is then recorded as a
+    # failed run: 1 is indistinguishable from trivy's own error exit. A trivy.yaml in
+    # the scanned directory is not read (_config_file).
     success_exit_codes: ClassVar[Set[int]] = {0}
 
     # Env vars layered onto the subprocess. Populated by _process_config_options
