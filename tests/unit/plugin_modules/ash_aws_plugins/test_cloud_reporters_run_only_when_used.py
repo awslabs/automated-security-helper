@@ -342,13 +342,29 @@ class TestReportCommand:
             ],
         )
 
+    @staticmethod
+    def _plugin_config(root):
+        """An operator config that names the AWS plugin module and sets nothing else.
+
+        ``ash report`` loads the plugin modules the config names, as a scan does,
+        so without one the AWS reporters are not there to refuse or run.
+        """
+        path = root / "operator" / "ash-aws.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"ash_plugin_modules:\n  - {AWS_PLUGIN_MODULE}\n", encoding="utf-8"
+        )
+        return path
+
     def test_a_cloud_reporter_the_operator_did_not_enable_is_refused(
         self, tmp_path, requests, sessions, security_hub_runs
     ):
         output_dir = tmp_path / "out"
         _stored_results(output_dir)
 
-        result = self._report(output_dir)
+        result = self._report(
+            output_dir, "--config", str(self._plugin_config(tmp_path))
+        )
 
         assert result.exit_code == 1, result.output
         # rich wraps the message at the console width; compare it with the line
@@ -367,6 +383,8 @@ class TestReportCommand:
 
         result = self._report(
             output_dir,
+            "--config",
+            str(self._plugin_config(tmp_path)),
             "--config-overrides",
             "reporters.aws-security-hub.enabled=true",
         )
