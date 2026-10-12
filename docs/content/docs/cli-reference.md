@@ -262,7 +262,7 @@ container cannot see that, the host passes it `--config-from-scanned-repository`
 at a time as the host does). A workspace scan inside the
 container refuses that flag, so in workspace mode `--mode container` refuses such a
 `--config` instead, with exit 3 before anything is built or mounted: keep `--config`
-outside the checkout, or inside the workspace. A config inside the workspace root is
+outside every git checkout, or inside the workspace. A config inside the workspace root is
 read through `/src` and judged by the scan inside, and one outside every checkout is
 the operator's. `./ash` and `Invoke-ASH` scan one directory and refuse a `--workspace`
 passed through to `ash` with exit 3; use `ash --mode container --workspace`. In

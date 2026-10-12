@@ -54,6 +54,7 @@ from automated_security_helper.config.default_config import (
     default_config_names,
     get_default_config,
 )
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.config.operator_paths import (
     anchor_override_paths,
     the_operators_files,
@@ -1103,9 +1104,8 @@ def confine_honor_ignore_files(
         f"Ignoring honor_ignore_files from {files}: {reason}, and whether the "
         "scanned repository's own .gitignore and .ignore files are honored is the "
         "operator's choice. Using honor_ignore_files: "
-        f"{str(trusted.honor_ignore_files).lower()}. Set it with "
-        "--no-honor-ignore-files, --config-overrides or a config file outside every "
-        "git checkout."
+        f"{str(trusted.honor_ignore_files).lower()}. {KEEP_A_SETTING} Or turn it "
+        "off with --no-honor-ignore-files."
     )
 
 

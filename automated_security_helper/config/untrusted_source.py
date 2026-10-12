@@ -23,6 +23,8 @@ dropped, where a scan keeps an installed module outside the tree.
 from dataclasses import dataclass
 from typing import Optional
 
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+
 
 @dataclass(frozen=True)
 class UntrustedSource:
@@ -31,7 +33,9 @@ class UntrustedSource:
     Attributes:
         reason: A clause saying why the config's values are not taken. It follows
             the files a warning names.
-        remedy: Where the operator sets those values instead.
+        remedy: The sentences that end a warning, saying how the operator keeps
+            those values. For a file, ``confinement_remedy.KEEP_A_SETTING``, the
+            text every confinement warning about a file ends with.
         modules_remedy: The same for ``ash_plugin_modules``.
         named_modules_only: Drop every ``ash_plugin_modules`` entry the trusted
             base does not name, rather than keeping an installed module outside
@@ -55,13 +59,15 @@ class UntrustedSource:
     fills_missing_sections: bool = True
 
 
-#: A config file inside the scanned tree, or one an MCP client delivered.
+#: A config file inside a git checkout or the scanned tree, or one an MCP client
+#: delivered.
 IN_TREE_OR_DELIVERED = UntrustedSource(
-    reason="that config is inside the scanned tree or was delivered by an MCP client",
-    remedy="--config-overrides or a config file outside the tree",
-    modules_remedy=(
-        "--ash-plugin-modules, --config-overrides or a config file outside the tree"
+    reason=(
+        "that config is inside a git checkout or the scanned tree, or was delivered "
+        "by an MCP client"
     ),
+    remedy=KEEP_A_SETTING,
+    modules_remedy=f"{KEEP_A_SETTING} Or name the module with --ash-plugin-modules.",
 )
 
 #: The config a shard recorded in its results, as ``ash merge`` reads it.
@@ -70,8 +76,10 @@ SHARD_RECORDED = UntrustedSource(
         "that is the config a shard recorded in its results, which ash merge holds "
         "to the rules for a repository's config"
     ),
-    remedy="ash merge's --config-overrides or --config",
-    modules_remedy="ash merge's --config-overrides or --config",
+    remedy="To keep a setting, pass it with ash merge's --config-overrides or --config.",
+    modules_remedy=(
+        "To keep a module, pass it with ash merge's --config-overrides or --config."
+    ),
     named_modules_only=True,
     scanner_steps_note=(
         "No scanner runs during a merge, so this changes only the merged results, "

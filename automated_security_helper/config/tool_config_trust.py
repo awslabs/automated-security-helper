@@ -269,7 +269,7 @@ def confine_scanner_config_files(
         tail = (
             f"{source.scanner_steps_note}."
             if source.scanner_steps_note
-            else f"Set them with {source.remedy}."
+            else source.remedy
         )
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: these choose "
@@ -395,7 +395,7 @@ def confine_tool_versions(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: tool_version "
             "chooses which release of a tool ASH installs and accepts, which is the "
             f"operator's choice, and {source.reason}. The operator's value, or the "
-            f"tool's default constraint, applies instead. Set it with {source.remedy}."
+            f"tool's default constraint, applies instead. {source.remedy}"
         )
 
 

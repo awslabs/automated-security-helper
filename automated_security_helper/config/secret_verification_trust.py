@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, FrozenSet, Iterable, List, Optional, Sequence
 
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -188,7 +189,8 @@ def confine_detect_secrets_settings(
             "Ignoring scanners.detect-secrets.options.scan_settings entries "
             f"{', '.join(removed)}: {record.reason}. Only the operator's own "
             "configuration may turn on secret verification, which sends candidate "
-            "secrets to their issuers, or name a plugin or filter file to import."
+            "secrets to their issuers, or name a plugin or filter file to import. "
+            f"{KEEP_A_SETTING}"
         )
 
 

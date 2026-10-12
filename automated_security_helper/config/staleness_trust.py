@@ -137,6 +137,6 @@ def confine_content_db_staleness(
             f"Ignoring {'; '.join(ignored)} from {files}: relaxing the stale content "
             "database check is the operator's choice, and "
             f"{source.reason}. The operator's policy, or the default "
-            f"({STALENESS_FAIL}), applies instead. Set it with {source.remedy}, or "
-            "pass --allow-stale-content-db."
+            f"({STALENESS_FAIL}), applies instead. {source.remedy} Or pass "
+            "--allow-stale-content-db."
         )

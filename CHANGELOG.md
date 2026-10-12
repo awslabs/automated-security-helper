@@ -556,7 +556,7 @@
   `ash --mode container --workspace` now refuses it with exit 3 before anything is
   built, mounted or cleared: a config in the scanned checkout or another one, or named
   through a link to such a file, outside the workspace root. Keep `--config` outside
-  the checkout, or inside the workspace. A config inside the workspace root, read
+  every git checkout, or inside the workspace. A config inside the workspace root, read
   through `/src`, and one outside every checkout are used as before. `./ash` and
   `Invoke-ASH`, which scan one directory and hand the scan inside `--source-dir /src`,
   now refuse a `--workspace` passed through with exit 3 instead of starting a
@@ -572,6 +572,20 @@
   at a time, at most 40 links, and pass `--config-from-scanned-repository` when any
   link on the way sits in the scanned tree or a checkout. A chain of links outside
   every checkout is used as before.
+- **Every warning that drops a setting from a config file says how to keep it.** A
+  config file inside a git checkout, or inside the scanned directory, may not choose
+  the sandbox grants, `ash_plugin_modules`, the reporters' destinations, the
+  scanners' own config files, `tool_version`, the content database staleness
+  policy, detect-secrets' verification and `file://` plugins, `honor_ignore_files`,
+  or a higher archive extraction limit, and ASH warns when it drops one, naming the
+  file and the setting. Each of those warnings now ends with the same remedy: "To
+  keep a setting, move the file outside every git checkout, or pass the setting with
+  --config-overrides. A file inside the scanned directory has to move out of it as
+  well." Before, the warnings said to use a config file outside the scanned tree,
+  which a file in another checkout is too, and detect-secrets' warning gave no
+  remedy. Their reason now says the config is inside a git checkout or the scanned
+  tree, or an MCP client delivered it. `ash merge`'s warnings about a shard's config
+  say "To keep a setting, pass it with ash merge's --config-overrides or --config."
 - **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
   Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
   and GID 100, which cannot write an output directory the caller owns, and checked

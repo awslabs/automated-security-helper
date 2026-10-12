@@ -37,7 +37,7 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 from tests.utils.config_link_layouts import config_through_links
 
 GRANT = "project_name: tier\nsandbox:\n  extra_read_paths:\n    - /opt/tier-grant\n"
-FIX = "Keep --config outside the checkout, or inside the workspace"
+FIX = "Keep --config outside every git checkout, or inside the workspace"
 
 
 @pytest.fixture

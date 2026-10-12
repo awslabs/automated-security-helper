@@ -464,7 +464,7 @@ def confine_sandbox_grants(
             if source.scanner_steps_note
             else "A network_scanners list there still removes network from scanners "
             "it does not name, and a sandbox mode there still applies when nothing "
-            f"else turns the sandbox on. Set these with {source.remedy}."
+            f"else turns the sandbox on. {source.remedy}"
         )
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(ignored)} from {files}: {source.reason}. {tail}"

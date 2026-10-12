@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     EXTRACTION_LIMIT_OPTIONS,
     ArchiveConverterConfigOptions,
@@ -114,10 +115,7 @@ def confine_archive_limits(
             set_by_file.append(entry)
         setattr(options, name, cap)
     files = ", ".join(describe_config_path(path) for path in in_tree)
-    remedy = (
-        "Raise a limit with --config-overrides or a config file outside the scanned "
-        "tree."
-    )
+    remedy = KEEP_A_SETTING
     if set_by_file:
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(set_by_file)}, set by {files}: the scanned "

@@ -484,7 +484,7 @@ def _confine(
     ASH_LOGGER.warning(
         f"Ignoring {', '.join(ignored)} from {files}: {source.reason}, and these "
         "options choose whether findings are sent, where they are sent or written, "
-        f"and which credentials send them. Set them with {source.remedy}."
+        f"and which credentials send them. {source.remedy}"
     )
 
 

@@ -1396,7 +1396,8 @@ def _refuse_repository_config_in_a_workspace(
         "checkout, or reached through one, and outside the workspace root "
         f"{Path(source_dir).as_posix()}. A workspace scan inside the container cannot "
         "be told so, and would give it the operator's grants, so container mode "
-        "refuses it. Keep --config outside the checkout, or inside the workspace."
+        "refuses it. Keep --config outside every git checkout, or inside the "
+        "workspace."
     )
 
 

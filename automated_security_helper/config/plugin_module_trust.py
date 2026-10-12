@@ -313,8 +313,7 @@ def confine_plugin_modules(
     )
     ASH_LOGGER.warning(
         f"Ignoring ash_plugin_modules entries {', '.join(refused)} from {files}: "
-        f"{source.reason}, so {imported}. Name other modules with "
-        f"{source.modules_remedy}."
+        f"{source.reason}, so {imported}. {source.modules_remedy}"
     )
 
 
