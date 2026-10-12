@@ -201,6 +201,16 @@ def test_a_converter_without_a_config_has_the_default_limits(
     ]
 
 
+def test_a_converter_without_a_config_extracts_under_its_own_name(
+    test_plugin_context,
+):
+    """Its work directory is the one the configured converter uses, work/archive."""
+    converter = ArchiveConverter(context=test_plugin_context)
+
+    assert converter.config.name == "archive"
+    assert converter.results_dir == Path(test_plugin_context.work_dir) / "archive"
+
+
 def test_the_defaults_are_the_documented_ones():
     """The values docs/content/docs/plugins/builtin/converters.md states."""
     assert ArchiveConverterConfigOptions().model_dump() == {

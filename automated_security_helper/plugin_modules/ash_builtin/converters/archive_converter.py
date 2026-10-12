@@ -823,6 +823,14 @@ class ArchiveConverterConfig(ConverterPluginConfigBase):
 class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
     """Converter implementation for Archive file extraction."""
 
+    def model_post_init(self, context):
+        # Without a config, ConverterPluginBase would give a nameless one, and the
+        # work directory would be named for the class (work/ArchiveConverter)
+        # rather than for the converter (work/archive), as configured runs use.
+        if self.config is None:
+            self.config = ArchiveConverterConfig()
+        return super().model_post_init(context)
+
     @staticmethod
     def _open_tar(
         handle: BinaryIO, stack: contextlib.ExitStack
