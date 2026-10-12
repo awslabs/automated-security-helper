@@ -1237,6 +1237,10 @@
     limit, and that reporter does not run; the others do. Before, the reporter was
     built from the generic reporter config instead, with the refused value in it
     and nothing logged.
+  - The Bedrock summary reporter now retries a throttled Bedrock call `max_retries`
+    times, waiting `base_delay` seconds and doubling up to `max_delay`, as the
+    CloudWatch Logs and S3 reporters do. Before, it read none of the three options
+    and reported a rate-limit error at the first refusal.
   - `enabled: false` for one of these reporters is accepted the same way through
     `select_profile`'s `patch_ops` and `override_yaml` and the MCP workspace tools'
     `config_overrides`, under the entries that cover it; `enabled: true`, and

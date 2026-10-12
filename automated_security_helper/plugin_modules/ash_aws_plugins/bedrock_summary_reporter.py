@@ -926,6 +926,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             temperature=opts.temperature,
             max_tokens=opts.max_tokens,
             top_p=opts.top_p,
+            max_retries=opts.max_retries,
+            base_delay=opts.base_delay,
+            max_delay=opts.max_delay,
         )
 
     # ------------------------------------------------------------------
@@ -1247,6 +1250,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             temperature=inference_config.get("temperature", opts.temperature),
             max_tokens=inference_config.get("maxTokens", opts.max_tokens),
             top_p=inference_config.get("topP", opts.top_p),
+            max_retries=opts.max_retries,
+            base_delay=opts.base_delay,
+            max_delay=opts.max_delay,
         )
         prompt_text = ""
         if messages and messages[0].get("content"):

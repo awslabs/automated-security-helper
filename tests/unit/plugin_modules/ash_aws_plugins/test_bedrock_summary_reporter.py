@@ -619,14 +619,19 @@ class TestTryModelCall:
             "converse",
         )
         reporter = BedrockSummaryReporter(context=mock_context)
-        result = reporter._try_model_call(
-            client,
-            "model",
-            [{"role": "user", "content": [{"text": "hi"}]}],
-            [{"text": "sys"}],
-            {"temperature": 0.5, "maxTokens": 100, "topP": 0.9},
-        )
+        # Retried max_retries (3 by default) times first; the backoff is stubbed.
+        with patch(
+            "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time.sleep"
+        ):
+            result = reporter._try_model_call(
+                client,
+                "model",
+                [{"role": "user", "content": [{"text": "hi"}]}],
+                [{"text": "sys"}],
+                {"temperature": 0.5, "maxTokens": 100, "topP": 0.9},
+            )
         assert "Rate limit" in result
+        assert client.converse.call_count == 4
 
     @patch("boto3.Session")
     def test_validation_error(self, mock_session_cls, mock_context):
