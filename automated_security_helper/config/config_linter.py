@@ -27,7 +27,10 @@ from automated_security_helper.config.config_sources import (
     read_config_bytes,
     read_config_file,
 )
-from automated_security_helper.config.config_validator import ConfigValidator
+from automated_security_helper.config.config_validator import (
+    ConfigValidator,
+    directory_path_advice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -849,15 +852,13 @@ class ConfigLinter:
         # We strip leading **/ patterns that won't exist as literal paths
         candidate = project_root / clean_path
         if candidate.is_dir():
-            # The path exists as a directory — warn that it needs /**
+            # The path exists as a directory and matches no file in it.
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
                     category=LintCategory.IGNORE_PATH_ISSUE,
-                    message=(
-                        f"Path '{path_pattern}' points to a directory but lacks a '**' glob suffix. "
-                        f"This pattern will not match files inside the directory. "
-                        f"Use '{clean_path}/**' to ignore all files recursively."
+                    message=directory_path_advice(
+                        path_pattern, ignore_path=slash_names_directory
                     ),
                     path=path_prefix,
                 )

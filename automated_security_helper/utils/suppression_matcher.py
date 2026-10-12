@@ -13,6 +13,7 @@ from typing import Iterable, List, Optional, Tuple
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.utils.path_matching import (
     _recursive_glob_match,
+    directory_spelling,
     ignore_path_pattern,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
@@ -154,7 +155,8 @@ def warn_unmatched_directory_suppressions(
             f"The suppression with path '{escape_markup(path)}' matched no finding: "
             "a suppression path ending in '/' matches only that literal path, not "
             "the files in the directory, as an ignore path's does. To suppress the "
-            f"findings below it, write '{escape_markup(directory)}/**/*'."
+            "findings below it, write "
+            f"'{escape_markup(directory_spelling(directory, ignore_path=False))}'."
         )
 
 

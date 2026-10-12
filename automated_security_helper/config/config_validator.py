@@ -26,6 +26,26 @@ from automated_security_helper.core.exceptions import (
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
 )
+from automated_security_helper.utils.path_matching import directory_spelling
+
+
+def directory_path_advice(path_pattern: str, *, ignore_path: bool) -> str:
+    """The warning for a path that names an existing directory and no file in it.
+
+    Shared by ``ash config validate`` and ``ash config lint``, and spelled as
+    ``path_matching.directory_spelling`` spells it, as the warning after the scan
+    does: ``<dir>/`` for an ignore path, ``<dir>/**/*`` for a suppression path.
+    """
+    spelling = directory_spelling(path_pattern, ignore_path=ignore_path)
+    action = (
+        "to ignore every file inside the directory"
+        if ignore_path
+        else "to suppress the findings in every file inside the directory"
+    )
+    return (
+        f"Path '{path_pattern}' points to a directory but matches no file in it. "
+        f"Use '{spelling}' {action}."
+    )
 
 
 class ConfigValidationError(Exception):
@@ -375,7 +395,9 @@ class ConfigValidator:
                 if not isinstance(entry, dict):
                     continue
                 path_pattern = entry.get("path", "")
-                warning = cls._check_single_path(path_pattern, project_root)
+                warning = cls._check_single_path(
+                    path_pattern, project_root, ignore_path=True
+                )
                 if warning:
                     warnings.append(warning)
 
@@ -386,24 +408,32 @@ class ConfigValidator:
                 if not isinstance(entry, dict):
                     continue
                 path_pattern = entry.get("path", "")
-                warning = cls._check_single_path(path_pattern, project_root)
+                warning = cls._check_single_path(
+                    path_pattern, project_root, ignore_path=False
+                )
                 if warning:
                     warnings.append(warning)
 
         return warnings
 
     @classmethod
-    def _check_single_path(cls, path_pattern: str, project_root: Path) -> Optional[str]:
+    def _check_single_path(
+        cls, path_pattern: str, project_root: Path, *, ignore_path: bool
+    ) -> Optional[str]:
         """Check a single path pattern for directory-without-glob issues.
 
-        Returns a warning message if the path points to an existing directory
-        without a '**' glob suffix, or None if the path is fine.
+        Returns a warning message if the path points to an existing directory and
+        matches no file in it, or None if the path is fine. An ignore path ending
+        in ``/`` names the directory and matches what is in it, so it is fine; a
+        suppression path ending in ``/`` is literal and is not.
         """
         if not path_pattern:
             return None
 
         # Skip patterns that already contain ** (recursive glob)
         if "**" in path_pattern:
+            return None
+        if ignore_path and path_pattern.endswith(("/", "\\")):
             return None
 
         # Strip trailing slash for directory check
@@ -419,11 +449,7 @@ class ConfigValidator:
         # Check if this path resolves to an existing directory
         candidate = project_root / clean_path
         if candidate.is_dir():
-            return (
-                f"Path '{path_pattern}' points to a directory but lacks a '**' glob suffix — "
-                f"it will not match files inside the directory. "
-                f"Use '{clean_path}/**' to ignore all files recursively."
-            )
+            return directory_path_advice(path_pattern, ignore_path=ignore_path)
 
         return None
 

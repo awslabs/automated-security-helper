@@ -160,6 +160,20 @@ def ignore_path_pattern(pattern: str) -> str:
     return pattern
 
 
+def directory_spelling(directory: str, *, ignore_path: bool) -> str:
+    """How to write "every file inside ``directory``", for advice ASH prints.
+
+    One spelling for one meaning, so the config lint, ``ash config validate`` and
+    the warning after the scan agree. For an ignore path, ``<dir>/``, which
+    ``ignore_path_pattern`` reads as what is inside the directory. For a
+    suppression path, whose trailing slash is literal, ``<dir>/**/*``: every file
+    below the directory and not a path named exactly ``<dir>``, which ``<dir>/**``
+    would also match.
+    """
+    directory = directory.rstrip("/\\")
+    return f"{directory}/" if ignore_path else f"{directory}/**/*"
+
+
 def match_glob(path: str, pattern: str) -> bool:
     """Public entry point: case-insensitive glob match with ``**`` support."""
     return _path_pattern_matches(path, pattern)

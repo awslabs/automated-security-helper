@@ -180,8 +180,11 @@
   each tree-walking scanner is given, and snyk-code's refusal. So `**/.*/` covers
   the files in dot-directories, not dotfiles such as `.env`, which detect-secrets
   keeps scanning. It stays anchored at the source directory (`**/vendor/` for any
-  depth). `ash config lint`
-  no longer warns about such an ignore path. Suppression paths keep their meaning:
+  depth). `ash config lint` no longer warns about such an ignore path, and `ash
+  config validate` no longer reports one as invalid. For a path that names an
+  existing directory and no file in it, both now suggest `<dir>/` for an ignore
+  path and `<dir>/**/*` for a suppression path, where they suggested `<dir>/**`
+  for either. Suppression paths keep their meaning:
   `build/` still matches no file, and ASH now warns once after the scan for each
   suppression path ending in `/` that matched nothing, naming `build/**/*`, which
   covers every file below `build` and not a file named `build`. bandit's

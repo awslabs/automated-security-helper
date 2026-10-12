@@ -10,7 +10,7 @@ Validating configuration file: invalid.yaml
   6. Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs
   7. Reporter 'html' contains internal-only field 'extension' - this should not be in user configs
   8. Converter 'archive' contains internal-only field 'install_timeout' - this should not be in user configs
-  9. Path 'vendor' points to a directory but lacks a '**' glob suffix — it will not match files inside the directory. Use 'vendor/**' to ignore all files recursively.
+  9. Path 'vendor' points to a directory but matches no file in it. Use 'vendor/' to ignore every file inside the directory.
 
 💡 Common fixes:
   - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
