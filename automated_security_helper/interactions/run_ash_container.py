@@ -17,7 +17,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Tuple
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 import typer
@@ -1347,26 +1347,59 @@ def container_build_refusal(
 
 
 #: Tells the scan inside the container that its --config was written by the
-#: repository being scanned; see _written_by_the_scanned_repository.
+#: repository being scanned, with every file it extends; see _config_marks.
 CONFIG_FROM_SCANNED_REPOSITORY_FLAG = "--config-from-scanned-repository"
+#: Tells the scan inside the container that one file the --config extends was
+#: written by the repository being scanned, by its container path; see _config_marks.
+CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG = "--config-file-from-scanned-repository"
 
 
-def _written_by_the_scanned_repository(
-    files: List[Path], source_dir: Path, named: Sequence[Path] = ()
-) -> bool:
-    """Whether a local scan of *source_dir* would count any of *files* as
-    repository-written.
+def _config_marks(config: str, source_dir: Path) -> Tuple[bool, List[str]]:
+    """Which mounted config files a local scan of *source_dir* would count as
+    repository-written: (the --config itself, the container paths of the files it
+    extends that are).
 
     The same rule ``resolve_config`` applies to a local scan,
-    ``config/sandbox_grants.repository_written``: a file inside any git checkout, by
-    its own or its resolved path, or inside the source directory by any of its
-    names, or reached through a link inside one. *named* holds the same files as
-    the operator named them. A config mounted at /ash-config is outside the scan's
-    own tree inside the container, so the host has to decide.
+    ``config/sandbox_grants.untrusted_path``, to each file by its resolved path and
+    by the names that reached it (the --config as the operator named it, and each
+    base as its extends entry spells it): a file inside any git checkout or the
+    source directory, or reached through a link inside one. The files are mounted
+    at /ash-config, outside the scan's own tree inside the container, so the host
+    decides and tells it: the whole chain with CONFIG_FROM_SCANNED_REPOSITORY_FLAG
+    when the --config is repository-written, else each base that is with
+    CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG, so the --config keeps the sandbox
+    settings it writes itself, as it does on the host. A config inside the source
+    directory is read through /src and needs neither.
     """
-    from automated_security_helper.config.sandbox_grants import repository_written
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        resolve_config_document,
+    )
+    from automated_security_helper.config.sandbox_grants import untrusted_path
 
-    return bool(repository_written(files, Path(source_dir), named))
+    source = Path(source_dir)
+    resolved = Path(config).resolve()
+    if resolved.is_relative_to(source.resolve()):
+        return False, []
+    if untrusted_path(resolved, source) or untrusted_path(Path(config), source):
+        return True, []
+    root = default_confinement_root(resolved, source.resolve())
+    inner_config = f"{CONTAINER_CONFIG_ROOT}/{resolved.relative_to(root).as_posix()}"
+    try:
+        document = resolve_config_document(resolved, confine_to=root)
+        placements = _chain_placements(resolved, inner_config, CONTAINER_CONFIG_ROOT)
+    except Exception:  # noqa: BLE001 - mounted alone; the scan inside reports it
+        return False, []
+    names: dict = {}
+    for file, name in zip(document.chain, document.named):
+        names.setdefault(Path(file), []).append(Path(name))
+    marked = [
+        inner
+        for file, inner in placements[1:]
+        if untrusted_path(file, source)
+        or any(untrusted_path(name, source) for name in names.get(file, []))
+    ]
+    return False, sorted(set(marked))
 
 
 def _refuse_repository_config_in_a_workspace(
@@ -1739,6 +1772,7 @@ def _assemble_run_command(
     # mode that is the operator's --config, which /src never holds.
     inner_config = None
     config_from_scanned_repository = False
+    marked_config_files: List[str] = []
     if config:
         _refuse_config_linked_out_of_the_tree(config, source_dir)
         _refuse_absolute_extends(config)
@@ -1754,11 +1788,10 @@ def _assemble_run_command(
         # before the build, so the rule holds whichever checks a caller ran first.
         if workspace_relative_file is not None:
             _refuse_repository_config_in_a_workspace(config, config_files, source_dir)
-        config_from_scanned_repository = bool(
-            config_files
-        ) and _written_by_the_scanned_repository(
-            config_files, source_dir, [Path(config)]
-        )
+        if config_files:
+            config_from_scanned_repository, marked_config_files = _config_marks(
+                config, source_dir
+            )
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:
         _refuse_config_linked_out_of_the_tree(
@@ -1876,6 +1909,8 @@ def _assemble_run_command(
         ash_args.extend(["--config", inner_config])
     if config_from_scanned_repository:
         ash_args.append(CONFIG_FROM_SCANNED_REPOSITORY_FLAG)
+    for marked in marked_config_files:
+        ash_args.extend([CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG, marked])
 
     for override in config_overrides:
         ash_args.extend(["--config-overrides", override])

@@ -28,6 +28,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
+from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
     _assemble_run_command,
 )
@@ -113,10 +114,12 @@ class TestTheHostTellsTheContainer:
 
         assert FLAG in inner
 
-    def test_an_operator_config_extending_a_base_in_the_checkout_is_marked(
+    def test_an_operator_config_extending_a_base_in_the_checkout_marks_the_base(
         self, checkout, tmp_path
     ):
-        """As locally: the merged config cannot be told apart from its base."""
+        """As locally: the base grants nothing, and the operator's file, outside
+        every checkout, keeps the sandbox settings it writes itself
+        (test_container_config_tier_parity.py)."""
         (checkout["ci"] / "base.yaml").write_text("project_name: p\n", encoding="utf-8")
         # Beside the checkout, so its confinement root holds the base.
         config = tmp_path / "ash.yaml"
@@ -126,7 +129,10 @@ class TestTheHostTellsTheContainer:
             _assemble(checkout["source"], checkout["out"], config=str(config))
         )
 
-        assert FLAG in inner
+        assert FLAG not in inner
+        flag = rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG
+        assert inner[inner.index(flag) + 1] == "/ash-config/repo/ci/base.yaml"
+        assert inner.count(flag) == 1
 
     def test_a_config_in_another_checkout_is_marked(self, checkout, tmp_path):
         """As locally: a config inside any git checkout cannot grant, not only one in
@@ -330,6 +336,77 @@ class TestTheScanInsideAppliesTheSameLimits:
         ]
         assert "someone other than the operator may have written it" in honor
         assert "MCP client" not in honor
+
+    def test_the_inner_cli_marks_each_named_file_of_the_chain(
+        self, monkeypatch, tmp_path
+    ):
+        """The mark for one file the config extends: that file only, while the scan
+        runs, and the config keeps its own standing."""
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+        from automated_security_helper.config.sandbox_grants import repository_written
+
+        source = tmp_path / "src"
+        source.mkdir()
+        mounted = tmp_path / "ash-config"
+        mounted.mkdir()
+        base = mounted / "base.yaml"
+        base.write_text("project_name: b\n", encoding="utf-8")
+        config = mounted / "ash.yaml"
+        config.write_text("extends: base.yaml\n", encoding="utf-8")
+        seen: Dict[str, Any] = {}
+
+        def run(**kwargs):
+            seen["kwargs"] = kwargs
+            seen["chain"] = repository_written(
+                [base.resolve(), config.resolve()], source
+            )
+            seen["root"] = repository_written([config.resolve()], source)
+
+        monkeypatch.setattr(scan_cli, "run_ash_scan", run)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--source-dir",
+                str(source),
+                "--config",
+                str(config),
+                rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
+                str(base),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert seen["chain"] == [base.resolve()]
+        assert seen["root"] == []
+        assert seen["kwargs"].get("untrusted_config", False) is False
+        assert repository_written([base.resolve()], source) == []
+
+    @pytest.mark.parametrize("where", ["not-in-the-chain", "no-config"])
+    def test_a_file_mark_that_is_not_a_file_of_the_chain_is_a_usage_error(
+        self, where, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+
+        monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: None)
+        (tmp_path / "src").mkdir()
+        config = tmp_path / "ash.yaml"
+        config.write_text("project_name: p\n", encoding="utf-8")
+        other = tmp_path / "other.yaml"
+        other.write_text("project_name: o\n", encoding="utf-8")
+        args = ["scan", "--source-dir", str(tmp_path / "src")]
+        if where == "not-in-the-chain":
+            args += ["--config", str(config)]
+
+        result = CliRunner().invoke(
+            app, [*args, rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG, str(other)]
+        )
+
+        assert result.exit_code == 3, result.output
+        assert rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG in result.output
 
     @pytest.mark.parametrize("mode", ["container", "nix"])
     def test_the_mark_on_any_other_scan_is_a_usage_error(

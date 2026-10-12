@@ -65,6 +65,7 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import (
+    CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
     CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
     container_build_refusal,
     container_input_refusal,
@@ -2428,10 +2429,18 @@ def _run_container_mode(
         # and for a usage error without one: an image built from an older ASH
         # rejects an option this ASH passes it, such as the repository mark.
         passed = [str(arg) for arg in (getattr(container_result, "args", None) or [])]
+        marks = [
+            flag
+            for flag in (
+                CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
+                CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
+            )
+            if flag in passed
+        ]
         cause = (
             f"the image was built from an older ASH that does not accept "
-            f"{CONFIG_FROM_SCANNED_REPOSITORY_FLAG}, which this ASH passes it"
-            if CONFIG_FROM_SCANNED_REPOSITORY_FLAG in passed
+            f"{' or '.join(marks)}, which this ASH passes it"
+            if marks
             else "the image may be from an older ASH that does not accept an option "
             "this ASH passes it"
         )

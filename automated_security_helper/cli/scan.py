@@ -60,6 +60,37 @@ def _from_environment(ctx: typer.Context, param: str) -> bool:
     return getattr(ctx.get_parameter_source(param), "name", None) == "ENVIRONMENT"
 
 
+def _fail_config_mark(message: str) -> NoReturn:
+    """A usage error in container mode's marks for the scan inside: exit 3."""
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(3)
+
+
+def _marked_outside_the_chain(config: Path, marked: List[str]) -> List[str]:
+    """The paths of *marked* that are not files of *config*'s extends chain.
+
+    Container mode names each file it marks by its path inside the container, so a
+    name that misses the chain would leave that file's grants in place unnoticed;
+    it is refused instead. A chain that does not load is left for the scan to
+    report, with its own exit code.
+    """
+    if not marked:
+        return []
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+    )
+    from automated_security_helper.config.resolve_config import read_config_document
+
+    try:
+        chain = read_config_document(
+            config, confine_to=default_confinement_root(config), log_failure=False
+        ).chain
+    except Exception:  # noqa: BLE001 - the scan reports a config that does not load
+        return []
+    files = {Path(os.path.realpath(path)) for path in chain}
+    return [path for path in marked if Path(os.path.realpath(path)) not in files]
+
+
 def _fail_workspace(
     message: str,
     code: WorkspaceExitCode = WorkspaceExitCode.WORKSPACE_ERROR,
@@ -529,9 +560,17 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--config-from-scanned-repository",
             hidden=True,
-            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on.",
+            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on.",
         ),
     ] = False,
+    config_files_from_scanned_repository: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--config-file-from-scanned-repository",
+            hidden=True,
+            help="Apply the limits ASH puts on a repository-written config file to this one file of the --config file's extends chain. Container mode passes it, once per file, for each file the config extends that is inside a git checkout when the config itself is not, so the config keeps the sandbox settings it writes itself, as on the host. Refused for a file that is not in the chain.",
+        ),
+    ] = None,
     ### WORKSPACE-RELATED OPTIONS
     workspace: Annotated[
         str | None,
@@ -750,40 +789,51 @@ def run_ash_scan_cli_command(
             f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
         )
 
-    # The hidden flag is how container mode tells the scan inside the container that
-    # the --config it mounted at /ash-config, or a file that config extends, is in a
-    # git checkout or the scanned directory on the host, which this scan cannot see.
-    # The mark makes that file, and every file a chain rooted at it extends,
-    # repository-written for the whole command, from planning on, in a one-directory
-    # scan and a workspace scan alike (sandbox_grants.marked_repository_written). It
-    # is not resolve_config's untrusted_config, which is for a file an MCP client
-    # delivered and holds it to the client's rules. That scan runs in local mode
-    # with a --config; any other scan cannot apply the mark, so it is a usage error
-    # with exit 3 rather than run_ash_scan's ValueError.
-    if config_from_scanned_repository:
+    # Container mode's marks for the scan inside, which cannot see where the host
+    # found the --config it mounted at /ash-config: --config-from-scanned-repository
+    # for a --config in a git checkout or the scanned directory, with every file it
+    # extends, and --config-file-from-scanned-repository for each file the config
+    # extends that is in one when the config itself is not. Every scan holds them,
+    # one-directory and workspace alike, for the whole command, from planning on
+    # (sandbox_grants.marked_repository_written, marked_files_repository_written).
+    # Neither is resolve_config's untrusted_config, which is for a file an MCP
+    # client delivered and holds it to the client's rules. The scan inside runs in
+    # local mode with a --config; any other scan cannot apply them, so they are a
+    # usage error with exit 3 rather than run_ash_scan's ValueError.
+    marked_files = list(config_files_from_scanned_repository or [])
+    if config_from_scanned_repository or marked_files:
         if (mode or RunMode.local) != RunMode.local:
-            typer.secho(
-                "--config-from-scanned-repository is passed by container mode to the "
-                "scan inside the container and applies only to a scan in local mode. "
-                "Leave it out: container mode decides it on the host.",
-                fg=typer.colors.RED,
-                err=True,
+            _fail_config_mark(
+                "--config-from-scanned-repository and "
+                "--config-file-from-scanned-repository are passed by container mode "
+                "to the scan inside the container and apply only to a scan in local "
+                "mode. Leave them out: container mode decides them on the host."
             )
-            raise typer.Exit(3)
         if config is None:
-            typer.secho(
-                "--config-from-scanned-repository marks the --config file, and this "
-                "scan has none. Leave it out: container mode decides it on the host.",
-                fg=typer.colors.RED,
-                err=True,
+            _fail_config_mark(
+                "--config-from-scanned-repository and "
+                "--config-file-from-scanned-repository mark the --config file and the "
+                "files it extends, and this scan has none. Leave them out: container "
+                "mode decides them on the host."
             )
-            raise typer.Exit(3)
+        outside = _marked_outside_the_chain(Path(config), marked_files)
+        if outside:
+            _fail_config_mark(
+                f"--config-file-from-scanned-repository names {', '.join(outside)}, "
+                f"which is not a file of the chain of --config {config}."
+            )
         from automated_security_helper.config.sandbox_grants import (
+            marked_files_repository_written,
             marked_repository_written,
         )
 
         marks = contextlib.ExitStack()
-        marks.enter_context(marked_repository_written(Path(config)))
+        if config_from_scanned_repository:
+            marks.enter_context(marked_repository_written(Path(config)))
+        if marked_files:
+            marks.enter_context(
+                marked_files_repository_written(Path(path) for path in marked_files)
+            )
         ctx.call_on_close(marks.close)
 
     workspace_plan: WorkspacePlan | None = None

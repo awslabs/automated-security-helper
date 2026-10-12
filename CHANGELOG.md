@@ -569,6 +569,17 @@
   `Invoke-ASH`, which scan one directory and hand the scan inside `--source-dir /src`,
   now refuse a `--workspace` passed through with exit 3 instead of starting a
   container that refused it.
+- **In a container scan, an operator's config keeps its own sandbox settings when only
+  a base it extends is in a git checkout.** On the host, a `--config` outside every
+  checkout that extends a base inside one keeps the sandbox section it writes itself,
+  and the base grants nothing. Container mode marked the whole chain for the scan
+  inside, so there the config lost its own section too. The host now marks each base
+  that is in a checkout on its own (`--config-file-from-scanned-repository`, by its
+  path inside the container), in one-directory and workspace scans, and the scan
+  inside applies the same split the host does. A config that is itself in a checkout
+  is still marked with every file it extends, and one outside every checkout with no
+  base in one is not marked. The scan inside refuses a mark for a file that is not in
+  the config's chain, without `--config`, or outside local mode, with exit 3.
 - **`./ash` and `Invoke-ASH` mark a `--config` reached through a link in a checkout.**
   A local scan, and `ash --mode container`, count a config as repository-written
   when a symlink its path follows sits in the scanned tree or in any git checkout,

@@ -5,8 +5,9 @@
 
 An operator's config kept outside the source directory may extend a file elsewhere
 in the scanned checkout (a shared ``ci/ash.yaml``, say); the scan inside is then
-told the merged config is the repository's (``--config-from-scanned-repository``).
-That base may extend other files of the checkout. One whose ``extends`` entry
+told that base, and each file of the checkout it extends, is the repository's
+(``--config-file-from-scanned-repository``, once per file), so the operator's file
+keeps what it writes itself. That base may extend other files of the checkout. One whose ``extends`` entry
 leads out of the checkout refuses the run with exit 3 before anything is built or
 run, and the message names the base and the file it extends. A base inside the
 source directory itself is refused whatever it extends
@@ -108,7 +109,14 @@ def test_a_repository_base_extending_a_file_in_the_tree_still_runs(layout, comma
 
     assert result.returncode == 0, result.stderr
     [run] = commands
-    assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG in run
+    # Each of the repository's files is marked on its own; the operator's is not.
+    assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG not in run
+    marked = [
+        run[i + 1]
+        for i, arg in enumerate(run[:-1])
+        if arg == rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG
+    ]
+    assert marked == ["/ash-config/repo/ci/ash.yaml", "/ash-config/repo/ci/common.yaml"]
 
 
 def test_an_operator_base_may_extend_another_operator_file(layout, commands):

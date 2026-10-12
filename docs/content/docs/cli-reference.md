@@ -259,7 +259,10 @@ when the config or a file it extends is inside a git checkout, the one holding
 the scanned tree, but outside `--source-dir` itself, where the scan inside the
 container cannot see that, the host passes it `--config-from-scanned-repository`
 (`./ash` and `Invoke-ASH` do the same for the config file, following its path one link
-at a time as the host does). In workspace mode the host marks a `--config` from
+at a time as the host does). When only files the config extends are in a checkout,
+the host marks each of those on its own (`--config-file-from-scanned-repository`), so
+the config, as on the host, keeps the sandbox settings it writes itself and its bases
+grant nothing. In workspace mode the host marks a `--config` from
 another git checkout the same way, and the workspace scan inside limits it, and every
 file it extends, for every project, as a local workspace scan does. One in the
 checkout around the workspace root, or reached through a link there, is refused with

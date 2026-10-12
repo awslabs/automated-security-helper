@@ -85,8 +85,11 @@ from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
 #: Config files the host marked as repository-written for the scan inside a
-#: container, by resolved path; see ``marked_repository_written``.
+#: container, by resolved path; see ``marked_repository_written`` and
+#: ``marked_files_repository_written``.
 _MARKED: List[Path] = []
+#: The marked files whose whole chain is marked with them.
+_MARKED_CHAINS: List[Path] = []
 
 #: Why a marked config file is not the operator's, for ``untrusted_reason``.
 MARKED_REASON = (
@@ -116,14 +119,41 @@ def marked_repository_written(config: Path) -> Iterator[None]:
     """
     marked = Path(os.path.realpath(config))
     _MARKED.append(marked)
+    _MARKED_CHAINS.append(marked)
     try:
         yield
     finally:
         _MARKED.remove(marked)
+        _MARKED_CHAINS.remove(marked)
+
+
+@contextmanager
+def marked_files_repository_written(files: Iterable[Path]) -> Iterator[None]:
+    """Treat each of ``files``, and only those, as repository-written while the
+    block runs.
+
+    For the scan inside a container, when the host found some of the files the
+    ``--config`` extends in a git checkout but not the config itself, and passed
+    each with ``--config-file-from-scanned-repository``. A root config outside
+    every checkout then keeps the sandbox settings it writes itself
+    (``resolve_config``'s own-sandbox rule), as it does on the host, and the
+    marked bases grant nothing.
+    """
+    marked = [Path(os.path.realpath(path)) for path in files]
+    _MARKED.extend(marked)
+    try:
+        yield
+    finally:
+        for path in marked:
+            _MARKED.remove(path)
 
 
 def _marked(path: Path) -> bool:
     return bool(_MARKED) and Path(os.path.realpath(path)) in _MARKED
+
+
+def _marked_chain(path: Path) -> bool:
+    return bool(_MARKED_CHAINS) and Path(os.path.realpath(path)) in _MARKED_CHAINS
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -372,8 +402,10 @@ def repository_written(
         chain: The files a config was built from, as resolved paths, in merge
             order with the root config last (``ResolvedConfigDocument.chain``; in a
             workspace, the operator's config layered over a project's comes last).
-            When that last file is one a host marked
-            (``marked_repository_written``), every file of the chain is returned.
+            When that last file is one a host marked with its chain
+            (``marked_repository_written``), every file of the chain is returned;
+            a file marked on its own (``marked_files_repository_written``) is
+            returned as one inside a checkout is.
         scan_root: The directory being scanned.
         lexical: The same files as they were named, where that is known (the
             config path the operator passed or ASH discovered). A file whose name
@@ -382,7 +414,7 @@ def repository_written(
             caller other than the operator supplied (an MCP client's upload).
     """
     chain = list(chain)
-    if all_untrusted or (chain and _marked(chain[-1])):
+    if all_untrusted or (chain and _marked_chain(chain[-1])):
         return chain or [Path(path) for path in lexical]
     untrusted = [path for path in chain if untrusted_path(path, scan_root)]
     for path in lexical:
