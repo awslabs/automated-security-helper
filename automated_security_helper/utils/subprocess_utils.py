@@ -1038,13 +1038,25 @@ def _write_stream_log(
     """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``."""
     if results_dir is None or preference not in ["write", "both"]:
         return
+    from automated_security_helper.utils.sandbox.scope import active_scope
+
     results_dir_path = Path(results_dir)
     results_dir_path.mkdir(parents=True, exist_ok=True)
     filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
+    path = results_dir_path.joinpath(filename)
     # Not a plain open(): a sandboxed scanner can leave a symlink at this name, and
-    # ASH is not sandboxed. See utils/sandbox/fs_guard.py.
+    # ASH is not sandboxed. See utils/sandbox/fs_guard.py. Under a sandbox the
+    # scope's results directory is named as the root: the spawn released its own
+    # registrations in its cleanup, before this write, and a process the scanner
+    # left running can make a link after the cleanup's sweep.
+    scope_results = getattr(active_scope(), "results_dir", None)
+    root = None
+    if scope_results is not None:
+        scope_root = Path(os.path.abspath(scope_results))
+        if scope_root in Path(os.path.abspath(path)).parents:
+            root = scope_root
     with open_for_write(
-        results_dir_path.joinpath(filename), encoding="utf-8", errors="replace"
+        path, encoding="utf-8", errors="replace", root=root
     ) as log_file:
         log_file.write(text)
 

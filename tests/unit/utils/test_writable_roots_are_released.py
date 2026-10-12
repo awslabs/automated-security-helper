@@ -171,6 +171,66 @@ def test_a_spawns_writable_directories_are_released_by_its_cleanup(make_scope):
     assert _holders() == before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+)
+def test_a_stream_log_written_after_the_spawn_released_its_roots_is_still_guarded(
+    tmp_path, monkeypatch
+):
+    """No PluginContext and no scanner scope factory registered the results directory.
+
+    The spawn's own registrations end with its cleanup, before ASH writes the
+    stream logs, and a process the scanner left running can replace a directory
+    there after the cleanup's sweep. The active scope's results directory guards
+    the write.
+    """
+    from automated_security_helper.utils import subprocess_utils
+    from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+
+    source = tmp_path / "src"
+    source.mkdir()
+    output = tmp_path / "out"
+    results = output / "scanners" / "probe"
+    target = results / "source"
+    target.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    write = subprocess_utils._write_stream_log
+    swapped = []
+
+    def swap_then_write(*args, **kwargs):
+        if not swapped:
+            target.rmdir()
+            target.symlink_to(elsewhere, target_is_directory=True)
+            swapped.append(True)
+        return write(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess_utils, "_write_stream_log", swap_then_write)
+    scope = scope_module.SandboxScope(
+        backend=_Recorder(),
+        scanner_name="probe",
+        requirements=SandboxRequirements(),
+        source_dir=source,
+        output_dir=output,
+        results_dir=results,
+        scan_target=source,
+        offline=True,
+    )
+    assert fs_guard._writable_root_for(target / "Probe.stdout.log") is None
+
+    with scope_module.sandbox_scope(scope):
+        subprocess_utils.run_command_with_output_handling(
+            [sys.executable, "-c", "print('scanner-output')"],
+            results_dir=target,
+            stdout_preference="write",
+            stderr_preference="write",
+            class_name="Probe",
+        )
+
+    assert swapped, "the stream-log write was never reached"
+    assert list(elsewhere.iterdir()) == [], "ASH wrote through the replaced directory"
+
+
 class TestARunReleasesWhatItsObjectsHeld:
     """A scan's roots are released when the scan ends, not when collection runs.
 
