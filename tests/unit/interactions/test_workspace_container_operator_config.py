@@ -114,11 +114,20 @@ def test_the_bases_it_extends_are_mounted_where_it_names_them(tmp_path):
     )
 
 
-def test_a_single_directory_scan_passes_its_config_as_before(tmp_path):
-    command = _command(tmp_path, config="ash.yaml", workspace_relative_file=None)
+def test_a_single_directory_scan_mounts_its_config_the_same_way(tmp_path):
+    """A single-directory scan's --config is mounted read-only under the same root
+    and named there, as a workspace scan's operator config is."""
+    config = _write(tmp_path / "ops" / "ash.yaml", {"fail_on_findings": True})
 
-    assert command[command.index("--config") + 1] == "ash.yaml"
-    assert not any(OPERATOR_CONFIG_MOUNT in mount for mount in _mounts(command))
+    command = _command(tmp_path, config=str(config), workspace_relative_file=None)
+
+    inside = f"{OPERATOR_CONFIG_MOUNT}/ash.yaml"
+    assert command[command.index("--config") + 1] == inside
+    assert (
+        f"type=bind,source={config.resolve()},destination={inside},readonly"
+        in _mounts(command)
+    )
+    assert str(config) not in command[command.index("ash:test") :]
 
 
 def _plan(root: Path) -> WorkspacePlan:
