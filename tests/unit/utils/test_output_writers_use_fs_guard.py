@@ -210,7 +210,7 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),
-    (f"{_ASH}/cli/mcp/source_delivery.py", "set_source_zip_chunk", "Path.open"): (
+    (f"{_ASH}/cli/mcp/source_delivery.py", "_append_zip_chunk", "Path.open"): (
         1,
         "the MCP upload workspace, where a client's source is assembled",
     ),

@@ -1672,7 +1672,10 @@ async def set_source_zip_chunk(
 
     Returns:
         Dict with success, received, next_sequence and last; or success=False
-        and error on an out-of-order, oversize, or malformed chunk.
+        and error on an out-of-order, oversize, or malformed chunk, and with
+        error_type session_workspace_busy while the server removes this
+        session's workspace for being unused longer than its time to live
+        (send the upload again from its first chunk).
     """
     try:
         session_id = resolve_caller_session_id(ctx)
@@ -1866,7 +1869,10 @@ async def select_profile(
         profile_name, session_id, and config_path -- the file inside this
         session's workspace that later scans will be handed. On failure,
         success=False and error, for an unknown profile, a denied patch op or
-        override, or YAML that does not validate.
+        override, or YAML that does not validate; with error_type
+        session_workspace_busy while the server removes this session's
+        workspace for being unused longer than its time to live (select the
+        profile again).
     """
     try:
         session_id = resolve_caller_session_id(ctx)

@@ -154,6 +154,10 @@ class MCPSession(BaseModel):
     _state_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
     _claimed_scans: int = PrivateAttr(default=0)
     _changing: bool = PrivateAttr(default=False)
+    # Requests writing the session's state outside a change, and whether the TTL
+    # sweep holds the session; both guarded by _state_lock. See try_begin_write.
+    _writes: int = PrivateAttr(default=0)
+    _sweeping: bool = PrivateAttr(default=False)
     # Scans counted against the per-session limit and not yet returned. See
     # try_start_scan.
     _scan_count: ScanCount = PrivateAttr(default_factory=ScanCount)
@@ -211,6 +215,56 @@ class MCPSession(BaseModel):
         with self._state_lock:
             self._changing = False
         self._lock.release()
+
+    def try_begin_write(self) -> bool:
+        """Hold the session against the TTL sweep for a request writing its state.
+
+        A chunk of an upload and a profile binding write the session's state
+        without taking its change (:meth:`try_begin_change`), which a running
+        scan refuses: neither touches the tree a scan reads, so neither waits
+        for one. The sweep runs on a worker thread and holds the session
+        (:meth:`try_begin_sweep`) from its last look at the session's age until
+        the removal is done, and a write that comes meanwhile is refused rather
+        than accepted and then removed with the session. Writes do not exclude
+        each other.
+
+        The hold is this process's: it is on the in-memory session, so it keeps
+        this server's sweep off the session. Another server sharing the
+        workspace root sweeps by the session's age and its scan presence entry
+        (:class:`ScanPresence`), and does not see a write in progress here.
+
+        Returns:
+            False while the sweep holds the session; otherwise True, until
+            :meth:`end_write`.
+        """
+        with self._state_lock:
+            if self._sweeping:
+                return False
+            self._writes += 1
+            return True
+
+    def end_write(self) -> None:
+        """End a write :meth:`try_begin_write` began."""
+        with self._state_lock:
+            self._writes = max(0, self._writes - 1)
+
+    def try_begin_sweep(self) -> bool:
+        """Hold the session for the TTL sweep's last check and its removal.
+
+        Returns:
+            False while a write (:meth:`try_begin_write`) is in progress, which
+            keeps the session; otherwise True, until :meth:`end_sweep`.
+        """
+        with self._state_lock:
+            if self._writes or self._sweeping:
+                return False
+            self._sweeping = True
+            return True
+
+    def end_sweep(self) -> None:
+        """End what :meth:`try_begin_sweep` began."""
+        with self._state_lock:
+            self._sweeping = False
 
     def try_start_scan(self, limit: Optional[int]) -> bool:
         """Count a scan of this session as running, unless ``limit`` already are.
@@ -450,6 +504,52 @@ def finish_ended_session(session_id: Optional[str]) -> None:
         pending = session_id in _ended_while_scanning
     if pending:
         end_session(session_id)
+
+
+class SessionWorkspaceBusyError(RuntimeError):
+    """A write to a session's state was refused: the TTL sweep is removing it."""
+
+
+#: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
+SESSION_WORKSPACE_BUSY = "session_workspace_busy"
+
+
+@contextlib.contextmanager
+def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
+    """Hold ``session_id`` against the TTL sweep while a request writes its state.
+
+    For a write outside the session's change: a chunk of an upload, a profile
+    binding (``MCPSession.try_begin_write``). ``None`` is the stdio session. A
+    caller with no session state, or an id that can't name one, is not held:
+    the write itself refuses those. The hold is this process's; see
+    ``MCPSession.try_begin_write``.
+
+    Raises:
+        SessionWorkspaceBusyError: while the sweep is removing the session, whose
+            workspace nobody used for longer than the TTL. Its state is gone once
+            the removal is done, so the request is sent again from the start: an
+            upload from its first chunk.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
+
+    session: Optional[MCPSession]
+    try:
+        session = get_default_registry().session_for(session_id or DEFAULT_SESSION_ID)
+    except ValueError:
+        session = None
+    if session is None:
+        yield
+        return
+    if not session.try_begin_write():
+        raise SessionWorkspaceBusyError(
+            "the server is removing this session's workspace, which nobody used "
+            "for longer than its time to live; send the request again, and an "
+            "upload from its first chunk"
+        )
+    try:
+        yield
+    finally:
+        session.end_write()
 
 
 #: ``error_type`` of a scan refused because its session is at the per-session limit.
@@ -865,6 +965,9 @@ def sweep_stale_workspaces(
       the scan returned;
     - a session used after its age was read: the age is read again while the
       sweep holds the session;
+    - a session whose state a request in this process is writing outside a
+      change (``MCPSession.try_begin_write``). A write that comes while the
+      sweep holds the session is refused instead (:func:`writing_session_state`);
     - a session a running scan in another server sharing the root holds
       (:class:`ScanPresence`);
     - every name ``session_identity.is_reserved_session_id`` reserves: the stdio
@@ -923,6 +1026,10 @@ def _remove_if_still_stale(
     if not session.try_begin_change():
         return False
     try:
+        # A request writing the session's state now keeps it, and one that comes
+        # before the removal is done is refused (MCPSession.try_begin_write).
+        if not session.try_begin_sweep():
+            return False
         try:
             if not _is_stale_workspace(sandbox, cutoff):
                 return False
@@ -934,6 +1041,8 @@ def _remove_if_still_stale(
                     (root / SCAN_PRESENCE_DIR / session_id).rmdir()
         except OSError:
             return False
+        finally:
+            session.end_sweep()
     finally:
         session.end_change()
     with _ended_lock:
@@ -945,7 +1054,9 @@ __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
     "SESSION_SCAN_LIMIT",
+    "SESSION_WORKSPACE_BUSY",
     "ScanCount",
+    "SessionWorkspaceBusyError",
     "StdioServerPresence",
     "end_session",
     "finish_ended_session",
@@ -956,4 +1067,5 @@ __all__ = [
     "reset_default_registry_for_tests",
     "sweep_stale_workspaces",
     "touch_session_workspace",
+    "writing_session_state",
 ]

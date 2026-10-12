@@ -2364,7 +2364,37 @@ def mcp_select_profile(
     copy is what ``config_path`` names, and every consumer resolves it with the
     client's rules against the registered profile in ``config/`` as the trusted
     base (``resolve_session_trusted_config_path``).
+
+    Refused with ``error_type`` ``session_workspace_busy`` while the server
+    removes the session's workspace for being unused longer than its time to
+    live (``sessions.writing_session_state``); select the profile again then.
     """
+    from automated_security_helper.cli.mcp.sessions import (
+        SESSION_WORKSPACE_BUSY,
+        SessionWorkspaceBusyError,
+        writing_session_state,
+    )
+
+    try:
+        with writing_session_state(session_id):
+            return _select_profile(
+                profile_name,
+                patch_ops=patch_ops,
+                override_yaml=override_yaml,
+                session_id=session_id,
+            )
+    except SessionWorkspaceBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+
+
+def _select_profile(
+    profile_name: str,
+    *,
+    patch_ops: Optional[list],
+    override_yaml: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    """:func:`mcp_select_profile`, once the session is held against the sweep."""
     from automated_security_helper.cli.mcp.profile_registry import (
         bind_session_config,
         get_profile_registry,
@@ -2714,8 +2744,15 @@ def mcp_set_source_zip_chunk(
     Returns:
         ``{"success": True, "received": int, "next_sequence": int, "last": bool}``
         on success; ``{"success": False, "error": str}`` on validation
-        failure (out-of-order, oversize, malformed b64).
+        failure (out-of-order, oversize, malformed b64), and with
+        ``error_type`` ``session_workspace_busy`` while the server removes the
+        session's workspace for being unused longer than its time to live
+        (send the upload again from its first chunk).
     """
+    from automated_security_helper.cli.mcp.sessions import (
+        SESSION_WORKSPACE_BUSY,
+        SessionWorkspaceBusyError,
+    )
     from automated_security_helper.cli.mcp.source_delivery import set_source_zip_chunk
 
     try:
@@ -2726,6 +2763,8 @@ def mcp_set_source_zip_chunk(
             last=last,
             session_id=session_id,
         )
+    except SessionWorkspaceBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
