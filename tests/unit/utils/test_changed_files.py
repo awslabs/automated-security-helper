@@ -71,6 +71,8 @@ class TestGetChangedFiles:
                 "--name-only",
                 "-z",
                 "origin/main...HEAD",
+                # Revisions only: see test_base_ref.TestAMissingBaseRefIsNeverReadAsAPath.
+                "--",
             ],
             capture_output=True,
             text=True,
@@ -156,6 +158,7 @@ class TestGetChangedFiles:
                 "--name-only",
                 "-z",
                 "origin/develop...HEAD",
+                "--",
             ],
             capture_output=True,
             text=True,

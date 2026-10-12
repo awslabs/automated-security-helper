@@ -1254,6 +1254,13 @@ def get_changed_files(
         # stores paths; surrogateescape keeps any other byte, so the Path still
         # names the file on disk. git_argv: the repository's config names no
         # program git runs here.
+        #
+        # The trailing "--" makes git read the range only as revisions. Without
+        # it, when the base ref is missing here (origin/main in a shallow clone)
+        # and the checkout has a file named "origin/main...HEAD", git reads the
+        # argument as that path, diffs it between the working tree and the index,
+        # and exits 0. With it, git exits 128 on the missing ref and the full-scan
+        # fallback applies.
         result = subprocess.run(
             git_argv(  # nosec B603 B607
                 "-c",
@@ -1262,6 +1269,7 @@ def get_changed_files(
                 "--name-only",
                 "-z",
                 f"{base_ref}...HEAD",
+                "--",
                 program=git,
             ),
             capture_output=True,

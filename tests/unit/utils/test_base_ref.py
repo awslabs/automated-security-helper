@@ -15,9 +15,16 @@ A base ref is accepted when it is a ref name that ``git check-ref-format
 optionally followed by ``~<n>`` or ``^<n>`` steps. Anything else is refused with
 an error that names the value and the reason, before any git process starts.
 
+The argument is not read as a path either. When the base ref does not exist
+locally (``origin/main`` in a shallow CI clone) and the checkout holds a file named
+``origin/main...HEAD``, git without ``--`` takes the argument as a path and diffs
+that file between the working tree and the index: exit 0, and at most that one
+name. ASH ends the revisions with ``--``, so git refuses the missing ref and the
+documented full-scan fallback applies.
+
 The tests put a recording ``git`` first on ``PATH``, so "no git process saw the
 value" is measured rather than inferred from a mock, and they prove with plain git
-that the values they use do act as options.
+that the values they use do act as options, or as a path.
 """
 
 from __future__ import annotations
@@ -192,7 +199,56 @@ class TestRefsThatStillWork:
         assert get_changed_files(base_ref=base_ref, cwd=repo.path) == [Path("b.py")]
 
         (call,) = git_calls()
-        assert f"{base_ref}...HEAD" in call
+        assert call[-2:] == [f"{base_ref}...HEAD", "--"]
+
+
+def _plant_a_file_named_after_the_range(repo, state: str) -> Path:
+    """Write ``origin/main...HEAD`` into the checkout, which has no ``origin``.
+
+    ``untracked`` leaves it untracked. ``tracked and edited`` commits it and then
+    edits it, so a diff that reads the argument as a path names it as changed.
+    """
+    planted = repo.path / "origin" / "main...HEAD"
+    planted.parent.mkdir()
+    planted.write_text("x = 1\n", encoding="utf-8")
+    if state == "tracked and edited":
+        _git(repo.path, "add", "origin")
+        _git(repo.path, "commit", "-q", "-m", "three")
+        planted.write_text("x = 2\n", encoding="utf-8")
+    return planted
+
+
+class TestAMissingBaseRefIsNeverReadAsAPath:
+    STATES = ["untracked", "tracked and edited"]
+
+    @pytest.mark.parametrize("state", STATES)
+    def test_plain_git_without_a_separator_reads_it_as_a_path(self, repo, state):
+        """The control: exit 0, and the names come from the planted file."""
+        _plant_a_file_named_after_the_range(repo, state)
+
+        result = subprocess.run(  # nosec B603 B607 -- list argv, fixture repository only
+            ["git", "diff", "--name-only", "-z", "origin/main...HEAD"],
+            cwd=repo.path,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, result.stderr
+        expected = "origin/main...HEAD\0" if state == "tracked and edited" else ""
+        assert result.stdout == expected
+
+    @pytest.mark.parametrize("state", STATES)
+    def test_ash_falls_back_to_the_full_scan(self, repo, git_calls, state):
+        """None is "the diff could not be computed"; [] would be "nothing changed"."""
+        _plant_a_file_named_after_the_range(repo, state)
+        # Committing the planted file runs git through the recording shim too.
+        setup_calls = len(git_calls())
+
+        assert get_changed_files(base_ref="origin/main", cwd=repo.path) is None
+
+        (call,) = git_calls()[setup_calls:]
+        assert call[-2:] == ["origin/main...HEAD", "--"]
 
 
 # ---------------------------------------------------------------------------

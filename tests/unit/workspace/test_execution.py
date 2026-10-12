@@ -1582,6 +1582,27 @@ class TestChangedFilesGate:
         assert FakeOrchestrator.built == []
         assert not (tmp_path / "out").exists()
 
+    def test_a_missing_base_ref_scans_in_full_whatever_files_the_project_holds(
+        self, tmp_path, git_available
+    ):
+        """A file named ``origin/main...HEAD`` does not stand in for the diff.
+
+        The project has no ``origin``. Read as a path, the argument named that
+        untracked file, the diff came back empty, and the project was skipped as
+        unchanged. Read as a revision it does not exist, so the project is scanned.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        _init_repo(root / "api", commit_extra=True)
+        (root / "api" / "origin").mkdir()
+        (root / "api" / "origin" / "main...HEAD").write_text("x\n", encoding="utf-8")
+
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="origin/main")
+
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+        assert [o.key for o in FakeOrchestrator.built] == ["api"]
+
 
 # ---------------------------------------------------------------------------
 # Output tree and payload
