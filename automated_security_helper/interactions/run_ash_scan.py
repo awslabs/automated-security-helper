@@ -130,6 +130,7 @@ if TYPE_CHECKING:
     # Imported for annotations only. A runtime import here would pull the
     # workspace executor -- and through it core.orchestrator -- into every
     # single-directory scan's import graph.
+    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.client_config_policy import (
         ClientConfigRules,
     )
@@ -1618,45 +1619,100 @@ def _load_with_confinement(
     )
 
 
-def _load_config_file(opts: ScanOptions):
-    """Load the config file a scan of *opts* would use, or None.
+def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
+    """The config a scan of *opts* resolves, read on the host, and whether a file gave it.
 
-    Extracted so the two exit-code fields read from one place. Duplicating the
-    candidate search was the alternative, and it would let the two fields be read
-    from different files the moment the search changed in one copy.
+    The one read behind the host's config refusal in container and nix mode and
+    the exit-code fields every mode reads before the scan, so they all see the
+    config the scan resolves, by a local scan's rule: ``--config`` (in container
+    mode, also the file ``ASH_CONFIG`` names when run_ash_scan passes it on),
+    else the file discovery selects under ``config_base_gate``, else the file
+    ``ASH_CONFIG`` names, else the defaults. Each file is loaded by
+    ``resolve_config.load_config_file`` (against the confinement root resolution
+    would use, for the first two), and ``--config-overrides`` are applied as
+    resolution applies them (``resolve_config.apply_config_overrides``). Not
+    logged: the resolution that refuses a file logs it once.
 
-    Returns None when no config file is found, and also when the file cannot be
-    loaded. That is not a fallback: such a file is refused with exit 3 before any
-    scanner runs -- by the orchestrator's resolve_config in local mode, and in
-    container and nix mode by run_ash_scan on the host before anything starts
-    (:func:`_outer_mode_config_refusal`) -- so the value read here is never used
-    for a scan. Refusing here as well would only duplicate that message.
+    Returns:
+        The config, and False when no config file supplied it (the defaults).
+
+    Raises:
+        ASHConfigValidationError: The file, or discovery, or an override is one
+            resolution refuses (exit 3).
     """
-    config_path_str = opts.config
-    if config_path_str is None:
-        try:
-            config_path_str = _discovered_config_path(
-                opts.source_dir, permit=opts.config_base_gate
-            )
-        except Exception:
-            # Surfaces again, with its message, when the orchestrator resolves.
-            return None
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.default_config import _ash_config_file
+    from automated_security_helper.config.operator_paths import (
+        not_delivered_by_a_client,
+    )
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+        load_config_file,
+    )
 
-    if config_path_str is None:
-        return None
-
-    try:
-        # Not logged: the resolution that refuses the file logs it once.
-        return _load_with_confinement(
-            config_path_str,
+    config_path = _scan_config_path(opts)
+    if config_path is not None:
+        config = _load_with_confinement(
+            config_path,
             opts.source_dir,
             opts.config_base_gate,
             log_failure=False,
             remote_client=opts.remote_client,
             session_id=getattr(opts.client_config_policy, "session_id", None),
         )
+        from_file = True
+    else:
+        env_config = _ash_config_file()
+        if env_config is not None:
+            # As default_config.get_default_config loads it.
+            config = load_config_file(
+                env_config,
+                log_failure=False,
+                anchor_relative_paths=not_delivered_by_a_client,
+            )
+            from_file = True
+        else:
+            config = AshConfig()
+            from_file = False
+    return apply_config_overrides(config, list(opts.config_overrides or [])), from_file
+
+
+def _load_config_file(opts: ScanOptions):
+    """The config file a scan of *opts* would use, overrides applied, or None.
+
+    None when no config file supplies the config (the defaults), and also when it
+    cannot be resolved. That is not a fallback: such a config is refused with exit
+    3 before any scanner runs -- by the orchestrator's resolve_config in local
+    mode, and in container and nix mode by run_ash_scan on the host before
+    anything starts (:func:`_outer_mode_config_refusal`) -- so a value read here
+    is never used for a scan. Refusing here as well would only duplicate that
+    message.
+    """
+    try:
+        config, from_file = _host_resolved_config(opts)
     except Exception:
         return None
+    return config if from_file else None
+
+
+def _host_config_value(opts: ScanOptions, name: str) -> Any:
+    """Top-level field *name* of the config a scan of *opts* resolves, or None if unset.
+
+    Set means a config file supplies the config, or a ``--config-overrides``
+    entry names the field; with neither, the field is the default, and None lets
+    the caller tell that from a value someone chose.
+    """
+    try:
+        config, from_file = _host_resolved_config(opts)
+    except Exception:
+        return None
+    overridden = {
+        override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        for override in opts.config_overrides or []
+    }
+    if from_file or name in overridden:
+        return getattr(config, name, None)
+    return None
 
 
 def _print_invalid_config(error: Exception) -> None:
@@ -1675,56 +1731,30 @@ def _outer_mode_config_refusal(
     Container and nix mode hand the config to a second ASH, which refuses a file
     that does not load with exit 3, but only once the image is built and started,
     or the shell entered, and the previous run's output cleared. So the host
-    judges the file first, as a local scan of the same directory would:
-    ``--config`` (in container mode, also the file ``ASH_CONFIG`` names when
-    run_ash_scan passes it on), else the file discovery selects, with discovery's
-    own refusals (a name that is a link to nothing), else the file ``ASH_CONFIG``
-    names. Each is loaded by ``resolve_config.load_config_file`` against the
-    confinement root resolution would use, so a file that is missing, not a
-    regular file, unreadable, not UTF-8, not valid YAML, JSON or TOML (YAML
-    aliases included), or not a valid config is refused with the error a local
-    scan reports. ``--config-overrides`` are then applied as resolution applies
-    them (``resolve_config.apply_config_overrides``), so one that does not parse,
-    or leaves a value the config model refuses, is refused too. Options of a
-    plugin are not judged here: they are validated against the plugin, which may
-    be installed only in the image.
+    resolves it first, as a local scan of the same directory would
+    (:func:`_host_resolved_config`): a file that is missing, not a regular file,
+    unreadable, not UTF-8, not valid YAML, JSON or TOML (YAML aliases included),
+    or not a valid config, a discovered name that is a link to nothing, and an
+    override that does not parse or leaves a value the config model refuses are
+    refused with the error a local scan reports. Options of a plugin are not
+    judged here: they are validated against the plugin, which may be installed
+    only in the image.
     """
-    from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.config.default_config import _ash_config_file
-    from automated_security_helper.config.resolve_config import (
-        apply_config_overrides,
-        load_config_file,
-    )
-
     try:
-        config_path = _scan_config_path(opts)
-        if config_path is not None:
-            config = _load_with_confinement(
-                config_path, opts.source_dir, log_failure=False
-            )
-        else:
-            # A local scan with no config file reads ASH_CONFIG's file, as
-            # get_default_config does, or uses the defaults.
-            env_config = _ash_config_file()
-            config = (
-                load_config_file(env_config, log_failure=False)
-                if env_config is not None
-                else AshConfig()
-            )
-        apply_config_overrides(config, list(opts.config_overrides or []))
+        _host_resolved_config(opts)
     except ASHConfigValidationError as exc:
         return exc
     return None
 
 
 def _resolve_config_fail_on_findings(opts: ScanOptions) -> Optional[bool]:
-    """Read fail_on_findings from the YAML config file, without loading the full orchestrator.
+    """fail_on_findings of the config the scan resolves, without the orchestrator.
 
-    Returns None when no config file is found or when the field is absent.
-    Used by both container and local mode so that YAML overrides are honoured
-    regardless of execution path.
+    Read as :func:`_host_config_value` reads it, so container mode forwards, and
+    nix mode decides the exit code from, the value the scan's own config and
+    ``--config-overrides`` give. None when neither sets it.
     """
-    return getattr(_load_config_file(opts), "fail_on_findings", None)
+    return _host_config_value(opts, "fail_on_findings")
 
 
 def _resolve_config_fail_on_incomplete_scanners(opts: ScanOptions) -> Optional[bool]:
@@ -1733,10 +1763,10 @@ def _resolve_config_fail_on_incomplete_scanners(opts: ScanOptions) -> Optional[b
     The sibling of :func:`_resolve_config_fail_on_findings`, and needed for the
     same reason: container mode has to know the value before it builds the
     container's command line, so it cannot wait for the orchestrator to resolve
-    the config. Returns None when there is no config file to read, which the
-    caller distinguishes from a file that sets the field to False.
+    the config. Returns None when no config file or override sets it, which the
+    caller distinguishes from a value of False.
     """
-    return getattr(_load_config_file(opts), "fail_on_incomplete_scanners", None)
+    return _host_config_value(opts, "fail_on_incomplete_scanners")
 
 
 # The values click's boolean type (typer's vendored copy included) reads as true. `ash scan` declares ASH_DEBUG and

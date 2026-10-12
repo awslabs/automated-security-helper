@@ -181,7 +181,11 @@
   is built or run, any mount, and any clearing of the previous run's output. The scan
   inside used to refuse it only after all of those. `--config-overrides` are applied on
   the host as well, so an override that does not parse or sets a value the config does
-  not accept is refused the same way. A missing `--config` in container
+  not accept is refused the same way. The same read gives the host its
+  `fail_on_findings` and `fail_on_incomplete_scanners`, so `ASH_CONFIG`'s file and an
+  override that sets either now count in container and nix mode as they do in a local
+  scan: nix mode used to decide the exit code without them, and container mode handed
+  the scan inside the config file's value in place of the override's. A missing `--config` in container
   mode now reports `Invalid configuration: Configuration file not found: <path>`, where
   it said `Config file not found: <path>`. Plugin options are still checked by the scan
   inside, which loads the plugin. The `Invalid configuration` message no longer drops
