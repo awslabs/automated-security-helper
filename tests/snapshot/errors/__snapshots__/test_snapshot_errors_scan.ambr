@@ -384,7 +384,7 @@
       ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': 1 validation error
       for AshConfig
       fail_on_findings
-        Input should be a valid boolean
+        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config
       lint' to identify and fix issues.
   

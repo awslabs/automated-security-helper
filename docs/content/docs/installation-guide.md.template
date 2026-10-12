@@ -135,6 +135,8 @@ It also avoids a quieter problem. In local mode, a scanner whose binary is missi
 
 Like container mode, this is an outer wrapper: ASH re-executes itself inside `nix develop` and the inner run is an ordinary local scan. A development shell changes `PATH` but not the filesystem, so no path translation is involved.
 
+Before it enters the shell, ASH reads the config file the inner scan will use (`--config`, the file `ASH_CONFIG` names, or the one found in the source directory) the way a local scan reads it. One the scan would refuse, because it is missing, not a regular file, unreadable, not valid YAML, JSON or TOML, or not a valid config, refuses the run with exit 3 and the message a local scan prints, before the shell starts and before the previous run's output is cleared. Options of a scanner or reporter plugin are checked by the inner scan, which loads the plugin.
+
 The shell sets `ASH_OFFLINE=YES` for the inner run. Several scanners prefer to install their own tools with `uv tool install`, and without this they would fetch copies that shadow the pinned ones, leaving a report that describes versions the flake never supplied.
 
 ### Choosing the flake

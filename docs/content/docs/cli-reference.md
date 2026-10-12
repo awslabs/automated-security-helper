@@ -225,11 +225,19 @@ the host reads, including a base the host reaches through a link; only those fil
 mounted, not the directory. A relative `--config` is resolved against the working
 directory on the host, as a local scan resolves it, and the scan inside is given the
 file's path in the container, never the path as typed, so it cannot name a different
-file under `/src`. A `--config` that is not an existing file, or is empty, refuses the
-scan with exit 3 before the container starts (`Config file not found: <path>`), and so
-does an `extends`
-entry anywhere in the chain that names its base by absolute path: inside the container
-that path is not the same file. A `--config` named inside the scanned tree whose real
+file under `/src`. The config file the scan inside will use, whether named with
+`--config`, named by `ASH_CONFIG`, or found in `--source-dir`, is read on the host the
+way a local scan reads it, before anything is built, run, mounted or cleared. One that a
+local scan would refuse refuses the run with exit 3 and the same message
+(`Invalid configuration: ...`): a file that is missing or empty, a directory or another
+file that is not a regular file, unreadable, not UTF-8, not valid YAML, JSON or TOML
+(YAML aliases included), or not a valid config, and a name in `--source-dir` that is a
+link to nothing. Options of a scanner or reporter plugin are left to the scan inside,
+which loads the plugin from the image. `--mode nix` reads the file the same way before
+it enters its shell. `--no-run` builds an image and scans nothing, so its config is not
+read. An `extends` entry anywhere in the chain that names its base by absolute path
+refuses the run with exit 3 before the container starts: inside the container that path
+is not the same file. A `--config` named inside the scanned tree whose real
 path, with every link on the way resolved, is outside that tree is refused with exit 3
 too, and so is a config file ASH cannot read itself. A config outside `--source-dir`
 whose `extends` chain includes a file inside it is refused with exit 3 as well: a

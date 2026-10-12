@@ -1626,11 +1626,11 @@ def _load_config_file(opts: ScanOptions):
     from different files the moment the search changed in one copy.
 
     Returns None when no config file is found, and also when the file cannot be
-    loaded. That is not a fallback: resolution refuses the same file with exit 3
-    before any scanner runs -- the orchestrator's resolve_config in local mode,
-    and the inner ASH in container and nix mode, which is handed the same path
-    or discovers the same file -- so the value read here is never used for a
-    scan. Refusing here as well would only duplicate that message.
+    loaded. That is not a fallback: such a file is refused with exit 3 before any
+    scanner runs -- by the orchestrator's resolve_config in local mode, and in
+    container and nix mode by run_ash_scan on the host before anything starts
+    (:func:`_outer_mode_config_refusal`) -- so the value read here is never used
+    for a scan. Refusing here as well would only duplicate that message.
     """
     config_path_str = opts.config
     if config_path_str is None:
@@ -1657,6 +1657,51 @@ def _load_config_file(opts: ScanOptions):
         )
     except Exception:
         return None
+
+
+def _print_invalid_config(error: Exception) -> None:
+    """The message a scan prints for a config it refuses with exit 3, in every run mode."""
+    print(
+        f"[bold red]ERROR (3) Invalid configuration: "
+        f"{escape_markup(str(error))}[/bold red]"
+    )
+
+
+def _outer_mode_config_refusal(
+    opts: ScanOptions,
+) -> Optional[ASHConfigValidationError]:
+    """Why the scan inside the image or Nix shell would refuse its config, or None.
+
+    Container and nix mode hand the config to a second ASH, which refuses a file
+    that does not load with exit 3, but only once the image is built and started,
+    or the shell entered, and the previous run's output cleared. So the host
+    judges the file first, as a local scan of the same directory would:
+    ``--config`` (in container mode, also the file ``ASH_CONFIG`` names when
+    run_ash_scan passes it on), else the file discovery selects, with discovery's
+    own refusals (a name that is a link to nothing), else the file ``ASH_CONFIG``
+    names. Each is loaded by ``resolve_config.load_config_file`` against the
+    confinement root resolution would use, so a file that is missing, not a
+    regular file, unreadable, not UTF-8, not valid YAML, JSON or TOML (YAML
+    aliases included), or not a valid config is refused with the error a local
+    scan reports. Options of a plugin are not judged here: they are validated
+    against the plugin, which may be installed only in the image.
+    """
+    from automated_security_helper.config.default_config import _ash_config_file
+    from automated_security_helper.config.resolve_config import load_config_file
+
+    try:
+        config_path = _scan_config_path(opts)
+        if config_path is not None:
+            _load_with_confinement(config_path, opts.source_dir, log_failure=False)
+        else:
+            # A local scan with no config file reads ASH_CONFIG's file, as
+            # get_default_config does, or uses the defaults.
+            env_config = _ash_config_file()
+            if env_config is not None:
+                load_config_file(env_config, log_failure=False)
+    except ASHConfigValidationError as exc:
+        return exc
+    return None
 
 
 def _resolve_config_fail_on_findings(opts: ScanOptions) -> Optional[bool]:
@@ -2697,7 +2742,7 @@ def _run_local_mode(
         print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
         sys.exit(3)
     except ASHConfigValidationError as e:
-        print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
+        _print_invalid_config(e)
         sys.exit(3)
     except ScannerSelectionError as e:
         # Ahead of the generic handler, and without logger.exception, because this is
@@ -3869,6 +3914,17 @@ def run_ash_scan(
 
     _apply_log_level_env(opts)
     _refuse_symlinked_output_dir(opts)
+    if opts.workspace_plan is None and (
+        opts.mode == RunMode.nix or (opts.mode == RunMode.container and opts.run)
+    ):
+        # Before ash.log is opened and before any build, run, mount or clearing of
+        # the previous run's output: the scan inside would refuse this config only
+        # after all of them. --no-run builds an image and scans nothing, so its
+        # config is not judged. A workspace plan was resolved on the host already.
+        refusal = _outer_mode_config_refusal(opts)
+        if refusal is not None:
+            _print_invalid_config(refusal)
+            sys.exit(3)
     # Every write this run makes below the output directory, from ash.log on, is
     # guarded (fs_guard). The registration is this run's and is released when it
     # ends, so a process that runs many scans, as the MCP server does, does not

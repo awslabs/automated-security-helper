@@ -171,6 +171,19 @@
 
 ### Behavior changes
 
+- **`--mode container` and `--mode nix` refuse an unusable config before anything
+  starts.** The config file the scan inside the image or Nix shell will use (`--config`,
+  the file `ASH_CONFIG` names, or the one found in the source directory) is read on the
+  host the way a local scan reads it. One that a local scan refuses with exit 3 (missing,
+  not a regular file, unreadable, not UTF-8, not valid YAML, JSON or TOML, YAML aliases,
+  not a valid config, or a discovered name that is a link to nothing) now refuses the run
+  with exit 3 and the local scan's `Invalid configuration: ...` message, before any image
+  is built or run, any mount, and any clearing of the previous run's output. The scan
+  inside used to refuse it only after all of those. A missing `--config` in container
+  mode now reports `Invalid configuration: Configuration file not found: <path>`, where
+  it said `Config file not found: <path>`. Plugin options are still checked by the scan
+  inside, which loads the plugin. The `Invalid configuration` message no longer drops
+  bracketed text, such as the `[type=..., input_value=...]` detail of a validation error.
 - **A scan uses only the plugin modules it names.** A scan's converters,
   scanners, reporters and event handlers are ASH's built-in ones plus those of the
   modules its own `ash_plugin_modules` and `--ash-plugin-modules` name. This holds in

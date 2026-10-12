@@ -4,7 +4,8 @@
 """An explicit ``--config`` is checked, and resolved, on the host before the container starts.
 
 - One that names no file refuses the scan with exit 3 before any runner command,
-  with the message the config commands give for it: ``Config file not found: <path>``.
+  with the message a local scan gives it: ``Invalid configuration: Configuration
+  file not found: <path>``.
 - A relative one is resolved against the host's working directory, as a local scan
   resolves it, never against the source directory. The file it names is mounted
   read-only under ``/ash-config`` (or read through ``/src`` when it is inside the
@@ -102,7 +103,10 @@ def test_a_missing_config_exits_3_before_the_container_starts(entry, commands):
 
     assert result.exit_code == 3, result.output
     assert commands == []
-    assert "Config file not found: missing.yaml" in result.output
+    assert (
+        "Invalid configuration: Configuration file not found: missing.yaml"
+        in result.output
+    )
 
 
 @pytest.mark.parametrize("entry", ENTRY_POINTS)
