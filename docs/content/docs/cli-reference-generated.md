@@ -320,7 +320,7 @@ Return structured details for a single finding by ID.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `finding_id` | str | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
+| `finding_id` | str | *required* | The ID from reports/ash.flat.json; copy it without modification. |
 | `results_path` | str |  | Optional path to the output directory containing |
 
 ### `get_config`

@@ -276,7 +276,7 @@ Return structured details for a single finding by ID.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
+| `finding_id` | string | *required* | The ID from reports/ash.flat.json; copy it without modification. |
 | `results_path` | string \| null | `null` | Optional path to the output directory containing ash_aggregated_results.json. Defaults to <cwd>/.ash/ash_output. |
 
 ## get_config
