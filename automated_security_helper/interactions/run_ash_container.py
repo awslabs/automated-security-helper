@@ -1070,6 +1070,31 @@ def _require_mountable(label: str, path: Path | str) -> None:
         )
 
 
+def _refuse_output_over_the_source(
+    source_dir: Path | str, output_dir: Path | str
+) -> None:
+    """Refuse an output directory that is the source directory or above it.
+
+    The source is mounted read-only at ``/src`` and the output read-write at
+    ``/out``; an output directory that holds the source tree would make that tree
+    writable through ``/out``. Compared by real path, so a link to the source
+    counts. One inside the source, the default ``.ash/ash_output``, or outside it
+    is fine, and so is an empty one, which the run puts at ``<source>/ash_output``.
+    """
+    if not str(output_dir):
+        return
+    source = Path(source_dir).resolve()
+    output = Path(output_dir).resolve()
+    if source == output or source.is_relative_to(output):
+        raise ContainerInputError(
+            f"The output directory {output} is the source directory {source} or a "
+            "directory above it. Container mode mounts the output read-write at "
+            "/out and the source read-only at /src, so the source would be "
+            "writable through /out. Use an output directory inside the source "
+            "(the default .ash/ash_output) or outside it, not above it."
+        )
+
+
 def _require_mountable_inputs(
     source_dir: Path | str,
     output_dir: Path | str,
@@ -1081,6 +1106,7 @@ def _require_mountable_inputs(
     source = Path(source_dir).resolve()
     _require_mountable("source directory", source)
     _require_mountable("output directory", Path(output_dir).resolve())
+    _refuse_output_over_the_source(source, output_dir)
     if config:
         _refuse_config_linked_out_of_the_tree(config, source)
         _refuse_absolute_extends(config)
@@ -1518,6 +1544,7 @@ def _assemble_run_command(
     """
     _require_mountable("source directory", source_dir)
     _require_mountable("output directory", output_dir)
+    _refuse_output_over_the_source(source_dir, output_dir)
 
     cmd: List[str] = [*oci_command_prefix, resolved_oci_runner, "run", "--rm"]
 

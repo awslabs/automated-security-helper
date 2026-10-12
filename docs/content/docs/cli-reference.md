@@ -200,7 +200,11 @@ the scan inside the ASH image with these bind mounts:
 
 The source is mounted read-only wherever the output directory is, including the default
 `.ash/ash_output` inside the source directory: the scan inside the container writes only
-to `/out`.
+to `/out`. An output directory that is the source directory itself, or a directory above
+it, would hold the source tree at `/out`, writable, so `--mode container`, `./ash` and
+`Invoke-ASH` refuse it with exit 3 before anything is built or mounted (compared by real
+path, so a link to the source counts). Use an output directory inside the source or
+outside it.
 
 The config file named with `--config` (or `ASH_CONFIG`) is the one the scan inside the
 container reads. One inside `--source-dir` is read through `/src`. One outside it is

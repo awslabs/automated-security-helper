@@ -153,6 +153,17 @@ require_mountable() {
 if [[ "${NO_RUN}" = "NO" ]]; then
   require_mountable "source directory" "${SOURCE_DIR}"
   require_mountable "output directory" "${OUTPUT_DIR}"
+  # /out is mounted read-write and /src read-only: an output directory that is the
+  # source directory or above it would hold the source tree, writable, at /out.
+  # Compared by physical path, so a link to the source counts.
+  SOURCE_PHYSICAL="$(cd -- "${SOURCE_DIR}" && pwd -P)"
+  OUTPUT_PHYSICAL="$(cd -- "${OUTPUT_DIR}" && pwd -P)"
+  case "${SOURCE_PHYSICAL%/}/" in
+    "${OUTPUT_PHYSICAL%/}"/*)
+      echo "ERROR: The output directory '${OUTPUT_DIR}' is the source directory '${SOURCE_DIR}' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it." >&2
+      exit 3
+      ;;
+  esac
 fi
 
 # The file's path with every symlink followed: the link's target is what is read.

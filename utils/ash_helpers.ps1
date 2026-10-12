@@ -253,6 +253,19 @@ function Invoke-ASH {
         if (-not $NoRun) {
             Assert-Mountable 'source directory' $sourceDirFull
             Assert-Mountable 'output directory' $outputDirFull
+            # /out is mounted read-write and /src read-only: an output directory that
+            # is the source directory or above it would hold the source tree, writable,
+            # at /out. A directory that is itself a link is compared by its target.
+            $separatorChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+            $nameComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+            $directories = foreach ($path in @($sourceDirFull, $outputDirFull)) {
+                $item = Get-Item -LiteralPath $path
+                $real = if ($item.LinkType -and $item.ResolvedTarget) { [string]$item.ResolvedTarget } else { $item.FullName }
+                $real.TrimEnd($separatorChars) + [System.IO.Path]::DirectorySeparatorChar
+            }
+            if ($directories[0].StartsWith($directories[1], $nameComparison)) {
+                Stop-AshRefusal 3 "The output directory '$outputDirFull' is the source directory '$sourceDirFull' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
+            }
         }
 
         # The config file, -Config or else ASH_CONFIG, is read by the scan inside the

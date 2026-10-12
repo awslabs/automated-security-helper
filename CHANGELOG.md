@@ -408,6 +408,13 @@
   for them. See the breaking
   change above. This repository's
   validate-container action now passes `--build-target ci` to every build and scan.
+- **Container mode refuses an output directory that is the source directory or above
+  it.** `/out` is mounted read-write and `/src` read-only, so an `--output-dir` equal
+  to `--source-dir`, or one of its parents, held the source tree writable through
+  `/out`. `ash --mode container`, `./ash` and `Invoke-ASH` now refuse it with exit 3
+  before anything is built or mounted, by real path. An output directory inside the
+  source, such as the default `.ash/ash_output`, or outside it works as before; a run
+  with `--no-run` mounts nothing and is not refused.
 - **On Windows, container mode and `ash build-image` default to the `ci` stage.** The
   output directory is bind-mounted into the container, and on Windows the runtime does
   not map write permissions onto that mount, so the `non-root` user could not write

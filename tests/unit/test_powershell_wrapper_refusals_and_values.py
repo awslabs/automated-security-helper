@@ -205,6 +205,38 @@ def test_a_refusal_exits_3_under_error_action_stop(
     assert not (tmp_path / "docker-args.txt").exists()
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param("-SourceDir src -OutputDir src", id="the-source"),
+        pytest.param("-SourceDir src/inner -OutputDir src", id="its-parent"),
+    ],
+)
+def test_an_output_directory_over_the_source_is_refused(
+    arguments, pwsh, recording_docker, tmp_path
+):
+    """/out is read-write and /src read-only: an output directory holding the
+    source tree would make it writable through /out."""
+    (tmp_path / "src" / "inner").mkdir(parents=True)
+
+    result = _invoke(pwsh, tmp_path, recording_docker, arguments)
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+    assert "above it" in " ".join(result.stderr.split())
+
+
+def test_an_output_directory_inside_the_source_runs(pwsh, recording_docker, tmp_path):
+    """Control: the default .ash/ash_output is inside the source."""
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, "-SourceDir src -OutputDir src/.ash/out"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.skipif(
     os.name == "nt",
     reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",

@@ -703,6 +703,48 @@ class TestANonRootBuildAsUid0IsRefused:
         assert "UID=1234" in build and "GID=1235" in build
 
 
+class TestAnOutputDirectoryOverTheSourceIsRefused:
+    """``/out`` is read-write and ``/src`` read-only; an output directory that is
+    the source directory or above it would hold the source tree writable through
+    ``/out``. Refused with exit 3 before anything runs, by real paths. Inside the
+    source (the default) or outside it is fine; ``--no-run`` mounts nothing."""
+
+    @pytest.mark.parametrize("where", ["the-source", "its-parent", "a-link-to-it"])
+    def test_it_is_refused(self, where, fake_runner, project, tmp_path):
+        if where == "the-source":
+            output = project
+        elif where == "its-parent":
+            output = project.parent
+        else:
+            output = tmp_path / "out-link"
+            output.symlink_to(project, target_is_directory=True)
+
+        rc, text, calls = _run_ash_status(
+            fake_runner, project, ["--no-build", "--output-dir", str(output)]
+        )
+
+        assert rc == 3, text
+        assert calls == []
+        assert "above it" in text
+
+    @pytest.mark.parametrize("where", ["default", "beside-it"])
+    def test_inside_or_outside_the_source_runs(
+        self, where, fake_runner, project, tmp_path
+    ):
+        args = ["--no-build"]
+        if where == "beside-it":
+            args += ["--output-dir", str(tmp_path / "out")]
+
+        calls = run_ash(fake_runner, project, args)
+
+        assert [call[0] for call in calls] == ["run"]
+
+    def test_a_build_without_a_run_is_not_refused(self, fake_runner, project):
+        calls = run_ash(fake_runner, project, ["--no-run", "--output-dir", "."])
+
+        assert [call[0] for call in calls] == ["build"]
+
+
 class TestAnOutsideConfigThatExtendsIsRefused:
     """``./ash`` mounts a config from outside the source directory on its own, so the
     files it extends are not in the container. A config there with an ``extends``
