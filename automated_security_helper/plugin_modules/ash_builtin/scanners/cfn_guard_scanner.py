@@ -231,7 +231,8 @@ class CfnGuardScannerConfig(ScannerPluginConfigBase):
 class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
     """Evaluates CloudFormation templates against cfn-guard rules."""
 
-    #: cfn-guard is a native binary. See ScannerPluginBase.python_only.
+    #: Not Python-only: cfn-guard is a native binary, installed from its pinned
+    #: release asset, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -538,11 +539,11 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         return True
 
     def nothing_to_scan_reason(self) -> Optional[str]:
-        """None when either tree holds a template cfn-guard evaluates; see the base class.
+        """Why cfn-guard has nothing to scan in this run, or None.
 
         From the selection ``scan()`` makes, which cfn-lint shares
-        (``cloudformation_templates_nothing_to_scan_reason``). Asked when the
-        binary or the rules are missing: neither costs a scan with no template.
+        (``cloudformation_templates_nothing_to_scan_reason``). The selection
+        needs neither the binary nor the rules.
         """
         if self.context is None:
             return None

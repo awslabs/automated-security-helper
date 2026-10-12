@@ -3,16 +3,15 @@
 
 """actionlint, cfn-guard, cfn-lint, gitleaks, trivy and zizmor each state python_only.
 
-``--python-only`` runs only the scanners that need nothing but Python. A scanner
-states which it is with the ``python_only`` class variable: True for a tool that is
-a Python package ASH runs through uv or imports, False for a native binary or any
-other program. Stated rather than derived, because what these scanners run can
-change after construction: zizmor and cfn-lint switch from ``uv tool run`` to a
-binary on PATH in their dependency check, and a rule that read ``use_uv_tool``
-would then answer differently for the same scanner within one scan.
+Each class says in ``python_only`` whether its scanner needs nothing but Python:
+True for a tool that is a Python package ASH runs through uv, False for a native
+binary. The answer does not depend on ``use_uv_tool``, which zizmor and cfn-lint
+set to False when their dependency check uses a binary on PATH instead.
 
-The ScanPhase test pins what ``--python-only`` runs among these six, measured on a
-real scan with every tool installed: cfn-lint and zizmor.
+``--python-only`` decides through ``is_python_only()``, which on these six gives
+the same answers from their install commands. The ScanPhase test pins what
+``--python-only`` runs among them, measured on a real scan with every tool
+installed: cfn-lint and zizmor.
 """
 
 from __future__ import annotations

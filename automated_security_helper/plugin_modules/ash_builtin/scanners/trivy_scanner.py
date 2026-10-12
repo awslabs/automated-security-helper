@@ -329,7 +329,8 @@ class TrivyScannerConfig(ScannerPluginConfigBase):
 class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     """Dependency vulnerability scanning with trivy."""
 
-    #: trivy is a native binary. See ScannerPluginBase.python_only.
+    #: Not Python-only: trivy is a native binary, installed from its pinned
+    #: release asset, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
 
     success_exit_codes: ClassVar[Set[int]] = {0}
@@ -370,9 +371,8 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         and with the operator's ``scanners`` including ``secret``,
         ``misconfig`` or ``license``, nearly any file. ASH makes no selection of
         its own that could come up empty, and trivy counts no targets, so a run
-        with the tool never reports that it evaluated nothing either. None keeps
-        the scanner MISSING when trivy or its database is absent; see
-        ScannerPluginBase.nothing_to_scan_reason.
+        with the tool never reports that it evaluated nothing either. None means
+        "cannot tell", never "nothing to scan".
         """
         return None
 

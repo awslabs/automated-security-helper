@@ -595,7 +595,8 @@ class _RefusedIntegration(Exception):
 class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
     """Lints GitHub Actions workflow files with actionlint."""
 
-    #: actionlint is a native binary. See ScannerPluginBase.python_only.
+    #: Not Python-only: actionlint is a native binary, installed from its pinned
+    #: release asset, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -753,16 +754,16 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         return found is not None
 
     def nothing_to_scan_reason(self) -> Optional[str]:
-        """None when either tree holds a workflow file actionlint lints; see the base class.
+        """Why actionlint has nothing to scan in this run, or None.
 
-        From ``_workflow_files``, the selection ``scan()`` makes, over every tree a
-        scan hands this scanner (``utils/scan_targets.py``), so a workflow that
-        selection leaves out (a link out of the tree, a reference outside it, a
-        vendored copy) is not input here either. ``global_settings.ignore_paths``
-        is not applied: scan() is handed its list by the scan, and without it this
-        can find more workflows than scan() does, never fewer, which keeps the
-        scanner MISSING rather than hiding it. Quiet, because the executor also
-        asks after a scan that linted nothing, which logged its own warnings.
+        A reason only when ``_workflow_files``, the selection ``scan()`` makes,
+        finds no workflow in any tree a scan hands this scanner
+        (``utils/scan_targets.py``), so a workflow that selection leaves out (a
+        link out of the tree, a reference outside it, a vendored copy) is not
+        input here either. ``global_settings.ignore_paths`` is not applied:
+        scan() is handed its list by the scan, and without it this can find more
+        workflows than scan() does, never fewer. Logs nothing; scan() logs the
+        warnings for the workflows it skips.
         """
         if self.context is None:
             return None

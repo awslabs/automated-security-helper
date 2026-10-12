@@ -473,9 +473,11 @@ class ZizmorScannerConfig(ScannerPluginConfigBase):
 class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     """GitHub Actions workflow and composite action analysis with zizmor."""
 
-    #: zizmor is a Python package ASH runs through uv: its PyPI wheel holds the
-    #: native binary, as semgrep's holds semgrep-core. A zizmor found on PATH
-    #: instead is the same program. See ScannerPluginBase.python_only.
+    #: Python-only: zizmor is a Python package ASH runs through uv, so it needs
+    #: nothing but Python. Its PyPI wheel holds the native binary, as semgrep's
+    #: holds semgrep-core. Stated here rather than read from use_uv_tool, which
+    #: the dependency check sets to False when it uses a zizmor on PATH, the same
+    #: program.
     python_only: ClassVar[bool | None] = True
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -745,16 +747,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         }
 
     def nothing_to_scan_reason(self) -> Optional[str]:
-        """None when either tree holds an input zizmor audits; see the base class.
+        """Why zizmor has nothing to scan in this run, or None.
 
-        From ``_collect_inputs``, the selection ``scan()`` makes, over every tree a
-        scan hands this scanner (``utils/scan_targets.py``), so an input that
-        selection leaves out (a link out of the tree, a vendored copy) is not input
-        here either. ``global_settings.ignore_paths`` is not applied: scan() is
-        handed its list by the scan, and without it this can find more inputs than
-        scan() does, never fewer, which keeps the scanner MISSING rather than
-        hiding it. Quiet, because the executor also asks after a scan that audited
-        nothing, which logged its own warnings.
+        A reason only when ``_collect_inputs``, the selection ``scan()`` makes,
+        finds no workflow or composite action in any tree a scan hands this
+        scanner (``utils/scan_targets.py``), so an input that selection leaves
+        out (a link out of the tree, a vendored copy) is not input here either.
+        ``global_settings.ignore_paths`` is not applied: scan() is handed its list
+        by the scan, and without it this can find more inputs than scan() does,
+        never fewer. Logs nothing; scan() logs the warnings for the inputs it
+        skips.
         """
         if self.context is None:
             return None

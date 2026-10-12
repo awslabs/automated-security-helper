@@ -387,7 +387,8 @@ class GitleaksScannerConfig(ScannerPluginConfigBase):
 class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     """Secret detection over the scan target's files using gitleaks."""
 
-    #: gitleaks is a native binary. See ScannerPluginBase.python_only.
+    #: Not Python-only: gitleaks is a native binary, installed from its pinned
+    #: release asset, so a Python-only scan does not run it.
     python_only: ClassVar[bool | None] = False
 
     # gitleaks' rules are compiled into the binary and it makes no network calls.
@@ -450,8 +451,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         have chosen. Any file it reads can hold a secret, so ASH makes no
         selection of its own that could come up empty, and gitleaks counts no
         targets, so a run with the tool never reports that it evaluated nothing
-        either. None keeps the scanner MISSING when gitleaks is absent; see
-        ScannerPluginBase.nothing_to_scan_reason.
+        either. None means "cannot tell", never "nothing to scan".
         """
         return None
 

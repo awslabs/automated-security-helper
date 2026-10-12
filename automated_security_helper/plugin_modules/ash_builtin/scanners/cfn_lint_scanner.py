@@ -417,8 +417,9 @@ class CfnLintScannerConfig(ScannerPluginConfigBase):
 class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     """Validates CloudFormation templates with cfn-lint."""
 
-    #: cfn-lint is a Python package ASH runs through uv. See
-    #: ScannerPluginBase.python_only.
+    #: Python-only: cfn-lint is a Python package ASH runs through uv, so it needs
+    #: nothing but Python. Stated here rather than read from use_uv_tool, which the
+    #: dependency check sets to False when it uses a cfn-lint on PATH instead.
     python_only: ClassVar[bool | None] = True
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -519,7 +520,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return get_uv_tool_command(_COMMAND) is not None
 
     def nothing_to_scan_reason(self) -> Optional[str]:
-        """None when either tree holds a template cfn-lint lints; see the base class.
+        """Why cfn-lint has nothing to scan in this run, or None.
 
         From the selection ``scan()`` makes, which cfn-guard shares
         (``cloudformation_templates_nothing_to_scan_reason``).

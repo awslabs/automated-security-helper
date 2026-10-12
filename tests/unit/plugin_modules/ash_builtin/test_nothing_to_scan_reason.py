@@ -4,10 +4,10 @@
 """``nothing_to_scan_reason`` for cfn-lint, cfn-guard, actionlint, zizmor, gitleaks, trivy.
 
 The hook says why a scanner has nothing to scan in this run, or None when it
-cannot tell. ScanPhase asks it when the scanner's tool is absent: a reason makes
-the scanner SKIPPED instead of MISSING, because the absent tool cost the scan
-nothing. So a reason is given only from the selection the scanner's own scan()
+cannot tell. A reason is given only from the selection the scanner's own scan()
 makes, over every tree the scan hands it, and only when that selection is empty.
+Nothing in ASH calls the hook yet; test_nothing_to_scan_hooks_have_no_caller.py
+pins that.
 
 Each selection-based hook is held to its scan() by an agreement test: on the same
 tree, scan() with the tool standing in attempts a target exactly when the hook
@@ -366,7 +366,7 @@ def test_actionlint_a_workflow_only_in_the_converted_tree_is_something_to_scan(
 
 
 def test_actionlint_the_hook_does_not_repeat_the_scans_warnings(tmp_path, caplog):
-    """The executor asks the hook after a scan that linted nothing, which warned."""
+    """scan() warns about the workflows it skips; the hook does not warn again."""
     context = _context(
         tmp_path,
         {"README.md": "# app\n"},
