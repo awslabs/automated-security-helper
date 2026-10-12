@@ -691,6 +691,42 @@ class TestValuesFromTheMatch:
         assert secrets.long_key not in _region_text(reuses[1])
         assert _region_text(reuses[1]).startswith('run("--key ')
 
+    def test_masking_a_matched_region_twice_changes_nothing_more(self):
+        model, _ = self._model()
+        mask_secrets_in_results(model)
+        once = model.sarif.model_dump_json()
+
+        mask_secrets_in_results(model)
+
+        assert model.sarif.model_dump_json() == once
+
+    def test_a_masked_line_gives_no_value_from_its_columns(self):
+        """A secrets scanner's finding whose snippet is no copy of the line.
+
+        A secrets scanner can report the secret's columns on the file's line with
+        a snippet that is not the line (here ``REDACTED``). Once that line is
+        masked, the columns point into the masked line itself; read again (stored
+        results are masked once more when reports are rendered), they gave a piece
+        of the masked line as a value, and masking it changed the masked line.
+        """
+        secret = _result(
+            "github-pat",
+            "app/settings.py",
+            4,
+            "a GitHub personal access token",
+            snippet="REDACTED",
+            scanner="detect-secrets",
+        )
+        region = secret["locations"][0]["physicalLocation"]["region"]
+        region.update({"startColumn": 18, "endColumn": 57})
+        model = _results(secret)
+
+        mask_secrets_in_results(model)
+        assert _region_text(model.sarif.runs[0].results[0]) == MASKED_LINE
+
+        mask_secrets_in_results(model)
+        assert _region_text(model.sarif.runs[0].results[0]) == MASKED_LINE
+
 
 class TestValuesAreMaskedInWhatFindingsReport:
     """Masking by value reaches the text a finding reports, not names and metadata.

@@ -925,7 +925,10 @@ def _matched_values(result: Any) -> List[str]:
         ):
             continue
         lines = _split_lines(text)
-        if not lines:
+        # A line already masked holds no value: the columns were the original
+        # line's, and read from ``MASKED_LINE`` they gave a piece of it, which
+        # masking the results again then masked inside the masked line.
+        if not lines or lines[0].strip() == MASKED_LINE:
             continue
         match = lines[0][start - 1 : end - 1].strip()
         literals = [found.group(2) for found in _STRING_LITERAL.finditer(match)]
