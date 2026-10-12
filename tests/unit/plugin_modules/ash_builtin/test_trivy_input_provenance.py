@@ -268,6 +268,7 @@ def test_an_operator_value_outside_the_tree_is_used(
 @pytest.mark.parametrize(
     ("env", "option", "flag"),
     [
+        ("TRIVY_CONFIG", "config_file", "--config"),
         ("TRIVY_IGNOREFILE", "ignore_file", "--ignorefile"),
         ("TRIVY_SECRET_CONFIG", "secret_config_file", "--secret-config"),
     ],
@@ -329,6 +330,28 @@ def test_trivy_config_from_the_environment_inside_the_tree_is_not_used(
 
     assert _passed(argv, "--config") == EMPTY_TOOL_CONFIG.as_posix()
     assert _real(planted) not in " ".join(argv)
+
+
+@pytest.mark.parametrize("scanner", SCANNERS)
+def test_a_relative_trivy_config_beside_the_scanned_tree_is_not_the_one_meant(
+    tmp_path, monkeypatch, scanner
+):
+    """``../trivy.yaml`` names a file next to the working directory, not next to
+    the scanned directory, which may be another part of the same checkout."""
+    source = _source(tmp_path)
+    beside_the_tree = tmp_path / "trivy.yaml"
+    beside_the_tree.write_text("module:\n  dir: ./planted\n", encoding="utf-8")
+    workdir = tmp_path / "ci" / "job"
+    workdir.mkdir(parents=True)
+    (workdir.parent / "trivy.yaml").write_text("{}\n", encoding="utf-8")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv("TRIVY_CONFIG", "../trivy.yaml")
+    config = resolve_config(source_dir=source)
+
+    argv = _argv(tmp_path, source, config, scanner, "config_file", None)
+
+    assert _passed(argv, "--config") == _real(workdir.parent / "trivy.yaml")
+    assert _real(beside_the_tree) not in " ".join(argv)
 
 
 # --------------------------------------------------------------------------- #

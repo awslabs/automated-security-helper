@@ -42,7 +42,7 @@ def _config_file(source: Path, tmp_path: Path) -> str:
         output_dir=tmp_path / "out",
         work_dir=tmp_path / "out" / "converted",
     )
-    return TrivyRepoScanner(context=context)._config_file()
+    return TrivyRepoScanner(context=context)._trivy_config_file()
 
 
 def _write(path: Path, text: str) -> Path:

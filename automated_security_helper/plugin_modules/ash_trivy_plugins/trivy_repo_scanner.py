@@ -90,7 +90,8 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
                 "file that sets it, or from the working directory for "
                 "--config-overrides, not from the source directory. Unset or "
                 "ignored, ASH passes TRIVY_CONFIG when that names a file outside the "
-                "scanned tree, and otherwise an empty config of its own, so trivy "
+                "scanned tree (a relative path in it is taken from the working "
+                "directory), and otherwise an empty config of its own, so trivy "
                 "does not load a trivy.yaml from the directory it runs in. A path "
                 "that does not exist fails the scan."
             ),

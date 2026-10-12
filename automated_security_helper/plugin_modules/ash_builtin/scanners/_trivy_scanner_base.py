@@ -59,10 +59,13 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
-from automated_security_helper.config.operator_paths import anchored_path
+from automated_security_helper.config.operator_paths import (
+    anchored_environment_path,
+)
 from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.config_trust import operator_path
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.content_db_refresh import (
     EMPTY_TOOL_CONFIG,
     default_cache_dir,
@@ -174,12 +177,16 @@ def trivy_default_misconfig_scanners(
 
 
 def _existing_file(key: str, value: Any, path: Path) -> str:
-    """``path`` as trivy is given it; a configured file that is missing fails."""
+    """``path`` as trivy is given it; a configured file that is missing fails.
+
+    The value is quoted with ``repr`` and the resolved path with its control
+    characters escaped, so a line break in either cannot forge a log line.
+    """
     if not path.is_file():
         raise ScannerError(
             f"{key} is {str(value)!r}, which is not a file (resolved to "
-            f"{path.as_posix()}). Fix the path or unset it; trivy is not run "
-            "without it."
+            f"{escape_controls(path.as_posix())}). Fix the path or unset it; "
+            "trivy is not run without it."
         )
     return path.as_posix()
 
@@ -250,7 +257,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
         1. ``options.config_file``, when ``_operator_path`` accepts it;
         2. otherwise ``TRIVY_CONFIG``, which is the operator's environment, for a
-           file outside the scanned tree (``config/path_trust.honored_path``);
+           file outside the scanned tree (``config/path_trust.honored_path``); a
+           relative path in it is taken from the working directory ASH runs in;
         3. otherwise ``EMPTY_TOOL_CONFIG``, the empty config ASH ships, which every
            sandbox backend mounts read-only and no scanner can write.
 
@@ -298,7 +306,12 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             )
             if path is not None:
                 return f"scanners.{name}.options.config_file", value, path
-        from_env = os.environ.get("TRIVY_CONFIG")
+        # The variable is the operator's, set where ASH runs, so a relative path in
+        # it is taken from the working directory as written, as TRIVY_IGNOREFILE's
+        # is (_trivy_input_file), not from the scanned directory. The value is
+        # quoted as set.
+        variable = os.environ.get("TRIVY_CONFIG")
+        from_env = anchored_environment_path(variable, Path.cwd())
         if from_env:
             path = honored_path(
                 from_env,
@@ -307,7 +320,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 config=getattr(self.context, "config", None),
             )
             if path is not None:
-                return "TRIVY_CONFIG", from_env, path
+                return "TRIVY_CONFIG", variable, path
         return None
 
     def _ignore_file(self) -> str:
@@ -377,8 +390,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         file outside the scanned tree). A refused or unset option falls through to
         the environment variable, which is the operator's, used for a file outside
         the tree (config/path_trust.py); a relative path in it is taken from the
-        working directory ASH runs in (``config/operator_paths.anchored_path``),
-        not from the source directory. Otherwise trivy gets a file that sets
+        working directory ASH runs in, as written
+        (``config/operator_paths.anchored_environment_path``), not from the source
+        directory. Otherwise trivy gets a file that sets
         nothing, which ASH writes outside the scanned tree (``empty_tool_config``).
         """
         if self.context is None:
@@ -396,8 +410,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             if path is not None:
                 return _existing_file(f"scanners.{name}.options.{option}", value, path)
         # The variable is the operator's, set where ASH runs, so a relative path
-        # in it names a file there, not one at the root of the scanned tree.
-        from_env = anchored_path(os.environ.get(env), Path.cwd())
+        # in it names a file there, as written, not one at the root of the
+        # scanned tree.
+        from_env = anchored_environment_path(os.environ.get(env), Path.cwd())
         if from_env:
             path = honored_path(
                 from_env,

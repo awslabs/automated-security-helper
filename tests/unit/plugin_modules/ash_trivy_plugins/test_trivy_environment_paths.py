@@ -41,7 +41,7 @@ VARIABLES = ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG")
 
 #: What each variable chooses, read from the scanner.
 CHOSEN: Dict[str, Callable[[TrivyRepoScanner], str]] = {
-    "TRIVY_CONFIG": lambda scanner: scanner._config_file(),
+    "TRIVY_CONFIG": lambda scanner: scanner._trivy_config_file(),
     "TRIVY_IGNOREFILE": lambda scanner: scanner._ignore_file(),
     "TRIVY_SECRET_CONFIG": lambda scanner: scanner._secret_config_file(),
 }
@@ -170,7 +170,7 @@ def test_the_refusal_gives_the_operators_advice(tmp_path, monkeypatch, caplog):
     monkeypatch.setenv("TRIVY_CONFIG", str(_write(repo / "sub" / "trivy.yaml")))
     caplog.set_level(logging.WARNING)
 
-    assert _scanner(repo, tmp_path)._config_file() == EMPTY_TOOL_CONFIG.as_posix()
+    assert _scanner(repo, tmp_path)._trivy_config_file() == EMPTY_TOOL_CONFIG.as_posix()
     (message,) = [
         r.getMessage() for r in caplog.records if "TRIVY_CONFIG" in r.getMessage()
     ]
@@ -185,7 +185,7 @@ def test_a_newline_in_a_refused_value_is_escaped_in_the_warning(
     monkeypatch.setenv("TRIVY_CONFIG", f"{repo / 'trivy.yaml'}\n")
     caplog.set_level(logging.WARNING)
 
-    _scanner(repo, tmp_path)._config_file()
+    _scanner(repo, tmp_path)._trivy_config_file()
 
     (message,) = [
         r.getMessage() for r in caplog.records if "TRIVY_CONFIG" in r.getMessage()
@@ -203,7 +203,7 @@ def test_a_newline_in_a_value_that_is_not_a_file_is_escaped_in_the_error(
     monkeypatch.setenv("TRIVY_CONFIG", f"{missing}\n")
 
     with pytest.raises(ScannerError) as excinfo:
-        _scanner(source, tmp_path)._config_file()
+        _scanner(source, tmp_path)._trivy_config_file()
 
     assert "\n" not in str(excinfo.value), str(excinfo.value)
     assert "trivy.yaml\\n" in str(excinfo.value), str(excinfo.value)
