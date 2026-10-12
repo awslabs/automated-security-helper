@@ -507,6 +507,48 @@ def test_cli_flags_check_can_fail(gate, tmp_path, monkeypatch):
     assert gate.check_cli_flags() == [], "documenting both halves still failed"
 
 
+def test_cli_flags_check_passes_on_the_real_tree(gate):
+    """The gate run on the committed scan.py and cli-reference.md.
+
+    The lint job runs this check, and nothing in the unit suite did, so a hidden
+    option named config_files_from_scanned_repository failed the gate while the
+    suite was green, the way check_reporters once did (see
+    test_reporter_check_passes_on_the_generated_table).
+    """
+    assert gate.check_cli_flags() == []
+
+
+def test_every_scan_option_is_named_for_its_flag():
+    """check_cli_flags turns each option's parameter name into a flag.
+
+    So a parameter named unlike its flag makes the gate ask cli-reference.md for
+    a flag the CLI does not have: config_files_from_scanned_repository, whose
+    flag is --config-file-from-scanned-repository, asked for
+    --config-files-from-scanned-repository. Hidden options count too: they are
+    documented in cli-reference.md like the rest.
+    """
+    import typer
+    from typer.models import OptionInfo
+
+    from automated_security_helper.cli.scan import run_ash_scan_cli_command
+
+    params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
+    misnamed = {}
+    for name, meta in params.items():
+        option = meta.default
+        if not isinstance(option, OptionInfo) or not option.param_decls:
+            continue
+        flags = {
+            flag
+            for decl in option.param_decls
+            for flag in decl.split("/")
+            if flag.startswith("--")
+        }
+        if "--" + name.replace("_", "-") not in flags:
+            misnamed[name] = sorted(flags)
+    assert misnamed == {}
+
+
 def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):
     doc = tmp_path / "suppressions.md"
     doc.write_text(

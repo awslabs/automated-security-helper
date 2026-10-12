@@ -350,7 +350,7 @@ class TestSkeleton:
         } - hidden
         assert hidden == {
             "config_from_scanned_repository",
-            "config_files_from_scanned_repository",
+            "config_file_from_scanned_repository",
             "ash_config_from_host",
         }
         assert set(skeleton) == expected

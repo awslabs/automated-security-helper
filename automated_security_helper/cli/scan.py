@@ -569,7 +569,7 @@ def run_ash_scan_cli_command(
             help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on.",
         ),
     ] = False,
-    config_files_from_scanned_repository: Annotated[
+    config_file_from_scanned_repository: Annotated[
         Optional[List[str]],
         typer.Option(
             "--config-file-from-scanned-repository",
@@ -821,7 +821,7 @@ def run_ash_scan_cli_command(
     # host, and not the --config it would be as the option's environment variable.
     # A file of its chain the host counts as repository-written comes marked with
     # --config-file-from-scanned-repository.
-    marked_files = list(config_files_from_scanned_repository or [])
+    marked_files = list(config_file_from_scanned_repository or [])
     if config_from_scanned_repository or marked_files or ash_config_from_host:
         if (mode or RunMode.local) != RunMode.local:
             _fail_config_mark(
