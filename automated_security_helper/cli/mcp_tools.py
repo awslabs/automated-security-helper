@@ -313,7 +313,9 @@ async def mcp_scan_directory(
     # session's lock only later, on a worker thread: from here on a change to
     # the delivered tree is refused and the session's removal waits for the
     # scan. Refused while such a change is in progress. See
-    # MCPSession.try_claim_scan.
+    # MCPSession.try_claim_scan. The claim is on the in-memory session: a scan
+    # creates nothing under the workspace root, so it starts even when that root
+    # can't be created.
     claimed_session = None
     if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
         from automated_security_helper.cli.mcp.sessions import (
@@ -323,7 +325,7 @@ async def mcp_scan_directory(
             SOURCE_DELIVERY_BUSY,
         )
 
-        claimed_session = _get_session_registry().get_or_create(session_id)
+        claimed_session = _get_session_registry().session_for(session_id)
         if not claimed_session.try_claim_scan():
             return {
                 "success": False,
@@ -541,7 +543,7 @@ async def _run_scan(
             get_default_registry as _get_session_registry,
         )
 
-        session_lock = _get_session_registry().get_or_create(session_id).lock
+        session_lock = _get_session_registry().session_for(session_id).lock
 
     # Mark the scan as running
     registry.update_scan_status(scan_id, MCScanStatus.RUNNING)

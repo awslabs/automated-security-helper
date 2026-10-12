@@ -131,13 +131,17 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
     server's event loop, and waiting there for a scan to finish would stall
     every other session. A session that ended while the change held the lock is
     removed once it is released.
+
+    Takes the in-memory session only: a change that is refused leaves no session
+    directory, and each change that writes creates and marks the directory
+    itself.
     """
     from automated_security_helper.cli.mcp.sessions import (
         finish_ended_session,
         get_default_registry,
     )
 
-    session = get_default_registry().get_or_create(session_id)
+    session = get_default_registry().session_for(session_id)
     if not session.try_begin_change():
         raise SourceDeliveryBusyError(
             "a scan of this session is running; change the delivered source after "

@@ -224,19 +224,25 @@ class MCPSessionRegistry:
 
         return resolve_workspace_root()
 
-    def get_or_create(self, session_id: str) -> MCPSession:
-        """Return the session for ``session_id``, creating one if needed.
+    def session_for(self, session_id: str) -> MCPSession:
+        """Return the session for ``session_id``, adding it to the map if needed.
 
-        Repeated calls with the same id return the same instance — the lock
-        identity is preserved so per-session serialization works.
+        Creates nothing on disk. This is the call for a caller that needs the
+        session's claim or lock and not its directory: a scan, and a change to
+        the delivered tree, whose functions create and mark the directory
+        themselves when they write there. A scan of a directory the operator
+        granted therefore starts even when the workspace root can't be created.
+
+        Repeated calls with the same id return the same instance, so the lock
+        and the claim are shared by every caller of one session.
 
         Raises:
             ValueError: if ``session_id`` is not usable as a single path
-                component. The id becomes a directory this method creates and
-                ``disconnect`` removes, so it is validated here rather than
-                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
-                rule, shared with the other surfaces that build a per-session
-                path.
+                component. The id names a directory that ``get_or_create``
+                creates and ``disconnect`` removes, so it is validated here
+                rather than trusted from the caller; ``cli/mcp/session_paths.py``
+                holds the rule, shared with the other surfaces that build a
+                per-session path.
 
         Validated before the map lookup, not after. Checking only on the
         create branch would admit the id for the lifetime of the process the
@@ -256,12 +262,25 @@ class MCPSessionRegistry:
             existing = self._sessions.get(session_id)
             if existing is not None:
                 return existing
-            workspace = mark_session_workspace(
-                session_directory(self._workspace_parent, session_id)
-            )
+            workspace = session_directory(self._workspace_parent, session_id)
             session = MCPSession(id=session_id, workspace_root=workspace)
             self._sessions[session_id] = session
             return session
+
+    def get_or_create(self, session_id: str) -> MCPSession:
+        """Return the session for ``session_id`` with its workspace directory.
+
+        :meth:`session_for`, plus the session's directory and its marker,
+        created when missing.
+
+        Raises:
+            ValueError: as :meth:`session_for`.
+            OSError: when the directory can't be created.
+        """
+        session = self.session_for(session_id)
+        if not session.workspace_root.is_dir():
+            mark_session_workspace(session.workspace_root)
+        return session
 
     def get(self, session_id: str) -> Optional[MCPSession]:
         """Return the session for ``session_id`` or None if unknown."""
