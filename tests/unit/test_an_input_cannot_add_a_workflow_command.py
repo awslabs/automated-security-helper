@@ -279,6 +279,41 @@ class TestOneTrailingLineFeedIsDropped:
         assert_clean(run)
         assert outputs[name.replace("-", "_")] == checked, outputs
 
+    @pytest.mark.parametrize(
+        "caller_yaml,checked",
+        [
+            pytest.param("ash-args: |\n  --verbose\n", "--verbose", id="literal |"),
+            pytest.param("ash-args: >\n  --verbose\n", "--verbose", id="folded >"),
+            pytest.param(
+                "ash-args: >\n  --verbose\n  --debug\n",
+                "--verbose --debug",
+                id="folded >, two source lines folded into one",
+            ),
+            pytest.param("ash-args: >-\n  --verbose\n", "--verbose", id="folded >-"),
+            pytest.param("ash-args: |-\n  --verbose\n", "--verbose", id="literal |-"),
+            pytest.param("ash-args: --verbose\n", "--verbose", id="plain scalar"),
+            pytest.param(
+                "ash-args: |\n  --verbose\n  --debug\n", None, id="literal |, two lines"
+            ),
+            pytest.param(
+                "ash-args: |+\n  --verbose\n\n", None, id="literal |+, kept blank line"
+            ),
+        ],
+    )
+    def test_each_way_a_caller_writes_ash_args(self, tmp_path, caller_yaml, checked):
+        """The values a caller's YAML gives, read the way the runner reads `with:`.
+
+        A folded scalar (`>`) ends in one line feed like a literal one (`|`), and
+        folds its source lines into one, so it passes. None means refused."""
+        value = yaml.safe_load(caller_yaml)["ash-args"]
+        run, outputs = _check_inputs(tmp_path, **{"ash-args": value})
+        if checked is None:
+            assert_refused_without_printing(run, "ash-args")
+            assert "ash_args" not in outputs, outputs
+        else:
+            assert_clean(run)
+            assert outputs["ash_args"] == checked, outputs
+
     @pytest.mark.parametrize("value", REFUSED_AFTER_ONE_LINE_FEED)
     @pytest.mark.parametrize("name", ["ash-args", "config-ref"])
     def test_anything_more_is_refused(self, tmp_path, name, value):
