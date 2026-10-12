@@ -835,6 +835,22 @@ def run_ash_scan_cli_command(
                         f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
                     )
 
+    # The hidden flag is how container mode tells the scan inside the container that its
+    # config was written by the repository being scanned. That scan is a
+    # single-directory local scan; any other scan cannot apply the mark, so it is a
+    # usage error with exit 3 rather than run_ash_scan's ValueError.
+    if config_from_scanned_repository and (
+        (mode or RunMode.local) != RunMode.local or workspace_plan is not None
+    ):
+        typer.secho(
+            "--config-from-scanned-repository is passed by container mode to the scan "
+            "inside the container and applies only to a single-directory scan in "
+            "local mode. Leave it out: container mode decides it on the host.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(3)
+
     # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,

@@ -183,6 +183,37 @@ class TestTheScanInsideAppliesTheSameLimits:
         assert result.exit_code == 0, result.output
         assert seen["untrusted_config"] is True
 
+    @pytest.mark.parametrize("mode", ["container", "nix"])
+    def test_the_mark_on_any_other_scan_is_a_usage_error(
+        self, mode, monkeypatch, tmp_path
+    ):
+        """Only container mode's inner scan reads the mark: an outer scan in another
+        mode is refused with exit 3 and a message, not a traceback."""
+        from automated_security_helper.cli.main import app
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--mode",
+                mode,
+                "--no-build",
+                "--no-progress",
+                "--source-dir",
+                "src",
+                "--output-dir",
+                "out",
+                FLAG,
+            ],
+        )
+
+        assert result.exit_code == 3, result.output
+        assert isinstance(result.exception, SystemExit), repr(result.exception)
+        assert FLAG in result.output
+
     def test_the_marked_config_is_limited_as_the_local_scan_limits_it(
         self, checkout, tmp_path
     ):
