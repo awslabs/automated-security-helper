@@ -42,6 +42,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_sca
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
     CfnLintScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+    NO_ZIZMOR_INPUT,
+    ZizmorScanner,
+)
 from automated_security_helper.utils.cfn_template_discovery import (
     NO_CLOUDFORMATION_TEMPLATE,
 )
@@ -379,6 +383,114 @@ def test_actionlint_scan_and_hook_agree(tmp_path, monkeypatch, tree):
 
     attempted = _scan_attempts_a_target(
         ActionlintScanner(context=context), context, monkeypatch
+    )
+
+    assert (reason is None) == attempted, (reason, attempted)
+
+
+# --------------------------------------------------------------------------- #
+# zizmor: the workflows and composite actions _collect_inputs selects
+# --------------------------------------------------------------------------- #
+
+ZIZMOR_TREES = [
+    pytest.param({"source": {".github/workflows/ci.yml": WORKFLOW}}, id="workflow"),
+    pytest.param(
+        {"source": {"tools/setup/action.yaml": COMPOSITE_ACTION}},
+        id="composite-action",
+    ),
+    pytest.param(
+        {"source": {"README.md": "# app\n", "ci.yml": WORKFLOW}},
+        id="no-input",
+    ),
+    pytest.param(
+        {"source": {".github/workflows/nested/ci.yml": WORKFLOW}},
+        id="below-the-workflows-directory",
+    ),
+    pytest.param(
+        {"source": {"node_modules/pkg/action.yml": COMPOSITE_ACTION}},
+        id="vendored",
+    ),
+    pytest.param(
+        {
+            "source": {"README.md": "# app\n"},
+            "converted": {"archive/.github/workflows/ci.yml": WORKFLOW},
+        },
+        id="workflow-only-converted",
+    ),
+    pytest.param(
+        {
+            "source": {"README.md": "# app\n"},
+            "links": {".github/workflows/ci.yml": WORKFLOW},
+        },
+        id="workflow-through-a-link-out-of-the-tree",
+    ),
+    pytest.param(
+        {"source": {"README.md": "# app\n"}, "links": {"action.yml": COMPOSITE_ACTION}},
+        id="action-through-a-link-out-of-the-tree",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        pytest.param({".github/workflows/ci.yml": WORKFLOW}, id="workflow"),
+        pytest.param({"action.yml": COMPOSITE_ACTION}, id="composite-action"),
+    ],
+)
+def test_zizmor_a_workflow_or_action_in_the_source_tree_is_something_to_scan(
+    tmp_path, files
+):
+    context = _context(tmp_path, files)
+
+    assert ZizmorScanner(context=context).nothing_to_scan_reason() is None
+
+
+def test_zizmor_a_tree_without_a_workflow_or_action_has_nothing_to_scan(tmp_path):
+    context = _context(
+        tmp_path,
+        {"README.md": "# app\n", "ci.yml": WORKFLOW},
+        {"archive/ci.yml": WORKFLOW},
+    )
+
+    assert ZizmorScanner(context=context).nothing_to_scan_reason() == (NO_ZIZMOR_INPUT)
+
+
+def test_zizmor_a_workflow_only_in_the_converted_tree_is_something_to_scan(
+    tmp_path,
+):
+    context = _context(
+        tmp_path,
+        {"README.md": "# app\n"},
+        {"archive/.github/workflows/ci.yml": WORKFLOW},
+    )
+
+    assert ZizmorScanner(context=context).nothing_to_scan_reason() is None
+
+
+def test_zizmor_the_hook_does_not_repeat_the_scans_warnings(tmp_path, caplog):
+    context = _context(
+        tmp_path,
+        {"README.md": "# app\n"},
+        links={".github/workflows/ci.yml": WORKFLOW},
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        reason = ZizmorScanner(context=context).nothing_to_scan_reason()
+
+    assert reason == NO_ZIZMOR_INPUT
+    assert "Not auditing" not in caplog.text
+
+
+@pytest.mark.parametrize("tree", ZIZMOR_TREES)
+def test_zizmor_scan_and_hook_agree(tmp_path, monkeypatch, tree):
+    context = _context(
+        tmp_path, tree["source"], tree.get("converted"), tree.get("links")
+    )
+    reason = ZizmorScanner(context=context).nothing_to_scan_reason()
+
+    attempted = _scan_attempts_a_target(
+        ZizmorScanner(context=context), context, monkeypatch
     )
 
     assert (reason is None) == attempted, (reason, attempted)

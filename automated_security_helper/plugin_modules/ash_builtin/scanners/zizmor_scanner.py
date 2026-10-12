@@ -148,6 +148,7 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     run_command,
@@ -183,6 +184,13 @@ ZIZMOR_NO_INPUTS_EXIT_CODE = 3
 
 _ACTION_FILE_NAMES = frozenset({"action.yml", "action.yaml"})
 _WORKFLOW_SUFFIXES = frozenset({".yml", ".yaml"})
+
+#: The reason ``nothing_to_scan_reason`` gives when no tree holds an input zizmor
+#: would audit.
+NO_ZIZMOR_INPUT = (
+    "no GitHub Actions workflow (.github/workflows/*.yml or *.yaml) or composite "
+    "action (action.yml or action.yaml) for zizmor to audit in the scanned files"
+)
 _VERSION_PROBE_TIMEOUT_SECONDS = 30
 _VERSION_PATTERN = re.compile(r"zizmor\s+v?(\d+(?:\.\d+)*)")
 #: zizmor's input-collection warnings, e.g. ``WARN collect_inputs:
@@ -736,11 +744,31 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             if key.upper() not in removed_upper
         }
 
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None when either tree holds an input zizmor audits; see the base class.
+
+        From ``_collect_inputs``, the selection ``scan()`` makes, over every tree a
+        scan hands this scanner (``utils/scan_targets.py``), so an input that
+        selection leaves out (a link out of the tree, a vendored copy) is not input
+        here either. ``global_settings.ignore_paths`` is not applied: scan() is
+        handed its list by the scan, and without it this can find more inputs than
+        scan() does, never fewer, which keeps the scanner MISSING rather than
+        hiding it. Quiet, because the executor also asks after a scan that audited
+        nothing, which logged its own warnings.
+        """
+        if self.context is None:
+            return None
+        for target_type, target in scan_targets(self.context):
+            if self._collect_inputs(target, target_type, [], report=False):
+                return None
+        return NO_ZIZMOR_INPUT
+
     def _collect_inputs(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason],
+        report: bool = True,
     ) -> List[Path]:
         """Workflows and composite actions under ``target``, after ASH's exclusions.
 
@@ -750,6 +778,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         ``KNOWN_IGNORE_PATHS`` (``node_modules/`` and virtualenvs, which hold
         vendored actions the repository does not own) and the global
         ``ignore_paths``. Sorted so the command line is deterministic.
+        ``report`` False leaves out the warnings for the inputs it skips.
         """
         target_abs = Path(target).absolute()
         target_real = Path(target).resolve()
@@ -783,20 +812,22 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             # cannot open, and it fails the whole run. Checked before resolve(),
             # which raises on a loop before Python 3.13.
             if candidate.is_symlink() and not candidate.is_file():
-                self._plugin_log(
-                    f"Not auditing {relative.as_posix()}: it is a symbolic link "
-                    "that does not resolve to a file.",
-                    level=logging.WARNING,
-                )
+                if report:
+                    self._plugin_log(
+                        f"Not auditing {relative.as_posix()}: it is a symbolic "
+                        "link that does not resolve to a file.",
+                        level=logging.WARNING,
+                    )
                 continue
             # zizmor reads a symlinked input where it points. Only pass files whose
             # real path is inside the real scan root.
             if not candidate.resolve().is_relative_to(target_real):
-                self._plugin_log(
-                    f"Not auditing {relative.as_posix()}: it resolves outside the "
-                    "scan root.",
-                    level=logging.WARNING,
-                )
+                if report:
+                    self._plugin_log(
+                        f"Not auditing {relative.as_posix()}: it resolves outside "
+                        "the scan root.",
+                        level=logging.WARNING,
+                    )
                 continue
             source_relative = (
                 candidate.relative_to(source_abs).as_posix()
