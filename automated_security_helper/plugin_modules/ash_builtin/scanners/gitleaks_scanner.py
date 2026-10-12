@@ -789,18 +789,22 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         return response
 
     def _describe_scan_failure(
-        self, exc: Exception, results_file: Optional[Path]
+        self,
+        exc: Exception,
+        results_file: Optional[Path],
+        tool_started: bool = True,
     ) -> str:
         """The failure and where gitleaks' log is, without quoting the log.
 
         The base class quotes the tool's stderr. gitleaks' can quote the scanned
         tree's ``.gitleaksignore``, and this message reaches ``ash.log``, the
-        console and every results file.
+        console and every results file. A failure before gitleaks started gives
+        no exit code, as the base class's does.
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
-        if results_file is None:
+        if not tool_started or results_file is None:
             # _execute_scan raised: gitleaks was not run, so there is no exit code.
-            return detail
+            return f"{detail} (gitleaks was not started)"
         verdict = (
             "an accepted exit code for this scanner"
             if self._exit_code_accepted()
