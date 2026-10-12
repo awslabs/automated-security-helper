@@ -200,6 +200,45 @@ class TestAConfigFileThatCannotBeRead:
         assert mcp_workspace._exit_code_for(excinfo.value) == 3
 
 
+class TestThePreReadCheckClassifiesEveryStatError:
+    """check_config_path decides from os.stat, not Path.is_file.
+
+    Before Python 3.14, Path.is_file() raises for an error other than "not
+    found" -- a directory above the file that cannot be searched gives
+    PermissionError -- so the check let a bare PermissionError out instead of
+    refusing the file as a config that cannot be read. 3.14's is_file returns
+    False there, so the older behavior is reproduced with a patched is_file.
+    """
+
+    def test_an_is_file_that_raises_does_not_escape(self, tmp_path, monkeypatch):
+        from automated_security_helper.config.resolve_config import check_config_path
+
+        path = tmp_path / "locked" / "cfg.yaml"
+        path.parent.mkdir()
+        path.write_text("project_name: x\n", encoding="utf-8")
+
+        def raising_is_file(self):
+            raise PermissionError(13, "Permission denied", str(self))
+
+        monkeypatch.setattr(Path, "is_file", raising_is_file)
+
+        assert check_config_path(path) == path
+
+    @needs_permissions
+    def test_a_directory_above_that_cannot_be_searched(self, tmp_path):
+        from automated_security_helper.config.resolve_config import check_config_path
+
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "cfg.yaml").write_text("project_name: x\n", encoding="utf-8")
+        locked.chmod(0)
+        try:
+            with pytest.raises(ASHConfigSourceError, match="Permission denied"):
+                check_config_path(locked / "cfg.yaml")
+        finally:
+            locked.chmod(0o755)
+
+
 class TestARustPanicWhileResolvingIsRefused:
     """pydantic-core reports a Rust panic as pyo3's PanicException, a BaseException.
 

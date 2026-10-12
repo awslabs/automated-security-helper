@@ -1,6 +1,7 @@
 import errno
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -133,7 +134,13 @@ def check_config_path(config_path: Path | str) -> Path:
     if isinstance(config_path, str) and not config_path.strip():
         raise _empty_config_path()
     path = Path(config_path)
-    if not path.is_file():
+    # os.stat, not Path.is_file: before Python 3.14 is_file raises for an error
+    # other than "not found" (a directory above that cannot be searched).
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except OSError:
+        regular = False
+    if not regular:
         raise _config_file_not_loadable(path)
     return path
 
