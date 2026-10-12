@@ -44,6 +44,10 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.process_env import set_environ
+from automated_security_helper.utils.python_child import (
+    python_child,
+    runs_module_or_code,
+)
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
@@ -211,11 +215,29 @@ def get_architecture() -> str:
 
 
 def run_command(args: List[str], shell: bool = False):
-    """Run a command and return the exit code."""
+    """Run a command and return the exit code.
+
+    A command that starts ASH's interpreter with ``-m`` or ``-c`` (``python -m pip
+    install``, the pinned-tool install script) starts in an empty directory of its
+    own, with ``-P`` where Python has it. Run from the current directory, which this
+    command treats as the source tree, it would import a ``pip/`` or
+    ``automated_security_helper/`` found there; see ``utils/python_child.py``.
+    """
     from automated_security_helper.utils.subprocess_utils import run_command as run_cmd
 
     try:
-        result = run_cmd(args=args, shell=shell, check=False, log_level=logging.INFO)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+        if not shell and runs_module_or_code(args):
+            with python_child(*args[1:]) as child:
+                result = run_cmd(  # nosec B603 - argv list built by plugins, no shell
+                    args=child.argv,
+                    cwd=child.cwd,
+                    check=False,
+                    log_level=logging.INFO,
+                )
+        else:
+            result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                args=args, shell=shell, check=False, log_level=logging.INFO
+            )
         # The child's output is not markup. pip alone prints `[notice]` lines and
         # echoes extras such as `ash[sarif,toml]`, which rich would otherwise
         # consume as tags and delete from the log.
@@ -296,9 +318,12 @@ def install_dependencies(
     )
 
     # Use provided bin path or default if bin_path was null
-    target_bin_path = bin_path or ASH_BIN_PATH
+    target_bin_path = Path(bin_path or ASH_BIN_PATH)
     # Create target_bin_path directory if it doesn't exist
     target_bin_path.mkdir(parents=True, exist_ok=True)
+    # Exported absolute, because the install commands that read it back do not all
+    # start in this directory: a Python one starts in an empty directory of its own.
+    target_bin_path = target_bin_path.absolute()
     # Set the ASH_BIN_PATH environment variable to override the default
     set_environ("ASH_BIN_PATH", str(target_bin_path))
 

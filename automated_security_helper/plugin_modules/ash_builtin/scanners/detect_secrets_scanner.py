@@ -62,6 +62,7 @@ from automated_security_helper.utils.get_scan_set import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.python_child import python_child
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -810,13 +811,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     @staticmethod
     def _worker_command(request_file: Path, output_file: Path) -> List[str]:
-        """The command that runs one scan in ``utils/detect_secrets_worker.py``.
+        """The interpreter arguments that run one scan in ``utils/detect_secrets_worker.py``.
 
-        The same interpreter as ASH, so the worker sees the same detect-secrets.
-        A separate method so tests can substitute the worker.
+        Everything after the interpreter: ``python_child`` adds ASH's own, so the
+        worker sees the same detect-secrets. A separate method so tests can
+        substitute the worker.
         """
         return [
-            sys.executable,
             "-m",
             "automated_security_helper.utils.detect_secrets_worker",
             str(request_file),
@@ -873,7 +874,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # Absolute, because the worker runs in a different working directory and
         # output_dir may be relative for a library caller.
         work_dir = Path(work_dir).absolute()
-        worker_cwd = Path(self.results_dir or work_dir).absolute()
         request_file = work_dir.joinpath("detect-secrets-worker-request.json")
         output_file = work_dir.joinpath("detect-secrets-worker-output.json")
         # The request first: open_for_write refuses a link at any component of
@@ -891,20 +891,27 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         try:
             output_file.unlink(missing_ok=True)
-            # cwd is the scanner's results directory, which ASH empties at the
-            # start of each run: `python -m` puts the working directory first on
-            # sys.path, so running from the scanned tree would let a repository's
-            # own `detect_secrets/` package replace the library.
-            response = run_command_with_output_handling(
-                command=self._worker_command(request_file, output_file),
-                stdout_preference="return",
-                stderr_preference="return",
-                cwd=worker_cwd,
-                env=None if verify else {**snapshot_environ(), REFUSE_HTTP_ENV: "1"},
-                encoding="utf-8",
-                errors="replace",
-                timeout=scan_timeout,
-            )
+            # `python -m` puts the working directory first on sys.path, so the
+            # worker starts in an empty directory of its own (and with -P where
+            # Python has it) rather than in the scanned tree or the results
+            # directory under it, where a `detect_secrets/` or
+            # `automated_security_helper/` package would replace the real one. The
+            # directory is under work_dir, which a sandboxed worker can see.
+            with python_child(
+                *self._worker_command(request_file, output_file), parent=work_dir
+            ) as child:
+                response = run_command_with_output_handling(
+                    command=child.argv,
+                    stdout_preference="return",
+                    stderr_preference="return",
+                    cwd=child.cwd,
+                    env=None
+                    if verify
+                    else {**snapshot_environ(), REFUSE_HTTP_ENV: "1"},
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=scan_timeout,
+                )
             if response.get("timed_out"):
                 self._plugin_log(
                     f"detect-secrets scan timed out after {scan_timeout}s",

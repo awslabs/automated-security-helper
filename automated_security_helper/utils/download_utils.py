@@ -1330,9 +1330,13 @@ def current_bin_path() -> Path:
     ``ash dependencies install --bin-path`` sets the environment variable *after*
     that import has happened, so a function that closed over the constant would
     install into the default directory while reporting the requested one.
+
+    Absolute, because the install commands built from it run in an empty directory
+    of their own (``utils/python_child.py``), where a relative path names another
+    place.
     """
     from_env = os.environ.get("ASH_BIN_PATH")
-    return Path(from_env) if from_env else ASH_BIN_PATH
+    return Path(from_env).absolute() if from_env else ASH_BIN_PATH
 
 
 # The script every pinned-tool install command runs. A constant so that
@@ -1356,8 +1360,10 @@ def create_pinned_tool_install_command(
     configuration pins itself, so the installer keeps one execution model for every
     tool: plugins declare commands, the CLI runs them and counts them.
     """
-    if destination is None:
-        destination = str(current_bin_path()).replace("\\", "/")
+    # Absolute either way: the command runs in an empty directory of its own.
+    destination = str(
+        current_bin_path() if destination is None else Path(destination).absolute()
+    ).replace("\\", "/")
 
     return CustomCommand(
         args=[
@@ -1443,10 +1449,11 @@ def create_url_download_command(
     # `ash dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
     # installed into the default directory while the installer reported the
     # requested one, and the post-install sweep then found nothing there.
-    if destination is None:
-        destination = str(current_bin_path()).replace(
-            "\\", "/"
-        )  # Ensure forward slashes for cross-platform compatibility
+    # Forward slashes for cross-platform compatibility, and absolute either way: the
+    # command runs in an empty directory of its own.
+    destination = str(
+        current_bin_path() if destination is None else Path(destination).absolute()
+    ).replace("\\", "/")
 
     if not Path(destination).exists():
         ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")

@@ -22,9 +22,13 @@ ASH_REPO_LATEST_REVISION = (
 )
 
 ASH_WORK_DIR_NAME = "converted"
+#: Absolute, so a relative ASH_BIN_PATH names the same directory for a child that
+#: starts somewhere else (a scanner in the scanned tree, a Python child in a
+#: directory of its own). An empty value counts as unset; ``Path("")`` was the
+#: current directory.
 ASH_BIN_PATH = (
-    Path(os.environ["ASH_BIN_PATH"])
-    if os.environ.get("ASH_BIN_PATH", None) is not None
+    Path(os.environ["ASH_BIN_PATH"]).absolute()
+    if os.environ.get("ASH_BIN_PATH")
     else Path.home().joinpath(".ash", "bin")
 )
 #: Used when ``ASH_DEFAULT_SEVERITY_LEVEL`` is unset or names no threshold. MEDIUM

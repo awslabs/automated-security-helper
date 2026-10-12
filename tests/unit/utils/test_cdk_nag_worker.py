@@ -274,6 +274,48 @@ def test_every_spelling_of_a_template_shares_the_batch(tmp_path, monkeypatch):
     )
 
 
+def test_control_a_child_that_keeps_sys_path_0_imports_from_the_scanned_directory(
+    tmp_path, monkeypatch
+):
+    """The test below, with the bootstrap's first statement removed.
+
+    The child changes into ASH's working directory, and under ``-c`` the ``''``
+    entry follows it, so the planted ``cdk_nag.py`` is what it imports. Shows the
+    test below can fail.
+    """
+    first_statement = "sys.path[:1] = [] if sys.path[:1] == [''] else sys.path[:1]; "
+    assert first_statement in cdk_nag_worker._CHILD_BOOTSTRAP
+    monkeypatch.setattr(
+        cdk_nag_worker,
+        "_CHILD_BOOTSTRAP",
+        cdk_nag_worker._CHILD_BOOTSTRAP.replace(first_statement, ""),
+    )
+    marker = _run_from_a_planted_repository(tmp_path, monkeypatch)
+    assert "cdk_nag" in marker.read_text()
+
+
+def _run_from_a_planted_repository(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    marker = tmp_path / "IMPORTED"
+    for name in ("yaml", "cdk_nag", "pydantic"):
+        (repo / f"{name}.py").write_text(
+            f"open({str(marker)!r}, 'a').write({name!r})\n", encoding="utf-8"
+        )
+    monkeypatch.chdir(repo)
+    monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    template = tmp_path / "t.yaml"
+    template.write_text(
+        "Resources:\n  B:\n    Type: AWS::S3::Bucket\n", encoding="utf-8"
+    )
+    outdir = tmp_path / "out"
+    with cdk_nag_worker.cdk_nag_worker_batch([str(template)], outdir):
+        # The planted cdk_nag has no packs, so the child's answer is re-raised here.
+        with pytest.raises(Exception, match="Unknown cdk-nag pack"):
+            _call(template, outdir)
+    return marker
+
+
 def test_the_child_does_not_import_from_the_scanned_directory(tmp_path, monkeypatch):
     """A real child, started from a directory holding modules that leave a mark when
     imported. Under ``python -m`` the working directory is first on the import path,

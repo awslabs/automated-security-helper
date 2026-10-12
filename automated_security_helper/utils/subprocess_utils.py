@@ -156,9 +156,12 @@ def _bin_path() -> Path:
 
     The module-level constant remains the fallback, so tests that patch
     ``subprocess_utils.ASH_BIN_PATH`` keep working.
+
+    Absolute: a tool found here is run by scanners whose working directory is the
+    scanned tree, where a relative ``bin/grype`` would name the repository's file.
     """
     from_env = os.environ.get("ASH_BIN_PATH")
-    return Path(from_env) if from_env else ASH_BIN_PATH
+    return Path(from_env).absolute() if from_env else ASH_BIN_PATH
 
 
 def path_independent_dirs() -> List[Path]:
