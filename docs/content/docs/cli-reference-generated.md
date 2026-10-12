@@ -158,7 +158,9 @@ Start the ASH MCP server (Model Context Protocol).
 | `--port` | int | 8000 |  | Port to bind for HTTP transports. |
 | `--mount-path` | str | `/mcp` |  | HTTP path the transport listens on (default: /mcp for streamable-http, /sse for sse). |
 | `--auth-header-name` | str |  |  | Required HTTP header name for single-tenant auth (HTTP transports only). |
-| `--auth-header-value` | str |  |  | Expected value of --auth-header-name. |
+| `--auth-header-value` | str |  |  | Expected value of --auth-header-name. Visible to other local users on the command line; prefer --auth-header-value-file or --auth-header-value-fd. |
+| `--auth-header-value-file` | Path |  |  | Read the expected value of --auth-header-name from this file, once at startup: a regular file, not a symlink, readable by its owner only. One trailing newline is dropped. |
+| `--auth-header-value-fd` | int |  |  | Read the expected value of --auth-header-name from this inherited file descriptor (3 or above), once at startup, then close it. |
 | `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
 | `--trust-upstream-session-id` | bool | False |  | Stateless streamable-HTTP only. Declare that a platform in front of ASH issues and authenticates the Mcp-Session-Id header, so it can name the caller's session. Without it a stateless server identifies no session, and tools that need one (source delivery, profiles, the scan registry) refuse. |
 | `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Required with a non-loopback --host unless --trust-upstream-host-check is given. |

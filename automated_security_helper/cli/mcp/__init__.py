@@ -107,6 +107,152 @@ def validate_command_options(verbose: bool, debug: bool, quiet: bool) -> None:
         raise ASHValidationError("Cannot use --quiet with --verbose or --debug options")
 
 
+#: The longest auth header value read from a file or a descriptor. HTTP servers
+#: refuse header lines far shorter than this, so a longer read is a wrong file.
+_AUTH_VALUE_MAX_BYTES = 16 * 1024
+
+
+def _auth_value_from_bytes(data: bytes, source: str) -> str:
+    """The header value in ``data`` (one trailing newline dropped), or refuse.
+
+    Decoded as latin-1, so the value's latin-1 encoding is the file's bytes: the
+    auth middleware compares the header's wire bytes against exactly those.
+    """
+    if len(data) > _AUTH_VALUE_MAX_BYTES:
+        raise ASHValidationError(
+            f"{source} holds more than {_AUTH_VALUE_MAX_BYTES} bytes, which no "
+            f"header value is"
+        )
+    if data.endswith(b"\r\n"):
+        data = data[:-2]
+    elif data.endswith(b"\n"):
+        data = data[:-1]
+    if not data:
+        raise ASHValidationError(f"{source} holds no auth header value")
+    if any(byte in data for byte in (b"\r", b"\n", b"\x00")):
+        raise ASHValidationError(
+            f"{source} holds a line break or NUL, which a header value can't contain"
+        )
+    return data.decode("latin-1")
+
+
+def _read_bounded(fd: int) -> bytes:
+    chunks: List[bytes] = []
+    size = 0
+    while size <= _AUTH_VALUE_MAX_BYTES:
+        chunk = os.read(fd, _AUTH_VALUE_MAX_BYTES + 1 - size)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks)
+
+
+def _auth_value_from_file(path: Path) -> str:
+    """Read the auth header value from a private regular file.
+
+    Refused: a symlink, anything but a regular file, and (on POSIX) a file with
+    any permission bit for its group or other users. Opened without following a
+    link and without blocking, and checked again on the open descriptor, so a
+    file swapped in between is refused too.
+    """
+    source = f"--auth-header-value-file {path}"
+    try:
+        named = os.lstat(path)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    if stat.S_ISLNK(named.st_mode):
+        raise ASHValidationError(f"{source} is a symlink; name the file itself")
+    if not stat.S_ISREG(named.st_mode):
+        raise ASHValidationError(f"{source} is not a regular file")
+    if os.name != "nt" and named.st_mode & 0o077:
+        raise ASHValidationError(
+            f"{source} has mode {stat.S_IMODE(named.st_mode):04o}, which lets other "
+            f"users read or change it; make it readable by its owner only "
+            f"(chmod 600)"
+        )
+    flags = os.O_RDONLY
+    for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_BINARY"):
+        flags |= getattr(os, name, 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+            named.st_dev,
+            named.st_ino,
+        ):
+            raise ASHValidationError(f"{source} changed while it was opened")
+        data = _read_bounded(fd)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    finally:
+        os.close(fd)
+    return _auth_value_from_bytes(data, source)
+
+
+def _auth_value_from_fd(fd: int) -> str:
+    """Read the auth header value from an inherited descriptor, then close it.
+
+    A regular file (a memfd, say) is read from its start; a pipe from where it is.
+    0, 1 and 2 are the server's own standard streams and are refused.
+    """
+    source = f"--auth-header-value-fd {fd}"
+    if fd < 3:
+        raise ASHValidationError(
+            f"{source} is not a descriptor the server can take: 0, 1 and 2 are its "
+            f"standard streams"
+        )
+    try:
+        info = os.fstat(fd)
+    except OSError as exc:
+        raise ASHValidationError(
+            f"{source} is not an open descriptor: {exc.strerror}"
+        ) from None
+    try:
+        if stat.S_ISREG(info.st_mode):
+            os.lseek(fd, 0, os.SEEK_SET)
+        elif not stat.S_ISFIFO(info.st_mode):
+            raise ASHValidationError(f"{source} is neither a file nor a pipe")
+        data = _read_bounded(fd)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    finally:
+        os.close(fd)
+    return _auth_value_from_bytes(data, source)
+
+
+def _resolve_auth_header_value(
+    auth_header_value: Optional[str],
+    auth_header_value_file: Optional[Path],
+    auth_header_value_fd: Optional[int],
+) -> Optional[str]:
+    """The auth header value from whichever one of its three forms was given.
+
+    Raises:
+        ASHValidationError: for more than one form, or a file or descriptor that
+            holds no usable value.
+    """
+    given = [
+        name
+        for name, value in (
+            ("--auth-header-value", auth_header_value),
+            ("--auth-header-value-file", auth_header_value_file),
+            ("--auth-header-value-fd", auth_header_value_fd),
+        )
+        if value is not None
+    ]
+    if len(given) > 1:
+        raise ASHValidationError(f"pass only one of {' and '.join(given)}")
+    if auth_header_value_file is not None:
+        return _auth_value_from_file(Path(auth_header_value_file))
+    if auth_header_value_fd is not None:
+        return _auth_value_from_fd(int(auth_header_value_fd))
+    return auth_header_value
+
+
 def _validate_auth_options(
     auth_header_name: Optional[str], auth_header_value: Optional[str]
 ) -> None:
@@ -678,7 +824,26 @@ def mcp_command(
         Optional[str],
         typer.Option(
             "--auth-header-value",
-            help="Expected value of --auth-header-name.",
+            help="Expected value of --auth-header-name. Visible to other local "
+            "users on the command line; prefer --auth-header-value-file or "
+            "--auth-header-value-fd.",
+        ),
+    ] = None,
+    auth_header_value_file: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--auth-header-value-file",
+            help="Read the expected value of --auth-header-name from this file, "
+            "once at startup: a regular file, not a symlink, readable by its owner "
+            "only. One trailing newline is dropped.",
+        ),
+    ] = None,
+    auth_header_value_fd: Annotated[
+        Optional[int],
+        typer.Option(
+            "--auth-header-value-fd",
+            help="Read the expected value of --auth-header-name from this inherited "
+            "file descriptor (3 or above), once at startup, then close it.",
         ),
     ] = None,
     stateless_http: Annotated[
@@ -805,13 +970,29 @@ def mcp_command(
     if not quiet:
         _stderr.print("[green]MCP dependencies found. Starting MCP server...[/green]")
 
-    # Validate command options for consistency
+    # Validate command options for consistency. The auth header value is read
+    # here, once, from whichever form carries it; a file or descriptor that holds
+    # no usable value stops startup like any other bad option.
     try:
         validate_command_options(verbose, debug, quiet)
+        argv_auth_value = auth_header_value is not None
+        auth_header_value = _resolve_auth_header_value(
+            auth_header_value, auth_header_value_file, auth_header_value_fd
+        )
         _validate_auth_options(auth_header_name, auth_header_value)
     except ASHValidationError as e:
-        _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
+        _stderr.print(f"[red]Validation Error: {escape(str(e))}[/red]", highlight=False)
         raise typer.Exit(3)
+    if argv_auth_value:
+        # Not gated on --quiet: the value is already on the command line, where
+        # every local user can read it, and this is the one place that says so.
+        _stderr.print(
+            "[yellow]Warning: --auth-header-value puts the value on this "
+            "process's command line, which other local users can read. Pass it "
+            "with --auth-header-value-file or --auth-header-value-fd "
+            "instead.[/yellow]",
+            highlight=False,
+        )
 
     # ASH_MCP_TRANSPORT is the operator's override that makes every caller
     # remote. A value that names no transport (a typo such as "http") would leave

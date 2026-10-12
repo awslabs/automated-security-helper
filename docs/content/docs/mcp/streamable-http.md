@@ -25,7 +25,7 @@ ash mcp \
   --mount-path /mcp \
   --allowed-host ash-mcp.example.com \
   --auth-header-name x-ash-token \
-  --auth-header-value SECRET \
+  --auth-header-value-file /etc/ash/mcp-token \
   --profile default=/etc/ash/default.yaml \
   --profile strict=/etc/ash/strict.yaml
 ```
@@ -38,7 +38,7 @@ Flags:
 - `--trust-upstream-host-check` — a proxy or platform in front of ASH checks Host and Origin, so ASH checks neither. For a platform that restricts Host itself and cannot be given an allowlist in advance, such as Bedrock AgentCore Runtime. Refused together with `--allowed-host`, and refused with a loopback `--host` (`127.0.0.1`, `localhost`, `::1`), where ASH accepts only its own origin; behind a proxy on the same host, pass `--allowed-host` with the name the proxy forwards. Both refusals exit 3.
 - `--port` — TCP port. Defaults are deliberately omitted; pick an explicit port that matches your proxy/firewall config.
 - `--mount-path` — path under which the FastMCP app is mounted. Defaults to `/mcp`. Clients must connect to `http(s)://host:port<mount-path>`.
-- `--auth-header-name` / `--auth-header-value` — single-tenant header gate. Connections missing this header (or carrying a wrong value) are rejected before any tool dispatch. See [Auth](#auth).
+- `--auth-header-name` with `--auth-header-value-file PATH`, `--auth-header-value-fd N` or `--auth-header-value VALUE` — single-tenant header gate. Connections missing this header (or carrying a wrong value) are rejected before any tool dispatch. See [Auth](#auth) for how each form passes the value.
 - `--stateless-http` — handle each request on its own instead of binding it to a server-held session, for a load balancer or a platform such as AgentCore. A stateless server issues no session; see [Session identity](#session-identity).
 - `--trust-upstream-session-id` — stateless only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session. See [Session identity](#session-identity).
 - `--session-workspace-ttl SECONDS` — how long a session workspace may go unused before the server removes it (default 86400). See [Session lifecycle](#session-lifecycle).
@@ -365,12 +365,20 @@ Scans are visible per session. `list_active_scans`, `get_scan_progress` and `can
 
 ## Auth
 
-The streamable-HTTP transport ships with one built-in gate: a static header check via `--auth-header-name` / `--auth-header-value`. Connections without the configured header (or with the wrong value) are rejected before any tool dispatches.
+The streamable-HTTP transport ships with one built-in gate: a static header check via `--auth-header-name` and the expected value. Connections without the configured header (or with the wrong value) are rejected before any tool dispatches.
+
+The value can be given three ways, and only one at a time:
+
+- `--auth-header-value-file PATH` reads it from a file once at startup. The file must be a regular file, not a symlink, with no permissions for its group or other users (`chmod 600`; the mode isn't checked on Windows). One trailing newline is dropped.
+- `--auth-header-value-fd N` reads it from an inherited file descriptor, 3 or above, once at startup, and closes it. A file (a memfd, say) is read from its start, a pipe from where it is.
+- `--auth-header-value VALUE` puts the value on the server's command line, which every local user can read (`/proc/<pid>/cmdline`, `ps`), including from outside a container on its host. It still works, and the server prints a warning naming the two options above.
+
+An empty value, one with a line break or NUL, or one longer than 16 KiB is refused, as is more than one form. Every refusal exits 3 before anything is served.
 
 This is sufficient for **single-tenant** deploys where one trusted client owns the server. For multi-tenant deployments:
 
 - Run ASH behind a reverse proxy (nginx, traefik, an API gateway) that terminates TLS and authenticates the caller.
-- Have the proxy inject the static `--auth-header-value` so ASH only accepts traffic that has already been authenticated upstream.
+- Have the proxy inject the static header value so ASH only accepts traffic that has already been authenticated upstream.
 - Run one server per tenant if their configs must differ. Per-tenant config selection over the protocol is not available yet — see [Selecting a profile is not available yet](#selecting-a-profile-is-not-available-yet) — so a single server cannot currently give two tenants two different configs.
 
 The runtime-override allowlist (Track 10.4) plus per-session workspaces (Track 10.5) are the in-process isolation primitives. They are not a substitute for upstream tenant authentication.
@@ -394,8 +402,10 @@ docker run \
     --profile default=/etc/ash/default.yaml \
     --profile strict=/etc/ash/strict.yaml \
     --auth-header-name x-ash-token \
-    --auth-header-value "$ASH_TOKEN"
+    --auth-header-value-file /etc/ash/mcp-token
 ```
+
+`/etc/ash/mcp-token` holds the value, with mode 600 and owned by the user the container runs ASH as.
 
 `docker-compose.yml` snippet pairing ASH with an nginx TLS terminator:
 
@@ -412,7 +422,7 @@ services:
       - --profile=default=/etc/ash/default.yaml
       - --profile=strict=/etc/ash/strict.yaml
       - --auth-header-name=x-ash-token
-      - --auth-header-value=${ASH_TOKEN}
+      - --auth-header-value-file=/etc/ash/mcp-token
     volumes:
       - /etc/ash:/etc/ash:ro
       - ash-workspace:/var/cache/ash-mcp

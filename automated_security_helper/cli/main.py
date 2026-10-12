@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from pathlib import Path
+
 import typer
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.dependencies import dependencies_app
@@ -90,7 +92,22 @@ def _mcp_wrapper(
     auth_header_value: str = typer.Option(
         None,
         "--auth-header-value",
-        help="Expected value of --auth-header-name.",
+        help="Expected value of --auth-header-name. Visible to other local users "
+        "on the command line; prefer --auth-header-value-file or "
+        "--auth-header-value-fd.",
+    ),
+    auth_header_value_file: Path = typer.Option(
+        None,
+        "--auth-header-value-file",
+        help="Read the expected value of --auth-header-name from this file, once at "
+        "startup: a regular file, not a symlink, readable by its owner only. One "
+        "trailing newline is dropped.",
+    ),
+    auth_header_value_fd: int = typer.Option(
+        None,
+        "--auth-header-value-fd",
+        help="Read the expected value of --auth-header-name from this inherited "
+        "file descriptor (3 or above), once at startup, then close it.",
     ),
     stateless_http: bool = typer.Option(
         False,
@@ -151,6 +168,8 @@ def _mcp_wrapper(
         mount_path=mount_path,
         auth_header_name=auth_header_name,
         auth_header_value=auth_header_value,
+        auth_header_value_file=auth_header_value_file,
+        auth_header_value_fd=auth_header_value_fd,
         stateless_http=stateless_http,
         trust_upstream_session_id=trust_upstream_session_id,
         allowed_host=allowed_host,
