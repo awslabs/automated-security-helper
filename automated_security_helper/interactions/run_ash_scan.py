@@ -65,6 +65,7 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import (
+    ASH_CONFIG_FROM_HOST_FLAG,
     CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
     CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
     container_build_refusal,
@@ -1641,9 +1642,12 @@ def _ash_config_fallback(
     A local scan falls back to ``ASH_CONFIG``'s file when it finds no config in the
     source directory (config/default_config.py). The scan inside a container sees
     neither the host's environment nor that file, so container mode names it
-    explicitly, in that same case and no other. A discovery error is left to the
-    scan, which reports it. ``permit`` is the scan's ``config_base_gate``, so
-    discovery here checks each source against it as the scan's own discovery does.
+    explicitly as ``--config``, in that same case and no other. In every case it
+    also hands the file over as the scan's base, which a local scan reads whatever
+    names the config (``run_ash_container._host_ash_config``). A discovery error
+    is left to the scan, which reports it. ``permit`` is the scan's
+    ``config_base_gate``, so discovery here checks each source against it as the
+    scan's own discovery does.
     """
     env_config = os.environ.get("ASH_CONFIG")
     if not env_config:
@@ -1702,6 +1706,13 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
     resolution applies them (``resolve_config.apply_config_overrides``). Not
     logged: the resolution that refuses a file logs it once.
 
+    The file ``ASH_CONFIG`` names is loaded first, whichever file supplies the
+    config, as a local scan loads it (``default_config.get_default_config``,
+    before ``resolve_config`` reads the named file): it is the base the settings
+    a repository-written config may not choose come from, so a file there that
+    does not load is refused with a valid ``--config`` as well, with its own
+    error.
+
     Returns:
         The config, and False when no config file supplied it (the defaults).
 
@@ -1719,6 +1730,17 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
         load_config_file,
     )
 
+    env_config_path = _ash_config_file()
+    # As default_config.get_default_config loads it.
+    env_config = (
+        load_config_file(
+            env_config_path,
+            log_failure=False,
+            anchor_relative_paths=not_delivered_by_a_client,
+        )
+        if env_config_path is not None
+        else None
+    )
     config_path = _scan_config_path(opts)
     if config_path is not None:
         config = _load_with_confinement(
@@ -1730,19 +1752,12 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
             session_id=getattr(opts.client_config_policy, "session_id", None),
         )
         from_file = True
+    elif env_config is not None:
+        config = env_config
+        from_file = True
     else:
-        env_config = _ash_config_file()
-        if env_config is not None:
-            # As default_config.get_default_config loads it.
-            config = load_config_file(
-                env_config,
-                log_failure=False,
-                anchor_relative_paths=not_delivered_by_a_client,
-            )
-            from_file = True
-        else:
-            config = AshConfig()
-            from_file = False
+        config = AshConfig()
+        from_file = False
     return apply_config_overrides(config, list(opts.config_overrides or [])), from_file
 
 
@@ -1805,7 +1820,8 @@ def _outer_mode_config_refusal(
     unreadable, not UTF-8, not valid YAML, JSON or TOML (YAML aliases included),
     or not a valid config, a discovered name that is a link to nothing, and an
     override that does not parse or leaves a value the config model refuses are
-    refused with the error a local scan reports. Options of a plugin are not
+    refused with the error a local scan reports. That holds for the file
+    ``ASH_CONFIG`` names too, with a ``--config`` or without one. Options of a plugin are not
     judged here: they are validated against the plugin, which may be installed
     only in the image.
     """
@@ -2502,6 +2518,7 @@ def _run_container_mode(
             for flag in (
                 CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
                 CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
+                ASH_CONFIG_FROM_HOST_FLAG,
             )
             if flag in passed
         ]

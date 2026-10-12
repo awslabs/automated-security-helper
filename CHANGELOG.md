@@ -611,6 +611,19 @@
   is still marked with every file it extends, and one outside every checkout with no
   base in one is not marked. The scan inside refuses a mark for a file that is not in
   the config's chain, without `--config`, or outside local mode, with exit 3.
+- **Container and nix mode read `ASH_CONFIG`'s file beside a `--config`, as a local scan
+  does.** A local scan reads the file `ASH_CONFIG` names first, whatever names the
+  config: it is the base the settings a repository-written config may not choose come
+  from, and a file there that does not load refuses the scan with exit 3. Container and
+  nix mode read it on the host only when nothing else named a config, so with a valid
+  `--config` a broken `ASH_CONFIG` file started the image or the Nix shell, and the scan
+  inside a container never saw the file, taking ASH's defaults as its base. The host now
+  refuses such a file with exit 3 before anything is built, run, mounted or cleared, in
+  both modes, and container mode hands the file to the scan inside, mounted under
+  `/ash-env-config` and passed with `--ash-config-from-host`, which the scan inside
+  reads as `ASH_CONFIG`. Each file of its chain a local scan would count as
+  repository-written is marked on its own. The scan in a Nix shell reads `ASH_CONFIG`
+  itself.
 - **`./ash` and `Invoke-ASH` mark a `--config` reached through a link in a checkout.**
   A local scan, and `ash --mode container`, count a config as repository-written
   when a symlink its path follows sits in the scanned tree or in any git checkout,

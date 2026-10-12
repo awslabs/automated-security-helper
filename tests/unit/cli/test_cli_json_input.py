@@ -335,8 +335,9 @@ class TestSkeleton:
         skeleton = json.loads(result.stdout)
         params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
         # Hidden options are not part of the structured input (json_input_parameters):
-        # --config-from-scanned-repository and --config-file-from-scanned-repository
-        # are what container mode passes the scan it starts, not operator settings.
+        # --config-from-scanned-repository, --config-file-from-scanned-repository and
+        # --ash-config-from-host are what container mode passes the scan it starts,
+        # not operator settings.
         hidden = {
             name
             for name, meta in params.items()
@@ -350,6 +351,7 @@ class TestSkeleton:
         assert hidden == {
             "config_from_scanned_repository",
             "config_files_from_scanned_repository",
+            "ash_config_from_host",
         }
         assert set(skeleton) == expected
 

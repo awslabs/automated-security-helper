@@ -87,7 +87,19 @@ OWN = {"sandbox": {"mode": "bwrap", "extra_read_paths": ["/opt/operator-own"]}}
 #: A plugin scanner's option that names a file its tool reads (config/path_trust.py).
 TOOL_SCANNER = "example-plugin"
 TOOL_KEY = f"scanners.{TOOL_SCANNER}.options.rules_file"
-CONTAINER_ROOTS = ("/src", "/out", "/ash-config", "/ash-workspace-config")
+CONTAINER_ROOTS = (
+    "/src",
+    "/out",
+    "/ash-config",
+    "/ash-workspace-config",
+    "/ash-env-config",
+)
+#: A file ASH_CONFIG names that grants: the base a repository-written --config's
+#: confined settings come from, when the file is the operator's.
+ENV_GRANT = {
+    "project_name": "env",
+    "sandbox": {"extra_read_paths": ["/opt/env-grant"], "network_scanners": ["syft"]},
+}
 
 
 def _write(path: Path, data: dict) -> Path:
@@ -255,8 +267,10 @@ def container(monkeypatch, tmp_path):
         result = rac.run_ash_container(build=False, run=True, **kwargs)
         assert result.returncode != 3, result.stderr
         (cmd,) = [cmd for cmd in commands if cmd[1] == "run"]
+        run.last = cmd
         return _scan_inside(cmd, tmp_path / "container", monkeypatch)
 
+    run.last = []
     return run
 
 
@@ -316,6 +330,9 @@ def _scan_inside(cmd: List[str], fs: Path, monkeypatch) -> dict:
 
     monkeypatch.setattr(scan_cli, "run_ash_scan", run_ash_scan)
     monkeypatch.chdir(fs)
+    # The container has none of the host's environment: ASH_CONFIG reaches it only
+    # as the run command hands it over.
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
     outcome = CliRunner().invoke(app, args)
     assert outcome.exit_code == 0, outcome.output
     return results
@@ -451,3 +468,77 @@ def test_a_tool_path_a_config_in_another_checkout_names(scan, container, tmp_pat
         inner_source,
     )
     assert unmarked[0][TOOL_KEY] is True
+
+
+ENV_LAYOUTS = [
+    "env-outside-every-checkout",
+    "env-in-another-checkout",
+    "env-in-the-scanned-checkout",
+]
+
+
+def _env_config(layout: str, w: Path) -> Path:
+    """The file ASH_CONFIG names, beside a --config in another checkout."""
+    if layout == "env-outside-every-checkout":
+        return _write(w / "env" / "ash-env.yaml", ENV_GRANT)
+    if layout == "env-in-another-checkout":
+        (w / "envco" / ".git").mkdir(parents=True)
+        return _write(w / "envco" / "ash-env.yaml", ENV_GRANT)
+    if layout == "env-in-the-scanned-checkout":
+        return _write(w / "repo" / "ci" / "ash-env.yaml", ENV_GRANT)
+    raise AssertionError(layout)
+
+
+@pytest.mark.parametrize("scan", ["one-directory", "workspace"])
+@pytest.mark.parametrize("layout", ENV_LAYOUTS)
+def test_the_file_ash_config_names_is_the_base_inside_as_on_the_host(
+    layout, scan, container, monkeypatch, tmp_path
+):
+    """A local scan reads the file ASH_CONFIG names as its base whatever names the
+    config: with a repository-written --config, the confined settings come from it,
+    unless it is repository-written as well. Container mode mounts it at
+    /ash-env-config and hands its path over with --ash-config-from-host, and
+    marks each file of its chain the host counts as repository-written."""
+    if scan == "workspace" and layout == "env-in-the-scanned-checkout":
+        pytest.skip("ASH_CONFIG in the workspace's checkout is the --config layout")
+    w = tmp_path / "W"
+    _tree(w)
+    config = _config("root-in-another-checkout", w)
+    env = _env_config(layout, w)
+    monkeypatch.setenv("ASH_CONFIG", str(env))
+    ws = w / "repo" / "ws"
+    if scan == "one-directory":
+        source = ws / "bare"
+        host = _host_one_directory(config, source)
+        inside = container(
+            source_dir=str(source), output_dir=str(tmp_path / "out"), config=str(config)
+        )
+        key = "scan"
+    else:
+        host = _host_workspace(config, ws / "ash.code-workspace", tmp_path / "out")
+        inside = container(
+            source_dir=str(ws),
+            output_dir=str(tmp_path / "out"),
+            config=str(config),
+            workspace_relative_file="ash.code-workspace",
+        )
+        key = "bare"
+
+    assert inside == host
+    run = container.last
+    flag = rac.ASH_CONFIG_FROM_HOST_FLAG
+    assert run[run.index(flag) + 1] == "/ash-env-config/ash-env.yaml"
+    marked = [
+        run[i + 1]
+        for i, arg in enumerate(run[:-1])
+        if arg == rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG
+    ]
+    settings = host[key][0]
+    if layout == "env-outside-every-checkout":
+        # The operator's: the grants come from it.
+        assert settings["sandbox.extra_read_paths"] == ["/opt/env-grant"]
+        assert marked == []
+    else:
+        # Repository-written as well: the grants come from the defaults.
+        assert settings["sandbox.extra_read_paths"] == []
+        assert marked == ["/ash-env-config/ash-env.yaml"]

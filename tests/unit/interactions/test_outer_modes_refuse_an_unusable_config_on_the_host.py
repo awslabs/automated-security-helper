@@ -52,6 +52,7 @@ class Stage:
         self.runner_log = root / "runner.log"
         self.named = root / "cfg" / "ash.yaml"
         self.discovered = self.source / ".ash.yaml"
+        self.env = root / "env" / "environment-config.yaml"
 
     def runner_calls(self) -> List[str]:
         if not self.runner_log.exists():
@@ -73,6 +74,7 @@ def stage(tmp_path, monkeypatch) -> Stage:
     stage.source.mkdir()
     (stage.source / "app.py").write_text("x = 1\n", encoding="utf-8")
     stage.named.parent.mkdir()
+    stage.env.parent.mkdir()
     # The previous run's output, which a refused scan leaves as it was.
     (stage.output / "reports").mkdir(parents=True)
     (stage.output / "ash_aggregated_results.json").write_text(
@@ -107,7 +109,7 @@ def stage(tmp_path, monkeypatch) -> Stage:
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
     monkeypatch.chdir(tmp_path)
     yield stage
-    for path in (stage.named, stage.discovered):
+    for path in (stage.named, stage.discovered, stage.env):
         if path.exists() and not path.is_symlink():
             path.chmod(0o755 if path.is_dir() else 0o644)
 
@@ -177,8 +179,8 @@ def _cli(stage: Stage, mode: str, *extra: str, env: Dict[str, str] | None = None
     return CliRunner().invoke(app, args, env=env)
 
 
-def _api(stage: Stage, mode: str):
-    """run_ash_scan as an API caller drives it, with no config named."""
+def _api(stage: Stage, mode: str, config: Path | None = None):
+    """run_ash_scan as an API caller drives it, with *config* named, or none."""
     from automated_security_helper.core.enums import RunMode
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
@@ -190,6 +192,7 @@ def _api(stage: Stage, mode: str):
             build=False,
             progress=False,
             show_summary=False,
+            **({"config": str(config)} if config is not None else {}),
         )
     return excinfo.value.code
 
@@ -257,6 +260,33 @@ def test_ash_config_when_an_api_caller_names_no_config(
     code = _promptly(make, stage.named, lambda: _api(stage, mode))
 
     _assert_refused_on_the_host(stage, before, code, capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("entry", ["cli", "api"])
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("make", REASONS)
+def test_ash_config_beside_a_valid_named_config(
+    stage, mode, make, entry, monkeypatch, capsys
+):
+    """A local scan reads the file ASH_CONFIG names first, as its base, whatever
+    else names the config (default_config.get_default_config), and refuses it
+    with a valid --config too. So does the host here, before anything starts."""
+    make(stage.env)
+    stage.named.write_text("project_name: fine\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(stage.env))
+    before = stage.output_snapshot()
+
+    if entry == "cli":
+        result = _promptly(
+            make, stage.env, lambda: _cli(stage, mode, "--config", str(stage.named))
+        )
+        code, output = result.exit_code, result.output
+    else:
+        code = _promptly(make, stage.env, lambda: _api(stage, mode, stage.named))
+        output = capsys.readouterr().out
+
+    _assert_refused_on_the_host(stage, before, code, output)
+    assert stage.env.name in " ".join(output.split()), output
 
 
 @pytest.mark.parametrize("mode", MODES)

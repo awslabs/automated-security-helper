@@ -19,6 +19,7 @@ gives.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List
@@ -407,6 +408,115 @@ class TestTheScanInsideAppliesTheSameLimits:
 
         assert result.exit_code == 3, result.output
         assert rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG in result.output
+
+    def test_the_inner_cli_reads_the_hosts_ash_config_file_as_ash_config(
+        self, monkeypatch, tmp_path
+    ):
+        """--ash-config-from-host is ASH_CONFIG for the whole command, set after
+        click has read --config, so it is the base and not the named config. A
+        file of its chain may be marked on its own; the mark and the variable end
+        with the command."""
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+        from automated_security_helper.config.sandbox_grants import repository_written
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        source = tmp_path / "src"
+        source.mkdir()
+        env = tmp_path / "ash-env-config" / "env.yaml"
+        env.parent.mkdir()
+        env.write_text("project_name: env\n", encoding="utf-8")
+        seen: Dict[str, Any] = {}
+
+        def run(**kwargs):
+            seen["kwargs"] = kwargs
+            seen["ASH_CONFIG"] = os.environ.get("ASH_CONFIG")
+            seen["env"] = repository_written([env.resolve()], source)
+
+        monkeypatch.setattr(scan_cli, "run_ash_scan", run)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--source-dir",
+                str(source),
+                rac.ASH_CONFIG_FROM_HOST_FLAG,
+                str(env),
+                rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
+                str(env),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert seen["ASH_CONFIG"] == str(env)
+        assert seen["kwargs"]["config"] is None
+        assert seen["env"] == [env.resolve()]
+        assert "ASH_CONFIG" not in os.environ
+        assert repository_written([env.resolve()], source) == []
+
+    def test_a_file_mark_in_neither_chain_is_a_usage_error_with_ash_config(
+        self, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: None)
+        (tmp_path / "src").mkdir()
+        env = tmp_path / "env.yaml"
+        env.write_text("project_name: env\n", encoding="utf-8")
+        other = tmp_path / "other.yaml"
+        other.write_text("project_name: o\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--source-dir",
+                str(tmp_path / "src"),
+                rac.ASH_CONFIG_FROM_HOST_FLAG,
+                str(env),
+                rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG,
+                str(other),
+            ],
+        )
+
+        assert result.exit_code == 3, result.output
+        assert rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG in result.output
+        assert "ASH_CONFIG" not in os.environ
+
+    def test_the_host_hands_its_ash_config_file_to_the_scan_inside(
+        self, checkout, monkeypatch, tmp_path
+    ):
+        """Mounted at /ash-env-config, beside a --config mounted at /ash-config, and
+        marked when the host counts it as repository-written."""
+        config = checkout["operator"] / "ash.yaml"
+        config.write_text("project_name: p\n", encoding="utf-8")
+        env = checkout["ci"] / "env.yaml"
+        env.write_text("project_name: env\n", encoding="utf-8")
+        monkeypatch.setenv("ASH_CONFIG", str(env))
+
+        inner = _inner_args(
+            _assemble(checkout["source"], checkout["out"], config=str(config))
+        )
+
+        assert inner[inner.index(rac.ASH_CONFIG_FROM_HOST_FLAG) + 1] == (
+            "/ash-env-config/env.yaml"
+        )
+        flag = rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG
+        assert inner[inner.index(flag) + 1] == "/ash-env-config/env.yaml"
+        assert FLAG not in inner
+
+    def test_the_host_refuses_an_ash_config_that_names_nothing(
+        self, checkout, monkeypatch, tmp_path
+    ):
+        """Before anything is built, mounted or cleared, as a missing --config is."""
+        monkeypatch.setenv("ASH_CONFIG", str(tmp_path / "absent.yaml"))
+
+        refusal = rac.container_input_refusal(checkout["source"], checkout["out"], None)
+
+        assert refusal is not None and "absent.yaml" in refusal
 
     @pytest.mark.parametrize("mode", ["container", "nix"])
     def test_the_mark_on_any_other_scan_is_a_usage_error(

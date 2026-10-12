@@ -982,6 +982,9 @@ CONTAINER_CONFIG_ROOT = "/ash-config"
 OPERATOR_CONFIG_MOUNT = CONTAINER_CONFIG_ROOT
 #: The same for a workspace policy file kept outside the workspace root.
 CONTAINER_WORKSPACE_CONFIG_ROOT = "/ash-workspace-config"
+#: The same for the file the host's ``ASH_CONFIG`` names, with each base it
+#: extends; see :func:`_host_ash_config`.
+CONTAINER_ENV_CONFIG_ROOT = "/ash-env-config"
 
 
 #: Characters the runner's ``--mount`` syntax cannot carry in a path. Its value is
@@ -1227,6 +1230,9 @@ def _require_mountable_inputs(
         )
         if workspace_relative_file is not None:
             _refuse_repository_config_in_a_workspace(config, config_files, source)
+    env_config = _host_ash_config()
+    if env_config is not None:
+        _mount_env_config(env_config, source)
     if workspace_config and workspace_relative_file is not None:
         _refuse_config_linked_out_of_the_tree(
             workspace_config, source, "workspace policy"
@@ -1237,6 +1243,20 @@ def _require_mountable_inputs(
             CONTAINER_WORKSPACE_CONFIG_ROOT,
             follow_extends=False,
         )
+
+
+def _mount_env_config(
+    env_config: str, source_dir: Path
+) -> Tuple[List[str], str, List[Path]]:
+    """The mounts, container path and host files of ASH_CONFIG's file, checked as
+    ``--config`` is: a file named inside the scanned tree that links out of it,
+    and an absolute ``extends`` entry, are refused, and the chain is mounted by
+    :func:`_host_file_in_container` under CONTAINER_ENV_CONFIG_ROOT."""
+    _refuse_config_linked_out_of_the_tree(env_config, source_dir, "ASH_CONFIG file")
+    _refuse_absolute_extends(env_config)
+    return _host_file_in_container(
+        env_config, source_dir, CONTAINER_ENV_CONFIG_ROOT, follow_extends=True
+    )
 
 
 def _unreadable_config(config: str | None) -> str | None:
@@ -1283,6 +1303,9 @@ def container_input_refusal(
     if refusal is not None:
         return refusal
     try:
+        refusal = _unreadable_config(_host_ash_config())
+        if refusal is not None:
+            return refusal
         _require_mountable_inputs(
             source_dir, output_dir, config, workspace_config, workspace_relative_file
         )
@@ -1402,6 +1425,76 @@ def _config_marks(config: str, source_dir: Path) -> Tuple[bool, List[str]]:
         or any(untrusted_path(name, source) for name in names.get(file, []))
     ]
     return False, sorted(set(marked))
+
+
+#: Tells the scan inside the container where the file the host's ASH_CONFIG names
+#: is mounted, so it reads that file as ASH_CONFIG; see _host_ash_config.
+ASH_CONFIG_FROM_HOST_FLAG = "--ash-config-from-host"
+
+
+def _host_ash_config() -> str | None:
+    """The file the host's ``ASH_CONFIG`` names, or None when it names none.
+
+    A local scan reads that file first, whatever else names a config
+    (``default_config.get_default_config``): it is the base the settings a
+    repository-written config may not choose come from, and the sandbox mode's
+    floor. The scan inside the container sees neither the host's environment nor
+    the file, so container mode mounts the file's chain under
+    CONTAINER_ENV_CONFIG_ROOT and passes its path there with
+    ASH_CONFIG_FROM_HOST_FLAG. A value ``default_config._ash_config_file`` refuses
+    (only whitespace, or a path that does not exist) is refused here with its
+    message.
+    """
+    from automated_security_helper.config.default_config import _ash_config_file
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    try:
+        path = _ash_config_file()
+    except ASHConfigValidationError as e:
+        raise ContainerInputError(str(e)) from e
+    return None if path is None else os.environ["ASH_CONFIG"]
+
+
+def _env_config_marks(env_config: str, source_dir: Path) -> List[str]:
+    """The container paths of the files of ASH_CONFIG's chain a local scan of
+    *source_dir* would count as repository-written.
+
+    Each file is judged on its own, as ``resolve_config`` judges the chain of the
+    file ``ASH_CONFIG`` names (``sandbox_grants.repository_written``): by its
+    resolved path and by the names that reached it, the value of ``ASH_CONFIG``
+    for the root and each base's extends entry. The scan inside is told with
+    CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG, once per file. A file inside the
+    source directory is read through /src, where the scan inside judges it, and
+    needs no mark.
+    """
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        resolve_config_document,
+    )
+    from automated_security_helper.config.sandbox_grants import untrusted_path
+
+    source = Path(source_dir)
+    resolved = Path(env_config).resolve()
+    if resolved.is_relative_to(source.resolve()):
+        return []
+    root = default_confinement_root(resolved, source.resolve())
+    inner = f"{CONTAINER_ENV_CONFIG_ROOT}/{resolved.relative_to(root).as_posix()}"
+    names: dict = {resolved: [Path(env_config)]}
+    try:
+        document = resolve_config_document(resolved, confine_to=root)
+        placements = _chain_placements(resolved, inner, CONTAINER_ENV_CONFIG_ROOT)
+    except Exception:  # noqa: BLE001 - mounted alone; the scan inside reports it
+        placements = [(resolved, inner)]
+    else:
+        for file, name in zip(document.chain, document.named):
+            names.setdefault(Path(file), []).append(Path(name))
+    marked = [
+        container_path
+        for file, container_path in placements
+        if untrusted_path(file, source)
+        or any(untrusted_path(name, source) for name in names.get(file, []))
+    ]
+    return sorted(set(marked))
 
 
 def _refuse_repository_config_in_a_workspace(
@@ -1794,6 +1887,21 @@ def _assemble_run_command(
             config_from_scanned_repository, marked_config_files = _config_marks(
                 config, source_dir
             )
+    # The file the host's ASH_CONFIG names, which a local scan reads as its base
+    # whatever names the config (_host_ash_config), mounted on its own, with each
+    # file of its chain the host counts as repository-written marked on its own.
+    inner_env_config = None
+    env_config = _host_ash_config()
+    if env_config is not None:
+        env_mounts, inner_env_config, env_files = _mount_env_config(
+            env_config, source_dir
+        )
+        cmd.extend(env_mounts)
+        if env_files:
+            marked_config_files = [
+                *marked_config_files,
+                *_env_config_marks(env_config, source_dir),
+            ]
     inner_workspace_config = None
     if workspace_config and workspace_relative_file is not None:
         _refuse_config_linked_out_of_the_tree(
@@ -1909,6 +2017,8 @@ def _assemble_run_command(
 
     if inner_config is not None:
         ash_args.extend(["--config", inner_config])
+    if inner_env_config is not None:
+        ash_args.extend([ASH_CONFIG_FROM_HOST_FLAG, inner_env_config])
     if config_from_scanned_repository:
         ash_args.append(CONFIG_FROM_SCANNED_REPOSITORY_FLAG)
     for marked in marked_config_files:

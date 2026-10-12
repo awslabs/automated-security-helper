@@ -197,6 +197,7 @@ the scan inside the ASH image with these bind mounts:
 | `/out`                    | `--output-dir`                                   | read-write |
 | `/ash-config/...`         | `--config` (or `ASH_CONFIG`), when outside `--source-dir` | read-only  |
 | `/ash-workspace-config/...` | the workspace policy, when outside the workspace root | read-only  |
+| `/ash-env-config/...`     | the file `ASH_CONFIG` names, when outside `--source-dir` | read-only  |
 
 The source is mounted read-only wherever the output directory is, including the default
 `.ash/ash_output` inside the source directory: the scan inside the container writes only
@@ -285,7 +286,15 @@ calls `run_ash_scan(mode=RunMode.container)` with no `config` gets `ASH_CONFIG`'
 handed to the container when no config is found in the source directory, which is when
 a local scan uses it. For a workspace scan (`workspace_plan`) it is handed over whenever
 it is set, as `ash scan --workspace`, which reads `ASH_CONFIG` as `--config`, hands it
-over.
+over. Whatever names the config, a local scan also reads `ASH_CONFIG`'s file as its
+base, the source of the settings a repository-written config may not choose, so the
+host refuses that file with exit 3 when it does not load, with a valid `--config` as
+well, and hands it to the scan inside: mounted read-only under `/ash-env-config` with
+the files it extends, and passed as `--ash-config-from-host`, which the scan inside
+reads as `ASH_CONFIG`. Each file of its chain a local scan would count as
+repository-written is marked on its own (`--config-file-from-scanned-repository`).
+Nix mode refuses the file on the host the same way, and the scan in the Nix shell
+reads `ASH_CONFIG` itself.
 
 A path that would be mounted (the source and output directories, the config file and
 the files it extends, the workspace policy) may not contain a comma, a double quote, a

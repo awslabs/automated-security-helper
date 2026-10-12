@@ -66,13 +66,14 @@ def _fail_config_mark(message: str) -> NoReturn:
     raise typer.Exit(3)
 
 
-def _marked_outside_the_chain(config: Path, marked: List[str]) -> List[str]:
-    """The paths of *marked* that are not files of *config*'s extends chain.
+def _marked_outside_the_chain(configs: List[Path], marked: List[str]) -> List[str]:
+    """The paths of *marked* that are not files of the extends chain of any of
+    *configs*: ``--config`` and the file ``ASH_CONFIG`` names.
 
     Container mode names each file it marks by its path inside the container, so a
-    name that misses the chain would leave that file's grants in place unnoticed;
-    it is refused instead. A chain that does not load is left for the scan to
-    report, with its own exit code.
+    name that misses both chains would leave that file's grants in place
+    unnoticed; it is refused instead. A chain that does not load is left for the
+    scan to report, with its own exit code.
     """
     if not marked:
         return []
@@ -81,13 +82,15 @@ def _marked_outside_the_chain(config: Path, marked: List[str]) -> List[str]:
     )
     from automated_security_helper.config.resolve_config import read_config_document
 
-    try:
-        chain = read_config_document(
-            config, confine_to=default_confinement_root(config), log_failure=False
-        ).chain
-    except Exception:  # noqa: BLE001 - the scan reports a config that does not load
-        return []
-    files = {Path(os.path.realpath(path)) for path in chain}
+    files: set[Path] = set()
+    for config in configs:
+        try:
+            chain = read_config_document(
+                config, confine_to=default_confinement_root(config), log_failure=False
+            ).chain
+        except Exception:  # noqa: BLE001 - the scan reports a config that does not load
+            return []
+        files.update(Path(os.path.realpath(path)) for path in chain)
     return [path for path in marked if Path(os.path.realpath(path)) not in files]
 
 
@@ -571,7 +574,15 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--config-file-from-scanned-repository",
             hidden=True,
-            help="Apply the limits ASH puts on a repository-written config file to this one file of the --config file's extends chain. Container mode passes it, once per file, for each file the config extends that is inside a git checkout when the config itself is not, so the config keeps the sandbox settings it writes itself, as on the host. Refused for a file that is not in the chain.",
+            help="Apply the limits ASH puts on a repository-written config file to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. Container mode passes it, once per file, for each file the config extends that is inside a git checkout when the config itself is not, so the config keeps the sandbox settings it writes itself, as on the host, and for each file of ASH_CONFIG's chain that is inside one. Refused for a file that is in neither chain.",
+        ),
+    ] = None,
+    ash_config_from_host: Annotated[
+        Optional[str],
+        typer.Option(
+            "--ash-config-from-host",
+            hidden=True,
+            help="Read this file as the file ASH_CONFIG names, for the whole command. Container mode passes it to the scan inside the container, with the path there of the file the host's ASH_CONFIG names, which a local scan reads as its base whatever names the config. Not --config, whose environment variable ASH_CONFIG is.",
         ),
     ] = None,
     ### WORKSPACE-RELATED OPTIONS
@@ -803,41 +814,60 @@ def run_ash_scan_cli_command(
     # client delivered and holds it to the client's rules. The scan inside runs in
     # local mode with a --config; any other scan cannot apply them, so they are a
     # usage error with exit 3 rather than run_ash_scan's ValueError.
+    #
+    # --ash-config-from-host is the file the host's ASH_CONFIG names, mounted at
+    # /ash-env-config: set as ASH_CONFIG here, after click has read --config, so
+    # it is the base the scan reads (default_config.get_default_config), as on the
+    # host, and not the --config it would be as the option's environment variable.
+    # A file of its chain the host counts as repository-written comes marked with
+    # --config-file-from-scanned-repository.
     marked_files = list(config_files_from_scanned_repository or [])
-    if config_from_scanned_repository or marked_files:
+    if config_from_scanned_repository or marked_files or ash_config_from_host:
         if (mode or RunMode.local) != RunMode.local:
             _fail_config_mark(
-                "--config-from-scanned-repository and "
-                "--config-file-from-scanned-repository are passed by container mode "
-                "to the scan inside the container and apply only to a scan in local "
-                "mode. Leave them out: container mode decides them on the host."
+                "--config-from-scanned-repository, "
+                "--config-file-from-scanned-repository and --ash-config-from-host "
+                "are passed by container mode to the scan inside the container and "
+                "apply only to a scan in local mode. Leave them out: container mode "
+                "decides them on the host."
             )
-        if config is None:
+        from automated_security_helper.config.sandbox_grants import (
+            marked_files_repository_written,
+            marked_repository_written,
+        )
+        from automated_security_helper.utils.process_env import environ_overrides
+
+        marks = contextlib.ExitStack()
+        ctx.call_on_close(marks.close)
+        if ash_config_from_host is not None:
+            marks.enter_context(environ_overrides({"ASH_CONFIG": ash_config_from_host}))
+        chains = [Path(path) for path in (config, ash_config_from_host) if path]
+        if (config_from_scanned_repository or marked_files) and not chains:
             _fail_config_mark(
                 "--config-from-scanned-repository and "
                 "--config-file-from-scanned-repository mark the --config file and the "
                 "files it extends, and this scan has none. Leave them out: container "
                 "mode decides them on the host."
             )
-        outside = _marked_outside_the_chain(Path(config), marked_files)
+        if config_from_scanned_repository and config is None:
+            _fail_config_mark(
+                "--config-from-scanned-repository marks the --config file and every "
+                "file it extends, and this scan has none. Leave it out: container "
+                "mode decides it on the host."
+            )
+        outside = _marked_outside_the_chain(chains, marked_files)
         if outside:
             _fail_config_mark(
                 f"--config-file-from-scanned-repository names {', '.join(outside)}, "
-                f"which is not a file of the chain of --config {config}."
+                "which is not a file of the chain of --config or of the file "
+                "ASH_CONFIG names."
             )
-        from automated_security_helper.config.sandbox_grants import (
-            marked_files_repository_written,
-            marked_repository_written,
-        )
-
-        marks = contextlib.ExitStack()
-        if config_from_scanned_repository:
+        if config_from_scanned_repository and config is not None:
             marks.enter_context(marked_repository_written(Path(config)))
         if marked_files:
             marks.enter_context(
                 marked_files_repository_written(Path(path) for path in marked_files)
             )
-        ctx.call_on_close(marks.close)
 
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
