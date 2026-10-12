@@ -421,11 +421,15 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # Each link leaving the target, for this resolution only (extra_args
         # persists across scan() calls, and the next target has links of its own).
         # grype follows none of them; see utils/link_exclusions.py.
-        original_extra_args = list(self.args.extra_args)
-        self.args.extra_args.extend(
-            ToolExtraArg(key="--exclude", value=pattern)
-            for pattern in syft_excludes(target)
-        )
+        # A new list: the one extra_args holds is restored as it was, unchanged.
+        original_extra_args = self.args.extra_args
+        self.args.extra_args = [
+            *original_extra_args,
+            *(
+                ToolExtraArg(key="--exclude", value=pattern)
+                for pattern in syft_excludes(target)
+            ),
+        ]
         if not any(arg.key == "--config" for arg in self.args.extra_args):
             empty = empty_tool_config("grype-empty.yaml", "{}\n", context=self.context)
             self.args.extra_args.append(

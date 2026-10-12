@@ -368,24 +368,24 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         )
         # Added to the --exclude value for this resolution only, like the paths
         # above: the entries depend on the target, and extra_args persists across
-        # scan() calls.
-        original_extra_args = list(self.args.extra_args)
+        # scan() calls. A new list: the one extra_args holds is put back as it
+        # was, unchanged.
+        original_extra_args = self.args.extra_args
         link_excludes = self._link_excludes(target)
-        if link_excludes:
-            self.args.extra_args = [
-                ToolExtraArg(
-                    key=f"{arg.key},{','.join(link_excludes)}", value=arg.value
-                )
-                if arg.key.startswith("--exclude=")
-                else arg
-                for arg in self.args.extra_args
-            ]
         ini_file = self._ini_file or empty_tool_config(
             "bandit-empty.ini", "[bandit]\n", context=self.context
         )
-        self.args.extra_args.append(
-            ToolExtraArg(key="--ini", value=ini_file.as_posix())
-        )
+        self.args.extra_args = [
+            *(
+                ToolExtraArg(
+                    key=f"{arg.key},{','.join(link_excludes)}", value=arg.value
+                )
+                if link_excludes and arg.key.startswith("--exclude=")
+                else arg
+                for arg in original_extra_args
+            ),
+            ToolExtraArg(key="--ini", value=ini_file.as_posix()),
+        ]
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file

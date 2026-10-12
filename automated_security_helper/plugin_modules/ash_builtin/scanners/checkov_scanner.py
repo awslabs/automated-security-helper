@@ -489,17 +489,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         # Added for this resolution only and then removed, as bandit does with its
         # excluded paths: the pattern depends on the target, and extra_args
-        # persists across scan() calls.
-        original_extra_args = list(self.args.extra_args)
+        # persists across scan() calls. A new list: the one extra_args holds is
+        # put back as it was, unchanged.
+        original_extra_args = self.args.extra_args
         output_skip = self._output_dir_skip_pattern(target)
-        if output_skip is not None:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--skip-path", value=output_skip)
-            )
-        for link_skip in self._link_skip_patterns(target):
-            self.args.extra_args.append(
-                ToolExtraArg(key="--skip-path", value=link_skip)
-            )
+        skips = [] if output_skip is None else [output_skip]
+        skips.extend(self._link_skip_patterns(target))
+        self.args.extra_args = [
+            *original_extra_args,
+            *(ToolExtraArg(key="--skip-path", value=skip) for skip in skips),
+        ]
         try:
             final_args = self._resolve_arguments(
                 target=target,

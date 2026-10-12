@@ -197,6 +197,81 @@ def test_grype_is_given_each_link_leaving_its_target_and_nothing_else(tmp_path):
     assert [(a.key, a.value) for a in scanner.args.extra_args] == before
 
 
+def _scanner_named(name: str, source: Path, base: Path):
+    if name == "grype":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+            GrypeScanner as scanner_class,
+            GrypeScannerConfig as config_class,
+        )
+    elif name == "checkov":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+            CheckovScanner as scanner_class,
+            CheckovScannerConfig as config_class,
+        )
+    else:
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+            BanditScanner as scanner_class,
+            BanditScannerConfig as config_class,
+        )
+    return scanner_class(context=_context(source, base), config=config_class())
+
+
+@pytest.mark.parametrize("name", ["grype", "checkov", "bandit"])
+def test_the_list_extra_args_held_is_left_as_it_was(tmp_path, name):
+    """The per-target entries go into a new list, not the one extra_args held.
+
+    Code holding that list (a caller, a test) saw the link entries appended to it,
+    even though extra_args itself was set back to a copy afterwards. And extra_args
+    is that same list again after the resolution, not a copy of it.
+    """
+    # No glob character in a link name: bandit refuses a target with one.
+    source = _tree(
+        tmp_path,
+        {**FILES, "main.tf": "", "app.py": "x = 1\n"},
+        {
+            "link_out.txt": "outside/requirements.txt",
+            "deep/requirements.txt": "outside/requirements.txt",
+            "link_out.tf": "outside/main.tf",
+            "link_out.py": "outside/secret.py",
+            "in_tree.txt": "real/requirements.txt",
+        },
+    )
+    scanner = _scanner_named(name, source, tmp_path)
+    held = scanner.args.extra_args
+    before = [(a.key, a.value) for a in held]
+
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert [(a.key, a.value) for a in held] == before
+    assert scanner.args.extra_args is held
+    # And the per-target entries did reach this resolution.
+    assert any("link_out" in str(arg) for arg in argv)
+
+
+@pytest.mark.parametrize("name", ["grype", "checkov", "bandit"])
+def test_a_target_with_no_link_leaving_it_leaves_the_list_as_it_was(tmp_path, name):
+    """The entries every resolution adds (bandit's --ini, grype's --config) too.
+
+    With no link to leave out, the list extra_args held was the one these were
+    added to, and as that list is the one put back, each scan added one more.
+    """
+    source = _tree(tmp_path, {**FILES, "main.tf": "", "app.py": "x = 1\n"}, {})
+    scanner = _scanner_named(name, source, tmp_path)
+    held = scanner.args.extra_args
+    before = [(a.key, a.value) for a in held]
+
+    first, _, _ = scanner._execute_scan(source, "source", [])
+    second, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert [(a.key, a.value) for a in held] == before
+    assert scanner.args.extra_args is held
+    # The same options again; an empty config file's path is new each time.
+    assert len(second) == len(first)
+    assert [arg for arg in second if str(arg).startswith("-")] == [
+        arg for arg in first if str(arg).startswith("-")
+    ]
+
+
 def test_syft_is_given_each_link_leaving_its_target_and_nothing_else(tmp_path):
     from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
         SyftScanner,
