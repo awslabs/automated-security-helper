@@ -284,6 +284,11 @@ async def run_ash_scan(
     or set_source_zip_finalize is changing this session's delivered source;
     call it again once that call has returned.
 
+    Needs a session, because get_scan_progress and cancel_scan do: refused
+    (error_type session_identity_required) on a stateless server run without
+    --trust-upstream-session-id. run_ash_workspace_scan returns its results in
+    its response and needs none.
+
     Returns:
         Dict with scan_id, status, and connection management guidance
     """
@@ -298,12 +303,15 @@ async def run_ash_scan(
                 "error_type": "invalid_session_id",
             }
 
+        # A scan is followed with get_scan_progress and stopped with cancel_scan,
+        # and both need a session. A caller the server could not identify would
+        # start a scan it can neither follow nor stop, so it starts none.
+        refusal = session_identity_refusal(session_id, "run_ash_scan")
+        if refusal is not None:
+            await ctx.error(refusal["error"])
+            return refusal
+
         if source_dir is None:
-            # "The tree this session delivered" needs a session.
-            refusal = session_identity_refusal(session_id, "run_ash_scan")
-            if refusal is not None:
-                await ctx.error(refusal["error"])
-                return refusal
             resolved = _resolve_omitted_source_dir(session_id)
             if resolved.error is not None:
                 await ctx.error(resolved.error["error"])

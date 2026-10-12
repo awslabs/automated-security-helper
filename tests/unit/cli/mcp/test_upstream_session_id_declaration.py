@@ -193,6 +193,58 @@ def test_session_tools_refuse_a_stateless_caller_without_the_declaration(
     assert "--trust-upstream-session-id" in result.get("error", ""), result
 
 
+def test_a_stateless_caller_without_the_declaration_starts_no_scan(
+    tmp_path, monkeypatch
+) -> None:
+    """A scan it named a directory for would be one it could neither poll nor cancel."""
+    from automated_security_helper.core.resource_management import (
+        scan_registry as scan_registry_module,
+    )
+
+    granted = tmp_path / "granted"
+    granted.mkdir()
+    (granted / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(granted))
+    registry = scan_registry_module.ScanRegistry()
+    monkeypatch.setattr(scan_registry_module, "_scan_registry", registry)
+    monkeypatch.setattr(
+        "automated_security_helper.interactions.run_ash_scan.run_ash_scan",
+        lambda **kwargs: pytest.fail("a scan ran for a caller with no session"),
+    )
+    app = build_streamable_http_app(
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        _issued, headers = http.open_session()
+        result = http.call_tool("run_ash_scan", {"source_dir": str(granted)}, headers)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert "--trust-upstream-session-id" in result.get("error", ""), result
+    assert registry.get_scan_by_directory(str(granted)) is None
+    assert not (granted / ".ash").exists(), "the refused scan wrote into the target"
+
+
+def test_the_scan_backend_refuses_a_caller_with_no_session(tmp_path) -> None:
+    import asyncio
+
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+    )
+    from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+    result = asyncio.run(
+        mcp_scan_directory(
+            directory_path=str(tmp_path), session_id=UNIDENTIFIED_SESSION_ID
+        )
+    )
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert not (tmp_path / ".ash").exists()
+
+
 class _Ctx:
     resilient_parsing = False
 

@@ -167,11 +167,21 @@ async def mcp_scan_directory(
         session_id: Optional MCP session id. When set, the scan acquires the
             per-session lock (Track 10.5 #63) so two concurrent scans on the
             same session serialize instead of racing on the shared output
-            dir. Distinct sessions never contend.
+            dir. Distinct sessions never contend. A caller the server could not
+            identify is refused before anything is checked or written: its scan
+            would be one it can neither poll nor cancel.
 
     Returns:
         Dictionary with scan ID and status information
     """
+    from automated_security_helper.cli.mcp.session_identity import (
+        session_identity_refusal,
+    )
+
+    refusal = session_identity_refusal(session_id, "scan_directory")
+    if refusal is not None:
+        return refusal
+
     from automated_security_helper.cli.mcp.scan_target import (
         ASH_MCP_ALLOWED_ROOTS_ENV,
         resolve_scan_target,
