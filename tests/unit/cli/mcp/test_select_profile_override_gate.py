@@ -372,6 +372,44 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    "/reporters/aws-security-hub/**": (
+        {
+            "op": "add",
+            "path": "/reporters/aws-security-hub",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"reporters": {"aws-security-hub": {"enabled": True, "options": {}}}},
+    ),
+    "/reporters/s3/**": (
+        {
+            "op": "add",
+            "path": "/reporters/s3",
+            "value": {"enabled": True, "options": {"bucket_name": "other-bucket"}},
+        },
+        {
+            "reporters": {
+                "s3": {"enabled": True, "options": {"bucket_name": "other-bucket"}}
+            }
+        },
+    ),
+    # Adding the section also writes its aws_* options, so the aws_* entry, listed
+    # first, is the one named; test_a_client_cannot_turn_on_an_off_host_reporter
+    # covers a write only the whole-section entry refuses.
+    "/reporters/bedrock-summary-reporter/**": (
+        {
+            "op": "add",
+            "path": "/reporters/bedrock-summary-reporter",
+            "value": {"enabled": True, "options": {"model_id": "other-model"}},
+        },
+        {
+            "reporters": {
+                "bedrock-summary-reporter": {
+                    "enabled": True,
+                    "options": {"model_id": "other-model"},
+                }
+            }
+        },
+    ),
     "/scanners/detect-secrets/options/scan_settings/filters_used": (
         {
             "op": "replace",
@@ -521,8 +559,38 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
         ),
         entry,
     )
+    if entry == "/reporters/bedrock-summary-reporter/**":
+        covering = "/reporters/bedrock-summary-reporter/options/aws_*"
     for result in (patched, overridden):
         assert f"entry {covering!r}" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+@pytest.mark.parametrize(
+    "reporter",
+    ["aws-security-hub", "bedrock-summary-reporter", "cloudwatch-logs", "s3"],
+)
+def test_a_client_cannot_turn_on_an_off_host_reporter(
+    tmp_path: Path, reporter: str
+) -> None:
+    """The profile configures the reporter off; turning it on is refused on both
+    routes by the reporter's whole-section entry, which no profile can drop."""
+    document = _profile(allowed_paths=["/**"], denied_paths=[])
+    document["reporters"] = {reporter: {"enabled": False, "options": {}}}
+    _install(tmp_path, document)
+    restated = yaml.safe_load(yaml.safe_dump(document))
+    restated["reporters"][reporter]["enabled"] = True
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": f"/reporters/{reporter}/enabled", "value": True},
+        yaml.safe_dump(restated),
+    )
+
+    entry = f"/reporters/{reporter}/**"
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert f"denied_paths entry {entry!r}" in result["error"], result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
 

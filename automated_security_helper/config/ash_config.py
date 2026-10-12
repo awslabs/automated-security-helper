@@ -698,7 +698,9 @@ ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: imported into ASH's own process. The detect-secrets settings that turn on secret
 #: verification (each candidate secret is sent to its issuer) or import a plugin or
 #: filter from a file, and the baseline that can carry both. The archive extraction
-#: limits.
+#: limits. And the reporters that send results off the host, each a whole section, so
+#: a client can neither turn one on nor choose where it sends (``**`` also matches the
+#: section itself).
 #:
 #: A floor rather than the default alone: denied_paths was replaced whole by a
 #: profile's own list, so adding one entry dropped every shipped one.
@@ -713,6 +715,10 @@ ALWAYS_DENIED_PATHS = (
     "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
     "/scanners/detect-secrets/options/baseline_file",
     *ARCHIVE_LIMIT_RUNTIME_PATHS,
+    "/reporters/s3/**",
+    "/reporters/aws-security-hub/**",
+    "/reporters/cloudwatch-logs/**",
+    "/reporters/bedrock-summary-reporter/**",
 )
 
 
@@ -751,9 +757,11 @@ class RuntimeOverridesConfig(BaseModel):
                 "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
                 "Defaults block the most dangerous fields on the real AshConfig schema. "
                 "A list set here replaces the defaults, except for the entries ASH "
-                "always denies (the scanner sandbox, ash_plugin_modules, and the "
-                "detect-secrets verification, plugin and baseline settings): those "
-                "are added to any list."
+                "always denies (the scanner sandbox, ash_plugin_modules, the "
+                "detect-secrets verification, plugin and baseline settings, the "
+                "archive converter's extraction limits, and the s3, "
+                "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
+                "reporter sections): those are added to any list."
             )
         ),
     ] = [
@@ -790,7 +798,13 @@ class RuntimeOverridesConfig(BaseModel):
         "/global_settings/suppressions",
         # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
         "/reporters/bedrock-summary-reporter/options/aws_*",
+        # The reporters that send results off the host, whole: turning one on or
+        # choosing its destination is the operator's call (also in
+        # ALWAYS_DENIED_PATHS).
         "/reporters/cloudwatch-logs/**",
+        "/reporters/aws-security-hub/**",
+        "/reporters/s3/**",
+        "/reporters/bedrock-summary-reporter/**",
         # The archive converter's extraction limits bound what extracting an
         # archive in the scanned tree may write, so a client may not raise them.
         # A write at an ancestor (/converters/archive, /converters) is refused too.

@@ -1522,6 +1522,11 @@
   Those entries (`ALWAYS_DENIED_PATHS` in `config/ash_config.py`) are now added to any
   list, so a profile can add denials but not remove them. A root-pointer replace is
   now always refused, even with an empty list, since it writes every one of them.
+  The reporters that send results off the host are in that set as whole sections
+  (`/reporters/s3/**`, `/reporters/aws-security-hub/**`, `/reporters/cloudwatch-logs/**`
+  and `/reporters/bedrock-summary-reporter/**`), so a client cannot turn one on or
+  choose where it sends, whatever a profile's list says; the default list now holds
+  all four whole.
 
 - **snyk-code on a tree with no file Snyk supports is SKIPPED, not ERROR.**
   `snyk code test` exits 3 when the target holds no file it reads ("no supported

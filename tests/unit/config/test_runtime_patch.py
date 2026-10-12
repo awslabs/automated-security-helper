@@ -361,17 +361,32 @@ class TestDefaults:
         fictional schema paths). For glob-bearing entries we resolve the prefix
         up to (but not including) the first wildcard segment.
 
-        Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`)
-        are NOT present on a default `AshConfig`; we materialize them here via
-        model_validate so the schema check covers extras that real plugins add.
+        Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
+        `aws-security-hub`, `s3`) are NOT present on a default `AshConfig`; we
+        materialize them here via model_validate so the schema check covers
+        extras that real plugins add, the AWS reporters from their own models.
         """
+        from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+            BedrockSummaryReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+            S3ReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+            SecurityHubReporterConfig,
+        )
+
         cfg = AshConfig.model_validate(
             {
                 "reporters": {
-                    "bedrock-summary-reporter": {
-                        "options": {"aws_region": "us-east-1"}
-                    },
+                    "aws-security-hub": SecurityHubReporterConfig().model_dump(
+                        by_alias=True
+                    ),
+                    "bedrock-summary-reporter": BedrockSummaryReporterConfig().model_dump(
+                        by_alias=True
+                    ),
                     "cloudwatch-logs": {"options": {"aws_region": "us-east-1"}},
+                    "s3": S3ReporterConfig().model_dump(by_alias=True),
                 }
             }
         )
@@ -1079,19 +1094,19 @@ class TestDenialsMatchEitherSeparator:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_either_spelling(self) -> None:
+        # trivy-repo, not an off-host reporter: those sections are always denied
+        # whole, so a value pattern under one is never reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={
-                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
-            },
+            denied_value_patterns={"/scanners/trivy-repo/options/ignore_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/reporters/bedrock_summary_reporter/options/aws_region",
-                "value": "us-east-1",
+                "path": "/scanners/trivy_repo/options/ignore_file",
+                "value": "x",
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
@@ -1177,19 +1192,19 @@ class TestDenialsMatchEveryPluginSpelling:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_every_spelling(self) -> None:
+        # trivy-repo, not the Bedrock reporter: an off-host reporter's section is
+        # always denied whole, so a value pattern under it is never reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={
-                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
-            },
+            denied_value_patterns={"/scanners/trivy-repo/options/ignore_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/reporters/BedrockSummary",
-                "value": {"options": {"aws_region": "us-east-1"}},
+                "path": "/scanners/TrivyRepo",
+                "value": {"options": {"ignore_file": "x"}},
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
