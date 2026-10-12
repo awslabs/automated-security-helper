@@ -331,3 +331,113 @@ class TestTheOperatorsOverridesStillDecide:
         assert code == 0
         assert ("SUMMARY" in capsys.readouterr().out) is summary_shown
         assert requests == []
+
+
+def _mcp_delivered(tmp_path: Path) -> tuple:
+    """A client's upload where the MCP server keeps one, with stored results of its scan.
+
+    The zip is in ``<root>/<session>/incoming/``, extracted into
+    ``<root>/<session>/source/`` (``cli/mcp/source_delivery.py``), in no git
+    checkout. Its ``.ash/.ash.yaml`` turns S3 on with the client's bucket and
+    names the AWS module. Returns (workspace root, that file, output directory,
+    a working directory outside the session).
+    """
+    import zipfile
+
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    root = tmp_path / "mcp-root"
+    session = root / "sess-0001"
+    (session / "incoming").mkdir(parents=True)
+    upload = session / "incoming" / "upload-0001.zip"
+    with zipfile.ZipFile(upload, "w") as bundle:
+        bundle.writestr("app.py", "value = 1\n")
+        bundle.writestr(
+            ".ash/.ash.yaml",
+            _module_list() + _s3_section("client-bucket", "eu-west-1"),
+        )
+    with zipfile.ZipFile(upload) as bundle:
+        bundle.extractall(session / "source")
+    delivered = session / "source" / ".ash" / ".ash.yaml"
+    _outside_every_checkout(delivered)
+
+    output_dir = session / "output"
+    output_dir.mkdir()
+    stored = AshAggregatedResults()
+    stored.ash_config = get_default_config()
+    (output_dir / "ash_aggregated_results.json").write_text(
+        stored.model_dump_json(by_alias=True), encoding="utf-8"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    return root, delivered, output_dir, elsewhere
+
+
+class TestAnMcpDeliveredConfig:
+    """``ash report --format s3 --config <a file an MCP client delivered>``, run outside the session.
+
+    The file is in no git checkout and outside the working directory, and the
+    stored results do not record the tree. Whether or not this process knows
+    the MCP workspace root, the client's bucket gets nothing.
+    """
+
+    def test_without_the_workspace_root_its_settings_are_ignored(
+        self, tmp_path, monkeypatch, requests, sessions, warnings_logged
+    ):
+        """Nothing marks the file as the client's, and it is held like any --config file."""
+        monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+        _, delivered, output_dir, elsewhere = _mcp_delivered(tmp_path)
+        monkeypatch.chdir(elsewhere)
+
+        code = _report("s3", output_dir, config=str(delivered))
+
+        assert code == 1
+        assert requests == [], requests
+        assert sessions == [], sessions
+        assert _ignored("reporters.s3.enabled", warnings_logged), warnings_logged
+
+    def test_with_the_workspace_root_the_file_is_refused_as_the_clients(
+        self, tmp_path, monkeypatch, requests, sessions
+    ):
+        """With ``ASH_MCP_WORKSPACE_ROOT`` naming the root, the file is a delivered one.
+
+        The client config policy refuses the S3 settings and the off-host module
+        before any reporter is built: exit 3.
+        """
+        root, delivered, output_dir, elsewhere = _mcp_delivered(tmp_path)
+        monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+        monkeypatch.chdir(elsewhere)
+
+        code = _report("s3", output_dir, config=str(delivered))
+
+        assert code == 3
+        assert requests == [], requests
+        assert sessions == [], sessions
+
+    def test_control_the_operators_overrides_send_to_the_operators_bucket(
+        self, tmp_path, monkeypatch, requests
+    ):
+        """The operator's overrides enable and aim S3; the client's bucket and region are unused."""
+        monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+        _, delivered, output_dir, elsewhere = _mcp_delivered(tmp_path)
+        monkeypatch.chdir(elsewhere)
+
+        # The refused upload leaves the reporter with no receipt: exit 1 after it.
+        _report(
+            "s3",
+            output_dir,
+            config=str(delivered),
+            overrides=[
+                "reporters.s3.enabled=true",
+                "reporters.s3.options.bucket_name=operator-bucket",
+                "reporters.s3.options.aws_region=us-west-2",
+                "reporters.s3.options.max_retries=0",
+            ],
+        )
+
+        puts = [r for r in requests if (r.service, r.operation) == ("s3", "PutObject")]
+        assert puts == [Request("s3", "PutObject", "us-west-2", "operator-bucket")], (
+            requests
+        )
+        assert all(r.bucket in (None, "operator-bucket") for r in requests), requests
