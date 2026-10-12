@@ -98,11 +98,15 @@ def test_the_sweep_spares_what_it_must(root, tmp_path) -> None:
 
     with lock:
         removed = sessions.sweep_stale_workspaces(DAY)
+        busy_during = busy.is_dir()
+    # What a scan does when it returns: the sweep must not have queued a removal.
+    sessions.finish_ended_session("busy")
 
     assert removed == ["stale"] and not stale.exists()
     assert default.is_dir(), "the stdio session's workspace is its server's to remove"
     assert elsewhere.is_dir() and (root / "a-link").is_symlink()
-    assert busy.is_dir(), "a workspace a scan is reading was swept"
+    assert busy_during, "a workspace a scan is reading was swept"
+    assert busy.is_dir(), "the sweep's removal of a busy workspace ran after the scan"
 
 
 def test_a_request_naming_a_session_keeps_its_workspace(root) -> None:

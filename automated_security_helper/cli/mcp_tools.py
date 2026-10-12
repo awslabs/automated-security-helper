@@ -559,9 +559,15 @@ async def _run_scan(
         Wrapped in a function so the lock is acquired on the executor
         worker thread, not the asyncio event-loop thread. Returns what
         ``run_ash_scan`` returned, which on exit 0 is the results model.
+
+        The scan also holds its session's ``ScanPresence`` while it runs, so the
+        TTL sweep of another server sharing the workspace root skips the
+        session.
         """
+        from automated_security_helper.cli.mcp.sessions import ScanPresence
+
         if session_lock is not None:
-            with session_lock:
+            with session_lock, ScanPresence(session_id):
                 return run_ash_scan(
                     source_dir=directory_path,
                     output_dir=output_dir,

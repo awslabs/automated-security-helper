@@ -207,17 +207,26 @@ def is_reserved_session_id(value: str) -> bool:
     """True if ``value`` names a directory under the workspace root ASH owns.
 
     Those are stdio's workspace (``DEFAULT_SESSION_ID``), the unidentified
-    sentinel, and the stdio servers' presence registry. Compared casefolded: on a
-    case-insensitive filesystem (the macOS and Windows defaults) ``__DEFAULT__``
-    opens the same directory as ``__default__``.
+    sentinel, the stdio servers' presence registry, and the running scans'
+    presence registry. Compared casefolded: on a case-insensitive filesystem (the
+    macOS and Windows defaults) ``__DEFAULT__`` opens the same directory as
+    ``__default__``.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
     )
-    from automated_security_helper.cli.mcp.sessions import STDIO_SERVERS_DIR
+    from automated_security_helper.cli.mcp.sessions import (
+        SCAN_PRESENCE_DIR,
+        STDIO_SERVERS_DIR,
+    )
 
-    reserved = (DEFAULT_SESSION_ID, UNIDENTIFIED_SESSION_ID, STDIO_SERVERS_DIR)
+    reserved = (
+        DEFAULT_SESSION_ID,
+        UNIDENTIFIED_SESSION_ID,
+        STDIO_SERVERS_DIR,
+        SCAN_PRESENCE_DIR,
+    )
     return value.casefold() in {name.casefold() for name in reserved}
 
 

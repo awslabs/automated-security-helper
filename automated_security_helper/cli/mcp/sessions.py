@@ -47,12 +47,13 @@ writes, so ending a session removes the tree that was delivered to it.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -547,6 +548,147 @@ class StdioServerPresence:
         self._entry = None
 
 
+#: Directory under the workspace root holding, per session, one locked entry for
+#: each running scan of that session, in any server process sharing the root.
+#: Not a session workspace: it carries no session marker, and
+#: ``session_identity.is_reserved_session_id`` refuses it as a session id.
+SCAN_PRESENCE_DIR = ".ash-mcp-scans"
+_SCAN_PRESENCE_LOCK = ".lock"
+
+
+def _workspace_root() -> Path:
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    return resolve_workspace_root()
+
+
+@contextlib.contextmanager
+def _scan_presence_guard(root: Path) -> Iterator[None]:
+    """Hold the lock that registering a scan and the sweep's check-and-remove share."""
+    registry = root / SCAN_PRESENCE_DIR
+    registry.mkdir(exist_ok=True)
+    with open(registry / _SCAN_PRESENCE_LOCK, "a+b") as guard:
+        _lock_blocking(guard)
+        yield
+
+
+class ScanPresence:
+    """Marks a running scan of ``session_id`` for every server sharing the root.
+
+    A scan's claim and lock on its ``MCPSession`` hold the session's tree in this
+    process only. Another server process sharing the workspace root (replicas
+    behind a load balancer, with one root on a network filesystem) can't see
+    them, so a running scan also holds an exclusive lock on its own entry under
+    ``<root>/.ash-mcp-scans/<session id>/``. The TTL sweep of every server skips
+    a session with a live entry. Registering and the sweep's check-and-remove run
+    under one lock file, so a scan that starts while a sweep removes its
+    session's workspace either is seen by it or finds the workspace gone.
+
+    Nothing is registered for a session with no workspace on disk: nothing of
+    the session's is there to protect, and a scan of a directory the operator
+    granted creates nothing under the root. A root where the entry can't be
+    created leaves the scan unregistered rather than failing it.
+
+    Limits: as ``StdioServerPresence``, a server on another host sharing the root
+    through a filesystem that does not share these locks can't see them.
+    """
+
+    def __init__(self, session_id: Optional[str]) -> None:
+        self._session_id = session_id
+        self._entry: Optional[Path] = None
+        self._handle: Any = None
+
+    def __enter__(self) -> Self:
+        import uuid
+
+        from automated_security_helper.cli.mcp.session_identity import (
+            is_reserved_session_id,
+        )
+
+        session_id = self._session_id
+        if not session_id or is_reserved_session_id(session_id):
+            return self
+        try:
+            root = _workspace_root()
+            sandbox = session_directory(root, session_id)
+            if not sandbox.is_dir():
+                return self
+            with _scan_presence_guard(root):
+                # Under the guard: a sweep that removed the workspace meanwhile
+                # has finished, and its marker is gone.
+                if not (sandbox / SESSION_MARKER).is_file():
+                    return self
+                holder = root / SCAN_PRESENCE_DIR / session_id
+                holder.mkdir(exist_ok=True)
+                entry = holder / f"{os.getpid()}-{uuid.uuid4().hex}"
+                handle = open(entry, "a+b")
+                # A file nobody else has opened: the lock is always free.
+                _try_lock(handle)
+                self._entry, self._handle = entry, handle
+        except (OSError, ValueError, RuntimeError):
+            self._entry = self._handle = None
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self._entry is None:
+            return
+        entry, handle = self._entry, self._handle
+        self._entry = self._handle = None
+        try:
+            with _scan_presence_guard(entry.parent.parent.parent):
+                handle.close()
+                with contextlib.suppress(OSError):
+                    entry.unlink()
+                with contextlib.suppress(OSError):
+                    entry.parent.rmdir()  # only when no other scan's entry is left
+        except OSError:
+            handle.close()
+
+
+def _a_scan_holds(holder: Path) -> bool:
+    """True if a live scan of any server holds an entry in ``holder``.
+
+    Run under the presence guard. An entry whose lock can be taken belongs to a
+    scan whose server died, and is removed.
+    """
+    try:
+        entries = list(holder.iterdir())
+    except FileNotFoundError:
+        return False
+    live = False
+    for entry in entries:
+        if not entry.is_file():
+            continue
+        try:
+            with open(entry, "a+b") as handle:
+                taken = _try_lock(handle)
+        except OSError:
+            # Windows refuses to open a file another process holds.
+            live = True
+            continue
+        if not taken:
+            live = True
+            continue
+        try:
+            entry.unlink()  # its server died without releasing it
+        except OSError:
+            live = True
+    return live
+
+
+def scan_presence_held(session_id: str) -> bool:
+    """True if a running scan of ``session_id`` in any server holds its presence."""
+
+    root = _workspace_root()
+    try:
+        with _scan_presence_guard(root):
+            return _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id)
+    except OSError:
+        return False
+
+
 def _last_used(sandbox: Path) -> float:
     """The newest mtime of the sandbox directory and its direct children."""
     newest = sandbox.lstat().st_mtime
@@ -583,12 +725,24 @@ def sweep_stale_workspaces(
 
     "Used" is the newest modification time of the sandbox directory and its
     direct children; every HTTP request that names a session refreshes it
-    (:func:`touch_session_workspace`), and every delivery writes there. A
-    session whose scan is running is skipped, and so is every name
-    ``session_identity.is_reserved_session_id`` reserves: the stdio session,
-    which the last stdio server removes when it exits, and the stdio servers'
-    presence registry. Entries that are not directories, are symlinks, or do
-    not name a single directory are left alone.
+    (:func:`touch_session_workspace`), and every delivery writes there. Skipped,
+    and never queued for later:
+
+    - a session whose scan runs in this process (its claim or lock is held) or
+      whose tree is being changed, because the sweep takes the session's change
+      (``MCPSession.try_begin_change``) and that is refused. Queuing the removal
+      would remove the tree, and the results the scan wrote under it, the moment
+      the scan returned;
+    - a session used after its age was read: the age is read again while the
+      sweep holds the session;
+    - a session a running scan in another server sharing the root holds
+      (:class:`ScanPresence`);
+    - every name ``session_identity.is_reserved_session_id`` reserves: the stdio
+      session, which the last stdio server removes when it exits, and the two
+      presence registries.
+
+    Entries that are not directories, are symlinks, or do not name a single
+    directory are left alone.
 
     Returns:
         The session ids whose workspaces were removed.
@@ -598,12 +752,9 @@ def sweep_stale_workspaces(
     from automated_security_helper.cli.mcp.session_identity import (
         is_reserved_session_id,
     )
-    from automated_security_helper.cli.mcp.source_delivery import (
-        resolve_workspace_root,
-    )
 
     try:
-        root = resolve_workspace_root()
+        root = _workspace_root()
         entries = list(root.iterdir()) if root.is_dir() else []
     except (OSError, RuntimeError):
         return []
@@ -615,18 +766,49 @@ def sweep_stale_workspaces(
             continue
         try:
             validated_path_component(session_id)
-            if entry.is_symlink() or not entry.is_dir():
-                continue
-            marker = entry / SESSION_MARKER
-            if marker.is_symlink() or not marker.is_file():
-                continue
-            if _last_used(entry) >= cutoff:
+            if not _is_stale_workspace(entry, cutoff):
                 continue
         except (OSError, ValueError):
             continue
-        if end_session(session_id):
+        if _remove_if_still_stale(root, session_id, entry, cutoff):
             removed.append(session_id)
     return removed
+
+
+def _is_stale_workspace(entry: Path, cutoff: float) -> bool:
+    if entry.is_symlink() or not entry.is_dir():
+        return False
+    marker = entry / SESSION_MARKER
+    if marker.is_symlink() or not marker.is_file():
+        return False
+    return _last_used(entry) < cutoff
+
+
+def _remove_if_still_stale(
+    root: Path, session_id: str, sandbox: Path, cutoff: float
+) -> bool:
+    """Remove a stale session's state, unless anything holds it now."""
+
+    session = get_default_registry().session_for(session_id)
+    if not session.try_begin_change():
+        return False
+    try:
+        try:
+            if not _is_stale_workspace(sandbox, cutoff):
+                return False
+            with _scan_presence_guard(root):
+                if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
+                    return False
+                _remove_session_state(session_id)
+                with contextlib.suppress(OSError):
+                    (root / SCAN_PRESENCE_DIR / session_id).rmdir()
+        except OSError:
+            return False
+    finally:
+        session.end_change()
+    with _ended_lock:
+        _ended_while_scanning.discard(session_id)
+    return True
 
 
 __all__ = [
