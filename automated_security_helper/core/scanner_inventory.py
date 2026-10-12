@@ -46,8 +46,8 @@ tree and no scan is run.
 import logging
 import re as _re
 import tempfile
-import time as _time
 from pathlib import Path
+from time import monotonic as _monotonic
 from typing import Any, Callable, Dict, List, Optional
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -384,9 +384,11 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
     if not resolved:
         return None
 
-    deadline = _time.monotonic() + _VERSION_PROBE_TOTAL_BUDGET_SECONDS
+    # The module's own reference to the clock, so a test can replace it here
+    # without stopping time.monotonic() for the rest of the process.
+    deadline = _monotonic() + _VERSION_PROBE_TOTAL_BUDGET_SECONDS
     for arg_form in _VERSION_PROBE_ARG_FORMS:
-        remaining = deadline - _time.monotonic()
+        remaining = deadline - _monotonic()
         if remaining < _VERSION_PROBE_MIN_ATTEMPT_SECONDS:
             # The prior form nearly spent the shared budget; do not start another
             # probe with a slice too small to give the tool a fair chance.
