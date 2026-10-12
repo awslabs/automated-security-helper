@@ -973,17 +973,19 @@ async def _run_scan(
             # An output directory refused before the scan started says why, since
             # the client cannot read the console it was printed to, and with a
             # remedy an MCP client can act on: it has no --output-dir to pass.
+            # OutputDirRefusedExit's own reason gives the command line's remedy, so
+            # only the link it found is used.
             found = getattr(e, "found", None)
+            reason = getattr(e, "reason", None)
             if found:
                 error_message = (
                     f"{error_message}: "
                     f"{OutputDirLinkRefused(found, MCP_SCAN_OUTPUT_REMEDY)}"
                 )
-            # A refusal that carries its reason (ReportPathRefusedExit: a link at a
-            # report path, or a report file name outside the reports directory)
-            # says why, for the same reason.
-            reason = getattr(e, "reason", None)
-            if isinstance(reason, str) and reason:
+            elif isinstance(reason, str) and reason:
+                # A refusal that carries its reason (ReportPathRefusedExit: a link
+                # at a report path, or a report file name outside the reports
+                # directory) says why, for the same reason.
                 error_message = f"{error_message}: {reason}"
             registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
             _logger.error(f"Scan {scan_id} failed: {error_message}")
