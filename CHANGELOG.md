@@ -992,7 +992,10 @@
   `error_type: config_input_not_permitted` and the file named by its path in the
   scanned directory. `resolve_ash_workspace` and `run_ash_workspace_scan` check each
   project's config file the same way, when they plan and again when each project is
-  scanned, and refuse with exit code 4. Over stdio only the system-directory check
+  scanned, and refuse with exit code 4. They check every config source in the
+  project's directory, a `pyproject.toml` included, before discovery opens any, so
+  the refusal is the same whether a link's target is missing, unreadable or
+  readable. Over stdio only the system-directory check
   applies, as for any other config input. A remote scan of a tree whose config links
   to a shared file now needs that file's directory in `ASH_MCP_ALLOWED_CONFIG_ROOTS`.
 

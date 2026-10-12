@@ -130,7 +130,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_config_policy import ClientConfigRules
-from automated_security_helper.config.config_sources import check_discovered_source
 from automated_security_helper.config.resolve_config import (
     find_config_file,
     resolve_config,
@@ -525,12 +524,11 @@ def _resolve_project_config(
     """
     operator = trusted_config if trusted_config is not None else default_config
     try:
-        config_path = find_config_file(candidate.resolved)
-        if config_path is not None:
-            # The project directory is one the caller may read, but the file
-            # found there may be a link out of it; a caller's gate covers it
-            # before anything reads it (config_sources, "Base paths").
-            check_discovered_source(config_path, permit_base)
+        # The project directory is one the caller may read, but a source found
+        # there may be a link out of it, and discovery reads a pyproject.toml to
+        # look for its table; a caller's gate covers every source before any is
+        # opened (config_sources.check_discovery_candidates).
+        config_path = find_config_file(candidate.resolved, permit=permit_base)
         overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
@@ -957,11 +955,11 @@ def resolve_workspace(
             (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
             too.
         permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
-            or None. Each project's own config file, every base its chain
-            extends, and the workspace policy file must resolve to a file it
-            permits; one that is a link out is refused before it is read
-            (``config_sources.check_discovered_source``). Must reach
-            ``ProjectScanSettings.config_base_gate`` too.
+            or None. Every config source in each project's directory, every
+            base a project's chain extends, and the workspace policy file must
+            resolve to a file it permits; one that is a link out is refused
+            before anything opens it (``config_sources.check_discovery_candidates``).
+            Must reach ``ProjectScanSettings.config_base_gate`` too.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with

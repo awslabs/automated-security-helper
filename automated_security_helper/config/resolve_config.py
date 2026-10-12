@@ -77,18 +77,21 @@ from automated_security_helper.core.exceptions import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
+def find_config_file(
+    search_dir: Path | None = None, permit: Optional[Callable[[Path], bool]] = None
+) -> Optional[Path]:
     """Return the config source a scan of search_dir would use, or None.
 
     Applies the discovery precedence in ``config_sources.discover_config_source``:
     ASH_CONFIG_FILE_NAMES in order (each in search_dir, then search_dir/.ash/),
     then the ashrc names, then a pyproject.toml with a [tool.ash] table. The
     result can therefore be a TOML file; callers that edit the file in place
-    must check its format.
+    must check its format. ``permit`` is passed to discovery, which checks every
+    source it finds against it before opening any.
     """
     if search_dir is None:
         search_dir = Path.cwd()
-    selected = discover_config_source(search_dir).selected
+    selected = discover_config_source(search_dir, permit=permit).selected
     return selected.path if selected is not None else None
 
 

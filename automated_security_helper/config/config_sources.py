@@ -405,9 +405,55 @@ def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool
         return False
 
 
-def discover_config_source(search_dir: Path) -> ConfigDiscovery:
-    """Find every config source in `search_dir` and select one by precedence."""
+def _candidate_paths(search_dir: Path) -> List[Path]:
+    """Every name discovery looks at in `search_dir`, in precedence order."""
+    candidates: List[Path] = []
+    for name in ASH_CONFIG_FILE_NAMES:
+        candidates.extend((search_dir / name, search_dir / ".ash" / name))
+    candidates.extend(search_dir / name for name in ASH_RC_FILE_NAMES)
+    candidates.append(search_dir / ASH_PYPROJECT_FILE_NAME)
+    return candidates
+
+
+def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
+    """Refuse `search_dir` when a config source in it resolves outside `permit`.
+
+    The check ``discover_config_source(search_dir, permit=permit)`` makes before
+    it opens anything. Every name that exists, as a file or as a link whatever it
+    reaches, is checked by the path it resolves to (``os.path.realpath``, which
+    opens nothing), and so is the ``.ash`` directory when it is a link. A refusal
+    names the source as found, so it reads the same whether the target is
+    missing, unreadable or readable. Nothing is checked without ``permit``.
+    """
+    if permit is None:
+        return
     search_dir = Path(search_dir)
+    ash_dir = search_dir / ".ash"
+    checked = [ash_dir] if os.path.islink(ash_dir) else []
+    checked.extend(
+        path for path in _candidate_paths(search_dir) if os.path.lexists(path)
+    )
+    for path in checked:
+        if not permit(Path(os.path.realpath(path))):
+            raise ASHConfigInputNotPermittedError(
+                f"{path.as_posix()}, a config source found in the scanned "
+                "directory, reaches a file outside the directories this caller "
+                "may read config from."
+            )
+
+
+def discover_config_source(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> ConfigDiscovery:
+    """Find every config source in `search_dir` and select one by precedence.
+
+    ``permit`` is the caller's predicate for the files it may read config from,
+    as for an ``extends`` base. Every source is checked against it before any is
+    opened (``check_discovery_candidates``), since discovery reads a
+    ``pyproject.toml`` to look for its table. Without it nothing is checked.
+    """
+    search_dir = Path(search_dir)
+    check_discovery_candidates(search_dir, permit)
     found: List[ConfigSource] = []
     for name in ASH_CONFIG_FILE_NAMES:
         for candidate in (search_dir / name, search_dir / ".ash" / name):

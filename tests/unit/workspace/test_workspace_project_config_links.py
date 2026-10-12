@@ -14,7 +14,10 @@ MCP client delivered the tree, as a single-directory scan holds it.
 from __future__ import annotations
 
 import asyncio
+import builtins
+import io
 import json
+import os
 from pathlib import Path
 from typing import Any, List
 from unittest.mock import patch
@@ -295,3 +298,110 @@ def test_a_link_into_a_set_aside_directory_is_followed(
     (project,) = result["projects"]
     assert project["display_label"] == "linked"
     assert str(_server["host"]) not in project["config_source"]
+
+
+# ---------------------------------------------------------------------------
+# A project's config sources are checked before discovery opens any of them
+# ---------------------------------------------------------------------------
+# Discovery reads a pyproject.toml to see whether it has a [tool.ash] table. One
+# that links outside the roots is refused before that, with the same answer
+# whether its target is missing, unreadable or readable.
+
+_MARKER = "TARGET-CONTENT-MARKER"
+_TARGETS = ["missing", "unreadable", "readable"]
+
+
+@pytest.fixture
+def linked_pyproject(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("mode 0 does not stop root from reading the target")
+    from automated_security_helper.cli.mcp.sandbox import (
+        ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        ASH_MCP_TRANSPORT_ENV,
+    )
+
+    root = tmp_path / "ws"
+    write(root / "api" / "app.py", "x = 1\n")
+    workspace = write(
+        root / "dev.code-workspace", json.dumps({"folders": [{"path": "api"}]})
+    )
+    elsewhere = tmp_path / "elsewhere"
+    targets = {name: elsewhere / f"{name}.toml" for name in _TARGETS}
+    write(targets["unreadable"], f'[tool]\nx = "{_MARKER}"\n').chmod(0)
+    write(targets["readable"], f'[tool]\nx = "{_MARKER}"\n')
+    monkeypatch.setenv(ASH_MCP_TRANSPORT_ENV, "stdio")
+    monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(root))
+    monkeypatch.setenv(ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV, str(root))
+    yield root, workspace, targets
+    targets["unreadable"].chmod(0o644)
+
+
+def _record_opens(monkeypatch: pytest.MonkeyPatch) -> List[Path]:
+    """Every path opened through os.open, open() or io.open (which Path uses)."""
+    opened: List[Path] = []
+    real_os_open, real_open = os.open, builtins.open
+
+    def recording_os_open(path, flags, *args, **kwargs):
+        opened.append(Path(os.fspath(path)))
+        return real_os_open(path, flags, *args, **kwargs)
+
+    def recording_open(file, *args, **kwargs):
+        if isinstance(file, (str, bytes, os.PathLike)):
+            opened.append(Path(os.fsdecode(file)))
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_os_open)
+    monkeypatch.setattr(builtins, "open", recording_open)
+    monkeypatch.setattr(io, "open", recording_open)
+    return opened
+
+
+@pytest.mark.parametrize("tool", ["mcp_resolve_workspace", "mcp_scan_workspace"])
+def test_a_linked_pyproject_is_refused_alike_whatever_it_reaches(
+    linked_pyproject, monkeypatch: pytest.MonkeyPatch, tool: str
+) -> None:
+    from automated_security_helper.cli.mcp import workspace as ws
+
+    root, workspace, targets = linked_pyproject
+    link = root / "api" / "pyproject.toml"
+    opened = _record_opens(monkeypatch)
+    responses = []
+    for target in _TARGETS:
+        if os.path.lexists(link):
+            link.unlink()
+        link.symlink_to(targets[target])
+        opened.clear()
+        result = asyncio.run(getattr(ws, tool)(str(workspace), session_id="client-one"))
+        responses.append(
+            (
+                target,
+                link in opened or targets[target] in opened,
+                result.get("success"),
+                result.get("exit_code"),
+                result.get("error_type"),
+                result.get("error"),
+            )
+        )
+
+    assert not any(was_opened for _, was_opened, *_ in responses), responses
+    assert len({tuple(r[2:]) for r in responses}) == 1, responses
+    assert responses[0][2:5] == (False, 4, "config_input_not_permitted"), responses
+    assert _MARKER not in json.dumps(responses, default=str)
+    assert "Errno" not in json.dumps(responses, default=str)
+
+
+def test_control_the_opens_are_recorded(linked_pyproject, monkeypatch) -> None:
+    """The recorder sees discovery read a pyproject.toml, so the test above can fail."""
+    from automated_security_helper.config.config_sources import (
+        discover_config_source,
+    )
+
+    root, _, targets = linked_pyproject
+    link = root / "api" / "pyproject.toml"
+    link.symlink_to(targets["readable"])
+    opened = _record_opens(monkeypatch)
+
+    discover_config_source(root / "api")
+
+    assert link in opened or targets["readable"] in opened, opened
