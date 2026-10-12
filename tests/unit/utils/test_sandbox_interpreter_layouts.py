@@ -536,6 +536,23 @@ def test_a_tool_in_a_bin_link_to_the_directory_holding_a_home_mounts_none_of_it(
 
 
 @pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_tool_directly_in_a_directory_holding_a_home_mounts_none_of_it(
+    world, monkeypatch, which_home
+):
+    """$WORK/tool with the home in $WORK: the tool's directory, named nothing like
+    bin, is $WORK itself, which holds the home."""
+    work = _work_holding(world, which_home)
+    tool = _python(work / "tool")
+    usr, system_python = _system_python(world)
+
+    policy = _build(world, monkeypatch, system_python, usr, argv0=tool)
+
+    assert Path(os.path.realpath(work)) not in _real_grants(policy)
+    assert not _covered(policy, world.passwd_home / ".ssh")
+    _assert_no_home_mounted(world, policy)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
 def test_a_tool_in_a_bin_link_to_a_config_directory_mounts_none_of_it(
     world, monkeypatch, which_home
 ):
