@@ -45,7 +45,9 @@ Two stacked Docker builds:
    outside is what makes SHA pinning possible. `ash_version` and
    `ash_repository_clone_url` follow `--` on the git command line, so git
    takes them as the ref and the remote URL even when one starts with `-`; such
-   a value names no ref or repository, and the build fails at the fetch.
+   a value names no ref or repository, and the build fails at the fetch. The
+   ASH `Dockerfile` installs cfn-nag's gems frozen from its committed
+   `Gemfile.lock`, so builds of one `ash_version` install the same gems.
 2. A thin wrapper (`files/wrapper.Dockerfile`) adding two scripts:
    - `ash-container-init` (the `ENTRYPOINT`) materializes the base config from
      SSM to `.ash/.ash.yaml`, resolves the MCP auth header value from Secrets

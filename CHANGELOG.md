@@ -1814,6 +1814,13 @@
   `finch`, `nerdctl` and `podman` on PATH, as `./ash` falls back when `OCI_RUNNER`
   is empty.
 
+- **The container image installs cfn-nag's gems from the committed `Gemfile.lock`.**
+  The Dockerfile copied only `automated_security_helper/assets/Gemfile`, so every build
+  resolved cfn-nag's dependencies again and could install gem versions the lockfile does
+  not list. It now copies the lockfile beside the Gemfile and runs Bundler with
+  `BUNDLE_FROZEN=true`, so a build installs exactly the locked gems and fails when the
+  Gemfile and the lockfile disagree.
+
 ### Reporting changes
 
 - **Reports now carry the age of every content database a scan used.** Additive:

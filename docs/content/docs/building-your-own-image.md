@@ -143,7 +143,11 @@ directory, or run an image you already have with `--no-build`.
 
 ASH orchestrates external scanners, and their versions are not all pinned. A rebuild
 can therefore change which findings you get, in both directions — a scanner release
-can add checks or drop them. That is an argument for rebuilding on a schedule you
+can add checks or drop them. cfn-nag is one that is pinned: the image installs it and
+every gem it depends on from the committed
+`automated_security_helper/assets/Gemfile.lock`, with Bundler frozen, so each build of
+one ASH version installs the same gems. A build whose Gemfile and Gemfile.lock disagree
+fails at that step instead of resolving new versions. That is an argument for rebuilding on a schedule you
 choose and reviewing the delta, not for rebuilding as rarely as possible.
 
 A workable cadence:

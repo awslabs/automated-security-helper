@@ -241,8 +241,13 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 # cfn-nag (via Gemfile)
 #
-COPY automated_security_helper/assets/Gemfile /deps/Gemfile
+COPY automated_security_helper/assets/Gemfile automated_security_helper/assets/Gemfile.lock /deps/
 ARG BUNDLER_VERSION="2.4.22"
+# Bundler installs the committed Gemfile.lock and does not resolve again. Frozen,
+# it refuses to run when the lockfile is missing or disagrees with the Gemfile, so
+# every build of one ASH commit installs the same gems. An ARG rather than an ENV:
+# it reaches the RUN below and is not left in the environment the image scans with.
+ARG BUNDLE_FROZEN=true
 # One RUN for install, build and purge. `core` is the base for both `ci` and
 # `non-root`, so a C toolchain left here ships in every published image, which is
 # its own finding in a security scanner. Docker layers are additive, so purging in
