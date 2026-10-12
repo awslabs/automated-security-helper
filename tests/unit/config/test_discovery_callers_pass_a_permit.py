@@ -35,9 +35,6 @@ NO_PERMIT = {
     "cli/config.py": "operator CLI",
     "cli/plugin.py": "operator CLI",
     "cli/inspect/inspect_findings_app.py": "operator CLI",
-    # Workspace planning. Reached from MCP scan_workspace too; #800's
-    # trustpaths lane threads the session's gate through resolve_workspace.
-    "workspace/resolver.py": "gated on #800 (trustpaths)",
 }
 
 
