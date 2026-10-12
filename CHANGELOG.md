@@ -174,10 +174,13 @@
 - **An ignore path ending in `/` ignores the directory.** `global_settings.ignore_paths`
   entries are globs matched against a file's path below the source directory, and
   a file's path never ends in `/`, so `vendor/` matched nothing: every file there
-  was scanned and reported. It is now matched as `vendor/**`, wherever ignore
-  paths are matched: dropping findings, the converters, detect-secrets, the
-  exclusions each tree-walking scanner is given, and snyk-code's refusal. It stays
-  anchored at the source directory (`**/vendor/` for any depth). `ash config lint`
+  was scanned and reported. It is now matched as `vendor/*/**`, what is inside a
+  directory named `vendor` and never a file of that name, wherever ignore paths
+  are matched: dropping findings, the converters, detect-secrets, the exclusions
+  each tree-walking scanner is given, and snyk-code's refusal. So `**/.*/` covers
+  the files in dot-directories, not dotfiles such as `.env`, which detect-secrets
+  keeps scanning. It stays anchored at the source directory (`**/vendor/` for any
+  depth). `ash config lint`
   no longer warns about such an ignore path. Suppression paths keep their meaning:
   `build/` still matches no file, and ASH now warns once after the scan for each
   suppression path ending in `/` that matched nothing, naming `build/**`. bandit's

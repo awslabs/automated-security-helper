@@ -135,12 +135,19 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
 def ignore_path_pattern(pattern: str) -> str:
     """The pattern a global ignore path's ``path`` is matched as.
 
-    One ending in ``/`` (or ``\\``) names a directory and ignores everything below
-    it, so it is matched as ``<dir>/**``. A file's path never ends in a slash, so
-    before this ``vendor/`` matched nothing, though it is how a ``.gitignore``
-    names a directory, and ASH's own known ignore paths are written that way.
-    Anchored like every ignore path: ``vendor/`` is the top-level directory, and
-    ``**/vendor/`` one at any depth. Any other pattern is returned as it is.
+    One ending in ``/`` (or ``\\``) names a directory and ignores what is inside
+    it, so ``vendor/`` is matched as ``vendor/*/**``. A file's path never ends in a
+    slash, so before this ``vendor/`` matched nothing, though it is how a
+    ``.gitignore`` names a directory. Anchored like every ignore path: ``vendor/``
+    is the top-level directory, and ``**/vendor/`` one at any depth. A pattern that
+    is only slashes is left alone, so ``/`` keeps matching nothing instead of
+    becoming ``**``; any other pattern is returned as it is.
+
+    Not ``vendor/**``: a trailing ``**`` also matches no component at all, so
+    that form covers a FILE named ``vendor`` as well, and ``**/.*/`` covered
+    every dotfile (``.env``, ``app/config/.npmrc``), which the detect-secrets
+    pre-filter then stopped scanning. The ``*`` requires one component below
+    the directory.
 
     For ignore paths only. A suppression's path ending in ``/`` keeps its literal
     meaning, which matches no file (see
@@ -149,7 +156,7 @@ def ignore_path_pattern(pattern: str) -> str:
     if pattern.endswith(("/", "\\")):
         directory = pattern.rstrip("/\\")
         if directory:
-            return f"{directory}/**"
+            return f"{directory}/*/{_DOUBLE_STAR}"
     return pattern
 
 

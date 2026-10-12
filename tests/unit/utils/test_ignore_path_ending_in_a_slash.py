@@ -12,12 +12,15 @@ passed to the findings step as ignore paths, and matched nothing for the same re
 They are no longer passed: read as directories they would drop every finding a
 dependency scanner reports there, all of npm-audit's among them.
 
-Now an ignore path ending in ``/`` (or ``\\``) is matched as ``<dir>/**``, at every
-place ignore paths are matched: dropping findings, keeping files from the converters
-and from detect-secrets, the exclusions each tree-walking scanner is given, and
-snyk-code's refusal. Like any ignore path it is anchored at the source directory:
-``vendor/`` is the top-level ``vendor`` directory, and ``**/vendor/`` is one at any
-depth.
+Now an ignore path ending in ``/`` (or ``\\``) is matched as ``<dir>/*/**``, at
+every place ignore paths are matched: dropping findings, keeping files from the
+converters and from detect-secrets, the exclusions each tree-walking scanner is
+given, and snyk-code's refusal. That is what is inside the directory, never a file
+of that name: as ``<dir>/**`` it also matched a file named ``vendor``, and
+``**/.*/`` (meant as dot-directories) matched every dotfile, so detect-secrets
+stopped reading ``.env``. Like any ignore path it is anchored at the source
+directory: ``vendor/`` is the top-level ``vendor`` directory, and ``**/vendor/`` is
+one at any depth.
 
 Suppressions keep their meaning. A suppression path ending in ``/`` still matches
 only that literal path, so it suppresses nothing; ASH warns once, after the scan,
@@ -119,6 +122,14 @@ class TestMatching:
             ("vendor/a.py", "**/vendor/", True),
             ("vendor/a.py", "vendor", False),
             ("vendor/a.py", "vendor/*", True),
+            ("vendor/lib/b.js", "vendor/", True),
+            # Inside the directory only, never a file of that name.
+            ("vendor", "vendor/", False),
+            ("src/vendor", "**/vendor/", False),
+            (".env", "**/.*/", False),
+            ("app/config/.npmrc", "**/.*/", False),
+            (".git/config", "**/.*/", True),
+            ("a/.cache/x", "**/.*/", True),
         ],
     )
     def test_an_ignore_path_ending_in_a_slash_is_its_directory(
@@ -143,6 +154,16 @@ class TestDroppedFindings:
         )
 
         assert _kept(report) == ["src/app.py"]
+
+    def test_a_file_named_like_the_directory_is_kept(self):
+        """``build/`` is what is inside a directory named build, not a file of
+        that name; ``**/.*/`` is what is inside dot-directories, not dotfiles."""
+        report = apply_suppressions_to_sarif(
+            _sarif("build", "build/out.py", ".env", "app/config/.npmrc", ".git/config"),
+            _context(["build/", "**/.*/"]),
+        )
+
+        assert _kept(report) == ["build", ".env", "app/config/.npmrc"]
 
     def test_the_built_in_scanner_exclusions_do_not_drop_findings(self):
         """KNOWN_IGNORE_PATHS (node_modules/, .venv/, venv/) are bandit's and
@@ -221,6 +242,26 @@ class TestTheScannersExclusions:
 
         assert sorted(found) == ["thirdparty/a.js", "thirdparty/sub/b.js"]
 
+    def test_files_named_like_the_directory_are_not_ignored(self, tmp_path):
+        """For the scanners' exclusions and snyk-code's refusal too."""
+        source = tmp_path / "src"
+        (source / "vendor" / "lib").mkdir(parents=True)
+        (source / "pkg").mkdir()
+        (source / "vendor" / "lib" / "b.js").write_text("b\n", encoding="utf-8")
+        (source / "pkg" / "vendor").write_text("a file\n", encoding="utf-8")
+        (source / ".env").write_text("KEY=1\n", encoding="utf-8")
+        files = [".env", "pkg/vendor", "vendor/lib/b.js"]
+        ignore = [
+            IgnorePathWithReason(path="**/vendor/", reason="vendored"),
+            IgnorePathWithReason(path="**/.*/", reason="dot-directories"),
+        ]
+
+        assert ignored_entries(source, source, ignore, files) == ["vendor/"]
+        kept = drop_ignored([str(source / name) for name in files], source, ignore)
+        assert kept == [str(source / ".env"), str(source / "pkg" / "vendor")]
+        found = ignore_paths_for_locations(files, _context([]), ignore)
+        assert sorted(found) == ["vendor/lib/b.js"]
+
 
 def test_the_archive_converter_skips_an_archive_below_it(test_plugin_context):
     from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
@@ -238,3 +279,5 @@ def test_the_archive_converter_skips_an_archive_below_it(test_plugin_context):
 
     assert converter._skipped(str(source / "vendor" / "deps.zip")) is True
     assert converter._skipped(str(source / "app" / "bundle.zip")) is False
+    # A file named vendor is not inside the directory.
+    assert converter._skipped(str(source / "vendor")) is False

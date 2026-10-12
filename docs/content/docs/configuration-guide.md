@@ -524,9 +524,11 @@ global_settings:
 
 An ignore path's `path` is a glob matched against a file's path below the source
 directory, anchored at both ends, with `**` for any number of directories. One
-ending in `/` names a directory and ignores everything below it, as `<dir>/**`
-does: `tests/test_data/` is the top-level `tests/test_data` directory, and
-`**/vendor/` a `vendor` directory at any depth. An ignore path drops every
+ending in `/` names a directory and ignores what is inside it, as `<dir>/*/**`
+does, never a file of that name: `tests/test_data/` is what is inside the
+top-level `tests/test_data` directory, and `**/vendor/` what is inside a `vendor`
+directory at any depth. So `**/.*/` ignores the files in dot-directories such as
+`.git/` and `.cache/`, and not dotfiles such as `.env`. An ignore path drops every
 finding below it, a dependency scanner's included, so `**/node_modules/` hides
 the vulnerabilities npm-audit reports. A path naming a
 directory without the slash, such as `tests/test_data`, matches no file in it, and

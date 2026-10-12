@@ -904,6 +904,30 @@ def test_a_global_ignore_path_ending_in_a_slash_drops_the_directory(scanner):
     )
 
 
+def test_an_ignore_path_for_dot_directories_still_scans_a_dotfile(scanner):
+    """``**/.*/`` names what is inside dot-directories, not the dotfiles: a key
+    planted in ``.env`` is still found, while one in ``.cache/`` is not read."""
+    work = Path(scanner.context.work_dir)
+    source_with_planted_key(work, name=".env")
+    hidden = work / ".cache"
+    hidden.mkdir(parents=True, exist_ok=True)
+    source_with_planted_key(hidden, name="settings.py")
+
+    report = scanner.scan(
+        target=scanner.context.work_dir,
+        target_type="converted",
+        global_ignore_paths=[
+            IgnorePathWithReason(path="**/.*/", reason="dot-directories")
+        ],
+    )
+
+    locations = [
+        result.locations[0].physicalLocation.root.artifactLocation.uri
+        for result in report.runs[0].results
+    ]
+    assert [Path(uri).name for uri in locations] == [".env"], locations
+
+
 def test_a_non_matching_global_ignore_leaves_the_finding_in_place(scanner):
     """Control for the global-ignore test above."""
     source_with_planted_key(scanner.context.work_dir, name="generated_settings.py")
