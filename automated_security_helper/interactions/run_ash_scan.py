@@ -3267,14 +3267,16 @@ def run_ash_scan(
             + (" with a workspace plan" if opts.workspace_plan is not None else "")
         )
 
-    if (
-        opts.mode == RunMode.container
-        and opts.config is None
-        and opts.workspace_plan is None
-    ):
+    if opts.mode == RunMode.container and opts.config is None:
         # Before anything reads the config, so the host's own reads (the exit-code
-        # fields below) use the file the container is handed.
-        opts.config = _ash_config_fallback(opts.source_dir)
+        # fields below) use the file the container is handed. A workspace scan gets
+        # ASH_CONFIG as the CLI hands it over, where it is --config's environment
+        # variable: the scan inside sees neither the host's environment nor the file.
+        opts.config = (
+            _ash_config_fallback(opts.source_dir)
+            if opts.workspace_plan is None
+            else os.environ.get("ASH_CONFIG") or None
+        )
 
     _apply_log_level_env(opts)
     _refuse_symlinked_output_dir(opts)

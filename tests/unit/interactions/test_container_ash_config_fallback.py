@@ -13,6 +13,7 @@ case a local scan would use it.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict
 
 import pytest
@@ -94,5 +95,51 @@ def test_an_explicit_config_wins_over_ash_config(
 def test_without_ash_config_nothing_is_named(handed_over, operator_config, tmp_path):
     """Control."""
     _scan(tmp_path)
+
+    assert handed_over["config"] is None
+
+
+def _workspace_plan(tmp_path):
+    from automated_security_helper.workspace.resolver import resolve_workspace
+
+    root = tmp_path / "ws"
+    (root / "api").mkdir(parents=True)
+    definition = root / "dev.code-workspace"
+    definition.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
+    return resolve_workspace(definition)
+
+
+def test_a_workspace_scan_hands_ash_config_over_as_the_cli_does(
+    handed_over, operator_config, monkeypatch, tmp_path
+):
+    """The CLI reads ASH_CONFIG as --config for a workspace scan too, so a library
+    caller's workspace scan in container mode gets the same file."""
+    monkeypatch.setenv("ASH_CONFIG", str(operator_config))
+    plan = _workspace_plan(tmp_path)
+
+    with pytest.raises(SystemExit):
+        ras.run_ash_scan(
+            source_dir=plan.workspace_root,
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.container,
+            workspace_plan=plan,
+        )
+
+    assert handed_over["config"] == str(operator_config)
+
+
+def test_a_workspace_scan_without_ash_config_names_nothing(
+    handed_over, operator_config, tmp_path
+):
+    """Control."""
+    plan = _workspace_plan(tmp_path)
+
+    with pytest.raises(SystemExit):
+        ras.run_ash_scan(
+            source_dir=plan.workspace_root,
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.container,
+            workspace_plan=plan,
+        )
 
     assert handed_over["config"] is None

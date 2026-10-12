@@ -243,7 +243,9 @@ extends, so they refuse one with an `extends` entry with exit 3; use
 `ash --mode container` for such a chain. A program that
 calls `run_ash_scan(mode=RunMode.container)` with no `config` gets `ASH_CONFIG`'s file
 handed to the container when no config is found in the source directory, which is when
-a local scan uses it.
+a local scan uses it. For a workspace scan (`workspace_plan`) it is handed over whenever
+it is set, as `ash scan --workspace`, which reads `ASH_CONFIG` as `--config`, hands it
+over.
 
 A path that would be mounted (the source and output directories, the config file and
 the files it extends, the workspace policy) may not contain a comma, a double quote, a
