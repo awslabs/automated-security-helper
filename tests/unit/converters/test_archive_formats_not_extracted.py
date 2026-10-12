@@ -13,10 +13,13 @@ not fail the completeness gate.
 
 from __future__ import annotations
 
+import gzip
 import io
 import zipfile
 from pathlib import Path
 from typing import Dict
+
+import pytest
 
 from automated_security_helper.interactions.run_ash_scan import incomplete_converters
 from automated_security_helper.models.asharp_model import (
@@ -39,7 +42,7 @@ NOT_EXTRACTED = [
     "tools.7z",
     "lib/vendor.jar",
     "wheels/pkg-1.0-py3-none-any.whl",
-    "odd.zip.",
+    "odd.tgz.",
 ]
 
 
@@ -119,3 +122,65 @@ def test_an_ignored_archive_format_is_not_recorded(test_plugin_context, monkeypa
     )
 
     assert [r.path for r in converter.refused_inputs] == ["release.tgz"]
+
+
+@pytest.mark.parametrize(
+    "name", ["dotted.zip.", "spaced.zip ", "both.zip. ", "UPPER.ZIP."]
+)
+def test_a_zip_named_with_trailing_dots_or_spaces_is_extracted(
+    name, test_plugin_context, monkeypatch
+):
+    """Windows drops trailing dots and spaces from a name, so the file is a zip there."""
+    converter, results = convert(
+        test_plugin_context, monkeypatch, {name: zip_of({"app.py": "x = 1\n"})}
+    )
+
+    (extracted,) = results
+    assert (extracted / "app.py").read_bytes() == b"x = 1\n"
+    assert converter.refused_inputs == []
+    assert converter.failed_inputs == []
+
+
+def test_a_single_file_gzip_named_with_a_trailing_dot_is_decompressed(
+    test_plugin_context, monkeypatch
+):
+    converter, results = convert(
+        test_plugin_context,
+        monkeypatch,
+        {"data.json.gz.": gzip.compress(b'{"a": 1}\n', mtime=0)},
+    )
+
+    (extracted,) = results
+    assert (extracted / "data.json").read_bytes() == b'{"a": 1}\n'
+    assert converter.failed_inputs == []
+
+
+def test_a_path_outside_the_tree_does_not_stop_the_conversion(
+    test_plugin_context, monkeypatch, tmp_path
+):
+    """The ignore-path check takes a path relative to the tree, which this has none of."""
+    monkeypatch.setattr(
+        test_plugin_context.config.global_settings,
+        "ignore_paths",
+        [IgnorePathWithReason(path="lib/**", reason="vendored")],
+    )
+    outside = tmp_path / "elsewhere" / "release.tgz"
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(b"not read")
+    tree = Path(test_plugin_context.source_dir)
+    tree.mkdir(parents=True, exist_ok=True)
+    inside = tree / "app.zip"
+    inside.write_bytes(zip_of({"app.py": "x = 1\n"}))
+    monkeypatch.setattr(
+        f"{ARCHIVE_MODULE}.scan_set", lambda **kwargs: [str(outside), str(inside)]
+    )
+    converter = ArchiveConverter(
+        context=test_plugin_context,
+        config=test_plugin_context.config.converters.archive,
+    )
+
+    (extracted,) = converter.convert()
+
+    assert (extracted / "app.py").is_file()
+    assert len(converter.refused_inputs) == 1
+    assert "not extracted" in converter.refused_inputs[0].reason

@@ -19,8 +19,9 @@ ASH includes 2 built-in converters that preprocess files to make them suitable f
 
 **Supported Formats**:
 - ZIP files (.zip)
-- TAR archives (.tar, .tar.gz). A file is selected by its last suffix only, so a
-  `.tgz` is not extracted. A file in the tree named as any other archive or
+- TAR archives (.tar, .tar.gz). A file is selected by its last suffix only, in any
+  case and after any trailing dots and spaces (which Windows drops from a name, so
+  `app.zip.` is a zip), so a `.tgz` is not extracted. A file in the tree named as any other archive or
   compressed format in the list below (`.tgz`, `.tar.bz2`, `.7z`, `.jar`, `.whl` and
   the rest) is recorded as a refused input that was not extracted, so the summaries
   show that its contents were not scanned. It does not fail the scan.

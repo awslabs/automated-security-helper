@@ -40,6 +40,7 @@ from automated_security_helper.base.converter_plugin import (
 )
 from automated_security_helper.base.options import ConverterOptionsBase
 from automated_security_helper.plugins.decorators import ash_converter_plugin
+from automated_security_helper.utils.converter_refusals import inert_text
 from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
@@ -591,7 +592,7 @@ def _plain_gzip_name(archive_file: str) -> Optional[str]:
     ``data.json.gz`` is ``data.json``. A name ending ``.tar.gz`` says the content is
     a tarball, so it is read as one and never as a single compressed file.
     """
-    base = archive_file.replace("\\", "/").rsplit("/", 1)[-1]
+    base = _base_name(archive_file)
     lowered = base.lower()
     if not lowered.endswith(".gz") or lowered.endswith(".tar.gz"):
         return None
@@ -616,14 +617,23 @@ def _gzip_holds_a_tar(handle: BinaryIO) -> bool:
     return True
 
 
-def _is_archive_name(name: str) -> bool:
-    """Whether a name marks a file as an archive or compressed file.
-
-    Trailing dots and spaces are dropped first, as Windows drops them, so
-    ``lib.zip.`` is a zip there and is one here.
+def _base_name(name: str) -> str:
+    """A path's last component, read with both separators, without trailing dots
+    and spaces, which Windows drops from a name: ``lib.zip.`` is ``lib.zip`` there,
+    so it is read as that here too.
     """
-    base = name.replace("\\", "/").rsplit("/", 1)[-1].rstrip(". ")
-    return "." in base and base.rsplit(".", 1)[-1].lower() in NESTED_ARCHIVE_SUFFIXES
+    return name.replace("\\", "/").rsplit("/", 1)[-1].rstrip(". ")
+
+
+def _archive_suffix(name: str) -> str:
+    """A path's last suffix, lowercased, after _base_name; empty when it has none."""
+    base = _base_name(name)
+    return base.rsplit(".", 1)[-1].lower() if "." in base else ""
+
+
+def _is_archive_name(name: str) -> bool:
+    """Whether a name marks a file as an archive or compressed file."""
+    return _archive_suffix(name) in NESTED_ARCHIVE_SUFFIXES
 
 
 # tarfile's "data" extraction filter refuses links that leave the destination, device
@@ -1021,9 +1031,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             output=self.context.output_dir,
             honor_ignore_files=honors_ignore_files(self.context.config),
         )
-        candidates = [f.strip() for f in archive_files]
+        # Paths as the scan set gives them: stripping them would turn a file whose
+        # name ends in a space into one that does not exist.
+        candidates = list(archive_files)
         archive_files = [
-            f for f in candidates if f.split(".")[-1].lower() in ARCHIVE_SUFFIXES
+            f for f in candidates if _archive_suffix(f) in ARCHIVE_SUFFIXES
         ]
         selected = set(archive_files)
         # Named as an archive the converter does not extract (a .tgz, .jar, .7z
@@ -1032,8 +1044,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         for path in candidates:
             if path in selected or not _is_archive_name(path):
                 continue
-            if self._skipped(path):
-                continue
+            try:
+                if self._skipped(path):
+                    continue
+            except (OSError, ValueError) as error:
+                # A path the ignore check cannot place in the tree: recorded all
+                # the same, since a record is all that is done with it.
+                ASH_LOGGER.debug(
+                    f"Could not check {inert_text(path)} against ignore_paths: {error}"
+                )
             self.record_refused_input(
                 TreeInputRefused(
                     relative_display(path, self.context.source_dir),
@@ -1129,9 +1148,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         continue
 
                     # Extract ZIP to target path after inspecting members
-                    is_zip = archive_file.lower().endswith(
-                        ".zip"
-                    ) and zipfile.is_zipfile(archive_handle)
+                    is_zip = _archive_suffix(
+                        archive_file
+                    ) == "zip" and zipfile.is_zipfile(archive_handle)
                     archive_handle.seek(0)
                     if is_zip:
                         # Counted before zipfile builds a ZipInfo for every entry.
