@@ -54,7 +54,20 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    Optional,
+    Set,
+    Tuple,
+)
+
+if TYPE_CHECKING:
+    from automated_security_helper.utils.log import ASHLogger
 
 #: ASGI scope key the stamp is stored under. Namespaced so no framework or SDK key
 #: can collide with it.
@@ -112,7 +125,7 @@ def _header(scope: Scope, name: bytes) -> Optional[str]:
 
 
 def _response_header(
-    headers: Iterable[Tuple[bytes, bytes]], name: bytes
+    headers: Optional[Iterable[Tuple[bytes, bytes]]], name: bytes
 ) -> Optional[str]:
     for key, value in headers or ():
         if key.lower() == name:
@@ -409,7 +422,7 @@ class SessionBoundary:
                 await self._end(session)
 
 
-def _logger():
+def _logger() -> ASHLogger:
     from automated_security_helper.utils.log import ASH_LOGGER
 
     return ASH_LOGGER

@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import contextlib
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Iterator, Mapping, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, Iterator, Mapping, Optional, cast
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import Context as SdkContext
@@ -294,7 +294,9 @@ def resolve_caller_session_id(ctx: object) -> str:
     return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
-def session_identity_refusal(session_id: str, operation: str) -> Optional[dict]:
+def session_identity_refusal(
+    session_id: str, operation: str
+) -> Optional[Dict[str, Any]]:
     """The refusal a session-dependent tool returns for an unidentified caller.
 
     Returns None when ``session_id`` names a session.

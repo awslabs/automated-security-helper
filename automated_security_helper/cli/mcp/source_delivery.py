@@ -387,7 +387,9 @@ def _stop_process_group(process: "subprocess.Popen[str]") -> None:
         os.killpg(process.pid, signal.SIGKILL)
 
 
-def _run_git(cmd: List[str], *, env: Dict[str, str]) -> subprocess.CompletedProcess:
+def _run_git(
+    cmd: List[str], *, env: Dict[str, str]
+) -> subprocess.CompletedProcess[str]:
     """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
 
     git runs in a process group of its own, with no stdin, so that on expiry the
@@ -604,7 +606,7 @@ def remote_clone_host(url: str) -> str:
 ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
 
 
-def git_allowed_hosts() -> frozenset:
+def git_allowed_hosts() -> frozenset[str]:
     """The hosts the operator allows clones from, lower-cased; possibly none."""
 
     raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
