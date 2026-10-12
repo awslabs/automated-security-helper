@@ -65,6 +65,11 @@ _stderr = Console(stderr=True)
 # without forcing an Enum class on the public CLI surface.
 _VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
 
+#: Exit code for an invocation the server can't run with: a usage error, apart
+#: from 3, which reports a config that can't be used. An unknown
+#: ``ASH_MCP_TRANSPORT`` exits with it.
+_EXIT_USAGE = 5
+
 #: Bind addresses for which the MCP SDK turns its Host and Origin check on by
 #: itself. Exactly the SDK's literal list: ``127.0.0.2`` is loopback too, but the
 #: SDK leaves the check off for it, so it is treated like any other address.
@@ -792,16 +797,15 @@ def mcp_command(
         _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
         raise typer.Exit(3)
 
-    if transport not in _VALID_TRANSPORTS:
-        _stderr.print(
-            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, got '{transport}'.[/red]"
-        )
-        raise typer.Exit(3)
-
     # ASH_MCP_TRANSPORT is the operator's override that makes every caller
-    # remote. A value it cannot read would be ignored by nothing and obeyed by
-    # nobody: refuse to start rather than serve with an override in an unknown
-    # state.
+    # remote. A value that names no transport (a typo such as "http") would leave
+    # the override in an unknown state, so the server refuses to start. The
+    # value is part of how the server was invoked, not a config file, so the
+    # refusal is a usage error, exit 5, where a config that can't be used is 3.
+    #
+    # Before the --transport check: the container entrypoint (ash-mcp-serve)
+    # passes this variable's value as --transport too, and the variable is the
+    # operator's mistake to report.
     from automated_security_helper.cli.mcp.sandbox import (
         ASH_MCP_TRANSPORT_ENV,
         KNOWN_TRANSPORTS,
@@ -811,9 +815,16 @@ def mcp_command(
     unknown = unknown_transport_override()
     if unknown is not None:
         _stderr.print(
-            f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={unknown!r} names no "
-            f"transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), or unset "
-            f"it.[/red]"
+            f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={escape(repr(unknown))} "
+            f"names no transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), "
+            f"or unset it.[/red]",
+            highlight=False,
+        )
+        raise typer.Exit(_EXIT_USAGE)
+
+    if transport not in _VALID_TRANSPORTS:
+        _stderr.print(
+            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, got '{transport}'.[/red]"
         )
         raise typer.Exit(3)
 

@@ -144,8 +144,9 @@ def test_a_config_file_in_a_directory_the_server_cannot_search_refuses_startup(
 @pytest.mark.parametrize(
     "content",
     [
-        pytest.param("project_name: [1, 2]\n", id="refused-by-the-schema"),
-        pytest.param("project_name: x\n  : : [\n", id="not-yaml"),
+        pytest.param(b"project_name: [1, 2]\n", id="refused-by-the-schema"),
+        pytest.param(b"project_name: x\n  : : [\n", id="not-yaml"),
+        pytest.param(b"project_name: \xff\xfe\xfa\n", id="not-utf-8"),
     ],
 )
 @pytest.mark.parametrize("transport", ["stdio", "streamable-http"])
@@ -153,7 +154,7 @@ def test_a_config_file_that_does_not_load_refuses_startup(
     tmp_path, monkeypatch, stderr, started, transport, content
 ) -> None:
     config = tmp_path / "ash-config.yaml"
-    config.write_text(content, encoding="utf-8")
+    config.write_bytes(content)
     monkeypatch.setenv("ASH_CONFIG", str(config))
 
     with pytest.raises(typer.Exit) as excinfo:
@@ -201,20 +202,32 @@ def test_the_ash_command_line_refuses_too(tmp_path, monkeypatch, started) -> Non
 
 
 @pytest.mark.parametrize(
-    "variable", ["ASH_CONFIG", "ASH_MCP_TRANSPORT"], ids=["config", "transport"]
+    "kind",
+    [
+        "missing",
+        "directory",
+        "not-utf-8",
+        pytest.param("unreadable", marks=_NO_POSIX_MODES),
+    ],
 )
 def test_running_the_server_module_makes_the_same_startup_checks(
-    tmp_path, variable
+    tmp_path, restore_modes, kind
 ) -> None:
-    # `python -m automated_security_helper.cli.mcp_server` starts the stdio server
-    # without `ash mcp` in front of it. It must refuse the same environment.
+    # `python -m automated_security_helper.cli.mcp_server` used to start the stdio
+    # server without `ash mcp` in front of it. It must refuse the same environment.
+    # Its refusal of an unknown ASH_MCP_TRANSPORT is in
+    # test_transport_override_is_validated.py.
+    config = tmp_path / "ash-config.yaml"
+    if kind == "directory":
+        config.mkdir()
+    elif kind == "not-utf-8":
+        config.write_bytes(b"project_name: \xff\xfe\xfa\n")
+    elif kind == "unreadable":
+        config.write_text("project_name: operator-policy\n", encoding="utf-8")
+        restore_modes(config)
     env = {k: v for k, v in os.environ.items() if not k.startswith("ASH_MCP_")}
-    env.pop("ASH_CONFIG", None)
     env["ASH_MCP_WORKSPACE_ROOT"] = str(tmp_path / "workspaces")
-    if variable == "ASH_CONFIG":
-        env["ASH_CONFIG"] = str(tmp_path / "missing.yaml")
-    else:
-        env["ASH_MCP_TRANSPORT"] = "no-such-transport"
+    env["ASH_CONFIG"] = str(config)
 
     result = subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.mcp_server"],
@@ -227,7 +240,7 @@ def test_running_the_server_module_makes_the_same_startup_checks(
     )
 
     assert result.returncode == 3, (result.returncode, result.stderr[-2000:])
-    assert variable in result.stderr, result.stderr[-2000:]
+    assert "ASH_CONFIG" in result.stderr, result.stderr[-2000:]
 
 
 def test_the_message_names_the_variable_and_the_path(
