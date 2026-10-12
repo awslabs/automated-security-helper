@@ -162,6 +162,19 @@
 
 ### Behavior changes
 
+- **A scan uses only the plugin modules it names.** A scan's converters,
+  scanners, reporters and event handlers are ASH's built-in ones plus those of the
+  modules its own `ash_plugin_modules` and `--ash-plugin-modules` name. This holds in
+  a process that runs several scans, the MCP server included: a module named for an
+  earlier scan, whether by a repository's config, the operator or one MCP session's
+  profile, or loaded by the `list_scanners` tool, takes no part in a later scan that
+  does not name it.
+  - Embedding code that registers plugin classes itself should define them in a
+    module inside the plugin namespace (a package named `ash_plugins` or ending in
+    `_ash_plugins`) and name that module in the scan's `ash_plugin_modules`. A class
+    registered from a module the scan does not name is not used by it.
+  - Event handlers the embedding program subscribes from outside the plugin
+    namespace are still notified in every scan it runs.
 - **The AWS reporters are disabled by default.** The Security Hub, CloudWatch
   Logs, S3 and Bedrock summary reporters shipped `enabled: true`, so loading
   `ash_aws_plugins` (by any earlier scan in the process, an MCP server, or a config

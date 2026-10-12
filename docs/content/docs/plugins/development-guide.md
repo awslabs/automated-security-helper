@@ -490,6 +490,15 @@ name with a class in another plugin package or with one of ASH's built-in plugin
 Each one registers, neither replaces the other, and each takes part in the scans that
 select it.
 
+A process that runs several scans, such as the MCP server or a program calling
+`run_ash_scan` more than once, keeps every plugin module any of them imported
+registered, but each scan still uses only the modules it names. A module the operator
+named for one scan, for example in one MCP session's profile, takes no part in a later
+scan that does not name it. If your own program registers plugin classes itself
+instead of shipping them in a package, define them in a module inside the plugin
+namespace and name that module in each scan's `ash_plugin_modules`: a class registered
+from a module the scan does not name is not used by that scan.
+
 ## Best Practices
 
 ### Plugin Design
