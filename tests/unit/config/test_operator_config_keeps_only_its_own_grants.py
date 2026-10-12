@@ -23,6 +23,10 @@ The layouts are under a directory ``W`` that holds the scanned checkout ``W/repo
 
 The controls are a config with no ``extends``, which keeps its grant, and a config
 inside the scanned tree, which keeps neither grant.
+
+The rule is the same for the root file: a ``--config`` inside a git checkout that
+is not scanned, such as ``W/other``, grants nothing either, and the warning names
+it. Only a file outside every checkout keeps the grants it writes.
 """
 
 from __future__ import annotations
@@ -201,5 +205,26 @@ def test_a_config_inside_the_scanned_tree_keeps_neither_grant(
     assert any(
         _ignored_keys(message)
         == {"sandbox.network_scanners", "sandbox.extra_read_paths"}
+        for message in _dropped(sandbox_warnings)
+    ), sandbox_warnings
+
+
+def test_a_root_config_in_a_checkout_that_is_not_scanned_keeps_no_grant(
+    tmp_path, sandbox_warnings
+):
+    """The root file follows the bases' rule: inside any git checkout, it grants
+    nothing, and the warning names it."""
+    w = tmp_path / "W"
+    _scanned_checkout(w)
+    (w / "other" / ".git").mkdir(parents=True)
+    config = _write(w / "other" / "ash-config.yaml", OPERATOR)
+
+    sandbox = resolve_config(config_path=config, source_dir=w / "repo").sandbox
+
+    assert list(sandbox.extra_read_paths) == []
+    named = (Path("other") / config.name).as_posix()
+    assert any(
+        _ignored_keys(message) == {"sandbox.extra_read_paths"}
+        and named in message.replace("\\", "/")
         for message in _dropped(sandbox_warnings)
     ), sandbox_warnings
