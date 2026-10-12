@@ -190,6 +190,7 @@ from automated_security_helper.utils.config_trust import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.scan_targets import scan_targets
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.subprocess_utils import path_independent_dirs
 from automated_security_helper.utils.suppression_matcher import file_path_matches
@@ -256,6 +257,13 @@ _SEVERITY_TO_LEVEL: Dict[str, str] = {
 _DEFAULT_CONFIG_CANDIDATES = (".github/actionlint.yaml", ".github/actionlint.yml")
 
 _WORKFLOW_SUFFIXES = (".yml", ".yaml")
+
+#: The reason ``nothing_to_scan_reason`` gives when no tree holds a workflow file
+#: actionlint would lint.
+NO_WORKFLOW_FILE = (
+    "no GitHub Actions workflow file (.github/workflows/*.yml or *.yaml) for "
+    "actionlint to lint in the scanned files"
+)
 
 #: Directory names whose workflows are not linted: vendored dependencies and
 #: virtualenvs, which the repository does not own. zizmor skips the same ones.
@@ -744,13 +752,36 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             )
         return found is not None
 
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None when either tree holds a workflow file actionlint lints; see the base class.
+
+        From ``_workflow_files``, the selection ``scan()`` makes, over every tree a
+        scan hands this scanner (``utils/scan_targets.py``), so a workflow that
+        selection leaves out (a link out of the tree, a reference outside it, a
+        vendored copy) is not input here either. ``global_settings.ignore_paths``
+        is not applied: scan() is handed its list by the scan, and without it this
+        can find more workflows than scan() does, never fewer, which keeps the
+        scanner MISSING rather than hiding it. Quiet, because the executor also
+        asks after a scan that linted nothing, which logged its own warnings.
+        """
+        if self.context is None:
+            return None
+        for target_type, target in scan_targets(self.context):
+            if self._workflow_files(target, target_type, [], report=False):
+                return None
+        return NO_WORKFLOW_FILE
+
     def _workflow_files(
         self,
         target: Path,
         target_type: Literal["source", "converted"],
         global_ignore_paths: List[IgnorePathWithReason],
+        report: bool = True,
     ) -> List[str]:
-        """Workflow files under *target*, as POSIX paths relative to it, sorted."""
+        """Workflow files under *target*, as POSIX paths relative to it, sorted.
+
+        ``report`` False leaves out the warnings for the workflows it skips.
+        """
         if target_type == "converted":
             candidates = [str(p) for p in target.rglob("*") if p.is_file()]
         else:
@@ -787,29 +818,32 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             # cannot open: it exits 3 and no workflow in the run is linted. Checked
             # before resolve(), which raises on a loop before Python 3.13.
             if path.is_symlink() and not path.is_file():
-                self._plugin_log(
-                    f"Not linting {rel}: it is a symbolic link that does not "
-                    "resolve to a file.",
-                    level=logging.WARNING,
-                )
+                if report:
+                    self._plugin_log(
+                        f"Not linting {rel}: it is a symbolic link that does not "
+                        "resolve to a file.",
+                        level=logging.WARNING,
+                    )
                 continue
             # A symlinked workflow is followed by actionlint, which copies the
             # target's lines into the SARIF snippet. Only pass files whose real
             # path is inside the real scan root.
             if not path.resolve().is_relative_to(target_real):
-                self._plugin_log(
-                    f"Not linting {rel}: it resolves outside the scan root.",
-                    level=logging.WARNING,
-                )
+                if report:
+                    self._plugin_log(
+                        f"Not linting {rel}: it resolves outside the scan root.",
+                        level=logging.WARNING,
+                    )
                 continue
             spec = self._reference_outside_the_tree(path, target_real)
             if spec is not None:
-                self._plugin_log(
-                    f"Not linting {rel}: its local reference 'uses: {spec}' "
-                    "resolves outside the scanned tree, and actionlint would read "
-                    "that file and quote it in its findings.",
-                    level=logging.WARNING,
-                )
+                if report:
+                    self._plugin_log(
+                        f"Not linting {rel}: its local reference 'uses: {spec}' "
+                        "resolves outside the scanned tree, and actionlint would "
+                        "read that file and quote it in its findings.",
+                        level=logging.WARNING,
+                    )
                 continue
             relative.append(rel)
         return sorted(set(relative))

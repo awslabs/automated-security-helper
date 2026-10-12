@@ -18,6 +18,7 @@ alone would count as input.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Dict, Optional
 from unittest.mock import MagicMock, patch
@@ -31,6 +32,10 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    NO_WORKFLOW_FILE,
+    ActionlintScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
     CfnGuardScanner,
 )
@@ -259,6 +264,121 @@ def test_cfn_scan_and_hook_agree(tmp_path, monkeypatch, scanner_class, tree):
 
     attempted = _scan_attempts_a_target(
         scanner_class(context=context), context, monkeypatch
+    )
+
+    assert (reason is None) == attempted, (reason, attempted)
+
+
+# --------------------------------------------------------------------------- #
+# actionlint: the workflow files _workflow_files selects
+# --------------------------------------------------------------------------- #
+
+WORKFLOW = (
+    "on: push\n"
+    "jobs:\n"
+    "  build:\n"
+    "    runs-on: ubuntu-latest\n"
+    "    steps:\n"
+    "      - run: echo hi\n"
+)
+#: A workflow whose local reference resolves outside the scanned tree. actionlint
+#: would read and quote what it names, so _workflow_files leaves it out.
+WORKFLOW_USING_A_PATH_OUTSIDE = WORKFLOW + "      - uses: ./../elsewhere\n"
+COMPOSITE_ACTION = "name: a\nruns:\n  using: composite\n  steps: []\n"
+
+WORKFLOW_TREES = [
+    pytest.param({"source": {".github/workflows/ci.yml": WORKFLOW}}, id="workflow"),
+    pytest.param(
+        {"source": {"README.md": "# app\n", "ci.yml": WORKFLOW}},
+        id="no-workflow",
+    ),
+    pytest.param(
+        {"source": {".github/workflows/nested/ci.yml": WORKFLOW}},
+        id="below-the-workflows-directory",
+    ),
+    pytest.param(
+        {"source": {"node_modules/pkg/.github/workflows/ci.yml": WORKFLOW}},
+        id="vendored",
+    ),
+    pytest.param(
+        {"source": {"action.yml": COMPOSITE_ACTION}},
+        id="composite-action-only",
+    ),
+    pytest.param(
+        {
+            "source": {"README.md": "# app\n"},
+            "converted": {"archive/.github/workflows/ci.yml": WORKFLOW},
+        },
+        id="workflow-only-converted",
+    ),
+    pytest.param(
+        {
+            "source": {"README.md": "# app\n"},
+            "links": {".github/workflows/ci.yml": WORKFLOW},
+        },
+        id="workflow-through-a-link-out-of-the-tree",
+    ),
+    pytest.param(
+        {"source": {".github/workflows/ci.yml": WORKFLOW_USING_A_PATH_OUTSIDE}},
+        id="workflow-referencing-a-path-outside",
+    ),
+]
+
+
+def test_actionlint_a_workflow_in_the_source_tree_is_something_to_scan(tmp_path):
+    context = _context(tmp_path, {".github/workflows/ci.yml": WORKFLOW})
+
+    assert ActionlintScanner(context=context).nothing_to_scan_reason() is None
+
+
+def test_actionlint_a_tree_without_a_workflow_has_nothing_to_scan(tmp_path):
+    context = _context(
+        tmp_path,
+        {"README.md": "# app\n", "action.yml": COMPOSITE_ACTION},
+        {"archive/ci.yml": WORKFLOW},
+    )
+
+    assert ActionlintScanner(context=context).nothing_to_scan_reason() == (
+        NO_WORKFLOW_FILE
+    )
+
+
+def test_actionlint_a_workflow_only_in_the_converted_tree_is_something_to_scan(
+    tmp_path,
+):
+    context = _context(
+        tmp_path,
+        {"README.md": "# app\n"},
+        {"archive/.github/workflows/ci.yml": WORKFLOW},
+    )
+
+    assert ActionlintScanner(context=context).nothing_to_scan_reason() is None
+
+
+def test_actionlint_the_hook_does_not_repeat_the_scans_warnings(tmp_path, caplog):
+    """The executor asks the hook after a scan that linted nothing, which warned."""
+    context = _context(
+        tmp_path,
+        {"README.md": "# app\n"},
+        links={".github/workflows/ci.yml": WORKFLOW},
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        reason = ActionlintScanner(context=context).nothing_to_scan_reason()
+
+    assert reason == NO_WORKFLOW_FILE
+    assert "Not linting" not in caplog.text
+
+
+@pytest.mark.parametrize("tree", WORKFLOW_TREES)
+def test_actionlint_scan_and_hook_agree(tmp_path, monkeypatch, tree):
+    context = _context(
+        tmp_path, tree["source"], tree.get("converted"), tree.get("links")
+    )
+    reason = ActionlintScanner(context=context).nothing_to_scan_reason()
+
+    attempted = _scan_attempts_a_target(
+        ActionlintScanner(context=context), context, monkeypatch
     )
 
     assert (reason is None) == attempted, (reason, attempted)
