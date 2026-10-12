@@ -67,8 +67,10 @@ GitLab and Jenkins jobs): pass `--build-target ci` there. Another `--container-u
 container runs as that user and writes its reports there; on a root host ASH creates the
 output directory as root. `./ash` refuses it the same way, and so does `Invoke-ASH`, run as root
 or given `-ContainerUID 0` or `-ContainerGID 0`; its opt-in is `-BuildTarget ci`.
-Without `-ContainerUID`, `Invoke-ASH` builds an unprivileged caller's image with the
-Dockerfile's own UID.
+On Linux and macOS, `Invoke-ASH` gives the non-root user the caller's own UID and GID
+(`id -u`, `id -g`) unless `-ContainerUID` or `-ContainerGID` names another, as `./ash`
+and `ash --mode container` do, and checks both the same way; on Windows the
+Dockerfile's defaults apply.
 
 The opt-in for a job that runs as root, such as an AWS CodeBuild build:
 

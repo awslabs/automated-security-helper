@@ -32,6 +32,8 @@ from typing import Optional
 
 import pytest
 
+from tests.utils.host_ids import fixed_id_dir
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPERS = REPO_ROOT / "utils" / "ash_helpers.ps1"
 PWSH = shutil.which("pwsh")
@@ -118,11 +120,9 @@ def host(tmp_path, pwsh):
     runner.chmod(0o755)
     (tmp_path / "src").mkdir()
 
-    def invoke(arguments: str, uid: Optional[str] = "1000"):
+    def invoke(arguments: str, uid: Optional[str] = "1000", gid: Optional[str] = None):
         if uid is not None:
-            fake_id = bin_dir / "id"
-            fake_id.write_text(f"#!/bin/sh\necho {uid}\n", encoding="utf-8")
-            fake_id.chmod(0o755)
+            fixed_id_dir(bin_dir, uid, gid if gid is not None else uid)
         script = (
             f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
             f"Invoke-ASH -OCIRunner docker -SourceDir src -OutputDir out {arguments}; "
@@ -182,6 +182,37 @@ def test_an_unprivileged_caller_builds_non_root(host):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert calls[calls.index("--target") + 1] == "non-root"
+
+
+@pytestmark_posix
+def test_the_caller_ids_are_the_default_ids_of_the_non_root_user(host):
+    """As ./ash and ash --mode container do: the user owns what the caller made."""
+    result, calls = host("-NoRun", uid="1234", gid="1235")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "UID=1234" in calls and "GID=1235" in calls
+
+
+@pytestmark_posix
+def test_a_root_caller_with_another_uid_still_gets_gid_0_refused(host):
+    """The GID comes from the caller too, so root's group 0 is refused, as ./ash
+    and ash --mode container refuse it."""
+    result, calls = host("-NoRun -ContainerUID 1000", uid="0", gid="0")
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert calls == []
+    assert "GID 0" in " ".join(result.stderr.split())
+
+
+@pytestmark_posix
+def test_explicit_ids_win_over_the_caller_ids(host):
+    """Control."""
+    result, calls = host(
+        "-NoRun -ContainerUID 2000 -ContainerGID 2001", uid="0", gid="0"
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "UID=2000" in calls and "GID=2001" in calls
 
 
 @pytestmark_posix

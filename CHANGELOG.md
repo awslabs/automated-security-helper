@@ -448,6 +448,13 @@
   before anything is built or mounted, by real path. An output directory inside the
   source, such as the default `.ash/ash_output`, or outside it works as before; a run
   with `--no-run` mounts nothing and is not refused.
+- **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
+  Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
+  and GID 100, which cannot write an output directory the caller owns, and checked
+  only the IDs it was given. It now takes the caller's own (`id -u`, `id -g`), as
+  `./ash` and `ash --mode container` do, and refuses a UID or GID of 0 from either
+  source the same way, so a root caller with `-ContainerUID 1000` and GID 0 is refused
+  too. Windows keeps the Dockerfile's defaults.
 - **On Windows, container mode and `ash build-image` default to the `ci` stage.** The
   output directory is bind-mounted into the container, and on Windows the runtime does
   not map write permissions onto that mount, so the `non-root` user could not write

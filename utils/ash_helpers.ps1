@@ -400,6 +400,15 @@ function Invoke-ASH {
 
                 # Build the container if not skipped
                 if (-not $NoBuild) {
+                    # On Linux and macOS the non-root user gets the caller's own UID and
+                    # GID (id -u, id -g) unless -ContainerUID or -ContainerGID names
+                    # another, as ./ash and `ash --mode container` give it, so it owns
+                    # what the caller created; both are then checked the same way. On
+                    # Windows there is no such ID and the Dockerfile's defaults apply.
+                    if (-not ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) -and (Get-Command id -ErrorAction SilentlyContinue)) {
+                        if (-not $ContainerUID) { $ContainerUID = "$(& id -u)".Trim() }
+                        if (-not $ContainerGID) { $ContainerGID = "$(& id -g)".Trim() }
+                    }
                     # -ContainerUID and -ContainerGID become build arguments, read as
                     # numbers.
                     foreach ($id in @(@('UID', $ContainerUID), @('GID', $ContainerGID))) {
@@ -410,21 +419,17 @@ function Invoke-ASH {
                     }
                     # The non-root stage creates its user with `adduser --uid <UID>
                     # --gid <GID>`. UID 0 is root, which already exists, and GID 0 is
-                    # root's group. A non-root build as root is refused before building,
-                    # as ./ash and `ash --mode container` refuse it: by -ContainerUID or
-                    # -ContainerGID 0 (any spelling of zero), or, without -ContainerUID,
-                    # by a caller whose own UID (id -u) is 0. -BuildTarget ci is the
-                    # opt-in for the image that runs as root.
+                    # root's group. A non-root build with either is refused before
+                    # building, as ./ash and `ash --mode container` refuse it: given as
+                    # -ContainerUID or -ContainerGID 0 (any spelling of zero), or taken
+                    # from a caller running as root. -BuildTarget ci is the opt-in for
+                    # the image that runs as root.
                     if ($BuildTarget -eq 'non-root') {
-                        $buildUid = $ContainerUID
-                        if (-not $buildUid -and -not ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) -and (Get-Command id -ErrorAction SilentlyContinue)) {
-                            $buildUid = "$(& id -u)".Trim()
-                        }
-                        if ($buildUid -match '\A0+\z') {
+                        if ($ContainerUID -match '\A0+\z') {
                             Stop-AshRefusal 3 "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerUID and -ContainerGID work only when the output directory is writable by that UID: the container runs as that user and writes its reports there."
                         }
                         if ($ContainerGID -match '\A0+\z') {
-                            Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
+                            Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: Invoke-ASH is running with GID 0, or -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
                         }
                     }
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
