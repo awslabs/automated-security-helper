@@ -1512,9 +1512,17 @@ async def mcp_resolve_workspace(
         )
 
     # The workspace root's config sets how the scan executes, and scan_workspace
-    # refuses one that cannot be loaded (exit 3); read as the scan reads it.
+    # refuses one that cannot be loaded (exit 3); read as the scan reads it:
+    # under the session's gate, and with the caller's rule for which files may
+    # resolve !ENV (config_sources.env_refused_for).
     try:
-        resolve_workspace_execution_config(Path(plan.workspace_root), session_config)
+        resolve_workspace_execution_config(
+            Path(plan.workspace_root),
+            session_config,
+            config_base_gate(session_id),
+            remote_client=caller_is_remote(session_id),
+            session_id=session_id,
+        )
     except ASHConfigValidationError as exc:
         return _error_response(exc, "resolve_workspace")
 
