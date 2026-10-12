@@ -11,7 +11,8 @@ Python launcher reach the same decision for the same config layouts:
 
 - the source directory is mounted at ``/src`` read-only under its own name, also
   when the name holds spaces, shell punctuation or glob characters;
-- the arguments before the image name are the ones the wrapper means to pass;
+- the arguments before the image name are the ones the wrapper means to pass, and
+  nothing from the environment adds a mount or another runner option;
 - a config outside the source directory with an ``extends`` entry is refused,
   because the wrapper mounts that file alone;
 - for a config inside the source, outside the checkout, elsewhere in the checkout,
@@ -265,6 +266,16 @@ def _assert_only_the_wrappers_own_options(options: List[str]) -> None:
     [
         pytest.param({}, id="clean-environment"),
         pytest.param({"ASH_IMAGE_NAME": "registry.example/ash:1"}, id="image-name"),
+        # A variable the wrapper does not set adds nothing to the command.
+        pytest.param(
+            {"MOUNT_OUTPUT_DIR": "--mount type=bind,source=/,destination=/host"},
+            id="MOUNT_OUTPUT_DIR",
+        ),
+        # The image name is one argument, as ash --mode container passes it.
+        pytest.param(
+            {"ASH_IMAGE_NAME": "--privileged registry.example/ash:1"},
+            id="image-name-with-a-space",
+        ),
     ],
 )
 @pytest.mark.parametrize("flags", [[], ["--offline"]], ids=["online", "offline"])

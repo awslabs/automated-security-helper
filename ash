@@ -392,7 +392,7 @@ else
         ${CONTAINER_UID_OPTION} \
         ${CONTAINER_GID_OPTION} \
         ${BASE_IMAGE_OPTION} \
-        --tag ${ASH_IMAGE_NAME} \
+        --tag "${ASH_IMAGE_NAME}" \
         --target ${TARGET_STAGE} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
@@ -442,9 +442,8 @@ else
           --mount source="${SOURCE_DIR}",type=bind,destination=/src,readonly \
           --mount source="${OUTPUT_DIR}",type=bind,destination=/out \
           "${CONFIG_RUN_ARGS[@]}" \
-          ${MOUNT_OUTPUT_DIR} \
           ${DOCKER_RUN_EXTRA_ARGS} \
-          ${ASH_IMAGE_NAME} \
+          "${ASH_IMAGE_NAME}" \
             ash \
               --source-dir /src \
               --output-dir /out \
