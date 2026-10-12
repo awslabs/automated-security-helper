@@ -107,25 +107,44 @@ it needs.
   scanner can read it and cannot write to it. Under sandbox-exec, the one backend
   that limits where programs run from, it cannot run programs from it either.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
-  are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
-  are mounted, and a tool's install prefix only when it is deeper than a directory
-  directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). When `HOME`
-  names a directory other than your account's passwd entry's home, both directories
-  are screened this way. ASH's own Python is mounted where it is installed, and
-  `ASH_BIN_PATH` with it. A Python whose binary sits directly in a top-level system
-  directory (`/opt/python3`, or `/bin/python3` where `/bin` is not merged into
-  `/usr`) gets that directory, which is already mounted, and never `/`. One directly
-  in any other top-level directory (`/mnt/python3`, `/srv/python3`) is refused, since
-  it would mount that whole directory, and so is a Python whose `sys.prefix` is `/`.
-  The scanner is refused rather than given the home when
-  the Python's prefix is a home directory or a directory directly in one that is
-  not a virtual environment or conda installation (`~/.local`, which never counts as
-  one, nor does a directory holding `share/keyrings`, whatever marker it has), when
-  the Python is
-  reached through a link kept directly in a home (a virtual environment made with
-  `~/python3 -m venv`), or when `ASH_BIN_PATH` names a home or a directory directly
-  in one not named `bin`. Use an interpreter or virtual environment outside the
-  home directory, or one created from the interpreter's real path.
+  are read-only. A `PATH` entry inside the scanned tree or the output directory is
+  not a tool directory; the tree is mounted only as the scan's data. Inside `$HOME`
+  only `PATH` entries that are `bin`, `sbin` or `Scripts` directories are mounted,
+  and a tool's install prefix only when it is deeper than a directory directly
+  under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). Whether a directory
+  is a `bin` directory is judged by the directory it resolves to, so `~/bin` linked
+  to `~/.aws` is not one. An install prefix that is `/`, a home directory or a
+  directory holding one is never mounted: a tool in `$WORK/bin` with
+  `HOME=$WORK/home` gets `$WORK/bin`, and nothing of `$WORK` when `$WORK/bin` is a
+  link to `$WORK` itself. When `HOME` names a directory other than your account's
+  passwd entry's home, both directories are screened this way.
+- A program that one of ASH's own checks has a spawn's tool start gets the grants
+  that tool gets, through the same rules: its directory and its install prefix. The
+  check of a pre-installed scanner runs `uv`, which starts the scanner's Python to
+  inspect it, so that Python's environment is mounted for the check. Only ASH's own
+  code names such a program, never a scanner's options or the scanned repository.
+- ASH's own Python is mounted where it is installed, and `ASH_BIN_PATH` with it. A
+  Python whose binary sits directly in a top-level system directory (`/opt/python3`,
+  or `/bin/python3` where `/bin` is not merged into `/usr`) gets that directory,
+  which is already mounted, and never `/`. One directly in any other top-level
+  directory (`/mnt/python3`, `/srv/python3`) is refused, since it would mount that
+  whole directory, and so is a Python whose `sys.prefix` is `/`. The scanner is
+  refused rather than given the home when the Python's prefix is a home directory
+  or a directory directly in one that is not a virtual environment or conda
+  installation, when the Python is reached through a link kept in a home outside a
+  `bin`, `sbin` or `Scripts` directory and outside the Python's own installation (a
+  virtual environment made with `~/python3 -m venv`, or a link in `~/.config`), or
+  when `ASH_BIN_PATH` names a home or a directory directly in one that is not a
+  `bin` directory. Use an interpreter or virtual environment outside the home
+  directory, or one created from the interpreter's real path.
+- A virtual environment or conda installation directly in a home is told apart from
+  any other directory there by its marker (`pyvenv.cfg`, `conda-meta`) and by a short
+  list of directories that never count as one, whatever marker they hold:
+  `~/.local`, and any directory holding `share/keyrings`. That list is a heuristic,
+  not a proof. Another directory with a marker, such as a venv made at `~/work`, is
+  mounted whole. It is acceptable because `sys.prefix` is the Python the operator
+  chose to run ASH with, so keep that environment free of files a scanner must not
+  read.
 - The offline rule cache of semgrep and opengrep, the directory
   `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
   for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
