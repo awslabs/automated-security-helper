@@ -600,6 +600,10 @@ class _SecretIndex:
         self.shapes: Set[SecretValueShape] = set()
         #: The secret findings themselves, whose own snippets are masked whole.
         self.secret_results: List[Any] = []
+        #: (uri, first line, last line, values) of each secret finding's location:
+        #: every finding that overlaps it has these values masked, whatever they
+        #: look like. The lines are None when the location gives none.
+        self.local_values: List[Tuple[str, Optional[int], Optional[int], Set[str]]] = []
         self._pattern: Optional[re.Pattern] = None
 
     def add_values(self, values: Iterable[str]) -> None:
@@ -771,6 +775,17 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         ) in described or _describes_a_credential_in_code(
             _text_of(getattr(result, "message", None))
         )
+        text = _text_of(getattr(result, "message", None)) or ""
+        quoted = _quoted_values(text)
+        exposed: List[str] = []
+        for value_start, value_end in quoted:
+            exposed.extend(_exposed_values(text[value_start:value_end].strip(), result))
+        if not quoted:
+            exposed.extend(_matched_values(result))
+        # Every value is masked wherever it looks like a secret; and, whatever it
+        # looks like, in every finding that overlaps where this one reports it.
+        index.add_values(exposed)
+        local = {value for value in exposed if value and "\n" not in value}
         for physical in _physical_locations_of(result):
             uri = _normalized_uri(
                 getattr(getattr(physical, "artifactLocation", None), "uri", None)
@@ -792,13 +807,76 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 elif resource_only and not isinstance(end, int):
                     end = _TO_END_OF_FILE
             index.add_location(uri, start, end)
-        text = _text_of(getattr(result, "message", None)) or ""
-        quoted = _quoted_values(text)
-        for start, end in quoted:
-            index.add_values(_exposed_values(text[start:end].strip(), result))
-        if not quoted:
-            index.add_values(_matched_values(result))
+            if local:
+                index.local_values.append(
+                    (
+                        uri,
+                        start if isinstance(start, int) else None,
+                        end
+                        if isinstance(end, int)
+                        and isinstance(start, int)
+                        and end >= start
+                        else start,
+                        local,
+                    )
+                )
     return index
+
+
+def _line_spans(physical: Any) -> List[Tuple[Optional[int], Optional[int]]]:
+    """The (first, last) lines a physical location's region and context cover.
+
+    ``(None, None)`` for a region or context with a snippet but no first line,
+    which cannot be placed.
+    """
+    spans: List[Tuple[Optional[int], Optional[int]]] = []
+    region = getattr(physical, "region", None)
+    if region is not None:
+        start = getattr(region, "startLine", None)
+        end = getattr(region, "endLine", None)
+        if isinstance(start, int):
+            spans.append(
+                (start, end if isinstance(end, int) and end >= start else start)
+            )
+        elif getattr(region, "snippet", None) is not None:
+            spans.append((None, None))
+    context = getattr(physical, "contextRegion", None)
+    if context is not None:
+        start = getattr(context, "startLine", None)
+        end = getattr(context, "endLine", None)
+        text = getattr(getattr(context, "snippet", None), "text", None)
+        if isinstance(start, int):
+            last = (
+                start + max(len(_split_lines(text)) - 1, 0)
+                if isinstance(text, str)
+                else start
+            )
+            if isinstance(end, int) and end > last:
+                last = end
+            spans.append((start, last))
+        elif isinstance(text, str):
+            spans.append((None, None))
+    return spans
+
+
+def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
+    """The values of the secret findings whose location ``result`` overlaps."""
+    found: Set[str] = set()
+    if not index.local_values:
+        return found
+    for physical in _physical_locations_of(result, related=True):
+        uri = _normalized_uri(
+            getattr(getattr(physical, "artifactLocation", None), "uri", None)
+        )
+        if uri is None:
+            continue
+        for first, last in _line_spans(physical):
+            for secret_uri, start, end, values in index.local_values:
+                if not _same_file(secret_uri, uri):
+                    continue
+                if first is None or start is None or (first <= end and start <= last):
+                    found |= values
+    return found
 
 
 def _matched_values(result: Any) -> List[str]:
@@ -1071,6 +1149,37 @@ def _mask_report(
         seen: Set[int] = set()
         for run in sarif_report.runs:
             _mask_tree(run, index, seen)
+    # A value that does not look like a secret is not masked everywhere, but it is
+    # masked in every finding whose region or context overlaps the secret
+    # finding's location: what that finding reports is the same line.
+    if index.local_values:
+        secret_ids = {id(result) for result in index.secret_results}
+        for result in sarif_report.get_all_results() or []:
+            values = _overlapping_values(result, index)
+            if not values:
+                continue
+            local_index = _SecretIndex()
+            local_index.values = set(values)
+            if id(result) not in secret_ids:
+                _mask_tree(result, local_index, set())
+                continue
+            # A secret finding's own message is masked at its quoted value
+            # (_mask_message_values); masking the words of its label, as in
+            # "Possible hardcoded password:" for the value "password", would
+            # change what recognizes it.
+            for name in list(type(result).model_fields) + list(
+                (result.__pydantic_extra__ or {}).keys()
+            ):
+                if name == "message" or name in _SKIPPED_FIELDS:
+                    continue
+                if name in _METADATA_FIELDS:
+                    continue
+                value = getattr(result, name, None)
+                if value is None:
+                    continue
+                masked = _mask_tree(value, local_index, set())
+                if isinstance(value, str) and masked != value:
+                    setattr(result, name, masked)
     return index
 
 

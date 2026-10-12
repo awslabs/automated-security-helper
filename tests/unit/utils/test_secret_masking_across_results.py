@@ -230,6 +230,85 @@ def _reuse(text, uri="deploy.py", line=5):
     return _result("B602", uri, line, "subprocess call", snippet=text, scanner="bandit")
 
 
+#: A short, all-letter value: masked in its own finding and in findings that
+#: overlap it, never elsewhere.
+WORD_VALUE = "hun" + "ter"
+
+
+class TestEveryValueIsMaskedInFindingsThatOverlapIt:
+    """A finding whose region or context covers a secret finding's line has the value masked.
+
+    Whatever the value looks like: the line it holds is the secret finding's own,
+    so its other text (its message, its properties) is masked with the value too,
+    as its snippet is masked by location.
+    """
+
+    def _secret(self):
+        return _b105(WORD_VALUE, line=3)
+
+    def _overlapping(self, line=3, context=None):
+        result = _result(
+            "python.lang.security.audit.hardcoded-login",
+            "app.py",
+            line,
+            f"login() is called with the literal '{WORD_VALUE}'",
+            snippet=f'login("{WORD_VALUE}")\n',
+            context=context,
+            scanner="semgrep",
+        )
+        result["properties"]["matched"] = f'login("{WORD_VALUE}")'
+        return result
+
+    def test_a_finding_on_the_same_line(self):
+        model = _results(self._secret(), self._overlapping())
+
+        mask_secrets_in_results(model)
+
+        overlapping = model.sarif.runs[0].results[1]
+        assert WORD_VALUE not in overlapping.model_dump_json()
+        assert _message(overlapping).startswith("login() is called with the literal ")
+        assert _region_text(overlapping) == MASKED_LINE + "\n"
+        # The secret finding's own label is left as it is.
+        assert _message(model.sarif.runs[0].results[0]).startswith(HARDCODED)
+
+    def test_masking_overlapping_findings_twice_changes_nothing_more(self):
+        model = _results(self._secret(), self._overlapping())
+        mask_secrets_in_results(model)
+        once = model.sarif.model_dump_json()
+
+        mask_secrets_in_results(model)
+
+        assert model.sarif.model_dump_json() == once
+
+    def test_a_finding_whose_context_covers_the_line(self):
+        model = _results(
+            self._secret(),
+            self._overlapping(
+                line=2, context=(2, OTHER_LINE + f'{NAME} = "{WORD_VALUE}"\n')
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        overlapping = model.sarif.runs[0].results[1]
+        assert WORD_VALUE not in overlapping.model_dump_json()
+
+    def test_a_finding_that_does_not_overlap_keeps_the_word(self):
+        """Control: in another file, or on another line, the word is left alone."""
+        elsewhere = self._overlapping()
+        elsewhere["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = (
+            "lib.py"
+        )
+        later = self._overlapping(line=9)
+        model = _results(self._secret(), elsewhere, later)
+
+        mask_secrets_in_results(model)
+
+        for result in model.sarif.runs[0].results[1:]:
+            assert WORD_VALUE in _message(result)
+        assert model.secret_value_shapes == []
+
+
 class TestOnlyValuesThatLookLikeSecretsAreMaskedElsewhere:
     """A hard-coded password check quotes ordinary words as often as credentials.
 
