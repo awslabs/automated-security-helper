@@ -902,6 +902,50 @@ class TestALinkedOutputDirectoryIsRefused:
         assert (project / ".ash" / "ash_output").is_dir()
 
 
+class TestAnExplicitRunnerPathRunsThatPath:
+    """Two runners named ``docker``: one at the path OCI_RUNNER names, one first on
+    PATH, each recording its own path. A path runs exactly that file; a bare name
+    resolves on PATH. Matches ``ash --mode container`` and Invoke-ASH."""
+
+    @staticmethod
+    def _runner(directory: Path, log: Path) -> Path:
+        directory.mkdir(parents=True)
+        runner = directory / "docker"
+        runner.write_text(
+            f"#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$1\" >> '{log}'\nexit 0\n",
+            encoding="utf-8",
+        )
+        runner.chmod(0o755)
+        return runner
+
+    @pytest.mark.parametrize("given", ["a-path", "a-name"])
+    def test_it_runs_the_given_path(self, given, fake_runner, project, tmp_path):
+        log = tmp_path / "runner-calls.txt"
+        explicit = self._runner(tmp_path / "given-dir", log)
+        on_path = self._runner(tmp_path / "path-bin", log)
+        path = os.pathsep.join(
+            [
+                str(on_path.parent),
+                str(tmp_path / "fixed-id-bin"),
+                os.environ.get("PATH") or os.defpath,
+            ]
+        )
+
+        rc, text, _ = _run_ash_status(
+            fake_runner,
+            project,
+            ["--no-build"],
+            extra_env={
+                "OCI_RUNNER": str(explicit) if given == "a-path" else "docker",
+                "PATH": path,
+            },
+        )
+
+        assert rc == 0, text
+        expected = explicit if given == "a-path" else on_path
+        assert log.read_text(encoding="utf-8").splitlines() == [f"{expected} run"]
+
+
 class TestAnOutsideConfigThatExtendsIsRefused:
     """``./ash`` mounts a config from outside the source directory on its own, so the
     files it extends are not in the container. A config there with an ``extends``

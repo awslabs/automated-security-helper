@@ -304,9 +304,12 @@ the first yourself, as above, and end the script with
 `if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }` to keep
 the scan's own exit code. It runs the runner through
 `Invoke-Expression`, and passes each path and value it was given by name, so PowerShell
-reads a directory named `a$(...)` as that name. Three inputs are still parsed as
+reads a directory named `a$(...)` as that name. Two inputs are still parsed as
 PowerShell: the arguments after the named parameters, which are passed through to `ash`
-as written, `OCI_RUNNER_WRAPPER`, and the runner's command name.
+as written, and `OCI_RUNNER_WRAPPER`. A runner given as a path (`-OCIRunner`,
+`--oci-runner` or `OCI_RUNNER` naming a file, such as `/opt/podman/bin/podman`) runs
+that file in all three entry points; a bare name such as `podman` is looked up on
+`PATH`.
 
 The scan inside the container sees the host only through these mounts, and receives only
 the environment variables ASH sets for it. So any other value that names a host file

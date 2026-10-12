@@ -40,14 +40,13 @@ PWSH = shutil.which("pwsh")
 _IN_CI = "true" in (os.environ.get("CI"), os.environ.get("GITHUB_ACTIONS"))
 
 #: Variables the command strings may still splice in: the commands themselves, the
-#: runner and its wrapper
-#: (a command name and a prefix meant to be split), the fixed stage, the lists
+#: runner's wrapper (a prefix meant to be split), the fixed stage, the lists
 #: assembled from constants or from references, YES/NO and the terminal size, and
-#: AshArgs, passed through as written.
+#: AshArgs, passed through as written. The runner is not among them: it can be a
+#: path the operator gave, so it is written in by name like any other path.
 SPLICE_ALLOWED = {
     "buildCmd",
     "runCmd",
-    "RESOLVED_OCI_RUNNER",
     "OCI_WRAPPER",
     "BuildTarget",
     "buildArgs",
@@ -492,6 +491,78 @@ def test_a_source_path_is_passed_as_a_value_and_not_run(
     assert not (tmp_path / "marker").exists(), "the path was parsed as PowerShell"
     args = (tmp_path / "docker-args.txt").read_text(encoding="utf-8").splitlines()
     assert f"type=bind,source={source},destination=/src,readonly" in args
+
+
+def _self_recording_runner(directory: Path, log: Path) -> Path:
+    """A ``docker`` that appends its own path and its first argument to *log*."""
+    directory.mkdir(parents=True)
+    runner = directory / "docker"
+    runner.write_text(
+        f"#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$1\" >> '{log}'\nexit 0\n",
+        encoding="utf-8",
+    )
+    runner.chmod(0o755)
+    return runner
+
+
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
+)
+@pytest.mark.parametrize("given", ["a-path", "a-name", "a-path-under-a-wrapper"])
+def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
+    """Two runners named ``docker``: one at the path given to -OCIRunner, one first
+    on PATH. A path runs exactly that file; a bare name resolves on PATH, as before.
+    The path holds a space and ``$(...)``, which a spliced command name would break
+    on or run. Under OCI_RUNNER_WRAPPER the path is the wrapper's first argument."""
+    (tmp_path / "src").mkdir()
+    log = tmp_path / "runner-calls.txt"
+    explicit = _self_recording_runner(tmp_path / "given dir $(x)", log)
+    on_path = _self_recording_runner(tmp_path / "path-bin", log)
+    runner = "docker" if given == "a-name" else f"'{explicit.as_posix()}'"
+    wrapper = tmp_path / "wrapper-bin" / "wrap"
+    wrapper.parent.mkdir()
+    wrapper.write_text(
+        f"#!/bin/sh\nprintf 'wrap %s\\n' \"$1\" >> '{log}'\nexec \"$@\"\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        f"try {{ Invoke-ASH -OCIRunner {runner} -NoBuild -SourceDir src -OutputDir out }} "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PATH", "ASH_CONFIG", "OCI_RUNNER_WRAPPER")
+    }
+    env["PATH"] = os.pathsep.join(
+        [on_path.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
+    )
+    if given == "a-path-under-a-wrapper":
+        env["OCI_RUNNER_WRAPPER"] = wrapper.as_posix()
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log.read_text(encoding="utf-8").splitlines()
+    if given == "a-name":
+        assert calls == [f"{on_path} run"]
+    elif given == "a-path":
+        assert calls == [f"{explicit} run"]
+    else:
+        assert calls == [f"wrap {explicit}", f"{explicit} run"]
 
 
 # ---------------------------------------------------------------------------

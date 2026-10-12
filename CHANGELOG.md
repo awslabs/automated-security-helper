@@ -469,6 +469,13 @@
   variable and a directly set `ASH_MCP_AUTH_HEADER_VALUE` before it starts `ash mcp`.
   A custom command run in place of `ash-mcp-serve` with `ASH_MCP_AUTH_SECRET_ARN` set
   gets the descriptor instead of the variable.
+- **An explicit runner path is now used as given.** `Invoke-ASH -OCIRunner
+  /path/to/podman` kept only the name `podman` and ran whichever `podman` came first on
+  `PATH`. It now runs the file at the path, passed to `Invoke-Expression` by name like
+  every other path, so a path with spaces or `$(...)` in it is that path. A bare name
+  is looked up on `PATH` as before. `./ash` (`OCI_RUNNER`) and `ash --mode container`
+  (`--oci-runner`) already ran the path they were given, and now have tests that
+  pin it.
 - **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
   Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
   and GID 100, which cannot write an output directory the caller owns, and checked

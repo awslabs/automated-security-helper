@@ -480,10 +480,14 @@ function Invoke-ASH {
     }
     process {
         try {
+            # A runner given as a path runs that file: its resolved path is kept, not
+            # its name, which would run whichever file of that name comes first on
+            # PATH. A bare name resolves on PATH, as before. ./ash and
+            # `ash --mode container` do the same.
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
                 if ($FOUND = Get-Command $runner -ErrorAction SilentlyContinue) {
-                    $RESOLVED_OCI_RUNNER = $FOUND.Name
+                    $RESOLVED_OCI_RUNNER = if ($runner.IndexOfAny([char[]]@('/', '\')) -ge 0) { $FOUND.Source } else { $FOUND.Name }
                     break
                 }
             }
@@ -532,12 +536,13 @@ function Invoke-ASH {
                     }
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
 
+                    # The runner is written in by name, like every path: it can be one
+                    # the operator gave, with spaces or `$(...)` in it. `&` invokes it
+                    # when nothing wraps it; a wrapper takes it as its first argument.
                     $buildCmd = @()
-                    if ($OCI_WRAPPER) { $buildCmd += $OCI_WRAPPER }
-                    $buildCmd += @(
-                        $RESOLVED_OCI_RUNNER
-                        'build'
-                    )
+                    if ($OCI_WRAPPER) { $buildCmd += $OCI_WRAPPER; $buildCmd += '"$RESOLVED_OCI_RUNNER"' }
+                    else { $buildCmd += '& "$RESOLVED_OCI_RUNNER"' }
+                    $buildCmd += 'build'
 
                     # Add UID/GID build args
                     if ($ContainerUID) {
@@ -627,10 +632,11 @@ function Invoke-ASH {
                 if (-not $NoRun) {
                     Write-Host "Running ASH scan using built image..."
                     $ashDebug = "$(if($PSBoundParameters.ContainsKey('Debug')){"YES"}else{"NO"})".Trim()
+                    # The runner by name, as for the build above.
                     $runCmd = @()
-                    if ($OCI_WRAPPER) { $runCmd += $OCI_WRAPPER }
+                    if ($OCI_WRAPPER) { $runCmd += $OCI_WRAPPER; $runCmd += '"$RESOLVED_OCI_RUNNER"' }
+                    else { $runCmd += '& "$RESOLVED_OCI_RUNNER"' }
                     $runCmd += @(
-                        $RESOLVED_OCI_RUNNER
                         'run'
                         '--rm'
                         "-e", '"ASH_ACTUAL_SOURCE_DIR=$sourceDirFull"'
