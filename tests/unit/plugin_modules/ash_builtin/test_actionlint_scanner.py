@@ -1204,6 +1204,27 @@ def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypat
     assert inside not in " ".join(argv)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit and symlinks")
+def test_a_name_found_through_a_link_in_the_scanned_tree_is_refused(repo, monkeypatch):
+    """An absolute PATH entry inside the tree that is a link out of it: the name
+    is found at <tree>/bin/shellcheck, which resolves outside the tree, but the
+    tree's link chose the program."""
+    tool = _plant(repo.parent / "elsewhere", "shellcheck")
+    (repo / "bin").symlink_to(tool.parent, target_is_directory=True)
+    found = (repo / "bin" / "shellcheck").as_posix()
+    monkeypatch.setattr(
+        module,
+        "find_absolute_executable",
+        lambda name: FAKE_ACTIONLINT if name == "actionlint" else found,
+    )
+    scanner = _scanner(repo, shellcheck="shellcheck")
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert found not in " ".join(argv) and tool.as_posix() not in " ".join(argv)
+
+
 def _only_path(monkeypatch, *entries) -> None:
     """PATH is exactly ``entries``, nothing is cached and ASH's bin dirs are empty."""
     monkeypatch.setenv("PATH", os.pathsep.join(str(entry) for entry in entries))

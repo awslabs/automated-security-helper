@@ -59,8 +59,9 @@ Decisions, and why
    relative to the source directory, checked by ``config_trust.operator_path``.
    Whoever sets it, a program that resolves inside the scanned tree is
    refused, and so is a path in the tree that a symbolic link there leads out of
-   it, since the link would choose the program. A refused value is logged and the
-   integration stays off.
+   it, whether the operator wrote it or a name was found at it through a PATH
+   entry inside the tree, since the link would choose the program. A refused value
+   is logged and the integration stays off.
 
    Names are looked up only in PATH's absolute entries and ASH's bin directory, and
    actionlint is handed the absolute path ASH checked; actionlint itself is started
@@ -181,6 +182,7 @@ from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.utils.config_trust import (
     INSIDE_THE_TREE,
     LEADS_OUT_OF_THE_TREE,
+    leaves_the_tree_through_a_link,
     operator_path,
     scan_root,
     set_by_operator,
@@ -688,6 +690,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             if found is not None and in_scanned_tree(found, root):
                 raise _RefusedIntegration(
                     f"it resolves to {found}, inside the scanned tree"
+                )
+            # A PATH entry inside the tree that is a link out of it: the program
+            # resolves outside the tree, but the tree's link chose it.
+            if found is not None and leaves_the_tree_through_a_link(
+                found, source_dir, root
+            ):
+                raise _RefusedIntegration(
+                    f"it is found at {found}, a path inside the scanned tree that "
+                    "resolves outside it through a symbolic link"
                 )
             return found
         # A path: the operator's only (checked above), resolved, and never inside
