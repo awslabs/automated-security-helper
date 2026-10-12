@@ -31,6 +31,13 @@ loop) is skipped with a warning too, since zizmor would fail the whole run on it
 with neither kind of file does not start zizmor; the scanner reports `SKIPPED`
 with zero findings, the same as cfn-nag on a repository with no templates.
 
+zizmor answers whether a scan has anything for it from this same selection, over
+the source tree and the converted files, so under the rule that a scanner with
+nothing to scan is `SKIPPED` whether or not its tool is installed, a missing zizmor
+on a repository with neither kind of file is `SKIPPED`, not `MISSING`. A file
+skipped for one of the reasons above does not count. zizmor is a Python package
+ASH runs through uv, so `--python-only` runs it.
+
 A file named `action.yml` that is not a GitHub Actions definition is not counted.
 A workflow or action that zizmor cannot load (a YAML syntax error, or a file in
 `.github/workflows` that is not a valid workflow) is counted as a target that

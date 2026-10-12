@@ -6,6 +6,8 @@ cfn-lint and cfn-guard are two builtin CloudFormation scanners. Both read the sa
 
 cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If cfn-guard is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner. cfn-lint is installed on first use when ASH is online, and is `MISSING` only when that install fails and none is on `PATH`. `ash dependencies install` and the container image provide both.
 
+Both answer whether a scan has anything for them from the templates they select (see "Which files it scans" below), over the source tree and the converted files, so under the rule that a scanner with nothing to scan is `SKIPPED` whether or not its tool is installed, a missing cfn-lint, or a missing cfn-guard binary or rules bundle, is `SKIPPED` rather than `MISSING` on a tree with no CloudFormation template. A file with a `Resources` mapping that ASH cannot model counts as something to scan. `--python-only` runs cfn-lint, a Python package ASH runs through uv, and leaves out cfn-guard, a native binary.
+
 ## cfn-lint
 
 [cfn-lint](https://github.com/aws-cloudformation/cfn-lint) validates AWS CloudFormation templates against the CloudFormation resource schemas and its own rule set: misspelled or invalid properties, values a service rejects, end-of-life Lambda runtimes, unused parameters and similar problems. It checks that a template is correct, not that it is secure, which is why its severities sit below the security scanners' (see the mapping below).
