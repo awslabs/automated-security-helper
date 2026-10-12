@@ -395,7 +395,8 @@ path, ASH does not run that tool on that directory, rather than let it read the 
 the link points at; the same goes for snyk-code and any such link. The scanner's
 status is `ERROR`, and the error names the link, as `Not running bandit on /src:
 'a,b.py': link leaves the scanned tree, and bandit's --exclude cannot leave out that
-file alone, ...`. bandit cannot be given a path with a comma or one of `*`, `?` and
+file alone, ... (bandit was not started)`. It carries no exit code, since the tool
+did not run. bandit cannot be given a path with a comma or one of `*`, `?` and
 `[`, or a path that another file's path contains, because it also leaves out every
 path an entry is part of. ferret-scan cannot be given a path with a comma or any of
 `*?[]{}\`. checkov cannot be given any on Windows, where it joins the paths it walks

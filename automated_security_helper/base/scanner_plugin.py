@@ -876,6 +876,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # Bound before the try so the failure handler can name the stderr log
         # even when _execute_scan itself is what raised.
         results_file = None
+        # Whether the tool was started, so a failure before it (a refusal while
+        # resolving the arguments) is not described with an exit code it never had.
+        tool_started = False
 
         try:
             final_args, results_file, subprocess_env = self._execute_scan(
@@ -890,6 +893,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # was the only scanner that timed out cleanly, because it carried its
             # own copy of this option and enforced it in its own scan override.
             effective_timeout = self._effective_scan_timeout()
+            tool_started = True
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=results_file.parent,
@@ -967,10 +971,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return self._post_process_sarif(sarif_report, final_args, target)
 
         except Exception as e:
-            raise ScannerError(self._describe_scan_failure(e, results_file))
+            raise ScannerError(
+                self._describe_scan_failure(e, results_file, tool_started=tool_started)
+            )
 
     def _describe_scan_failure(
-        self, exc: Exception, results_file: Optional["Path"]
+        self,
+        exc: Exception,
+        results_file: Optional["Path"],
+        tool_started: bool = True,
     ) -> str:
         """Build the failure message, naming the cause rather than the symptom.
 
@@ -1011,8 +1020,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         * stderr is truncated to keep a scanner that wrote megabytes from
           swamping the error; the full text stays in the log file, which is
           named.
+        * With ``tool_started`` False the failure came before the tool was
+          started, such as a target the scanner refuses while resolving its
+          arguments. There is no exit code or stderr to describe, so the message
+          is the failure and that the tool was not started.
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
+        if not tool_started:
+            tool = getattr(getattr(self, "config", None), "name", None)
+            return f"{detail} ({tool or 'its tool'} was not started)"
 
         accepted = self._exit_code_accepted()
         verdict = (

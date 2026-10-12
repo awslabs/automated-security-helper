@@ -2466,6 +2466,13 @@
 
 ### Fixes
 
+- **A scanner that refuses a target before starting its tool says so, without an
+  exit code.** A refusal while the command was being assembled, such as bandit's
+  for a link it cannot leave out, was reported with "(exit code 0: an accepted
+  exit code for this scanner)" and a note that the tool had written no stderr log,
+  describing a run that never happened. It now ends "(bandit was not started)".
+  A tool that ran and failed is still described with its exit code, whether that
+  code is accepted, and its stderr.
 - **bandit reads no file in `global_settings.ignore_paths`.** bandit's `--exclude`
   value was built once, when the scanner was constructed, so the scan's ignore
   paths never reached it: bandit read the ignored files, and its own results under
