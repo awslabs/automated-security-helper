@@ -186,12 +186,29 @@ def _cli(source: Path, **resolve: Any):
 def _workspace(
     tmp_path: Path, project_config: Path, operator: Path | None, **settings: Any
 ):
+    from automated_security_helper.config.resolve_config import (
+        operator_config_digest,
+    )
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         _project_config_with_policy,
     )
     from automated_security_helper.workspace.plan import ProjectPlan
+    from automated_security_helper.workspace.resolver import _operator_config
 
+    scan_settings = ProjectScanSettings(
+        output_dir=tmp_path / "out",
+        default_config_path=operator.as_posix() if operator else None,
+        **settings,
+    )
+    # The project has a config of its own, so the plan records the operator's
+    # config layered over it and that file's digest, as resolve_workspace does.
+    layered = _operator_config(
+        operator,
+        Path(scan_settings.trusted_config_path)
+        if scan_settings.trusted_config_path
+        else None,
+    )
     project_dir = project_config.parent.parent
     project = ProjectPlan(
         key="api",
@@ -201,15 +218,10 @@ def _workspace(
         display_label="api",
         severity_threshold="MEDIUM",
         config_source=project_config.as_posix(),
+        operator_config=layered.as_posix() if layered else None,
+        operator_config_digest=operator_config_digest(layered) if layered else None,
     )
-    config = _project_config_with_policy(
-        project,
-        ProjectScanSettings(
-            output_dir=tmp_path / "out",
-            default_config_path=operator.as_posix() if operator else None,
-            **settings,
-        ),
-    )
+    config = _project_config_with_policy(project, scan_settings)
     confine_declared_reporter_destinations(config, ASH_REPORTERS)
     return config
 
