@@ -715,7 +715,14 @@ def _converted(scanner) -> Path:
 
 def test_each_target_is_judged_by_its_own_exit_code(tmp_path, monkeypatch):
     """ScannerExecutor runs one instance over the source, then the converted target.
-    A source run that fails (exit 1) must not make a clean converted run fail too."""
+    A source run that fails (exit 1) must not make a clean converted run fail too.
+
+    The binary and, offline, its database are supplied here, so the dependency
+    check passes whatever $HOME holds: without them it looked for trivy under
+    ``$HOME/.ash/bin`` and ran ``trivy version`` against the cache under $HOME.
+    """
+    _found_binary(monkeypatch)
+    monkeypatch.setattr(staleness, "_built_from_trivy", lambda ctx: (None, "x"))
     scanner = _scanner(tmp_path, offline=True)
     converted = _converted(scanner)
     _runs_through_the_base_class(monkeypatch, [1, 0])
