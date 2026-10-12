@@ -240,10 +240,13 @@ def test_the_probe_reads_through_the_config_the_scan_passed(tmp_path, monkeypatc
 def test_a_probe_whose_temporary_directory_is_in_a_checkout_runs_from_the_root(
     tmp_path, monkeypatch
 ):
-    """The probe's scratch directory is made in the temporary directory; when that is
-    inside a checkout, trivy runs from the filesystem root instead."""
+    """A probe given no working directory (``ProbeContext.cwd``) runs from the
+    filesystem root of the temporary directory; when that directory is inside a
+    checkout, trivy still runs from the root, not from the checkout, and reads the
+    empty config ASH ships rather than a file there."""
     import tempfile
 
+    from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
     from automated_security_helper.utils.content_db_staleness import (
         ProbeContext,
         _built_from_trivy,
@@ -254,14 +257,15 @@ def test_a_probe_whose_temporary_directory_is_in_a_checkout_runs_from_the_root(
     (checkout / ".git").mkdir(parents=True)
     (checkout / "tmp").mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(checkout / "tmp"))
+    # Not vacuous: the temporary directory the probe falls back to is in the checkout.
+    assert checkout.resolve() in Path(tempfile.gettempdir()).resolve().parents
 
     _built_from_trivy(
         ProbeContext(env=dict(os.environ), executable=str(tmp_path / "bin" / "trivy"))
     )
 
     (call,) = [json.loads(line) for line in record.read_text().splitlines()]
-    # Not vacuous: the probe's empty config was written inside the checkout.
-    assert checkout.resolve() in Path(_config_flag(call["argv"])).resolve().parents
+    assert Path(_config_flag(call["argv"])) == EMPTY_TOOL_CONFIG
     cwd = Path(call["cwd"])
     assert not any((p / ".git").exists() for p in [cwd, *cwd.parents])
     assert cwd == Path(cwd.anchor)
