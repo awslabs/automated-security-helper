@@ -65,9 +65,11 @@ tree counts as in the tree wherever the link points, because the repository wrot
 the link: a ``.ash/.ash.yaml`` that links to a file elsewhere is held to the same
 limits as one written in place (``files_inside``).
 
-Known limitation: a trusted config file kept in a checkout of its own (an ops or
-dotfiles repository) can't grant either. Its grants are dropped with a warning that
-names the file and the setting; pass them with ``--config-overrides``.
+The rule is any git checkout, not only the one scanned: a config file kept in a
+checkout of its own (an ops or dotfiles repository) can't grant either, since ASH
+can't tell who wrote it. Its grants are dropped with a warning that names the file
+and the setting and says how to keep them: pass them with ``--config-overrides``,
+or keep the config file outside every git checkout and the scanned directory.
 """
 
 import os
