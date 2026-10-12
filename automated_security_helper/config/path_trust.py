@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -465,7 +466,13 @@ def honored_path(
                 "passed to the tool only from outside every git checkout and the "
                 f"scanned directory. {KEEP_A_SETTING}"
             )
-        ASH_LOGGER.warning(f"Ignoring {key} ({named.as_posix()}): {reason}. {advice}")
+        # The value and the paths in the reason are written with their control
+        # characters escaped: a newline in an environment variable's value would
+        # otherwise start a line of its own in the log.
+        ASH_LOGGER.warning(
+            f"Ignoring {key} ({escape_controls(named.as_posix())}): "
+            f"{escape_controls(reason)}. {advice}"
+        )
     return None
 
 

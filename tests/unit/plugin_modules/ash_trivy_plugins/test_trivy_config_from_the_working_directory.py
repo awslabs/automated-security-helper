@@ -85,7 +85,8 @@ def test_a_relative_trivy_config_inside_the_scanned_checkout_is_refused(
     (message,) = [
         r.getMessage() for r in caplog.records if "TRIVY_CONFIG" in r.getMessage()
     ]
-    assert (repo / "sub" / "trivy.yaml").as_posix() in message, message
+    # Named as the variable gives it, joined to the working directory.
+    assert (cwd / ".." / "trivy.yaml").as_posix() in message, message
     assert "inside the scanned tree" in message, message
 
 

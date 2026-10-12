@@ -38,6 +38,7 @@ from automated_security_helper.utils.package_identity import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.path_trust import honored_path
@@ -422,13 +423,15 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         empty config (``EMPTY_TOOL_CONFIG``, readable under every sandbox backend).
         The variable is the operator's, set where ASH runs, so a relative path in
         it is taken from the working directory, as ``TRIVY_IGNOREFILE``'s and
-        ``TRIVY_SECRET_CONFIG``'s are (config/operator_paths.py).
+        ``TRIVY_SECRET_CONFIG``'s are (``operator_paths.anchored_environment_path``).
         """
-        from automated_security_helper.config.operator_paths import anchored_path
+        from automated_security_helper.config.operator_paths import (
+            anchored_environment_path,
+        )
 
         source_dir = Path(self.context.source_dir)
         variable = os.environ.get("TRIVY_CONFIG")
-        configured = anchored_path(variable, Path.cwd())
+        configured = anchored_environment_path(variable, Path.cwd())
         if configured:
             path = honored_path(
                 configured,
@@ -440,8 +443,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 if not path.is_file():
                     raise ScannerError(
                         f"TRIVY_CONFIG is {variable!r}, which is not a file "
-                        f"(resolved to {path.as_posix()}). Fix the path or unset it; "
-                        "trivy is not run without it."
+                        f"(resolved to {escape_controls(path.as_posix())}). Fix the "
+                        "path or unset it; trivy is not run without it."
                     )
                 return path.as_posix()
         in_tree = source_dir / "trivy.yaml"
@@ -498,7 +501,9 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         """
         context_config = getattr(self.context, "config", None)
         source_dir = Path(self.context.source_dir)
-        from automated_security_helper.config.operator_paths import anchored_path
+        from automated_security_helper.config.operator_paths import (
+            anchored_environment_path,
+        )
 
         for key, value in (
             (
@@ -507,7 +512,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             ),
             # The variable is the operator's, set where ASH runs: a relative path
             # in it is taken from the working directory (config/operator_paths.py).
-            (env, anchored_path(os.environ.get(env), Path.cwd())),
+            (env, anchored_environment_path(os.environ.get(env), Path.cwd())),
         ):
             if not value:
                 continue
@@ -519,8 +524,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             if not path.is_file():
                 raise ScannerError(
                     f"{key} is {value!r}, which is not a file (resolved to "
-                    f"{path.as_posix()}). Fix the path or unset it; trivy is not run "
-                    "without it."
+                    f"{escape_controls(path.as_posix())}). Fix the path or unset "
+                    "it; trivy is not run without it."
                 )
             return path.as_posix()
         in_tree = source_dir / default_name

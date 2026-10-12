@@ -1023,7 +1023,10 @@ detect-secrets' `baseline_file` and the `file://` entries of its `scan_settings`
 trivy-repo's `ignore_file` and `secret_config_file`, opengrep's and semgrep's
 `config` when a file or directory is there (otherwise it is a registry entry such
 as `p/ci`), and `sandbox.extra_read_paths`. A path that starts with `~`, or is
-absolute, is used as written. A config file inside the scanned tree does not set
+absolute, is used as written. In `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` and
+`TRIVY_CONFIG`, any other value is taken from the working directory exactly as
+written, a `$` or `://` in it included, and a `..` after a symbolic link goes up
+from where the link points. A config file inside the scanned tree does not set
 these options (see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)).
 To name a file in the scanned repository, give its absolute path, or a path

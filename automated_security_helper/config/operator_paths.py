@@ -25,7 +25,11 @@ flags that become overrides, are taken from the working directory ASH runs in
 ``TRIVY_SECRET_CONFIG``, which trivy-repo reads in place of its two options, and
 ``TRIVY_CONFIG``, the trivy config file it passes with ``--config``. A
 value that is already absolute, starts with ``~`` (the scanner expands it), holds
-``$`` (the sandbox expands it) or is a URL is left as written.
+``$`` (the sandbox expands it) or is a URL is left as written. The three
+environment variables are anchored by ``anchored_environment_path``: nothing
+expands them, so a relative value is joined as written, ``$`` and ``://``
+included, and its ``..`` is left for the lookup, which goes up from where a
+symbolic link before it points.
 
 The options (``SCANNER_PATH_OPTIONS``, ``SCANNER_RULES_OPTIONS``):
 
@@ -53,6 +57,12 @@ Known limitations
   and under the MCP server none of these options is the client's to set.
 * ``ash config update`` and the config wizard read a file without anchoring, so
   they write back what the file holds.
+* ``anchored_path`` normalizes the joined path by name (``os.path.normpath``), so
+  in a config file or ``--config-overrides`` a ``link/..`` names the directory
+  holding the link, where the kernel would go up from the link's target. The
+  values are compared with each other after anchoring (``tool_config_trust``,
+  ``OperatorPaths``), so dropping the normalization means changing how those
+  comparisons see a path. The environment variables are not normalized.
 * Reporter options that name a report file (the Bedrock reporter's
   ``output_file`` and the others) are a file name in the reports directory, not
   a path, so they are not listed here. ``global_settings.ignore_paths`` and the
@@ -126,6 +136,24 @@ def _spellings(container: Dict[str, Any], name: str) -> List[str]:
         for key in container
         if isinstance(key, str) and key.replace("-", "_") == wanted
     ]
+
+
+def anchored_environment_path(value: Any, base_dir: Path) -> Any:
+    """A path the operator set in an environment variable, a relative one joined to ``base_dir``.
+
+    ``base_dir`` is the working directory ASH runs in. Nothing expands such a
+    variable's value, so a ``$`` or ``://`` in it is part of a file name, and the
+    value is joined as written. ``..`` is left for the lookup to resolve, so it
+    goes up from where a symbolic link before it points, as the kernel and the
+    shell read the path. A value that is not a string, is empty, is absolute or
+    starts with ``~`` (expanded by ``path_trust.resolved_path``) is returned as
+    it is.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return value
+    if value.startswith("~") or os.path.isabs(value):
+        return value
+    return os.path.join(os.fspath(base_dir), value)
 
 
 def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) -> Any:
