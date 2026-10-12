@@ -42,6 +42,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_sca
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
     CfnLintScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
     NO_ZIZMOR_INPUT,
     ZizmorScanner,
@@ -494,3 +500,38 @@ def test_zizmor_scan_and_hook_agree(tmp_path, monkeypatch, tree):
     )
 
     assert (reason is None) == attempted, (reason, attempted)
+
+
+# --------------------------------------------------------------------------- #
+# gitleaks and trivy: their tool walks the whole target, so they cannot tell
+# --------------------------------------------------------------------------- #
+
+WHOLE_TREE_SCANNERS = [
+    pytest.param(GitleaksScanner, id="gitleaks"),
+    pytest.param(TrivyScanner, id="trivy"),
+]
+
+
+@pytest.mark.parametrize("scanner_class", WHOLE_TREE_SCANNERS)
+def test_a_whole_tree_scanner_states_its_hook(scanner_class):
+    """Stated on the class, so the answer is this scanner's and not a default."""
+    assert "nothing_to_scan_reason" in vars(scanner_class)
+
+
+@pytest.mark.parametrize("scanner_class", WHOLE_TREE_SCANNERS)
+@pytest.mark.parametrize(
+    ("source", "converted"),
+    [
+        pytest.param({"README.md": "# app\n"}, {}, id="readme-only"),
+        pytest.param({}, {}, id="empty"),
+        pytest.param(
+            {"README.md": "# app\n"}, {"archive/notes.txt": "x\n"}, id="converted"
+        ),
+    ],
+)
+def test_a_whole_tree_scanner_cannot_tell_there_is_nothing_to_scan(
+    tmp_path, scanner_class, source, converted
+):
+    context = _context(tmp_path, source, converted)
+
+    assert scanner_class(context=context).nothing_to_scan_reason() is None

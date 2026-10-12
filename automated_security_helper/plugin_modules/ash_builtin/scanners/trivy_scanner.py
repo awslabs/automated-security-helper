@@ -361,6 +361,21 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
     def _reads_vulnerability_db(self) -> bool:
         return "vuln" in self._options().scanners
 
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None: ASH cannot tell before trivy runs whether it reads any file.
+
+        ``trivy fs`` is handed the whole target and walks it itself. Which files
+        it reads is decided by trivy's own analyzers: for ``vuln``, lockfiles and
+        manifests in many formats, a list that changes between trivy releases,
+        and with the operator's ``scanners`` including ``secret``,
+        ``misconfig`` or ``license``, nearly any file. ASH makes no selection of
+        its own that could come up empty, and trivy counts no targets, so a run
+        with the tool never reports that it evaluated nothing either. None keeps
+        the scanner MISSING when trivy or its database is absent; see
+        ScannerPluginBase.nothing_to_scan_reason.
+        """
+        return None
+
     def _process_config_options(self) -> None:
         self._honor_scanner_set()
         self._append_trivy_options()

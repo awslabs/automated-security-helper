@@ -442,6 +442,19 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             raise ScannerError("GitleaksScanner has no plugin context")
         return Path(self.context.source_dir)
 
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """None: ASH cannot tell before gitleaks runs whether it reads any file.
+
+        gitleaks is handed the whole target (``gitleaks dir``), walks it itself,
+        and skips what its config's allowlists name, a config the operator may
+        have chosen. Any file it reads can hold a secret, so ASH makes no
+        selection of its own that could come up empty, and gitleaks counts no
+        targets, so a run with the tool never reports that it evaluated nothing
+        either. None keeps the scanner MISSING when gitleaks is absent; see
+        ScannerPluginBase.nothing_to_scan_reason.
+        """
+        return None
+
     def _operator_option_path(self, option: str) -> Optional[Path]:
         """``option``'s path when the operator set it, else None (with a warning).
 
