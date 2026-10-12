@@ -1887,6 +1887,13 @@
   values on to the reports and responses rendered from it. `ash merge` masks the
   merged results against every shard's secret findings before it writes them.
 
+- **checkov's and cfn-nag's hard-coded credential rules are secret findings.**
+  checkov's `CKV_AWS_41`, `CKV_AWS_45`, `CKV_AWS_46` and the other "hard-coded"
+  checks, and cfn-nag's "... must not be a plaintext string" password rules, were
+  not recognized, so the credentials checkov puts in every snippet of the
+  resource (a Lambda's environment, say) stayed in clear in every finding about
+  it. They are now recognized by what their message or rule description says.
+
 - **Ordinary words a password check quotes are no longer masked everywhere.**
   A B105 on `FIELD = "password"` masked every `password` in the results: rule
   descriptions, tags, other findings' messages (which changed their IDs) and SBOM

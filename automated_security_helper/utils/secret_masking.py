@@ -346,17 +346,62 @@ def _physical_locations_of(result: Any, related: bool = False) -> Iterable[Any]:
             yield physical
 
 
-def _rule_ids_tagged(sarif_report: Any, is_tag) -> Set[str]:
-    found: Set[str] = set()
+def _rules_of(sarif_report: Any) -> Iterable[Any]:
     for run in getattr(sarif_report, "runs", None) or []:
         tool = getattr(run, "tool", None)
         components = [getattr(tool, "driver", None)]
         components.extend(getattr(tool, "extensions", None) or [])
         for component in components:
-            for rule in getattr(component, "rules", None) or []:
-                tags = getattr(getattr(rule, "properties", None), "tags", None) or []
-                if any(is_tag(tag) for tag in tags) and getattr(rule, "id", None):
-                    found.add(rule.id)
+            yield from getattr(component, "rules", None) or []
+
+
+def _rule_ids_tagged(sarif_report: Any, is_tag) -> Set[str]:
+    found: Set[str] = set()
+    for rule in _rules_of(sarif_report):
+        tags = getattr(getattr(rule, "properties", None), "tags", None) or []
+        if any(is_tag(tag) for tag in tags) and getattr(rule, "id", None):
+            found.add(rule.id)
+    return found
+
+
+#: What the rules about a credential written into infrastructure code say,
+#: since neither tool tags them. checkov's checks: "Ensure no hard coded AWS
+#: access key and secret key exists in provider" (CKV_AWS_41), "... hard-coded
+#: secrets exist in lambda environment" (CKV_AWS_45), "... in EC2 user data"
+#: (CKV_AWS_46), "... in Parameter Store values" (CKV_AWS_384), "no sensitive
+#: credentials are exposed in VM custom_data" (CKV_AZURE_45), "SecureString
+#: parameter should not have hardcoded default values" (CKV_AZURE_131), and the
+#: providers' "no hard coded ... token/key/password" checks. cfn-nag's
+#: PasswordBaseRule rules: "<Resource> <Property> password must not be a
+#: plaintext string ..." (F23, F31, F34-F37, F41, F44-F71 and others, written
+#: with a CFN_NAG_ prefix in its SARIF). "master username must not be a
+#: plaintext string" (F24) is not about a credential.
+_IAC_CREDENTIAL = re.compile(
+    r"(?i)\bhard[- ]?coded\b.*\b(?:secrets?|credentials?|passwords?|keys?|tokens?)\b"
+    r"|\b(?:secrets?|credentials?|passwords?|keys?|tokens?|securestring)\b.*"
+    r"\bhard[- ]?coded\b"
+    r"|(?:passw|secret|token|key|credential)\w*\s+must not be a plaintext"
+    r"|\bsensitive credentials\b"
+    r"|\bcredentials in the template\b",
+    re.DOTALL,
+)
+
+
+def _describes_a_credential_in_code(text: Any) -> bool:
+    return isinstance(text, str) and bool(_IAC_CREDENTIAL.search(text))
+
+
+def _rule_ids_described(sarif_report: Any) -> Set[str]:
+    """IDs of rules whose name or description is about a credential in code."""
+    found: Set[str] = set()
+    for rule in _rules_of(sarif_report):
+        texts = [getattr(rule, "name", None)]
+        for field in ("shortDescription", "fullDescription"):
+            texts.append(_text_of(getattr(rule, field, None)))
+        if any(_describes_a_credential_in_code(text) for text in texts) and getattr(
+            rule, "id", None
+        ):
+            found.add(rule.id)
     return found
 
 
@@ -400,9 +445,13 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
 
     A rule is a secret rule when its tags include ``secret``/``secrets`` (trivy's)
     or a hard-coded credential CWE (``_SECRET_CWE``: semgrep's and opengrep's
-    ``generic.secrets.*`` rules, whose results carry no tags of their own).
+    ``generic.secrets.*`` rules, whose results carry no tags of their own), or
+    when its name or description is about a credential written into
+    infrastructure code (``_IAC_CREDENTIAL``: checkov's and cfn-nag's).
     """
-    return _rule_ids_tagged(sarif_report, _is_secret_tag)
+    return _rule_ids_tagged(sarif_report, _is_secret_tag) | _rule_ids_described(
+        sarif_report
+    )
 
 
 def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> bool:
@@ -423,7 +472,7 @@ def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> b
     if SECRETS_TOOL_TYPE in result_tool_types(result):
         return True
     text = _text_of(getattr(result, "message", None)) or ""
-    return bool(_quoted_values(text))
+    return bool(_quoted_values(text)) or _describes_a_credential_in_code(text)
 
 
 def _same_file(first: str, second: str) -> bool:
@@ -708,12 +757,20 @@ def _mask_message_values(text: str) -> str:
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
     index = _SecretIndex()
     rule_ids = secret_rule_ids(sarif_report)
+    described = _rule_ids_described(sarif_report)
     known: Optional[Dict[str, Dict[int, str]]] = None
     for result in sarif_report.get_all_results() or []:
         if not is_secret_finding(result, rule_ids):
             continue
         index.secret_results.append(result)
         private_key = _is_private_key_finding(result)
+        # cfn-nag reports a credential rule at its resource's first line only; the
+        # property holding the value is somewhere after it.
+        resource_only = getattr(
+            result, "ruleId", None
+        ) in described or _describes_a_credential_in_code(
+            _text_of(getattr(result, "message", None))
+        )
         for physical in _physical_locations_of(result):
             uri = _normalized_uri(
                 getattr(getattr(physical, "artifactLocation", None), "uri", None)
@@ -732,6 +789,8 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 if private_key or _starts_a_block(known, uri, start):
                     block_end = _block_end(known, uri, start)
                     end = block_end if block_end is not None else _TO_END_OF_FILE
+                elif resource_only and not isinstance(end, int):
+                    end = _TO_END_OF_FILE
             index.add_location(uri, start, end)
         text = _text_of(getattr(result, "message", None)) or ""
         quoted = _quoted_values(text)

@@ -334,6 +334,196 @@ class TestOnlyValuesThatLookLikeSecretsAreMaskedElsewhere:
         ] == untouched
 
 
+#: A Lambda resource with credentials in its environment, lines 7-13, as
+#: checkov 3.3.26 puts it in every finding's snippet for the resource.
+KEY_ID_VALUE = "AKIA" + _derived("masking-unit-key-id", 16).upper()
+LAMBDA_LINES = [
+    'resource "aws_lambda_function" "fn" {\n',
+    '  function_name = "fn"\n',
+    "  environment {\n",
+    "    variables = {\n",
+    f'      AWS_ACCESS_KEY_ID = "{KEY_ID_VALUE}"\n',
+    "    }\n",
+    "  }\n",
+]
+
+
+def _checkov(rule_id, name, line=7, lines=LAMBDA_LINES, uri="tf/main.tf"):
+    """A result as checkov writes it: the check's name as the message, the resource as the region."""
+    return {
+        "ruleId": rule_id,
+        "level": "error",
+        "message": {"text": name},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": {
+                        "startLine": line,
+                        "endLine": line + len(lines) - 1,
+                        "snippet": {"text": "".join(lines)},
+                    },
+                }
+            }
+        ],
+    }
+
+
+def _cfn_nag(rule_id, message, line=4, uri="cfn/template.yaml"):
+    """A result as cfn_nag 0.8.10 writes it: the resource's first line and no snippet."""
+    return {
+        "ruleId": rule_id,
+        "level": "error",
+        "message": {"text": message},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
+                    "region": {"startLine": line},
+                }
+            }
+        ],
+    }
+
+
+_PLAINTEXT_TAIL = (
+    " must not be a plaintext string or a Ref to a Parameter with a Default value."
+    "  Can be Ref to a NoEcho Parameter without a Default, or a dynamic reference"
+    " to a secretsmanager/ssm-secure value."
+)
+DB_PASSWORD_VALUE = _derived("masking-unit-db-value", 16)
+RDS_LINES = [
+    "  Database:\n",
+    "    Type: AWS::RDS::DBInstance\n",
+    "    Properties:\n",
+    "      MasterUsername: admin\n",
+    f"      MasterUserPassword: {DB_PASSWORD_VALUE}\n",
+]
+
+
+class TestInfrastructureCredentialRules:
+    """checkov's and cfn-nag's rules about a credential written into IaC are secret rules.
+
+    Neither tool tags them, so they are recognized by what they say: checkov's
+    "hard-coded" checks (CKV_AWS_41, 45, 46, 384, CKV_AZURE_45, 131, and the
+    providers' ones) and cfn-nag's "... password must not be a plaintext string"
+    rules (F23, F31, F34, F35 and the rest). checkov puts the resource in every
+    finding's snippet, credentials included.
+    """
+
+    @pytest.mark.parametrize(
+        "rule_id, name",
+        [
+            (
+                "CKV_AWS_41",
+                "Ensure no hard coded AWS access key and secret key exists in provider",
+            ),
+            ("CKV_AWS_45", "Ensure no hard-coded secrets exist in lambda environment"),
+            ("CKV_AWS_46", "Ensure no hard-coded secrets exist in EC2 user data"),
+            (
+                "CKV_AWS_384",
+                "Ensure no hard-coded secrets exist in Parameter Store values",
+            ),
+            (
+                "CKV_AZURE_45",
+                "Ensure that no sensitive credentials are exposed in VM custom_data",
+            ),
+            (
+                "CKV_AZURE_131",
+                "SecureString parameter should not have hardcoded default values",
+            ),
+            ("CKV_OCI_1", "Ensure no hard coded OCI private key in provider"),
+        ],
+    )
+    def test_a_checkov_credential_check_masks_the_resource_in_other_findings(
+        self, rule_id, name
+    ):
+        model = _results(
+            _checkov(rule_id, name),
+            _checkov(
+                "CKV_AWS_272",
+                "Ensure AWS Lambda function is configured to validate code-signing",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert KEY_ID_VALUE not in _region_text(model.sarif.runs[0].results[1])
+
+    @pytest.mark.parametrize(
+        "rule_id, subject",
+        [
+            ("CFN_NAG_F23", "RDS instance master user password"),
+            ("CFN_NAG_F34", "RDS DB Cluster master user password"),
+            ("CFN_NAG_F41", "Amplify App AccessToken"),
+            ("CFN_NAG_F57", "Pinpoint APNSChannel PrivateKey"),
+        ],
+    )
+    def test_a_cfn_nag_plaintext_credential_rule_masks_the_rest_of_the_resource(
+        self, rule_id, subject
+    ):
+        """cfn-nag reports the resource's first line only, so the range runs on from it."""
+        neighbor = _result(
+            "CKV_AWS_16",
+            "cfn/template.yaml",
+            3,
+            "Ensure all data stored in the RDS is securely encrypted at rest",
+            context=(3, "Resources:\n" + "".join(RDS_LINES)),
+            scanner="checkov",
+        )
+        model = _results(_cfn_nag(rule_id, subject + _PLAINTEXT_TAIL), neighbor)
+
+        mask_secrets_in_results(model)
+
+        context = _region_text(model.sarif.runs[0].results[1], "contextRegion")
+        assert DB_PASSWORD_VALUE not in context
+        # Control: the line before the resource is kept.
+        assert context.startswith("Resources:\n")
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            _cfn_nag("CFN_NAG_F24", "RDS instance master username" + _PLAINTEXT_TAIL),
+            _cfn_nag(
+                "CFN_NAG_F27", "RDS DBInstance should have StorageEncrypted enabled"
+            ),
+            _checkov(
+                "CKV_AWS_272",
+                "Ensure AWS Lambda function is configured to validate code-signing",
+            ),
+        ],
+        ids=["cfn-nag-username", "cfn-nag-encryption", "checkov-code-signing"],
+    )
+    def test_other_rules_are_not_secret_rules(self, result):
+        """Control: a user name, or a rule that is not about a credential."""
+        from automated_security_helper.utils.secret_masking import is_secret_finding
+
+        model = _results(result)
+
+        assert not is_secret_finding(model.sarif.runs[0].results[0])
+
+    def test_a_rule_that_says_so_in_its_metadata_only(self):
+        """A result whose message is generic, with the rule's description saying it."""
+        import json
+
+        dumped = json.loads(
+            _results(
+                _checkov("CKV_CUSTOM_9", "Custom check failed"),
+                _checkov("CKV_AWS_272", "Ensure code-signing"),
+            ).model_dump_json(by_alias=True)
+        )
+        dumped["sarif"]["runs"][0]["tool"]["driver"]["rules"] = [
+            {
+                "id": "CKV_CUSTOM_9",
+                "shortDescription": {"text": "Ensure no hard-coded secrets exist"},
+            }
+        ]
+
+        model = AshAggregatedResults.model_validate(dumped)
+
+        assert KEY_ID_VALUE not in _region_text(model.sarif.runs[0].results[1])
+
+
 class TestValuesFromTheMatch:
     """A secret finding that quotes no value gives the one its own region matched.
 

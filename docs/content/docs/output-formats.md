@@ -446,8 +446,16 @@ result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit
 B105, B106 or B107, a checkov `CKV_SECRET_*` rule, a rule with a `secrets` segment
 in its id (semgrep's and opengrep's `generic.secrets.*`), or a rule whose tags, in
 the tool's rule metadata or on the result, carry `secret`, `secrets` or a
-hard-coded credential CWE: CWE-798, CWE-259 or CWE-321. Snippets with no secret in them are left as they
-were.
+hard-coded credential CWE: CWE-798, CWE-259 or CWE-321. So is a rule about a
+credential written into infrastructure code, recognized by what its message or
+description says since neither tool tags these: checkov's "hard-coded" checks
+(`CKV_AWS_41`, `CKV_AWS_45`, `CKV_AWS_46`, `CKV_AWS_384`, `CKV_AZURE_45`,
+`CKV_AZURE_131` and the providers' token and key checks) and cfn-nag's
+"... password must not be a plaintext string" rules (`F23`, `F31`, `F34` and the
+rest). checkov puts the whole resource in each finding's snippet, so its lines
+are masked in every finding about that resource. cfn-nag reports only the
+resource's first line, so the masked range runs from there to the end of the
+file. Snippets with no secret in them are left as they were.
 
 Results that are read back from an existing `ash_aggregated_results.json` are
 masked the same way as they are loaded, whatever wrote the file (an older ASH, or
