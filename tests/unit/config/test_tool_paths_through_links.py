@@ -9,9 +9,9 @@ file outside it resolves outside, but the repository chose that file by placing
 the link, so it is refused as a file inside the tree is: a link at any depth, a
 directory link, or a chain of links that ends outside. A link outside the tree,
 and a path that leaves by ``..`` with no link, are passed as before. Each
-scanner that takes such a path goes through ``honored_path``: trivy's ignore
-file and secret config (option and environment variable), checkov's and
-ferret's ``config_file``, and detect-secrets' ``file://`` plugins.
+scanner that takes such a path goes through ``honored_path``: trivy's and
+trivy-repo's ignore file and secret config (option and environment variable),
+checkov's and ferret's ``config_file``, and detect-secrets' ``file://`` plugins.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from automated_security_helper.config.path_trust import (
     reset_path_refusal_warnings,
 )
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
 PluginContext.model_rebuild()
@@ -178,14 +179,33 @@ def _context(source: Path, tmp_path: Path, config) -> PluginContext:
     )
 
 
-def _trivy_argv(tmp_path: Path, source: Path, options=None) -> list:
+def _trivy_argv(tmp_path: Path, source: Path, scanner_name: str, options=None) -> list:
+    """The argv ``trivy`` or ``trivy-repo`` would run with ``options`` set.
+
+    The config is built from no file in the scanned tree, so ``options`` are the
+    operator's (``utils/config_trust.record_provenance``): a value refused here is
+    refused for where its path leads, not for who set it.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+        TrivyScannerConfig,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
     )
 
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
+    context = _context(source, tmp_path, config)
+    if scanner_name == "trivy":
+        fs = TrivyScanner(
+            context=context, config=TrivyScannerConfig(options=options or {})
+        )
+        final_args, _, _ = fs._execute_scan(source, "source", [])
+        return [str(a) for a in final_args]
     scanner = TrivyRepoScanner(
-        context=_context(source, tmp_path, AshConfig()),
+        context=context,
         config=TrivyRepoScannerConfig(options=options or {}),
     )
     scanner.dependencies_satisfied = True
@@ -203,6 +223,7 @@ def _flag(argv: list, name: str) -> Path:
     return Path(values[0])
 
 
+@pytest.mark.parametrize("scanner_name", ["trivy", "trivy-repo"])
 @pytest.mark.parametrize(
     "option, env, flag",
     [
@@ -213,7 +234,7 @@ def _flag(argv: list, name: str) -> Path:
     ],
 )
 def test_trivy_does_not_get_a_file_an_in_tree_link_reaches(
-    tree, tmp_path: Path, monkeypatch, option, env, flag
+    tree, tmp_path: Path, monkeypatch, option, env, flag, scanner_name: str
 ) -> None:
     source, operator = tree
     outside = _file(operator / "trivy-input", "github-pat\n")
@@ -224,25 +245,28 @@ def test_trivy_does_not_get_a_file_an_in_tree_link_reaches(
     else:
         monkeypatch.setenv(env, str(link))
 
-    passed = _flag(_trivy_argv(tmp_path, source, options), flag)
+    passed = _flag(_trivy_argv(tmp_path, source, scanner_name, options), flag)
 
     assert passed.resolve() != outside.resolve()
     assert "github-pat" not in passed.read_text()
 
 
+@pytest.mark.parametrize("scanner_name", ["trivy", "trivy-repo"])
 @pytest.mark.parametrize(
     "option, flag",
     [("ignore_file", "ignorefile"), ("secret_config_file", "secret-config")],
 )
 def test_control_trivy_gets_the_operators_file_through_an_outside_link(
-    tree, tmp_path: Path, option: str, flag: str
+    tree, tmp_path: Path, option: str, flag: str, scanner_name: str
 ) -> None:
     """The same option names a file it is given, so the test above can fail."""
     source, operator = tree
     outside = _file(operator / "trivy-input", "github-pat\n")
     link = _link(operator / "alias", outside)
 
-    passed = _flag(_trivy_argv(tmp_path, source, {option: str(link)}), flag)
+    passed = _flag(
+        _trivy_argv(tmp_path, source, scanner_name, {option: str(link)}), flag
+    )
 
     assert passed == outside.resolve()
 
