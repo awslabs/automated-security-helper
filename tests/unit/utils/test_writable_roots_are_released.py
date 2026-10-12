@@ -169,3 +169,84 @@ def test_a_spawns_writable_directories_are_released_by_its_cleanup(make_scope):
 
     assert during != before, "the spawn's writable directories were never registered"
     assert _holders() == before
+
+
+@pytest.fixture
+def logger_name():
+    """A logger of the test's own, its handlers closed afterwards."""
+    import logging
+    import uuid
+
+    name = f"roots-{uuid.uuid4().hex}"
+    yield name
+    logger = logging.getLogger(name)
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
+def _log_to(name: str, output: Path):
+    from automated_security_helper.utils.log import get_logger
+
+    return get_logger(
+        name=name, output_dir=output, log_format="BOTH", show_progress=True
+    )
+
+
+def _close_handlers(name: str) -> None:
+    import logging
+
+    for handler in list(logging.getLogger(name).handlers):
+        handler.close()
+
+
+class TestTheLogFileHandlers:
+    """Each log file's handler holds its directory's registration while it is open."""
+
+    def test_an_open_log_holds_its_directory_and_closing_it_releases_it(
+        self, tmp_path, logger_name
+    ):
+        output = (tmp_path / "out").absolute()
+        before = fs_guard.registered_roots()
+
+        _log_to(logger_name, output)
+        assert output in fs_guard.registered_roots()
+
+        _close_handlers(logger_name)
+        assert fs_guard.registered_roots() == before
+
+    def test_a_new_output_directory_releases_the_previous_one(
+        self, tmp_path, logger_name
+    ):
+        """The MCP server sets the logger up again for each scan's output."""
+        before = fs_guard.registered_roots()
+        outputs = [(tmp_path / f"out{i}").absolute() for i in range(4)]
+
+        for output in outputs:
+            _log_to(logger_name, output)
+
+        assert fs_guard.registered_roots() - before == {outputs[-1]}
+        _close_handlers(logger_name)
+        assert fs_guard.registered_roots() == before
+
+    def test_a_reopen_after_the_run_s_own_root_is_gone_still_refuses_a_link(
+        self, tmp_path, logger_name
+    ):
+        output = tmp_path / "out"
+        victim = tmp_path / "victim.txt"
+        victim.write_text("outside content\n")
+        with fs_guard.writable_root(output):
+            _log_to(logger_name, output)
+        (handler,) = [
+            h
+            for h in __import__("logging").getLogger(logger_name).handlers
+            if Path(getattr(h, "baseFilename", "")).name == f"{logger_name}.log"
+        ]
+        handler.close()
+        (output / f"{logger_name}.log").unlink()
+        (output / f"{logger_name}.log").symlink_to(victim)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            handler._open()
+
+        assert victim.read_text() == "outside content\n"

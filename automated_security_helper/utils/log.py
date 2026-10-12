@@ -429,7 +429,37 @@ class _GuardedFileHandler(logging.FileHandler):
     opened: the directory holding the file is guarded for each open, whether or not
     it is still a registered root, and below a registered output directory every
     component under it is checked too.
+
+    The handler registers the directory holding its file (the output directory) as
+    a guarded root while it is open, so ASH's other writes there refuse a link for
+    as long as it logs there, and releases it in close().
     """
+
+    def __init__(self, filename: str, *args, **kwargs) -> None:
+        # Imported here, not at the top: fs_guard imports this module for
+        # ASH_LOGGER. Do not hoist.
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        self._root: Path | None = fs_guard.register_writable_root(Path(filename).parent)
+        try:
+            super().__init__(filename, *args, **kwargs)
+        except BaseException:
+            self._release_root()
+            raise
+
+    def _release_root(self) -> None:
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        root, self._root = self._root, None
+        if root is not None:
+            fs_guard.release_writable_root(root)
+
+    def close(self) -> None:
+        """Close the file, and release the directory's registration once."""
+        try:
+            super().close()
+        finally:
+            self._release_root()
 
     def _open(self):
         from automated_security_helper.utils.sandbox import fs_guard
@@ -471,6 +501,11 @@ def get_logger(
 
     # Clear existing handlers to avoid duplicates when the function is called multiple times
     if logger.handlers:
+        # The log files of an earlier call are closed, which releases the output
+        # directory each one registered; the other handlers are only dropped.
+        for handler in logger.handlers:
+            if isinstance(handler, _GuardedFileHandler):
+                handler.close()
         logger.handlers = []
 
     # Explicit set the logger level to TRACE/5
