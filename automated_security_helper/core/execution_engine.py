@@ -303,10 +303,13 @@ class ScanExecutionEngine:
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
-        # Named, because a plugin left out here otherwise leaves no trace: no row,
+        # Logged, because a plugin left out here otherwise leaves no trace: no row,
         # no MISSING. The usual case is a module another scan in this process named;
         # the one to notice is a plugin a named package registers from another
-        # package or a subpackage without importing or listing it.
+        # package or a subpackage without importing or listing it. The count goes
+        # to INFO and the names to DEBUG: ash.log records INFO, and in a process
+        # running several scans (an MCP server) the names are what other scans
+        # named.
         left_out = [
             f"{kind} {plugin.__name__} ({plugin.__module__})"
             for kind in ("converter", "scanner", "reporter")
@@ -315,9 +318,12 @@ class ScanExecutionEngine:
         ]
         if left_out:
             ASH_LOGGER.info(
-                "Registered plugins not used by this scan, because no module in its "
-                "ash_plugin_modules defines, imports or lists them: "
-                + ", ".join(left_out)
+                f"{len(left_out)} registered plugin(s) not used by this scan, "
+                "because no module in its ash_plugin_modules defines, imports or "
+                "lists them. Run with --debug to see which."
+            )
+            ASH_LOGGER.debug(
+                "Registered plugins not used by this scan: " + ", ".join(left_out)
             )
 
         self.ensure_initialized(self._context.config)

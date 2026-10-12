@@ -140,14 +140,32 @@ def _reports(output_dir: Path, extension: str) -> List[str]:
 #: community scanner packages; ``{"subscribe": true}`` subscribes a handler defined in
 #: this program to EXECUTION_START, the way embedding code calls
 #: ``ash_plugin_manager.subscribe``, which writes ``embedded-<tree name>``. Prints one
-#: report line: per scan, the exit code and each scanner row's status.
+#: report line: per scan, the exit code, each scanner row's status, and the scan's
+#: "not used by this scan" log records with their levels.
 _PROGRAM = r"""
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 
 from automated_security_helper.plugins.loader import load_internal_plugins
+
+#: The "not used by this scan" log records of the scan running now, at every
+#: level. A filter on ASH's logger sees each record before any handler does, and
+#: survives the handler reset each scan's logging setup makes.
+LEFT_OUT = []
+
+
+class _LeftOutRecorder(logging.Filter):
+    def filter(self, record):
+        message = record.getMessage()
+        if "not used by this scan" in message:
+            LEFT_OUT.append({"level": record.levelname, "message": message})
+        return True
+
+
+logging.getLogger("ash").addFilter(_LeftOutRecorder())
 
 
 def record_embedded_start(*args, **kwargs):
@@ -198,6 +216,7 @@ for step in json.loads(sys.argv[1]):
         target = {"workspace_plan": resolve_workspace(Path(step["workspace_file"]))}
     else:
         target = {"source_dir": step["source_dir"]}
+    LEFT_OUT.clear()
     try:
         run_ash_scan(
             **target,
@@ -222,7 +241,7 @@ for step in json.loads(sys.argv[1]):
             for name, info in data.get("scanner_results", {}).items()
             if name not in BUILTINS
         }
-    scans.append({"exit": code, "rows": rows})
+    scans.append({"exit": code, "rows": rows, "left_out": list(LEFT_OUT)})
 
 print("PLUGIN-SELECTION-REPORT " + json.dumps(scans), flush=True)
 """
@@ -406,13 +425,22 @@ def _left_out_messages(output_dir: Path) -> List[str]:
     ]
 
 
+def _records(scan: dict, level: str) -> List[str]:
+    """The scan's "not used by this scan" log messages at *level*, from any handler."""
+    return [r["message"] for r in scan["left_out"] if r["level"] == level]
+
+
 class TestWhatAScanLeavesOutIsLogged:
-    """A registered plugin a scan does not select is named in that scan's log."""
+    """A scan counts the registered plugins it leaves out at INFO, and names them at DEBUG.
+
+    The names stay out of ``ash.log``, which records INFO and above: in a process
+    that runs several scans, they are what other scans named.
+    """
 
     def test_a_module_an_earlier_scan_named(self, tmp_path):
         proc = _Process(tmp_path)
         first, second = proc.tree("first"), proc.tree("second")
-        proc.run(
+        scan1, scan2 = proc.run(
             [
                 {
                     "source_dir": str(first),
@@ -424,8 +452,16 @@ class TestWhatAScanLeavesOutIsLogged:
         )
 
         assert _left_out_messages(tmp_path / "out1") == []
-        (message,) = _left_out_messages(tmp_path / "out2")
-        assert "FerretScanScanner" in message
+        assert scan1["left_out"] == []
+        (line,) = _left_out_messages(tmp_path / "out2")
+        assert "1 registered plugin" in line, line
+        assert "FerretScanScanner" not in line, (
+            "the scan's ash.log names a plugin only an earlier scan named"
+        )
+        (info,) = _records(scan2, "INFO")
+        assert "FerretScanScanner" not in info
+        (debug,) = _records(scan2, "DEBUG")
+        assert "FerretScanScanner" in debug, debug
 
     def test_a_scanner_a_named_package_registers_without_listing_it(self, tmp_path):
         proc = _Process(tmp_path)
@@ -450,8 +486,10 @@ class TestWhatAScanLeavesOutIsLogged:
         )
 
         assert "helperscanner" not in {name.lower() for name in scan["rows"] or {}}
-        messages = _left_out_messages(tmp_path / "out")
-        assert any("HelperScanner" in message for message in messages), messages
+        (line,) = _left_out_messages(tmp_path / "out")
+        assert "HelperScanner" not in line, line
+        (debug,) = _records(scan, "DEBUG")
+        assert "HelperScanner" in debug, debug
 
 
 class TestThePluginRootNamesNoPlugin:

@@ -478,9 +478,12 @@ that submodule (`my_ash_plugins.scanners`) itself. The same holds for a plugin d
 in another package, for example a helper library whose classes carry
 `@ash_scanner_plugin`: `from helper_lib import HelperScanner` in `__init__.py` makes
 the scan use it, and `import helper_lib` alone does not, though the class registers
-either way. The scan logs each registered plugin it leaves out, in a line starting
-"Registered plugins not used by this scan", in the console and in `ash.log` in the
-output directory.
+either way. The scan logs how many registered plugins it leaves out ("... registered
+plugin(s) not used by this scan"), in the console and in `ash.log` in the output
+directory. Run it with `--debug` to have the console list them, in a line starting
+"Registered plugins not used by this scan". `ash.log` keeps only the count, because in
+a process that runs several scans, such as the MCP server, the plugins one scan leaves
+out are often the ones other scans named.
 
 Plugin classes are registered by module and class name, so your class may share its
 name with a class in another plugin package or with one of ASH's built-in plugins.
