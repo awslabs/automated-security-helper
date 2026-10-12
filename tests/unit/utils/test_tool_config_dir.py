@@ -383,3 +383,29 @@ def test_runs_in_two_threads_each_see_and_are_granted_only_their_own_directory(
     b_granted = {_real(p) for p in b_policy.read_only}
     assert _real(a_dir) in a_granted and _real(b_dir) not in a_granted
     assert _real(b_dir) in b_granted and _real(a_dir) not in b_granted
+
+
+@posix_only
+def test_each_run_gets_a_new_directory_whose_name_is_not_known_in_advance(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A directory made at a name an earlier run used is not taken for a new run's."""
+    _temp_dir(monkeypatch, tmp_path / "temp", 0o700)
+    context = _context(tree.source, tree.outside)
+    made = []
+    for _ in range(2):
+        with tool_config_scope(context):
+            made.append(write_tool_config("x.yaml", "{}\n").parent)
+        assert not made[-1].exists()
+    assert made[0] != made[1]
+
+    # Something else makes a directory at the second run's name, with a file in it.
+    planted = made[1]
+    planted.mkdir()
+    (planted / "x.yaml").write_text("planted\n", encoding="utf-8")
+    with tool_config_scope(context):
+        third = write_tool_config("x.yaml", "{}\n")
+        assert planted not in third.parents
+        assert third.read_text(encoding="utf-8") == "{}\n"
+    assert (planted / "x.yaml").read_text(encoding="utf-8") == "planted\n"
+    assert sorted(path.name for path in planted.iterdir()) == ["x.yaml"]
