@@ -17,7 +17,7 @@ not have, which is precisely the failure these tests exist to rule out.
 
 import importlib
 import json
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -595,14 +595,19 @@ class TestListScanners:
         # deliberate: metadata discovery and the vendored list find different packages, so
         # passing only the discovered one drops ferret, snyk and trivy from the answer the
         # moment any ash_*_plugins distribution is installed.
-        load_extra.assert_called_once_with(
-            [
+        #
+        # One call per package, because each is imported inside its own
+        # ash_plugin_manager.untrusted_import: a client's request loads them, so a
+        # later scan that does not load one is not offered its scanners.
+        assert load_extra.call_args_list == [
+            call([package])
+            for package in (
                 "automated_security_helper.plugin_modules.acme_scan",
                 "automated_security_helper.plugin_modules.ash_ferret_plugins",
                 "automated_security_helper.plugin_modules.ash_snyk_plugins",
                 "automated_security_helper.plugin_modules.ash_trivy_plugins",
-            ]
-        )
+            )
+        ]
 
     def test_unavailable_distribution_metadata_does_not_break_the_listing(self):
         """packages_distributions raising falls back to the well-known modules."""

@@ -358,6 +358,20 @@
     held to the same rule. It is also selected when the trusted modules load the
     module or package that defines the off-host class it subclasses; it used to be
     selected whenever its own package was loaded.
+  - Any other plugin class that such a file's `ash_plugin_modules` entry loaded is
+    no longer selected by a later scan in the same process that does not load that
+    module, under the MCP server and across a workspace run, nor by the
+    workspace-level report step. Neither is one the MCP `list_scanners` tool
+    loaded: trivy-repo and ferret-scan used to run in later scans after a client
+    listed the scanners. A later scan used to select every class an earlier one
+    had loaded, as a fresh process would not. A module that
+    `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a config
+    file outside the tree names stays loaded for every later scan in the process,
+    even when the tree's config also names it.
+  - Known limit: the plugin registry is still the process's rather than each
+    scan's, so the classes of a module the operator loaded, and the event
+    handlers any loaded module subscribes, reach every later scan in the process.
+    Scoping the registry to each scan would remove both.
   - bandit's, grype's and syft's own config files are the operator's.
     `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`
     and `scanners.syft.options.config_file` from such a file are ignored; ASH no

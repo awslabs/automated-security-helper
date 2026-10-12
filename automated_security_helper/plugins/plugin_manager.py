@@ -337,7 +337,7 @@ class AshPluginManager(BaseModel):
             for name, registration in dict(registry).items():
                 if not registration.enabled:
                     continue
-                found = self._registered_classes(kind, registration, quiet=True)
+                found = self._registered_classes(kind, registration, imported_only=True)
                 entry = tracked.get((kind, name))
                 if entry is None or entry[1] is not registration:
                     untracked_classes.update(found)
@@ -380,22 +380,31 @@ class AshPluginManager(BaseModel):
 
     @staticmethod
     def _registered_classes(
-        plugin_type: str, registration: AshPluginRegistration, quiet: bool = False
+        plugin_type: str,
+        registration: AshPluginRegistration,
+        imported_only: bool = False,
     ) -> List[type]:
         """The ``plugin_type`` classes in the module ``registration`` names.
 
         Every class there with that ``ash_plugin_type``, not only the registered
         one, which is how ``plugin_modules`` has always resolved a registration.
+        With ``imported_only``, a module not yet imported gives none and nothing
+        is imported: every class ``plugin_modules`` resolved came from a module it
+        imported.
         """
-        try:
-            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-            module = importlib.import_module(registration.plugin_module_path)
-        except ImportError as e:
-            if not quiet:
-                ASH_LOGGER.warning(
-                    f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                )
-            return []
+        path = registration.plugin_module_path
+        if imported_only:
+            imported = sys.modules.get(path)
+            if imported is None:
+                return []
+            module = imported
+        else:
+            try:
+                # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+                module = importlib.import_module(path)
+            except ImportError as e:
+                ASH_LOGGER.warning(f"Failed to import plugin module {path}: {e}")
+                return []
         found: List[type] = []
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
