@@ -1354,9 +1354,12 @@ def _under_session_lock(
     process-wide variable for that scan's duration too.
 
     The in-memory session only (``session_for``): taking its lock creates nothing
-    under the workspace root.
+    under the workspace root. A caller with no session the server issued
+    (``UNIDENTIFIED_SESSION_ID``) has no session to lock, and ``session_for``
+    refuses it; its scans are bounded by the count such callers share instead
+    (``sessions.sessionless_scan_count``).
     """
-    if session_id is None:
+    if session_id is None or session_id == UNIDENTIFIED_SESSION_ID:
         return _offline_aware(plan, settings)
 
     with get_default_registry().session_for(session_id).lock:
