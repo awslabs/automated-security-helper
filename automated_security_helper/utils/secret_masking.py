@@ -2,6 +2,7 @@
 
 import html
 import json
+import math
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import unquote
@@ -148,11 +149,16 @@ def shapes_of_secret_values(values: Iterable[str]) -> List[SecretValueShape]:
 # on all results of a scan at once:
 #
 # * by location: every snippet line in a file and line range a secret finding
-#   reports is replaced with ``MASKED_LINE`` (indentation and line end kept);
-# * by value: every value a secret finding's message exposes (bandit B105-B107's
-#   ``Possible hardcoded password: '<value>'``, ferret-scan's
-#   ``Matched text: '<value>'``) is masked with ``_mask_secret_value`` wherever it
-#   occurs as a whole token in any string of any result.
+#   reports is replaced with ``MASKED_LINE`` (indentation and line end kept), a
+#   private key's range runs to its END line, and a secret finding's own
+#   snippets are masked whole;
+# * by value: every value a secret finding exposes -- quoted in its message
+#   (bandit B105-B107's ``Possible hardcoded password: '<value>'``, ferret-scan's
+#   ``Matched text: '<value>'``) or matched by its own region (semgrep's and
+#   opengrep's columns) -- is masked in its own message, and, when it looks like
+#   a secret (``_propagates``), with ``_mask_secret_value`` wherever it occurs as
+#   a whole token in the text findings report. Rule metadata, tags and
+#   identifiers are left alone (``_METADATA_FIELDS``, ``_SKIPPED_FIELDS``).
 #
 # A secret finding is one from a secrets scanner (``utils/scanner_tool_types.py``),
 # one tagged ``secret``, ``secrets`` or a hard-coded credential CWE (798, 259,
@@ -247,14 +253,33 @@ def _mask_spans(text: str, spans: Iterable[Tuple[int, int]]) -> str:
     return text
 
 
-#: Values shorter than this are masked in their own finding's message only, not
-#: wherever they occur: replacing a two- or three-character token across every
-#: snippet would change unrelated code.
-MIN_PROPAGATED_VALUE_LENGTH = 4
+#: A value is masked wherever it occurs, not only in its own finding, only when it
+#: looks like a secret (``_looks_like_a_secret``). A hard-coded password check
+#: quotes ordinary words as often as credentials (``password``, ``secret``,
+#: ``access_token``), and masking those everywhere rewrote other findings'
+#: messages, and so their IDs, and SBOM entries. Every value is still masked in
+#: its own finding's message and lines.
+MIN_PROPAGATED_VALUE_LENGTH = 8
+#: Shannon entropy per character below which a value is too repetitive to tell
+#: from ordinary text (``aaaaaaaa1``, ``86400000``).
+MIN_PROPAGATED_VALUE_ENTROPY = 2.5
+#: Letters alone, as one word or several joined by whitespace, dots, hyphens or
+#: underscores: words, identifiers and prose.
+_WORD_LIKE = re.compile(r"[A-Za-z]+(?:[\s._-]+[A-Za-z]+)*")
+#: Template placeholders: ``${NAME}``, ``$NAME``, ``{name}``, ``%(name)s``,
+#: ``<value>``.
+_PLACEHOLDER = re.compile(r"\$\{?\w+\}?|\{\w*\}|%\(\w+\)[a-z]|<[^<>]*>")
 
 #: Fields that name things rather than hold text a finding reports.
 _SKIPPED_FIELDS = frozenset(
     {"uri", "uriBaseId", "ruleId", "guid", "correlationGuid", "baselineState"}
+)
+#: Fields under which nothing is masked by value: a tool's rule metadata,
+#: taxonomies and policies, a result's rule reference and every ``tags`` list.
+#: They describe or classify findings; a finding tagged ``secret`` whose tag was
+#: masked stopped being a secret finding on the next pass.
+_METADATA_FIELDS = frozenset(
+    {"tool", "taxonomies", "translations", "policies", "rule", "tags"}
 )
 
 _WORD_CHARACTER = re.compile(r"\w")
@@ -648,8 +673,31 @@ def _shape_pattern(shape: SecretValueShape) -> str:
 
 
 def _propagates(value: str) -> bool:
-    """Whether ``value`` is masked wherever it occurs, not only in its own finding."""
-    return len(value) >= MIN_PROPAGATED_VALUE_LENGTH and "\n" not in value
+    """Whether ``value`` is masked wherever it occurs, not only in its own finding.
+
+    A value a scanner already masked (``_is_masked_form``) hides what it was, so
+    only its length counts; it is kept for its shape when no line holds the
+    value to read back.
+    """
+    if "\n" in value or len(value) < MIN_PROPAGATED_VALUE_LENGTH:
+        return False
+    return _is_masked_form(value) or _looks_like_a_secret(value)
+
+
+def _looks_like_a_secret(value: str) -> bool:
+    """Not letters alone, not a placeholder, and not repetitive (see the constants)."""
+    if _WORD_LIKE.fullmatch(value) or _PLACEHOLDER.fullmatch(value):
+        return False
+    return _entropy(value) >= MIN_PROPAGATED_VALUE_ENTROPY
+
+
+def _entropy(value: str) -> float:
+    """Shannon entropy of ``value``'s characters, in bits per character."""
+    counts: Dict[str, int] = {}
+    for character in value:
+        counts[character] = counts.get(character, 0) + 1
+    total = len(value)
+    return -sum(count / total * math.log2(count / total) for count in counts.values())
 
 
 def _mask_message_values(text: str) -> str:
@@ -686,9 +734,45 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                     end = block_end if block_end is not None else _TO_END_OF_FILE
             index.add_location(uri, start, end)
         text = _text_of(getattr(result, "message", None)) or ""
-        for start, end in _quoted_values(text):
+        quoted = _quoted_values(text)
+        for start, end in quoted:
             index.add_values(_exposed_values(text[start:end].strip(), result))
+        if not quoted:
+            index.add_values(_matched_values(result))
     return index
+
+
+def _matched_values(result: Any) -> List[str]:
+    """What a secret finding's own region matched, for one that quotes no value.
+
+    semgrep and opengrep report a match by columns on its line: the key itself,
+    or an assignment holding it, whose string literals are then the values. Only
+    a single-line region with both columns and a snippet starting at the line's
+    first column is read.
+    """
+    values: List[str] = []
+    for physical in _physical_locations_of(result):
+        region = getattr(physical, "region", None)
+        start_line = getattr(region, "startLine", None)
+        end_line = getattr(region, "endLine", None) or start_line
+        start = getattr(region, "startColumn", None)
+        end = getattr(region, "endColumn", None)
+        text = getattr(getattr(region, "snippet", None), "text", None)
+        if not (
+            isinstance(text, str)
+            and isinstance(start, int)
+            and isinstance(end, int)
+            and start_line == end_line
+            and 1 <= start < end
+        ):
+            continue
+        lines = _split_lines(text)
+        if not lines:
+            continue
+        match = lines[0][start - 1 : end - 1].strip()
+        literals = [found.group(2) for found in _STRING_LITERAL.finditer(match)]
+        values.extend(literals or [match])
+    return values
 
 
 #: A quoted string literal in a line of source. The two alternatives inside it
@@ -710,22 +794,24 @@ def _exposed_values(quoted: str, result: Any) -> List[str]:
     line no secret finding reports is masked too.
 
     Only the exact shape counts as already masked (``_is_masked_form``): a raw
-    value can hold a ``*`` too. The quoted text is returned as well either way.
-    For a raw value that is the value; for a masked one, masking it again
-    changes nothing, and it carries the value's shape when no line holds the
-    value to read back.
+    value can hold a ``*`` too, and is returned as it is. When no line holds a
+    value whose mask is the quoted one, the masked form itself is returned: masking
+    it again changes nothing, and it still carries the value's shape. It is not
+    returned beside a value read back, whose own test decides whether it is
+    masked elsewhere (``_propagates``): the masked form of ``password`` would
+    otherwise mask every eight-letter word that starts with p and ends with d.
     """
     if not quoted:
         return []
-    found = [quoted]
     if not _is_masked_form(quoted):
-        return found
+        return [quoted]
+    found = []
     for line in _own_snippet_lines(result):
         for match in _STRING_LITERAL.finditer(line):
             candidate = match.group(2)
             if candidate != quoted and _mask_secret_value(candidate) == quoted:
                 found.append(candidate)
-    return found
+    return found or [quoted]
 
 
 def _is_masked_form(text: str) -> bool:
@@ -861,7 +947,7 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         names = list(fields)
         names.extend((node.__pydantic_extra__ or {}).keys())
         for name in names:
-            if name in _SKIPPED_FIELDS:
+            if name in _SKIPPED_FIELDS or name in _METADATA_FIELDS:
                 continue
             value = getattr(node, name, None)
             if value is None:
@@ -878,7 +964,7 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
         return node
     if isinstance(node, dict):
         for key in list(node):
-            if key in _SKIPPED_FIELDS:
+            if key in _SKIPPED_FIELDS or key in _METADATA_FIELDS:
                 continue
             item = node[key]
             masked = _mask_tree(item, index, seen)

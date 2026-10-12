@@ -424,12 +424,22 @@ above, the Bedrock summary and MCP responses get the masked results:
   at (a form feed, a vertical tab, NEL, U+2028, U+2029, an information separator
   or a lone `\r`), since its lines cannot be placed. A base64 (`binary`) snippet
   at a reported line is dropped.
-- **By value.** Each value a secret finding's message quotes
-  (`Possible hardcoded password: '...'`, `Matched text: '...'`) is masked wherever
-  it occurs as a whole token, in any string of any finding, including on lines no
-  secret finding reports. The masked form keeps at most the first two and the last
-  character, for example `hu*************t`. Values shorter than four characters
-  are masked in their own finding's message only.
+- **By value.** Each value a secret finding exposes is masked in its own
+  message. That is the value its message quotes
+  (`Possible hardcoded password: '...'`, `Matched text: '...'`, to the last quote
+  of the message), or, for a finding that quotes none, what its own region
+  matched (semgrep's and opengrep's columns). A value that looks like a secret is
+  also masked wherever it occurs as a whole token in what any finding reports:
+  messages, snippets, the other fields of a result and of `additional_reports`,
+  including on lines no secret finding reports. Rule metadata, tags and
+  identifiers (rule IDs, URIs) are left as they are. A value looks like a secret
+  when it has at least eight characters, is not made of letters alone (one word,
+  or words joined by spaces, dots, hyphens or underscores), is not a template
+  placeholder such as `${NAME}` or `{name}`, and is not repetitive (at least 2.5
+  bits of entropy per character). A hard-coded password check quotes ordinary
+  words such as `password` as often as credentials, and those are masked in their
+  own finding only. The masked form keeps at most the first two and the last
+  character, for example `hu*************t`.
 
 A secret finding is one from a secrets scanner (detect-secrets, ferret-scan, or a
 result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit

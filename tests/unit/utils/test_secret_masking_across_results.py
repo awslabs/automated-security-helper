@@ -215,6 +215,321 @@ def _secret_on_line_3():
     )
 
 
+def _b105(value, uri="app.py", line=1, quote="'"):
+    return _result(
+        "B105",
+        uri,
+        line,
+        HARDCODED + quote + value + quote,
+        snippet=f"{NAME} = {quote}{value}{quote}\n",
+        scanner="bandit",
+    )
+
+
+def _reuse(text, uri="deploy.py", line=5):
+    return _result("B602", uri, line, "subprocess call", snippet=text, scanner="bandit")
+
+
+class TestOnlyValuesThatLookLikeSecretsAreMaskedElsewhere:
+    """A hard-coded password check quotes ordinary words as often as credentials.
+
+    Masking ``password`` wherever it occurred rewrote rule descriptions, tags,
+    other findings' messages (and so their IDs) and SBOM entries. A value is masked
+    beyond its own finding only when it looks like a secret: at least eight
+    characters, not letters alone, not a template placeholder, and not
+    repetitive. Every value is still masked in its own finding.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            NAME,
+            "secret",
+            "access_token",
+            "Enter your " + NAME,
+            "${DB_" + NAME.upper() + "}",
+            "{" + NAME + "}",
+            "%(" + NAME + ")s",
+            "aaaaaaaa1",
+            _derived("masking-unit-seven", 7),
+        ],
+        ids=[
+            "dictionary-word",
+            "short-word",
+            "identifier",
+            "prose",
+            "env-placeholder",
+            "format-placeholder",
+            "percent-placeholder",
+            "repetitive",
+            "seven-characters",
+        ],
+    )
+    def test_a_value_that_does_not_look_like_a_secret_is_masked_only_in_its_finding(
+        self, value
+    ):
+        reuse = f'log("{value}")\n'
+        model = _results(_b105(value), _reuse(reuse))
+
+        mask_secrets_in_results(model)
+
+        assert _message(model.sarif.runs[0].results[0]) == (
+            HARDCODED + "'" + _mask_secret_value(value) + "'"
+        )
+        assert _region_text(model.sarif.runs[0].results[1]) == reuse
+        assert model.secret_value_shapes == []
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            VALUE,
+            _derived("masking-unit-eight", 8),
+            "Tr0ub4dor&3",
+            "jane.doe@example.com",
+        ],
+        ids=["derived", "eight-characters", "mixed", "address"],
+    )
+    def test_a_value_that_looks_like_a_secret_is_masked_where_it_is_reused(self, value):
+        model = _results(_b105(value), _reuse(f'log("{value}")\n'))
+
+        mask_secrets_in_results(model)
+
+        assert value not in _region_text(model.sarif.runs[0].results[1])
+
+    def test_findings_that_hold_an_ordinary_word_keep_their_ids(self):
+        before = _results(
+            _b105(NAME),
+            _reuse("send(" + NAME + ")\n"),
+            _result(
+                "python.lang.security.audit.logging",
+                "lib/y.py",
+                2,
+                f"Avoid logging the user {NAME} in plain text",
+                scanner="semgrep",
+            ),
+        )
+        untouched = [
+            vuln.id
+            for vuln in before.to_flat_vulnerabilities()
+            if vuln.rule_id != "B105"
+        ]
+        after = _results(
+            _b105(NAME),
+            _reuse("send(" + NAME + ")\n"),
+            _result(
+                "python.lang.security.audit.logging",
+                "lib/y.py",
+                2,
+                f"Avoid logging the user {NAME} in plain text",
+                scanner="semgrep",
+            ),
+        )
+
+        mask_secrets_in_results(after)
+
+        assert [
+            vuln.id
+            for vuln in after.to_flat_vulnerabilities()
+            if vuln.rule_id != "B105"
+        ] == untouched
+
+
+class TestValuesFromTheMatch:
+    """A secret finding that quotes no value gives the one its own region matched.
+
+    semgrep's and opengrep's ``generic.secrets.*`` rules report the match by
+    columns on the matched line: the key itself, or an assignment holding it. The
+    value is read from there, so its reuse on a line no secret finding reports is
+    masked too.
+    """
+
+    def _model(self):
+        from tests.utils.secret_bearing_scan import SECRETS, opengrep_secret_sarif
+
+        sarif = opengrep_secret_sarif()
+        sarif["runs"][0]["results"].extend(
+            [
+                _reuse(f'run("--id {SECRETS.key_id}")\n', uri="src/deploy.py", line=3),
+                _reuse(
+                    f'run("--key {SECRETS.long_key}")\n', uri="src/deploy.py", line=4
+                ),
+            ]
+        )
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(sarif)
+        return model, SECRETS
+
+    def test_a_matched_key_is_masked_where_it_is_reused(self):
+        model, secrets = self._model()
+
+        mask_secrets_in_results(model)
+
+        reuses = model.sarif.runs[0].results[2:]
+        assert secrets.key_id not in _region_text(reuses[0])
+        assert _region_text(reuses[0]).startswith('run("--id ')
+
+    def test_a_key_inside_a_matched_assignment_is_masked_where_it_is_reused(self):
+        """The match spans the whole assignment; its string literal is the value."""
+        model, secrets = self._model()
+
+        mask_secrets_in_results(model)
+
+        reuses = model.sarif.runs[0].results[2:]
+        assert secrets.long_key not in _region_text(reuses[1])
+        assert _region_text(reuses[1]).startswith('run("--key ')
+
+
+class TestValuesAreMaskedInWhatFindingsReport:
+    """Masking by value reaches the text a finding reports, not names and metadata.
+
+    Rule metadata, tags and identifiers name things; rewriting them made a
+    finding tagged ``secret`` stop being a secret finding on the next pass.
+    """
+
+    def _model(self, value):
+        import json
+
+        dumped = json.loads(
+            _results(
+                _b105(value),
+                _result(
+                    "CUSTOM-1",
+                    "lib/x.py",
+                    9,
+                    f"Third-party finding near {value}",
+                    snippet=f"call({value})\n",
+                ),
+            ).model_dump_json(by_alias=True)
+        )
+        run = dumped["sarif"]["runs"][0]
+        run["tool"]["driver"]["rules"] = [
+            {
+                "id": "CUSTOM-1",
+                "shortDescription": {"text": f"Example: {value}"},
+                "properties": {"tags": ["secret", value]},
+            }
+        ]
+        run["results"][1]["properties"] = {"tags": ["secret", value]}
+        model = AshAggregatedResults.model_validate(dumped)
+        model.additional_reports = {
+            "syft": {"components": [{"name": value, "tags": [value]}]}
+        }
+        mask_secrets_in_results(model)
+        return model
+
+    def test_rule_metadata_and_tags_are_left_alone(self):
+        model = self._model(VALUE)
+
+        run = model.sarif.runs[0]
+        rule = run.tool.driver.rules[0]
+        assert rule.shortDescription.text == f"Example: {VALUE}"
+        assert list(rule.properties.tags) == ["secret", VALUE]
+        assert list(run.results[1].properties.tags) == ["secret", VALUE]
+        assert model.additional_reports["syft"]["components"][0]["tags"] == [VALUE]
+
+    def test_what_a_finding_reports_is_masked(self):
+        """Control: the same value in a message, a snippet and a report field."""
+        model = self._model(VALUE)
+
+        result = model.sarif.runs[0].results[1]
+        assert VALUE not in _message(result)
+        assert VALUE not in _region_text(result)
+        assert VALUE not in model.additional_reports["syft"]["components"][0]["name"]
+
+    def test_a_finding_tagged_secret_is_still_one_after_masking(self):
+        from automated_security_helper.utils.secret_masking import is_secret_finding
+
+        # B105 quoting the word its neighbor is tagged with.
+        model = self._model("secret")
+
+        assert list(model.sarif.runs[0].results[1].properties.tags)[0] == "secret"
+        assert is_secret_finding(model.sarif.runs[0].results[1])
+
+
+class TestTokenBoundaries:
+    """A value is masked as a whole token only."""
+
+    @pytest.mark.parametrize(
+        "text", ["x" + VALUE, VALUE + "y"], ids=["word-before", "word-after"]
+    )
+    def test_a_value_joined_to_a_word_on_one_side_is_left_alone(self, text):
+        reuse = f'run("{text}")\n'
+        model = _results(_b105(VALUE), _reuse(reuse))
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1]) == reuse
+
+    def test_another_literal_on_the_secret_line_is_not_a_value(self):
+        """Only the literal whose mask the message shows is read back."""
+        other = _derived("masking-unit-other-literal", 14)
+        line = f'connect(user="{other}", {NAME}="{VALUE}")\n'
+        model = _results(
+            _result(
+                "B106",
+                "app.py",
+                1,
+                HARDCODED + "'" + _mask_secret_value(VALUE) + "'",
+                snippet=line,
+                scanner="bandit",
+            ),
+            _reuse(f'run("{other}")\n'),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1]) == f'run("{other}")\n'
+
+    def test_a_masked_line_keeps_its_indentation(self):
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.py",
+                2,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+            _result(
+                "B404",
+                "app.py",
+                1,
+                "import",
+                context=(1, OTHER_LINE + "    " + ASSIGN_LINE),
+                scanner="bandit",
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert _region_text(model.sarif.runs[0].results[1], "contextRegion") == (
+            OTHER_LINE + "    " + MASKED_LINE + "\n"
+        )
+
+    def test_a_binary_snippet_away_from_the_secret_line_is_kept(self):
+        from automated_security_helper.schemas.sarif_schema_model import (
+            ArtifactContent,
+        )
+
+        model = _results(
+            _result(
+                "SECRET-KEYWORD",
+                "app.bin",
+                2,
+                "Secret of type 'Keyword' detected",
+                scanner="detect-secrets",
+            ),
+            _result("B999", "app.bin", 5, "other", scanner="bandit"),
+        )
+        region = (
+            model.sarif.runs[0].results[1].locations[0].physicalLocation.root.region
+        )
+        region.snippet = ArtifactContent(binary="AAAA")
+
+        mask_secrets_in_results(model)
+
+        assert region.snippet.binary == "AAAA"
+
+
 class TestLineSeparators:
     """Snippets are split into lines the way scanners count them.
 

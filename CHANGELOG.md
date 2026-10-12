@@ -1887,6 +1887,15 @@
   values on to the reports and responses rendered from it. `ash merge` masks the
   merged results against every shard's secret findings before it writes them.
 
+- **Ordinary words a password check quotes are no longer masked everywhere.**
+  A B105 on `FIELD = "password"` masked every `password` in the results: rule
+  descriptions, tags, other findings' messages (which changed their IDs) and SBOM
+  entries. A value is now masked beyond its own finding only when it looks like a
+  secret (eight characters or more, not letters alone, not a template
+  placeholder, not repetitive), and only in what findings report, never in rule
+  metadata, tags or identifiers. A secret finding that quotes no value (semgrep's
+  and opengrep's `generic.secrets.*`) gives the value its own region matched.
+
 - **A value one project or shard exposes is masked in the others' findings.**
   Each workspace project and each `ash merge` shard was masked against its own
   secret findings only, so a value project A's B105 reported stayed in clear where
