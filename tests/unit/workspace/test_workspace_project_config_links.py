@@ -391,6 +391,49 @@ def test_a_linked_pyproject_is_refused_alike_whatever_it_reaches(
     assert "Errno" not in json.dumps(responses, default=str)
 
 
+_ASH_DIR_TARGETS = ["missing", "unreadable", "empty", "holding a config"]
+
+
+def test_a_linked_ash_directory_is_refused_alike_whatever_it_holds(
+    linked_pyproject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Checked as a directory, so an unlistable or empty target answers the same."""
+    from automated_security_helper.cli.mcp import workspace as ws
+
+    root, workspace, _ = linked_pyproject
+    elsewhere = root.parent / "elsewhere-dirs"
+    dirs = {name: elsewhere / name.replace(" ", "-") for name in _ASH_DIR_TARGETS}
+    write(dirs["unreadable"] / ".ash.yaml", f"project_name: {_MARKER}\n")
+    dirs["unreadable"].chmod(0)
+    dirs["empty"].mkdir(parents=True)
+    write(dirs["holding a config"] / ".ash.yaml", f"project_name: {_MARKER}\n")
+    link = root / "api" / ".ash"
+    responses = []
+    try:
+        for name in _ASH_DIR_TARGETS:
+            if os.path.lexists(link):
+                link.unlink()
+            link.symlink_to(dirs[name], target_is_directory=True)
+            result = asyncio.run(
+                ws.mcp_resolve_workspace(str(workspace), session_id="client-one")
+            )
+            responses.append(
+                (
+                    name,
+                    result.get("success"),
+                    result.get("exit_code"),
+                    result.get("error_type"),
+                    result.get("error"),
+                )
+            )
+    finally:
+        dirs["unreadable"].chmod(0o755)
+
+    assert len({tuple(r[1:]) for r in responses}) == 1, responses
+    assert responses[0][1:4] == (False, 4, "config_input_not_permitted"), responses
+    assert _MARKER not in json.dumps(responses, default=str)
+
+
 def test_control_the_opens_are_recorded(linked_pyproject, monkeypatch) -> None:
     """The recorder sees discovery read a pyproject.toml, so the test above can fail."""
     from automated_security_helper.config.config_sources import (
