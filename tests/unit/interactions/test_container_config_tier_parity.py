@@ -30,13 +30,17 @@ import logging
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import scan as scan_cli
 from automated_security_helper.cli.main import app
+from automated_security_helper.config.path_trust import (
+    honored_path,
+    reset_path_refusal_warnings,
+)
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
@@ -80,6 +84,9 @@ CHOSEN = {
 }
 #: The sandbox section a root config writes itself.
 OWN = {"sandbox": {"mode": "bwrap", "extra_read_paths": ["/opt/operator-own"]}}
+#: A plugin scanner's option that names a file its tool reads (config/path_trust.py).
+TOOL_SCANNER = "example-plugin"
+TOOL_KEY = f"scanners.{TOOL_SCANNER}.options.rules_file"
 CONTAINER_ROOTS = ("/src", "/out", "/ash-config", "/ash-workspace-config")
 
 
@@ -140,10 +147,24 @@ def _config(layout: str, w: Path) -> Path:
     raise AssertionError(layout)
 
 
-def _settings_of(config) -> Dict[str, object]:
+def _tool_path(config, source: Optional[Path]) -> Dict[str, object]:
+    """Whether the scan may hand a tool the file ``TOOL_KEY`` names, when the config
+    names one (config/path_trust.py)."""
+    named = config.scanners.model_dump().get(TOOL_SCANNER, {}).get("options", {})
+    value = named.get("rules_file") if isinstance(named, dict) else None
+    if value is None or source is None:
+        return {}
+    # Each refusal warns once per process; both sides have to warn.
+    reset_path_refusal_warnings()
+    honored = honored_path(value, source_dir=source, key=TOOL_KEY, config=config)
+    return {TOOL_KEY: honored is not None}
+
+
+def _settings_of(config, source: Optional[Path] = None) -> Dict[str, object]:
     sandbox = config.sandbox
     scan_settings = config.scanners.detect_secrets.options.scan_settings
     return {
+        **_tool_path(config, source),
         "sandbox.mode": sandbox.mode,
         "sandbox.network_scanners": sandbox.network_scanners,
         "sandbox.extra_read_paths": list(sandbox.extra_read_paths),
@@ -174,19 +195,24 @@ class _Warnings(logging.Handler):
         )
 
 
-def _resolved(resolve) -> Tuple[Dict[str, object], List[str]]:
+def _resolved(
+    resolve, source: Optional[Path] = None
+) -> Tuple[Dict[str, object], List[str]]:
     warnings = _Warnings()
     ASH_LOGGER.addHandler(warnings)
     try:
         config = resolve()
+        settings = _settings_of(config, source)
     finally:
         ASH_LOGGER.removeHandler(warnings)
-    return _settings_of(config), warnings.remedied()
+    return settings, warnings.remedied()
 
 
 def _host_one_directory(config: Path, source: Path) -> dict:
     return {
-        "scan": _resolved(lambda: resolve_config(config_path=config, source_dir=source))
+        "scan": _resolved(
+            lambda: resolve_config(config_path=config, source_dir=source), source
+        )
     }
 
 
@@ -195,7 +221,8 @@ def _host_workspace(config: Path, definition: Path, out: Path) -> dict:
     settings = ProjectScanSettings(output_dir=out, default_config_path=str(config))
     return {
         Path(project.path).name: _resolved(
-            lambda project=project: _project_config_with_policy(project, settings)
+            lambda project=project: _project_config_with_policy(project, settings),
+            Path(project.path),
         )
         for project in plan.projects
     }
@@ -271,7 +298,8 @@ def _scan_inside(cmd: List[str], fs: Path, monkeypatch) -> dict:
                 results[Path(project.path).name] = _resolved(
                     lambda project=project: _project_config_with_policy(
                         project, settings
-                    )
+                    ),
+                    Path(project.path),
                 )
         else:
             results["scan"] = _resolved(
@@ -282,7 +310,8 @@ def _scan_inside(cmd: List[str], fs: Path, monkeypatch) -> dict:
                     # As the orchestrator passes it on: the scan inside sets it for
                     # no container mark, which it holds in sandbox_grants instead.
                     untrusted_config=kwargs.get("untrusted_config", False),
-                )
+                ),
+                Path(kwargs["source_dir"]),
             )
 
     monkeypatch.setattr(scan_cli, "run_ash_scan", run_ash_scan)
@@ -363,3 +392,62 @@ def _expect(layout: str, result: Tuple[Dict[str, object], List[str]]) -> None:
         assert settings["sandbox.extra_read_paths"] == own
     else:
         assert settings["sandbox.extra_read_paths"] == []
+
+
+def _tool_path_layout(w: Path) -> Tuple[Path, Path]:
+    """A config in another checkout (W/ops) that names a tool file in that checkout."""
+    (w / "ops" / ".git").mkdir(parents=True)
+    rules = w / "ops" / "rules.yaml"
+    rules.write_text("", encoding="utf-8")
+    config = _write(
+        w / "ops" / "ash.yaml",
+        {
+            "project_name": "o",
+            "scanners": {
+                TOOL_SCANNER: {"enabled": True, "options": {"rules_file": str(rules)}}
+            },
+        },
+    )
+    return config, rules
+
+
+@pytest.mark.parametrize("scan", ["one-directory", "workspace"])
+def test_a_tool_path_a_config_in_another_checkout_names(scan, container, tmp_path):
+    """On the host the tool paths a config file names follow that file's tier
+    (resolve_config._operator_wrote, sandbox_grants.untrusted_path): a config in
+    another checkout names them as the repository does, so a file in that checkout
+    is refused, with the remedy. The scan inside, given the mark, decides the same.
+    The tool file is at the same path here on both sides; in a real container the
+    host does not mount it, so a scanner there could not read it either way."""
+    w = tmp_path / "W"
+    _tree(w)
+    config, _ = _tool_path_layout(w)
+    ws = w / "repo" / "ws"
+    if scan == "one-directory":
+        source = ws / "bare"
+        host = _host_one_directory(config, source)
+        inside = container(
+            source_dir=str(source), output_dir=str(tmp_path / "out"), config=str(config)
+        )
+        key, inner_source = "scan", tmp_path / "container" / "src"
+    else:
+        host = _host_workspace(config, ws / "ash.code-workspace", tmp_path / "out")
+        inside = container(
+            source_dir=str(ws),
+            output_dir=str(tmp_path / "out"),
+            config=str(config),
+            workspace_relative_file="ash.code-workspace",
+        )
+        key, inner_source = "bare", tmp_path / "container" / "src" / "bare"
+
+    assert inside == host
+    settings, remedied = host[key]
+    assert settings[TOOL_KEY] is False
+    assert any(message.startswith(f"Ignoring {TOOL_KEY}") for message in remedied)
+    # Control: without the mark, the scan inside would hand the tool that file.
+    mounted = tmp_path / "container" / "ash-config" / "ash.yaml"
+    unmarked = _resolved(
+        lambda: resolve_config(config_path=mounted, source_dir=inner_source),
+        inner_source,
+    )
+    assert unmarked[0][TOOL_KEY] is True
