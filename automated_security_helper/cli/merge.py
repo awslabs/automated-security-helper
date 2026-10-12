@@ -179,6 +179,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
 
@@ -1420,6 +1421,16 @@ def _override_value(value: Any) -> str:
     return json.dumps(value)
 
 
+def _override_argument(key: str, value: Any) -> str:
+    """``key`` set to ``value`` as one ``--config-overrides`` argument for a shell.
+
+    A list or mapping holds spaces and double quotes, and a string can hold
+    anything, so the argument is quoted the way a POSIX shell reads it back.
+    ``key`` ends with ``+`` for an appending override.
+    """
+    return shlex.quote(f"{key}={_override_value(value)}")
+
+
 def warn_on_ignored_operator_verdict_settings(
     trusted_config: AshConfig,
     recorded: AshConfig,
@@ -1452,7 +1463,7 @@ def warn_on_ignored_operator_verdict_settings(
             f"ash merge's --config sets {key} to {_shown(value)}, and the shards "
             f"recorded {_shown(shards.get(key))}. The verdict follows the shards' "
             "own configuration, so their value applies. To apply yours, pass "
-            f"--config-overrides {key}={_override_value(value)}{flag}."
+            f"--config-overrides {_override_argument(key, value)}{flag}."
         )
 
 
@@ -1466,12 +1477,9 @@ def _section_dict(section: Any) -> Dict[str, Any]:
 
 def _apply_hint(key: str, value: Any) -> str:
     """The ``--config-overrides`` that sets ``key`` to ``value``, shortened when long."""
-    text = _override_value(value)
-    if len(text) > 60:
+    if len(_override_value(value)) > 60:
         return f"pass its value with --config-overrides {key}=VALUE"
-    if isinstance(value, (list, dict)):
-        return f"pass --config-overrides '{key}={text}'"
-    return f"pass --config-overrides {key}={text}"
+    return f"pass --config-overrides {_override_argument(key, value)}"
 
 
 def warn_on_unapplied_operator_settings(
@@ -1497,7 +1505,7 @@ def warn_on_unapplied_operator_settings(
             f"ash merge's --config names the ash_plugin_modules entry {name!r}, which "
             "does not apply: the shards did not record it, and --config supplies "
             "values for what the shards recorded without adding to it. To load it, "
-            f"pass --config-overrides 'ash_plugin_modules+={json.dumps([name])}'."
+            f"pass --config-overrides {_override_argument('ash_plugin_modules+', [name])}."
         )
     destinations: Dict[str, Tuple[str, ...]] = dict(REPORTER_DESTINATION_OPTIONS)
     destinations.update(declared_destination_options(reporter_classes))

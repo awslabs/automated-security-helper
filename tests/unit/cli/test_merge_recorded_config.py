@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Literal, Optional, Sequence, Tuple
 from unittest.mock import MagicMock
@@ -41,7 +42,11 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
 )
 from automated_security_helper.cli.merge import RESULTS_FILE_NAME
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.resolve_config import (
+    apply_config_overrides,
+    resolve_config,
+)
 from tests.unit.cli.test_merge import (
     _make_shard_contribute_nothing,
     build_shards,
@@ -1050,6 +1055,12 @@ class TestShardOrder:
         )
 
 
+def _suggested_override(message: str) -> str:
+    """The ``--config-overrides`` value a warning suggests, as a POSIX shell passes it."""
+    suggestion = message.split("--config-overrides ", 1)[1].removesuffix(".")
+    return shlex.split(suggestion)[0]
+
+
 #: A setting the verdict reads, and two values for it.
 VERDICT_DISAGREEMENTS = [
     ("fail_on_findings", {"fail_on_findings": False}, {"fail_on_findings": True}),
@@ -1237,13 +1248,19 @@ class TestVerdictSettings:
         assert "--config-overrides fail_on_findings=true" in named[0]
         assert "--fail-on-findings" in named[0]
 
-    def test_the_suggested_override_carries_no_internal_marker(self, harness):
-        """The suppression list it suggests is the operator's, without client_supplied."""
+    def test_the_suggested_override_gives_back_the_operators_list(self, harness):
+        """Passed as a shell passes it, the override sets the operator's suppressions.
+
+        The list is suggested as the operator wrote it, without ASH's
+        ``client_supplied`` mark, and quoted, since it holds spaces and quotes. A
+        reason with an apostrophe checks the quoting is a shell's, not a bare pair
+        of single quotes.
+        """
         shard_paths = harness.write_shards({"project_name": "test-merge"})
-        suppression = {"path": "src/**", "reason": "vendored", "rule_id": "X"}
+        suppressions = [{"path": "src/**", "reason": "vendor's code", "rule_id": "X"}]
         operator = _write_yaml(
             harness.tmp_path / "operator" / "ash.yaml",
-            {"global_settings": {"suppressions": [suppression]}},
+            {"global_settings": {"suppressions": suppressions}},
         )
 
         result = harness.merge(shard_paths, "--config", str(operator))
@@ -1256,7 +1273,13 @@ class TestVerdictSettings:
         ]
         assert named, harness.warnings
         assert "client_supplied" not in named[0], named[0]
-        assert '"rule_id": "X"' in named[0], named[0]
+        applied = apply_config_overrides(AshConfig(), [_suggested_override(named[0])])
+        expected = apply_config_overrides(
+            AshConfig(), [f"global_settings.suppressions={json.dumps(suppressions)}"]
+        )
+        assert applied.global_settings.suppressions == (
+            expected.global_settings.suppressions
+        )
 
     def test_the_same_suppressions_in_the_operators_config_are_not_reported(
         self, harness
