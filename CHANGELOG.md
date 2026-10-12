@@ -302,13 +302,14 @@
   `yarnPath` names in place of itself, ASH's own `yarn --version` included (measured
   with npm 10.9.4, pnpm 12.6.0 and yarn 1.22.22). npm and pnpm now run from a private
   copy of the package's `package.json` and lockfile, whose audit requests were
-  identical to the in-tree ones, workspaces included; yarn runs with
-  `YARN_IGNORE_PATH=1`, `YARN_RC_FILENAME` naming no file and, for yarn 1,
-  `--no-default-rc`. The user and global npmrc are replaced by an empty file too, so
-  a registry mirror or proxy set in `~/.npmrc` no longer applies to npm-audit: set
-  `npm_config_registry` (pnpm: `pnpm_config_registry`) or `HTTPS_PROXY` in the
-  environment instead, which is passed through. Offline npm-audit still runs no
-  package manager.
+  identical to the in-tree ones, workspaces included; yarn runs from a copy outside
+  the scanned tree of its lockfile and every `package.json` below it, with
+  `YARN_IGNORE_PATH=1`. Your own `~/.npmrc`, global npmrc and `~/.yarnrc` still apply,
+  so private registries and their credentials are unaffected. Under `--sandbox`,
+  where the tool's home is private, yarn runs in place reading no settings file. A
+  `pnpm.auditConfig` advisory ignore list in the repository's `package.json` counts
+  as a repository suppression: it applies, and `--ignore-suppressions` removes it.
+  Offline npm-audit still runs no package manager.
 
 - **A workspace with an incomplete project exits 1, even when another project has
   findings.** A project that failed, or whose scanners did not all complete

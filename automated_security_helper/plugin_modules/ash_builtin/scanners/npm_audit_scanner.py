@@ -4,11 +4,8 @@ import copy
 import json
 import logging
 import re
-import shutil
-import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Any, Tuple
+from typing import Annotated, ClassVar, Dict, List, Literal, Any
 
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -56,39 +53,10 @@ from automated_security_helper.utils.package_identity import (
     identity_properties,
     install_path,
 )
-from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.utils.subprocess_utils import find_executable
-
-# The files npm and pnpm get in their private directory: the manifest and the
-# lockfiles they audit from, and no settings file (see _package_manager_invocation).
-_PACKAGE_MANAGER_INPUTS = {
-    "npm": ("package.json", "package-lock.json", "npm-shrinkwrap.json"),
-    "pnpm": ("package.json", "pnpm-lock.yaml"),
-}
-
-# Where each package manager reads its user and global settings files from. ASH
-# points all four at one empty file of its own; pnpm 12 reads both spellings.
-_SETTINGS_FILE_VARIABLES = (
-    "npm_config_userconfig",
-    "npm_config_globalconfig",
-    "pnpm_config_userconfig",
-    "pnpm_config_globalconfig",
+from automated_security_helper.utils.package_manager_child import (
+    package_manager_child,
 )
-
-# The settings file name yarn 2 and later are told to look for (YARN_RC_FILENAME).
-# No directory has one, so they read no .yarnrc.yml, the repository's or a parent's.
-_NO_YARNRC = ".ash-no-yarnrc.yml"
-
-
-@dataclass(frozen=True)
-class PackageManagerInvocation:
-    """Where npm-audit runs a package manager, with what environment and flags."""
-
-    cwd: Path
-    env: Dict[str, str]
-    leading_args: Tuple[str, ...] = ()
-    #: The private directory to remove once the package manager has run.
-    scratch: Path | None = None
+from automated_security_helper.utils.subprocess_utils import find_executable
 
 
 # The top-level key each package manager's audit report always carries, clean or
@@ -148,10 +116,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # npm cannot audit without writing its cache (the registry metadata the
         # vulnerable ranges come from) and logs, both under npm_config_cache.
         cache_env=("npm_config_cache",),
-        # pnpm 12 reads pnpm_config_* rather than npm_config_*; the two YARN_ names
-        # are how a sandboxed yarn is kept from the repository's settings and from
-        # running its yarn-path (see _package_manager_invocation).
-        env_prefixes=("npm_config_", "NPM_CONFIG_", "pnpm_config_", "PNPM_CONFIG_"),
+        env_prefixes=("npm_config_", "NPM_CONFIG_"),
+        # How a sandboxed yarn is kept from the repository's settings and from
+        # running its yarn-path (see utils/package_manager_child.py).
         env_names=("YARN_IGNORE_PATH", "YARN_RC_FILENAME"),
     )
 
@@ -227,72 +194,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _process_config_options(self):
         return super()._process_config_options()
 
-    def _package_manager_invocation(
-        self,
-        binary: str,
-        package_dir: Path,
-        results_dir: Path,
-        yarn_major: int | None = None,
-    ) -> PackageManagerInvocation:
-        """Run ``binary`` reading no settings file the scanned repository wrote.
-
-        Measured with npm 10.9.4, pnpm 12.6.0 and yarn 1.22.22, run where ASH ran
-        them, in the package's directory: npm and pnpm applied the registry set in
-        the directory's ``.npmrc`` (pnpm also the one in ``pnpm-workspace.yaml``),
-        yarn 1 the one in ``.yarnrc``, and yarn ran the JavaScript file a
-        ``.yarnrc`` ``yarn-path`` or ``.yarnrc.yml`` ``yarnPath`` names, ``yarn
-        --version`` included. So the repository chose where the dependency list
-        went, with what proxy, TLS settings and cache, and could run code.
-
-        * npm and pnpm have no option that skips the project's file, and read it
-          only from the directory they run in, so they run in a new directory
-          holding copies of ``package.json`` and the lockfile. Their audit
-          requests from such a copy were identical to the in-tree ones,
-          workspaces included: both read the workspace from the lockfile.
-        * yarn runs in the package directory (yarn 1 needs workspace manifests),
-          with ``YARN_IGNORE_PATH=1``, which stops ``yarn-path`` and ``yarnPath``
-          for yarn 1 (measured) and 2+ (its ``ignorePath`` setting),
-          ``YARN_RC_FILENAME`` naming a file no directory has, so yarn 2+ reads
-          no ``.yarnrc.yml``, and for yarn 1 ``--no-default-rc``, so it reads no
-          ``.yarnrc`` or ``.npmrc`` there or in a parent. ``yarn_major`` is
-          None for the version probe, which takes only the variables.
-        * Each gets one empty user and global settings file of ASH's, so the
-          operator's own ``npm_config_*`` and ``YARN_*`` variables are the only
-          settings left.
-
-        The private directory is under ``results_dir``, the one place a
-        sandboxed tool can run in; neither npm nor pnpm looks for settings in a
-        parent of it (measured from a copy inside the scanned tree). Remove
-        ``scratch`` when the tool has run.
-        """
-        scratch = Path(tempfile.mkdtemp(prefix=f"{binary}-", dir=results_dir))
-        empty = scratch / "empty-settings"
-        with open_for_write(empty) as handle:
-            handle.write("")
-        env = {
-            key: value
-            for key, value in snapshot_environ().items()
-            if key.lower() not in _SETTINGS_FILE_VARIABLES
+    def _package_manager_options(self, results_dir: Path) -> Dict[str, Any]:
+        """What utils/package_manager_child.py needs from this scan."""
+        config = getattr(self.context, "config", None)
+        return {
+            "parent": Path(results_dir),
+            "scan_root": Path(
+                getattr(config, "_scanned_root", None) or self.context.source_dir
+            ),
+            "skip": [Path(self.context.output_dir)],
+            "ignore_suppressions": bool(
+                getattr(self.context, "ignore_suppressions", False)
+            ),
         }
-        env.update({key: empty.as_posix() for key in _SETTINGS_FILE_VARIABLES})
-        env["YARN_IGNORE_PATH"] = "1"
-        env["YARN_RC_FILENAME"] = _NO_YARNRC
-        if binary == "yarn":
-            leading = (
-                ("--no-default-rc",)
-                if yarn_major is not None and yarn_major < 2
-                else ()
-            )
-            return PackageManagerInvocation(
-                cwd=Path(package_dir), env=env, leading_args=leading, scratch=scratch
-            )
-        project = scratch / "project"
-        project.mkdir()
-        for name in _PACKAGE_MANAGER_INPUTS.get(binary, ("package.json",)):
-            source = Path(package_dir) / name
-            if source.is_file():
-                shutil.copyfile(source, project / name)
-        return PackageManagerInvocation(cwd=project, env=env, scratch=scratch)
 
     @staticmethod
     def _lock_context(
@@ -1329,24 +1243,24 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # depends on the project (corepack honours its
                         # `packageManager` field), so ask it from there, reading
                         # none of the repository's settings and running no
-                        # yarn-path (see _package_manager_invocation).
+                        # yarn-path (see utils/package_manager_child.py).
                         yarn_major: int | None = None
                         cmd = [binary, "audit", "--json"]
+                        child_options = self._package_manager_options(
+                            target_results_dir
+                        )
                         if binary == "yarn":
-                            probe = self._package_manager_invocation(
-                                binary, package_dir, target_results_dir
-                            )
-                            try:
+                            with package_manager_child(
+                                binary, package_dir, **child_options
+                            ) as probe:
                                 version_result = self._run_subprocess(
-                                    command=[binary, "--version"],
+                                    command=[binary, *probe.leading_args, "--version"],
                                     stdout_preference="return",
                                     stderr_preference="return",
                                     cwd=probe.cwd,
                                     env=probe.env,
                                     timeout=self._effective_scan_timeout(),
                                 )
-                            finally:
-                                shutil.rmtree(probe.scratch, ignore_errors=True)
                             yarn_major = self._yarn_major(version_result.get("stdout"))
                             if yarn_major is None:
                                 detail = self._yarn_error_detail(
@@ -1368,21 +1282,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # npm and pnpm run from a private copy of the package's
                         # manifest and lockfile, yarn from the package directory
                         # (#99), none reading the repository's settings files.
-                        invocation = self._package_manager_invocation(
-                            binary, package_dir, target_results_dir, yarn_major
-                        )
-                        try:
+                        with package_manager_child(
+                            binary, package_dir, yarn_major=yarn_major, **child_options
+                        ) as child:
                             result = self._run_subprocess(
-                                command=[cmd[0], *invocation.leading_args, *cmd[1:]],
+                                command=[cmd[0], *child.leading_args, *cmd[1:]],
                                 results_dir=target_results_dir,
                                 stdout_preference="both",
                                 stderr_preference="both",
-                                cwd=invocation.cwd,
-                                env=invocation.env,
+                                cwd=child.cwd,
+                                env=child.env,
                                 timeout=self._effective_scan_timeout(),
                             )
-                        finally:
-                            shutil.rmtree(invocation.scratch, ignore_errors=True)
                         ASH_LOGGER.info(result)
 
                         # npm audit returns non-zero exit code when vulnerabilities are found

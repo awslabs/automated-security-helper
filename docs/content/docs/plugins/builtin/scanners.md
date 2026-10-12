@@ -230,15 +230,20 @@ offline scan. See
 [What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
 
 npm-audit runs npm, pnpm and yarn without the scanned repository's settings files:
-its `.npmrc`, the settings in `pnpm-workspace.yaml`, `.yarnrc` and `.yarnrc.yml`
-(including a `yarn-path` or `yarnPath`, which would run a file from the repository),
-and without your own `~/.npmrc` and global npmrc, which ASH replaces with an empty
-file. npm and pnpm run from a private copy of each package's `package.json` and
-lockfile; yarn runs in the package directory with `YARN_IGNORE_PATH=1`,
-`YARN_RC_FILENAME` naming no file and, for yarn 1, `--no-default-rc`. To point the
-audit at a mirror or through a proxy, set the environment variables the package
-manager reads (`npm_config_registry`, `pnpm_config_registry`, `HTTPS_PROXY`), which
-are passed through.
+its `.npmrc`, the settings in `pnpm-workspace.yaml`, `.yarnrc` and `.yarnrc.yml`,
+including a `yarn-path` or `yarnPath`, which would run a file from the repository.
+Your own settings still apply: `~/.npmrc`, the global npmrc, `~/.yarnrc` and
+`~/.yarnrc.yml`, so a private registry and its credentials work as before. npm and
+pnpm run from a private copy of each package's `package.json` and lockfile; yarn
+runs from a copy, outside the scanned tree, of its lockfile and every
+`package.json` below it, with `YARN_IGNORE_PATH=1`. Under `--sandbox` the tool's home
+is private, so only environment variables reach it, and yarn runs in the package
+directory reading no settings file (`--no-default-rc`, or `YARN_RC_FILENAME` for
+yarn 2 and later).
+
+A `pnpm.auditConfig` in the repository's `package.json` (`ignoreCves`,
+`ignoreGhsas`) hides those advisories, as a suppression in the repository's ASH
+configuration would; `--ignore-suppressions` removes it from the copy pnpm audits.
 
 **Dependencies**: Node.js, npm
 

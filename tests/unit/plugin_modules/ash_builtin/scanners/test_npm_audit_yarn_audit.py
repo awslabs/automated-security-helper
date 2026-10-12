@@ -102,15 +102,10 @@ FAILURES = [
 ]
 
 EXPECTED_COMMAND = {
-    # --no-default-rc: yarn 1 reads no settings file of the repository's
-    # (test_npm_audit_project_rc_ignored.py). It changes no output, so the yarn 1
-    # captures, recorded without it, are still what this command prints.
-    1: ["yarn", "--no-default-rc", "audit", "--json"],
+    1: ["yarn", "audit", "--json"],
     3: ["yarn", "npm", "audit", "--json", "--recursive"],
     4: ["yarn", "npm", "audit", "--json", "--recursive"],
 }
-#: The flags the captures were recorded without.
-SETTINGS_FLAGS = ("--no-default-rc",)
 
 
 @pytest.fixture
@@ -203,10 +198,7 @@ def test_yarn_reports_become_findings(plugin_context, name, expected):
     # The capture was produced by the command the scanner now runs.
     audit = [c for c in commands if "--version" not in c]
     major = int(capture["yarn_version"].split(".")[0])
-    assert audit == [EXPECTED_COMMAND[major]]
-    assert [[p for p in c if p not in SETTINGS_FLAGS] for c in audit] == [
-        capture["command"]
-    ]
+    assert audit == [EXPECTED_COMMAND[major]] == [capture["command"]]
 
 
 @pytest.mark.parametrize("name, reason", FAILURES, ids=[n for n, _ in FAILURES])

@@ -12,11 +12,11 @@ The fix passes ``cwd=lock_file.parent`` to ``_run_subprocess`` for every
 package manager invocation so the audit command runs from the correct
 directory.
 
-npm and pnpm now run from a private copy of that directory's manifest and
+npm, pnpm and yarn now run from a private copy of that directory's manifest and
 lockfile instead, so they read no settings file the repository wrote (see
 test_npm_audit_project_rc_ignored.py). What #99 needs is the lockfile in the
-tool's working directory, so for them that is what is checked: the working
-directory, read when the tool is started, holds that lockfile's contents.
+tool's working directory, so that is what is checked: the working directory, read
+when the tool is started, holds that lockfile's contents.
 """
 
 from pathlib import Path
@@ -137,19 +137,20 @@ def test_npm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
 
 
 def test_yarn_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
-    """yarn should also run from the lock file directory."""
+    """yarn should also run with the lock file directory's contents."""
     root = tmp_path / "repo"
     nested = root / "libs" / "core"
     nested.mkdir(parents=True)
     (nested / "package.json").write_text('{"name":"core"}')
-    (nested / "yarn.lock").write_text("")
+    (nested / "yarn.lock").write_text("# yarn lockfile v1\n# libs/core\n")
 
     npm_scanner.context.source_dir = root
 
-    captured_kwargs = []
+    seen = []
 
     def fake_run(command, **kwargs):
-        captured_kwargs.append(kwargs)
+        if "audit" in command:
+            seen.append(_cwd_contents(kwargs.get("cwd")))
         return _yarn_1_clean(command)
 
     with (
@@ -167,7 +168,8 @@ def test_yarn_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
     ):
         npm_scanner.scan(target=root, target_type="source")
 
-    cwds = [kw.get("cwd") for kw in captured_kwargs]
-    assert any(cwd is not None and Path(cwd) == nested for cwd in cwds), (
-        f"Expected cwd={nested}, got cwds={cwds}"
-    )
+    expected = {
+        "package.json": (nested / "package.json").read_text(),
+        "yarn.lock": (nested / "yarn.lock").read_text(),
+    }
+    assert expected in seen, f"no yarn run had {nested}'s lockfile: {seen}"
