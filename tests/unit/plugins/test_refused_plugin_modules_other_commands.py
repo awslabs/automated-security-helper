@@ -43,6 +43,8 @@ from tests.unit.cli.test_merge import build_shards, write_shards
 
 REFUSED = "zz_other_command_pkg"
 ACCEPTED = "zzother_ash_plugins"
+#: Inside the namespace, and no package of this name is installed.
+NOT_INSTALLED = "zzother_absent_ash_plugins"
 EXIT_INVALID_CONFIG = 3
 
 
@@ -134,6 +136,61 @@ class TestTheRefusal:
         load_plugins(plugin_context=context)
 
         assert ACCEPTED in sys.modules
+
+    def test_load_plugins_refuses_a_name_that_does_not_import(self, packages, tmp_path):
+        config = AshConfig(project_name="t")
+        config.ash_plugin_modules = [ACCEPTED, NOT_INSTALLED]
+        context = PluginContext(
+            source_dir=tmp_path, output_dir=tmp_path / "out", config=config
+        )
+
+        with pytest.raises(ASHConfigValidationError) as raised:
+            load_plugins(plugin_context=context)
+
+        assert repr(NOT_INSTALLED) in str(raised.value)
+        assert repr(ACCEPTED) not in str(raised.value)
+
+
+class TestCommandsExitThreeForANameThatDoesNotImport:
+    def test_plugin_list(self, packages):
+        result = _invoke(["plugin", "list", "--ash-plugin-modules", NOT_INSTALLED])
+
+        assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+        assert NOT_INSTALLED in result.output
+
+    def test_dependencies_install(self, packages, tmp_path, monkeypatch):
+        installer = MagicMock()
+        installer.plugin_modules.side_effect = AssertionError(
+            "dependencies install got past the plugin module import refusal"
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.ash_plugin_manager", installer
+        )
+        result = _invoke(
+            [
+                "dependencies",
+                "install",
+                "--bin-path",
+                str(tmp_path / "bin"),
+                "--config",
+                str(_config_file(tmp_path, NOT_INSTALLED)),
+            ]
+        )
+
+        assert result.exit_code == EXIT_INVALID_CONFIG, result.output
+
+    def test_report(self, packages, tmp_path):
+        result = _invoke(
+            [
+                "report",
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--config",
+                str(_config_file(tmp_path, NOT_INSTALLED)),
+            ]
+        )
+
+        assert result.exit_code == EXIT_INVALID_CONFIG, result.output
 
 
 class TestCommandsExitThree:

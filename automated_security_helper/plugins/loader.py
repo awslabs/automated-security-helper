@@ -209,13 +209,21 @@ def _namespace_rule() -> str:
     )
 
 
-class PluginModuleNamespaceError(ASHConfigValidationError):
-    """``ash_plugin_modules`` names a module outside the plugin namespace.
+class PluginModuleError(ASHConfigValidationError):
+    """``ash_plugin_modules`` names something that adds no plugin module to a scan.
 
     An invalid configuration, so a scan maps it to exit code 3 with every other
     ``ASHConfigValidationError``. Its own type lets a command that maps other
     configuration errors differently still give this one exit code 3.
     """
+
+
+class PluginModuleNamespaceError(PluginModuleError):
+    """``ash_plugin_modules`` names a module outside the plugin namespace."""
+
+
+class PluginModuleImportError(PluginModuleError):
+    """A module ``ash_plugin_modules`` names could not be imported."""
 
 
 def _namespace_package_refusal(module_path: str) -> Optional[str]:
@@ -228,7 +236,8 @@ def _namespace_package_refusal(module_path: str) -> Optional[str]:
 
     Each level of the name is located without importing its parent packages
     (``config.plugin_module_trust._spec_without_importing``), so the check runs no
-    code. A name that cannot be located is left to the import, which reports it.
+    code. A name that cannot be located is left to the import, which refuses it
+    (:class:`PluginModuleImportError`).
     """
     from automated_security_helper.config.plugin_module_trust import (
         _spec_without_importing,
@@ -405,18 +414,32 @@ def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     return admits
 
 
-def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> dict:
+def load_additional_plugin_modules(
+    plugin_modules: List[str] | None = None,
+    fail_on_import_error: bool = False,
+) -> dict:
     """Load additional plugin modules specified in configuration.
 
     Args:
         plugin_modules: List of module paths to import
+        fail_on_import_error: Raise :class:`PluginModuleImportError` naming every
+            module that failed to import, after trying them all, rather than
+            logging a warning per module. A scan and the commands that read a
+            config's ``ash_plugin_modules`` pass True: a module the operator named
+            that does not import would otherwise leave a scan that runs without its
+            plugins and passes. ASH's own vendored packages are loaded with False.
+
+    Raises:
+        PluginModuleImportError: With *fail_on_import_error*, when any named module
+            raised while it was imported (ImportError for a missing package or
+            dependency, or any other exception its own code raised).
     """
     if plugin_modules is None:
         plugin_modules = []
     discovered = {"converters": [], "scanners": [], "reporters": []}
+    failed: List[str] = []
 
-    unique = list(set(plugin_modules))
-    for module_path in unique:
+    for module_path in dict.fromkeys(plugin_modules):
         # Validate module path matches expected namespace patterns
         if not _is_allowed_module_path(module_path):
             ASH_LOGGER.warning(
@@ -425,35 +448,51 @@ def load_additional_plugin_modules(plugin_modules: List[str] | None = None) -> d
             )
             continue
 
+        ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
         try:
-            ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
             # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             module = importlib.import_module(module_path)
-            # The import itself should trigger plugin registration
-            # via the AshPlugin metaclass
-            # Track what was discovered
-            if hasattr(module, "ASH_CONVERTERS"):
-                discovered["converters"].extend(module.ASH_CONVERTERS)
-            if hasattr(module, "ASH_SCANNERS"):
-                discovered["scanners"].extend(module.ASH_SCANNERS)
-            if hasattr(module, "ASH_REPORTERS"):
-                discovered["reporters"].extend(module.ASH_REPORTERS)
-
-            # Register event handlers from external modules
-            if hasattr(module, "ASH_EVENT_HANDLERS"):
-                ASH_LOGGER.debug(
-                    f"Found event handlers in {module_path}: {list(module.ASH_EVENT_HANDLERS.keys())}"
-                )
-                for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
-                    for callback in handlers:
-                        ASH_LOGGER.debug(
-                            f"Registering event callback {callback.__name__} for {event_type}"
-                        )
-                        ash_plugin_manager.subscribe(event_type, callback)
-
         except ImportError as e:
-            ASH_LOGGER.warning(f"Failed to import plugin module {module_path}: {e}")
+            if not fail_on_import_error:
+                ASH_LOGGER.warning(f"Failed to import plugin module {module_path}: {e}")
+                continue
+            failed.append(f"{module_path!r} ({type(e).__name__}: {e})")
+            continue
+        except Exception as e:
+            if not fail_on_import_error:
+                raise
+            failed.append(f"{module_path!r} ({type(e).__name__}: {e})")
+            continue
 
+        # The import itself triggers plugin registration through the plugin
+        # decorators. Track what the module declares.
+        if hasattr(module, "ASH_CONVERTERS"):
+            discovered["converters"].extend(module.ASH_CONVERTERS)
+        if hasattr(module, "ASH_SCANNERS"):
+            discovered["scanners"].extend(module.ASH_SCANNERS)
+        if hasattr(module, "ASH_REPORTERS"):
+            discovered["reporters"].extend(module.ASH_REPORTERS)
+
+        # Register event handlers from external modules
+        if hasattr(module, "ASH_EVENT_HANDLERS"):
+            ASH_LOGGER.debug(
+                f"Found event handlers in {module_path}: {list(module.ASH_EVENT_HANDLERS.keys())}"
+            )
+            for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
+                for callback in handlers:
+                    ASH_LOGGER.debug(
+                        f"Registering event callback {callback.__name__} for {event_type}"
+                    )
+                    ash_plugin_manager.subscribe(event_type, callback)
+
+    if failed:
+        raise PluginModuleImportError(
+            "ash_plugin_modules names "
+            + ", ".join(failed)
+            + ", which could not be imported. Nothing was scanned or installed. "
+            "Install the package, or remove the entry from the config file, "
+            "--config-overrides, --ash-plugin-modules or ASH_PLUGIN_MODULES."
+        )
     return discovered
 
 
@@ -469,6 +508,7 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
     Raises:
         PluginModuleNamespaceError: The config names a plugin module outside the
             plugin namespace (see refuse_plugin_modules_outside_namespace).
+        PluginModuleImportError: A module the config names could not be imported.
     """
     # Extract additional plugin modules from context if available, split on
     # commas the way a scan reads them
@@ -494,7 +534,9 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
     # Load any additional plugin modules specified in configuration
     external_plugins = {}
     if additional_plugin_modules:
-        external_plugins = load_additional_plugin_modules(additional_plugin_modules)
+        external_plugins = load_additional_plugin_modules(
+            additional_plugin_modules, fail_on_import_error=True
+        )
 
     # Combine internal and external plugins
     all_plugins = {

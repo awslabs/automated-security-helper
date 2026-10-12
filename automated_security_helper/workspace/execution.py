@@ -480,7 +480,9 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
 
     if modules:
         ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")
-        load_additional_plugin_modules(modules)
+        # A named module that does not import refuses the workspace with exit 3,
+        # before any project starts.
+        load_additional_plugin_modules(modules, fail_on_import_error=True)
         discover_plugins(plugin_modules=modules)
 
     # Resolve once so the memoised list is complete and identical for every

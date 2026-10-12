@@ -23,7 +23,7 @@ from automated_security_helper.config.resolve_config import (
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins.loader import (
-    PluginModuleNamespaceError,
+    PluginModuleError,
     load_plugins,
 )
 from automated_security_helper.utils.log import get_logger
@@ -295,10 +295,10 @@ def list_plugins(
                         table.add_row(*[str(cell) for cell in error_row])
 
             console.print(table)
-    except PluginModuleNamespaceError as e:
+    except PluginModuleError as e:
         # Exit 3, invalid configuration, as a scan with the same config exits:
         # ash_plugin_modules names a module outside the plugin namespace, and
-        # nothing was imported.
+        # nothing was imported, or a module that does not import.
         typer.secho(f"Invalid configuration: {e}", err=True)
         raise typer.Exit(3)
     except ASHConfigValidationError as e:

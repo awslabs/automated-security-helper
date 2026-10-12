@@ -67,6 +67,12 @@ ACCEPTED = "zzctl_ash_plugins"
 #: A second accepted package, for entries that name two.
 ACCEPTED_TOO = "zzctl2_ash_plugins"
 
+#: Accepted names that do not import: one names no installed package, and the
+#: other's ``__init__`` raises ImportError, as a package with a missing dependency
+#: does.
+NOT_INSTALLED = "zzabsent_ash_plugins"
+BROKEN = "zzbroken_ash_plugins"
+
 EXIT_INVALID_CONFIG = 3
 
 _MARKER_ENV = "PLUGIN_IMPORT_MARKER"
@@ -267,6 +273,11 @@ class _Run:
     def __init__(self, tmp_path: Path):
         self.root = tmp_path
         self.site = _site(tmp_path, REFUSED_SPELLINGS + [ACCEPTED, ACCEPTED_TOO])
+        (self.site / BROKEN).mkdir()
+        (self.site / BROKEN / "__init__.py").write_text(
+            "raise ImportError('zzbroken_ash_plugins needs zz_missing_dependency')\n",
+            encoding="utf-8",
+        )
         self.markers = tmp_path / "markers"
         self.markers.mkdir()
         self.home = tmp_path / "home"
@@ -586,3 +597,92 @@ class TestEveryEntryPointSplitsCommaJoinedNames:
             },
         )
         _assert_both_imported(run, completed)
+
+
+def _assert_import_refused(
+    run: _Run, completed: subprocess.CompletedProcess, name: str
+) -> None:
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == EXIT_INVALID_CONFIG, (
+        f"naming {name!r}, which does not import, must refuse the scan with exit "
+        f"{EXIT_INVALID_CONFIG}, got {completed.returncode}\n" + _tail(completed)
+    )
+    assert name in output, _tail(completed)
+    assert not (run.root / "out" / "ash_aggregated_results.json").exists(), (
+        "the scan wrote results although a module it named did not import"
+    )
+
+
+class TestANamedModuleThatDoesNotImportRefusesTheScan:
+    """The operator named it, so a missing or broken package is a configuration error."""
+
+    @pytest.mark.parametrize("name", [NOT_INSTALLED, BROKEN])
+    def test_the_ash_plugin_modules_flag(self, tmp_path, name):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "cli", {"args": run.scan_args("--ash-plugin-modules", name)}
+        )
+        _assert_import_refused(run, completed, name)
+
+    def test_the_ash_plugin_modules_environment_variable(self, tmp_path):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "cli", {"args": run.scan_args()}, {"ASH_PLUGIN_MODULES": NOT_INSTALLED}
+        )
+        _assert_import_refused(run, completed, NOT_INSTALLED)
+
+    def test_an_operator_config_file_beside_an_accepted_name(self, tmp_path):
+        run = _Run(tmp_path)
+        config = tmp_path / "operator.yaml"
+        config.write_text(
+            f"project_name: tree\nash_plugin_modules:\n  - {ACCEPTED}\n  - {BROKEN}\n",
+            encoding="utf-8",
+        )
+        completed = run.run("cli", {"args": run.scan_args("--config", str(config))})
+        _assert_import_refused(run, completed, BROKEN)
+
+    def test_the_python_api(self, tmp_path):
+        run = _Run(tmp_path)
+        completed = run.run(
+            "api",
+            {
+                "source_dir": str(run.tree),
+                "output_dir": str(tmp_path / "out"),
+                "modules": [NOT_INSTALLED],
+            },
+        )
+        _assert_import_refused(run, completed, NOT_INSTALLED)
+
+    def test_the_flag_in_workspace_mode(self, tmp_path):
+        run = _Run(tmp_path)
+        workspace = tmp_path / "ws"
+        for key in ("api", "web"):
+            (workspace / key / ".ash").mkdir(parents=True)
+            (workspace / key / "app.py").write_text("x = 1\n", encoding="utf-8")
+            (workspace / key / ".ash" / ".ash.yaml").write_text(
+                f"project_name: {key}\n", encoding="utf-8"
+            )
+        workspace_file = workspace / "dev.code-workspace"
+        workspace_file.write_text(
+            json.dumps({"folders": [{"path": "api"}, {"path": "web"}]}),
+            encoding="utf-8",
+        )
+        completed = run.run(
+            "cli",
+            {
+                "args": [
+                    "--workspace",
+                    str(workspace_file),
+                    "--output-dir",
+                    str(tmp_path / "out"),
+                    "--mode",
+                    "local",
+                    "--scanners",
+                    "detect-secrets",
+                    "--no-progress",
+                    "--ash-plugin-modules",
+                    BROKEN,
+                ]
+            },
+        )
+        _assert_import_refused(run, completed, BROKEN)

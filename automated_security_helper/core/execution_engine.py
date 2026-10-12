@@ -208,9 +208,13 @@ class ScanExecutionEngine:
             )
 
             # Before importing any of them: a name outside the plugin namespace
-            # refuses the scan with exit 3, and nothing is imported.
+            # refuses the scan with exit 3, and nothing is imported. A named
+            # module that then fails to import refuses it with exit 3 too, before
+            # any scanner runs.
             refuse_plugin_modules_outside_namespace(combined_plugin_modules)
-            load_additional_plugin_modules(combined_plugin_modules)
+            load_additional_plugin_modules(
+                combined_plugin_modules, fail_on_import_error=True
+            )
 
             # Discover plugins from specified modules
             discover_plugins(plugin_modules=combined_plugin_modules)

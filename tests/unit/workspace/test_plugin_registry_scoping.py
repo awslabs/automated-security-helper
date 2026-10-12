@@ -249,22 +249,49 @@ class TestPrewarm:
         plan = self._plan(tmp_path, ("api", []), ("gone", ["does.not.exist"]))
         plan.projects[1].skipped = True
         settings = ProjectScanSettings(output_dir=tmp_path / "out")
-        # A non-importable module would be logged by the loader, not raised; what
-        # matters is that pre-warm does not attempt it at all and still resolves.
+        # Attempting the module would refuse the workspace (it is outside the plugin
+        # namespace and does not import), so resolving at all shows pre-warm never
+        # attempted it.
         assert prewarm_plugin_registry(plan, settings) > 0
 
-    def test_cli_modules_are_included(self, tmp_path):
+    def test_cli_modules_are_included(self, tmp_path, monkeypatch):
         """--ash-plugin-modules is additive to whatever the projects declare."""
+        import sys
+
+        site = tmp_path / "site"
+        (site / "zzfromcli_ash_plugins").mkdir(parents=True)
+        (site / "zzfromcli_ash_plugins" / "__init__.py").write_text(
+            "LOADED = True\n", encoding="utf-8"
+        )
+        monkeypatch.syspath_prepend(str(site))
         plan = self._plan(tmp_path, ("api", []))
         settings = ProjectScanSettings(
             output_dir=tmp_path / "out",
-            ash_plugin_modules=("acme_ash_plugins.from_cli",),
+            ash_plugin_modules=("zzfromcli_ash_plugins",),
         )
-        # Resolves without raising even though the CLI module does not import;
-        # load_additional_plugin_modules logs and continues. The name is inside the
-        # plugin namespace, so this holds the additive merge only: a name outside
-        # the namespace refuses the scan (tests/unit/plugins/test_refused_plugin_modules.py).
-        assert prewarm_plugin_registry(plan, settings) > 0
+
+        try:
+            assert prewarm_plugin_registry(plan, settings) > 0
+            assert "zzfromcli_ash_plugins" in sys.modules, (
+                "pre-warm did not import the module the CLI named"
+            )
+        finally:
+            sys.modules.pop("zzfromcli_ash_plugins", None)
+
+    def test_a_cli_module_that_does_not_import_refuses_the_workspace(self, tmp_path):
+        """Inside the plugin namespace and not installed: exit 3, as for one scan."""
+        from automated_security_helper.plugins.loader import PluginModuleImportError
+
+        plan = self._plan(tmp_path, ("api", []))
+        settings = ProjectScanSettings(
+            output_dir=tmp_path / "out",
+            ash_plugin_modules=("zzabsent_ash_plugins.from_cli",),
+        )
+
+        with pytest.raises(PluginModuleImportError) as raised:
+            prewarm_plugin_registry(plan, settings)
+
+        assert "zzabsent_ash_plugins.from_cli" in str(raised.value)
 
 
 class TestPrewarmRunsBeforeTheWorkers:

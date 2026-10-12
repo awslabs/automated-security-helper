@@ -23,7 +23,7 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
-    PluginModuleNamespaceError,
+    PluginModuleError,
     load_plugins,
 )
 from automated_security_helper.utils.log import escape_markup, get_logger
@@ -198,8 +198,9 @@ def report_command(
     ash_plugin_manager.set_context(plugin_context)
     try:
         load_plugins(plugin_context=plugin_context)
-    except PluginModuleNamespaceError as e:
-        # A plugin module outside the plugin namespace, refused before import
+    except PluginModuleError as e:
+        # A plugin module outside the plugin namespace, refused before import, or
+        # a named module that does not import
         print(f"[red]Invalid configuration: {e}[/red]")
         raise typer.Exit(3)
 

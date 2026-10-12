@@ -36,7 +36,7 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
-    PluginModuleNamespaceError,
+    PluginModuleError,
     load_plugins,
 )
 from automated_security_helper.utils.download_utils import (
@@ -361,9 +361,10 @@ def install_dependencies(
                 config=resolved_config,
             )
         )
-    except PluginModuleNamespaceError as e:
-        # A plugin module outside the plugin namespace: refused before anything
-        # is imported or installed, with a scan's invalid-configuration code.
+    except PluginModuleError as e:
+        # A plugin module outside the plugin namespace, or one that does not
+        # import: refused before anything is installed, with a scan's
+        # invalid-configuration code.
         print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
         raise typer.Exit(3)
 

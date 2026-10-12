@@ -181,7 +181,7 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
-    PluginModuleNamespaceError,
+    PluginModuleError,
     load_plugins,
     refuse_plugin_modules_outside_namespace,
 )
@@ -1391,7 +1391,7 @@ def merge_command(
                 getattr(merged.ash_config, "ash_plugin_modules", None) or []
             )
         )
-    except PluginModuleNamespaceError as exc:
+    except PluginModuleError as exc:
         print(f"[red]Invalid configuration: {exc}[/red]")
         raise typer.Exit(3)
 
