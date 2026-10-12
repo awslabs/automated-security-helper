@@ -739,7 +739,10 @@ def test_trivy_repo_records_each_targets_own_exit_code(tmp_path, monkeypatch):
     converted = _converted(scanner)
     _runs_through_the_base_class(monkeypatch, [1, 0])
 
-    scanner.scan(target=scanner.context.source_dir, target_type="source")
+    # trivy-repo accepts only 0 (success_exit_codes): a run that exits 1 is an
+    # error, and its results file is not read.
+    with pytest.raises(ScannerError, match="exited with code 1"):
+        scanner.scan(target=scanner.context.source_dir, target_type="source")
     report = scanner.scan(target=converted, target_type="converted")
 
     assert scanner.exit_code == 0
