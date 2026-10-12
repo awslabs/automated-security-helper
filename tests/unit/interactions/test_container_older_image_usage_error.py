@@ -47,7 +47,7 @@ def container(monkeypatch, tmp_path) -> Dict[str, Any]:
         rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
     )
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["runs"].append(list(cmd))
         return create_completed_process(
             args=list(cmd), returncode=seen["returncode"], stderr="Usage: ash ...\n"

@@ -444,7 +444,7 @@ class TestRunAshNix:
         captured = {}
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: (
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
                 captured.update(env=env) or subprocess.CompletedProcess(cmd, 0)
             ),
         )

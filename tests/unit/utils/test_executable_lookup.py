@@ -332,6 +332,7 @@ class TestNothingIsFoundThroughTheWorkingDirectory:
             types.SimpleNamespace(
                 run=run,
                 PIPE=subprocess.PIPE,
+                DEVNULL=subprocess.DEVNULL,
                 CompletedProcess=subprocess.CompletedProcess,
                 CalledProcessError=subprocess.CalledProcessError,
                 TimeoutExpired=subprocess.TimeoutExpired,
@@ -363,6 +364,7 @@ class TestNothingIsFoundThroughTheWorkingDirectory:
             types.SimpleNamespace(
                 run=run,
                 PIPE=subprocess.PIPE,
+                DEVNULL=subprocess.DEVNULL,
                 CompletedProcess=subprocess.CompletedProcess,
                 CalledProcessError=subprocess.CalledProcessError,
                 TimeoutExpired=subprocess.TimeoutExpired,

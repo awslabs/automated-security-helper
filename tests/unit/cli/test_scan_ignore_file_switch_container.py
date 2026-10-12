@@ -37,7 +37,7 @@ def recorded(monkeypatch, tmp_path) -> Dict[str, Any]:
     (tmp_path / "src" / "app.py").write_text("print('hello')\n")
     seen: Dict[str, Any] = {"commands": []}
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["commands"].append(list(cmd))
         return create_completed_process(args=list(cmd), returncode=0)
 

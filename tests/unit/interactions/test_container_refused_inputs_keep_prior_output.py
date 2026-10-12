@@ -49,7 +49,7 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
         rac, "_find_runner", lambda _name: "/nonexistent/ash-test/docker"
     )
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["executed"] += 1
         return create_completed_process(args=list(cmd), returncode=0)
 
