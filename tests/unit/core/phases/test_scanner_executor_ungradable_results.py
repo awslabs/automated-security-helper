@@ -423,3 +423,13 @@ class TestOnlyACompletedStatusIsGraded:
         )
 
         assert (row.status, row.finding_count) == (ScannerStatus.FAILED, 1)
+
+
+class TestNoResultIsAnErrorThatSaysSo:
+    """A ``scan()`` that returns None: the row is ERROR, and its errors say why."""
+
+    def test_the_row_names_the_scanner_and_the_target(self, plugin_context):
+        row = _override_row(plugin_context, None)
+
+        assert row.status == ScannerStatus.ERROR
+        assert "shape-tool returned no result on source" in row.errors, row.errors
