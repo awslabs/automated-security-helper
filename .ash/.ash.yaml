@@ -24,15 +24,6 @@ global_settings:
         secret, generated per run with secrets.choice, into the test's temporary
         fixture tree so trivy's secret scanner has something to find. Nothing reads
         a real credentials file.
-    - rule_id: "threat-filesystem-read"
-      path: "tests/integration/scanners/test_trivy_real_binary.py"
-      line_start: 508
-      line_end: 508
-      reason: >-
-        False positive. The line writes a creds.env holding a fake AWS key id and
-        secret, generated per run with secrets.choice, into the test's temporary
-        fixture tree so trivy's secret scanner has something to find. Nothing reads
-        a real credentials file.
     # === Product code: pinned to the lines the rules report ===
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/redacted_model.py
@@ -2850,8 +2841,8 @@ global_settings:
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 875
-      line_end: 875
+      line_start: 925
+      line_end: 925
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
