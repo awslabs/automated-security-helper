@@ -220,71 +220,59 @@ def _too_many_members(max_members: int) -> "_ExtractionLimitExceeded":
     )
 
 
-_ZIP_END_RECORD = b"PK\x05\x06"
-_ZIP_END_RECORD_BYTES = 22
-_ZIP_COMMENT_MAX_BYTES = 65535
-_ZIP64_LOCATOR = b"PK\x06\x07"
-_ZIP64_LOCATOR_BYTES = 20
-_ZIP64_END_RECORD = b"PK\x06\x06"
-_ZIP64_END_RECORD_BYTES = 56
 _ZIP_DIRECTORY_ENTRY = b"PK\x01\x02"
 _ZIP_DIRECTORY_ENTRY_BYTES = 46
 
 
-def _zip_has_more_entries_than(handle: BinaryIO, size: int, limit: int) -> bool:
-    """Whether a zip's central directory holds more than ``limit`` entries.
+def _zip_end_record(handle: BinaryIO) -> Optional[List[Any]]:
+    """The zip's end-of-central-directory record as zipfile reads it, or None.
 
-    ``zipfile.ZipFile()`` builds a ZipInfo for every entry as it opens the archive,
-    so the entries are counted first, holding none of them: the end record (or the
-    zip64 end record it points to) locates the directory, which ends where that
-    record starts, and each entry's fixed 46-byte header gives the lengths of the
-    name, extra field and comment that follow it. The count the end record declares
-    is checked, then the entries themselves, since zipfile reads the whole
-    directory whatever that count says. False where the directory cannot be found
-    or walked: zipfile then opens the archive and refuses it if it is damaged.
+    zipfile's own reader, ``_EndRecData``, so the directory located from it is the
+    one ``ZipFile()`` reads: the record is searched for back from the end of the
+    file (a byte after it is read past), and whenever a zip64 locator is there the
+    counts, size and location come from the zip64 end record, saturated or not and
+    with any extensible data allowed for. It is private to zipfile and the same in
+    every Python ASH supports, 3.10 to 3.14; a Python without it fails the archive.
     """
-    tail_bytes = min(size, _ZIP_END_RECORD_BYTES + _ZIP_COMMENT_MAX_BYTES)
-    handle.seek(size - tail_bytes)
-    tail = handle.read(tail_bytes)
-    # The end record whose comment runs exactly to the end of the file, as zipfile
-    # requires, so a signature inside the comment is not taken for it.
-    at = tail.rfind(_ZIP_END_RECORD)
-    while at >= 0 and (
-        len(tail) - at < _ZIP_END_RECORD_BYTES
-        or struct.unpack_from("<H", tail, at + 20)[0]
-        != len(tail) - at - _ZIP_END_RECORD_BYTES
-    ):
-        at = tail.rfind(_ZIP_END_RECORD, 0, at)
-    if at < 0:
+    try:
+        return zipfile._EndRecData(handle)
+    except (OSError, zipfile.BadZipFile):
+        return None
+
+
+def _zip_has_more_entries_than(handle: BinaryIO, limit: int) -> bool:
+    """Whether opening a zip would make zipfile build more than ``limit`` entries.
+
+    ``zipfile.ZipFile()`` builds a ZipInfo for every central-directory entry as it
+    opens the archive, so the entries are counted first, holding none of them, the
+    way its ``_RealGetContents`` reads them: the directory starts at the end
+    record's location less the directory's size (which allows for data before the
+    zip), and is read entry by entry while under that size, each a 46-byte header
+    with the lengths of the name, extra field and comment after it. The count the
+    record declares is checked first, then the entries, since zipfile reads the
+    whole directory whatever that count says. zipfile stops at a short or bad
+    header only after building every entry before it, so those are counted too.
+    False where zipfile would build none: no end record, or a directory that would
+    start before the file does.
+    """
+    end_record = _zip_end_record(handle)
+    if not end_record:
         return False
-    directory_end = size - tail_bytes + at
-    (declared, directory_bytes) = struct.unpack_from("<HI", tail, at + 10)
-    if declared == 0xFFFF or directory_bytes == 0xFFFFFFFF:
-        # zip64: the counts are in the zip64 end record, which with its locator
-        # sits just before the end record, where zipfile also reads it.
-        record_at = directory_end - _ZIP64_LOCATOR_BYTES - _ZIP64_END_RECORD_BYTES
-        if record_at < 0:
-            return False
-        handle.seek(record_at)
-        record = handle.read(_ZIP64_END_RECORD_BYTES + _ZIP64_LOCATOR_BYTES)
-        if (
-            record[:4] != _ZIP64_END_RECORD
-            or record[_ZIP64_END_RECORD_BYTES:][:4] != _ZIP64_LOCATOR
-        ):
-            return False
-        (declared, directory_bytes) = struct.unpack_from("<QQ", record, 32)
-        directory_end = record_at
-    if declared > limit:
+    if end_record[zipfile._ECD_ENTRIES_TOTAL] > limit:
         return True
-    start = directory_end - directory_bytes
+    directory_bytes = end_record[zipfile._ECD_SIZE]
+    start = end_record[zipfile._ECD_LOCATION] - directory_bytes
     if start < 0:
         return False
     handle.seek(start)
     counted = 0
     walked = 0
-    while walked + _ZIP_DIRECTORY_ENTRY_BYTES <= directory_bytes:
+    while walked < directory_bytes:
         header = handle.read(_ZIP_DIRECTORY_ENTRY_BYTES)
-        if header[:4] != _ZIP_DIRECTORY_ENTRY:
+        if (
+            len(header) != _ZIP_DIRECTORY_ENTRY_BYTES
+            or header[:4] != _ZIP_DIRECTORY_ENTRY
+        ):
             break
         (name, extra, comment) = struct.unpack_from("<HHH", header, 28)
         handle.seek(name + extra + comment, io.SEEK_CUR)
@@ -1130,9 +1118,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     if is_zip:
                         # Counted before zipfile builds a ZipInfo for every entry.
                         max_members = budget.options.max_members
-                        if _zip_has_more_entries_than(
-                            archive_handle, archive_size, max_members
-                        ):
+                        if _zip_has_more_entries_than(archive_handle, max_members):
                             raise _too_many_members(max_members)
                         archive_handle.seek(0)
                         with zipfile.ZipFile(archive_handle, "r") as zip_ref:

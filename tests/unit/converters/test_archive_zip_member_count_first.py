@@ -60,6 +60,42 @@ def zip64_of(count: int, monkeypatch) -> bytes:
     return with_declared_count(raw, 0xFFFF)
 
 
+def zip64_declaring_one_entry(count: int, monkeypatch) -> bytes:
+    """A zip64 zip whose end record is not saturated and declares one entry.
+
+    zipfile reads the zip64 end record whenever its locator is there, saturated
+    or not, so it reads every entry the zip64 record declares.
+    """
+    with monkeypatch.context() as patch:
+        patch.setattr(zipfile, "ZIP_FILECOUNT_LIMIT", 1, raising=True)
+        raw = zip_of(count)
+    return with_declared_count(raw, 1)
+
+
+def zip64_with_extensible_data(count: int, monkeypatch, extra: int = 16) -> bytes:
+    """A zip64 zip with ``extra`` bytes of extensible data in its zip64 end record.
+
+    The record's size field grows by ``extra`` and the bytes sit between the record
+    and its locator, which zipfile accounts for when it finds the record from the
+    locator's offset.
+    """
+    with monkeypatch.context() as patch:
+        patch.setattr(zipfile, "ZIP_FILECOUNT_LIMIT", 1, raising=True)
+        raw = bytearray(zip_of(count))
+    record = raw.rfind(b"PK\x06\x06")
+    locator = raw.rfind(b"PK\x06\x07")
+    assert locator == record + 56
+    (size,) = struct.unpack_from("<Q", raw, record + 4)
+    struct.pack_into("<Q", raw, record + 4, size + extra)
+    raw[locator:locator] = bytes(extra)
+    return with_declared_count(bytes(raw), 0xFFFF)
+
+
+def with_a_trailing_byte(raw: bytes) -> bytes:
+    """zipfile finds the end record by searching back, so a byte after it is read past."""
+    return raw + b"\x00"
+
+
 @pytest.fixture
 def limited(test_plugin_context, monkeypatch):
     options = test_plugin_context.config.converters.archive.options
@@ -96,6 +132,17 @@ def convert(context, monkeypatch, data: bytes, forbid_zipfile: bool):
             lambda mp: with_declared_count(zip_of(200), 1), id="count-declared-low"
         ),
         pytest.param(lambda mp: zip64_of(200, mp), id="zip64-count"),
+        pytest.param(lambda mp: with_a_trailing_byte(zip_of(200)), id="trailing-byte"),
+        pytest.param(
+            lambda mp: with_a_trailing_byte(with_declared_count(zip_of(200), 1)),
+            id="trailing-byte-count-declared-low",
+        ),
+        pytest.param(
+            lambda mp: zip64_declaring_one_entry(200, mp), id="zip64-not-saturated"
+        ),
+        pytest.param(
+            lambda mp: zip64_with_extensible_data(200, mp), id="zip64-extensible-data"
+        ),
     ],
 )
 def test_a_zip_over_max_members_is_refused_before_zipfile_opens_it(
@@ -118,6 +165,14 @@ def test_a_zip_over_max_members_is_refused_before_zipfile_opens_it(
     [
         pytest.param(lambda mp: zip_of(LIMIT), id="at-the-limit"),
         pytest.param(lambda mp: zip64_of(LIMIT, mp), id="zip64-at-the-limit"),
+        pytest.param(
+            lambda mp: with_a_trailing_byte(zip_of(LIMIT)),
+            id="trailing-byte-at-the-limit",
+        ),
+        pytest.param(
+            lambda mp: zip64_with_extensible_data(LIMIT, mp),
+            id="zip64-extensible-data-at-the-limit",
+        ),
     ],
 )
 def test_a_zip_at_max_members_is_extracted(build, limited, monkeypatch):
