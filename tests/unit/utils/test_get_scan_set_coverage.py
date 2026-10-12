@@ -613,9 +613,10 @@ def test_git_repository_root_returns_none_on_empty_output(tmp_path):
     ["origin/main; rm -rf x", "$(whoami)", "ref with spaces", "back`tick`", ""],
 )
 def test_get_changed_files_rejects_a_ref_that_fails_the_allowlist(bad_ref):
-    """An unsafe ref falls back to a full scan rather than reaching subprocess."""
+    """An unsafe ref is refused with an error and never reaches subprocess."""
     with patch.object(gss.subprocess, "run") as run:
-        assert get_changed_files(base_ref=bad_ref) is None
+        with pytest.raises(gss.InvalidBaseRefError):
+            get_changed_files(base_ref=bad_ref)
 
     run.assert_not_called()
 

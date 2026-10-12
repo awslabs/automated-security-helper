@@ -3303,6 +3303,15 @@ def run_ash_scan(
             + (" with a workspace plan" if opts.workspace_plan is not None else "")
         )
 
+    if opts.changed_files_only:
+        # Refused here, before logging is set up and before any git process
+        # starts, in every mode: the base ref goes to `git diff`, and a value git
+        # reads as an option changes what git does. Unchecked without
+        # --changed-files-only, because then no diff runs.
+        from automated_security_helper.utils.get_scan_set import validate_base_ref
+
+        validate_base_ref(opts.base_ref)
+
     if opts.mode == RunMode.container and opts.config is None:
         # Before anything reads the config, so the host's own reads (the exit-code
         # fields below) use the file the container is handed. A workspace scan gets

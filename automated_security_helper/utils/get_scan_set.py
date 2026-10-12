@@ -1146,6 +1146,77 @@ def git_repository_root(path: Path) -> Optional[Path]:
     return Path(top).resolve()
 
 
+#: The characters a base ref may hold. Narrower than git's own ref name rules,
+#: which also allow shell metacharacters, quotes and non-ASCII text.
+_BASE_REF_CHARACTERS = re.compile(r"[a-zA-Z0-9._/~^@{}\-]+")
+
+#: ``~<n>`` and ``^<n>`` steps after a ref name (gitrevisions(7)): ``HEAD~1`` is
+#: the commit before ``HEAD``, ``HEAD^2`` its second parent.
+_ANCESTRY_STEPS = re.compile(r"(?:[~^][0-9]*)+\Z")
+
+
+class InvalidBaseRefError(ValueError):
+    """A base ref ASH does not pass to git, so the changed-files scan is refused."""
+
+
+def _breaks_ref_name_rules(name: str) -> bool:
+    """Whether ``git check-ref-format --allow-onelevel`` refuses *name*.
+
+    The rules of git-check-ref-format(1), checked here so that no git process
+    starts for a value git would refuse: no ``..``, ``//``, ``@{`` or ``\\``; no
+    space, ``~``, ``^``, ``:``, ``?``, ``*``, ``[`` or ASCII control character; no
+    leading or trailing ``/``, no trailing ``.``; not ``@`` alone; and no
+    ``/``-separated component that starts with ``.`` or ends with ``.lock``.
+    ``tests/unit/utils/test_base_ref.py`` compares this with git itself.
+    """
+    if name in ("", "@") or name.startswith("/") or name.endswith(("/", ".")):
+        return True
+    if any(sequence in name for sequence in ("..", "//", "@{")):
+        return True
+    if any(ch in " ~^:?*[\\" or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in name):
+        return True
+    return any(
+        component.startswith(".") or component.endswith(".lock")
+        for component in name.split("/")
+    )
+
+
+def validate_base_ref(base_ref: str) -> str:
+    """Return *base_ref* when git can read it only as a revision; raise otherwise.
+
+    A base ref goes to ``git diff`` as ``<base_ref>...HEAD``, and git reads any
+    argument that starts with ``-`` as an option, whatever follows it:
+    ``--output=<file>`` makes git write the diff into that file, and ``-O<file>``
+    turns the command into a different diff that exits 0 and names no files. So
+    a base ref is accepted only when it is a ref name that ``git check-ref-format
+    --allow-onelevel`` accepts (a branch, a tag, a remote-tracking branch,
+    ``HEAD`` or a commit id), in the characters :data:`_BASE_REF_CHARACTERS`
+    allows, optionally followed by ``~<n>`` or ``^<n>`` steps. Reflog forms such
+    as ``main@{1}`` are refused, since ``@{`` breaks the ref name rules.
+
+    Called by every entry point before it starts any git process: the CLI, the
+    ``run_ash_scan`` library call, a workspace run, and :func:`get_changed_files`.
+
+    Raises:
+        InvalidBaseRefError: naming the value (escaped with ``repr``) and why.
+    """
+    if not base_ref:
+        reason = "it is empty"
+    elif base_ref.startswith("-"):
+        reason = "it starts with '-', which git reads as an option"
+    elif not _BASE_REF_CHARACTERS.fullmatch(base_ref):
+        reason = "it holds a character other than letters, digits and . _ / ~ ^ @ { } -"
+    elif _breaks_ref_name_rules(_ANCESTRY_STEPS.sub("", base_ref)):
+        reason = "it is not a ref name git accepts (see git check-ref-format)"
+    else:
+        return base_ref
+    raise InvalidBaseRefError(
+        f"Refusing --base-ref {base_ref!r}: {reason}. Name a branch, a tag or a "
+        "commit, optionally followed by ~<n> or ^<n>: for example origin/main, "
+        "v1.2.0 or HEAD~1."
+    )
+
+
 def get_changed_files(
     base_ref: str = "origin/main", cwd: Optional[Path] = None
 ) -> Optional[List[Path]]:
@@ -1163,10 +1234,12 @@ def get_changed_files(
     Returns:
         A list of :class:`~pathlib.Path` objects relative to the repo root,
         or ``None`` if the diff could not be computed.
+
+    Raises:
+        InvalidBaseRefError: when :func:`validate_base_ref` refuses *base_ref*.
+            No git process is started for it.
     """
-    if not re.match(r"^[a-zA-Z0-9._/~^@{}\-]+$", base_ref):
-        ASH_LOGGER.warning(f"Invalid base_ref '{base_ref}'; falling back to full scan")
-        return None
+    validate_base_ref(base_ref)
 
     git = _git_executable()
     if git is None:

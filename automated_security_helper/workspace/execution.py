@@ -283,6 +283,7 @@ from automated_security_helper.utils.content_db_staleness import (
 from automated_security_helper.utils.get_scan_set import (
     get_changed_files,
     git_repository_root,
+    validate_base_ref,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.output_dir_links import (
@@ -1375,7 +1376,14 @@ def execute_workspace(
             unsupported in workspace mode. Raised rather than recorded because
             nothing has been scanned yet -- that is an exit-4 refusal, not a
             project failure.
+        InvalidBaseRefError: When ``changed_files_only`` is set and
+            ``validate_base_ref`` refuses ``base_ref``. Checked once, before any
+            project runs or any output is written, rather than failing each
+            project with the same error.
     """
+    if settings.changed_files_only:
+        validate_base_ref(settings.base_ref)
+
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 

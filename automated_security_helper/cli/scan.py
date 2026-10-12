@@ -41,6 +41,10 @@ from automated_security_helper.utils.content_databases import (
     go_duration,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.get_scan_set import (
+    InvalidBaseRefError,
+    validate_base_ref,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
 from automated_security_helper.workspace.workspace_file import (
@@ -660,6 +664,15 @@ def run_ash_scan_cli_command(
         )
 
         apply_environ_overrides({ALLOW_IN_TREE_TOOLS_ENV: "1"})
+
+    # With --changed-files-only the base ref goes to `git diff`, so it is refused
+    # here, before any git process starts, when git could read it as anything but
+    # a revision. Without the flag no diff runs and the value is not used.
+    if changed_files_only:
+        try:
+            validate_base_ref(base_ref)
+        except InvalidBaseRefError as exc:
+            _fail_usage(f"{exc} The value comes from --base-ref or ASH_BASE_REF.")
 
     # Workspace mode is handled before any cwd-based default is applied, because
     # --workspace and --source-dir are mutually exclusive and defaulting

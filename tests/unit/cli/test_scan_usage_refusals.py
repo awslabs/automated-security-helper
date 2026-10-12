@@ -8,8 +8,10 @@
 * A ``--source-dir`` that does not exist was not refused at all. A real scan
   ran over nothing, every scanner found no files, and it could exit 0 -- the
   same answer as a clean scan of the directory the operator meant.
+* A ``--base-ref`` starting with ``-`` went to ``git diff`` as an option, not a
+  revision (see ``tests/unit/utils/test_base_ref.py``).
 
-Both now exit 1, the code scan already uses for a refused shard selection
+All three now exit 1, the code scan already uses for a refused shard selection
 (``_fail_shard_selection``): 2 means "actionable findings", so a usage error
 that exited 2 would read to a CI gate as a scan that found problems.
 """
@@ -144,3 +146,63 @@ class TestUseExistingWithoutResults:
             )
         assert result.exit_code == 0, result.output
         assert mock_run.call_args.kwargs["existing_results"] == results.as_posix()
+
+
+class TestBaseRef:
+    def _invoke(self, runner, tmp_path, *extra):
+        source = tmp_path / "src"
+        source.mkdir()
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(
+                app,
+                [
+                    "scan",
+                    "--source-dir",
+                    str(source),
+                    "--output-dir",
+                    str(tmp_path / "o"),
+                    *extra,
+                ],
+            )
+        return result, mock_run
+
+    @pytest.mark.parametrize("base_ref", ["-p", "--output=x", "--upload-pack=x"])
+    def test_an_option_like_value_is_refused_before_any_scan_runs(
+        self, runner, tmp_path, base_ref
+    ):
+        result, mock_run = self._invoke(
+            runner, tmp_path, "--changed-files-only", "--base-ref", base_ref
+        )
+        _assert_refused(result, "--base-ref", repr(base_ref), "starts with '-'")
+        mock_run.assert_not_called()
+
+    def test_from_the_environment_is_refused_too(self, runner, tmp_path, monkeypatch):
+        monkeypatch.setenv("ASH_BASE_REF", "-p")
+        result, mock_run = self._invoke(runner, tmp_path, "--changed-files-only")
+        _assert_refused(result, "--base-ref", "'-p'")
+        mock_run.assert_not_called()
+
+    def test_a_value_that_breaks_the_ref_name_rules_is_refused(self, runner, tmp_path):
+        result, mock_run = self._invoke(
+            runner, tmp_path, "--changed-files-only", "--base-ref", "main..HEAD"
+        )
+        _assert_refused(result, "--base-ref", "'main..HEAD'")
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize("base_ref", ["origin/main", "v1.2.3", "HEAD~1"])
+    def test_a_revision_reaches_the_scan(self, runner, tmp_path, base_ref):
+        result, mock_run = self._invoke(
+            runner, tmp_path, "--changed-files-only", "--base-ref", base_ref
+        )
+        assert result.exit_code == 0, result.output
+        assert mock_run.call_args.kwargs["base_ref"] == base_ref
+        assert mock_run.call_args.kwargs["changed_files_only"] is True
+
+    def test_without_changed_files_only_the_value_is_not_used_so_not_checked(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """No diff runs, so a value set for other jobs (ASH_BASE_REF) is ignored."""
+        monkeypatch.setenv("ASH_BASE_REF", "-p")
+        result, mock_run = self._invoke(runner, tmp_path)
+        assert result.exit_code == 0, result.output
+        assert mock_run.call_args.kwargs["changed_files_only"] is False

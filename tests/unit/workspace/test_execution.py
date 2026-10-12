@@ -1563,6 +1563,25 @@ class TestChangedFilesGate:
         )
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
+    def test_an_option_like_base_ref_is_refused_before_any_project_runs(
+        self, tmp_path, git_available
+    ):
+        """git would read "-p" as an option; the workspace is refused, not scanned.
+
+        Before, git refused the option, so the diff had no answer and the project
+        fell back to a full scan.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
+        _init_repo(root / "changed", commit_extra=True)
+
+        with pytest.raises(ValueError, match=r"starts with '-'"):
+            _run(tmp_path, plan, changed_files_only=True, base_ref="-p")
+
+        assert FakeOrchestrator.built == []
+        assert not (tmp_path / "out").exists()
+
 
 # ---------------------------------------------------------------------------
 # Output tree and payload
