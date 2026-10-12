@@ -153,6 +153,40 @@ def test_operator_override_naming_an_outside_baseline_verifies(
     )
 
 
+def test_operator_override_naming_a_baseline_relative_to_the_source_verifies(
+    recorder, repo, tmp_path, monkeypatch
+):
+    """``baseline_file`` relative to the source directory, as the scanner reads it.
+
+    The operator's record of the baseline it named is compared with the one the
+    scanner uses, and a relative value has to be joined to the source directory
+    on both sides. Run from a working directory at another depth than the source,
+    so a comparison that joined it to the working directory instead names a
+    different file and refuses the operator's own baseline.
+    """
+    _baseline(
+        tmp_path / "shared" / "verifying.baseline",
+        [{"path": VERIFICATION_FILTER, "min_level": 2}],
+    )
+    _config(repo / ".ash" / ".ash.yaml", {})
+    deeper = tmp_path / "a" / "b"
+    deeper.mkdir(parents=True)
+    monkeypatch.chdir(deeper)
+
+    _scan(
+        repo,
+        tmp_path / "out",
+        config_overrides=[
+            "scanners.detect-secrets.options.baseline_file=../shared/verifying.baseline"
+        ],
+    )
+
+    assert _issuer_requests(recorder), (
+        "the relative baseline the operator named did not verify; "
+        f"the recorder saw {recorder.requests}"
+    )
+
+
 @pytest.mark.parametrize("baseline_filters", ["none", "verifying"])
 def test_operator_filter_survives_an_in_tree_baseline(
     recorder, repo, tmp_path, elsewhere, baseline_filters

@@ -145,3 +145,47 @@ def test_every_plugin_group_registers_whichever_module_is_imported_first(
     assert result["loaded"] == control["loaded"]
     assert result["registered_reporters"] == control["registered_reporters"]
     assert result["event_handlers"] == control["event_handlers"]
+
+
+# ---------------------------------------------------------------------------
+# The recorded errors follow the groups that are still lost
+# ---------------------------------------------------------------------------
+
+REPORTERS = "automated_security_helper.plugin_modules.ash_builtin.reporters"
+
+
+def test_a_group_recovered_on_a_later_call_is_no_longer_reported(monkeypatch):
+    """An error recorded by an earlier call is dropped once the group loads.
+
+    plugin_load_errors() feeds the completeness gate, which grades every scanner
+    of a reported group MISSING; a group that loaded on retry but stayed in the
+    record would fail a scan whose scanners all ran.
+    """
+    import automated_security_helper.plugin_modules.ash_builtin as ash_builtin
+    from automated_security_helper.plugins import loader
+
+    monkeypatch.setitem(loader._PLUGIN_LOAD_ERRORS, REPORTERS, "ImportError: partial")
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", {})
+
+    loader.load_internal_plugins()
+
+    assert REPORTERS not in loader.plugin_load_errors()
+
+
+def test_control_a_group_that_is_still_lost_stays_reported(monkeypatch):
+    import automated_security_helper.plugin_modules.ash_builtin as ash_builtin
+    from automated_security_helper.plugins import loader
+
+    still_lost = {REPORTERS: "ImportError: an optional dependency is absent"}
+    monkeypatch.setitem(loader._PLUGIN_LOAD_ERRORS, REPORTERS, "ImportError: partial")
+    monkeypatch.setattr(ash_builtin, "ASH_PLUGIN_LOAD_ERRORS", dict(still_lost))
+    # The retry fails again, as it does for a group missing a dependency.
+    monkeypatch.setattr(
+        ash_builtin,
+        "retry_failed_plugin_groups",
+        lambda: dict(ash_builtin.ASH_PLUGIN_LOAD_ERRORS),
+    )
+
+    loader.load_internal_plugins()
+
+    assert REPORTERS in loader.plugin_load_errors()
