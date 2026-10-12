@@ -28,6 +28,11 @@ from automated_security_helper.workspace.resolver import resolve_workspace
 _NOT_THE_OPERATORS = "must be the operator's"
 
 
+def _fix(place: str) -> str:
+    """The sentence of the refusal that says where to move the config."""
+    return f"Move the config, and every base it extends, outside {place}."
+
+
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
     for name in ("ASH_CONFIG", "ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_WORKSPACE"):
@@ -68,6 +73,7 @@ def test_an_operator_config_inside_the_workspace_is_refused(tmp_path, projects):
         resolve_workspace(workspace, default_config=inside)
 
     assert "ops.yaml" in str(raised.value)
+    assert _fix(f"the scanned directory '{root.as_posix()}'") in str(raised.value)
 
 
 def test_an_operator_config_extending_a_base_inside_the_workspace_is_refused(
@@ -86,6 +92,7 @@ def test_an_operator_config_extending_a_base_inside_the_workspace_is_refused(
         resolve_workspace(workspace, default_config=operator)
 
     assert "base.yaml" in str(raised.value)
+    assert _fix(f"the scanned directory '{root.as_posix()}'") in str(raised.value)
 
 
 def test_an_operator_config_inside_the_checkout_around_the_workspace_is_refused(
@@ -103,6 +110,22 @@ def test_an_operator_config_inside_the_checkout_around_the_workspace_is_refused(
         resolve_workspace(workspace, default_config=beside)
 
     assert "ash.yaml" in str(raised.value)
+    assert _fix(f"the checkout '{checkout.as_posix()}'") in str(raised.value)
+
+
+def test_a_file_reached_through_a_link_in_the_checkout_says_so(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    workspace = _workspace(checkout / "work", {"api": {"fail_on_findings": True}})
+    outside = _write(tmp_path / "ops" / "ash.yaml", {"fail_on_findings": False})
+    link = checkout / "ash.yaml"
+    link.symlink_to(outside)
+
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS) as raised:
+        resolve_workspace(workspace, default_config=link)
+
+    assert "reached through a link inside the checkout" in str(raised.value)
+    assert _fix(f"the checkout '{checkout.as_posix()}'") in str(raised.value)
 
 
 def test_an_operator_config_an_mcp_client_delivered_is_refused(tmp_path):
@@ -112,8 +135,12 @@ def test_an_operator_config_an_mcp_client_delivered_is_refused(tmp_path):
         {"fail_on_findings": False},
     )
 
-    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS):
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS) as raised:
         resolve_workspace(workspace, default_config=delivered)
+
+    assert "delivered by an MCP client" in str(raised.value)
+    root = (tmp_path / "mcp-workspaces").as_posix()
+    assert _fix(f"the MCP workspace root '{root}'") in str(raised.value)
 
 
 def test_a_client_copy_with_no_trusted_copy_is_not_layered(tmp_path):

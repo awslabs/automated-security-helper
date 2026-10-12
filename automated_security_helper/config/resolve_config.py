@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from pathlib import Path
 from types import UnionType
 from typing import (
@@ -62,7 +63,9 @@ from automated_security_helper.config.tool_config_trust import (
 from automated_security_helper.config.sandbox_grants import (
     confine_sandbox_grants,
     files_inside,
+    is_within,
     scanned_trees,
+    tree_holding,
 )
 from automated_security_helper.config.staleness_trust import (
     confine_content_db_staleness,
@@ -781,21 +784,50 @@ def _refuse_unless_the_operators(
     that wrote it. Refused rather than confined: confining it field by field
     would still leave every field outside the confined settings final.
     """
-    others = _not_the_operators(
-        overlay.chain, scanned_trees(Path(scanned_root)), overlay.names
-    )
+    trees = scanned_trees(Path(scanned_root))
+    others = _not_the_operators(overlay.chain, trees, overlay.names)
     if not others:
         return
     root = overlay.chain[-1]
-    files = ", ".join(f"'{describe_config_path(path)}'" for path in others)
-    verb = "is" if len(others) == 1 else "are each"
+    reasons = []
+    places: List[str] = []
+    for path in others:
+        reason, place = _whose_file(path, trees, overlay.names)
+        reasons.append(f"'{describe_config_path(path)}' {reason}")
+        if place not in places:
+            places.append(place)
     raise ASHConfigValidationError(
         f"The operator config '{describe_config_path(root)}' is layered over each "
         "project's own config, so every file it is built from must be the "
-        f"operator's. {files} {verb} inside the tree being scanned or delivered "
-        "by an MCP client. Keep the config, and every base it extends, outside "
-        "the scanned tree and outside the MCP workspace root."
+        f"operator's, and {'; '.join(reasons)}. Move the config, and every base "
+        f"it extends, outside {' and outside '.join(places)}."
     )
+
+
+def _whose_file(
+    path: Path, trees: List[Path], names: Optional[ChainNames]
+) -> Tuple[str, str]:
+    """Why ``path``, one of ``_not_the_operators``, is not the operator's, and the
+    place to move it out of: the scanned checkout (or the scanned directory, when
+    it is in no checkout) it is inside or was reached through, else the MCP
+    workspace root it was delivered under."""
+    from automated_security_helper.cli.mcp.sandbox import shared_workspace_root
+
+    tree = tree_holding(path, trees, names)
+    if tree is None:
+        shared = shared_workspace_root()
+        place = "the MCP workspace root" + (
+            f" '{shared.as_posix()}'" if shared is not None else ""
+        )
+        return f"was delivered by an MCP client, under {place}", place
+    # A scanned tree is a checkout's top, or the scan root when it is in none
+    # (sandbox_grants._outermost_checkout).
+    in_checkout = os.path.lexists(tree / ".git")
+    kind = "the checkout" if in_checkout else "the scanned directory"
+    place = f"{kind} '{tree.as_posix()}'"
+    if any(is_within(path, each) for each in trees):
+        return f"is inside {place}", place
+    return f"is reached through a link inside {place}", place
 
 
 def check_operator_config(

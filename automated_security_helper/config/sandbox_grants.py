@@ -144,16 +144,26 @@ def files_inside(
     every symlink on the way (``utils/link_locations``).
     """
     trees = list(trees)
-    known = names or {}
+    return [path for path in chain if tree_holding(path, trees, names) is not None]
 
-    def inside(path: Path) -> bool:
-        for name in (path, *known.get(path, ())):
-            places = [name, *(link.parent for link in link_locations(name))]
-            if any(is_within(place, tree) for place in places for tree in trees):
-                return True
-        return False
 
-    return [path for path in chain if inside(path)]
+def tree_holding(
+    path: Path,
+    trees: Iterable[Path],
+    names: Optional[Mapping[Path, Sequence[Path]]] = None,
+) -> Optional[Path]:
+    """The tree of ``trees`` that ``path`` is inside or was reached through, or None.
+
+    ``files_inside``'s test for one file, which names the tree, so a refusal can
+    say which tree to move the file out of.
+    """
+    trees = list(trees)
+    for name in (path, *(names or {}).get(path, ())):
+        places = [name, *(link.parent for link in link_locations(name))]
+        for tree in trees:
+            if any(is_within(place, tree) for place in places):
+                return tree
+    return None
 
 
 def confine_sandbox_grants(
