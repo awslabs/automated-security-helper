@@ -1194,3 +1194,47 @@ def _mcp_workspace_root_outside_home(monkeypatch, tmp_path_factory):
         "ASH_MCP_WORKSPACE_ROOT",
         str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
     )
+
+
+def _drop_mcp_session_state() -> None:
+    # Looked up rather than imported: a worker that never imported the module
+    # has no session state, and importing it here would load ASH's config models
+    # on every worker before its first test.
+    sessions = sys.modules.get("automated_security_helper.cli.mcp.sessions")
+    if sessions is None:
+        return
+    sessions.reset_default_registry_for_tests()
+    sessions._ended_while_scanning.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_mcp_session_state_outlives_its_test():
+    """Start and end every test with no MCP session state in the process.
+
+    The session registry (``cli/mcp/sessions.get_default_registry``) is
+    process-wide. For each session id it holds the scan claim
+    (``MCPSession.try_claim_scan``) that makes set_source_git, set_source_zip_*
+    and clear_source refuse with ``source_delivery_busy`` while a scan runs, and
+    the scan's place in the per-session limit. A scan's task gives both back when
+    it returns. A test that stands in for ``_run_scan_async``, or whose
+    ``asyncio.run`` returns before the task it started has run at all, never
+    gives them back, so its session id stays busy for every later test on the
+    same worker.
+
+    That is how this was found.
+    ``test_mcp_config_confinement.py::TestInsideTheRootsStillWorks::test_set_source_git_with_a_remote_url_reaches_git``
+    failed once with ``source_delivery_busy`` in a ``tests/unit -n 8`` run and
+    passed alone. Earlier on the same worker,
+    ``test_discovered_config_outside_the_grant.py``'s
+    ``test_control_a_tree_whose_config_is_inside_the_grant_starts_the_scan`` had
+    started a scan with ``_run_scan_async`` patched out, for the same session id,
+    ``client-one``. With ``-n 0`` and that order it fails every time. Which tests
+    share a worker depends on ``-n`` and on how xdist hands out work, so the
+    failure came and went.
+
+    Sessions whose removal waits for a scan (``_ended_while_scanning``) are
+    process-wide too, and are cleared with the registry.
+    """
+    _drop_mcp_session_state()
+    yield
+    _drop_mcp_session_state()
