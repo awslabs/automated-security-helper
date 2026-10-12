@@ -331,6 +331,30 @@ def test_an_accepted_exit_code_with_no_findings_is_passed(
     )
 
 
+#: SARIF documents that validate and hold no run: nothing was scanned.
+RUNLESS_SARIF = {
+    "empty-object": json.dumps({}),
+    "no-runs": json.dumps({"version": "2.1.0", "runs": []}),
+}
+
+
+@pytest.mark.parametrize("content", sorted(RUNLESS_SARIF))
+@pytest.mark.parametrize("name", [name for name in EXECUTED if name != "syft"])
+def test_sarif_with_no_run_is_an_error_row(plugin_context, monkeypatch, name, content):
+    """The template refuses it before grading; a scan() override returns it as is."""
+    row = _row_with(plugin_context, monkeypatch, name, 0, RUNLESS_SARIF[content])
+
+    assert row.status == ScannerStatus.ERROR, (
+        f"{name} exited 0 with a results file holding no SARIF run ({content}); "
+        f"the row was graded {row.status.value}"
+    )
+    assert any("no SARIF run" in str(error) for error in row.errors), row.errors
+
+
+def _row_with(plugin_context, monkeypatch, name: str, exit_code: int, content: str):
+    return _rows(plugin_context, monkeypatch, name, [(exit_code, content)])["source"]
+
+
 @pytest.mark.parametrize("name", EXECUTED)
 def test_the_tools_own_exit_code_decides_over_an_earlier_run_in_the_target(
     plugin_context, monkeypatch, name

@@ -595,6 +595,19 @@ class ScannerExecutor:
                     )
 
                     if isinstance(raw_results, SarifReport):
+                        if not raw_results.runs:
+                            # Every field of a SARIF log is optional, so `{}`
+                            # validates. The template refuses it before grading; a
+                            # scan() override can return it as it is, and zero
+                            # findings from no run reads as a clean scan.
+                            container.status = ScannerStatus.ERROR
+                            no_run = (
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that holds no SARIF run, so there is "
+                                "nothing to grade"
+                            )
+                            ASH_LOGGER.error(no_run)
+                            container.add_error(no_run)
                         raw_results = sanitize_sarif_paths(
                             raw_results, self.plugin_context.source_dir
                         )
