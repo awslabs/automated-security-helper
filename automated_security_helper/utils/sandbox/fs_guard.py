@@ -54,23 +54,29 @@ class OutputLinkRefused(OSError, OutputDirLinkRefused):
     describes the link as ``OutputDirLinkRefused`` does.
     """
 
-    def __init__(self, path: Union[str, Path], link: Union[str, Path]) -> None:
+    def __init__(
+        self,
+        path: Union[str, Path],
+        link: Union[str, Path],
+        where: str = "below its output directory",
+    ) -> None:
         found = f"{Path(link).as_posix()} is a symlink"
         # OSError's own __init__: OutputDirLinkRefused's is not called, and its
         # attribute is set below.
         super().__init__(
             errno.ELOOP,
             f"{Path(path).as_posix()} was not written: {found}, and ASH does not "
-            "write through a symlink below its output directory",
+            f"write through a symlink {where}",
         )
         self.found = found
         self.path = Path(path)
         self.link = Path(link)
+        self.where = where
 
     def __reduce__(self):
         # Rebuilt from its own arguments: the default rebuilds from OSError's args,
         # which this __init__ does not take.
-        return (type(self), (self.path, self.link))
+        return (type(self), (self.path, self.link, self.where))
 
 
 class OutputHardLinkRefused(OSError, OutputDirLinkRefused):
@@ -439,6 +445,42 @@ def _open_regular(
         return fd
     except BaseException:
         os.close(fd)
+        raise
+
+
+def replace_without_following(
+    path: Union[str, Path], content: str, encoding: str = "utf-8"
+) -> None:
+    """Write ``content`` to ``path`` as a new file renamed over it, never through a link.
+
+    For a destination the operator names, outside every output directory, such as
+    ``ash get-genai-guide --output``. A symlink (or reparse point) at ``path``
+    raises OutputLinkRefused and is left in place. The content goes to a file
+    created exclusively beside ``path`` (O_EXCL, and O_NOFOLLOW where it exists, so
+    nothing already at that name is opened), which then replaces ``path``: a file
+    another name refers to is replaced as an entry, and that other name keeps its
+    content. A link that appears at ``path`` between the check and the rename is
+    replaced, not followed.
+    """
+    import uuid
+
+    path = Path(os.path.abspath(path))
+    try:
+        status = _lstat(path)
+    except FileNotFoundError:
+        status = None
+    if status is not None and _is_link_status(status):
+        raise OutputLinkRefused(path, path, where="at a destination it writes")
+    staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(
+        staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY, 0o666
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(content)
+        os.replace(staging, path)
+    except BaseException:
+        staging.unlink(missing_ok=True)
         raise
 
 

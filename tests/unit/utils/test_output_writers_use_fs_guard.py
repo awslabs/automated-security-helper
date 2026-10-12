@@ -153,6 +153,10 @@ _MCP_SESSIONS = (
     "the MCP server's workspace root: session markers and the lock files that "
     "record live servers and scans"
 )
+_OPERATOR_DESTINATION = (
+    "fs_guard.replace_without_following: a destination the operator names, written "
+    "as a new file renamed over it, with a symlink there refused"
+)
 _CDK_NAG_CHILD = (
     "the worker child's response file, created exclusively in the fresh "
     "directory its parent made and wrote the request into with fs_guard"
@@ -189,10 +193,6 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
     (f"{_ASH}/cli/entrypoint.py", "_reattach", "os.fdopen"): (
         1,
         "the process's own standard stream",
-    ),
-    (f"{_ASH}/cli/main.py", "get_genai_guide", "write_text"): (
-        1,
-        "the file the operator names for the guide",
     ),
     (f"{_ASH}/cli/mcp/source_delivery.py", "_write_next_sequence", "write_text"): (
         1,
@@ -254,6 +254,22 @@ WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
         2,
         _FS_GUARD,
     ),
+    # A destination the operator names (ash get-genai-guide --output): a symlink
+    # there is refused, and the file is a new one renamed over it.
+    (f"{_ASH}/utils/sandbox/fs_guard.py", "replace_without_following", "os.open"): (
+        1,
+        _OPERATOR_DESTINATION,
+    ),
+    (
+        f"{_ASH}/utils/sandbox/fs_guard.py",
+        "replace_without_following",
+        "os.fdopen",
+    ): (1, _OPERATOR_DESTINATION),
+    (
+        f"{_ASH}/utils/sandbox/fs_guard.py",
+        "replace_without_following",
+        "os.replace",
+    ): (1, _OPERATOR_DESTINATION),
     (f"{_ASH}/utils/cdk_nag_worker.py", "main", "open"): (1, _CDK_NAG_CHILD),
     (f"{_ASH}/utils/detect_secrets_worker.py", "main", "open"): (
         1,

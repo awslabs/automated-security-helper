@@ -250,9 +250,19 @@ def get_genai_guide(
             typer.echo(github_url, err=True)
             raise typer.Exit(1)
 
-    # Write to output file
+    # Write to output file, as a new file renamed over the destination: a symlink
+    # there is refused rather than written through (fs_guard).
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        OutputLinkRefused,
+        replace_without_following,
+    )
+
     output_file = Path(output_path)
-    output_file.write_text(guide_content)
+    try:
+        replace_without_following(output_file, guide_content)
+    except OutputLinkRefused as refused:
+        typer.echo(f"Error: {refused}", err=True)
+        raise typer.Exit(1)
 
     typer.echo(f"✓ GenAI Integration Guide saved to: {output_file.absolute()}")
     if source:
