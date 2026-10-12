@@ -2542,6 +2542,9 @@
         },
         "severity_counts": {},
         "status": "ERROR",
+        "errors": [
+          "infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation template"
+        ],
         "targets_attempted": 1,
         "targets_failed": 1
       }

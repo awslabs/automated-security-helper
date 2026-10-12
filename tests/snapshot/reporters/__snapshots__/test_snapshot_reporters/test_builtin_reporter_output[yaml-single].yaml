@@ -25,6 +25,9 @@ additional_reports:
     source:
       duration: 0.25
       end_time: '2026-01-15T12:00:18.500000Z'
+      errors:
+      - 'infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation
+        template'
       finding_count: 0
       metadata:
         scanner_version: 0.8.10

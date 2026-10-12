@@ -79,6 +79,13 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
 _COMPLETED_RESULT_STATUSES = frozenset({"passed", "completed", "success", "ok"})
 
 
+def _refuse_to_grade(container: ScanResultsContainer, reason: str) -> None:
+    """Make the row ERROR with ``reason``, in its errors and in the log."""
+    container.status = ScannerStatus.ERROR
+    ASH_LOGGER.error(reason)
+    container.add_error(reason)
+
+
 def _completed_result_status(status: Any) -> bool:
     return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
 
@@ -547,9 +554,11 @@ class ScannerExecutor:
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
                     )
                     if raw_results is None:
-                        container.add_error(
+                        no_result = (
                             f"{scanner_config_name} returned no result on {target_type}"
                         )
+                        ASH_LOGGER.error(no_result)
+                        container.add_error(no_result)
                         raw_results = {
                             "errors": scanner_plugin.errors or [],
                             "output": scanner_plugin.output or [],
@@ -600,14 +609,12 @@ class ScannerExecutor:
                             # validates. The template refuses it before grading; a
                             # scan() override can return it as it is, and zero
                             # findings from no run reads as a clean scan.
-                            container.status = ScannerStatus.ERROR
-                            no_run = (
+                            _refuse_to_grade(
+                                container,
                                 f"{scanner_config_name} returned a result on "
                                 f"{target_type} that holds no SARIF run, so there is "
-                                "nothing to grade"
+                                "nothing to grade",
                             )
-                            ASH_LOGGER.error(no_run)
-                            container.add_error(no_run)
                         raw_results = sanitize_sarif_paths(
                             raw_results, self.plugin_context.source_dir
                         )
@@ -629,11 +636,12 @@ class ScannerExecutor:
                             # "failed" dicts carry their own errors: the template's
                             # and the scan phase's failure responses.
                             if raw_results["status"] != "failed":
-                                container.add_error(
+                                _refuse_to_grade(
+                                    container,
                                     f"{scanner_config_name} returned a result on "
                                     f"{target_type} with status "
                                     f"{raw_results['status']!r}, which does not say "
-                                    "its tool completed, so it was not graded"
+                                    "its tool completed, so it was not graded",
                                 )
                         elif not (
                             "status" in raw_results
@@ -643,12 +651,12 @@ class ScannerExecutor:
                             # Nothing here to grade: a tool's own JSON that a scanner
                             # returned because it did not parse. Graded on its zero
                             # findings it read as a clean scan.
-                            container.status = ScannerStatus.ERROR
-                            container.add_error(
+                            _refuse_to_grade(
+                                container,
                                 f"{scanner_config_name} returned a result on "
                                 f"{target_type} that could not be graded: it is not "
                                 "SARIF and carries no status, severity_counts or "
-                                "findings"
+                                "findings",
                             )
                         else:
                             if "severity_counts" in raw_results:
@@ -686,12 +694,12 @@ class ScannerExecutor:
                         # Nothing the executor reads: a scan() override's own list,
                         # string or number. Graded on its zero findings it read as a
                         # clean scan. A falsy result is MISSING, above.
-                        container.status = ScannerStatus.ERROR
-                        container.add_error(
+                        _refuse_to_grade(
+                            container,
                             f"{scanner_config_name} returned a result on "
                             f"{target_type} that could not be graded: a "
                             f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
-                            "a dict"
+                            "a dict",
                         )
 
                     if scan_called:

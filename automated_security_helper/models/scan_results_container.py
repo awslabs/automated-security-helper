@@ -119,9 +119,14 @@ class ScanResultsContainer(BaseModel):
 
         Args:
             error: Error message to add
+
+        Assigned rather than appended: appending to the default list does not mark
+        ``errors`` as set, so ``model_dump(exclude_unset=True)`` (ScanResultProcessor)
+        would leave the reason out of ``additional_reports`` and
+        ``ASH.ScanResults.json``.
         """
         if error not in self.errors:
-            self.errors.append(error)
+            self.errors = [*self.errors, error]
 
     def record_target_attempt(self, count: int = 1) -> None:
         """Record that the scanner is about to process ``count`` more targets.
