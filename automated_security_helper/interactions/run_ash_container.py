@@ -978,6 +978,19 @@ class UnmountablePathError(ContainerInputError):
     """A host path that would be mounted holds a character ``--mount`` cannot carry."""
 
 
+class ContainerOutputLinkRefused(ContainerInputError):
+    """The output directory mounted at ``/out`` is a symlink or is reached through one.
+
+    ``found`` describes the link as the general check describes it
+    (utils/output_dir_links.linked_output_component), and the message adds why
+    container mode refuses it and what to use instead.
+    """
+
+    def __init__(self, found: str, message: str):
+        super().__init__(message)
+        self.found = found
+
+
 def _scanned_tree_roots(source_dir: Path) -> List[Path]:
     """The scanned tree, under every name it has.
 
@@ -1112,10 +1125,13 @@ def _refuse_linked_output_dir(
     it is created or resolved, because creating ``.ash/ash_output`` through a
     linked ``.ash`` already writes where the link points. An empty output
     directory is the one the run makes, ``<source>/ash_output``.
+
+    Raises ContainerOutputLinkRefused, whose ``found`` describes the link as
+    linked_output_component does, the description refuse_symlinked_output_dir
+    reports too.
     """
-    from automated_security_helper.utils.sandbox.policy import (
-        SandboxUnavailable,
-        refuse_symlinked_output_dir,
+    from automated_security_helper.utils.output_dir_links import (
+        linked_output_component,
     )
 
     source = Path(source_dir) if source_dir else Path.cwd()
@@ -1124,17 +1140,18 @@ def _refuse_linked_output_dir(
         if output_dir is not None and str(output_dir)
         else source / "ash_output"
     )
-    try:
-        for named in (source, source.resolve()):
-            refuse_symlinked_output_dir(named, output)
-    except SandboxUnavailable as refusal:
-        raise ContainerInputError(
-            f"Refusing the output directory {output.as_posix()}: {refusal}. "
-            "Container mode mounts the output directory read-write at /out, so the "
-            "scan inside the container would write through the link. Use a "
-            "directory that is not a symlink and is not reached through one below "
-            "the source directory."
-        ) from None
+    for named in (source, source.resolve()):
+        found = linked_output_component(named, output)
+        if found is not None:
+            raise ContainerOutputLinkRefused(
+                found,
+                f"Refusing the output directory {output.as_posix()}: {found}, so "
+                "mounting the output directory would expose wherever it points. "
+                "Container mode mounts the output directory read-write at /out, so "
+                "the scan inside the container would write through the link. Use a "
+                "directory that is not a symlink and is not reached through one "
+                "below the source directory.",
+            )
 
 
 def _refuse_unusable_output_dir(
@@ -1152,18 +1169,19 @@ def _refuse_unusable_output_dir(
 
 def container_output_dir_refusal(
     source_dir: Path | str | None, output_dir: Path | str | None
-) -> str | None:
-    """Why the output directory cannot be used by a container scan, or None.
+) -> ContainerOutputLinkRefused | None:
+    """The refusal of the output directory for a container scan, or None.
 
     Only the link rule (:func:`_refuse_linked_output_dir`), which ``run_ash_scan``
     checks before its logger opens ``ash.log`` in the output directory, with or
     without ``--no-run``; the full set is checked with the other inputs by
-    :func:`container_input_refusal`.
+    :func:`container_input_refusal`. The refusal's message is the reason, and its
+    ``found`` names the link.
     """
     try:
         _refuse_linked_output_dir(source_dir, output_dir)
-    except ContainerInputError as e:
-        return str(e)
+    except ContainerOutputLinkRefused as e:
+        return e
     return None
 
 

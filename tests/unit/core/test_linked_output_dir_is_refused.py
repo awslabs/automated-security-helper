@@ -266,6 +266,32 @@ def test_run_ash_scan_refuses_before_the_logger_or_the_clean_up(
 
 
 @needs_symlinks
+@pytest.mark.parametrize("mode", MODES, ids=lambda m: m.value)
+@pytest.mark.parametrize("where", ["output-dir", "on-the-way"])
+def test_the_refusal_names_the_same_link_in_every_mode(layout, mode, where):
+    """``found`` is the link as the general check describes it, with no remedy.
+
+    An in-process caller reports ``found`` with a remedy of its own. Container
+    mode's own rule runs first, so its refusal names the link as the other modes
+    do, and its container remedy stays in ``reason``.
+    """
+    if where == "output-dir":
+        output = _linked_output(layout)
+    else:
+        (layout.tree / ".ash").symlink_to(layout.host, target_is_directory=True)
+        output = layout.tree / ".ash" / "ash_output"
+
+    exited, _ = _refuse(_options(layout, output, mode))
+
+    assert exited.code == 3
+    assert exited.found == linked_output_component(layout.tree, output)
+    # The message starts with the description, capitalized.
+    assert exited.found.casefold() in exited.reason.casefold()
+    if mode == RunMode.container:
+        assert "read-write at /out" in exited.reason
+
+
+@needs_symlinks
 @pytest.mark.parametrize("mode", [RunMode.container, RunMode.nix])
 def test_the_clean_up_itself_refuses_and_deletes_nothing(layout, mode):
     """Beside its rmtree, for a caller that skipped run_ash_scan's check."""

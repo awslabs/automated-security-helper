@@ -1560,8 +1560,8 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     if opts.mode == RunMode.container:
         refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
         if refusal is not None:
-            typer.secho(refusal, fg=typer.colors.RED)
-            raise OutputDirRefusedExit(refusal, refusal)
+            typer.secho(str(refusal), fg=typer.colors.RED)
+            raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
     from automated_security_helper.utils.output_dir_links import (
         OutputDirLinkRefused,
         refuse_linked_output_dir,
