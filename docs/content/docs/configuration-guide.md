@@ -513,9 +513,22 @@ global_settings:
 
 An ignore path is a suppression. ASH does not convert a file under one or include
 it in the file lists it hands scanners, and leaves a finding any scanner reports
-there out of the results. bandit is also told, in its `--exclude`, to leave out the
-files an ignore path matches. The other scanners that walk the directory
-themselves still read them, and ASH drops what they find there.
+there out of the results. The scanners that walk the directory themselves are also
+told to leave out the files an ignore path matches, matched the same way: each
+ignored file, or once for a directory whose every file is ignored.
+
+- bandit: in its `--exclude`;
+- grype and syft: `--exclude ./<path>`, and `./<dir>/**` for a directory;
+- trivy-repo: `--skip-files` and `--skip-dirs`;
+- checkov: one `--skip-path` each, anchored so it matches that path alone;
+- semgrep and opengrep: `--exclude=<name>`, only for a name that nothing else
+  below the scanned directory, and nothing in that directory's own path, has.
+
+A path a tool's option cannot carry (one with a comma for bandit and trivy, or a
+name that is not unique for semgrep and opengrep) is still read by that tool, and
+ASH drops what it finds there. snyk-code has no option that leaves out a path, so
+it still reads, and uploads, the files an ignore path matches. On Windows the
+tools are given none of these.
 `--ignore-suppressions` lifts ignore paths along with
 suppressions: every scanner reads those files and their findings are reported. See
 [Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).

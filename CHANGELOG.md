@@ -2501,6 +2501,18 @@
   is not passed, and bandit then reads that file and ASH drops its findings as
   before. An option changed after the scanner was built, such as
   `scanners.bandit.options.excluded_paths`, now reaches bandit too.
+- **No scanner reads a file in `global_settings.ignore_paths` where its options
+  can leave it out.** Only detect-secrets and ferret-scan were given the ignore
+  paths. The other scanners read the ignored files, and their own results under
+  `scanners/<tool>/` held their findings (grype's and trivy's vulnerabilities, the
+  packages in syft's SBOM, which also reached the reports' SBOMs). Each is now
+  told, matching each pattern as ASH does when it drops findings: grype and syft
+  with `--exclude ./<path>` (a fully ignored directory `./<dir>/**`), trivy-repo
+  with `--skip-files` and `--skip-dirs`, checkov with an anchored `--skip-path`,
+  and semgrep and opengrep with `--exclude=<name>` for a name nothing else has.
+  cfn-nag, cdk-nag and npm-audit leave the ignored files out of the scan set they
+  read. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
+  `ERROR`. snyk-code, which has no such option, still reads and uploads them.
 - **A plugin module that failed to import in any shard or workspace project fails
   the combined results too.** `metadata.plugin_load_errors` lists the plugin modules
   a scan could not import, and the completeness gate

@@ -50,45 +50,86 @@ def doublestar_literal(text: str) -> str:
     )
 
 
-def syft_excludes(target: str | Path) -> List[str]:
-    """``--exclude`` values for syft and grype, one per link leaving ``target``.
+def syft_excludes(
+    target: str | Path,
+    source_dir: str | Path | None = None,
+    ignore_paths: Iterable[object] | None = None,
+) -> List[str]:
+    """``--exclude`` values for syft and grype: the links leaving ``target``, and
+    the paths ``ignore_paths`` ignore.
 
     syft 1.54.1 and grype 0.120.1 list no file behind a link to a file or a
     directory whose target leaves the directory they scan (measured). Each value is
-    ``./`` and the link's path below ``target``, glob characters escaped: syft
-    anchors a ``./`` pattern at the scanned directory, whatever ``--base-path``
-    says, and matches the whole path, so ``./x/requirements.txt`` left out that file
-    and not ``sub/x/requirements.txt`` (measured, with brackets, braces, ``*``,
-    ``?``, a backslash, a space and a comma in the path). None on Windows, where
-    the paths it matches are not ``/``-joined.
+    ``./`` and the path below ``target``, glob characters escaped: syft anchors a
+    ``./`` pattern at the scanned directory, whatever ``--base-path`` says, and
+    matches the whole path, so ``./x/requirements.txt`` left out that file and not
+    ``sub/x/requirements.txt`` (measured, with brackets, braces, ``*``, ``?``, a
+    backslash, a space and a comma in the path). A directory whose every file is
+    ignored is ``./<dir>/**``. None on Windows, where the paths it matches are not
+    ``/``-joined.
     """
     if os.sep != "/":
         return []
-    return [
-        f"./{doublestar_literal(relative)}"
-        for relative in file_links_leaving_tree(target)
-    ]
+    files, links = walked_files(target)
+    values = [f"./{doublestar_literal(relative)}" for relative in links]
+    for entry in _ignore_entries(target, source_dir, ignore_paths, files):
+        if entry.endswith("/"):
+            values.append(f"./{doublestar_literal(entry[:-1])}/**")
+        else:
+            values.append(f"./{doublestar_literal(entry)}")
+    return values
 
 
-def trivy_skip_files(target: str | Path) -> List[str]:
-    """``--skip-files`` values for trivy, one per link leaving ``target``.
+def trivy_skip_dirs(
+    target: str | Path,
+    source_dir: str | Path | None = None,
+    ignore_paths: Iterable[object] | None = None,
+) -> List[str]:
+    """``--skip-dirs`` values for trivy: each directory whose every file is ignored.
+
+    The directory's path below ``target``, glob characters escaped, which trivy
+    matches against the whole path, as for ``--skip-files``. One with a comma, a
+    double quote or a line break is left out, since trivy reads the value as CSV;
+    trivy then reads its files and ASH drops their findings. None on Windows.
+    """
+    if os.sep != "/":
+        return []
+    files, _ = walked_files(target)
+    values = []
+    for entry in _ignore_entries(target, source_dir, ignore_paths, files):
+        if entry.endswith("/") and not any(c in _TRIVY_UNSAFE for c in entry):
+            values.append(doublestar_literal(entry[:-1]))
+    return values
+
+
+def trivy_skip_files(
+    target: str | Path,
+    source_dir: str | Path | None = None,
+    ignore_paths: Iterable[object] | None = None,
+) -> List[str]:
+    """``--skip-files`` values for trivy: the links leaving ``target``, and the
+    files ``ignore_paths`` ignore outside the directories ``trivy_skip_dirs`` names.
 
     trivy 0.75.0 skips every link, inside the tree or not (measured). A value is the
-    link's path below ``target`` with glob characters escaped, which trivy matches
-    against the whole path: ``x.txt`` left out ``x.txt`` and not ``sub/x.txt``
-    (measured). A path with a comma, a double quote or a line break is left out of
-    the option, since trivy reads the value as CSV, and named in one debug record.
-    None on Windows.
+    path below ``target`` with glob characters escaped, which trivy matches against
+    the whole path: ``x.txt`` left out ``x.txt`` and not ``sub/x.txt`` (measured). A
+    link with a comma, a double quote or a line break is left out of the option,
+    since trivy reads the value as CSV, and named in one debug record; an ignored
+    file with one is left out too, and ASH drops its findings. None on Windows.
     """
     if os.sep != "/":
         return []
+    files, links = walked_files(target)
     values: List[str] = []
     left_out: List[str] = []
-    for relative in file_links_leaving_tree(target):
+    for relative in links:
         if any(character in _TRIVY_UNSAFE for character in relative):
             left_out.append(relative)
         else:
             values.append(doublestar_literal(relative))
+    for entry in _ignore_entries(target, source_dir, ignore_paths, files):
+        if not entry.endswith("/") and not any(c in _TRIVY_UNSAFE for c in entry):
+            values.append(doublestar_literal(entry))
     if left_out:
         ASH_LOGGER.debug(
             "trivy: %d link(s) leaving %s not given in --skip-files, since a comma, "
@@ -183,3 +224,112 @@ def ignored_entries(
     entries = [f"{directory}/" for directory in whole if not _under_whole(directory)]
     entries += [relative for relative in ignored if not _under_whole(relative)]
     return sorted(entries)
+
+
+def _ignore_entries(
+    target: str | Path,
+    source_dir: str | Path | None,
+    ignore_paths: Iterable[object] | None,
+    files: Sequence[str],
+) -> List[str]:
+    """``ignored_entries``, or none when no source directory or ignore path is given."""
+    if source_dir is None or not ignore_paths:
+        return []
+    return ignored_entries(target, source_dir, ignore_paths, files)
+
+
+#: Characters a semgrep or opengrep ``--exclude`` reads as pattern syntax.
+_GREP_PATTERN_CHARACTERS = frozenset("*?[]{}!\\")
+
+
+def grep_ignore_names(
+    target: str | Path,
+    source_dir: str | Path | None,
+    ignore_paths: Iterable[object] | None,
+) -> List[str]:
+    """``--exclude`` names for semgrep and opengrep that leave out only ignored paths.
+
+    Their ``--exclude`` cannot name one path: semgrep matches a pattern against
+    paths below the git work tree's root, and opengrep a name at every depth. A bare
+    name leaves out every file or directory of that name at any depth. So the name
+    of an ignored file, or of a directory whose every file is ignored, is passed
+    only when nothing else could match it: no path below ``target`` that is not
+    ignored has a part of that name, ``target``'s own absolute path has none (a
+    part above it could be below the work tree's root, and then the name would
+    leave out the whole target), and it holds no pattern character. Any other
+    ignored path is still read, and ASH drops its findings. None on Windows.
+    """
+    if os.sep != "/":
+        return []
+    files, _ = walked_files(target)
+    entries = _ignore_entries(target, source_dir, ignore_paths, files)
+    if not entries:
+        return []
+    ignored_dirs = [entry for entry in entries if entry.endswith("/")]
+    ignored_files = {entry for entry in entries if not entry.endswith("/")}
+
+    def _ignored(relative: str) -> bool:
+        return relative in ignored_files or any(
+            relative.startswith(directory) for directory in ignored_dirs
+        )
+
+    taken = {
+        part
+        for relative in files
+        if not _ignored(relative)
+        for part in relative.split("/")
+    }
+    taken.update(Path(os.path.abspath(target)).parts)
+    names = []
+    for entry in entries:
+        name = entry.rstrip("/").rsplit("/", 1)[-1]
+        if (
+            name
+            and name not in taken
+            and name not in names
+            and not any(character in _GREP_PATTERN_CHARACTERS for character in name)
+            and not any(character in name for character in "\r\n")
+        ):
+            names.append(name)
+    return names
+
+
+def drop_ignored(
+    paths: Iterable[str | Path],
+    source_dir: str | Path,
+    ignore_paths: Iterable[object] | None,
+    matches: Callable[[str, str], bool] = file_path_matches,
+) -> List[str]:
+    """``paths`` without the ones ``ignore_paths`` ignore, for a scan-set reader.
+
+    Each path is matched as ASH matches it when it drops findings: its path below
+    ``source_dir`` against each pattern. A path not below ``source_dir`` is kept.
+    """
+    patterns = [
+        str(getattr(entry, "path", "") or "")
+        for entry in ignore_paths or []
+        if getattr(entry, "path", None)
+    ]
+    kept = [str(path) for path in paths]
+    if not patterns:
+        return kept
+    roots = {
+        Path(os.path.abspath(source_dir)),
+        Path(os.path.realpath(source_dir)),
+    }
+
+    def _below(path: str) -> str | None:
+        for root in roots:
+            try:
+                return Path(os.path.abspath(path)).relative_to(root).as_posix()
+            except ValueError:
+                continue
+        return None
+
+    result = []
+    for path in kept:
+        relative = _below(path)
+        if relative is not None and any(matches(relative, p) for p in patterns):
+            continue
+        result.append(path)
+    return result

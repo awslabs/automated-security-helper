@@ -31,6 +31,8 @@ from typing import (
     final,
 )
 
+from pydantic import PrivateAttr
+
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -42,6 +44,7 @@ from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.utils.link_exclusions import grep_ignore_names
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -74,6 +77,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     """Shared scaffolding for semgrep and opengrep scanners."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    # The names the current target's command excludes for the global ignore paths
+    # (_execute_scan), which _post_process_sarif tells apart from other excludes.
+    _ignore_exclude_names: List[str] = PrivateAttr(default_factory=list)
 
     # ---------------------------------------------------------------
     # Hooks subclasses override
@@ -454,6 +461,21 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # directories, and then it leaves out the whole target.
         final_args = self._resolve_arguments(target=target, results_file=results_file)
 
+        # The global ignore paths, as names that leave out nothing else (see
+        # utils/link_exclusions.grep_ignore_names); an ignored path no such name
+        # covers is still read, and ASH drops its findings. In the joined form,
+        # since a name can start with "-".
+        ignore_names = grep_ignore_names(
+            target, getattr(self.context, "source_dir", None), global_ignore_paths
+        )
+        self._ignore_exclude_names = ignore_names
+        if ignore_names:
+            head = [self.command, *self.subcommands]
+            insert_at = len(head) if final_args[: len(head)] == head else 1
+            final_args[insert_at:insert_at] = [
+                f"--exclude={name}" for name in ignore_names
+            ]
+
         # The scanned and skipped paths, read after the run (_post_process_sarif).
         # Not in patterns mode, which writes its JSON results instead of SARIF.
         if not getattr(getattr(self.config, "options", None), "patterns", None):
@@ -503,7 +525,17 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                     if isinstance(entry, dict)
                     and entry.get("reason") == "cli_exclude_flags_match"
                 ]
-                if excluded:
+                # Files left out for the global ignore paths were left out on
+                # purpose, so a scan that found only those had nothing to scan.
+                ignored_names = set(self._ignore_exclude_names)
+                not_ignored = [
+                    entry
+                    for entry in excluded
+                    if not ignored_names.intersection(
+                        Path(str(entry.get("path", ""))).parts
+                    )
+                ]
+                if not_ignored:
                     raise ScannerError(
                         f"{self.command} scanned no file below "
                         f"{Path(target).as_posix()}: its --exclude patterns left out "
@@ -511,6 +543,14 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         "nothing about them."
                     )
                 self.targets_attempted = 0
+                if excluded:
+                    self._plugin_log(
+                        f"{self.command} scanned no file below "
+                        f"{Path(target).as_posix()}: every file it found is in "
+                        "global_settings.ignore_paths.",
+                        level=logging.INFO,
+                    )
+                    return super()._post_process_sarif(sarif_report, final_args, target)
                 reasons = sorted(
                     {
                         str(entry.get("reason"))

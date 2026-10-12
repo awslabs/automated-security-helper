@@ -43,7 +43,10 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.config.tool_config_trust import empty_tool_config
-from automated_security_helper.utils.link_exclusions import trivy_skip_files
+from automated_security_helper.utils.link_exclusions import (
+    trivy_skip_dirs,
+    trivy_skip_files,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils import subprocess_utils
@@ -666,6 +669,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         """
         # Per target; see ScannerPluginBase.scan().
         self.exit_code = 0
+        # Passed by keyword, as the executor passes it to every scanner.
+        global_ignore_paths = kwargs.get("global_ignore_paths") or []
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -732,10 +737,21 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 f"--secret-config={self._secret_config_file()}",
                 f"--cache-dir={cache.as_posix()}",
                 f"--config={self._config_file()}",
-                # Each link leaving the target; trivy follows no link. In the
-                # joined form, since a path can start with "-". See
-                # utils/link_exclusions.py.
-                *(f"--skip-files={path}" for path in trivy_skip_files(target)),
+                # Each link leaving the target (trivy follows no link), and each
+                # path the global ignore paths ignore. In the joined form, since a
+                # path can start with "-". See utils/link_exclusions.py.
+                *(
+                    f"--skip-files={path}"
+                    for path in trivy_skip_files(
+                        target, self.context.source_dir, global_ignore_paths
+                    )
+                ),
+                *(
+                    f"--skip-dirs={path}"
+                    for path in trivy_skip_dirs(
+                        target, self.context.source_dir, global_ignore_paths
+                    )
+                ),
             ]
             if self._scanner_offline():
                 final_args = self._offline_misconfig_args(final_args)

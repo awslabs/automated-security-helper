@@ -43,6 +43,7 @@ from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
 )
+from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -521,14 +522,19 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
 
+            # The scan set, without the files the global ignore paths ignore.
             orig_scannable = (
                 list(self.context.work_dir.glob("**/*.*"))
                 if target_type == "converted"
-                else scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
-                    honor_ignore_files=honors_ignore_files(self.context.config),
-                    # filter_pattern=r"\.(yaml|yml|json)$",
+                else drop_ignored(
+                    scan_set(
+                        source=self.context.source_dir,
+                        output=self.context.output_dir,
+                        honor_ignore_files=honors_ignore_files(self.context.config),
+                        # filter_pattern=r"\.(yaml|yml|json)$",
+                    ),
+                    self.context.source_dir,
+                    global_ignore_paths,
                 )
             )
             ASH_LOGGER.debug(

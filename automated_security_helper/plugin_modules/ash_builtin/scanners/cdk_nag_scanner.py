@@ -42,6 +42,7 @@ from automated_security_helper.utils.get_scan_set import (
     honors_ignore_files,
     scan_set,
 )
+from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.cfn_template_model import describe_parse_error
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -917,14 +918,19 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # emit the same rule descriptors in a different order and give ash-cdk-nag.sarif a
         # non-empty diff. The non-converted branch below already ends in
         # ``sorted(set(included))`` inside get_scan_set, so only this branch was unordered.
+        # The scan set, without the files the global ignore paths ignore.
         orig_scannable = (
             sorted(self.context.work_dir.glob("**/*.*"))
             if target_type == "converted"
-            else scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-                honor_ignore_files=honors_ignore_files(self.context.config),
-                # filter_pattern=r"\.(yaml|yml|json)$",
+            else drop_ignored(
+                scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                    honor_ignore_files=honors_ignore_files(self.context.config),
+                    # filter_pattern=r"\.(yaml|yml|json)$",
+                ),
+                self.context.source_dir,
+                global_ignore_paths,
             )
         )
         ASH_LOGGER.debug(

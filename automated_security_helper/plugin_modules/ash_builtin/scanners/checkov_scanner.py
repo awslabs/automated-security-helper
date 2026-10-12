@@ -33,6 +33,10 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
+from automated_security_helper.utils.link_exclusions import (
+    ignored_entries,
+    walked_files,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
@@ -495,6 +499,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         output_skip = self._output_dir_skip_pattern(target)
         skips = [] if output_skip is None else [output_skip]
         skips.extend(self._link_skip_patterns(target))
+        skips.extend(self._ignore_skip_patterns(target, global_ignore_paths))
         self.args.extra_args = [
             *original_extra_args,
             *(ToolExtraArg(key="--skip-path", value=skip) for skip in skips),
@@ -509,6 +514,35 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         finally:
             self.args.extra_args = original_extra_args
         return _directory_as_one_token(final_args), results_file, None
+
+    def _ignore_skip_patterns(
+        self, target: Path, global_ignore_paths: List[IgnorePathWithReason]
+    ) -> List[str]:
+        """One ``--skip-path`` for each path the global ignore paths ignore.
+
+        The paths come from ``ignored_entries``, which matches each pattern as ASH
+        does when it drops findings. A file is written as a link's path is
+        (``_link_skip_patterns``): anchored at both ends, so it matches that file
+        alone. A directory whose every file is ignored is anchored at the start and
+        ends with ``/``, so it matches every path below it and not a sibling that
+        shares its name's start; no group, since checkov's Terraform module finder
+        joins every value into one regex. None on Windows, where checkov's walked
+        paths are not ``/``-joined; checkov then reads those files, and ASH drops
+        their findings.
+        """
+        if os.sep != "/" or not global_ignore_paths:
+            return []
+        files, _ = walked_files(target)
+        entries = ignored_entries(
+            target, self.context.source_dir, global_ignore_paths, files
+        )
+        root = Path(target).as_posix()
+        escaped_dot = "\\."
+        patterns = []
+        for entry in entries:
+            literal = re.escape(f"{root}/{entry}").replace(escaped_dot, "[.]")
+            patterns.append("^" + literal + ("" if entry.endswith("/") else "$"))
+        return patterns
 
     def _link_skip_patterns(self, target: Path) -> List[str]:
         """One ``--skip-path`` for each link to a file whose target leaves ``target``.

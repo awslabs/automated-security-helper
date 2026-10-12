@@ -47,8 +47,22 @@ IN_TREE_KEY = "AKIA" + "INTREE5E2A000001"
 IGNORED_PACKAGE = "pyyaml"
 MARKERS = [MARKER, MARKER.lower(), IGNORED_KEY, IGNORED_PACKAGE]
 
-#: The scanners whose own results are checked; each is one test.
-CHECKED = ["bandit"]
+#: The scanners whose own results are checked; each is one test. snyk-code is not
+#: here: it needs Snyk's service, so it never runs in this offline scan.
+CHECKED = [
+    "bandit",
+    "cdk-nag",
+    "cfn-nag",
+    "checkov",
+    "detect-secrets",
+    "ferret-scan",
+    "grype",
+    "npm-audit",
+    "opengrep",
+    "semgrep",
+    "syft",
+    "trivy-repo",
+]
 
 SHELL_TRUE_RULE = """rules:
   - id: ignore-e2e-shell-true
@@ -328,3 +342,14 @@ def test_no_scanner_output_holds_an_ignored_path(scan, scanner):
     if status not in ("PASSED", "FAILED") and not _recorded_inputs(directory):
         pytest.skip(f"{scanner} did not run here ({status})")
     assert _holding(directory) == {}, status
+
+
+def test_no_report_holds_an_ignored_path(scan):
+    """The reports, the SBOMs among them, hold nothing from the ignored directory."""
+    output, results = scan
+    reports = {
+        name: hits
+        for name, hits in _holding(output).items()
+        if not name.startswith("scanners/")
+    }
+    assert reports == {}

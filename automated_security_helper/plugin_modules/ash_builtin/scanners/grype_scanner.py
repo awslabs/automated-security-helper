@@ -429,7 +429,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             *original_extra_args,
             *(
                 ToolExtraArg(key="--exclude", value=pattern)
-                for pattern in syft_excludes(target)
+                for pattern in syft_excludes(
+                    target, self.context.source_dir, global_ignore_paths
+                )
             ),
         ]
         if not any(arg.key == "--config" for arg in self.args.extra_args):

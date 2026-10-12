@@ -311,12 +311,14 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 self.args.extra_args.append(
                     ToolExtraArg(key="--config", value=empty.as_posix())
                 )
-            # Each link leaving this target; syft follows none of them. Rebuilt
-            # with the arguments above for every target. See
-            # utils/link_exclusions.py.
+            # Each link leaving this target (syft follows none of them), and each
+            # path the global ignore paths ignore. Rebuilt with the arguments above
+            # for every target. See utils/link_exclusions.py.
             self.args.extra_args.extend(
                 ToolExtraArg(key="--exclude", value=pattern)
-                for pattern in syft_excludes(target)
+                for pattern in syft_excludes(
+                    target, self.context.source_dir, global_ignore_paths
+                )
             )
             conf: SyftScannerConfig = self.config
             opts: SyftScannerConfigOptions = conf.options
