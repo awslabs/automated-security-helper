@@ -4,7 +4,7 @@
 """Workspace mode refuses an operator config that is not entirely the operator's.
 
 The operator's ``--config`` is final over every project, so a file it is built
-from that the workspace wrote (one inside the workspace) or an MCP client
+from that the workspace wrote (one inside the workspace's tree) or an MCP client
 delivered (one under the MCP workspace root) would make that file's settings
 final too. Such a config is refused, as a config error (exit 3), whether or not
 a project has a config of its own.
@@ -86,6 +86,23 @@ def test_an_operator_config_extending_a_base_inside_the_workspace_is_refused(
         resolve_workspace(workspace, default_config=operator)
 
     assert "base.yaml" in str(raised.value)
+
+
+def test_an_operator_config_inside_the_checkout_around_the_workspace_is_refused(
+    tmp_path,
+):
+    """The scanned tree is the outermost git checkout around the workspace, as for
+    every other config check, so a file beside the workspace in that checkout is
+    the repository's, not the operator's."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    workspace = _workspace(checkout / "work", {"api": {"fail_on_findings": True}})
+    beside = _write(checkout / "ops" / "ash.yaml", {"fail_on_findings": False})
+
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS) as raised:
+        resolve_workspace(workspace, default_config=beside)
+
+    assert "ash.yaml" in str(raised.value)
 
 
 def test_an_operator_config_an_mcp_client_delivered_is_refused(tmp_path):

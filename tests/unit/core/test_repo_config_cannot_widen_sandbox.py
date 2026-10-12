@@ -14,7 +14,11 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.config import sandbox_grants
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import (
+    operator_config_digest,
+    resolve_config,
+)
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     build_scanner_policy,
@@ -490,6 +494,9 @@ def test_workspace_mode_takes_the_sandbox_from_the_operators_config(tmp_path):
         display_label="api",
         severity_threshold="MEDIUM",
         config_source=own.as_posix(),
+        # As workspace resolution records it (resolver.resolve_workspace).
+        operator_config=operator.as_posix(),
+        operator_config_digest=operator_config_digest(operator),
     )
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(operator)
@@ -499,34 +506,24 @@ def test_workspace_mode_takes_the_sandbox_from_the_operators_config(tmp_path):
     assert sandbox.network_scanners == ["checkov"]
 
 
-def test_an_operator_config_inside_the_workspace_is_not_trusted(tmp_path):
+def test_an_operator_config_inside_the_workspace_is_refused(tmp_path):
+    # Workspace resolution refuses it first; the scan refuses it as well, for a
+    # plan that records it anyway.
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         _project_config_with_policy,
     )
-    from automated_security_helper.workspace.plan import ProjectPlan
 
     workspace = tmp_path / "workspace"
-    project_dir = workspace / "api"
-    (project_dir / ".ash").mkdir(parents=True)
-    own = project_dir / ".ash" / ".ash.yaml"
-    own.write_text("project_name: api\n")
+    workspace.mkdir()
     in_tree_default = workspace / "default.yaml"
     in_tree_default.write_text(TRUSTED_BWRAP)
-    project = ProjectPlan(
-        key="api",
-        relative_path="api",
-        path=project_dir.as_posix(),
-        label="api",
-        display_label="api",
-        severity_threshold="MEDIUM",
-        config_source=own.as_posix(),
-    )
+    project = _workspace_project(workspace, "project_name: api\n", in_tree_default)
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(in_tree_default)
     )
-    sandbox = _project_config_with_policy(project, settings).sandbox
-    assert sandbox.network_scanners is None
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS):
+        _project_config_with_policy(project, settings)
 
 
 def test_a_config_elsewhere_in_the_scanned_repository_is_inside(tmp_path):
@@ -641,7 +638,12 @@ def test_the_sandbox_flag_still_turns_off_an_operator_floor(tmp_path, monkeypatc
     assert sandbox.mode == "off"
 
 
-def _workspace_project(workspace: Path, own_config: str):
+_NOT_THE_OPERATORS = "must be the operator's"
+
+
+def _workspace_project(workspace: Path, own_config: str, operator: Path):
+    """A project with a config of its own, planned the way workspace resolution
+    plans it with ``operator`` as the operator's config."""
     from automated_security_helper.workspace.plan import ProjectPlan
 
     project_dir = workspace / "api"
@@ -656,12 +658,15 @@ def _workspace_project(workspace: Path, own_config: str):
         display_label="api",
         severity_threshold="MEDIUM",
         config_source=own.as_posix(),
+        operator_config=operator.as_posix(),
+        operator_config_digest=operator_config_digest(operator),
     )
 
 
-def test_a_workspace_operator_config_inside_a_checkout_still_sets_the_mode_floor(
-    tmp_path,
-):
+def test_a_workspace_operator_config_inside_the_checkout_is_refused(tmp_path):
+    # Unlike ASH_CONFIG for a single directory, which keeps its sandbox mode as
+    # a floor there, the operator's workspace config is final over every field,
+    # so one inside the checkout around the workspace is refused outright.
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         _project_config_with_policy,
@@ -671,51 +676,48 @@ def test_a_workspace_operator_config_inside_a_checkout_still_sets_the_mode_floor
     (top / ".git").mkdir(parents=True)
     operator = top / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP)
-    project = _workspace_project(top / "workspace", REPO_OFF)
+    project = _workspace_project(top / "workspace", REPO_OFF, operator)
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(operator)
     )
-    sandbox = _project_config_with_policy(project, settings).sandbox
-    assert sandbox.mode == "bwrap"
-    assert sandbox.network_scanners is None
+    with pytest.raises(ASHConfigValidationError, match=_NOT_THE_OPERATORS):
+        _project_config_with_policy(project, settings)
 
 
-def test_an_operator_config_extending_into_the_tree_still_sets_the_mode_floor(
-    tmp_path,
-):
+def test_an_operator_config_extending_into_the_tree_is_refused(tmp_path):
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         _project_config_with_policy,
     )
 
     workspace = tmp_path / "workspace"
-    project = _workspace_project(workspace, REPO_OFF)
-    (workspace / "shared").mkdir()
+    (workspace / "shared").mkdir(parents=True)
     (workspace / "shared" / "base.yaml").write_text("project_name: shared\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP + "extends: workspace/shared/base.yaml\n")
+    project = _workspace_project(workspace, REPO_OFF, operator)
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(operator)
     )
-    sandbox = _project_config_with_policy(project, settings).sandbox
-    assert sandbox.mode == "bwrap"
-    assert sandbox.network_scanners is None
+    with pytest.raises(ASHConfigValidationError, match="base.yaml"):
+        _project_config_with_policy(project, settings)
 
 
 def test_an_invalid_operator_config_is_refused_like_any_config(tmp_path):
-    from automated_security_helper.core.exceptions import ASHConfigValidationError
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         _project_config_with_policy,
     )
 
-    project = _workspace_project(tmp_path / "workspace", "project_name: api\n")
     operator = tmp_path / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP + "fail_on_findings: 'true'\n")
+    project = _workspace_project(
+        tmp_path / "workspace", "project_name: api\n", operator
+    )
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(operator)
     )
-    with pytest.raises(ASHConfigValidationError):
+    with pytest.raises(ASHConfigValidationError, match="validation failed"):
         _project_config_with_policy(project, settings)
 
 

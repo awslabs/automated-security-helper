@@ -1066,9 +1066,12 @@
     workspace root. A patched binding whose registered copy is gone is refused
     (exit 3), and a call's `profile` is written to a file of its own per profile.
   - Every file the operator's config is built from must be the operator's: a
-    `--config` inside the workspace, one that `extends` a base inside it, or one
-    under the MCP workspace root is refused with exit 3 before any project is
-    resolved. Keep the config and its bases outside the workspace.
+    `--config` inside the workspace's tree (the outermost git checkout around the
+    workspace, or the workspace itself when it is in no checkout), one that
+    `extends` a base inside it, or one under the MCP workspace root is refused
+    with exit 3 before any project is resolved. Before, a `--config` inside the
+    checkout around the workspace was used with its sandbox grants dropped and
+    its sandbox mode kept. Keep the config and its bases outside that tree.
   - The plan records a digest of the operator's config and its bases. A project
     whose operator config changed after the plan, or whose plan was resolved
     without the operator config the scan is given, fails with exit 3.
