@@ -1978,6 +1978,33 @@ class TestSandboxExecProfile:
             assert _as_argv(directory) not in allowed, directory
             assert _as_argv(directory) not in document["read_only"], directory
 
+    def test_a_path_entry_outside_the_scanned_tree_is_still_a_tool_directory(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """The positive counterpart: skipping in-tree entries keeps every other one.
+
+        A tool directory on PATH outside the scanned tree and the output directory,
+        named by nothing else in the policy, is readable, executable and allowed to
+        run under sandbox-exec. A PATH filter that dropped every entry fails here.
+        """
+        tools = tmp_path / "opt-tools" / "bin"
+        tools.mkdir(parents=True)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(tools), "/usr/bin"]))
+
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+
+        real = Path(os.path.realpath(tools))
+        assert real in _resolved(policy.read_only)
+        assert real in _resolved(policy.executable)
+        assert _as_argv(tools) in allowed
+
     def test_the_keychain_files_are_denied_after_every_file_allow(
         self, layout, tmp_path
     ):

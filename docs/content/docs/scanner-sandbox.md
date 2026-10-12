@@ -111,9 +111,12 @@ it needs.
   not a tool directory; the tree is mounted only as the scan's data. Inside `$HOME`
   only `PATH` entries that are `bin`, `sbin` or `Scripts` directories are mounted,
   and a tool's install prefix only when it is deeper than a directory directly
-  under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). Whether a directory
-  is a `bin` directory is judged by the directory it resolves to, so `~/bin` linked
-  to `~/.aws` is not one. An install prefix that is `/`, a home directory or a
+  under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). A directory counts
+  as a `bin` directory only by the directory it resolves to: that directory must be
+  named `bin`, `sbin` or `Scripts`, must not be a home directory, and must not
+  contain one. So a real `~/bin` is mounted, while a link spelled `bin` that
+  resolves somewhere else (`~/bin` linked to `~/.aws`, or `$WORK/bin` linked to
+  `$WORK`) is not a `bin` directory. An install prefix that is `/`, a home directory or a
   directory holding one is never mounted: a tool in `$WORK/bin` with
   `HOME=$WORK/home` gets `$WORK/bin`, and nothing of `$WORK` when `$WORK/bin` is a
   link to `$WORK` itself. When `HOME` names a directory other than your account's
