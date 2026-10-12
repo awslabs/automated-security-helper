@@ -1554,8 +1554,8 @@ def test_the_scan_skips_the_update_it_ran_first(tmp_path, monkeypatch):
     (update,) = fake.calls
     assert update[:4] == ["/bin/trivy", "image", "--download-db-only", "--no-progress"]
     assert Path(_value(update, "--cache-dir")) == (tmp_path / "trivy-cache").absolute()
-    # The update gets an empty config of its own, not one from where ASH runs.
-    assert Path(_value(update, "--config")).name == "empty-config.yaml"
+    # The update gets the empty config ASH ships, not one from where ASH runs.
+    assert Path(_value(update, "--config")) == refresh.EMPTY_TOOL_CONFIG
     (final,) = ran
     assert final[:6] == [
         "trivy",
@@ -1618,7 +1618,7 @@ def test_a_tree_set_trivy_config_cannot_turn_the_update_off(tmp_path, monkeypatc
 
     (update,) = fake.calls
     assert update[1:3] == ["image", "--download-db-only"]
-    assert Path(_value(update, "--config")).name == "empty-config.yaml"
+    assert Path(_value(update, "--config")) == refresh.EMPTY_TOOL_CONFIG
 
 
 def test_misconfig_also_fetches_the_checks_bundle_and_skips_it(tmp_path, monkeypatch):
@@ -1665,7 +1665,7 @@ def test_a_tree_set_trivy_config_does_not_reach_the_update(tmp_path, monkeypatch
     scanner._run_subprocess(command=["trivy", "fs", "/t"], results_dir=tmp_path)
 
     (update,) = fake.calls
-    assert Path(_value(update, "--config")).name == "empty-config.yaml"
+    assert Path(_value(update, "--config")) == refresh.EMPTY_TOOL_CONFIG
 
 
 def test_only_the_hosts_environment_chooses_the_updates_cache(tmp_path, monkeypatch):

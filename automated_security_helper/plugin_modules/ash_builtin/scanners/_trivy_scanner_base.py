@@ -273,8 +273,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
         So the update runs first, in ``utils/content_db_refresh.prepare_content_db``,
         sandboxed or not: outside the scanner sandbox, under a lock in the cache
-        directory, once per scan, from an empty directory ASH makes outside every
-        checkout and with an empty ``--config`` of ASH's own, so nothing in the
+        directory, once per scan, from a working directory outside the scanned tree
+        (``config.path_trust.cwd_outside_scanned_tree``, given the scan's source and
+        results directories and its config) and with an explicit ``--config``
+        (``EMPTY_TOOL_CONFIG``, or the operator's file below), so nothing in the
         scanned tree (a ``trivy.yaml`` whose ``db.repository`` names another
         database, measured with trivy 0.75.0) reaches it. The scan is then told to
         skip it: ``--skip-db-update``, ``--skip-check-update`` when ``misconfig``
@@ -292,6 +294,8 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         if self._offline():
             return []
+        if self.context is None:
+            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
         options: Any = self.config.options  # type: ignore[union-attr]
         wants_checks = "misconfig" in (options.scanners or [])
         # From the host's environment only: the update runs unsandboxed, so nothing
@@ -313,6 +317,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             "trivy",
             cache,
             offline=False,
+            source_dir=self.context.source_dir,
+            results_dir=self.results_dir or self.context.output_dir,
+            config=getattr(self.context, "config", None),
             checks=wants_checks,
             scan_id=scan_id_for(self.context),
             executable=find_executable(command[0]),

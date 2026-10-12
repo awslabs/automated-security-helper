@@ -159,13 +159,17 @@ def test_a_temporary_directory_inside_a_checkout_is_not_the_working_directory(
     (checkout / ".git").mkdir(parents=True)
     (checkout / "tmp").mkdir()
     monkeypatch.setattr(refresh.tempfile, "tempdir", str(checkout / "tmp"))
-    refresh.prepare_content_db(tool, tmp_path / "cache", offline=False, executable=tool)
+    # Not vacuous: the update's scratch directory is made inside the checkout.
+    assert checkout in Path(refresh.tempfile.gettempdir()).parents
+    refresh.prepare_content_db(
+        tool, tmp_path / "cache", offline=False, **_where(tmp_path), executable=tool
+    )
     (call,) = recorder.calls
     config = Path(
         call.argv[call.argv.index("-c" if tool == "grype" else "--config") + 1]
     )
-    # Not vacuous: the update's own files were made inside the checkout.
-    assert checkout in config.parents
+    # The config is the empty one ASH ships, not a file in the checkout.
+    assert config == refresh.EMPTY_TOOL_CONFIG
     assert not any((p / ".git").exists() for p in [call.cwd, *call.cwd.parents])
     assert call.cwd == Path(call.cwd.anchor)
 
@@ -201,6 +205,7 @@ def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
         tmp_path / "trivy",
         offline=False,
         checks=True,
+        **_where(tmp_path),
         executable="trivy",
         config_file=operator,
     )
@@ -218,6 +223,7 @@ def test_grype_takes_no_config_file(recorder, tmp_path):
             "grype",
             tmp_path,
             offline=False,
+            **_where(tmp_path),
             executable="grype",
             config_file=tmp_path / "x.yaml",
         )
@@ -290,7 +296,12 @@ def test_an_operators_environment_can_turn_the_database_update_off(
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     refresh.prepare_content_db(
-        "trivy", tmp_path, offline=False, checks=True, executable="trivy"
+        "trivy",
+        tmp_path,
+        offline=False,
+        checks=True,
+        **_where(tmp_path),
+        executable="trivy",
     )
     ran = [c.argv[1:3] for c in recorder.calls]
     assert (["image", "--download-db-only"] not in ran) is skips
@@ -327,6 +338,7 @@ def test_an_operators_trivy_config_can_turn_the_database_update_off(
         "trivy",
         tmp_path / "cache",
         offline=False,
+        **_where(tmp_path),
         executable="trivy",
         config_file=operator,
     )
@@ -341,6 +353,7 @@ def test_the_environment_outranks_the_operators_config(recorder, tmp_path, monke
         "trivy",
         tmp_path / "cache",
         offline=False,
+        **_where(tmp_path),
         executable="trivy",
         config_file=operator,
     )
@@ -350,7 +363,12 @@ def test_the_environment_outranks_the_operators_config(recorder, tmp_path, monke
 def test_the_java_database_has_its_own_opt_out(recorder, tmp_path, monkeypatch):
     monkeypatch.setenv("TRIVY_SKIP_JAVA_DB_UPDATE", "true")
     refresh.prepare_content_db(
-        "trivy", tmp_path, offline=False, java=True, executable="trivy"
+        "trivy",
+        tmp_path,
+        offline=False,
+        java=True,
+        **_where(tmp_path),
+        executable="trivy",
     )
     assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
     operator = tmp_path / "trivy.yaml"
@@ -363,6 +381,7 @@ def test_the_java_database_has_its_own_opt_out(recorder, tmp_path, monkeypatch):
         tmp_path,
         offline=False,
         java=True,
+        **_where(tmp_path),
         executable="trivy",
         config_file=operator,
     )
@@ -374,7 +393,9 @@ def test_a_skipped_update_is_logged_with_the_setting_that_skipped_it(
 ):
     monkeypatch.setenv("TRIVY_SKIP_DB_UPDATE", "true")
     with caplog.at_level("WARNING"):
-        refresh.prepare_content_db("trivy", tmp_path, offline=False, executable="trivy")
+        refresh.prepare_content_db(
+            "trivy", tmp_path, offline=False, **_where(tmp_path), executable="trivy"
+        )
     assert recorder.calls == []
     assert "TRIVY_SKIP_DB_UPDATE=true" in caplog.text
     assert "did not update" in caplog.text
