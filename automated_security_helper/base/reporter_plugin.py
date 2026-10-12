@@ -193,10 +193,17 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
     than writing through it, so a symlink at that name is not followed. A reporter
     that calls this declares the names in ``companion_file_names``, so that a link
     already at one of them, or a name that is not a file in ``report_dir``, refuses
-    the run before any reporter writes.
+    the run before any reporter writes. A link that is at the name by the time of
+    the write is refused and the refusal raised (``fs_guard.OutputLinkRefused``), as
+    for any other output file, rather than skipped with a warning.
     """
     from automated_security_helper.utils.atomic_write import write_text_atomically
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+    from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
 
+    named = Path(report_dir) / filename
+    if Path(filename).name == filename and named.is_symlink():
+        raise OutputLinkRefused(named, named)
     target = confined_report_path(report_dir, filename)
     if target is None:
         ASH_LOGGER.warning(
@@ -205,6 +212,8 @@ def write_report_file(report_dir: Path, filename: str, content: str) -> Optional
         return None
     try:
         write_text_atomically(target, content)
+    except OutputDirLinkRefused:
+        raise
     except OSError as error:
         ASH_LOGGER.warning(f"Could not write {target}: {error}")
         return None

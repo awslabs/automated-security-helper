@@ -8,7 +8,9 @@ in ``<output>/reports``: the unused-suppressions reporter's markdown (on by
 default), the S3 reporter's local copy and the Bedrock reporter's summaries. For a
 CLI scan the default output directory is inside the scanned repository, so one
 of those names can be a symlink the repository put there. Each test makes the
-name a symlink to a file outside and checks that the file is unchanged.
+name a symlink to a file outside and checks that the write is refused, as every
+output write below the output directory is (``fs_guard.OutputLinkRefused``), and
+that the file is unchanged.
 """
 
 import sys
@@ -77,11 +79,14 @@ def test_the_unused_suppressions_markdown_does_not_follow_a_symlink(tmp_path):
         UnusedSuppressionsReporter,
     )
 
+    from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
+
     outside = _plant(tmp_path, "ash.unused-suppressions.md")
 
-    UnusedSuppressionsReporter(context=_context(tmp_path)).report(
-        AshAggregatedResults()
-    )
+    with pytest.raises(OutputLinkRefused):
+        UnusedSuppressionsReporter(context=_context(tmp_path)).report(
+            AshAggregatedResults()
+        )
 
     assert outside.read_text(encoding="utf-8") == "unchanged"
 
@@ -178,6 +183,8 @@ def _bedrock_write(tmp_path: Path) -> None:
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
 def test_the_bedrock_files_do_not_follow_a_symlink(tmp_path):
+    from automated_security_helper.utils.sandbox.fs_guard import OutputLinkRefused
+
     outsides = []
     for index, name in enumerate(
         ["ash.bedrock.summary.md", "bedrock-executive.md", "bedrock-technical.md"]
@@ -189,7 +196,8 @@ def test_the_bedrock_files_do_not_follow_a_symlink(tmp_path):
         (reports / name).symlink_to(outside)
         outsides.append(outside)
 
-    _bedrock_write(tmp_path)
+    with pytest.raises(OutputLinkRefused):
+        _bedrock_write(tmp_path)
 
     assert [o.read_text(encoding="utf-8") for o in outsides] == ["unchanged"] * 3
 
