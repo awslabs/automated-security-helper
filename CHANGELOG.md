@@ -896,6 +896,12 @@
   refused before any project is scanned, including for a name that collides with
   `reports/workspace-reports.json`.
 
+- **`--use-existing` exits 1 on results that hold no scan.** A results file with no
+  scanner results, as a run that stopped before its scan recorded anything leaves
+  (a release up to v3.7.1 writes such a file after its scan phase), or one that
+  records a refused run, used to be reported on as a clean scan and exit 0. The
+  error names the file and says to run the scan without `--use-existing`.
+
 - **The exit code counts only the SARIF report this run's SARIF reporter wrote.**
   `--use-existing` keeps `reports/`, so when no SARIF reporter is selected the
   `ash.sarif` there is an earlier run's, and its findings, or its lack of them,
@@ -914,17 +920,19 @@
 - **Container and nix mode read the inner run's results back only when that run
   completed.** The outer process gives the inner run an ID (`ASH_OUTER_RUN_ID`).
   The inner run writes it into `ash_aggregated_results.json` as a `run_completed`
-  validation checkpoint when it completes, or with the refusal as a
-  `report_path_refused` checkpoint when its reports are refused. With the refusal
-  the outer process exits 1 with the inner run's message, giving paths as the host
-  sees them; without either record for its own ID it exits 1, saying the inner run
-  did not complete and naming the results file. That covers a refused report file
-  name, which leaves nothing in `reports/`, a refusal whose record could not be
-  written, and an inner run that failed after the scan phase had written the
-  results file, which used to be read back as a verdict. A workspace run in a
-  container that is refused before any project is scanned writes a results file
-  holding only the refusal, so the host reports it with its message rather than as
-  a missing results file. A record an earlier run
+  validation checkpoint when it completes, or with the refusal into
+  `ash_inner_run_outcome.json` beside it when its reports are refused. With the
+  refusal the outer process exits 1 with the inner run's message, giving paths as
+  the host sees them; without either record for its own ID it exits 1, saying the
+  inner run did not complete and naming the results file. That covers a refused
+  report file name, which leaves nothing in `reports/`, a refusal whose record could
+  not be written, a run refused before it wrote any results (a workspace run
+  refused before any project is scanned, or `--phases report`), and an inner run
+  that failed after the scan phase had written the results file, which used to be
+  read back as a verdict. The refusal is never written into the results file, so no
+  results file holding only a refusal is left behind. A refusal record that is a
+  link or not a regular file refuses the read-back without being read, and an
+  earlier run's is removed before the inner run starts. A record an earlier run
   left in a file read back with `--use-existing` is ignored, and is dropped when
   the file is loaded, so reports do not repeat it; `ash merge` drops each shard's
   records the same way. The inner run takes the ID out

@@ -382,14 +382,20 @@ class TestRunWorkspaceModeSettings:
     def test_a_report_refusal_is_recorded_for_the_outer_process(
         self, recorded_workspace_execution, logger, tmp_path, monkeypatch, results_file
     ):
-        """Before any project (no results file yet) or when the report step starts."""
+        """Before any project (no results file yet) or when the report step starts.
+
+        Beside the results file, which keeps what the projects wrote, and never in
+        a results file of its own, which --use-existing would read as a scan.
+        """
         from automated_security_helper.utils.report_path_links import (
             ReportPathRefused,
         )
 
         results_path = tmp_path / "out" / "ash_aggregated_results.json"
+        before = None
         if results_file == "written":
             _write_unified_results(tmp_path, results_path)
+            before = results_path.read_bytes()
         refusal = ReportPathRefused(
             "the report file name 'ash.../x' is not a file in /out/reports"
         )
@@ -406,16 +412,18 @@ class TestRunWorkspaceModeSettings:
             _run_workspace_mode(opts, logger)
 
         assert refused.value.code == 1
-        records = [
-            checkpoint
-            for checkpoint in json.loads(results_path.read_text())[
-                "validation_checkpoints"
-            ]
-            if checkpoint.get("type") == "report_path_refused"
-        ]
-        assert [(r["message"], r["metadata"]["run_id"]) for r in records] == [
-            (str(refusal), run_id)
-        ]
+        record = json.loads(
+            (tmp_path / "out" / "ash_inner_run_outcome.json").read_text()
+        )
+        assert (record["type"], record["message"], record["metadata"]["run_id"]) == (
+            "report_path_refused",
+            str(refusal),
+            run_id,
+        )
+        if before is None:
+            assert not results_path.exists()
+        else:
+            assert results_path.read_bytes() == before
 
     def test_the_root_configs_parallelism_bound_reaches_the_settings(
         self, recorded_workspace_execution, logger, tmp_path

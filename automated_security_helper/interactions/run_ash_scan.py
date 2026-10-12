@@ -92,19 +92,21 @@ from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
 )
 from automated_security_helper.utils.inner_run_outcome import (
+    INNER_RUN_OUTCOME_FILE,
+    ExistingResultsRefused,
     as_seen_from_the_host,
     completion_marker,
     mark_run_completed,
     new_outer_run_id,
+    not_a_regular_file,
     take_outer_run_id,
     read_back_outcome,
-    record_report_refusal,
+    read_refusal_outcome,
+    record_refusal_outcome,
     record_reports_written,
     records_reports_written,
     release_records_completion,
     report_file_written_as,
-    refusal_record,
-    write_refusal_results,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
@@ -1190,47 +1192,48 @@ def _refuse_report_path_link(refusal: ReportPathRefused) -> NoReturn:
     raise ReportPathRefusedExit(str(refusal)) from refusal
 
 
-def _record_inner_workspace_refusal(
+def _record_inner_refusal(
     opts: ScanOptions, refusal: ReportPathRefused, run_id: Optional[str], logger
 ) -> None:
-    """As the inner run of a container workspace scan, record ``refusal`` for the outer process.
+    """As the inner run of a container or nix scan, record ``refusal`` for the outer process.
 
-    Into the unified results file when the projects already wrote it (the report
-    step refused), stamped rather than loaded; otherwise, refused before any
-    project ran, into a results file that holds only the refusal.
+    Beside the results file (``record_refusal_outcome``), whether or not the run
+    wrote one: a local or workspace run refused before it wrote results has none,
+    and a results file that held only the refusal would read as a scan to a later
+    ``--use-existing``. The results file, when there is one, is left as written.
     """
     if run_id is None:
         return
-    from automated_security_helper.workspace.aggregation import stamp_run_record
-
-    results_file = opts.output_dir / "ash_aggregated_results.json"
-    if results_file.exists():
-        recorded = stamp_run_record(
-            results_file, refusal_record(str(refusal), run_id, opts.output_dir)
-        )
-    else:
-        recorded = write_refusal_results(
-            results_file, str(refusal), run_id, opts.output_dir
-        )
-    if not recorded:
+    if not record_refusal_outcome(opts.output_dir, str(refusal), run_id):
         logger.warning(
-            f"Could not record the refusal in {results_file}; the outer process "
-            "will report that this run did not complete."
+            f"Could not record the refusal in {opts.output_dir / INNER_RUN_OUTCOME_FILE}; "
+            "the outer process will report that this run did not complete."
         )
 
 
-def _record_inner_report_refusal(
-    opts: ScanOptions, refusal: ReportPathRefused, run_id: Optional[str], logger
-) -> None:
-    """As the inner run of a container or nix scan, record ``refusal`` for the outer process."""
-    if run_id is None:
-        return
-    results_file = opts.output_dir / "ash_aggregated_results.json"
-    if not record_report_refusal(results_file, str(refusal), run_id, opts.output_dir):
-        logger.warning(
-            f"Could not record the refusal in {results_file}; the outer process "
-            "will report that this run did not complete."
+def _refuse_an_inner_run_that_was_refused(opts: ScanOptions, run_id: str) -> None:
+    """Exit 1 with the refusal the inner run recorded, given as this process sees the paths.
+
+    Read before the results file, which a run refused before its scan phase never
+    wrote. A record that is a link, or not a regular file, refuses the read-back
+    without being read; one with another run's ID is ignored.
+    """
+    outcome_file = opts.output_dir / INNER_RUN_OUTCOME_FILE
+    problem = not_a_regular_file(outcome_file)
+    if problem is not None:
+        reason = (
+            f"{outcome_file.as_posix()} {problem}, so the inner run's outcome is not "
+            "read. ASH writes that file as a regular file; remove it and run ASH again."
         )
+        print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
+        raise ReportPathRefusedExit(reason)
+    refusal = read_refusal_outcome(opts.output_dir, run_id)
+    if refusal is not None:
+        reason = as_seen_from_the_host(
+            refusal.message, refusal.inner_output_dir, opts.output_dir.as_posix()
+        )
+        print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
+        raise ReportPathRefusedExit(reason)
 
 
 def _image_rebuild_hint() -> str:
@@ -1279,16 +1282,10 @@ def _refuse_an_inner_run_that_did_not_complete(
     The inner run's status is a verdict this process re-derives, and 1 is also what
     a refused or failed inner run exits with, so the results file has to say that
     the run with this ID completed (utils/inner_run_outcome.py). A refusal the inner
-    run recorded is reported with its message, given with this process's view of
-    the output directory.
+    run recorded was reported before this, by
+    ``_refuse_an_inner_run_that_was_refused``.
     """
     outcome = read_back_outcome(results, run_id)
-    if outcome.refusal is not None:
-        reason = as_seen_from_the_host(
-            outcome.refusal, outcome.inner_output_dir, opts.output_dir.as_posix()
-        )
-        print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
-        raise ReportPathRefusedExit(reason)
     if outcome.completed:
         return
     if outcome.written_by_an_older_ash:
@@ -1686,7 +1683,7 @@ def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
 
 # The output-directory entries a local scan clears before it starts, copied from the two
 # places the orchestrator clears them: ``ensure_directories`` rmtrees these four working
-# directories (core/orchestrator.py:418-425) and ``initialize`` unlinks these three files
+# directories (core/orchestrator.py:418-425) and ``initialize`` unlinks these four files
 # (core/orchestrator.py:280-293). Both are gated there on ``existing_results_path is
 # None``, which is the exemption in ``_discard_prior_run_artifacts`` below.
 #
@@ -1697,6 +1694,7 @@ _PRIOR_RUN_OUTPUT_FILES = (
     "ash_aggregated_results.json",
     "ash-ignore-report.txt",
     "ash-scan-set-files-list.txt",
+    INNER_RUN_OUTCOME_FILE,
 )
 
 
@@ -1742,6 +1740,12 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
         refuse_a_linked_reports_dir(opts.output_dir / "reports")
     except ReportPathRefused as refusal:
         _refuse_report_path_link(refusal)
+    # Never an input, so removed even when --use-existing keeps the rest: the inner
+    # run this process starts records its own refusal there, if any.
+    try:
+        (opts.output_dir / INNER_RUN_OUTCOME_FILE).unlink(missing_ok=True)
+    except OSError as error:
+        logger.debug(f"Could not remove {INNER_RUN_OUTCOME_FILE}: {error}")
     if opts.existing_results:
         # The one shape that legitimately consumes a file from before this invocation.
         # --use-existing resolves to a path in this directory and the inner scan is asked
@@ -2008,6 +2012,7 @@ def _run_container_mode(
         sys.exit(container_returncode)
 
     _refuse_links_left_in_reports(opts)
+    _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
 
     output_file = opts.output_dir / "ash_aggregated_results.json"
     if output_file.exists():
@@ -2071,6 +2076,7 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         logger.warning(f"Nix shell exited with code {nix_result.returncode}")
 
     _refuse_links_left_in_reports(opts)
+    _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
 
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
@@ -2365,16 +2371,21 @@ def _run_local_mode(
         # operator's config is fine.
         print(f"[bold red]ERROR (1) {e}[/bold red]")
         sys.exit(1)
+    except ExistingResultsRefused as e:
+        # --use-existing named results that hold no scan: reported on, they would
+        # read as a clean one. The operator's input, not a fault, so no traceback.
+        print(f"[bold red]ERROR (1) {escape_markup(str(e))}[/bold red]")
+        sys.exit(1)
     except ReportPathRefused as e:
         # A report path was refused: by the report phase before any reporter wrote
-        # (a link at the reports directory or at a report file, or a report file
-        # name that is not a file in the reports directory), or by the
-        # --changed-files-only rewrite of reports/ash.sarif after the reporters
-        # wrote (a link there). Not a fault, so no traceback. As the inner
-        # run of a container or nix scan, recorded in the results file the scan left
-        # for the outer process; if that fails, the outer process finds no record of
-        # this run's completion and exits 1 all the same.
-        _record_inner_report_refusal(opts, e, outer_run_id, logger)
+        # (a link at the reports directory or at a report file, a report file name
+        # that is not a file in the reports directory, or two reporters writing one
+        # file), or by the --changed-files-only rewrite of the SARIF report after
+        # the reporters wrote (a link there). Not a fault, so no traceback. As the
+        # inner run of a container or nix scan, recorded beside the results file
+        # for the outer process; if that fails, the outer process finds no record
+        # of this run's completion and exits 1 all the same.
+        _record_inner_refusal(opts, e, outer_run_id, logger)
         _refuse_report_path_link(e)
     except Exception as e:
         logger.exception(e)
@@ -2642,7 +2653,8 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     except ReportPathRefused as exc:
         # Exit 1, as in a single-directory scan: a link at a report path, or a file
         # name outside the reports directory, is not a workspace definition error.
-        _record_inner_workspace_refusal(opts, exc, outer_run_id, logger)
+        # Recorded beside the unified results, which keep what the projects wrote.
+        _record_inner_refusal(opts, exc, outer_run_id, logger)
         _refuse_report_path_link(exc)
     except Exception as exc:
         logger.exception(exc)

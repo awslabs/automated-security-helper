@@ -32,7 +32,12 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.get_scan_set import scan_set
-from automated_security_helper.utils.inner_run_outcome import without_run_records
+from automated_security_helper.utils.inner_run_outcome import (
+    INNER_RUN_OUTCOME_FILE,
+    ExistingResultsRefused,
+    existing_results_problem,
+    without_run_records,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
@@ -355,6 +360,8 @@ class ASHScanOrchestrator(BaseModel):
                     "ash_aggregated_results.json",
                     "ash-ignore-report.txt",
                     "ash-scan-set-files-list.txt",
+                    # An earlier inner run's refusal (utils/inner_run_outcome.py).
+                    INNER_RUN_OUTCOME_FILE,
                     # Don't delete log files here - they're managed by the logger
                     # which truncates them on initialization
                     # "ash.log",
@@ -558,6 +565,7 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.info(
                     f"Loading existing results from {self.existing_results_path}"
                 )
+                problem = None
                 try:
                     from automated_security_helper.models.asharp_model import (
                         AshAggregatedResults,
@@ -568,6 +576,9 @@ class ASHScanOrchestrator(BaseModel):
 
                     # Load the model from the existing results
                     asharp_model = AshAggregatedResults.from_json(model_data)
+                    # Results that hold no scan, or record a refused run, would be
+                    # reported as a clean scan. Read before the run records go.
+                    problem = existing_results_problem(asharp_model)
                     # Without the records an earlier container or nix run left
                     # about itself, before any reporter sees the model. See
                     # utils/inner_run_outcome.py.
@@ -598,6 +609,14 @@ class ASHScanOrchestrator(BaseModel):
                     ASH_LOGGER.error(f"Failed to load existing results: {str(e)}")
                     raise ASHValidationError(
                         f"Failed to load existing results: {str(e)}"
+                    )
+                # Outside the handler above, so the refusal is not reported as
+                # results that failed to load.
+                if problem is not None:
+                    raise ExistingResultsRefused(
+                        f"--use-existing was given, but "
+                        f"{self.existing_results_path.as_posix()} {problem}. Run the "
+                        "scan without --use-existing."
                     )
                 # Ensure the reports directory exists but don't clean up any other
                 # directories. Outside the handler above, which would report a link

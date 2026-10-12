@@ -14,6 +14,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import results_of_a_scan
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -307,7 +308,7 @@ class TestExecuteScan:
         src.mkdir()
         out = tmp_path / "out"
         existing = tmp_path / "existing.json"
-        existing.write_text(AshAggregatedResults().model_dump_json())
+        existing.write_text(results_of_a_scan().model_dump_json())
 
         engine = _EngineStub(phases_result=AshAggregatedResults())
         orch = _initialized(src, out, engine, existing_results_path=existing)
@@ -324,7 +325,7 @@ class TestExecuteScan:
         src.mkdir()
         out = tmp_path / "out"
         existing = tmp_path / "existing.json"
-        existing.write_text(AshAggregatedResults().model_dump_json())
+        existing.write_text(results_of_a_scan().model_dump_json())
 
         engine = _EngineStub(phases_result=AshAggregatedResults())
         orch = _initialized(src, out, engine, existing_results_path=existing)

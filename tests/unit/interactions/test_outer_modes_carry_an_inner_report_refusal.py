@@ -10,11 +10,13 @@ A refused report file name leaves nothing in ``reports/`` for the outer process 
 find, and a crash after the scan phase leaves a results file that reads as clean.
 
 So the outer process gives the inner run an ID, and the inner run writes that ID
-into its results file when it completes, or with the refusal when its reports are
-refused. The outer process reads the file back only when it carries its own ID's
-completion marker; with its own ID's refusal it exits 1 with the inner run's
-message; otherwise it exits 1 saying the inner run did not complete. A record
-another run wrote is ignored.
+into its results file when it completes, or, with the refusal, into
+``ash_inner_run_outcome.json`` beside it when its reports are refused. The outer
+process reads the results back only when they carry its own ID's completion
+marker; with its own ID's refusal it exits 1 with the inner run's message;
+otherwise it exits 1 saying the inner run did not complete. A record another run
+wrote is ignored. The refusal is kept out of the results file so that a file
+holding only a refusal is never left for ``--use-existing`` to read as a scan.
 
 Most tests run the inner local scan in this process, with a stand-in orchestrator
 around the real report phase, so the records are written by the code that writes
@@ -436,12 +438,139 @@ def _completed(run_id: str) -> dict:
     return {"type": "run_completed", "metadata": {"run_id": run_id}}
 
 
-def _refused(run_id: str, message: str) -> dict:
-    return {
-        "type": "report_path_refused",
-        "message": message,
-        "metadata": {"run_id": run_id},
-    }
+OUTCOME_FILE = "ash_inner_run_outcome.json"
+
+
+def _write_outcome(output_dir: Path, record: dict) -> Path:
+    """Write ``record`` where an inner run records a refusal."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / OUTCOME_FILE
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return path
+
+
+def _refused(run_id: Optional[str], message: str) -> dict:
+    metadata = {"run_id": run_id} if run_id else {}
+    return {"type": "report_path_refused", "message": message, "metadata": metadata}
+
+
+@OUTER
+def test_the_refusal_is_recorded_beside_the_results_not_in_them(tmp_path, outer):
+    """So no results file is left that a later --use-existing reads as a scan."""
+    opts = _opts(tmp_path)
+    run_ids: List[str] = []
+
+    def inner(run_id: str) -> int:
+        run_ids.append(run_id)
+        return _inner_run(run_id, opts.output_dir, [_Escaping])
+
+    with pytest.raises(SystemExit):
+        outer(opts, inner)
+
+    outcome = json.loads((opts.output_dir / OUTCOME_FILE).read_text(encoding="utf-8"))
+    assert outcome["type"] == "report_path_refused"
+    assert outcome["metadata"]["run_id"] == run_ids[0]
+    assert REFUSED_NAME in outcome["message"]
+    recorded = json.loads(
+        (opts.output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
+    )
+    assert not any(
+        checkpoint.get("type") in ("report_path_refused", "run_completed")
+        for checkpoint in recorded["validation_checkpoints"]
+    )
+
+
+class _RefusedBeforeWriting:
+    """An inner orchestrator whose reports are refused before any results are written."""
+
+    config = None
+
+    def execute_scan(self, phases=None):
+        from automated_security_helper.utils.report_path_links import (
+            ReportPathRefused,
+        )
+
+        raise ReportPathRefused("the report file name 'ash.x/y' is not a file in here")
+
+
+@OUTER
+def test_a_refusal_before_any_results_file_is_reported_with_its_message(
+    tmp_path, outer
+):
+    """As ``--phases report`` refuses: there is no results file to record it in."""
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    opts = _opts(tmp_path)
+
+    def inner(run_id: str) -> int:
+        inner_opts = ScanOptions(
+            source_dir=opts.source_dir, output_dir=opts.output_dir, mode=RunMode.local
+        )
+        with (
+            patch.dict(os.environ, {RUN_ID_ENV: run_id}),
+            patch.object(
+                ASHScanOrchestrator,
+                "create",
+                staticmethod(lambda **kwargs: _RefusedBeforeWriting()),
+            ),
+        ):
+            try:
+                _run_local_mode(inner_opts, MagicMock())
+            except SystemExit as exited:
+                return int(exited.code or 0)
+        return 0
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, inner)
+
+    assert refused.value.code == 1
+    reason = getattr(refused.value, "reason", "")
+    assert "The report file name 'ash.x/y' is not a file in here" in reason, reason
+    assert not (opts.output_dir / "ash_aggregated_results.json").exists()
+
+
+@OUTER
+def test_a_refusal_record_that_is_a_link_is_not_read(tmp_path, outer):
+    """It refuses the read-back, as a link in reports/ does."""
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+
+    def inner(run_id: str) -> int:
+        _write_results(opts.output_dir, _completed(run_id))
+        target = tmp_path / "elsewhere.json"
+        target.write_text(json.dumps(_refused(run_id, "from elsewhere")), "utf-8")
+        (opts.output_dir / OUTCOME_FILE).symlink_to(target)
+        return 0
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, inner, logger)
+
+    assert refused.value.code == 1
+    reason = str(getattr(refused.value, "reason", ""))
+    assert f"{(opts.output_dir / OUTCOME_FILE).as_posix()} is a symlink" in reason
+    assert "from elsewhere" not in _errors(logger) + reason
+
+
+@OUTER
+def test_an_earlier_runs_refusal_record_is_removed_before_the_inner_run(
+    tmp_path, outer
+):
+    """--use-existing keeps the results file, but not the record of another run."""
+    opts = _opts(tmp_path)
+    _write_results(opts.output_dir, _completed(OTHER_RUN))
+    _write_outcome(opts.output_dir, _refused(OTHER_RUN, "an earlier refusal"))
+    opts.existing_results = (opts.output_dir / "ash_aggregated_results.json").as_posix()
+    present: List[bool] = []
+
+    def inner(run_id: str) -> int:
+        present.append((opts.output_dir / OUTCOME_FILE).exists())
+        _write_results(opts.output_dir, _completed(run_id))
+        return 0
+
+    results = outer(opts, inner)
+
+    assert present == [False]
+    assert results.name == "written here"
 
 
 @OUTER
@@ -451,11 +580,8 @@ def test_a_refusal_another_run_recorded_is_ignored_when_this_run_completed(
     opts = _opts(tmp_path)
 
     def inner(run_id: str) -> int:
-        _write_results(
-            opts.output_dir,
-            _refused(OTHER_RUN, "an earlier refusal"),
-            _completed(run_id),
-        )
+        _write_outcome(opts.output_dir, _refused(OTHER_RUN, "an earlier refusal"))
+        _write_results(opts.output_dir, _completed(run_id))
         return 0
 
     results = outer(opts, inner)
@@ -469,7 +595,8 @@ def test_a_refusal_another_run_recorded_does_not_explain_this_one(tmp_path, oute
     logger = MagicMock()
 
     def inner(run_id: str) -> int:
-        _write_results(opts.output_dir, _refused(OTHER_RUN, "an earlier refusal"))
+        _write_outcome(opts.output_dir, _refused(OTHER_RUN, "an earlier refusal"))
+        _write_results(opts.output_dir)
         return 1
 
     with pytest.raises(SystemExit) as refused:
@@ -568,18 +695,16 @@ def test_the_container_hint_names_a_release_only_when_it_records_completion(
 
 
 @OUTER
-def test_a_refusal_recorded_without_a_run_id_is_attributed_to_an_older_ash(
+def test_a_completion_marker_without_a_run_id_is_attributed_to_an_older_ash(
     tmp_path, outer
 ):
+    """A marker this run did not write, whatever wrote it, is not this run's."""
     opts = _opts(tmp_path)
     logger = MagicMock()
 
     def inner(run_id: str) -> int:
-        _write_results(
-            opts.output_dir,
-            {"type": "report_path_refused", "message": "a refusal with no run ID"},
-        )
-        return 1
+        _write_results(opts.output_dir, {"type": "run_completed"})
+        return 0
 
     with pytest.raises(SystemExit) as refused:
         outer(opts, inner, logger)
@@ -588,6 +713,23 @@ def test_a_refusal_recorded_without_a_run_id_is_attributed_to_an_older_ash(
     errors = _errors(logger)
     assert "did not complete" in errors, errors
     assert "a record without a run ID, which an ASH older than this one" in errors
+
+
+@OUTER
+def test_a_refusal_recorded_without_a_run_id_is_not_this_runs(tmp_path, outer):
+    opts = _opts(tmp_path)
+    logger = MagicMock()
+
+    def inner(run_id: str) -> int:
+        _write_outcome(opts.output_dir, _refused(None, "a refusal with no run ID"))
+        _write_results(opts.output_dir)
+        return 1
+
+    with pytest.raises(SystemExit) as refused:
+        outer(opts, inner, logger)
+
+    assert refused.value.code == 1
+    assert "did not complete" in _errors(logger), _errors(logger)
     assert "a refusal with no run ID" not in str(getattr(refused.value, "reason", ""))
 
 
@@ -608,7 +750,7 @@ def test_a_completion_marker_another_run_wrote_is_not_read_back(tmp_path, outer)
 def test_a_workspace_refused_before_any_project_refuses_the_container_run(
     tmp_path, monkeypatch
 ):
-    """No results file exists yet, so the inner run writes one holding the refusal."""
+    """No results file exists yet; the refusal is recorded beside where it would be."""
     from automated_security_helper.interactions.run_ash_scan import _run_workspace_mode
     from automated_security_helper.utils.report_path_links import ReportPathRefused
     from automated_security_helper.workspace import execution as workspace_execution
@@ -651,6 +793,8 @@ def test_a_workspace_refused_before_any_project_refuses_the_container_run(
     assert "The report file name 'ash.../x' is not a file in" in getattr(
         refused.value, "reason", ""
     )
+    # No results file holding only the refusal, which --use-existing would read.
+    assert not (opts.output_dir / "ash_aggregated_results.json").exists()
 
 
 def test_the_container_output_directory_in_a_refusal_is_given_as_the_hosts(tmp_path):
@@ -726,9 +870,14 @@ def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path
     (source / "app.py").write_text("x = 1\n", encoding="utf-8")
     output = tmp_path / "out"
     (output / "reports").mkdir(parents=True)
+    # A scan's results, with one scanner's entry: --use-existing refuses results
+    # that hold no scan.
+    existing = json.loads(AshAggregatedResults().model_dump_json(by_alias=True))
+    existing["scanner_results"] = {
+        "bandit": {"source": {"scanner_name": "bandit", "status": "PASSED"}}
+    }
     (output / "ash_aggregated_results.json").write_text(
-        AshAggregatedResults().model_dump_json(indent=2, by_alias=True),
-        encoding="utf-8",
+        json.dumps(existing, indent=2), encoding="utf-8"
     )
     env = dict(os.environ)
     env.pop(RUN_ID_ENV, None)

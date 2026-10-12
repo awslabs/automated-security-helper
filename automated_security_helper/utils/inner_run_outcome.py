@@ -13,24 +13,32 @@ process to find, and the file such a run leaves reads as a clean scan.
 
 So the outer process gives the inner run an ID (``OUTER_RUN_ID_ENV``: an
 environment variable for nix mode, ``-e`` for the container), and the inner run
-writes that ID into its results file as a validation checkpoint:
+records how it ended with that ID:
 
-* ``run_completed`` when ``_run_local_mode`` or ``_run_workspace_mode`` completes
-  (``mark_run_completed``; a workspace run stamps it into the file it streamed,
-  with ``workspace.aggregation.stamp_run_record``);
-* ``report_path_refused``, with the refusal's message, when its reports are
-  refused (``record_report_refusal``, or ``write_refusal_results`` when the run was
-  refused before it wrote a results file).
+* ``run_completed``, a validation checkpoint in its results file, when
+  ``_run_local_mode`` or ``_run_workspace_mode`` completes (``mark_run_completed``;
+  a workspace run stamps it into the file it streamed, with
+  ``workspace.aggregation.stamp_run_record``);
+* ``report_path_refused``, with the refusal's message, in
+  ``ash_inner_run_outcome.json`` beside the results file, when its reports are
+  refused (``record_refusal_outcome``).
 
-The outer process (``read_back_outcome``) reads the file back only when it holds
-the completion marker with the outer process's own ID. With a refusal carrying that
-ID it exits 1 with the refusal's message; otherwise it exits 1 saying the inner run
-did not complete. That fails closed whatever stopped the inner run, including a
-refusal whose record could not be written and an inner ASH older than this one,
-which writes no marker. A record with another ID was left by an earlier run, in a
-results file read back with ``--use-existing``, and is ignored; the orchestrator
-drops such records when it loads existing results (``without_run_records``), so
-reports do not repeat them.
+The refusal is not written into the results file. A run refused before it wrote
+one would otherwise leave a results file holding only the refusal, which a later
+``--use-existing`` read as a clean scan; and the orchestrator refuses
+``--use-existing`` on results that hold no scan or record a refused run
+(``existing_results_problem``) whatever wrote them.
+
+The outer process reads the refusal record first (``read_refusal_outcome``): with
+its own ID there, it exits 1 with the refusal's message. Otherwise it reads the
+results file back only when it holds the completion marker with its own ID
+(``read_back_outcome``), and exits 1 saying the inner run did not complete. That
+fails closed whatever stopped the inner run, including a refusal whose record
+could not be written and an inner ASH older than this one, which writes no marker.
+A record with another ID was left by an earlier run and is ignored; the outer
+process removes an earlier refusal record before the inner run starts, and the
+orchestrator drops the run records in results it loads with ``--use-existing``
+(``without_run_records``), so reports do not repeat them.
 
 What this guards against, and what it does not
 ----------------------------------------------
@@ -50,14 +58,21 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+from automated_security_helper.core.exceptions import ASHValidationError
 from automated_security_helper.utils.atomic_write import write_text_atomically
 
 PathLike = Union[str, "os.PathLike[str]"]
+
+
+class ExistingResultsRefused(ASHValidationError):
+    """``--use-existing`` named a results file that holds no scan to report on."""
+
 
 #: The environment variable that carries the outer process's run ID to the inner run.
 OUTER_RUN_ID_ENV = "ASH_OUTER_RUN_ID"
@@ -65,8 +80,12 @@ OUTER_RUN_ID_ENV = "ASH_OUTER_RUN_ID"
 #: ``type`` of the checkpoint that records that the inner run completed.
 RUN_COMPLETED_CHECKPOINT = "run_completed"
 
-#: ``type`` of the checkpoint that records that the inner run's reports were refused.
+#: ``type`` of the record that says the inner run's reports were refused.
 REPORT_PATH_REFUSED_CHECKPOINT = "report_path_refused"
+
+#: Where the inner run records a refusal, in its output directory beside the
+#: results file: never in the results file, which would then read as a scan.
+INNER_RUN_OUTCOME_FILE = "ash_inner_run_outcome.json"
 
 #: ``type`` of the checkpoint in which the report phase lists the report files it
 #: wrote, each with its reporter's format, so the exit code is counted only from
@@ -279,56 +298,115 @@ def refusal_record(message: str, run_id: str, output_dir: PathLike) -> Dict[str,
     }
 
 
-def record_report_refusal(
-    results_file: PathLike, message: str, run_id: str, output_dir: PathLike
-) -> bool:
-    """Record in the results file that this run's reports were refused, and why.
+def record_refusal_outcome(output_dir: PathLike, message: str, run_id: str) -> bool:
+    """Record beside the results file that this run's reports were refused, and why.
 
-    Replaces any run record in the file. Returns False when the file could not be
-    read or rewritten; the outer process then reads no record of this run's
-    completion and fails closed, without the message.
+    In ``INNER_RUN_OUTCOME_FILE``, replacing it. Returns False when it could not be
+    written; the outer process then finds no record of this run's completion and
+    fails closed, without the message.
     """
     try:
-        path = Path(results_file)
-        document = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(document, dict):
-            return False
-        checkpoints = document.get("validation_checkpoints")
-        document["validation_checkpoints"] = [
-            *_without_outcome_records(
-                checkpoints if isinstance(checkpoints, list) else []
-            ),
-            refusal_record(message, run_id, output_dir),
-        ]
-        write_text_atomically(path, json.dumps(document, indent=2))
-    except (OSError, TypeError, ValueError):
-        return False
-    return True
-
-
-def write_refusal_results(
-    results_file: PathLike, message: str, run_id: str, output_dir: PathLike
-) -> bool:
-    """Write a results file that holds only the refusal, for a run refused before it wrote one.
-
-    A workspace run refuses a report file name before any project is scanned, so
-    there is no results file to record the refusal in, and the outer process would
-    have only "results file not found" to report. Returns False when it cannot be
-    written.
-    """
-    from automated_security_helper.models.asharp_model import AshAggregatedResults
-
-    try:
-        document = json.loads(AshAggregatedResults().model_dump_json(by_alias=True))
-        document["validation_checkpoints"] = [
-            refusal_record(message, run_id, output_dir)
-        ]
-        path = Path(results_file)
+        path = Path(output_dir) / INNER_RUN_OUTCOME_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_text_atomically(path, json.dumps(document, indent=2))
+        write_text_atomically(
+            path, json.dumps(refusal_record(message, run_id, output_dir), indent=2)
+        )
     except (OSError, TypeError, ValueError):
         return False
     return True
+
+
+def not_a_regular_file(path: PathLike) -> Optional[str]:
+    """How ``path`` is not a regular file, or None when it is one or is absent.
+
+    Checked without following a link: a file the inner run left is read by this
+    process, so a link there would have it read whatever the link names.
+    """
+    try:
+        found = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return f"cannot be examined ({type(error).__name__})"
+    if stat.S_ISLNK(found.st_mode):
+        return "is a symlink"
+    if not stat.S_ISREG(found.st_mode):
+        return "is not a regular file"
+    return None
+
+
+@dataclass(frozen=True)
+class InnerRunRefusal:
+    """A refusal an inner run recorded, with the output directory as it saw it."""
+
+    message: str
+    inner_output_dir: Optional[str] = None
+
+
+#: Far above any refusal record; a larger file is not one this ASH wrote.
+_MAX_OUTCOME_BYTES = 1 << 20
+
+
+def read_refusal_outcome(
+    output_dir: PathLike, run_id: str
+) -> Optional[InnerRunRefusal]:
+    """The refusal the inner run with ``run_id`` recorded, or None.
+
+    None when there is no record, when it is another run's or carries no run ID,
+    and when it cannot be read as one. The caller checks ``not_a_regular_file``
+    first.
+    """
+    path = Path(output_dir) / INNER_RUN_OUTCOME_FILE
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read(_MAX_OUTCOME_BYTES + 1)
+    except (OSError, ValueError):
+        return None
+    if len(text) > _MAX_OUTCOME_BYTES:
+        return None
+    try:
+        record = json.loads(text)
+    except ValueError:
+        return None
+    if not (
+        isinstance(record, dict)
+        and record.get("type") == REPORT_PATH_REFUSED_CHECKPOINT
+        and _run_id_of(record) == run_id
+    ):
+        return None
+    metadata = record.get("metadata") or {}
+    recorded_dir = metadata.get("output_dir")
+    return InnerRunRefusal(
+        message=str(record.get("message") or "The reports were refused."),
+        inner_output_dir=recorded_dir if isinstance(recorded_dir, str) else None,
+    )
+
+
+def existing_results_problem(results: object) -> Optional[str]:
+    """Why ``--use-existing`` must not report on ``results``, or None.
+
+    Results that record a refused run, or that hold no scanner results, hold no
+    scan: reported on, they read as a clean one. A workspace run's unified results
+    hold their projects' scans.
+    """
+    for checkpoint in getattr(results, "validation_checkpoints", None) or []:
+        if (
+            isinstance(checkpoint, dict)
+            and checkpoint.get("type") == REPORT_PATH_REFUSED_CHECKPOINT
+        ):
+            return (
+                "records that the run that wrote it was refused "
+                f"({checkpoint.get('message') or 'its reports were refused'}), so it "
+                "holds no complete scan"
+            )
+    if not getattr(results, "scanner_results", None) and (
+        getattr(results, "workspace", None) is None
+    ):
+        return (
+            "holds no scanner results, as a run that stopped before its scan "
+            "recorded anything leaves"
+        )
+    return None
 
 
 @dataclass(frozen=True)
@@ -336,8 +414,6 @@ class InnerRunOutcome:
     """What an inner run's results file says about the run with a given ID."""
 
     completed: bool
-    refusal: Optional[str] = None
-    inner_output_dir: Optional[str] = None
     #: A record carries another run's ID: an earlier run's, in a file read back with
     #: ``--use-existing`` that this run did not finish rewriting.
     marked_by_another_run: bool = False
@@ -346,35 +422,25 @@ class InnerRunOutcome:
 
 
 def read_back_outcome(results: object, run_id: str) -> InnerRunOutcome:
-    """Read the records for ``run_id`` from the inner run's results."""
+    """Read the completion marker for ``run_id`` from the inner run's results."""
     completed = False
-    refusal: Optional[str] = None
-    inner_output_dir: Optional[str] = None
     another_run = False
     older_ash = False
     for checkpoint in getattr(results, "validation_checkpoints", None) or []:
         if not (
-            isinstance(checkpoint, dict) and checkpoint.get("type") in _OUTCOME_TYPES
+            isinstance(checkpoint, dict)
+            and checkpoint.get("type") == RUN_COMPLETED_CHECKPOINT
         ):
             continue
         recorded_id = _run_id_of(checkpoint)
         if recorded_id is None:
             older_ash = True
-            continue
-        if recorded_id != run_id:
+        elif recorded_id != run_id:
             another_run = True
-            continue
-        if checkpoint.get("type") == RUN_COMPLETED_CHECKPOINT:
-            completed = True
         else:
-            refusal = str(checkpoint.get("message") or "The reports were refused.")
-            metadata = checkpoint.get("metadata") or {}
-            recorded_dir = metadata.get("output_dir")
-            inner_output_dir = recorded_dir if isinstance(recorded_dir, str) else None
+            completed = True
     return InnerRunOutcome(
-        completed=completed and refusal is None,
-        refusal=refusal,
-        inner_output_dir=inner_output_dir,
+        completed=completed,
         marked_by_another_run=another_run,
         written_by_an_older_ash=older_ash,
     )

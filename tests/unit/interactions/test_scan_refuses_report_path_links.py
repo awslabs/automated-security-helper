@@ -31,8 +31,7 @@ from typing import List
 
 import pytest
 
-from automated_security_helper.models.asharp_model import AshAggregatedResults
-from tests.utils.helpers import importing_this_checkout
+from tests.utils.helpers import importing_this_checkout, results_of_a_scan
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
@@ -109,7 +108,7 @@ def _single_directory(base: Path) -> tuple[Path, Path]:
 
 def _write_existing_results(output: Path) -> None:
     (output / "ash_aggregated_results.json").write_text(
-        AshAggregatedResults().model_dump_json(indent=2, by_alias=True),
+        results_of_a_scan().model_dump_json(indent=2, by_alias=True),
         encoding="utf-8",
     )
 

@@ -63,6 +63,19 @@ def mark_inner_run_completed(results_file: Path, run_id: str) -> bool:
     return True
 
 
+def results_of_a_scan():
+    """Results that hold a scan: one scanner's entry, as a scan phase records it.
+
+    For tests that hand ``--use-existing`` a results file. ``AshAggregatedResults()``
+    on its own holds no scanner results, which ``--use-existing`` refuses.
+    """
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    return AshAggregatedResults.model_validate(
+        {"scanner_results": {"bandit": {"source": {"scanner_name": "bandit"}}}}
+    )
+
+
 def sarif_report_written(results, name: str = "ash.sarif"):
     """Record in ``results`` that the run's SARIF reporter wrote ``reports/<name>``.
 

@@ -61,11 +61,16 @@ reporter's report file name that is not a file in the reports directory (an
 `extension` with `/`, `\` or `..` that its config did not replace with the
 default), or such a name among the files a reporter writes beside its report, stops
 the run with exit 1 the same way, in container and nix mode too. There the inner run
-records the refusal in `ash_aggregated_results.json` as a `report_path_refused`
-validation checkpoint, and the outer process exits 1 with its message. The outer
-process reads the inner run's results back only when they carry a `run_completed`
-checkpoint with the ID it gave that run (`ASH_OUTER_RUN_ID`); otherwise it exits 1,
-saying the inner run did not complete.
+records the refusal in `ash_inner_run_outcome.json` beside
+`ash_aggregated_results.json`, and the outer process exits 1 with its message. The
+outer process reads the inner run's results back only when they carry a
+`run_completed` validation checkpoint with the ID it gave that run
+(`ASH_OUTER_RUN_ID`); otherwise it exits 1, saying the inner run did not complete.
+
+`--use-existing` exits 1 rather than report on a results file that holds no scan:
+one with no scanner results, as a run that stopped before its scan recorded
+anything leaves, or one that records a refused run. Run the scan again without
+`--use-existing`.
 
 Each reporter writes files of its own. When two enabled reporters would write the
 same file, for example because `reporters.cyclonedx.extension: sarif` gives the
