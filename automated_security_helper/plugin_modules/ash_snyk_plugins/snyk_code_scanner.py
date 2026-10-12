@@ -32,6 +32,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.link_exclusions import (
+    ignoring_patterns,
+    walked_files,
+)
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.scanned_tree import (
     REASON_LINK_LEAVES_TREE,
@@ -269,6 +273,46 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _refuse_ignored_files(self, target: Path, ignore_paths: Any) -> None:
+        """Refuse a target holding a file the global ignore paths ignore.
+
+        ``snyk code test`` uploads the files it reads to Snyk and has no option
+        that leaves out a path, so an ignored file would leave the host. The other
+        scanners are told to leave such a file out, or ASH drops its findings; for
+        an upload that is not enough. The files are the ones snyk would list
+        (``walked_files``), matched as ASH matches ignore paths. The ignore paths
+        are the operator's: the default config sets none, and the scanner-level
+        default exclusions (``KNOWN_IGNORE_PATHS``) are not ignore paths.
+
+        Raises:
+            ScannerError: Giving the number of ignored files, the patterns that
+                matched them and the remedy. snyk is then not run on ``target``.
+        """
+        if not ignore_paths:
+            return
+        files, _ = walked_files(target)
+        root = Path(target)
+        ignored = ignoring_patterns(
+            [str(root / relative) for relative in files],
+            self.context.source_dir,
+            ignore_paths,
+        )
+        if not ignored:
+            return
+        patterns = list(dict.fromkeys(ignored.values()))
+        shown = ", ".join(repr(pattern) for pattern in patterns[:3])
+        if len(patterns) > 3:
+            shown += f" and {len(patterns) - 3} more"
+        count = len(ignored)
+        raise ScannerError(
+            f"Not running snyk code test on {root.as_posix()}: {count} "
+            f"{'file' if count == 1 else 'files'} there "
+            f"{'is' if count == 1 else 'are'} in global_settings.ignore_paths "
+            f"({shown}), and snyk has no option that leaves out a path, so it would "
+            "upload them. To scan the rest, narrow ignore_paths, or leave snyk-code "
+            "out with --exclude-scanners snyk-code (snyk code test was not started)."
+        )
+
     def _refuse_links_leaving(self, target: Path) -> None:
         """Refuse a target holding any link whose target leaves it.
 
@@ -378,6 +422,8 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         try:
             self._refuse_links_leaving(target)
+            # Passed by keyword, as the executor passes it to every scanner.
+            self._refuse_ignored_files(target, kwargs.get("global_ignore_paths"))
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)

@@ -526,9 +526,11 @@ ignored file, or once for a directory whose every file is ignored.
 
 A path a tool's option cannot carry (one with a comma for bandit and trivy, or a
 name that is not unique for semgrep and opengrep) is still read by that tool, and
-ASH drops what it finds there. snyk-code has no option that leaves out a path, so
-it still reads, and uploads, the files an ignore path matches. On Windows the
-tools are given none of these.
+ASH drops what it finds there. snyk-code has no option that leaves out a path and
+uploads the files it reads, so it is not run on a directory holding a file an
+ignore path matches; its error gives the number of files and the patterns, and
+suggests narrowing `ignore_paths` or `--exclude-scanners snyk-code`. On Windows the
+other tools are given none of these.
 `--ignore-suppressions` lifts ignore paths along with
 suppressions: every scanner reads those files and their findings are reported. See
 [Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).

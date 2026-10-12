@@ -238,6 +238,7 @@ Snyk Code results are integrated into ASH's unified reporting system:
 - **Rate Limits**: Snyk may apply rate limits based on your subscription tier
 - **Offline Mode**: Snyk Code needs Snyk's service, so offline it does not run and is reported MISSING (see [Offline Mode](#offline-mode))
 - **Links leaving the tree**: `snyk code test` uploads the files it reads and has no option that leaves out one path, so ASH does not run it on a directory holding a link, to a file or to a directory, whose target is outside that directory. snyk-code is then `ERROR`, and the error names the link. Remove the link, or exclude snyk-code for that scan.
+- **Ignored paths**: for the same reason, ASH does not run snyk-code on a directory holding a file that `global_settings.ignore_paths` matches, since the file would be uploaded. snyk-code is then `ERROR`, and the error gives the number of files and the patterns that matched them. Narrow `ignore_paths`, or exclude snyk-code with `--exclude-scanners snyk-code`. ASH's own default exclusions, such as `node_modules/`, are not ignore paths and do not stop it.
 
 ## Troubleshooting
 

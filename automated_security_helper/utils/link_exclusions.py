@@ -294,25 +294,26 @@ def grep_ignore_names(
     return names
 
 
-def drop_ignored(
+def ignoring_patterns(
     paths: Iterable[str | Path],
     source_dir: str | Path,
     ignore_paths: Iterable[object] | None,
     matches: Callable[[str, str], bool] = file_path_matches,
-) -> List[str]:
-    """``paths`` without the ones ``ignore_paths`` ignore, for a scan-set reader.
+) -> dict[str, str]:
+    """``{path: pattern}`` for each of ``paths`` an ignore path ignores, with the
+    first pattern that matches it.
 
     Each path is matched as ASH matches it when it drops findings: its path below
-    ``source_dir`` against each pattern. A path not below ``source_dir`` is kept.
+    ``source_dir`` against each pattern. A path not below ``source_dir`` is not
+    ignored.
     """
     patterns = [
         str(getattr(entry, "path", "") or "")
         for entry in ignore_paths or []
         if getattr(entry, "path", None)
     ]
-    kept = [str(path) for path in paths]
     if not patterns:
-        return kept
+        return {}
     roots = {
         Path(os.path.abspath(source_dir)),
         Path(os.path.realpath(source_dir)),
@@ -326,10 +327,29 @@ def drop_ignored(
                 continue
         return None
 
-    result = []
-    for path in kept:
+    ignored: dict[str, str] = {}
+    for path in (str(path) for path in paths):
         relative = _below(path)
-        if relative is not None and any(matches(relative, p) for p in patterns):
+        if relative is None:
             continue
-        result.append(path)
-    return result
+        for pattern in patterns:
+            if matches(relative, pattern):
+                ignored[path] = pattern
+                break
+    return ignored
+
+
+def drop_ignored(
+    paths: Iterable[str | Path],
+    source_dir: str | Path,
+    ignore_paths: Iterable[object] | None,
+    matches: Callable[[str, str], bool] = file_path_matches,
+) -> List[str]:
+    """``paths`` without the ones ``ignore_paths`` ignore, for a scan-set reader.
+
+    Matched as ``ignoring_patterns`` matches them; a path not below
+    ``source_dir`` is kept.
+    """
+    kept = [str(path) for path in paths]
+    ignored = ignoring_patterns(kept, source_dir, ignore_paths, matches)
+    return [path for path in kept if path not in ignored]

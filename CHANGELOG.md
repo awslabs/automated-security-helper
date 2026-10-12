@@ -2557,7 +2557,10 @@
   and semgrep and opengrep with `--exclude=<name>` for a name nothing else has.
   cfn-nag, cdk-nag and npm-audit leave the ignored files out of the scan set they
   read. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
-  `ERROR`. snyk-code, which has no such option, still reads and uploads them.
+  `ERROR`. snyk-code, which has no such option and uploads what it reads, is not
+  run on a directory holding an ignored file: it is `ERROR`, and the error gives
+  the number of files, the patterns, and the remedy (narrow `ignore_paths`, or
+  `--exclude-scanners snyk-code`).
 - **A plugin module that failed to import in any shard or workspace project fails
   the combined results too.** `metadata.plugin_load_errors` lists the plugin modules
   a scan could not import, and the completeness gate
