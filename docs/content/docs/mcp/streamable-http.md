@@ -347,7 +347,7 @@ Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash
 
 | Transport | The session ends |
 | --- | --- |
-| streamable-HTTP, stateful | when the client's `DELETE` is answered (the removal is complete before the response is sent), when the MCP SDK answers 404 for a session it discarded (after its 30-minute idle timeout, say) and a client asks about it again, and for every session the server issued when the server shuts down |
+| streamable-HTTP, stateful | when the client's `DELETE` is answered (the removal is complete before the response is sent), when the MCP SDK answers 404 on the server's endpoint (`--mount-path`) for a session it discarded (after its 30-minute idle timeout, say) and a client asks about it again (a 404 for any other path, which has no route, ends nothing), and for every session the server issued when the server shuts down |
 | sse | when the event stream closes |
 | stdio | when the last stdio server sharing the workspace root exits (every stdio server of one user shares `__default__`, so one server's exit leaves it in place while another runs) |
 | streamable-HTTP, `--stateless-http` | never visibly: see the sweep below |

@@ -431,6 +431,9 @@ def build_streamable_http_app(
         mode=MODE_STATELESS if stateless_http else MODE_STATEFUL,
         trust_upstream_session_id=trust_upstream_session_id,
         session_workspace_ttl=_workspace_ttl(session_workspace_ttl),
+        # The same path the SDK routes its endpoint on, so only its 404 for a
+        # discarded session ends one.
+        endpoint_path=mount_path,
     )
 
     if auth_header_name and auth_header_value:

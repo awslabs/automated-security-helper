@@ -120,15 +120,29 @@ def _response_header(
     return None
 
 
-def _on_the_sdk_session_path(scope: Scope) -> bool:
-    """True when the SDK handles this request on its session-tracking path.
+def _route_path(scope: Scope) -> str:
+    """The path Starlette routes on: ``path`` without the ``root_path`` prefix."""
 
-    The SDK sends a request that names a protocol version outside the
-    ``initialize`` handshake versions to a separate, sessionless path; every
-    other request goes through its session check. The same rule, from the SDK's
-    own list. If the list cannot be read, no request counts, so a 404 never ends
-    a session.
+    path = scope.get("path") or ""
+    root = scope.get("root_path") or ""
+    if root and path.startswith(root) and path[len(root) : len(root) + 1] in ("", "/"):
+        return path[len(root) :]
+    return path
+
+
+def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool:
+    """True when the SDK's session endpoint handles this request's session.
+
+    Two conditions. The request is for the endpoint itself: Starlette answers
+    404 for a path the app has no route for, and that says nothing about a
+    session. And it names a protocol version the SDK sends through its session
+    check: a request that names a version outside the ``initialize`` handshake
+    versions goes to a separate, sessionless path. The same rule as the SDK's,
+    from its own list. If the list cannot be read, no request counts, so a 404
+    never ends a session.
     """
+    if endpoint_path is None or _route_path(scope) != endpoint_path:
+        return False
     try:
         from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
     except ImportError:
@@ -185,11 +199,15 @@ class SessionBoundary:
             platform in front of ASH issues and authenticates it.
         session_workspace_ttl: Seconds a session workspace may go unused before
             the sweep removes it.
+        endpoint_path: Stateful only, and required there: the path the SDK's
+            streamable endpoint was built at (``streamable_http_path``). Only a
+            404 on that path ends a session.
 
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
     session's ``DELETE``, answered only after the removal is complete; the SDK
-    answering 404 for a stateful session it discarded; an sse event stream
+    answering 404 on its endpoint for a stateful session it discarded (a 404
+    for any other path is Starlette's, for a path with no route); an sse event stream
     finishing; and every session this app issued when it shuts down. Sessions
     whose end it cannot see -- every stateless one, and a stateful one the SDK
     closed for being idle that no client asks about again -- are removed by the
@@ -204,13 +222,20 @@ class SessionBoundary:
         mode: str,
         trust_upstream_session_id: bool = False,
         session_workspace_ttl: float = DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
+        endpoint_path: Optional[str] = None,
     ) -> None:
         if mode not in (MODE_SSE, MODE_STATEFUL, MODE_STATELESS):
             raise ValueError(f"unknown session boundary mode: {mode!r}")
         if session_workspace_ttl <= 0:
             raise ValueError("session_workspace_ttl must be a positive number")
+        if mode == MODE_STATEFUL and not endpoint_path:
+            raise ValueError(
+                "a stateful session boundary needs the endpoint path, to tell the "
+                "SDK's 404 for a discarded session from a 404 for no route"
+            )
         self.app = app
         self.mode = mode
+        self.endpoint_path = endpoint_path
         self.trust_upstream_session_id = (
             trust_upstream_session_id and mode == MODE_STATELESS
         )
@@ -332,14 +357,15 @@ class SessionBoundary:
         sends one on a refused opening request and then discards that session.
         A session ends here when its ``DELETE`` succeeds, and when the SDK
         answers 404 for it on its own session path, which it does once it has
-        discarded the session (its idle timeout, for one). A 404 on the newer
-        protocol's path can mean an unknown method, so it ends nothing.
+        discarded the session (its idle timeout, for one). A 404 for another path
+        is Starlette's, for a path with no route, and a 404 on the newer
+        protocol's path can mean an unknown method, so neither ends anything.
         """
 
         header = _header(scope, _SESSION_HEADER)
         known = header if header in self._issued else None
         deleting = scope.get("method") == "DELETE"
-        session_path = _on_the_sdk_session_path(scope)
+        session_path = _on_the_sdk_session_path(scope, self.endpoint_path)
 
         async def watched(message: Message) -> None:
             if message.get("type") == "http.response.start":

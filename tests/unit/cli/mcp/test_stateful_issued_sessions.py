@@ -118,6 +118,62 @@ def test_a_session_the_sdk_discarded_is_ended(workspace) -> None:
     assert not still_on_disk, "the discarded session's workspace is still on disk"
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["/.well-known/oauth-protected-resource", "/health", "/mcp/x", "/"],
+)
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_a_404_from_a_path_the_app_has_no_route_for_ends_nothing(
+    workspace, path, method
+) -> None:
+    """A client that sends its session header to every path of the origin."""
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        session_id, headers = http.open_session()
+        sandbox = _deliver(http, headers)
+        response = client.request(
+            method, path, headers={**STREAMABLE_HEADERS, **headers}
+        )
+        remembered = session_id in _boundary(app)._issued
+        still_on_disk = sandbox.is_dir()
+        status, _message = http.rpc("tools/list", None, headers)
+
+    assert response.status_code == 404, response.text[:200]
+    assert remembered, "a 404 from no route ended the session"
+    assert still_on_disk, "a 404 from no route removed the session's tree"
+    assert status == 200
+
+
+def test_a_404_on_the_endpoint_under_another_mount_path_still_ends_it(
+    workspace,
+) -> None:
+    """The endpoint path is the one the app was built with, not always /mcp."""
+    from automated_security_helper.cli.mcp_server import mcp
+
+    app = build_streamable_http_app(
+        mount_path="/ash/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client, mount_path="/ash/mcp")
+        session_id, headers = http.open_session()
+        sandbox = _deliver(http, headers)
+        unrouted = client.get("/mcp", headers={**STREAMABLE_HEADERS, **headers})
+        kept = sandbox.is_dir()
+        mcp.session_manager._server_instances.pop(session_id)
+
+        status, _message = http.rpc("tools/list", None, headers)
+        remembered = session_id in _boundary(app)._issued
+        still_on_disk = sandbox.exists()
+
+    assert unrouted.status_code == 404 and kept
+    assert status == 404
+    assert not remembered
+    assert not still_on_disk
+
+
 def test_a_404_on_the_newer_protocol_path_ends_nothing(workspace) -> None:
     app = build_streamable_http_app(
         mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
@@ -152,3 +208,13 @@ def test_a_404_on_the_newer_protocol_path_ends_nothing(workspace) -> None:
     assert response.status_code == 404, response.text[:200]
     assert remembered
     assert still_on_disk
+
+
+def test_a_stateful_boundary_needs_the_endpoint_path() -> None:
+    from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
+
+    async def app(scope, receive, send):  # pragma: no cover - never called
+        raise AssertionError("called")
+
+    with pytest.raises(ValueError, match="endpoint path"):
+        SessionBoundary(app, mode=MODE_STATEFUL)
