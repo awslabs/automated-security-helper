@@ -57,7 +57,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.config.operator_paths import anchored_path
 from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.config_trust import operator_path
 from automated_security_helper.utils.content_db_refresh import (
     default_cache_dir,
@@ -66,7 +68,6 @@ from automated_security_helper.utils.content_db_refresh import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
-from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.utils.package_identity import (
@@ -184,8 +185,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         trivy path option follows (``_operator_path``: set by the operator, for a
         file outside the scanned tree). A refused or unset option falls through to
         the environment variable, which is the operator's, used for a file outside
-        the tree (config/path_trust.py). Otherwise trivy gets a file ASH writes
-        into the results directory, which sets nothing.
+        the tree (config/path_trust.py); a relative path in it is taken from the
+        working directory ASH runs in (``config/operator_paths.anchored_path``),
+        not from the source directory. Otherwise trivy gets a file that sets
+        nothing, which ASH writes outside the scanned tree (``empty_tool_config``).
         """
         if self.context is None:
             raise ScannerError(f"{self.__class__.__name__} has no plugin context")
@@ -201,7 +204,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             )
             if path is not None:
                 return _existing_file(f"scanners.{name}.options.{option}", value, path)
-        from_env = os.environ.get(env)
+        # The variable is the operator's, set where ASH runs, so a relative path
+        # in it names a file there, not one at the root of the scanned tree.
+        from_env = anchored_path(os.environ.get(env), Path.cwd())
         if from_env:
             path = honored_path(
                 from_env,
@@ -220,13 +225,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                 "to use one.",
                 level=logging.WARNING,
             )
-        if self.results_dir is None:
-            raise ScannerError(f"{self.__class__.__name__} has no results directory")
-        written = Path(os.path.abspath(self.results_dir)) / ash_name
-        written.parent.mkdir(parents=True, exist_ok=True)
-        with open_for_write(written) as handle:
-            handle.write(ash_content)
-        return written.as_posix()
+        return empty_tool_config(ash_name, ash_content, context=self.context).as_posix()
 
     def _run_subprocess(
         self, command: List[str], *args: Any, **kwargs: Any

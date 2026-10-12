@@ -119,7 +119,7 @@ scanners:
 
 trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. Unset, they name an empty config file and an empty directory ASH creates in the scanner's results directory. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A configured path that does not exist fails the scan.
 
-`ignore_file` and `secret_config_file` follow the same rule. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree, and otherwise an empty file ASH writes, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
+`ignore_file` and `secret_config_file` follow the same rule. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree (a relative path in either is taken from the working directory ASH runs in), and otherwise an empty file ASH writes outside the scanned tree, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
 ### Scanner Types
 

@@ -3,8 +3,8 @@
 
 """The config files ASH writes for a scanner's tool are outside the scanned tree.
 
-bandit, grype, syft, trivy-repo and ferret-scan each get a config file ASH writes
-when the operator names none, one that sets nothing, so the tool does not read one
+bandit, grype, syft, trivy, trivy-repo and ferret-scan each get a config file ASH
+writes when the operator names none, one that sets nothing, so the tool does not read one
 from the tree on its own (``config/tool_config_trust.empty_tool_config``). The
 output directory defaults to ``<source>/.ash/ash_output``, so the scanner's results
 directory, where these files used to be written, is inside the tree.
@@ -88,6 +88,16 @@ CASES = [
         "source/results_sarif.sarif",
     ),
     Case(
+        "trivy", "--ignorefile", "trivyignore-empty", "", "source/results_sarif.sarif"
+    ),
+    Case(
+        "trivy",
+        "--secret-config",
+        "trivy-secret-empty.yaml",
+        "{}\n",
+        "source/results_sarif.sarif",
+    ),
+    Case(
         "ferret-scan",
         "--config",
         "ferret-empty-config.yaml",
@@ -145,6 +155,11 @@ def _scanner_class(name: str):
         from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (  # type: ignore[assignment]
             TrivyRepoScanner as cls,
             TrivyRepoScannerConfig as config,
+        )
+    elif name == "trivy":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # type: ignore[assignment]
+            TrivyScanner as cls,
+            TrivyScannerConfig as config,
         )
     else:
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (  # type: ignore[assignment]

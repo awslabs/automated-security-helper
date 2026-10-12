@@ -1302,7 +1302,7 @@
     of links) counts as inside the tree, since the repository chose that file, and
     is not passed to the tool. A link outside the tree, and a path that leaves by
     `..`, are followed as before.
-  - The empty config files ASH passes bandit, grype, syft, ferret-scan and
+  - The empty config files ASH passes bandit, grype, syft, ferret-scan, trivy and
     trivy-repo when the operator names none are written in a new directory
     outside the scanned tree, one per scanner run, made with mode 0700 and
     removed when the run ends, instead of in `<output>/scanners/<name>/`, which

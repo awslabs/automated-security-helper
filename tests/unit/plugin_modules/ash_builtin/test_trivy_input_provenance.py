@@ -129,6 +129,16 @@ def _inside(path: Path, tree: Path) -> bool:
     return Path(os.path.realpath(path)).is_relative_to(Path(os.path.realpath(tree)))
 
 
+def _is_ashs_own(passed: str, source: Path, content: str) -> bool:
+    """Whether ``passed`` is the file ASH writes for trivy: outside the tree, setting nothing.
+
+    Where ASH writes it is ``config/tool_config_trust.empty_tool_config``'s choice
+    (tests/unit/config/test_generated_tool_configs_are_outside_the_tree.py).
+    """
+    path = Path(passed)
+    return not _inside(path, source) and path.read_text(encoding="utf-8") == content
+
+
 def _real(path: Path) -> str:
     return Path(os.path.realpath(path)).as_posix()
 
@@ -167,7 +177,7 @@ def test_a_value_from_the_scanned_trees_config_is_not_used(
     )
 
     assert passed != _real(chosen)
-    assert Path(passed).is_relative_to(Path(os.path.realpath(tmp_path / "out")))
+    assert _is_ashs_own(passed, source, content)
 
 
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
@@ -232,6 +242,35 @@ def test_an_operator_value_outside_the_tree_is_used(
     )
 
     assert passed == _real(chosen)
+
+
+@pytest.mark.parametrize(
+    ("env", "option", "flag"),
+    [
+        ("TRIVY_IGNOREFILE", "ignore_file", "--ignorefile"),
+        ("TRIVY_SECRET_CONFIG", "secret_config_file", "--secret-config"),
+    ],
+)
+@pytest.mark.parametrize("scanner", SCANNERS)
+def test_a_relative_path_in_the_environment_is_taken_from_the_working_directory(
+    tmp_path, monkeypatch, scanner, env, option, flag
+):
+    """The variable is the operator's, set where ASH runs, not in the scanned tree.
+
+    The same name at the root of the scanned tree is not the file meant.
+    """
+    source = _source(tmp_path)
+    (source / "operator-file").write_text("{}\n", encoding="utf-8")
+    workdir = tmp_path / "ci"
+    workdir.mkdir()
+    (workdir / "operator-file").write_text("{}\n", encoding="utf-8")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv(env, "operator-file")
+    config = resolve_config(source_dir=source)
+
+    passed = _passed(_argv(tmp_path, source, config, scanner, option, None), flag)
+
+    assert passed == _real(workdir / "operator-file")
 
 
 # --------------------------------------------------------------------------- #
@@ -308,7 +347,7 @@ def test_trivy_is_handed_the_path_that_was_checked(
         os.path.realpath(source / value if spelling.startswith("relative") else chosen)
     )
     if spelling == "relative-dotdot-through-link" or _inside(target, source):
-        assert Path(passed).is_relative_to(Path(os.path.realpath(tmp_path / "out")))
+        assert _is_ashs_own(passed, source, content)
     else:
         assert passed == _real(target) == _real(chosen)
 
@@ -336,7 +375,7 @@ def test_windows_dotdot_semantics_refuse_the_in_tree_target(
     passed = _passed(_argv(tmp_path, source, config, scanner, option, value), flag)
 
     assert passed != _real(lexical)
-    assert Path(passed).is_relative_to(Path(real(tmp_path / "out")))
+    assert _is_ashs_own(passed, source, content)
 
 
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
@@ -360,7 +399,7 @@ def test_an_outside_symlink_into_the_tree_is_not_used(
 
     passed = _passed(argv, flag)
     assert passed not in (_real(planted), link.as_posix())
-    assert Path(passed).is_relative_to(Path(os.path.realpath(tmp_path / "out")))
+    assert _is_ashs_own(passed, source, content)
 
 
 @pytest.mark.parametrize("spelling", ["relative", "dotdot", "symlink", "home", "tree"])

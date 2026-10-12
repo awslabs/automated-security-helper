@@ -72,8 +72,22 @@ from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     get_severity_metrics_from_sarif,
 )
+from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
 PluginContext.model_rebuild()
+
+
+def _ashs_own(scanner: TrivyScanner, value: str) -> bool:
+    """Whether ``value`` is a file ASH wrote for this run's trivy.
+
+    ``config/tool_config_trust.empty_tool_config`` writes it in a directory of the
+    scanner run's own, outside the scanned tree.
+    """
+    path = Path(value)
+    return not path.resolve().is_relative_to(
+        Path(scanner.context.source_dir).resolve()
+    ) and any(parent.name.startswith(TOOL_CONFIG_DIR_PREFIX) for parent in path.parents)
+
 
 DATA = Path(__file__).parents[3] / "test_data" / "scanners" / "trivy"
 VULN_SARIF = DATA / "trivy-0.69.3.vuln.sarif"
@@ -239,6 +253,13 @@ def test_default_argv(tmp_path):
     source = scanner.context.source_dir
     argv = _argv(scanner, source)
     results = scanner.results_dir / "source" / "results_sarif.sarif"
+    written = {
+        flag: next(a for a in argv if a.startswith(f"{flag}="))[len(flag) + 1 :]
+        for flag in ("--ignorefile", "--secret-config")
+    }
+    assert Path(written["--ignorefile"]).name == "trivyignore-empty"
+    assert Path(written["--secret-config"]).name == "trivy-secret-empty.yaml"
+    assert all(_ashs_own(scanner, value) for value in written.values())
     assert argv == [
         "trivy",
         "fs",
@@ -252,8 +273,8 @@ def test_default_argv(tmp_path):
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
         f"--config={(scanner.results_dir / 'trivy-config.yaml').resolve().as_posix()}",
-        f"--ignorefile={(scanner.results_dir / 'trivyignore-empty').resolve().as_posix()}",
-        f"--secret-config={(scanner.results_dir / 'trivy-secret-empty.yaml').resolve().as_posix()}",
+        f"--ignorefile={written['--ignorefile']}",
+        f"--secret-config={written['--secret-config']}",
         source.as_posix(),
         "--output",
         results.as_posix(),
@@ -301,7 +322,10 @@ def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
     ):
         value = next(a for a in argv if a.startswith(flag))[len(flag) :]
         assert Path(value).is_file() and Path(value).read_text() == content
-        assert Path(value).is_relative_to(scanner.results_dir.resolve())
+        if flag == "--config=":
+            assert Path(value).is_relative_to(scanner.results_dir.resolve())
+        else:
+            assert _ashs_own(scanner, value)
 
 
 @pytest.mark.parametrize(
@@ -351,7 +375,7 @@ def test_an_ignore_or_secret_file_inside_the_tree_is_never_passed(
     with caplog.at_level("WARNING"):
         argv = _argv(scanner, scanner.context.source_dir)
     (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
-    assert Path(value).is_relative_to(scanner.results_dir.resolve())
+    assert _ashs_own(scanner, value)
     assert f"scanners.trivy.options.{option}" in caplog.text
 
 
@@ -461,9 +485,11 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
 
     assert (outside / "trivy.yaml").resolve().as_posix() not in " ".join(argv)
     (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
-    assert Path(value).is_relative_to(scanner.results_dir.resolve())
     if ash_name is not None:
+        assert Path(value).is_relative_to(scanner.results_dir.resolve())
         assert value.endswith(f"/{ash_name}")
+    else:
+        assert _ashs_own(scanner, value)
     assert f"Ignoring scanners.trivy.options.{option}" in caplog.text
     assert "symbolic link" in caplog.text
 
