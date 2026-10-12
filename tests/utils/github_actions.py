@@ -440,17 +440,42 @@ def render(value: Any, context: dict[str, Any]) -> Any:
     return _EMBEDDED.sub(lambda m: to_string(evaluate(m.group(1), context)), value)
 
 
+_STATUS_CALL = re.compile(r"\b(?:success|always|cancelled|failure)\s*\(", re.IGNORECASE)
+
+
 def condition_holds(condition: Any, context: dict[str, Any]) -> bool:
-    """Evaluate an ``if:``. An absent condition is ``success()``."""
+    """Evaluate an ``if:``. An absent condition is ``success()``.
+
+    Like the runner, a condition that calls none of ``success()``, ``failure()``,
+    ``always()`` or ``cancelled()`` is evaluated as ``success() && (<condition>)``, so
+    ``needs.x.result == 'failure'`` alone never holds after ``x`` failed.
+    """
+    succeeded = context.get("__status__", "success") == "success"
     if condition is None:
-        return context.get("__status__", "success") == "success"
+        return succeeded
     if isinstance(condition, bool):
-        return condition
+        return succeeded and condition
     text = str(condition).strip()
     whole = _EMBEDDED.fullmatch(text)
     if whole:
         text = whole.group(1)
+    if not _STATUS_CALL.search(text):
+        text = f"success() && ({text})"
     return truthy(evaluate(text, context))
+
+
+def needs_status(context: dict[str, Any]) -> str:
+    """The status a job's ``success()``/``failure()`` see, from the jobs it needs."""
+    results = [
+        str((need or {}).get("result") or "")
+        for need in (context.get("needs") or {}).values()
+    ]
+    if all(result == "success" for result in results):
+        return "success"
+    if any(result == "failure" for result in results):
+        return "failure"
+    # A skipped or cancelled need: success() and failure() are both false.
+    return "skipped"
 
 
 # --------------------------------------------------------------------------- workflows
@@ -607,7 +632,14 @@ def job_permissions(workflow: Workflow, job: dict[str, Any]) -> dict[str, str] |
 
 
 def job_runs(job: dict[str, Any], context: dict[str, Any]) -> bool:
-    """Evaluate a job's ``if:``; a condition this model cannot read counts as running."""
+    """Evaluate a job's ``if:``; a condition this model cannot read counts as running.
+
+    Unless the caller set one, the status the job's condition sees comes from the
+    results in ``needs``: a failed need makes ``success()`` false and ``failure()``
+    true.
+    """
+    if "__status__" not in context:
+        context = {**context, "__status__": needs_status(context)}
     try:
         return condition_holds(job.get("if"), context)
     except ExpressionError:

@@ -242,4 +242,9 @@ class TestNothingIsReportedWhenTheScanUploadedNothing:
                 "without uploading ash_output"
             )
             assert _job_runs(sarif, {}, result), result
-        assert not _job_runs(sarif, {}, "skipped")
+        # A skipped scan job has no outputs, so it uploaded nothing.
+        assert not _job_runs(sarif, {}, "skipped", outputs={})
+        # Nor after the run was cancelled, even with an artifact uploaded.
+        context = ga.base_context(event_name="pull_request")
+        context["needs"] = {"ash": {"result": "failure", "outputs": UPLOADED}}
+        assert not ga.job_runs(sarif, {**context, "__status__": "cancelled"})
