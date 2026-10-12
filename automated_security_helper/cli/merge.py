@@ -127,8 +127,10 @@ row added to those modules' tables, applies here without a change to this one.
 
 Two things differ from a scan, and ``SHARD_RECORDED`` carries both. The warnings
 name the shard's results file and give ``ash merge``'s own options as the fix. And
-an ``ash_plugin_modules`` entry the operator's configuration does not name is
-dropped even when it is an installed module outside the tree: nothing the merge
+the merge imports ASH's built-in plugins and the modules the operator names, in
+``--config`` and ``--config-overrides``, whether or not a shard recorded them; an
+``ash_plugin_modules`` entry only a shard names is dropped even when it is an
+installed module outside the tree, with one warning naming it: nothing the merge
 imports is a shard's choice. So the merge does not need
 ``drop_untrusted_off_host_plugins``; every class it loads comes from a module the
 operator named. ``enabled`` of a reporter that sends findings off the host comes
@@ -139,8 +141,8 @@ ignored with the warning like its ``true``.
 is loaded (:func:`apply_operator_overrides`), so the completion gate, the verdict
 and the reporters all see them, and they are replayed onto the trusted base, as
 in a scan. ``--config`` supplies only the trusted values and does not replace the
-recorded configuration: a reporter or plugin module the shards did not configure
-is added with ``--config-overrides``.
+recorded configuration: a reporter section the shards did not configure is added
+with ``--config-overrides``. Its plugin modules are the exception, as above.
 
 The verdict settings (``fail_on_findings``, ``fail_on_incomplete_scanners``, the
 severity thresholds, suppressions, ignore paths and content database bounds)
@@ -1733,26 +1735,16 @@ def warn_on_unapplied_operator_settings(
     effective: AshConfig,
     reporter_classes: Sequence[type],
 ) -> None:
-    """Name each plugin module and reporter setting ``--config`` sets that does not apply.
+    """Name each reporter setting ``--config`` sets that does not apply.
 
-    ``--config`` supplies the operator's values for the settings the shards'
-    recorded config names, and adds nothing: a plugin module the shards did not
-    record is not imported, and a reporter's ``enabled`` or destination option
-    for a section the shards did not record is not used. Each such entry is named
-    with the ``--config-overrides`` that would add it. Compared after every
-    confinement step and the plugin load, so only what really did not apply is
-    named.
+    ``--config`` supplies the operator's values for the reporter sections the
+    shards' recorded config names, and adds no section: a reporter's ``enabled``
+    or destination option for a section the shards did not record is not used.
+    Each such entry is named with the ``--config-overrides`` that would add it.
+    Compared after every confinement step and the plugin load, so only what
+    really did not apply is named. The plugin modules ``--config`` names always
+    apply: they are the ones the merge loads (``confine_recorded_config``).
     """
-    effective_modules = set(split_plugin_modules(effective.ash_plugin_modules))
-    for name in split_plugin_modules(trusted_config.ash_plugin_modules):
-        if name in effective_modules:
-            continue
-        ASH_LOGGER.warning(
-            f"ash merge's --config names the ash_plugin_modules entry {name!r}, which "
-            "does not apply: the shards did not record it, and --config supplies "
-            "values for what the shards recorded without adding to it. To load it, "
-            f"pass {_override_suggestion('ash_plugin_modules+', [name])}."
-        )
     destinations: Dict[str, Tuple[str, ...]] = dict(REPORTER_DESTINATION_OPTIONS)
     destinations.update(declared_destination_options(reporter_classes))
     defaults: Dict[str, bool] = dict(REPORTER_ENABLED_DEFAULTS)
@@ -1859,8 +1851,10 @@ def merge_command(
                 "The operator's config file. Its values replace the shards' for "
                 "the settings a shard's recorded config cannot choose, such as "
                 "where reporters send findings and which off-host reporters run. "
-                "It adds no plugin module or reporter the shards did not record; "
-                "use --config-overrides for that."
+                "Its ash_plugin_modules are the plugin modules the merge loads, "
+                "with any --config-overrides adds; a module only the shards "
+                "recorded is not loaded. It adds no reporter section the shards "
+                "did not record; use --config-overrides for that."
             ),
             envvar="ASH_CONFIG",
         ),
@@ -2018,9 +2012,10 @@ def merge_command(
         raise typer.Exit(1)
 
     # Before anything is written, and before the output directory is created. The
-    # shards' config names the plugin modules the reports are rendered with, and a
-    # module outside the plugin namespace is refused here as the scan itself
-    # refuses it, without importing anything.
+    # merged config now names the plugin modules the reports are rendered with,
+    # the operator's, and a module outside the plugin namespace, the operator's or
+    # one a shard recorded, is refused here as the scan itself refuses it, without
+    # importing anything.
     try:
         refuse_plugin_modules_outside_namespace(
             split_plugin_modules(
@@ -2058,8 +2053,8 @@ def merge_command(
         ignore_suppressions=ignore_suppressions,
     )
 
-    # Also before anything is written: a module the shards' config names that
-    # does not import refuses the merge with exit 3, as it refuses a scan.
+    # Also before anything is written: a module the operator names that does not
+    # import refuses the merge with exit 3, as it refuses a scan.
     ash_plugin_manager.set_context(plugin_context)
     try:
         load_plugins(plugin_context=plugin_context)

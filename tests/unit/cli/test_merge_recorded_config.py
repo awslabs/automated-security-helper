@@ -1502,15 +1502,16 @@ class TestAnOperatorConfigThatNamesNothingReadable:
 
 
 class TestOperatorConfigOutsideTheRecordedConfig:
-    """``--config`` supplies values for what the shards recorded and adds no module.
+    """``--config`` supplies values for what the shards recorded, and its modules.
 
-    A plugin module the file names that the shards did not record is not imported,
-    so it is named in a warning with the override that would add it. A reporter
-    that sends findings off the host is the operator's to turn on, in a merge as in
-    a scan, so its section in ``--config`` applies to the merged results' recorded
-    config whether or not the shards recorded one. Whether it runs, and where it
-    sends, come from ``--config-overrides``: the shards do not record which tree
-    was scanned, so the file may be that tree's own (``TestTheOperatorsBase``).
+    The plugin modules the file names are the ones the merge loads, whether or not
+    the shards recorded them. A reporter that sends findings off the host is the
+    operator's to turn on, in a merge as in a scan, so its section in ``--config``
+    applies to the merged results' recorded config whether or not the shards
+    recorded one. Whether it runs, and where it sends, come from
+    ``--config-overrides``: the shards do not record which tree was scanned, so
+    the file may be that tree's own (``TestTheOperatorsBase``). A local reporter's
+    setting for a section the shards did not record does not apply, and is named.
     """
 
     OPERATOR = {
@@ -1526,21 +1527,38 @@ class TestOperatorConfigOutsideTheRecordedConfig:
         },
     }
 
-    def test_a_module_the_shards_did_not_record_is_named(self, harness):
+    def test_a_module_only_the_operators_config_names_is_loaded(self, harness):
+        """The shards record no module; the operator's file loads the AWS plugins.
+
+        The overrides enable and aim the upload, since an off-host reporter's
+        ``enabled`` and destination come only from ``--config-overrides``.
+        """
+        harness.satisfy_s3_when_it_has_a_destination()
         shard_paths = harness.write_shards({"project_name": "test-merge"})
         operator = _write_yaml(
             harness.tmp_path / "operator" / "ash.yaml", self.OPERATOR
         )
 
-        result = harness.merge(shard_paths, "--config", str(operator))
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(operator),
+            "--config-overrides",
+            "reporters.s3.enabled=true",
+            "--config-overrides",
+            "reporters.s3.options.bucket_name=operator-bucket",
+            "--config-overrides",
+            "reporters.s3.options.aws_region=us-east-2",
+        )
 
         _assert_merged(result, harness)
-        assert harness.loaded_modules == [[]]
-        assert harness.uploads == []
-        module = [m for m in harness.warnings if f'ash_plugin_modules+=["{AWS}"]' in m]
-        assert module, harness.warnings
-        assert "--config-overrides" in module[0]
-        _assert_says_it_is_quoted_for_a_posix_shell(module[0])
+        assert harness.loaded_modules == [[AWS]]
+        assert [upload["Bucket"] for upload in harness.uploads] == ["operator-bucket"]
+        assert not [
+            m
+            for m in harness.warnings
+            if "ash_plugin_modules" in m and "does not apply" in m
+        ], harness.warnings
         # The operator's S3 section applies though the shards recorded none, so
         # none of it is named as not applying.
         s3 = harness.merged_section(harness.S3Reporter)

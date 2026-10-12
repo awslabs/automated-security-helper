@@ -35,10 +35,12 @@ Each level of a dotted name is located without importing its parent packages
 filtered here.
 
 ``ash merge`` holds the config a shard recorded in its results to these rules with
-``UntrustedSource.named_modules_only`` (``config/untrusted_source.py``): an entry
-the trusted list does not name is dropped whether or not it is installed, because
-nothing the merge imports is a shard's choice. Every class the merge then loads
-comes from a module the operator named, so it does not call
+``UntrustedSource.named_modules_only`` (``config/untrusted_source.py``): the
+merge loads the trusted list, the modules its ``--config`` and
+``--config-overrides`` name, whether or not a shard recorded them, and an entry
+only the shard names is dropped whether or not it is installed, because nothing
+the merge imports is a shard's choice. Every class the merge then loads comes
+from a module the operator named, so it does not call
 ``drop_untrusted_off_host_plugins``.
 
 The name check alone does not cover another installed package that imports one
@@ -260,8 +262,9 @@ def confine_plugin_modules(
             ``path_trust.in_scanned_tree``'s.
         in_tree: The config files inside the tree, named in the warning.
         source: Why those files are not the operator's, and the fix, for the
-            warning. With ``named_modules_only`` (``ash merge``), an entry the
-            trusted list does not name is dropped as well.
+            warning. With ``named_modules_only`` (``ash merge``), the list becomes
+            the trusted list: an entry it does not name is dropped as well, and
+            one it names is added whether or not the config named it.
     """
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
@@ -276,7 +279,8 @@ def confine_plugin_modules(
     ]
     if module_overrides:
         trusted_config = apply_config_overrides(trusted_config, module_overrides)
-    trusted_names = set(split_plugin_modules(trusted_config.ash_plugin_modules))
+    trusted_list = split_plugin_modules(trusted_config.ash_plugin_modules)
+    trusted_names = set(trusted_list)
     config._trusted_plugin_modules = tuple(sorted(trusted_names))
     kept: List[str] = []
     refused: List[str] = []
@@ -301,9 +305,17 @@ def confine_plugin_modules(
             kept.append(name)
         else:
             refused.append(f"{name!r} ({reason})")
+    if source.named_modules_only:
+        # The merge loads the operator's modules, not the shards': the trusted
+        # list, after any entry outside the namespace kept above for the refusal.
+        outside = [name for name in kept if not _is_allowed_module_path(name)]
+        loaded = list(dict.fromkeys(outside + trusted_list))
+        if loaded != split_plugin_modules(getattr(config, "ash_plugin_modules", [])):
+            config.ash_plugin_modules = loaded
     if not refused:
         return
-    config.ash_plugin_modules = kept
+    if not source.named_modules_only:
+        config.ash_plugin_modules = kept
     files = ", ".join(describe_config_path(path) for path in in_tree)
     imported = (
         "only modules the operator's configuration names are imported from it"

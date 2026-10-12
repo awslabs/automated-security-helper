@@ -127,7 +127,7 @@ Merges the results of a sharded scan into one unified report.
 | `--results` | List[str] | *required* |  | A shard's ash_aggregated_results.json, or a directory containing one. Repeat once per shard. |
 | `--output-dir` | str | *required* | ASH_OUTPUT_DIR | Directory to write the merged results and reports to. |
 | `--output-formats` | List[str] |  |  | Comma-separated report formats to generate. Defaults to the formats the scan's own configuration asks for. |
-| `--config`, `-c` | str |  | ASH_CONFIG | The operator's config file. Its values replace the shards' for the settings a shard's recorded config cannot choose, such as where reporters send findings and which off-host reporters run. It adds no plugin module or reporter the shards did not record; use --config-overrides for that. |
+| `--config`, `-c` | str |  | ASH_CONFIG | The operator's config file. Its values replace the shards' for the settings a shard's recorded config cannot choose, such as where reporters send findings and which off-host reporters run. Its ash_plugin_modules are the plugin modules the merge loads, with any --config-overrides adds; a module only the shards recorded is not loaded. It adds no reporter section the shards did not record; use --config-overrides for that. |
 | `--config-overrides` | List[str] |  |  | Configuration overrides as key-value pairs (e.g., 'reporters.s3.enabled=true'), applied over the shards' recorded config. |
 | `--min-severity` | str | `low` |  | Minimum severity that counts as actionable for the exit code. |
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ash scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |

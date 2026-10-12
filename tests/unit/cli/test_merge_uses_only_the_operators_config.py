@@ -1,7 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash merge`` takes its config from the operator alone, and refuses one it cannot use.
+"""``ash merge`` takes its plugin modules and its config from the operator alone.
+
+Plugin modules. A merge imports ASH's built-in plugins and the modules the operator
+names, with ``--config`` or ``--config-overrides``. The module list a shard
+recorded in its results is data in an artifact, so a module only a shard names is
+not imported, and one warning names it with the way to load it. A module the
+operator's ``--config`` names is imported whether or not a shard recorded it; it
+used to be named in a warning as not applying and never imported. A config file
+the merge would find in its working directory is not the operator's either.
 
 An unusable ``--config``. Missing, unreadable, a directory, a dangling link, not
 YAML, or YAML that does not validate: each refuses the merge with exit code 3,
@@ -15,8 +23,8 @@ An unset environment reference. A YAML, TOML or pyproject config whose
 --config`` as ``ash scan --config`` handles it; each case runs both and compares.
 
 Every merge runs in a child process, so the only plugin modules registered are the
-ones that merge imports. The child has no AWS credentials, a refusing proxy and
-its own HOME.
+ones that merge imports, and the marker package's import is seen in a file it
+writes. The child has no AWS credentials, a refusing proxy and its own HOME.
 """
 
 from __future__ import annotations
@@ -178,6 +186,74 @@ class _Child:
 def _flat(text: str) -> str:
     """``text`` without the line breaks and padding the console wraps it with."""
     return "".join(text.split())
+
+
+def _operator_config(path: Path, modules: List[str]) -> Path:
+    lines = ["project_name: operator", "ash_plugin_modules:"]
+    lines += [f"  - {name}" for name in modules]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+# --------------------------------------------------------------------------- modules
+
+
+class TestOnlyTheOperatorChoosesThePluginModules:
+    def test_a_module_only_a_shard_recorded_is_not_imported(self, tmp_path):
+        child = _Child(tmp_path)
+
+        result = child.merge(child.shards([MARKER_PACKAGE]))
+
+        assert not child.imported(), result["output"]
+        assert child.merged(), result["output"]
+        warning = _flat(result["output"])
+        assert _flat(f"Ignoring ash_plugin_modules entries '{MARKER_PACKAGE}'") in (
+            warning
+        ), result["output"]
+        assert _flat("ash merge's --config-overrides or --config") in warning
+
+    def test_a_module_the_operators_config_names_is_imported(self, tmp_path):
+        """The shards record no module; the operator's --config names one."""
+        child = _Child(tmp_path)
+        config = _operator_config(child.operator / "ash.yaml", [MARKER_PACKAGE])
+
+        result = child.merge(child.shards(), "--config", str(config))
+
+        assert child.imported(), result["output"]
+        assert child.merged(), result["output"]
+        assert _flat("does not apply") not in _flat(result["output"]), result["output"]
+
+    def test_a_module_a_shard_and_the_operators_config_name_is_imported(self, tmp_path):
+        child = _Child(tmp_path)
+        config = _operator_config(child.operator / "ash.yaml", [MARKER_PACKAGE])
+
+        result = child.merge(child.shards([MARKER_PACKAGE]), "--config", str(config))
+
+        assert child.imported(), result["output"]
+        assert _flat("Ignoring ash_plugin_modules") not in _flat(result["output"])
+
+    def test_a_module_an_override_names_is_imported(self, tmp_path):
+        child = _Child(tmp_path)
+
+        result = child.merge(
+            child.shards(),
+            "--config-overrides",
+            f'ash_plugin_modules+=["{MARKER_PACKAGE}"]',
+        )
+
+        assert child.imported(), result["output"]
+        assert child.merged(), result["output"]
+
+    def test_a_config_file_in_the_working_directory_adds_no_module(self, tmp_path):
+        """The merge's working directory is the scanned tree, not the operator's."""
+        child = _Child(tmp_path)
+        (child.workdir / ".ash").mkdir()
+        _operator_config(child.workdir / ".ash" / ".ash.yaml", [MARKER_PACKAGE])
+
+        result = child.merge(child.shards([MARKER_PACKAGE]))
+
+        assert not child.imported(), result["output"]
+        assert child.merged(), result["output"]
 
 
 # --------------------------------------------------------------------- unusable config

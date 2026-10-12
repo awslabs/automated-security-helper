@@ -2352,9 +2352,11 @@
   the setting and the shard's results file. The merged `ash_aggregated_results.json`
   records the configuration as the merge applied it.
 
-  `ash_plugin_modules` is stricter than in a scan: `ash merge` imports only the
-  modules the operator's configuration names, so an installed plugin module a
-  shard recorded is dropped unless the operator names it too. `enabled` of a
+  `ash_plugin_modules` is stricter than in a scan: `ash merge` imports ASH's
+  built-in plugins and the modules the operator names in `--config` or
+  `--config-overrides`, whether or not a shard recorded them, so an installed
+  plugin module a shard recorded is dropped, with one warning naming it, unless
+  the operator names it too. `enabled` of a
   reporter that sends findings off the host comes from the operator's
   configuration, or the reporter's default where that is silent, as in a scan:
   `ash merge` ignores a shard's `enabled: false` with a warning, as it ignores a

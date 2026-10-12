@@ -16,8 +16,9 @@ That config is not a file in a tree, and the merge's operator sets the values wi
 both clauses: ``IN_TREE_OR_DELIVERED`` by default, ``SHARD_RECORDED`` for a merge.
 
 ``named_modules_only`` is the merge's rule for ``ash_plugin_modules``. Nothing the
-merge imports is a shard's choice, so an entry the trusted base does not name is
-dropped, where a scan keeps an installed module outside the tree.
+merge imports is a shard's choice, so the merge loads the modules the trusted base
+names, and an entry only the shard names is dropped, where a scan keeps an
+installed module outside the tree.
 """
 
 from dataclasses import dataclass
@@ -37,9 +38,9 @@ class UntrustedSource:
             those values. For a file, ``confinement_remedy.KEEP_A_SETTING``, the
             text every confinement warning about a file ends with.
         modules_remedy: The same for ``ash_plugin_modules``.
-        named_modules_only: Drop every ``ash_plugin_modules`` entry the trusted
-            base does not name, rather than keeping an installed module outside
-            the tree.
+        named_modules_only: Replace ``ash_plugin_modules`` with the trusted
+            base's list: drop every entry it does not name, rather than keeping
+            an installed module outside the tree, and add the ones it names.
         scanner_steps_note: What the sandbox and scanner-config steps' warnings
             say in place of their remedy, where no scanner runs. None gives the
             remedy.
