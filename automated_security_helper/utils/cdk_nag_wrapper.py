@@ -976,19 +976,15 @@ def run_cdk_nag_against_cfn_template(
                     f".ash-cfn-include{Path(template_path).suffix}"
                 )
                 # Created fresh and never through a link: anything already at the
-                # name is removed, and O_EXCL|O_NOFOLLOW refuses whatever appears in
-                # its place before the open.
-                include_file.unlink(missing_ok=True)
-                include_fd = os.open(
-                    include_file,
-                    os.O_WRONLY
-                    | os.O_CREAT
-                    | os.O_EXCL
-                    | getattr(os, "O_NOFOLLOW", 0)
-                    | getattr(os, "O_BINARY", 0),
-                    0o600,
+                # name is removed, and open_for_write refuses a link that appears in
+                # its place, or at any directory on the way to it below the output
+                # directory.
+                from automated_security_helper.utils.sandbox.fs_guard import (
+                    open_for_write,
                 )
-                with os.fdopen(include_fd, "w", encoding="utf-8") as include:
+
+                include_file.unlink(missing_ok=True)
+                with open_for_write(include_file, mode=0o600) as include:
                     include.write(template_text)
                 try:
                     stack = WrapperStack(

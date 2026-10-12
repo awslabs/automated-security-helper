@@ -134,7 +134,6 @@ from automated_security_helper.models.workspace import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
     sarif_level_fails_threshold,
@@ -848,7 +847,12 @@ class WorkspaceAggregator:
         # The project key is a path-derived value with separators already
         # replaced by dashes, so it is safe as a filename by construction.
         spool_path = self.spool_dir / f"{outcome.project}.run.json"
-        with open_no_follow(spool_path) as handle:
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+        # Guarded below the workspace output directory whether or not a
+        # PluginContext registered it: a link at the spool or at the file name is
+        # refused rather than written through.
+        with open_for_write(spool_path, root=self.output_dir) as handle:
             json.dump(rebased, handle)
         self._spooled[outcome.project] = spool_path
 
@@ -1012,8 +1016,10 @@ class WorkspaceAggregator:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         target = self.output_dir / RESULTS_FILENAME
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
         try:
-            with open_no_follow(target) as handle:
+            with open_for_write(target, root=self.output_dir) as handle:
                 handle.write("{\n")
                 handle.writelines(
                     f"{json.dumps(key)}: {json.dumps(value)},\n"

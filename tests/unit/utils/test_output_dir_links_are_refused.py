@@ -380,6 +380,217 @@ class TestDetectSecretsWrites:
         assert sarif["runs"], sarif
 
 
+@pytest.fixture
+def log_name():
+    """A logger of the test's own, closed afterwards, so ASH's logger is untouched."""
+    import logging
+    import uuid
+
+    name = f"links-{uuid.uuid4().hex}"
+    yield name
+    logger = logging.getLogger(name)
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
+def _get_logger(name: str, output: Path, truncate_log: bool = True):
+    from automated_security_helper.utils.log import get_logger
+
+    return get_logger(
+        name=name,
+        output_dir=output,
+        log_format="BOTH",
+        show_progress=True,
+        truncate_log=truncate_log,
+    )
+
+
+class TestTheLogFile:
+    """``<output>/<name>.log`` and ``.log.jsonl``, which the logger opens itself."""
+
+    @pytest.mark.parametrize("truncate_log", [True, False])
+    @pytest.mark.parametrize("suffix", [".log", ".log.jsonl"])
+    def test_a_link_at_the_log_file_is_refused(
+        self, layout, log_name, suffix, truncate_log
+    ):
+        _source, output, target = layout
+        planted = output / f"{log_name}{suffix}"
+        planted.symlink_to(target)
+
+        with pytest.raises(fs_guard.OutputLinkRefused) as refused:
+            _get_logger(log_name, output, truncate_log)
+
+        assert REFUSAL in str(refused.value)
+        assert target.read_text() == ORIGINAL
+        assert planted.is_symlink()
+
+    def test_a_log_file_another_name_refers_to_is_refused(self, layout, log_name):
+        _source, output, target = layout
+        os.link(target, output / f"{log_name}.log")
+
+        with pytest.raises(fs_guard.OutputHardLinkRefused):
+            _get_logger(log_name, output)
+
+        assert target.read_bytes() == ORIGINAL.encode()
+
+    def test_a_scan_stops_before_writing_through_a_linked_ash_log(self, layout, capsys):
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _setup_logger,
+        )
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        source, output, target = layout
+        (output / "ash.log").symlink_to(target)
+        handlers = list(ASH_LOGGER.handlers)
+        try:
+            with pytest.raises(SystemExit) as exited:
+                _setup_logger(ScanOptions(source_dir=source, output_dir=output))
+        finally:
+            for handler in ASH_LOGGER.handlers:
+                if handler not in handlers:
+                    handler.close()
+            ASH_LOGGER.handlers = handlers
+
+        assert exited.value.code == 1
+        assert target.read_text() == ORIGINAL
+        assert REFUSAL in " ".join(capsys.readouterr().out.split())
+
+    def test_the_log_files_are_written(self, layout, log_name):
+        _source, output, _target = layout
+        (output / f"{log_name}.log").write_text("previous run\n")
+
+        logger = _get_logger(log_name, output)
+        logger.info("written by this run")
+        for handler in logger.handlers:
+            handler.flush()
+
+        text = (output / f"{log_name}.log").read_text()
+        assert "written by this run" in text
+        assert "previous run" not in text
+        assert "written by this run" in (output / f"{log_name}.log.jsonl").read_text()
+
+    def test_without_truncation_the_log_is_appended_to(self, layout, log_name):
+        _source, output, _target = layout
+        (output / f"{log_name}.log").write_text("previous run\n")
+
+        logger = _get_logger(log_name, output, truncate_log=False)
+        logger.info("written by this run")
+        for handler in logger.handlers:
+            handler.flush()
+
+        text = (output / f"{log_name}.log").read_text()
+        assert text.startswith("previous run\n")
+        assert "written by this run" in text
+
+
+class TestAtomicWrites:
+    """``write_text_atomically``: a staging file in the target's directory, renamed."""
+
+    def test_a_link_at_a_directory_component_is_refused(self, layout):
+        from automated_security_helper.utils.atomic_write import write_text_atomically
+
+        source, output, target = layout
+        _context(source, output)
+        (output / "reports").symlink_to(target.parent, target_is_directory=True)
+
+        with pytest.raises(fs_guard.OutputLinkRefused) as refused:
+            write_text_atomically(output / "reports" / "ash.sarif", "{}")
+
+        assert REFUSAL in str(refused.value)
+        assert sorted(p.name for p in target.parent.iterdir()) == [target.name]
+
+    def test_a_link_at_the_file_name_is_refused(self, layout):
+        from automated_security_helper.utils.atomic_write import write_text_atomically
+
+        source, output, target = layout
+        _context(source, output)
+        path = output / "ash_aggregated_results.json"
+        path.symlink_to(target)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            write_text_atomically(path, "{}")
+
+        assert target.read_text() == ORIGINAL
+        assert path.is_symlink()
+        assert [p.name for p in output.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_a_file_another_name_refers_to_is_refused(self, layout):
+        from automated_security_helper.utils.atomic_write import write_text_atomically
+
+        source, output, target = layout
+        _context(source, output)
+        path = output / "ash_aggregated_results.json"
+        os.link(target, path)
+
+        with pytest.raises(fs_guard.OutputHardLinkRefused):
+            write_text_atomically(path, "{}")
+
+        assert target.read_bytes() == ORIGINAL.encode()
+
+    def test_a_regular_file_there_is_replaced(self, layout):
+        from automated_security_helper.utils.atomic_write import write_text_atomically
+
+        source, output, _target = layout
+        _context(source, output)
+        path = output / "reports" / "ash.sarif"
+        path.parent.mkdir()
+        path.write_text("previous\n")
+
+        write_text_atomically(path, "replaced\n")
+
+        assert path.read_text() == "replaced\n"
+        assert sorted(p.name for p in path.parent.iterdir()) == ["ash.sarif"]
+
+    def test_outside_every_output_directory_it_writes_as_before(self, tmp_path):
+        from automated_security_helper.utils.atomic_write import write_text_atomically
+
+        path = tmp_path / "elsewhere" / "merged.json"
+        path.parent.mkdir()
+
+        write_text_atomically(path, "merged\n")
+
+        assert path.read_text() == "merged\n"
+
+
+class TestOtherOutputWriters:
+    def test_the_unused_suppressions_markdown_is_not_written_through_a_link(
+        self, layout
+    ):
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+            UnusedSuppressionsReporter,
+        )
+
+        source, output, target = layout
+        context = _context(source, output)
+        (output / "reports").mkdir()
+        (output / "reports" / "ash.unused-suppressions.md").symlink_to(target)
+        reporter = UnusedSuppressionsReporter(context=context)
+
+        with pytest.raises(fs_guard.OutputLinkRefused):
+            reporter.report(AshAggregatedResults())
+
+        assert target.read_text() == ORIGINAL
+
+    def test_safe_write_json_file_does_not_write_through_a_link(self, layout):
+        from automated_security_helper.core.resource_management.error_handling import (
+            safe_write_json_file,
+        )
+
+        source, output, target = layout
+        _context(source, output)
+        path = output / "mcp" / "state.json"
+        path.parent.mkdir()
+        path.symlink_to(target)
+
+        error = safe_write_json_file(path, {"written": True})
+
+        assert target.read_text() == ORIGINAL
+        assert error is not None and REFUSAL in str(error), error
+
+
 class TestTheWorkerOutput:
     """The worker child writes its output file; ASH removes any entry there first."""
 

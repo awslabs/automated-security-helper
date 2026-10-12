@@ -104,7 +104,9 @@ def test_a_failed_report_write_leaves_the_previous_report_intact(tmp_path):
         "The report was overwritten in place: a reader opening it during the write "
         "would have seen it truncated."
     )
-    assert intercepted == [str(report)], (
+    # The output directory is guarded, so the rename names the report relative to
+    # its directory's descriptor (fs_guard.open_parent_beneath).
+    assert [Path(target).name for target in intercepted] == [report.name], (
         "The report write never reached a rename, so it is not atomic."
     )
     assert _leftover_staging_files(reports_dir) == []

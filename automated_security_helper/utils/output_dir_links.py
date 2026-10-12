@@ -18,23 +18,18 @@ the same directories before the inner run), MCP scans, ``ash report`` and
 compared by device and inode as well as by name, are the operator's own spelling
 (macOS's ``/tmp``, a home directory that links elsewhere) and are not examined.
 
-``open_no_follow`` is the write side of the same rule, for the files ASH opens in
-place rather than replacing (the logs, the scan-set lists, the workspace's results):
-it does not follow a link at the name even if one appears after the check.
+The write side of the same rule is ``utils/sandbox/fs_guard.open_for_write``, which
+every write below the output directory goes through: it does not follow a link at
+the name, or at a directory on the way to it, even if one appears after the check.
+``open_no_follow`` is that function guarding the directory that holds the file.
 """
 
 from __future__ import annotations
 
-import errno
 import os
 import stat
 from pathlib import Path
 from typing import IO, Optional, Tuple, Union
-
-try:
-    import fcntl
-except ImportError:  # Windows
-    fcntl = None  # type: ignore[assignment]
 
 PathLike = Union[str, "os.PathLike[str]"]
 
@@ -68,9 +63,6 @@ REMEDY = (
     "link with a directory."
 )
 
-_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
-_BINARY = getattr(os, "O_BINARY", 0)
 # Values from the Windows SDK. The stat module defines both on every platform; the
 # literals are only the fallback for an interpreter that does not.
 _FILE_ATTRIBUTE_REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -81,11 +73,21 @@ class OutputDirLinkRefused(ValueError):
     """The output directory, or something ASH writes under it, is reached through a link.
 
     ``found`` describes the link; the message adds the remedy for the caller.
+
+    The base of every link refusal for ASH's output: fs_guard's OutputLinkRefused
+    and OutputHardLinkRefused, raised by a write below the output directory, derive
+    from it as well as from OSError, so ``except OutputDirLinkRefused`` sees a
+    refused write as well as a refused output directory.
     """
 
     def __init__(self, found: str, remedy: str = REMEDY):
         self.found = found
+        self.remedy = remedy
         super().__init__(f"{found[0].upper()}{found[1:]}. {remedy}")
+
+    def __reduce__(self):
+        # Rebuilt from its own arguments, not from the formatted message.
+        return (type(self), (self.found, self.remedy))
 
 
 def is_junction(path: PathLike) -> bool:
@@ -243,36 +245,22 @@ def open_no_follow(
     """Open ``path`` for writing text without following a link at its name.
 
     Truncates, or appends with ``append``; creates the file when missing, with the
-    mode open() would give it. A link at the name raises OutputDirLinkRefused rather
-    than being written through, and anything other than a regular file (a FIFO, a
-    device) raises OSError. Where the platform has no O_NOFOLLOW the name is checked
-    with lstat first.
+    mode open() would give it. This is ``fs_guard.open_for_write`` guarding the
+    directory that holds ``path``, so it is ASH's one write path below an output
+    directory: a link at the name raises OutputLinkRefused, an
+    OutputDirLinkRefused, rather than being written through; a file another name
+    refers to raises OutputHardLinkRefused, one too; and anything other than a
+    regular file (a FIFO, a device) raises OSError. Below a registered root every
+    component under that root is checked as well.
     """
-    target = Path(path)
-    if not _NOFOLLOW and is_link(target):
-        raise OutputDirLinkRefused(f"{target.as_posix()} is {_kind(target)}")
-    flags = (
-        os.O_WRONLY
-        | os.O_CREAT
-        | (os.O_APPEND if append else os.O_TRUNC)
-        | _NOFOLLOW
-        | _NONBLOCK
-        | _BINARY
+    # Imported here: fs_guard imports this module for the exception family.
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    target = Path(os.path.abspath(path))
+    return fs_guard.open_for_write(
+        target,
+        encoding=encoding,
+        errors=errors,
+        append=append,
+        root=target.parent,
     )
-    try:
-        fd = os.open(target, flags, 0o666)
-    except OSError as exc:
-        # ELOOP on Linux and macOS; FreeBSD reports EMLINK for O_NOFOLLOW.
-        if exc.errno in (errno.ELOOP, errno.EMLINK) and target.is_symlink():
-            raise OutputDirLinkRefused(f"{target.as_posix()} is a symlink") from exc
-        raise
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError(errno.EINVAL, f"not a regular file: {target.as_posix()}")
-        if _NONBLOCK and fcntl is not None:
-            flags_now = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, flags_now & ~_NONBLOCK)
-    except BaseException:
-        os.close(fd)
-        raise
-    return os.fdopen(fd, "a" if append else "w", encoding=encoding, errors=errors)

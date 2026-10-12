@@ -421,6 +421,28 @@ def configure_windows_safe_logging():
         pass  # codecs/locale not available
 
 
+class _GuardedFileHandler(logging.FileHandler):
+    """A FileHandler that opens its file as ``fs_guard.open_for_write`` does.
+
+    Appending, since get_logger has already truncated the file when asked to. A link
+    at the file name, or a file another name refers to, raises instead of being
+    opened: the directory holding the file is guarded for each open, whether or not
+    it is still a registered root, and below a registered output directory every
+    component under it is checked too.
+    """
+
+    def _open(self):
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        return fs_guard.open_for_write(
+            self.baseFilename,
+            encoding=self.encoding,
+            errors=self.errors,
+            append=True,
+            root=Path(self.baseFilename).parent,
+        )
+
+
 def get_logger(
     name: str = "ash",
     level: str | int | None = None,
@@ -558,6 +580,15 @@ def get_logger(
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
+        # Imported here: fs_guard logs through this module.
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        # The output directory is a guarded root from here on, as it is for every
+        # PluginContext, so the log files below are opened as ASH's other writes
+        # there are: a link at the file name, or a file another name refers to,
+        # raises before anything is written.
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        fs_guard.register_writable_root(output_dir)
         # Determine file log level (default to INFO to avoid huge log files)
         final_file_log_level = (
             file_log_level if file_log_level is not None else logging.INFO
@@ -566,7 +597,6 @@ def get_logger(
         # Create JSONLines/JSONL file handler for logging to a file
         if log_format in ["JSONL", "BOTH"]:
             jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
-            jsonl_log_file.parent.mkdir(parents=True, exist_ok=True)
             jsonl_file_handler = _log_file_handler(jsonl_log_file, truncate_log)
             logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
             jsonl_file_handler.setLevel(final_file_log_level)
@@ -590,7 +620,6 @@ def get_logger(
         # Create tabular file handler for logging to a file
         if log_format in ["TABULAR", "BOTH"]:
             tab_log_file = Path(output_dir).joinpath(f"{name}.log")
-            tab_log_file.parent.mkdir(parents=True, exist_ok=True)
             tab_file_handler = _log_file_handler(tab_log_file, truncate_log)
             logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
             tab_file_handler.setLevel(final_file_log_level)
@@ -604,34 +633,18 @@ def get_logger(
     return logger
 
 
-class _NoFollowFileHandler(logging.FileHandler):
-    """A FileHandler that does not follow a link at its file's name.
-
-    The file is opened with utils/output_dir_links.open_no_follow: a regular file is
-    appended to, and a link at the name is refused.
-    """
-
-    def _open(self):  # type: ignore[override]
-        from automated_security_helper.utils.output_dir_links import open_no_follow
-
-        return open_no_follow(
-            self.baseFilename,
-            append=True,
-            encoding=self.encoding,
-            errors=self.errors,
-        )
-
-
 def _log_file_handler(path: Path, truncate: bool) -> logging.FileHandler:
     """A handler appending to ``path``, emptied first when ``truncate`` (the default).
 
-    Both opens refuse a link at the name; see utils/output_dir_links.open_no_follow.
+    Both opens go through fs_guard.open_for_write below the output directory
+    get_logger registered, so a link at the name, or a file another name refers to,
+    raises before anything is written; see _GuardedFileHandler.
     """
-    from automated_security_helper.utils.output_dir_links import open_no_follow
+    from automated_security_helper.utils.sandbox import fs_guard
 
-    if truncate:
-        open_no_follow(path).close()
-    return _NoFollowFileHandler(path.as_posix(), mode="a")
+    with fs_guard.open_for_write(path, append=not truncate, root=path.parent):
+        pass
+    return _GuardedFileHandler(path.as_posix())
 
 
 ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]

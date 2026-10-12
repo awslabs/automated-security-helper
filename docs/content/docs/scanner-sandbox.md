@@ -148,8 +148,10 @@ it needs.
   results directory when the scanner starts (one committed with the scanned tree) is
   refused instead, and the scanner is `ERROR`.
 - ASH's own writes below the output directory never follow a symlink, with the
-  sandbox on or off: worker request files, stream logs, `ASH.ScanResults.json` and
-  the files a scanner override writes. A symlink at any component of the path, the
+  sandbox on or off: `ash.log` and `ash.log.jsonl`, worker request files, stream
+  logs, `ASH.ScanResults.json`, `ash_aggregated_results.json`, every report, the
+  files a converter extracts and the files a scanner override writes. A link at
+  `ash.log` stops the scan with exit 1 before it starts. A symlink at any component of the path, the
   file name included, stops the write with "`<path>` was not written: `<link>` is a
   symlink, and ASH does not write through a symlink below its output directory"
   (`OutputLinkRefused`, an `OSError`). Nothing is written where the link points, the

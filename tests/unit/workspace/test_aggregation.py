@@ -904,6 +904,24 @@ class TestAggregatorOutput:
 
         assert not victim.exists()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_directory_that_is_a_link_is_not_written_through(self, tmp_path):
+        """No PluginContext registered the workspace output; the spool is guarded."""
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (output / ".workspace-spool").symlink_to(elsewhere, target_is_directory=True)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert list(elsewhere.iterdir()) == []
+
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""
         plan = _plan(tmp_path, "api", "web")

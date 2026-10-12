@@ -108,22 +108,41 @@ def _within(path: Path, root: Optional[Path]) -> bool:
     return real == real_root or real.startswith(real_root.rstrip(os.sep) + os.sep)
 
 
-def _copy_manifest(source: Path, target: Path, *, ignore_suppressions: bool) -> None:
+def _write_copy(target: Path, data: bytes, private: Path) -> None:
+    """Write ``data`` at ``target`` in the ``private`` directory, through fs_guard.
+
+    ``private`` is the directory mkdtemp made for this child. For npm and pnpm it is
+    below the scanner's results directory, so below the output directory, where ASH
+    writes nothing through a link; it is guarded for this write whatever the
+    platform's registered roots are.
+    """
+    # Imported here: fs_guard imports the sandbox package, which this module's
+    # callers may be importing.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+    with open_for_write(target, binary=True, make_parents=True, root=private) as out:
+        out.write(data)
+
+
+def _copy_manifest(
+    source: Path, target: Path, *, ignore_suppressions: bool, private: Path
+) -> None:
     """Copy ``package.json``, without ``pnpm.auditConfig`` when suppressions are off."""
+    data = source.read_bytes()
     if not ignore_suppressions:
-        shutil.copyfile(source, target)
+        _write_copy(target, data, private)
         return
-    text = source.read_text(encoding="utf-8")
     try:
-        manifest = json.loads(text)
+        manifest = json.loads(data.decode("utf-8"))
     except ValueError:
-        shutil.copyfile(source, target)  # not JSON: the tool reports it as it would
+        # Not JSON (or not UTF-8): the tool reports it as it would.
+        _write_copy(target, data, private)
         return
     pnpm = manifest.get("pnpm") if isinstance(manifest, dict) else None
     if isinstance(pnpm, dict) and "auditConfig" in pnpm:
         pnpm.pop("auditConfig")
-        text = json.dumps(manifest, indent=2) + "\n"
-    target.write_text(text, encoding="utf-8")
+        data = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    _write_copy(target, data, private)
 
 
 def package_manager_inputs(
@@ -219,17 +238,26 @@ def _copy_inputs(
     roots: Sequence[Path],
     skip: Iterable[Path],
     ignore_suppressions: bool,
+    private: Path,
 ) -> None:
-    """Each input that stays in the tree, at its place below ``project``."""
+    """Each input that stays in the tree, at its place below ``project``.
+
+    Written through fs_guard (``_write_copy``), which makes the parents and refuses
+    a link on the way, with ``private`` as the guarded root.
+    """
     for source in package_manager_inputs(binary, package_dir, skip=skip):
         if input_refusal(source, roots) is not None:
             continue
         target = project / source.relative_to(package_dir)
-        target.parent.mkdir(parents=True, exist_ok=True)
         if source.name == "package.json":
-            _copy_manifest(source, target, ignore_suppressions=ignore_suppressions)
+            _copy_manifest(
+                source,
+                target,
+                ignore_suppressions=ignore_suppressions,
+                private=private,
+            )
         else:
-            shutil.copyfile(source, target)
+            _write_copy(target, source.read_bytes(), private)
 
 
 @contextmanager
@@ -295,6 +323,7 @@ def package_manager_child(
             roots=list(roots),
             skip=skip,
             ignore_suppressions=ignore_suppressions,
+            private=directory,
         )
         yield PackageManagerChild(leading_args=(), cwd=project, env=env)
     finally:

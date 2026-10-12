@@ -713,20 +713,18 @@ def _decompress_plain_gzip(
     Its size is known only by reading it (the size in the gzip trailer is the
     writer's claim, modulo 4 GiB), so at most ``budget.room()`` plus one byte is
     written and then admitted, which refuses it, naming the limit, when it is over.
-    The file is created without following a link at its name.
+    The file is created with fs_guard.open_for_write, which below the output
+    directory follows no link at any component of its path, and elsewhere none at
+    its name.
     """
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
     handle.seek(0)
     room = budget.room()
-    fd = os.open(
-        destination,
-        os.O_WRONLY
-        | os.O_CREAT
-        | os.O_TRUNC
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_BINARY", 0),
-        0o644,
-    )
-    with gzip.GzipFile(fileobj=handle, mode="rb") as source, os.fdopen(fd, "wb") as out:
+    with (
+        gzip.GzipFile(fileobj=handle, mode="rb") as source,
+        open_for_write(destination, binary=True, mode=0o644) as out,
+    ):
         # A copy that stops short of room + 1 bytes stopped because the stream
         # ended, and GzipFile checks the CRC and length before it reports the end,
         # so a damaged stream or a bad CRC has raised by then.
@@ -744,26 +742,25 @@ def _copy_tar_members(
     each member's mode, owner and times, so a setuid bit or a foreign owner (when ASH
     runs as root) would carry over. The members reaching here are regular files whose
     names inspect_members has already checked, so copying their content is all there
-    is to do. Each file is created without following a link at its name, and no more
-    than the member's declared size is copied into it, whatever its stream yields:
-    the declared sizes are what the extraction limits admitted.
+    is to do. Each file is created with fs_guard.open_for_write, which below the
+    output directory follows no link at any component of its path, and elsewhere
+    none at its name; no more than the member's declared size is copied into it,
+    whatever its stream yields: the declared sizes are what the extraction limits
+    admitted.
     """
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
     for member in members:
         source = tar_ref.extractfile(member)
         if source is None:
             continue
         destination = target_path.joinpath(*PurePosixPath(member.name).parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(
-            destination,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_TRUNC
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_BINARY", 0),
-            0o644,
-        )
-        with source, os.fdopen(fd, "wb") as out:
+        with (
+            source,
+            open_for_write(
+                destination, binary=True, mode=0o644, make_parents=True
+            ) as out,
+        ):
             _copy_at_most(source, out, member.size)
 
 

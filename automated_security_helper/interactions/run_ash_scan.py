@@ -1577,20 +1577,37 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
 
 
 def _setup_logger(opts: ScanOptions):
+    """Configure ASH's logger, with ``ash.log`` in the output directory.
+
+    The log file is opened as ASH's other writes below the output directory are,
+    so a symlink at ``ash.log``, or a file another name refers to, stops the scan
+    here with exit 1 rather than being written through.
+    """
     from automated_security_helper.utils.log import get_logger
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        OutputHardLinkRefused,
+        OutputLinkRefused,
+    )
 
     final_log_level = _resolve_log_level(opts)
     final_logging_level = logging._nameToLevel.get(final_log_level.value, logging.INFO)
     simple_logging = opts.simple or opts.log_level == AshLogLevel.SIMPLE
 
-    return get_logger(
-        level=final_logging_level,
-        output_dir=opts.output_dir,
-        show_progress=_live_progress_enabled(opts),
-        use_color=opts.color,
-        simple_format=simple_logging,
-        truncate_log=opts.existing_results is None,
-    )
+    try:
+        return get_logger(
+            level=final_logging_level,
+            output_dir=opts.output_dir,
+            show_progress=_live_progress_enabled(opts),
+            use_color=opts.color,
+            simple_format=simple_logging,
+            truncate_log=opts.existing_results is None,
+        )
+    except (OutputLinkRefused, OutputHardLinkRefused) as refused:
+        print(
+            f"[bold red]ERROR (1) {escape_markup(str(refused))}. Remove it, or "
+            "choose an output directory outside the scanned tree.[/bold red]"
+        )
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

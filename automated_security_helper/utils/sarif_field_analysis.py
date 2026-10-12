@@ -232,21 +232,25 @@ def analyze_sarif_fields(
                     f"[bold red]Error processing {file_path}: {str(e)}[/bold red]"
                 )
 
+    # The inspect phase writes these below the output directory: never through a
+    # link there (fs_guard).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
     # Write JSON output for included fields
     json_path = os.path.join(output_dir, "sarif_fields.json")
-    with open(json_path, mode="w", encoding="utf-8") as f:
+    with open_for_write(json_path) as f:
         json.dump(results_dict, f, indent=2)
     console.print(f"Wrote included fields JSON to [cyan]{json_path}[/cyan]")
 
     # Write JSON output for excluded fields
     excluded_json_path = os.path.join(output_dir, "sarif_excluded_fields.json")
-    with open(excluded_json_path, mode="w", encoding="utf-8") as f:
+    with open_for_write(excluded_json_path) as f:
         json.dump(excluded_dict, f, indent=2)
     console.print(f"Wrote excluded fields JSON to [cyan]{excluded_json_path}[/cyan]")
 
     # Write CSV output for included fields
     csv_path = os.path.join(output_dir, "sarif_fields.csv")
-    with open(csv_path, "w", newline="") as f:
+    with open_for_write(csv_path, encoding=None, errors=None, newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners"])
 
@@ -256,7 +260,7 @@ def analyze_sarif_fields(
 
     # Write CSV output for excluded fields
     excluded_csv_path = os.path.join(output_dir, "sarif_excluded_fields.csv")
-    with open(excluded_csv_path, "w", newline="") as f:
+    with open_for_write(excluded_csv_path, encoding=None, errors=None, newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["field", "scanners", "reason"])
 

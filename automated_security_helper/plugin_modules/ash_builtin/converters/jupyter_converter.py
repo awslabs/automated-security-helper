@@ -5,7 +5,6 @@
 
 import glob
 import json
-import os
 import re
 import shutil
 import subprocess  # nosec B404 — CalledProcessError and TimeoutExpired; spawns go through spawn_run
@@ -593,20 +592,17 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         target = target_base.with_name(
             target_base.name + produced.name[len(_STAGED_NAME) :]
         )
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
         target.parent.mkdir(parents=True, exist_ok=True)
         # Created fresh and never through a link: anything already at the name is
-        # removed, and O_EXCL|O_NOFOLLOW refuses whatever appears in its place.
+        # removed, O_EXCL refuses whatever appears in its place, and fs_guard
+        # follows no link at a directory below the output directory either.
         target.unlink(missing_ok=True)
-        fd = os.open(
-            target,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_BINARY", 0),
-            0o644,
-        )
-        with os.fdopen(fd, "wb") as out, produced.open("rb") as source:
+        with (
+            open_for_write(target, binary=True, mode=0o644, exclusive=True) as out,
+            produced.open("rb") as source,
+        ):
             shutil.copyfileobj(source, out)
         return target
 

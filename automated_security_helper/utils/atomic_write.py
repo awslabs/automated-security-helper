@@ -36,12 +36,24 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
     """Write ``content`` to ``path`` so that readers see the old file or the new one.
 
     The staging file is created in the target's own directory, because ``os.replace``
-    is only atomic within one filesystem. It is created with ``open(..., "x")`` rather
-    than ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain write
-    would: ``mkstemp`` creates 0600, which would stop a host user reading results a
+    is only atomic within one filesystem. It is created exclusively rather than with
+    ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain write would:
+    ``mkstemp`` creates 0600, which would stop a host user reading results a
     container wrote.
+
+    Below a registered output directory (``fs_guard``), the directory is opened
+    without following a link at any component, and the staging file is created and
+    renamed relative to that descriptor: a link on the way to ``path``, or at
+    ``path`` itself, raises ``OutputLinkRefused``, and a file at ``path`` that
+    another name refers to raises ``OutputHardLinkRefused``.
     """
+    from automated_security_helper.utils.sandbox.fs_guard import open_parent_beneath
+
     path = Path(path)
+    guarded = open_parent_beneath(path)
+    if guarded is not None:
+        _write_beneath(*guarded, content=content, encoding=encoding)
+        return
     staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
         with open(staging, mode="x", encoding=encoding) as handle:
@@ -50,6 +62,32 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
     except BaseException:
         staging.unlink(missing_ok=True)
         raise
+
+
+def _write_beneath(dir_fd: int, name: str, *, content: str, encoding: str) -> None:
+    """Write ``name`` in ``dir_fd`` through a staging file renamed over it."""
+    staging = f".{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_BINARY", 0)
+    )
+    try:
+        fd = os.open(staging, flags, 0o666, dir_fd=dir_fd)
+        try:
+            with os.fdopen(fd, "w", encoding=encoding) as handle:
+                handle.write(content)
+            os.replace(staging, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except BaseException:
+            try:
+                os.unlink(staging, dir_fd=dir_fd)
+            except FileNotFoundError:
+                pass
+            raise
+    finally:
+        os.close(dir_fd)
 
 
 def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:

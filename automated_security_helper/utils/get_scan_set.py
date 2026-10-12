@@ -15,7 +15,6 @@ import os
 
 from automated_security_helper.utils.git_command import git_argv
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_dir_links import open_no_follow
 from automated_security_helper.utils.scanned_tree import (
     REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
@@ -1628,6 +1627,12 @@ def scan_set(
         )
 
     if output:
+        # Imported here: get_scan_set is imported before the sandbox package is.
+        # The output directory is guarded for these two writes whether or not a
+        # PluginContext registered it: a link at either name, or at a directory
+        # below the output directory, is refused rather than written through.
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
         # Ensure output is a Path object
         output_path = Path(output)
         ashignore_path = output_path.joinpath("ash-ignore-report.txt")
@@ -1637,7 +1642,7 @@ def scan_set(
             debug_echo(f"Writing ash-ignore-report.txt to {output}", debug=debug)
             if not ashignore_path.parent.exists():
                 ashignore_path.parent.mkdir(parents=True)
-            with open_no_follow(ashignore_path) as f:
+            with open_for_write(ashignore_path, root=output_path) as f:
                 f.write("\n".join(ashignore_content))
 
         if not ashscanset_imported:
@@ -1647,7 +1652,7 @@ def scan_set(
             )
             if not ashscanset_path.parent.exists():
                 ashscanset_path.parent.mkdir(parents=True)
-            with open_no_follow(ashscanset_path) as f:
+            with open_for_write(ashscanset_path, root=output_path) as f:
                 f.write("\n".join(ashscanset_list))
 
     if print_results:

@@ -125,8 +125,10 @@
   tool's version, and the check of a pre-installed tool against the scan's
   requirement are probed again by the next check that asks.
 
-  ASH's own writes below the output directory (worker request files, stream logs,
-  results files) no longer follow a symlink, with or without a sandbox. The default
+  ASH's own writes below the output directory (`ash.log` and `ash.log.jsonl`, worker
+  request files, stream logs, results files, reports, the aggregated results,
+  extracted archive members) no longer follow a symlink, with or without a sandbox;
+  a link at `ash.log` stops the scan with exit 1 before it starts. The default
   output directory is inside the scanned tree, so a link committed at one of those
   paths used to redirect the write when the sandbox was off. A link at any
   component of the path now stops the write (`OutputLinkRefused`) and the scanner is

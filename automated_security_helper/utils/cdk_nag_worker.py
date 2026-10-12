@@ -249,7 +249,10 @@ def main(argv: List[str]) -> int:
             f"{request.get('protocol')}\n"
         )
         return 2
-    with open(response_path, "w", encoding="utf-8") as out:
+    # Exclusively: the parent made this directory fresh for the run and wrote the
+    # request into it with fs_guard, so anything already at the name, a link
+    # included, is refused rather than opened.
+    with open(response_path, "x", encoding="utf-8") as out:
         _evaluate(request, out)
     return 0
 

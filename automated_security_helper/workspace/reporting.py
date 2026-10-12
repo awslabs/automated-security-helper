@@ -515,6 +515,10 @@ def emit_workspace_reports(
         What was written, what was withheld, and what refused. The caller folds
         ``refused`` into the exit code; nothing here calls ``sys.exit``.
     """
+    # The reports and the manifest are written as ASH's other output: never through
+    # a link below the output directory (fs_guard).
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
     output_dir = Path(output_dir)
     reports_dir = output_dir / REPORTS_DIR_NAME
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -644,24 +648,25 @@ def emit_workspace_reports(
             continue
 
         target = reports_dir / filename
-        target.write_text(content, encoding="utf-8")
+        with open_for_write(target) as handle:
+            handle.write(content)
         artifacts[name] = target
         entry["workspace_artifact"] = target.relative_to(output_dir).as_posix()
         ASH_LOGGER.info(f"Writing workspace {name} report to {target}")
 
     manifest_path = reports_dir / MANIFEST_FILENAME
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "workspace_file": plan.workspace_file,
-                "workspace_root": plan.workspace_root,
-                "projects": [project.key for project in plan.projects],
-                "reporters": manifest_reporters,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    with open_for_write(manifest_path) as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "workspace_file": plan.workspace_file,
+                    "workspace_root": plan.workspace_root,
+                    "projects": [project.key for project in plan.projects],
+                    "reporters": manifest_reporters,
+                },
+                indent=2,
+            )
+        )
 
     return WorkspaceReportOutcome(
         manifest_path=manifest_path,

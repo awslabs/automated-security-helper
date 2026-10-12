@@ -18,7 +18,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.output_dir_links import open_no_follow
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.scanner_tool_types import (
     SECRETS_TOOL_TYPE,
     normalize_tool_type,
@@ -976,7 +976,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = reports_dir / opts.output_file
-        with open_no_follow(output_path) as f:
+        # Guarded below the output directory whether or not it is a registered root.
+        with open_for_write(output_path, root=self.context.output_dir) as f:
             f.write(summary)
         ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
 
@@ -998,7 +999,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 ),
             )
             exec_path = reports_dir / opts.output_executive_file
-            with open_no_follow(exec_path) as f:
+            with open_for_write(exec_path, root=self.context.output_dir) as f:
                 f.write(f"# Executive Security Summary\n\n{exec_content}")
             ASH_LOGGER.info(f"Executive summary written to {exec_path}")
 
@@ -1022,7 +1023,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 ),
             )
             tech_path = reports_dir / opts.output_technical_file
-            with open_no_follow(tech_path) as f:
+            with open_for_write(tech_path, root=self.context.output_dir) as f:
                 f.write(f"# Technical Security Analysis\n\n{tech_content}")
             ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
 
