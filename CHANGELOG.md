@@ -1032,7 +1032,9 @@
   before its tool runs (an empty converted tree, missing dependencies, or a target
   the sandbox refused) reports 0, where it had reported the previous target's code,
   and cfn-nag's and npm-audit's invocations record the largest code of that target's
-  runs alone. A tool a signal ended is recorded as `128 + N`, as a shell
+  runs alone. The scanner's row in `scanner_results`, which stands for all its
+  targets, now carries a code too, where it was always 0: the largest code among
+  its `ERROR` targets, else the largest of any target. A tool a signal ended is recorded as `128 + N`, as a shell
   reports it; its absolute value had put SIGHUP, SIGINT and SIGQUIT inside common
   success sets. A run ASH itself failed to carry out (an error in its own runner,
   not the tool's) is recorded as 127, like a tool that could not start, where it had
