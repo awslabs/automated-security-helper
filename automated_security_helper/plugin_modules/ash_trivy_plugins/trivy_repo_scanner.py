@@ -30,10 +30,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
-from automated_security_helper.utils.link_exclusions import (
-    trivy_skip_dirs,
-    trivy_skip_files,
-)
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -346,20 +342,8 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 f"--secret-config={self._secret_config_file()}",
                 *self._pinned_config_args(),
                 # Each link leaving the target (trivy follows no link), and each
-                # path the global ignore paths ignore. In the joined form, since a
-                # path can start with "-". See utils/link_exclusions.py.
-                *(
-                    f"--skip-files={path}"
-                    for path in trivy_skip_files(
-                        target, self.context.source_dir, global_ignore_paths
-                    )
-                ),
-                *(
-                    f"--skip-dirs={path}"
-                    for path in trivy_skip_dirs(
-                        target, self.context.source_dir, global_ignore_paths
-                    )
-                ),
+                # path the global ignore paths ignore.
+                *self._link_skip_args(target, global_ignore_paths),
             ]
             if self._offline():
                 final_args = self._offline_misconfig_args(final_args)

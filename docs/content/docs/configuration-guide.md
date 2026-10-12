@@ -395,11 +395,13 @@ directory, or does not run it on that directory:
   target leaves the directory they scan (measured with grype 0.120.1 and syft
   1.54.1). Each such link is still passed in their `--exclude`, as `./` and its
   path with the glob characters escaped, which leaves out that path and no other.
-- trivy (the `trivy-repo` scanner) skips every link, inside the tree or not
-  (measured with trivy 0.75.0). Each such link is still passed in `--skip-files`,
+- trivy (the `trivy` and `trivy-repo` scanners) skips every link, inside the tree or
+  not (measured with trivy 0.75.0). Each such link is still passed in `--skip-files`,
   glob characters escaped, unless its path holds a comma, a double quote or a line
   break, which trivy's option cannot carry. Such a link is named in a debug log
   line (`--log-level DEBUG`).
+- gitleaks runs `gitleaks dir` without `--follow-symlinks`, which gitleaks reads as
+  skipping every link.
 - semgrep and opengrep skip every link, inside the tree or not (measured with
   semgrep 1.180.0 and opengrep 1.30.2), and get no exclusion for one. Their
   `--exclude` cannot name one path: semgrep matches a pattern against paths below

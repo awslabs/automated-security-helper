@@ -51,7 +51,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.core import ToolExtraArg
+from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     SarifReport,
@@ -70,6 +70,10 @@ from automated_security_helper.utils.content_db_refresh import (
     scan_id_for,
 )
 from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils.link_exclusions import (
+    trivy_skip_dirs,
+    trivy_skip_files,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import find_executable
@@ -326,6 +330,30 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             # An empty file is a decode error in trivy; an empty mapping is not.
             ash_content="{}\n",
         )
+
+    def _link_skip_args(
+        self,
+        target: Path | str,
+        global_ignore_paths: Optional[List[IgnorePathWithReason]] = None,
+    ) -> List[str]:
+        """``--skip-files`` and ``--skip-dirs`` for ``target``.
+
+        Each link leaving it, as a second guard (utils/link_exclusions.py): trivy
+        follows no link and skips them on its own. And each path
+        ``global_ignore_paths`` ignores, picked as ASH matches them below the source
+        directory. In the joined form, since a path can start with "-".
+        """
+        source_dir = self.context.source_dir
+        return [
+            *(
+                f"--skip-files={path}"
+                for path in trivy_skip_files(target, source_dir, global_ignore_paths)
+            ),
+            *(
+                f"--skip-dirs={path}"
+                for path in trivy_skip_dirs(target, source_dir, global_ignore_paths)
+            ),
+        ]
 
     def _trivy_input_file(
         self,

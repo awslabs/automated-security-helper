@@ -4,18 +4,19 @@
 """Every scanner that walks its target itself is kept off links that leave it.
 
 ASH's scan set leaves out a link to a file whose target leaves the scanned tree, but
-only detect-secrets, cfn-nag, cdk-nag and npm-audit read the scan set. Every other
-scanner is handed a directory and walks it. bandit, checkov and ferret-scan are
-covered in their own tests (test_scanners_skip_links_leaving_the_tree.py and the
-ferret one). This covers the rest, and pins that every registered scanner is one of
+only detect-secrets, cfn-nag, cdk-nag, npm-audit, actionlint, zizmor, cfn-lint and
+cfn-guard read the scan set. Every other scanner is handed a directory and walks
+it. bandit, checkov and ferret-scan are covered in their own tests
+(test_scanners_skip_links_leaving_the_tree.py and the ferret one). This covers the rest, and pins that every registered scanner is one of
 the kinds below, so a new one cannot be added without deciding which:
 
 - grype and syft follow no link leaving their target (measured with grype 0.120.1
   and syft 1.54.1). Each link is still passed in ``--exclude``, as ``./<path>`` with
   the glob characters escaped, which leaves out that path and no other.
-- trivy (the trivy-repo scanner) skips every link (measured with trivy 0.75.0). Each
-  link is passed in ``--skip-files`` with the glob characters escaped; a path with a
-  comma is not, because trivy splits the value on commas.
+- trivy (the trivy and trivy-repo scanners) skips every link (measured with trivy
+  0.75.0). Each link is passed in ``--skip-files`` with the glob characters escaped;
+  a path with a comma is not, because trivy splits the value on commas.
+- gitleaks runs ``gitleaks dir`` without ``--follow-symlinks``, so it reads no link.
 - semgrep and opengrep skip every link (measured with semgrep 1.180.0 and opengrep
   1.30.2), and their ``--exclude`` cannot name one path: semgrep matches a pattern
   against paths below the git work tree's root when the target is inside one, and
@@ -28,6 +29,7 @@ the kinds below, so a new one cannot be added without deciding which:
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sys
 from pathlib import Path
@@ -69,14 +71,22 @@ LINK_HANDLING = {
     "cfn-nag": READS_THE_SCAN_SET,
     "cdk-nag": READS_THE_SCAN_SET,
     "npm-audit": READS_THE_SCAN_SET,
+    "actionlint": READS_THE_SCAN_SET,
+    "zizmor": READS_THE_SCAN_SET,
+    # Through utils/cfn_template_discovery.py.
+    "cfn-lint": READS_THE_SCAN_SET,
+    "cfn-guard": READS_THE_SCAN_SET,
     "bandit": EXCLUDES_THE_LINK,
     "checkov": EXCLUDES_THE_LINK,
     "ferret-scan": EXCLUDES_THE_LINK,
     "grype": EXCLUDES_THE_LINK,
     "syft": EXCLUDES_THE_LINK,
     "trivy-repo": EXCLUDES_THE_LINK,
+    "trivy": EXCLUDES_THE_LINK,
     "semgrep": FOLLOWS_NO_LINK,
     "opengrep": FOLLOWS_NO_LINK,
+    # `gitleaks dir` runs without --follow-symlinks.
+    "gitleaks": FOLLOWS_NO_LINK,
     "snyk-code": REFUSES_THE_TARGET,
 }
 
@@ -128,6 +138,34 @@ SCANNER_CLASSES = {
         "TrivyRepoScanner",
         "TrivyRepo",
     ),
+    "trivy": ("ash_builtin.scanners.trivy_scanner", "TrivyScanner", "Trivy"),
+    "actionlint": (
+        "ash_builtin.scanners.actionlint_scanner",
+        "ActionlintScanner",
+        "Actionlint",
+    ),
+    "zizmor": ("ash_builtin.scanners.zizmor_scanner", "ZizmorScanner", "Zizmor"),
+    "cfn-lint": (
+        "ash_builtin.scanners.cfn_lint_scanner",
+        "CfnLintScanner",
+        "CfnLint",
+    ),
+    "cfn-guard": (
+        "ash_builtin.scanners.cfn_guard_scanner",
+        "CfnGuardScanner",
+        "CfnGuard",
+    ),
+    "gitleaks": (
+        "ash_builtin.scanners.gitleaks_scanner",
+        "GitleaksScanner",
+        "Gitleaks",
+    ),
+}
+#: Where the scanners that take their inputs from utils/cfn_template_discovery.py
+#: call scan_set, which their own module does not.
+_SCAN_SET_MODULE = {
+    "cfn-lint": "automated_security_helper.utils.cfn_template_discovery",
+    "cfn-guard": "automated_security_helper.utils.cfn_template_discovery",
 }
 #: The scanners whose own scan() resolves the command, rather than the template
 #: scan() calling _execute_scan.
@@ -255,21 +293,29 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
     """What LINK_HANDLING says of each scanner, checked on a tree with such links."""
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.setenv("SNYK_TOKEN", "placeholder-token")
-    if name == "trivy-repo":
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
+    if name in ("trivy-repo", "trivy"):
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            _trivy_scanner_base,
         )
 
+        # No database update: the recorder replaces the run that would make one.
         monkeypatch.setattr(
-            trivy_repo_scanner, "sandboxed_online", lambda offline: False
+            _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
         )
     source = _tree(tmp_path, HANDLING_FILES, HANDLING_LINKS)
     module, scanner = _scanner_for(name, source, tmp_path)
     handling = LINK_HANDLING[name]
 
     if handling == READS_THE_SCAN_SET:
+        import importlib
+
+        scan_set_module = (
+            importlib.import_module(_SCAN_SET_MODULE[name])
+            if name in _SCAN_SET_MODULE
+            else module
+        )
         seen: list[list[str]] = []
-        real = module.scan_set
+        real = scan_set_module.scan_set
 
         def _spy(*args, **kwargs):
             seen.append([str(path) for path in real(*args, **kwargs)])
@@ -277,10 +323,17 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
 
         scanner.dependencies_satisfied = True
         with (
-            patch.object(module, "scan_set", side_effect=_spy),
+            patch.object(scan_set_module, "scan_set", side_effect=_spy),
             patch.object(scanner, "_pre_scan", return_value=True),
             patch.object(scanner, "_post_scan"),
             patch.object(scanner, "_run_subprocess", side_effect=_Stop),
+            # cfn-guard's rules come from an installed bundle, which the scan
+            # reads before its templates; no rule is needed to reach them.
+            (
+                patch.object(scanner, "_selected_rules", return_value=[])
+                if name == "cfn-guard"
+                else contextlib.nullcontext()
+            ),
         ):
             try:
                 scanner.scan(target=source, target_type="source")
@@ -471,15 +524,27 @@ def test_the_operators_syft_excludes_are_kept_beside_them(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("scanner_name", ["trivy-repo", "trivy"])
 def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, scanner_name
 ):
+    """Both trivy scanners build their argv in the shared base's terms."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+        TrivyScannerConfig,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins import (
         trivy_repo_scanner,
     )
 
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    monkeypatch.setattr(trivy_repo_scanner, "sandboxed_online", lambda offline: False)
+    # No database update: the recorder below replaces the run that would make one.
+    monkeypatch.setattr(
+        _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
+    )
     source = _tree(
         tmp_path,
         FILES,
@@ -491,10 +556,15 @@ def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
             "in_tree.txt": "real/requirements.txt",
         },
     )
-    scanner = trivy_repo_scanner.TrivyRepoScanner(
-        context=_context(source, tmp_path),
-        config=trivy_repo_scanner.TrivyRepoScannerConfig(),
-    )
+    if scanner_name == "trivy":
+        scanner = TrivyScanner(
+            context=_context(source, tmp_path), config=TrivyScannerConfig()
+        )
+    else:
+        scanner = trivy_repo_scanner.TrivyRepoScanner(
+            context=_context(source, tmp_path),
+            config=trivy_repo_scanner.TrivyRepoScannerConfig(),
+        )
 
     argv = _recorded_argv(scanner, source)
 

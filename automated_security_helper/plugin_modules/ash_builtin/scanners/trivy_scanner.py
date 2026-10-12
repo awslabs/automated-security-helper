@@ -511,6 +511,7 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # (TrivyScannerBase._trivy_input_file).
         extra.append(f"--ignorefile={self._ignore_file()}")
         extra.append(f"--secret-config={self._secret_config_file()}")
+        extra.extend(self._link_skip_args(target))
         # Before the target, which _resolve_arguments places after the options.
         target_index = final_args.index(Path(target).as_posix())
         final_args[target_index:target_index] = extra

@@ -164,12 +164,18 @@ def test_a_doublestar_character_in_an_ignored_path_is_escaped(tmp_path):
 
 
 def test_trivy_is_given_the_ignored_files_and_directories(tmp_path, monkeypatch):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins import (
         trivy_repo_scanner,
     )
 
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    monkeypatch.setattr(trivy_repo_scanner, "sandboxed_online", lambda offline: False)
+    # No database update: the recorder replaces the run that would make one.
+    monkeypatch.setattr(
+        _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
+    )
     source = _tree(tmp_path)
     scanner = trivy_repo_scanner.TrivyRepoScanner(
         context=_context(source, tmp_path),
