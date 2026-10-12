@@ -44,6 +44,22 @@ def _write(tmp_path: Path, payload: object, name: str = "params.json") -> Path:
     return path
 
 
+#: The characters of the Rich panel a usage error is printed in.
+_PANEL_BORDER = str.maketrans("", "", "│╭╮╰╯─")
+
+
+def _flat(output: str) -> str:
+    """``output`` with the error panel's border and all whitespace removed.
+
+    The panel wraps its text at the console width, so where a line breaks
+    depends on how long the message is, and a message that quotes a tmp path
+    can break inside a name the test looks for. The names looked for here have
+    no whitespace, so they are found in the flattened text wherever the line
+    broke.
+    """
+    return "".join(output.translate(_PANEL_BORDER).split())
+
+
 def _scan_kwargs(mock_run) -> dict:
     assert mock_run.call_count == 1, "the scan was not invoked"
     return mock_run.call_args.kwargs
@@ -202,16 +218,16 @@ class TestScanJsonInputErrors:
         result, mock_run = self._invoke(runner, tmp_path, {"sauce_dir": "x"})
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'sauce_dir'" in result.output
-        assert "source_dir" in result.output
-        assert "output_dir" in result.output
+        assert "'sauce_dir'" in _flat(result.output)
+        assert "source_dir" in _flat(result.output)
+        assert "output_dir" in _flat(result.output)
 
     def test_wrong_enum_value_points_at_the_key(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"strategy": "sideways"})
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'strategy'" in result.output
-        assert "sideways" in result.output
+        assert "'strategy'" in _flat(result.output)
+        assert "sideways" in _flat(result.output)
 
     def test_wrong_int_value_points_at_the_key(self, runner, tmp_path):
         result, mock_run = self._invoke(
@@ -219,20 +235,20 @@ class TestScanJsonInputErrors:
         )
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'shard_index'" in result.output
+        assert "'shard_index'" in _flat(result.output)
 
     def test_list_for_scalar_parameter_is_rejected(self, runner, tmp_path):
         # A string parameter would otherwise accept str(['a', 'b']).
         result, mock_run = self._invoke(runner, tmp_path, {"source_dir": ["a", "b"]})
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'source_dir'" in result.output
+        assert "'source_dir'" in _flat(result.output)
 
     def test_scalar_for_list_parameter_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"scanners": "bandit"})
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'scanners'" in result.output
+        assert "'scanners'" in _flat(result.output)
 
     def test_boolean_for_non_boolean_parameter_is_rejected(self, runner, tmp_path):
         # int(True) == 1, so without this check `true` would become shard 1.
@@ -241,13 +257,13 @@ class TestScanJsonInputErrors:
         )
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'shard_index'" in result.output
+        assert "'shard_index'" in _flat(result.output)
 
     def test_object_for_parameter_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"config": {"a": 1}})
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'config'" in result.output
+        assert "'config'" in _flat(result.output)
 
     def test_same_parameter_under_two_spellings_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(
@@ -255,13 +271,13 @@ class TestScanJsonInputErrors:
         )
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "strategy" in result.output
+        assert "strategy" in _flat(result.output)
 
     def test_top_level_must_be_an_object(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, ["strategy", "parallel"])
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "object" in result.output
+        assert "object" in _flat(result.output)
 
     def test_duplicate_key_in_document_is_rejected(self, runner, tmp_path):
         path = tmp_path / "dup.json"
@@ -270,7 +286,7 @@ class TestScanJsonInputErrors:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "strategy" in result.output
+        assert "strategy" in _flat(result.output)
 
     def test_malformed_json_is_rejected(self, runner, tmp_path):
         path = tmp_path / "bad.json"
@@ -279,7 +295,7 @@ class TestScanJsonInputErrors:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "JSON" in result.output
+        assert "JSON" in _flat(result.output)
 
     def test_missing_file_is_rejected(self, runner, tmp_path):
         with patch(RUN_ASH_SCAN) as mock_run:
@@ -288,7 +304,7 @@ class TestScanJsonInputErrors:
             )
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "absent.json" in result.output
+        assert "absent.json" in _flat(result.output)
 
     def test_meta_options_cannot_be_set_from_json(self, runner, tmp_path):
         result, mock_run = self._invoke(
@@ -296,7 +312,7 @@ class TestScanJsonInputErrors:
         )
         assert result.exit_code == 2
         assert not mock_run.called
-        assert "'cli_json_input'" in result.output
+        assert "'cli_json_input'" in _flat(result.output)
 
     def test_no_environment_expansion_in_values(self, runner, tmp_path, monkeypatch):
         monkeypatch.setenv("ASH_TEST_290", "expanded")
@@ -444,7 +460,7 @@ class TestNoDrift:
         )
         assert result.exit_code == 2
         assert captured == {}
-        assert "'brand_new_flag'" in result.output
+        assert "'brand_new_flag'" in _flat(result.output)
 
     def test_positional_argument_on_command_line_overrides_json(self, runner, tmp_path):
         captured: dict = {}
