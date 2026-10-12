@@ -2564,6 +2564,8 @@
   those in a config an MCP client delivered drop their findings but do not stop
   the upload, and a client that does not want its files sent leaves snyk-code out
   with the `excluded_scanners` argument of `run_ash_workspace_scan`.
+  `run_ash_scan` has no argument that selects scanners, so a client using it does
+  not deliver the files it does not want sent.
 - **A plugin module that failed to import in any shard or workspace project fails
   the combined results too.** `metadata.plugin_load_errors` lists the plugin modules
   a scan could not import, and the completeness gate
