@@ -100,8 +100,13 @@ def _expected_pins(pins: Any) -> dict[str, tuple[str, str]]:
     for tool, entry in pins.THIRD_PARTY_LICENSES.items():
         ecosystem = checker.PYPI if entry.distribution else checker.GITHUB
         expected[tool] = (entry.version, ecosystem)
-    expected[checker.CFN_NAG_GEM] = (pins.CFN_NAG_GEM_VERSION, checker.RUBYGEMS)
+    for gem, name in _GEM_PINS.items():
+        expected[gem] = (getattr(pins, name), checker.RUBYGEMS)
     return expected
+
+
+#: The gems tool_downloads.py pins, and the module global that holds each version.
+_GEM_PINS = {"cfn-nag": "CFN_NAG_GEM_VERSION", "bundler": "BUNDLER_VERSION"}
 
 
 def _uncovered(pins: Any, enumerated: list[Any]) -> list[str]:
@@ -135,7 +140,7 @@ class TestEnumerationCoversEveryPin:
         tools = {p.tool for p in enumerated}
         assert set(pins.TOOL_VERSIONS) <= tools
         assert set(pins.THIRD_PARTY_LICENSES) <= tools
-        assert checker.CFN_NAG_GEM in tools
+        assert set(_GEM_PINS) <= tools
 
     def test_the_population_is_not_vacuous(self, pins):
         """Positive control: an empty module would satisfy the test above."""
@@ -354,6 +359,27 @@ class TestExitCode:
         assert code == 1
         assert re.search(r"grype\s+v\S+\s+v999\.0\.0\s+outdated", out), out
 
+    def test_a_stale_bundler_is_reported_outdated(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """bundler is looked up on RubyGems like cfn-nag; the lookup is a stub."""
+        pins = checker.load_pins_module()
+        versions = self._pinned_versions()
+        asked: list[str] = []
+
+        def latest(project: str) -> str:
+            asked.append(project)
+            return "99.0.0" if project == "bundler" else versions[project]
+
+        code, out = self._run(monkeypatch, capsys, latest, ["--fail-on-outdated"])
+        assert "bundler" in asked, "bundler's latest release was never looked up"
+        assert code == 1, out
+        pinned = re.escape(pins.BUNDLER_VERSION)
+        assert re.search(rf"bundler\s+{pinned}\s+99\.0\.0\s+outdated", out), out
+        assert "ARG BUNDLER_VERSION in Dockerfile:" in out
+        assert "BUNDLED WITH" in out
+        assert "required Ruby version" in out
+
     def test_outdated_without_the_flag_exits_zero(self, monkeypatch, capsys):
         versions = self._pinned_versions()
         bumped = dict(versions, **{"anchore/grype": "v999.0.0"})
@@ -441,23 +467,18 @@ _TABLES_A_BUMP_LEAVES = {
 
 #: Dockerfile ``ARG <NAME>_VERSION`` lines that pin a version this script does not
 #: track, by design. Each is a version pin all the same, so the reason says how it is
-#: bumped instead.
-_UNTRACKED_DOCKERFILE_VERSION_ARGS = {
-    "BUNDLER_VERSION": (
-        "the bundler the image installs the cfn-nag gems with. Not tracked by this "
-        "checker, by design: it reads its pins from tool_downloads.py, and this "
-        "version is set only in the Dockerfile, so tracking it would need a new kind "
-        "of pin read from there. A bundler bump is a manual edit to this ARG."
-    ),
-}
+#: bumped instead. Empty: every such ARG belongs to a pin. A new one fails the test
+#: below until a pin owns it or its reason is written here.
+_UNTRACKED_DOCKERFILE_VERSION_ARGS: dict[str, str] = {}
 
 PINS_REL = PINS_FILE.relative_to(REPO_ROOT).as_posix()
 GEMFILE_REL = "automated_security_helper/assets/Gemfile"
+GEMFILE_LOCK = REPO_ROOT / f"{GEMFILE_REL}.lock"
 
 
 def _kind(pins: Any, tool: str) -> str:
     """The kind of pin ``tool`` is, read from the module's tables."""
-    if tool == checker.CFN_NAG_GEM:
+    if tool in _GEM_PINS:
         return "gem"
     if tool in getattr(pins, "RULES_BUNDLES", {}):
         return "rules-bundle"
@@ -573,13 +594,31 @@ def _bundle_version_name(tool: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _needles(pins: Any, pin: Any) -> list[str]:
-    """Text a bump of ``pin`` has to name, one string per value it changes."""
-    tool, bare = pin.tool, pin.version.lstrip("v")
+def _gem_copies(tool: str, version: str) -> list[str]:
+    """Where assets/Gemfile and its lockfile repeat a gem pin's version."""
+    copies = []
+    gemfile = (REPO_ROOT / GEMFILE_REL).read_text(encoding="utf-8")
+    gem_line = rf'^gem "{re.escape(tool)}", "{re.escape(version)}"'
+    if re.search(gem_line, gemfile, re.MULTILINE):
+        copies.append(GEMFILE_REL)
+    lock = GEMFILE_LOCK.read_text(encoding="utf-8")
+    spec_line = rf"^    {re.escape(tool)} \({re.escape(version)}\)$"
+    if re.search(spec_line, lock, re.MULTILINE):
+        copies.append(f"{GEMFILE_REL}.lock")
+    bundled_with = re.search(r"^BUNDLED WITH\n\s+(\S+)", lock, re.MULTILINE)
+    if tool == "bundler" and bundled_with and bundled_with.group(1) == version:
+        copies += [f"{GEMFILE_REL}.lock", "BUNDLED WITH"]
+    return copies
+
+
+def _needles(pins: Any, tool: str, version: str) -> list[str]:
+    """Text a bump of ``tool`` from ``version`` has to name, one per value it changes."""
+    bare = version.lstrip("v")
     kind = _kind(pins, tool)
     needles: list[str] = []
     if kind == "gem":
-        needles += ["CFN_NAG_GEM_VERSION", GEMFILE_REL, f"{GEMFILE_REL}.lock"]
+        needles.append(_GEM_PINS[tool])
+        needles += _gem_copies(tool, version)
     if kind == "release-binary":
         needles.append(f'TOOL_VERSIONS["{tool}"]')
         table = pins._ASSET_TABLES[tool]
@@ -622,16 +661,28 @@ def _steps_text(pins: Any, pin: Any) -> str:
 
 
 def _unnamed(pins: Any, pin: Any, steps: str) -> list[str]:
-    return [needle for needle in _needles(pins, pin) if needle not in steps]
+    needles = _needles(pins, pin.tool, pin.version)
+    return [needle for needle in needles if needle not in steps]
 
 
-_REAL_PINS = checker.enumerate_pins(checker.load_pins_module())
+# Every pin the module carries, read by this file rather than by the script, so a pin
+# the script does not enumerate is still a case below, and fails.
+_EXPECTED_PINS = sorted(_expected_pins(checker.load_pins_module()).items())
 
 
 class TestBumpStepsNameEveryValueABumpChanges:
-    @pytest.mark.parametrize("tool", [p.tool for p in _REAL_PINS])
-    def test_every_value_is_named(self, pins: Any, tool: str) -> None:
-        pin = {p.tool: p for p in checker.enumerate_pins(pins)}[tool]
+    @pytest.mark.parametrize(
+        ("tool", "version"),
+        [(tool, version) for tool, (version, _) in _EXPECTED_PINS],
+        ids=[tool for tool, _ in _EXPECTED_PINS],
+    )
+    def test_every_value_is_named(self, pins: Any, tool: str, version: str) -> None:
+        pin = {p.tool: p for p in checker.enumerate_pins(pins)}.get(tool)
+        assert pin is not None, (
+            f"{tool} {version} ({_kind(pins, tool)}) is pinned, but the script "
+            "reports no pin for it, so a bump gets no steps and none of "
+            f"{_needles(pins, tool, version)}"
+        )
         steps = _steps_text(pins, pin)
         unnamed = _unnamed(pins, pin, steps)
         assert not unnamed, (
@@ -715,15 +766,39 @@ class TestBumpStepsNameEveryValueABumpChanges:
             assert needle in steps, f"{needle!r} missing from:\n{steps}"
 
     def test_the_needles_are_not_vacuous(self, pins: Any) -> None:
-        """Positive control: what the test above requires, for two pins."""
-        by_tool = {p.tool: p for p in checker.enumerate_pins(pins)}
-        registry = _needles(pins, by_tool["aws-guard-rules-registry"])
+        """Positive control: what the test above requires, for three pins."""
+        expected = {tool: version for tool, (version, _) in _EXPECTED_PINS}
+        registry = _needles(
+            pins, "aws-guard-rules-registry", expected["aws-guard-rules-registry"]
+        )
         assert "_CFN_GUARD_RULES_RELEASE" in registry
         assert '_BUNDLE_CONTENTS_DIGESTS["ruleset-build-v1.0.2.zip"]' in registry
         assert len(registry) >= 10, registry
-        cfn_guard = _needles(pins, by_tool["cfn-guard"])
+        cfn_guard = _needles(pins, "cfn-guard", expected["cfn-guard"])
         assert "nix/cfn-guard.nix" in cfn_guard
         assert any(n.startswith("Dockerfile:") for n in cfn_guard), cfn_guard
+        bundler = _needles(pins, "bundler", expected["bundler"])
+        assert "BUNDLER_VERSION" in bundler and "BUNDLED WITH" in bundler, bundler
+        assert any(n.startswith("Dockerfile:") for n in bundler), bundler
+
+    def test_the_bundler_pin_and_its_copies_agree(self, pins: Any) -> None:
+        """The Dockerfile ARG and the lockfile's BUNDLED WITH are the same pin."""
+        arg = re.search(
+            r'^ARG BUNDLER_VERSION="([^"]+)"$',
+            DOCKERFILE.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        bundled_with = re.search(
+            r"^BUNDLED WITH\n\s+(\S+)$",
+            GEMFILE_LOCK.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        assert arg and bundled_with
+        assert arg.group(1) == bundled_with.group(1) == pins.BUNDLER_VERSION, (
+            f"BUNDLER_VERSION is {pins.BUNDLER_VERSION}, the Dockerfile ARG "
+            f"{arg.group(1)} and Gemfile.lock's BUNDLED WITH {bundled_with.group(1)}; "
+            "a bundler bump is half-applied"
+        )
 
     def test_a_step_left_out_is_caught(self, pins: Any) -> None:
         """Negative control: the same steps with one dropped fail the check."""

@@ -159,6 +159,11 @@ TOOL_VERSIONS: dict[str, str] = {
 # whole gem closure is assets/Gemfile.lock; this must agree with assets/Gemfile.
 CFN_NAG_GEM_VERSION = "0.8.10"
 
+# The Bundler the container image installs cfn-nag's gems with: the Dockerfile's
+# `ARG BUNDLER_VERSION`, and the `BUNDLED WITH` line of assets/Gemfile.lock. All three
+# must agree; tests/unit/test_pinned_tool_version_check.py checks that they do.
+BUNDLER_VERSION = "2.4.22"
+
 
 # ---------------------------------------------------------------------------
 # Asset filenames, per tool, exactly as published upstream.

@@ -1730,8 +1730,9 @@
   is unchanged and still takes the newest version the scanner's default allows. A new weekly workflow, ASH - Pinned Tool Versions, runs
   `scripts/check_pinned_tool_versions.py`, which compares every pin in
   `tool_downloads.py` (these three, the release binaries in `TOOL_VERSIONS`, the
-  Guard Rules Registry bundle in `RULES_BUNDLES`, the license files and the cfn-nag
-  gem) with its upstream's latest release and fails when one is behind, listing every
+  Guard Rules Registry bundle in `RULES_BUNDLES`, the license files, the cfn-nag gem
+  and the Bundler the image installs it with) with its upstream's latest release and
+  fails when one is behind, listing every
   value the bump has to change: the module's entries, the Dockerfile ARG, and each
   tracked file that repeats one of the pin's digests. A license entry that no download
   pin names is refused rather than reported with part of its steps. It sends the job's

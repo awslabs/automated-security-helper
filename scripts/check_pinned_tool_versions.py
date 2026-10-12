@@ -9,7 +9,8 @@ Why this exists
 itself to an exact version and SHA256: the release binaries in ``TOOL_VERSIONS``,
 the Python scanners the container image installs with ``uv tool install`` (the
 ``THIRD_PARTY_LICENSES`` entries with a ``distribution``), the license files fetched
-at each tool's release commit, and the cfn-nag gem. Nothing told anyone when one of
+at each tool's release commit, the cfn-nag gem and the Bundler the image installs it
+with. Nothing told anyone when one of
 those fell behind. Dependabot reads lockfiles and manifests; a Python dict is
 neither, so it never sees these pins, and the module's own guidance describes a bump
 as a manual edit of both digest tables. A pin that nobody is reminded about stays
@@ -18,18 +19,19 @@ the scanner exists to find.
 
 This script reads the pins from the module itself and asks each upstream for its
 latest release: the GitHub releases API for the release binaries and the rules
-bundles, PyPI's JSON API for the uv-tool pins, and the RubyGems API for cfn-nag. It
+bundles, PyPI's JSON API for the uv-tool pins, and the RubyGems API for the gems. It
 prints pinned against latest, and for each pin that is behind, every value a bump has
 to change: the module's entries, the Dockerfile ARG, and each tracked file that
 repeats one of the pin's digests. ``.github/workflows/ash-pinned-tool-versions.yml``
 runs it weekly with ``--fail-on-outdated``.
 
 There is no second list of tools here. The pins come from ``TOOL_VERSIONS``,
-``THIRD_PARTY_LICENSES``, ``RULES_BUNDLES`` and ``CFN_NAG_GEM_VERSION``, so a tool
-pinned in any of them is checked without editing this file. A pin kept in a new
-module-level name would not be; ``tests/unit/test_pinned_tool_version_check.py``
-fails on any module global named like a version pin that ``PIN_SOURCES`` below does
-not name.
+``THIRD_PARTY_LICENSES``, ``RULES_BUNDLES``, ``CFN_NAG_GEM_VERSION`` and
+``BUNDLER_VERSION``, so a tool pinned in any of them is checked without editing this
+file. A pin kept in a new module-level name would not be;
+``tests/unit/test_pinned_tool_version_check.py`` fails on any module global named
+like a version pin that ``PIN_SOURCES`` below does not name, and on any Dockerfile
+``ARG <NAME>_VERSION`` that no pin owns.
 
 Each pin is one of ``PIN_KINDS``, and each kind has its own bump steps. A license
 entry that no download pin names is refused, because what a bump of it changes is
@@ -139,6 +141,7 @@ PIN_SOURCES = (
     "THIRD_PARTY_LICENSES",
     "RULES_BUNDLES",
     "CFN_NAG_GEM_VERSION",
+    "BUNDLER_VERSION",
 )
 
 # The kinds of pin enumerate_pins reports. bump_steps has steps for each, and a pin of
@@ -147,11 +150,16 @@ PIN_SOURCES = (
 RELEASE_BINARY = "release-binary"  # TOOL_VERSIONS: one release asset per platform
 UV_TOOL = "uv-tool"  # THIRD_PARTY_LICENSES with a distribution: a PyPI release
 RULES_BUNDLE = "rules-bundle"  # RULES_BUNDLES: one release archive of rule files
-GEM = "gem"  # CFN_NAG_GEM_VERSION
+GEM = "gem"  # GEM_PINS: a RubyGems release
 PIN_KINDS = (RELEASE_BINARY, UV_TOOL, RULES_BUNDLE, GEM)
 
 # The gem CFN_NAG_GEM_VERSION is the version of; see assets/Gemfile.
 CFN_NAG_GEM = "cfn-nag"
+# The Bundler the image installs cfn-nag's gems with; see the Dockerfile.
+BUNDLER_GEM = "bundler"
+
+# Each gem pin, by gem name, and the tool_downloads.py global holding its version.
+GEM_PINS = {CFN_NAG_GEM: "CFN_NAG_GEM_VERSION", BUNDLER_GEM: "BUNDLER_VERSION"}
 
 GITHUB = "github-release"
 PYPI = "pypi"
@@ -344,18 +352,19 @@ def enumerate_pins(pins: Any) -> list[Pin]:
             )
         )
 
-    gem_version = getattr(pins, "CFN_NAG_GEM_VERSION", None)
-    if gem_version is not None:
-        result.append(
-            Pin(
-                tool=CFN_NAG_GEM,
-                version=gem_version,
-                ecosystem=RUBYGEMS,
-                project=CFN_NAG_GEM,
-                pinned_in=("CFN_NAG_GEM_VERSION",),
-                kind=GEM,
+    for gem, name in GEM_PINS.items():
+        gem_version = getattr(pins, name, None)
+        if gem_version is not None:
+            result.append(
+                Pin(
+                    tool=gem,
+                    version=gem_version,
+                    ecosystem=RUBYGEMS,
+                    project=gem,
+                    pinned_in=(name,),
+                    kind=GEM,
+                )
             )
-        )
 
     return sorted(result, key=lambda p: p.tool)
 
@@ -767,12 +776,23 @@ def _rules_bundle_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
 
 
 def _gem_steps(pins: Any, pin: Pin, latest: str) -> list[str]:
-    return [
-        f"CFN_NAG_GEM_VERSION -> {latest}",
-        f'{GEMFILE}: gem "{CFN_NAG_GEM}", "{latest}"',
+    steps = [
+        (
+            f"{GEM_PINS[pin.tool]} -> {latest}, once rubygems.org shows {latest}'s "
+            "required Ruby version admits the Ruby the image installs (the "
+            "Dockerfile's `ruby=` apt pin)"
+        )
+    ]
+    if pin.tool == BUNDLER_GEM:
+        # Bundler is not in the Gemfile; the lockfile records the Bundler that wrote
+        # it, and the image installs that one (the Dockerfile ARG step follows).
+        steps.append(f"{GEMFILE}.lock: its BUNDLED WITH line -> {latest}")
+        return steps
+    return steps + [
+        f'{GEMFILE}: gem "{pin.tool}", "{latest}"',
         (
             f"{GEMFILE}.lock: regenerate with "
-            f"`bundle lock --update {CFN_NAG_GEM}` in that directory"
+            f"`bundle lock --update {pin.tool}` in that directory"
         ),
     ]
 
