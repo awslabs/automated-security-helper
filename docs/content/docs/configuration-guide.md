@@ -374,12 +374,12 @@ directory, or does not run it on that directory:
   glob characters escaped, unless its path holds a comma, a double quote or a line
   break, which trivy's option cannot carry.
 - semgrep and opengrep skip every link, inside the tree or not (measured with
-  semgrep 1.180.0 and opengrep 1.30.2). Their `--exclude` cannot name one path: a
-  pattern with a `/` is anchored at semgrep's project root, the git checkout's root
-  when the scanned directory is inside one, and opengrep matches a top-level name at
-  every depth. So a link's own name is passed only when no other file or directory
-  in the tree has that name, and the name holds only letters, digits and
-  `. _ + @ = ~ -`.
+  semgrep 1.180.0 and opengrep 1.30.2), and get no exclusion for one. Their
+  `--exclude` cannot name one path: semgrep matches a pattern against paths below
+  the git checkout's root when the scanned directory is inside one, and opengrep
+  matches a top-level name at every depth. A link's name passed in `--exclude` could
+  be one of the scanned directory's own names, and then semgrep left out every file
+  in it.
 - snyk-code uploads the files it reads to Snyk, `snyk code test` has no option that
   leaves out one path, and how it treats links has not been measured. So ASH does
   not run it on a directory holding such a link.

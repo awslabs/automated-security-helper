@@ -31,7 +31,6 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
     ToolExtraArg,
 )
-from automated_security_helper.utils.link_exclusions import grep_excludes
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -416,19 +415,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         target_results_dir.mkdir(exist_ok=True, parents=True)
 
-        # The uniquely named links leaving the target, for this resolution only
-        # (extra_args persists across scan() calls). Both tools follow no link;
-        # see utils/link_exclusions.py for why only unique names are passed.
-        original_extra_args = list(self.args.extra_args)
-        self.args.extra_args.extend(
-            ToolExtraArg(key="--exclude", value=name) for name in grep_excludes(target)
-        )
-        try:
-            final_args = self._resolve_arguments(
-                target=target, results_file=results_file
-            )
-        finally:
-            self.args.extra_args = original_extra_args
+        # No --exclude for links leaving the target: semgrep 1.180.0 and opengrep
+        # 1.30.2 follow no link (measured), and their --exclude cannot name one
+        # path. semgrep matches a pattern against paths below its project root, the
+        # git work tree's root when the target is a directory inside one, so even a
+        # name nothing below the target has can be one of the target's own
+        # directories, and then it leaves out the whole target.
+        final_args = self._resolve_arguments(target=target, results_file=results_file)
 
         env_vars = self.extra_subprocess_env()
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None

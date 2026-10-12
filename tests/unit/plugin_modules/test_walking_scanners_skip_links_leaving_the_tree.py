@@ -17,10 +17,11 @@ the kinds below, so a new one cannot be added without deciding which:
   link is passed in ``--skip-files`` with the glob characters escaped; a path with a
   comma is not, because trivy splits the value on commas.
 - semgrep and opengrep skip every link (measured with semgrep 1.180.0 and opengrep
-  1.30.2), and their ``--exclude`` cannot name one path: an anchored pattern is
-  anchored at semgrep's project root, the git work tree's root when the target is
-  inside one, and opengrep matches a top-level name at every depth. So a link's
-  name is passed, unanchored, only when nothing else in the tree has that name.
+  1.30.2), and their ``--exclude`` cannot name one path: semgrep matches a pattern
+  against paths below the git work tree's root when the target is inside one, and
+  opengrep matches a top-level name at every depth. So no link is passed: a name
+  passed when nothing below the target had it could still be one of the target's
+  own directories, and then it left out the whole target.
 - snyk-code uploads what it reads, has no option that leaves out one path, and how
   it treats links is not measured, so a target with such a link is not scanned.
 """
@@ -37,6 +38,7 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ScannerError
+from tests.utils.git_fixture import run_git
 
 PluginContext.model_rebuild()
 
@@ -60,8 +62,8 @@ LINK_HANDLING = {
     "grype": "follows no such link; excluded too",
     "syft": "follows no such link; excluded too",
     "trivy-repo": "follows no link; excluded too",
-    "semgrep": "follows no link; excluded when the name is unique",
-    "opengrep": "follows no link; excluded when the name is unique",
+    "semgrep": "follows no link; not excluded",
+    "opengrep": "follows no link; not excluded",
     "snyk-code": "the target refused",
 }
 
@@ -293,42 +295,64 @@ def grep_scanner_class(request):
     return OpengrepScanner, OpengrepScannerConfig
 
 
-def test_a_grep_scanner_is_given_a_uniquely_named_link_and_nothing_else(
+def _added_excludes(scanner, source: Path) -> list[str]:
+    """The ``--exclude`` values the scan adds to the scanner's configured ones."""
+    configured = [a.value for a in scanner.args.extra_args if a.key == "--exclude"]
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+    added = list(_values(argv, "--exclude"))
+    for value in configured:
+        added.remove(value)
+    return added
+
+
+def test_a_grep_scanner_is_given_no_link_exclusion(
     tmp_path, monkeypatch, grep_scanner_class
 ):
+    """semgrep and opengrep follow no link, and their --exclude cannot name one path.
+
+    A link's name was passed when nothing else below the target had it. semgrep
+    matches that name against paths below its project root, the git work tree's
+    root, so a name that is also one of the target's own directories hid the whole
+    target (54 results down to 0, measured with semgrep 1.180.0).
+    """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     scanner_class, config_class = grep_scanner_class
     source = _tree(
         tmp_path,
-        {"app.py": "x = 1\n", "sub/shared.py": "y = 2\n", "pkg/main.py": ""},
+        {"app.py": "x = 1\n"},
         {
-            # Unique names: passed, whatever directory they sit in.
             "link_out.py": "outside/secret.py",
             "deep/vendor_conf.yml": "outside/config.yml",
-            "main.py/x.py": "outside/secret.py",
-            # shared.py is also a regular file elsewhere, and main.py is a file
-            # and a directory elsewhere: an unanchored name would leave those
-            # out too, so it is not passed.
-            "shared.py": "outside/secret.py",
-            "other/main.py": "outside/secret.py",
-            # A name with characters the pattern syntax reads: not passed.
-            "we[1].py": "outside/secret.py",
-            # Inside the tree: never passed.
+            "dir_out": "outside",
             "in_tree.py": "app.py",
         },
     )
     scanner = scanner_class(context=_context(source, tmp_path), config=config_class())
     before = [(a.key, a.value) for a in scanner.args.extra_args]
 
-    argv, _, _ = scanner._execute_scan(source, "source", [])
-
-    # The scanner's own default excludes are passed as before.
-    defaults = [value for key, value in before if key == "--exclude"]
-    added = list(_values(argv, "--exclude"))
-    for value in defaults:
-        added.remove(value)
-    assert sorted(added) == ["link_out.py", "vendor_conf.yml", "x.py"]
+    assert _added_excludes(scanner, source) == []
     assert [(a.key, a.value) for a in scanner.args.extra_args] == before
+
+
+def test_a_link_named_like_the_targets_own_directory_does_not_hide_it(
+    tmp_path, monkeypatch, grep_scanner_class
+):
+    """The target is a directory inside a git work tree, as a workspace project is."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    scanner_class, config_class = grep_scanner_class
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git("init", "-q", str(repo), check=True)
+    project = repo / "proj"
+    (project / "sub").mkdir(parents=True)
+    (project / "real.py").write_text("x = 1\n", encoding="utf-8")
+    (project / "sub" / "proj").symlink_to(tmp_path / "elsewhere" / "proj")
+    scanner = scanner_class(context=_context(project, tmp_path), config=config_class())
+
+    added = _added_excludes(scanner, project)
+
+    assert "proj" not in added
+    assert added == []
 
 
 # ---------------------------------------------------------------------------

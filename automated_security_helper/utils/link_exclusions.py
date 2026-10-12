@@ -13,12 +13,14 @@ not read one (measured, see each function), so the values are a second guard: a
 link that cannot be written exactly is left out of the option rather than the
 target refused, because a pattern that also matched other paths would hide files
 the scan should read.
+
+semgrep and opengrep get no such value: they follow no link either, and their
+``--exclude`` cannot name one path (see ``_grep_scanner_base._execute_scan``).
 """
 
 from __future__ import annotations
 
 import os
-import string
 from pathlib import Path
 from typing import List
 
@@ -31,10 +33,6 @@ _DOUBLESTAR_SPECIAL = frozenset("\\*?[]{}")
 #: The characters trivy's ``--skip-files`` cannot carry: its value is read as one
 #: line of CSV, so a comma splits it and a quote or a line break changes it.
 _TRIVY_UNSAFE = frozenset(',"\r\n')
-
-#: The characters a link's name may hold for it to be passed to semgrep or opengrep,
-#: which read ``--exclude`` as an ignore-file pattern.
-_GREP_NAME_CHARACTERS = frozenset(string.ascii_letters + string.digits + "._+@=~-")
 
 
 def doublestar_literal(text: str) -> str:
@@ -81,42 +79,3 @@ def trivy_skip_files(target: str | Path) -> List[str]:
         for relative in file_links_leaving_tree(target)
         if not any(character in _TRIVY_UNSAFE for character in relative)
     ]
-
-
-def grep_excludes(target: str | Path) -> List[str]:
-    """``--exclude`` values for semgrep and opengrep, for links leaving ``target``.
-
-    semgrep 1.180.0 and opengrep 1.30.2 skip every link, inside the tree or not
-    (measured, in a git work tree and outside one). Their ``--exclude`` cannot name
-    one path: semgrep anchors a pattern holding a ``/`` at its project root, which
-    is the git work tree's root when the target is a directory inside one, so
-    ``sub/x.py`` matched nothing there; and opengrep matched ``/x.py`` at every
-    depth (measured). A pattern without a ``/`` matches that name at every depth in
-    both. So a link's own name is passed only when no other file or directory in
-    the tree has it (compared case-insensitively), and the name holds only letters,
-    digits and ``. _ + @ = ~ -`` and does not start with ``-``.
-    """
-    all_files: List[str] = []
-    links = file_links_leaving_tree(target, all_files=all_files)
-    if not links:
-        return []
-    counts: dict[str, int] = {}
-    seen_directories: set[str] = set()
-    for relative in all_files:
-        parts = relative.split("/")
-        for depth, part in enumerate(parts[:-1]):
-            directory = "/".join(parts[: depth + 1])
-            if directory not in seen_directories:
-                seen_directories.add(directory)
-                counts[part.casefold()] = counts.get(part.casefold(), 0) + 1
-        counts[parts[-1].casefold()] = counts.get(parts[-1].casefold(), 0) + 1
-    excludes = []
-    for relative in links:
-        name = relative.rsplit("/", 1)[-1]
-        if (
-            counts.get(name.casefold()) == 1
-            and not name.startswith("-")
-            and all(character in _GREP_NAME_CHARACTERS for character in name)
-        ):
-            excludes.append(name)
-    return excludes
