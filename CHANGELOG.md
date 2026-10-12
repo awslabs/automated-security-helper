@@ -229,9 +229,12 @@
     both scanners then run with `--skip-db-update` and `--skip-java-db-update` (and
     `--skip-check-update` when `misconfig` is on), pointed at that cache with
     `--cache-dir`. The update is the one sandboxed scans already use
-    (`utils/content_db_refresh.py`): it runs from an empty directory outside the
-    scanned tree with an explicit `--config`, so a `trivy.yaml` in the scanned
-    repository cannot change where the database comes from. An image built with `OFFLINE=YES`
+    (`utils/content_db_refresh.py`): it runs from a directory outside the
+    scanned tree with an explicit `--config` (the operator's config file when the
+    scan uses one, otherwise an empty one ASH ships), so a `trivy.yaml` in the
+    scanned repository cannot change where the database comes from. Both scanners
+    take their `--config` the same way: `config_file` from the operator, else
+    `TRIVY_CONFIG` for a file outside the scanned tree, else the empty config. An image built with `OFFLINE=YES`
     ships the database (its build fails if the download does) and holds it to `warn` rather than `fail`: from a day after it
     was published that image's scans still pass, and every report records the stale
     database, while grype's database and the offline rulesets keep `fail`.
@@ -247,7 +250,7 @@
     Both scanners run with `--exit-code=0`, so `TRIVY_EXIT_CODE` or an `exit-code`
     in the operator's trivy.yaml no longer turns a scan with findings into a failure.
     An operator's `TRIVY_SKIP_DB_UPDATE=true` (or `db.skip-update: true` in the
-    honored `config_file`) turns ASH's database update off too, with a warning;
+    operator's config file) turns ASH's database update off too, with a warning;
     the scan reads the cached database, and the staleness check still applies.
     Both scanners pass `--offline-scan` on every scan, online too: trivy scans never
     contact package registries, and the database refresh is a separate step. Maven
@@ -674,9 +677,9 @@
   could turn on a VEX repository download or client/server mode, and a `.syft.yaml`
   remote license and package lookups; both reached the network with every offline flag
   ASH passed, and online both decided what was reported. trivy now always gets
-  `--config` naming `TRIVY_CONFIG` when that is outside the tree, or an empty config
-  ASH ships, and syft runs from outside the tree and is given only a `config_file`
-  outside it. A repository that tuned trivy or syft through those files gets their
+  `--config` naming the operator's `scanners.trivy-repo.options.config_file`, else
+  `TRIVY_CONFIG` when that is outside the tree, or an empty config ASH ships, and
+  syft runs from outside the tree and is given only a `config_file` outside it. A repository that tuned trivy or syft through those files gets their
   defaults; put the settings in a file outside the tree (`TRIVY_CONFIG`,
   `scanners.syft.options.config_file`). Offline, trivy's version check and telemetry
   are turned off by `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY`, which an
@@ -1251,9 +1254,11 @@
   scanner's `honor_inline_ignores`. Tool output quoted in a scanner's error
   has terminal escape sequences removed and other control characters escaped.
 - **trivy-repo names its own config file and modules directory.** It always passes
-  `--config` and `--module-dir`: by default an empty config file and an empty
+  `--config` and `--module-dir`: by default `TRIVY_CONFIG` when that names a file
+  outside the scanned tree, or else an empty config ASH ships, and an empty
   directory that ASH makes outside the scanned tree for each run and removes when
-  the run ends, so trivy does not load a `trivy.yaml` from the scanned repository. New options `scanners.trivy-repo.options.config_file` and
+  the run ends, so trivy does not load a `trivy.yaml` from the scanned repository.
+  New options `scanners.trivy-repo.options.config_file` and
   `module_dir` name others; they are honored when set through `--config-overrides`
   or a config file outside the scanned tree, for paths outside that tree, and are
   ignored with a warning otherwise.

@@ -68,6 +68,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     get_severity_metrics_from_sarif,
@@ -210,8 +211,9 @@ def _assert_expected(report: SarifReport) -> None:
 
 @pytest.fixture(autouse=True)
 def _online(monkeypatch):
-    """No test here inherits ASH_OFFLINE from the shell running it."""
+    """No test here inherits ASH_OFFLINE, or a TRIVY_CONFIG, from the shell running it."""
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    monkeypatch.delenv("TRIVY_CONFIG", raising=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -255,9 +257,8 @@ def test_default_argv(tmp_path):
     results = scanner.results_dir / "source" / "results_sarif.sarif"
     written = {
         flag: next(a for a in argv if a.startswith(f"{flag}="))[len(flag) + 1 :]
-        for flag in ("--config", "--ignorefile", "--secret-config")
+        for flag in ("--ignorefile", "--secret-config")
     }
-    assert Path(written["--config"]).name == "trivy-config.yaml"
     assert Path(written["--ignorefile"]).name == "trivyignore-empty"
     assert Path(written["--secret-config"]).name == "trivy-secret-empty.yaml"
     assert all(_ashs_own(scanner, value) for value in written.values())
@@ -273,7 +274,7 @@ def test_default_argv(tmp_path):
         "--skip-version-check",
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
-        f"--config={written['--config']}",
+        f"--config={EMPTY_TOOL_CONFIG.as_posix()}",
         f"--ignorefile={written['--ignorefile']}",
         f"--secret-config={written['--secret-config']}",
         source.as_posix(),
@@ -323,7 +324,11 @@ def test_the_ash_config_and_ignore_files_are_empty(tmp_path):
     ):
         value = next(a for a in argv if a.startswith(flag))[len(flag) :]
         assert Path(value).is_file() and Path(value).read_text() == content
-        assert _ashs_own(scanner, value)
+        if flag == "--config=":
+            # The empty config ASH ships, which no scanner can write.
+            assert Path(value) == EMPTY_TOOL_CONFIG
+        else:
+            assert _ashs_own(scanner, value)
 
 
 @pytest.mark.parametrize(
@@ -418,7 +423,7 @@ def test_a_trivy_config_set_by_the_scanned_tree_is_not_passed(
         argv = _argv(scanner, scanner.context.source_dir)
 
     (config_arg,) = [a for a in argv if a.startswith("--config=")]
-    assert config_arg.endswith("/trivy-config.yaml")
+    assert config_arg == f"--config={EMPTY_TOOL_CONFIG.as_posix()}"
     assert planted.resolve().as_posix() not in " ".join(argv)
     assert "scanners.trivy.options.config_file" in caplog.text
 
@@ -453,7 +458,7 @@ def test_an_operator_override_names_a_trivy_config_outside_the_tree(tmp_path):
 @pytest.mark.parametrize(
     "option, flag, ash_name",
     [
-        ("config_file", "--config", "trivy-config.yaml"),
+        ("config_file", "--config", EMPTY_TOOL_CONFIG.name),
         ("ignore_file", "--ignorefile", None),
         ("secret_config_file", "--secret-config", None),
     ],
@@ -465,7 +470,7 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
     """A path written in the tree goes where the tree's links send it, so the tree
     would choose which file trivy reads: a trivy.yaml that loads modules, or an
     ignore file that drops findings. trivy gets ASH's own file instead."""
-    for env in ("TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
+    for env in ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
         monkeypatch.delenv(env, raising=False)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -483,9 +488,11 @@ def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
 
     assert (outside / "trivy.yaml").resolve().as_posix() not in " ".join(argv)
     (value,) = [a[len(flag) + 1 :] for a in argv if a.startswith(f"{flag}=")]
-    assert _ashs_own(scanner, value)
     if ash_name is not None:
-        assert value.endswith(f"/{ash_name}")
+        # The config ASH ships rather than one it writes for this run.
+        assert Path(value) == EMPTY_TOOL_CONFIG and value.endswith(f"/{ash_name}")
+    else:
+        assert _ashs_own(scanner, value)
     assert f"Ignoring scanners.trivy.options.{option}" in caplog.text
     assert "symbolic link" in caplog.text
 
@@ -1360,7 +1367,8 @@ def test_trivy_repo_passes_its_own_config_and_an_empty_modules_dir(
 
     config = _flag(argv, "--config")
     modules = _flag(argv, "--module-dir")
-    assert config.name == "trivy-config.yaml" and _ashs_own(scanner, str(config))
+    # The empty config ASH ships, as trivy gets (TrivyScannerBase._trivy_config_file).
+    assert config == EMPTY_TOOL_CONFIG
     assert config.read_text() == ""
     assert modules.name == "trivy-modules" and _ashs_own(scanner, str(modules))
     assert list(modules.iterdir()) == []
@@ -1401,7 +1409,7 @@ def test_trivy_repo_ignores_a_config_file_the_scanned_tree_sets(
             tmp_path, monkeypatch, config_file="trivy.yaml", module_dir="."
         )
 
-    assert _flag(argv, "--config").name == "trivy-config.yaml"
+    assert _flag(argv, "--config") == EMPTY_TOOL_CONFIG
     assert _flag(argv, "--module-dir").name == "trivy-modules"
     assert planted.resolve().as_posix() not in " ".join(argv)
     assert "scanners.trivy-repo.options.config_file" in caplog.text
@@ -1450,7 +1458,7 @@ def test_trivy_repo_refuses_operator_paths_in_the_tree_that_link_out_of_it(
             module_dir="mods",
         )
 
-    assert _flag(argv, "--config").name == "trivy-config.yaml"
+    assert _flag(argv, "--config") == EMPTY_TOOL_CONFIG
     assert _flag(argv, "--module-dir").name == "trivy-modules"
     assert outside.resolve().as_posix() not in " ".join(argv)
     for option in ("config_file", "module_dir"):
@@ -1847,6 +1855,6 @@ def test_outside_trivy_repo_paths_set_by_the_scanned_tree_are_not_passed(
         module_dir=str(elsewhere / "modules"),
     )
 
-    assert _flag(argv, "--config").name == "trivy-config.yaml"
+    assert _flag(argv, "--config") == EMPTY_TOOL_CONFIG
     assert _flag(argv, "--module-dir").name == "trivy-modules"
     assert elsewhere.resolve().as_posix() not in " ".join(argv)

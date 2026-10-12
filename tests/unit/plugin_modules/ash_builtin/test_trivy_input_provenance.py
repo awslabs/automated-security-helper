@@ -36,6 +36,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfig,
     TrivyRepoScannerConfigOptions,
 )
+from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 
 PluginContext.model_rebuild()
 
@@ -49,6 +50,7 @@ OPTIONS = [
 
 @pytest.fixture(autouse=True)
 def _no_operator_env(monkeypatch):
+    monkeypatch.delenv("TRIVY_CONFIG", raising=False)
     monkeypatch.delenv("TRIVY_IGNOREFILE", raising=False)
     monkeypatch.delenv("TRIVY_SECRET_CONFIG", raising=False)
     try:
@@ -129,12 +131,16 @@ def _inside(path: Path, tree: Path) -> bool:
     return Path(os.path.realpath(path)).is_relative_to(Path(os.path.realpath(tree)))
 
 
-def _is_ashs_own(passed: str, source: Path, content: str) -> bool:
-    """Whether ``passed`` is the file ASH writes for trivy: outside the tree, setting nothing.
+def _is_ashs_own(passed: str, flag: str, source: Path, content: str) -> bool:
+    """ASH's own file for ``flag``: for ``--config`` the empty config ASH ships
+    (``EMPTY_TOOL_CONFIG``), and for the other two the file ASH writes for trivy,
+    outside the tree and setting nothing.
 
-    Where ASH writes it is ``config/tool_config_trust.empty_tool_config``'s choice
-    (tests/unit/config/test_generated_tool_configs_are_outside_the_tree.py).
+    Where ASH writes those is ``config/tool_config_trust.empty_tool_config``'s
+    choice (tests/unit/config/test_generated_tool_configs_are_outside_the_tree.py).
     """
+    if flag == "--config":
+        return Path(passed) == EMPTY_TOOL_CONFIG
     path = Path(passed)
     return not _inside(path, source) and path.read_text(encoding="utf-8") == content
 
@@ -177,7 +183,7 @@ def test_a_value_from_the_scanned_trees_config_is_not_used(
     )
 
     assert passed != _real(chosen)
-    assert _is_ashs_own(passed, source, content)
+    assert _is_ashs_own(passed, flag, source, content)
 
 
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
@@ -273,6 +279,43 @@ def test_a_relative_path_in_the_environment_is_taken_from_the_working_directory(
     assert passed == _real(workdir / "operator-file")
 
 
+@pytest.mark.parametrize("set_by", ["unset", "the scanned tree's config"])
+@pytest.mark.parametrize("scanner", SCANNERS)
+def test_trivy_config_from_the_environment_is_used_for_a_file_outside_the_tree(
+    tmp_path, monkeypatch, scanner, set_by
+):
+    """``config_file`` unset or refused falls back to ``TRIVY_CONFIG``, the operator's
+    environment, as ``ignore_file`` falls back to ``TRIVY_IGNOREFILE``."""
+    source = _source(tmp_path)
+    chosen = _outside(tmp_path, "trivy.yaml", "")
+    monkeypatch.setenv("TRIVY_CONFIG", str(chosen))
+    value = None
+    if set_by != "unset":
+        value = str(_outside(tmp_path, "tree-chose.yaml", ""))
+        _write_config(source / ".ash" / ".ash.yaml", scanner, "config_file", value)
+    config = resolve_config(source_dir=source)
+
+    argv = _argv(tmp_path, source, config, scanner, "config_file", value)
+
+    assert _passed(argv, "--config") == _real(chosen)
+
+
+@pytest.mark.parametrize("scanner", SCANNERS)
+def test_trivy_config_from_the_environment_inside_the_tree_is_not_used(
+    tmp_path, monkeypatch, scanner
+):
+    source = _source(tmp_path)
+    planted = source / "trivy.yaml"
+    planted.write_text("module:\n  dir: ./planted\n", encoding="utf-8")
+    monkeypatch.setenv("TRIVY_CONFIG", str(planted))
+    config = resolve_config(source_dir=source)
+
+    argv = _argv(tmp_path, source, config, scanner, "config_file", None)
+
+    assert _passed(argv, "--config") == EMPTY_TOOL_CONFIG.as_posix()
+    assert _real(planted) not in " ".join(argv)
+
+
 # --------------------------------------------------------------------------- #
 # The path checked is the path used
 # --------------------------------------------------------------------------- #
@@ -347,7 +390,7 @@ def test_trivy_is_handed_the_path_that_was_checked(
         os.path.realpath(source / value if spelling.startswith("relative") else chosen)
     )
     if spelling == "relative-dotdot-through-link" or _inside(target, source):
-        assert _is_ashs_own(passed, source, content)
+        assert _is_ashs_own(passed, flag, source, content)
     else:
         assert passed == _real(target) == _real(chosen)
 
@@ -375,7 +418,7 @@ def test_windows_dotdot_semantics_refuse_the_in_tree_target(
     passed = _passed(_argv(tmp_path, source, config, scanner, option, value), flag)
 
     assert passed != _real(lexical)
-    assert _is_ashs_own(passed, source, content)
+    assert _is_ashs_own(passed, flag, source, content)
 
 
 @pytest.mark.parametrize("option, flag, name, content", OPTIONS)
@@ -399,7 +442,7 @@ def test_an_outside_symlink_into_the_tree_is_not_used(
 
     passed = _passed(argv, flag)
     assert passed not in (_real(planted), link.as_posix())
-    assert _is_ashs_own(passed, source, content)
+    assert _is_ashs_own(passed, flag, source, content)
 
 
 @pytest.mark.parametrize("spelling", ["relative", "dotdot", "symlink", "home", "tree"])

@@ -168,11 +168,11 @@ otherwise undo the flag.
 
 #### What offline mode turns off
 
-Online and offline, trivy-repo and syft read no config file from the scanned tree,
-because a `trivy.yaml` there can turn on a VEX repository download or client/server
-mode and a `.syft.yaml` remote license and package lookups. trivy always gets
-`--config`, naming `TRIVY_CONFIG` when that is a file outside the scanned tree and an
-empty config ASH ships otherwise; syft runs from outside the tree and is given only a
+Online and offline, trivy, trivy-repo and syft read no config file from the scanned
+tree, because a `trivy.yaml` there can turn on a VEX repository download or
+client/server mode and a `.syft.yaml` remote license and package lookups. trivy always
+gets `--config`, naming the operator's `config_file`, else `TRIVY_CONFIG` when that is
+a file outside the scanned tree, and an empty config ASH ships otherwise; syft runs from outside the tree and is given only a
 `config_file` outside it.
 
 Besides the database and rule downloads, offline mode turns off what the scanners do

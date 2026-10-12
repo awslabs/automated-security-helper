@@ -3,10 +3,13 @@
 
 """The config files ASH writes for a scanner's tool are outside the scanned tree.
 
-bandit, grype, syft, trivy, trivy-repo, ferret-scan, actionlint and cfn-lint each get
-a config file ASH writes when the operator names none, one that sets nothing, so the tool does not read one
-from the tree on its own (``config/tool_config_trust.empty_tool_config``); gitleaks
-gets one that names only its default rules. trivy-repo's modules directory and
+bandit, grype, syft, ferret-scan, actionlint and cfn-lint each get a config file ASH
+writes when the operator names none, one that sets nothing, so the tool does not read
+one from the tree on its own (``config/tool_config_trust.empty_tool_config``); gitleaks
+gets one that names only its default rules, and trivy and trivy-repo get the ignore
+file and secret config ASH writes. Their ``--config`` is the empty config ASH ships
+(``content_db_refresh.EMPTY_TOOL_CONFIG``), which is written once, with ASH, and not
+per run. trivy-repo's modules directory and
 gitleaks' ignore directory are empty directories ASH makes the same way
 (``empty_tool_directory``). The
 output directory defaults to ``<source>/.ash/ash_output``, so the scanner's results
@@ -132,13 +135,6 @@ CASES = [
     ),
     Case(
         "trivy-repo",
-        "--config",
-        "source/trivy-config.yaml",
-        "",
-        "source/results_sarif.sarif",
-    ),
-    Case(
-        "trivy-repo",
         "--module-dir",
         "source/trivy-modules",
         "",
@@ -155,7 +151,6 @@ CASES = [
         "{}\n",
         "source/results_sarif.sarif",
     ),
-    Case("trivy", "--config", "trivy-config.yaml", "", "source/results_sarif.sarif"),
     Case(
         "actionlint",
         "-config-file",
@@ -506,15 +501,20 @@ def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
 def test_trivy_s_database_probe_names_no_config_its_run_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scanner_name: str
 ) -> None:
-    """The next probe of trivy's database must not name the removed empty config.
+    """The next probe of trivy's database must not name a file its run removed.
 
     The probe (``trivy version --config``) reads the database through the config
     the last scan passed, and the scanner's dependency check runs it again before
     each later target, offline. trivy 0.75.0 exits with "config file ... loading
     error: ... no such file or directory" when that file is gone, which would
-    read as "no usable database".
+    read as "no usable database". The config is the empty one ASH ships, which no
+    run removes, while the files the run wrote are gone.
     """
-    (case,) = [c for c in CASES if c.scanner == scanner_name and c.flag == "--config"]
+    from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
+
+    (case,) = [
+        c for c in CASES if c.scanner == scanner_name and c.flag == "--ignorefile"
+    ]
     context = _context(tmp_path, case)
     scanner = _scanner(case, context, monkeypatch)
     tool = _Tool(case, scanner)
@@ -524,7 +524,7 @@ def test_trivy_s_database_probe_names_no_config_its_run_removed(
     (run,) = tool.runs
     assert not run.path.exists()
     probed = scanner.content_database_probe_context().config_file
-    assert probed is None or Path(probed).is_file(), probed
+    assert probed == EMPTY_TOOL_CONFIG.as_posix() and Path(probed).is_file(), probed
 
 
 def test_constructing_ferret_scan_writes_no_config(

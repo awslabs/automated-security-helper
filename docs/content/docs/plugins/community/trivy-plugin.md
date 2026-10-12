@@ -117,7 +117,7 @@ scanners:
 | `offline`            | bool      | `false`                                      | Run offline even when ASH does not; ASH's offline mode applies regardless |
 | `scan_timeout`       | int       | `1800`                                       | Seconds ASH lets trivy run; ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies |
 
-trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. Unset, they name an empty config file and an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings)). A configured path that does not exist fails the scan.
+trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside the scanned tree, and only for paths outside that tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree, and otherwise an empty config ASH ships; `--module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
 
 `ignore_file` and `secret_config_file` follow the same rule, a relative path included. Unset or refused, trivy-repo uses `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` from the environment for a file outside the scanned tree (a relative path in either is taken from the working directory ASH runs in), and otherwise an empty file ASH writes outside the scanned tree, so a `.trivyignore` or `trivy-secret.yaml` in the scanned repository does not remove findings or disable secret rules.
 
@@ -1526,12 +1526,13 @@ version check and telemetry contact check.trivy.dev, and `--skip-check-update` c
 only the checks bundle. Variables rather than flags, because a trivy too old to know
 the flags refuses the command, while it ignores the variables.
 
-Online and offline, ASH passes `--config`: `TRIVY_CONFIG` when that names a file
-outside the scanned tree, otherwise an empty config ASH ships, so a `trivy.yaml` in
-the scanned repository is never read. Its settings can reach the network (a VEX
-repository, client/server mode) or change what is reported. A relative path in
-`TRIVY_CONFIG` is taken from the working directory ASH runs in, as one in
-`TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` is, not from the source directory.
+Online and offline, ASH passes `--config`: the operator's `config_file`, else
+`TRIVY_CONFIG` when that names a file outside the scanned tree, otherwise an empty
+config ASH ships, so a `trivy.yaml` in the scanned repository is never read. Its
+settings can reach the network (a VEX repository, client/server mode) or change
+what is reported. A relative path in `TRIVY_CONFIG` is taken from the working
+directory ASH runs in, as one in `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG` is,
+not from the source directory.
 
 Offline, trivy's Terraform checks do not run. trivy downloads the source of every
 `module` block it evaluates (a registry module from registry.terraform.io, a `git::`

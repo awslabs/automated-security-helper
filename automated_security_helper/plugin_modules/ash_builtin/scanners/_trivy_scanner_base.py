@@ -62,6 +62,7 @@ from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.config_trust import operator_path
 from automated_security_helper.utils.content_db_refresh import (
+    EMPTY_TOOL_CONFIG,
     default_cache_dir,
     prepare_content_db,
     scan_id_for,
@@ -147,12 +148,81 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     # The cache directory the last online scan was pointed at (--cache-dir), so
     # the staleness probe reads the same one (content_database_probe_context).
     _pinned_cache_dir: Optional[str] = PrivateAttr(default=None)
-    # The operator's --config file the last scan passed trivy, for the same
-    # reason: a trivy.yaml can name the cache (``cache.dir``). None when trivy got
-    # ASH's empty config, which sets nothing and is removed when its run ends;
-    # trivy exits with an error when --config names a file that is not there
-    # (measured with 0.75.0), so a later probe must not be handed it.
+    # The --config file the last scan passed trivy (_trivy_config_file), for the
+    # same reason: a trivy.yaml can name the cache (``cache.dir``).
     _scan_config_file: Optional[str] = PrivateAttr(default=None)
+
+    def _trivy_config_file(self) -> str:
+        """The trivy config file a scan passes as ``--config``, online and offline.
+
+        Without the flag trivy reads ``trivy.yaml`` from its working directory, the
+        scanned repository. A ``trivy.yaml`` there can drop findings with nothing in
+        the report saying so (``severity``, ``scan.skip-files``), load WASM modules
+        (``module.dir``), and turn on a VEX repository download or client/server
+        mode, both of which reach the network whatever offline flags ASH passes
+        (measured with trivy 0.75.0). So trivy always gets ``--config``:
+
+        1. ``options.config_file``, when ``_operator_path`` accepts it;
+        2. otherwise ``TRIVY_CONFIG``, which is the operator's environment, for a
+           file outside the scanned tree (``config/path_trust.honored_path``);
+        3. otherwise ``EMPTY_TOOL_CONFIG``, the empty config ASH ships, which every
+           sandbox backend mounts read-only and no scanner can write.
+
+        A path from 1 or 2 that is not a file fails the scan. The choice is kept for
+        the staleness probe (``content_database_probe_context``), and the database
+        update reads through the same file (``_shared_update_flags``).
+        """
+        chosen = self._operator_config_choice()
+        if chosen is not None:
+            key, value, path = chosen
+            self._scan_config_file = _existing_file(key, value, path)
+            return self._scan_config_file
+        if self.context is not None:
+            in_tree = Path(self.context.source_dir) / "trivy.yaml"
+            if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
+                self._warned_inputs.add(in_tree.as_posix())
+                name = self.config.name if self.config is not None else "trivy"
+                self._plugin_log(
+                    f"Ignoring {in_tree.as_posix()}: it is inside the scanned tree, "
+                    "and its settings can reach the network or change what is "
+                    f"reported. Set scanners.{name}.options.config_file or "
+                    "TRIVY_CONFIG to a file outside the tree to use one.",
+                    level=logging.WARNING,
+                )
+        self._scan_config_file = EMPTY_TOOL_CONFIG.as_posix()
+        return self._scan_config_file
+
+    def _operator_config_choice(self) -> Optional[tuple[str, Any, Path]]:
+        """The operator's trivy config, as (where it was set, its value, its path).
+
+        ``options.config_file`` when ``_operator_path`` accepts it, else
+        ``TRIVY_CONFIG`` when ``honored_path`` does; None when neither names one.
+        Whether the file exists is the caller's question.
+        """
+        if self.context is None:
+            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+        name = self.config.name if self.config is not None else "trivy"
+        options = getattr(self.config, "options", None)
+        value = getattr(options, "config_file", None)
+        if value:
+            path = self._operator_path(
+                "config_file",
+                value,
+                "trivy gets TRIVY_CONFIG, if set, or ASH's empty config instead.",
+            )
+            if path is not None:
+                return f"scanners.{name}.options.config_file", value, path
+        from_env = os.environ.get("TRIVY_CONFIG")
+        if from_env:
+            path = honored_path(
+                from_env,
+                source_dir=Path(self.context.source_dir),
+                key="TRIVY_CONFIG",
+                config=getattr(self.context, "config", None),
+            )
+            if path is not None:
+                return "TRIVY_CONFIG", from_env, path
+        return None
 
     def _ignore_file(self) -> str:
         """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
@@ -294,7 +364,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         sandbox mounts. The scan-time staleness check
         (``utils/content_db_staleness.py``) still measures the database after.
         An update the operator's own trivy settings turn off (``TRIVY_SKIP_DB_UPDATE``,
-        or ``db.skip-update`` in the honored ``config_file``) is left out, with a
+        or ``db.skip-update`` in the operator's config file) is left out, with a
         warning (``content_db_refresh.trivy_update_opt_outs``), and the scan reads
         the cache as it is.
 
@@ -309,17 +379,13 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         # From the host's environment only: the update runs unsandboxed, so nothing
         # a scanner layers on (extra_env) may choose where it writes.
         cache = default_cache_dir("trivy", snapshot_environ())
-        # The operator's trivy.yaml, under the rule the scan's --config follows,
-        # so a database mirror it names applies to the update; otherwise the
-        # update gets an empty config of its own.
+        # The operator's trivy.yaml (options.config_file or TRIVY_CONFIG), under the
+        # rule the scan's --config follows (_trivy_config_file), so a database
+        # mirror it names applies to the update; otherwise prepare_content_db
+        # passes EMPTY_TOOL_CONFIG.
+        chosen = self._scan_config_file or self._operator_config_file()
         operator_config = (
-            self._operator_path(
-                "config_file",
-                options.config_file,
-                "The database update runs with an empty config instead.",
-            )
-            if options.config_file
-            else None
+            chosen if chosen and Path(chosen) != EMPTY_TOOL_CONFIG else None
         )
         prepare_content_db(
             "trivy",
@@ -360,19 +426,17 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     def _operator_config_file(self) -> Optional[str]:
         """The operator's trivy config file, when it is honored and exists.
 
-        For a probe that runs before the scan has chosen its ``--config`` (the
-        offline dependency check), so it reads through the same file the scan will.
+        ``_operator_config_choice``, for a probe that runs before the scan has chosen
+        its ``--config`` (the offline dependency check), so it reads through the same
+        file the scan will. A file that does not exist is not an error here: the
+        scan itself then fails on it (``_trivy_config_file``).
         """
-        options = getattr(self.config, "options", None)
-        value = getattr(options, "config_file", None)
-        if not value or self.context is None:
+        if self.context is None:
             return None
-        path = self._operator_path(
-            "config_file",
-            value,
-            "trivy runs with ASH's empty config instead.",
-        )
-        return path.as_posix() if path is not None and path.is_file() else None
+        chosen = self._operator_config_choice()
+        if chosen is None or not chosen[2].is_file():
+            return None
+        return chosen[2].as_posix()
 
     def _operator_path(
         self, option: str, value: Path | str, why: str

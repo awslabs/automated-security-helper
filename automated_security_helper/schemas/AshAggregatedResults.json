@@ -21548,7 +21548,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy config file (trivy.yaml), passed as trivy --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. A path that does not exist fails the scan.",
+          "description": "A trivy config file (trivy.yaml), passed as trivy --config. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree, and otherwise an empty config of its own, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. A path that does not exist fails the scan.",
           "title": "Config File"
         },
         "disable_telemetry": {

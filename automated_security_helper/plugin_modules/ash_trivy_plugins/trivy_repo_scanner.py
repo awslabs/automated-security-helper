@@ -12,10 +12,7 @@ from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.config.tool_config_trust import (
-    empty_tool_config,
-    empty_tool_directory,
-)
+from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     TrivyScannerBase,
@@ -147,14 +144,16 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy config file (trivy.yaml), passed as trivy --config. Unset, "
-                "ASH passes an empty one, so trivy does not load a trivy.yaml from the "
-                "directory it runs in. Honored only when set by --config-overrides "
-                "or a config file outside the scanned tree, for a file outside that "
-                "tree; otherwise ignored with a warning. A relative path is taken "
-                "from the directory of the config file that sets it, or from the "
-                "working directory for --config-overrides, not from the source "
-                "directory. A path that does not exist fails the scan."
+                "A trivy config file (trivy.yaml), passed as trivy --config. Honored "
+                "only when set by --config-overrides or a config file outside the "
+                "scanned tree, for a file outside that tree; otherwise ignored with a "
+                "warning. A relative path is taken from the directory of the config "
+                "file that sets it, or from the working directory for "
+                "--config-overrides, not from the source directory. Unset or "
+                "ignored, ASH passes TRIVY_CONFIG when that names a file outside the "
+                "scanned tree, and otherwise an empty config of its own, so trivy "
+                "does not load a trivy.yaml from the directory it runs in. A path "
+                "that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -316,35 +315,15 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         trivy runs with the scan target as its working directory and loads a
         ``trivy.yaml`` from there unless ``--config`` names another, and loads the
         modules in ``--module-dir`` (or the config's ``module.dir``). Both are
-        always passed: the operator's, when ``_operator_path`` accepts them, and
-        otherwise an empty config file and an empty modules directory that ASH
-        creates outside the scanned tree for this run (``empty_tool_config``,
-        ``empty_tool_directory``), new each time and removed when the run ends.
+        always passed. The config is ``TrivyScannerBase._trivy_config_file``'s, as
+        for ``trivy``: the operator's ``config_file`` or ``TRIVY_CONFIG``, else the
+        empty config ASH ships. The modules directory is the operator's, when
+        ``_operator_path`` accepts it, and otherwise an empty one that ASH creates
+        outside the scanned tree for this run (``empty_tool_directory``), new each
+        time and removed when the run ends.
         """
         options = self.config.options
-        config_file: Optional[Path] = None
-        if options.config_file:
-            config_file = self._operator_path(
-                "config_file",
-                options.config_file,
-                "trivy-repo runs with ASH's empty config instead.",
-            )
-            if config_file is not None and not config_file.is_file():
-                raise ScannerError(
-                    f"scanners.trivy-repo.options.config_file is "
-                    f"{str(options.config_file)!r}, which is not a file (resolved to "
-                    f"{config_file.as_posix()}). Fix the path or unset the option."
-                )
-        # Recorded for the staleness probe only when it is the operator's: ASH's
-        # empty one is removed with the run, and trivy fails on a --config that
-        # is missing (TrivyScannerBase._scan_config_file).
-        self._scan_config_file = (
-            config_file.resolve().as_posix() if config_file is not None else None
-        )
-        if config_file is None:
-            config_file = empty_tool_config(
-                "trivy-config.yaml", "", context=self.context
-            )
+        config_file = self._trivy_config_file()
         module_dir: Optional[Path] = None
         if options.module_dir:
             module_dir = self._operator_path(
@@ -362,7 +341,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         if module_dir is None:
             module_dir = empty_tool_directory("trivy-modules", context=self.context)
         return [
-            f"--config={config_file.resolve().as_posix()}",
+            f"--config={config_file}",
             f"--module-dir={module_dir.resolve().as_posix()}",
         ]
 
