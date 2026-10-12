@@ -780,8 +780,12 @@ ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
 #: verification (each candidate secret is sent to its issuer) or import a plugin or
 #: filter from a file, and the baseline that can carry both. The archive extraction
 #: limits. And every plugin that sends data off the host, each a whole section, so a
-#: client can neither turn one on or off nor change what it sends or where (``**``
-#: also matches the section itself): the reporters that send the results, and the
+#: client can neither configure nor enable one through config overrides, nor change
+#: what it sends or where, nor disable such a scanner (``**`` also matches the
+#: section itself; a reporter's ``enabled: false`` is accepted and takes no effect,
+#: see reporter_trust; a workspace scan's ``scanners`` and ``excluded_scanners``
+#: arguments can still leave a scanner out of a run, never add one): the reporters
+#: that send the results, and the
 #: scanners that send the source (snyk-code), dependency lists (npm-audit,
 #: trivy-repo), candidate secrets (detect-secrets) or usage metrics (semgrep,
 #: opengrep). tests/unit/config/test_off_host_plugins_are_operator_only.py lists what

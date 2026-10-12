@@ -5,9 +5,11 @@
 
 A plugin that sends the repository's content, its findings or its dependency list off
 the host does so with the operator's credentials, network and trust. An MCP client's
-runtime overrides must not turn one on, turn it off, or change what it sends or where,
-whatever a profile's ``denied_paths`` says. So each such plugin's whole section is in
-``ALWAYS_DENIED_PATHS`` (``**`` also matches the section itself).
+runtime overrides must not configure, enable or disable one, or change what it sends or
+where, whatever a profile's ``denied_paths`` says. So each such plugin's whole section
+is in ``ALWAYS_DENIED_PATHS`` (``**`` also matches the section itself). A workspace
+scan's ``scanners`` and ``excluded_scanners`` arguments, which are not overrides, can
+still leave a scanner out of a run, never add one.
 
 This file classifies every scanner, reporter and converter the plugin packages ship.
 A new plugin, or a plugin that starts to declare a network, fails here until it is
