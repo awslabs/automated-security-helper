@@ -236,6 +236,90 @@ function Invoke-ASH {
         $sourceDirFull = Get-Item -LiteralPath $SourceDir | Select-Object -ExpandProperty FullName
         Write-Verbose "Resolved SourceDir to: $sourceDirFull"
 
+        # The path with every link on the way followed, which is what the runner
+        # mounts. Component by component, so a link to a directory higher up is
+        # followed too; bounded, so a cycle of links ends.
+        function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            if ($Depth -gt 40) { return $full }
+            $root = [System.IO.Path]::GetPathRoot($full)
+            $current = $root
+            foreach ($part in $full.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $current = Join-Path $current $part
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+                if ($item -and $item.LinkType -and $item.Target) {
+                    $target = [string]@($item.Target)[0]
+                    if (-not [System.IO.Path]::IsPathRooted($target)) {
+                        $target = Join-Path (Split-Path -Parent $current) $target
+                    }
+                    $current = Get-AshRealPath $target ($Depth + 1)
+                }
+            }
+            return $current
+        }
+        $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        function Test-AshUnder([string]$Path, [string]$Root) {
+            $Root = $Root.TrimEnd($separators)
+            return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
+        }
+        $sourceReal = Get-AshRealPath $sourceDirFull
+
+        # /out is mounted read-write and /src read-only: an output directory that is
+        # the source directory or above it would hold the source tree, writable, at
+        # /out. A directory that is itself a link is compared by its target. One that
+        # does not exist yet cannot hold the source, so this runs before it is created.
+        if (-not $NoRun -and (Test-Path -LiteralPath $OutputDir -PathType Container)) {
+            $existingOutput = (Get-Item -LiteralPath $OutputDir).FullName
+            $directories = foreach ($path in @($sourceDirFull, $existingOutput)) {
+                $item = Get-Item -LiteralPath $path
+                $real = if ($item.LinkType -and $item.ResolvedTarget) { [string]$item.ResolvedTarget } else { $item.FullName }
+                $real.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+            }
+            if ($directories[0].StartsWith($directories[1], $pathComparison)) {
+                Stop-AshRefusal 3 "The output directory '$existingOutput' is the source directory '$sourceDirFull' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
+            }
+        }
+
+        # The same /out mount is why a linked output directory is refused: the scan
+        # inside would write wherever the link leads, and a repository that commits
+        # `.ash -> /some/host/dir` would choose that directory. Refused with exit 3:
+        # the output directory when it is a symbolic link or junction, wherever it is,
+        # and any link from below SourceDir down to it, with SourceDir taken under its
+        # name and its real path. Links at or above SourceDir are the operator's own
+        # spelling. The path is walked as written, '..' included, and before the
+        # directory is created, because creating it through a linked .ash already
+        # writes where the link points; so -NoRun, which creates it too, is refused as
+        # well. ./ash and `ash --mode container` apply the same rule.
+        function Test-AshLink([string]$Path) {
+            $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            return [bool]($item -and $item.LinkType -in @('SymbolicLink', 'Junction'))
+        }
+        $spelledOutput = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path (Get-Location).Path $OutputDir }
+        $outputRoot = [System.IO.Path]::GetPathRoot($spelledOutput)
+        $walked = [System.Collections.Generic.List[string]]::new()
+        $current = $null
+        $linkOnTheWay = $null
+        foreach ($part in $spelledOutput.Substring($outputRoot.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            if ($part -eq '.') { continue }
+            if ($part -eq '..') {
+                if ($walked.Count -gt 0) { $walked.RemoveAt($walked.Count - 1) }
+                continue
+            }
+            $walked.Add($part)
+            $current = $outputRoot.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + ($walked -join [System.IO.Path]::DirectorySeparatorChar)
+            if (((Test-AshUnder $current $sourceDirFull) -or (Test-AshUnder $current $sourceReal)) -and (Test-AshLink $current)) {
+                $linkOnTheWay = $current
+                break
+            }
+        }
+        if (-not $linkOnTheWay -and $walked.Count -gt 0 -and (Test-AshLink $current)) {
+            $linkOnTheWay = $current
+        }
+        if ($linkOnTheWay) {
+            Stop-AshRefusal 3 "Refusing the output directory '$OutputDir': the output directory path '$linkOnTheWay' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory."
+        }
+
         # Create the output directory if it doesn't exist
         if (-not (Test-Path -LiteralPath $OutputDir)) {
             Write-Verbose "Creating OutputDir: $OutputDir"
@@ -255,19 +339,6 @@ function Invoke-ASH {
         if (-not $NoRun) {
             Assert-Mountable 'source directory' $sourceDirFull
             Assert-Mountable 'output directory' $outputDirFull
-            # /out is mounted read-write and /src read-only: an output directory that
-            # is the source directory or above it would hold the source tree, writable,
-            # at /out. A directory that is itself a link is compared by its target.
-            $separatorChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-            $nameComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-            $directories = foreach ($path in @($sourceDirFull, $outputDirFull)) {
-                $item = Get-Item -LiteralPath $path
-                $real = if ($item.LinkType -and $item.ResolvedTarget) { [string]$item.ResolvedTarget } else { $item.FullName }
-                $real.TrimEnd($separatorChars) + [System.IO.Path]::DirectorySeparatorChar
-            }
-            if ($directories[0].StartsWith($directories[1], $nameComparison)) {
-                Stop-AshRefusal 3 "The output directory '$outputDirFull' is the source directory '$sourceDirFull' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
-            }
         }
 
         # The config file, -Config or else ASH_CONFIG, is read by the scan inside the
@@ -291,38 +362,11 @@ function Invoke-ASH {
             catch {
                 Stop-AshRefusal 3 "Config file cannot be read: $Config. ASH does not hand the container runner a file it cannot read itself."
             }
-            # The path with every link on the way followed, which is what the runner
-            # mounts. Component by component, so a link to a directory higher up is
-            # followed too; bounded, so a cycle of links ends.
-            function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
-                $full = [System.IO.Path]::GetFullPath($Path)
-                if ($Depth -gt 40) { return $full }
-                $root = [System.IO.Path]::GetPathRoot($full)
-                $current = $root
-                foreach ($part in $full.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
-                    $current = Join-Path $current $part
-                    $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
-                    if ($item -and $item.LinkType -and $item.Target) {
-                        $target = [string]@($item.Target)[0]
-                        if (-not [System.IO.Path]::IsPathRooted($target)) {
-                            $target = Join-Path (Split-Path -Parent $current) $target
-                        }
-                        $current = Get-AshRealPath $target ($Depth + 1)
-                    }
-                }
-                return $current
-            }
-            $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-            $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-            function Test-AshUnder([string]$Path, [string]$Root) {
-                $Root = $Root.TrimEnd($separators)
-                return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
-            }
-            # The config as named, and the real file the runner would mount.
+            # The config as named, and the real file the runner would mount
+            # (Get-AshRealPath, above, with $sourceReal).
             $configNamed = (Get-Item -LiteralPath $Config).FullName
             $configFull = Get-AshRealPath $configNamed
             Assert-Mountable 'config file' $configFull
-            $sourceReal = Get-AshRealPath $sourceDirFull
             # The scanned tree, as a local scan defines it: the outermost directory at
             # or above SourceDir holding a .git entry, found from SourceDir's name and
             # from its real path, each under both names.

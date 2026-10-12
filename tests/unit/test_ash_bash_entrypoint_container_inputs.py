@@ -789,6 +789,119 @@ class TestAnOutputDirectoryOverTheSourceIsRefused:
         assert [call[0] for call in calls] == ["build"]
 
 
+class TestALinkedOutputDirectoryIsRefused:
+    """``/out`` is mounted read-write, so with a linked output directory the scan
+    would write wherever the link leads. Refused with exit 3 before the directory is
+    created: the output directory when it is a link, wherever it is, and any link
+    below the source directory on the way to it, with the source taken under its
+    name and its real path. ``--no-run`` too, because ``./ash`` creates the output
+    directory either way. A real directory, and a source reached through a link
+    above it, run."""
+
+    @pytest.fixture
+    def elsewhere(self, tmp_path):
+        path = tmp_path / "elsewhere"
+        path.mkdir()
+        return path
+
+    @pytest.mark.parametrize(
+        "where",
+        [
+            "the-default-output-directory",
+            "a-directory-on-the-way",
+            "an-outside-output-directory",
+            "a-dangling-link",
+        ],
+    )
+    def test_it_is_refused(self, where, fake_runner, project, elsewhere, tmp_path):
+        args = ["--no-build"]
+        if where == "the-default-output-directory":
+            (project / ".ash").mkdir()
+            link = project / ".ash" / "ash_output"
+            link.symlink_to(elsewhere, target_is_directory=True)
+        elif where == "a-directory-on-the-way":
+            link = project / ".ash"
+            link.symlink_to(elsewhere, target_is_directory=True)
+        elif where == "an-outside-output-directory":
+            link = tmp_path / "out-link"
+            link.symlink_to(elsewhere, target_is_directory=True)
+            args += ["--output-dir", str(link)]
+        else:
+            (project / ".ash").mkdir()
+            link = project / ".ash" / "ash_output"
+            link.symlink_to(tmp_path / "not-there", target_is_directory=True)
+
+        rc, text, calls = _run_ash_status(fake_runner, project, args)
+
+        assert rc == 3, text
+        assert calls == []
+        assert list(elsewhere.iterdir()) == []
+        assert str(link) in text
+
+    def test_a_link_on_the_way_is_seen_under_the_real_name_of_the_source(
+        self, fake_runner, project, elsewhere, tmp_path
+    ):
+        named = tmp_path / "project-link"
+        named.symlink_to(project, target_is_directory=True)
+        (project / ".ash").symlink_to(elsewhere, target_is_directory=True)
+
+        rc, text, calls = _run_ash_status(
+            fake_runner,
+            project,
+            [
+                "--no-build",
+                "--source-dir",
+                str(named),
+                "--output-dir",
+                str(project / ".ash" / "ash_output"),
+            ],
+        )
+
+        assert rc == 3, text
+        assert calls == []
+        assert list(elsewhere.iterdir()) == []
+
+    def test_a_build_without_a_run_is_refused_too(
+        self, fake_runner, project, elsewhere
+    ):
+        (project / ".ash").symlink_to(elsewhere, target_is_directory=True)
+
+        rc, text, calls = _run_ash_status(fake_runner, project, ["--no-run"])
+
+        assert rc == 3, text
+        assert calls == []
+        assert list(elsewhere.iterdir()) == []
+
+    def test_a_real_default_output_directory_runs(self, fake_runner, project):
+        calls = run_ash(fake_runner, project, ["--no-build"])
+
+        assert [call[0] for call in calls] == ["run"]
+        output = project / ".ash" / "ash_output"
+        assert output.is_dir() and not output.is_symlink()
+
+    def test_a_source_reached_through_a_link_above_it_runs(
+        self, fake_runner, project, tmp_path
+    ):
+        named = tmp_path / "via-link"
+        named.symlink_to(tmp_path, target_is_directory=True)
+        spelled = named / "project"
+
+        calls = run_ash(
+            fake_runner,
+            project,
+            [
+                "--no-build",
+                "--source-dir",
+                str(spelled),
+                "--output-dir",
+                str(spelled / ".ash" / "ash_output"),
+            ],
+        )
+
+        assert [call[0] for call in calls] == ["run"]
+        assert (project / ".ash" / "ash_output").is_dir()
+
+
 class TestAnOutsideConfigThatExtendsIsRefused:
     """``./ash`` mounts a config from outside the source directory on its own, so the
     files it extends are not in the container. A config there with an ``extends``

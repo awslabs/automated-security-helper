@@ -448,6 +448,17 @@
   before anything is built or mounted, by real path. An output directory inside the
   source, such as the default `.ash/ash_output`, or outside it works as before; a run
   with `--no-run` mounts nothing and is not refused.
+- **Container mode refuses an output directory that is a symlink or is reached through
+  one.** The output directory is mounted read-write at `/out`, so with a linked one the
+  scan inside the container wrote wherever the link led, and a repository committing
+  `.ash -> /some/host/dir` chose that directory for the default `.ash/ash_output`.
+  `ash --mode container`, `./ash` and `Invoke-ASH` now refuse, with exit 3, an output
+  directory that is a symlink, wherever it is, and any symlink between the source
+  directory and it, before the directory is created, written or mounted. That includes
+  `--no-run`, since the output directory is created and `ash --mode container` opens
+  `ash.log` in it either way. The source directory counts under the name it was given
+  and its real path; links at or above it are your own spelling and are not examined.
+  This is the rule a sandboxed local scan already applies.
 - **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
   Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
   and GID 100, which cannot write an output directory the caller owns, and checked

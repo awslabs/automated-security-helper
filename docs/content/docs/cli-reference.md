@@ -206,6 +206,16 @@ it, would hold the source tree at `/out`, writable, so `--mode container`, `./as
 path, so a link to the source counts). Use an output directory inside the source or
 outside it.
 
+The output directory must not be a symlink or be reached through one, because the scan
+inside the container would write wherever the link leads. `--mode container`, `./ash`
+and `Invoke-ASH` refuse with exit 3, before the directory is created or mounted, an
+output directory that is a symlink, wherever it is, and any symlink between the source
+directory and it (a committed `.ash -> /some/host/dir`, for the default
+`.ash/ash_output`). `--no-run` is refused too, since the output directory is created
+either way. Links at or above the source directory are your own spelling and are not
+examined. This is the rule a sandboxed local scan applies (see
+[Scanner sandbox](scanner-sandbox.md)).
+
 The config file named with `--config` (or `ASH_CONFIG`) is the one the scan inside the
 container reads. One inside `--source-dir` is read through `/src`. One outside it is
 mounted read-only under `/ash-config`, together with the files its `extends` chain

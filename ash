@@ -132,6 +132,64 @@ if ! resolved="$(cd -- "${SOURCE_DIR}" && pwd)"; then
   exit 1
 fi
 SOURCE_DIR="${resolved}"
+SOURCE_PHYSICAL="$(cd -- "${SOURCE_DIR}" && pwd -P)"
+
+# /out is mounted read-write and /src read-only: an output directory that is the
+# source directory or above it would hold the source tree, writable, at /out.
+# Compared by physical path, so a link to the source counts. One that does not exist
+# yet cannot hold the source, so this runs before the directory is created.
+if [[ "${NO_RUN}" = "NO" && -d "${OUTPUT_DIR}" ]]; then
+  OUTPUT_NAMED="$(cd -- "${OUTPUT_DIR}" && pwd)"
+  OUTPUT_PHYSICAL="$(cd -- "${OUTPUT_DIR}" && pwd -P)"
+  case "${SOURCE_PHYSICAL%/}/" in
+    "${OUTPUT_PHYSICAL%/}"/*)
+      echo "ERROR: The output directory '${OUTPUT_NAMED}' is the source directory '${SOURCE_DIR}' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it." >&2
+      exit 3
+      ;;
+  esac
+fi
+
+# The same /out mount is why a linked output directory is refused: the scan inside
+# would write wherever the link leads, and a repository that commits
+# `.ash -> /some/host/dir` would choose that directory. Refused with exit 3: the
+# output directory when it is a symlink, wherever it is, and any symlink from below
+# the source directory down to it, with the source taken under its name and its
+# physical path. Links at or above the source are the operator's own spelling. The
+# path is walked as written, `..` included, and before the directory is created,
+# because creating it through a linked `.ash` already writes where the link points;
+# so --no-run, which creates it too, is refused as well. `ash --mode container` and
+# Invoke-ASH apply the same rule.
+refuse_linked_output_dir() {
+  local spelled="$1" rest part current="" link=""
+  case "${spelled}" in
+    /*) ;;
+    *) spelled="$(pwd)/${spelled}" ;;
+  esac
+  rest="${spelled#/}"
+  while [ -n "${rest}" ]; do
+    part="${rest%%/*}"
+    if [ "${part}" = "${rest}" ]; then rest=""; else rest="${rest#*/}"; fi
+    case "${part}" in
+      "" | .) continue ;;
+      ..) current="${current%/*}"; continue ;;
+    esac
+    current="${current}/${part}"
+    case "${current}" in
+      "${SOURCE_DIR%/}"/* | "${SOURCE_PHYSICAL%/}"/*)
+        if [ -L "${current}" ]; then link="${current}"; break; fi
+        ;;
+    esac
+  done
+  if [ -z "${link}" ] && [ -n "${current}" ] && [ -L "${current}" ]; then
+    link="${current}"
+  fi
+  if [ -n "${link}" ]; then
+    echo "ERROR: Refusing the output directory '$1': the output directory path '${link}' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory." >&2
+    exit 3
+  fi
+}
+refuse_linked_output_dir "${OUTPUT_DIR}"
+
 if ! resolved="$(mkdir -p -- "${OUTPUT_DIR}" && cd -- "${OUTPUT_DIR}" && pwd)"; then
   echo "ERROR: Output directory cannot be created: '${OUTPUT_DIR}'. Check --output-dir." >&2
   exit 1
@@ -153,17 +211,6 @@ require_mountable() {
 if [[ "${NO_RUN}" = "NO" ]]; then
   require_mountable "source directory" "${SOURCE_DIR}"
   require_mountable "output directory" "${OUTPUT_DIR}"
-  # /out is mounted read-write and /src read-only: an output directory that is the
-  # source directory or above it would hold the source tree, writable, at /out.
-  # Compared by physical path, so a link to the source counts.
-  SOURCE_PHYSICAL="$(cd -- "${SOURCE_DIR}" && pwd -P)"
-  OUTPUT_PHYSICAL="$(cd -- "${OUTPUT_DIR}" && pwd -P)"
-  case "${SOURCE_PHYSICAL%/}/" in
-    "${OUTPUT_PHYSICAL%/}"/*)
-      echo "ERROR: The output directory '${OUTPUT_DIR}' is the source directory '${SOURCE_DIR}' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it." >&2
-      exit 3
-      ;;
-  esac
 fi
 
 # The file's path with every symlink followed: the link's target is what is read.

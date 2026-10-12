@@ -356,6 +356,119 @@ def test_an_output_directory_inside_the_source_runs(pwsh, recording_docker, tmp_
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.fixture
+def elsewhere(tmp_path) -> Path:
+    """Where a link points the output directory; nothing may be written to it."""
+    path = tmp_path / "elsewhere"
+    path.mkdir()
+    return path
+
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        "the-output-directory",
+        "a-directory-on-the-way",
+        "an-outside-output-directory",
+        "a-dangling-link",
+    ],
+)
+def test_a_linked_output_directory_is_refused(
+    where, pwsh, recording_docker, elsewhere, tmp_path
+):
+    """/out is read-write: with a linked output directory the scan would write
+    wherever the link leads. Refused with exit 3 before the directory is created:
+    the output directory when it is a link, and any link below SourceDir on the way
+    to it."""
+    src = tmp_path / "src"
+    src.mkdir()
+    if where == "the-output-directory":
+        (src / ".ash").mkdir()
+        link = src / ".ash" / "out"
+        link.symlink_to(elsewhere, target_is_directory=True)
+        output = "src/.ash/out"
+    elif where == "a-directory-on-the-way":
+        link = src / ".ash"
+        link.symlink_to(elsewhere, target_is_directory=True)
+        output = "src/.ash/out"
+    elif where == "an-outside-output-directory":
+        link = tmp_path / "out-link"
+        link.symlink_to(elsewhere, target_is_directory=True)
+        output = "out-link"
+    else:
+        (src / ".ash").mkdir()
+        link = src / ".ash" / "out"
+        link.symlink_to(tmp_path / "not-there", target_is_directory=True)
+        output = "src/.ash/out"
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, f"-SourceDir src -OutputDir {output}"
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+    assert list(elsewhere.iterdir()) == []
+    assert str(link) in " ".join(result.stderr.split())
+
+
+def test_a_link_on_the_way_is_seen_under_the_real_name_of_the_source(
+    pwsh, recording_docker, elsewhere, tmp_path
+):
+    """SourceDir is named through a link and OutputDir through the real path, so
+    only the real name shows that .ash is below the source."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src-link").symlink_to(tmp_path / "src", target_is_directory=True)
+    (tmp_path / "src" / ".ash").symlink_to(elsewhere, target_is_directory=True)
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, "-SourceDir src-link -OutputDir src/.ash/out"
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_a_linked_output_directory_is_refused_without_a_run_too(
+    pwsh, recording_docker, elsewhere, tmp_path
+):
+    """-NoRun still creates the output directory, so it is refused as well."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / ".ash").symlink_to(elsewhere, target_is_directory=True)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir src/.ash/out -NoRun",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert list(elsewhere.iterdir()) == []
+
+
+@pytest.mark.parametrize("where", ["a-real-directory", "a-source-named-through-a-link"])
+def test_a_real_output_directory_runs(where, pwsh, recording_docker, tmp_path):
+    """Control: a real directory inside the source, also when the source is named
+    through a link above it, which is the operator's own spelling."""
+    (tmp_path / "work" / "src").mkdir(parents=True)
+    base = "work"
+    if where == "a-source-named-through-a-link":
+        (tmp_path / "work-link").symlink_to(tmp_path / "work", target_is_directory=True)
+        base = "work-link"
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir {base}/src -OutputDir {base}/src/.ash/out",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    output = tmp_path / "work" / "src" / ".ash" / "out"
+    assert output.is_dir() and not output.is_symlink()
+
+
 @pytest.mark.skipif(
     os.name == "nt",
     reason="the recording runner is a POSIX shell script; Windows gets a .cmd stub",

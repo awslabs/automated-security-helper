@@ -65,6 +65,7 @@ from automated_security_helper.interactions.run_ash_container import (
     CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
     container_build_refusal,
     container_input_refusal,
+    container_output_dir_refusal,
     container_was_started,
     run_ash_container,
 )
@@ -1542,7 +1543,18 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
     callers that do not come through here. A workspace project's own output tree is
     checked by workspace/execution.py before it is created; here a workspace run's
     ``projects`` and spool directories are checked with the rest.
+
+    Container mode first applies its own link rule, with exit 3 as for its other
+    unusable inputs: the output directory is mounted read-write at ``/out``, so the
+    scan inside the container would write wherever a link leads
+    (``container_output_dir_refusal``). The general check then runs as in every
+    other mode, for the paths that rule does not name.
     """
+    if opts.mode == RunMode.container:
+        refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
+        if refusal is not None:
+            typer.secho(refusal, fg=typer.colors.RED)
+            sys.exit(3)
     from automated_security_helper.utils.output_dir_links import (
         OutputDirLinkRefused,
         refuse_linked_output_dir,

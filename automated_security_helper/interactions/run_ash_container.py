@@ -1095,6 +1095,78 @@ def _refuse_output_over_the_source(
         )
 
 
+def _refuse_linked_output_dir(
+    source_dir: Path | str | None, output_dir: Path | str | None
+) -> None:
+    """Refuse an output directory that is a symlink or is reached through one.
+
+    The output is mounted read-write at ``/out``, so the scan inside the container
+    writes wherever it leads, and a link the scanned repository commits (``.ash ->
+    /some/host/dir``) would choose that directory. The rule is the one a sandboxed
+    local scan applies, :func:`~automated_security_helper.utils.sandbox.policy.
+    refuse_symlinked_output_dir`: the output directory itself when it is a symlink,
+    wherever it is, and any symlink from below the source directory down to it.
+    The source counts under the name it was given and under its real path, so an
+    output spelled through either is examined; links at or above the source are
+    the operator's own spelling and are not. Checked on the path as given, before
+    it is created or resolved, because creating ``.ash/ash_output`` through a
+    linked ``.ash`` already writes where the link points. An empty output
+    directory is the one the run makes, ``<source>/ash_output``.
+    """
+    from automated_security_helper.utils.sandbox.policy import (
+        SandboxUnavailable,
+        refuse_symlinked_output_dir,
+    )
+
+    source = Path(source_dir) if source_dir else Path.cwd()
+    output = (
+        Path(output_dir)
+        if output_dir is not None and str(output_dir)
+        else source / "ash_output"
+    )
+    try:
+        for named in (source, source.resolve()):
+            refuse_symlinked_output_dir(named, output)
+    except SandboxUnavailable as refusal:
+        raise ContainerInputError(
+            f"Refusing the output directory {output.as_posix()}: {refusal}. "
+            "Container mode mounts the output directory read-write at /out, so the "
+            "scan inside the container would write through the link. Use a "
+            "directory that is not a symlink and is not reached through one below "
+            "the source directory."
+        ) from None
+
+
+def _refuse_unusable_output_dir(
+    source_dir: Path | str | None, output_dir: Path | str | None
+) -> None:
+    """The checks on the directory mounted read-write at ``/out``.
+
+    It must not hold the source tree (:func:`_refuse_output_over_the_source`) and
+    must not be, or be reached through, a symlink (:func:`_refuse_linked_output_dir`).
+    ``./ash`` and ``Invoke-ASH`` apply the same two, in this order.
+    """
+    _refuse_output_over_the_source(source_dir or Path.cwd(), output_dir or "")
+    _refuse_linked_output_dir(source_dir, output_dir)
+
+
+def container_output_dir_refusal(
+    source_dir: Path | str | None, output_dir: Path | str | None
+) -> str | None:
+    """Why the output directory cannot be used by a container scan, or None.
+
+    Only the link rule (:func:`_refuse_linked_output_dir`), which ``run_ash_scan``
+    checks before its logger opens ``ash.log`` in the output directory, with or
+    without ``--no-run``; the full set is checked with the other inputs by
+    :func:`container_input_refusal`.
+    """
+    try:
+        _refuse_linked_output_dir(source_dir, output_dir)
+    except ContainerInputError as e:
+        return str(e)
+    return None
+
+
 def _require_mountable_inputs(
     source_dir: Path | str,
     output_dir: Path | str,
@@ -1106,7 +1178,7 @@ def _require_mountable_inputs(
     source = Path(source_dir).resolve()
     _require_mountable("source directory", source)
     _require_mountable("output directory", Path(output_dir).resolve())
-    _refuse_output_over_the_source(source, output_dir)
+    _refuse_unusable_output_dir(source_dir, output_dir)
     if config:
         _refuse_config_linked_out_of_the_tree(config, source)
         _refuse_absolute_extends(config)
@@ -1544,7 +1616,7 @@ def _assemble_run_command(
     """
     _require_mountable("source directory", source_dir)
     _require_mountable("output directory", output_dir)
-    _refuse_output_over_the_source(source_dir, output_dir)
+    _refuse_unusable_output_dir(source_dir, output_dir)
 
     cmd: List[str] = [*oci_command_prefix, resolved_oci_runner, "run", "--rm"]
 
