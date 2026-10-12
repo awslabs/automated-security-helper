@@ -12,7 +12,9 @@ that:
   (the output directory of every :class:`PluginContext`, and each sandboxed
   scanner's results directory) it opens every component without following a link,
   and refuses a link at any of them, the file name included, with
-  :class:`OutputLinkRefused`. The link is left where it is.
+  :class:`OutputLinkRefused`. The link is left where it is. A file that another
+  name also refers to (a hard link) is refused with :class:`OutputHardLinkRefused`
+  before it is truncated.
 * :func:`sweep_writable` runs after every sandboxed spawn and removes every entry
   under the writable directories that is not a regular file or a directory.
 """
@@ -55,6 +57,25 @@ class OutputLinkRefused(OSError):
         )
         self.path = Path(path)
         self.link = Path(link)
+
+
+class OutputHardLinkRefused(OSError):
+    """A write below a guarded root met a file that another name also refers to.
+
+    A hard link, as an extracted archive can hold, to a file anywhere on the same
+    filesystem: writing it would change that file. An ``OSError``
+    (``errno.EMLINK``). Nothing is written, and the file is not truncated.
+    """
+
+    def __init__(self, path: Union[str, Path], links: int) -> None:
+        super().__init__(
+            errno.EMLINK,
+            f"{Path(path).as_posix()} was not written: {links} names refer to it, and "
+            "ASH does not write to a file below its output directory that another "
+            "name refers to",
+        )
+        self.path = Path(path)
+        self.links = links
 
 
 _roots_lock = threading.Lock()
@@ -121,12 +142,15 @@ def _is_special(mode: int) -> bool:
 
 
 def refuse_links_below(root: Union[str, Path]) -> None:
-    """Raise OutputLinkRefused for the first symlink below ``root``, if any.
+    """Raise for the first symlink, or file another name refers to, below ``root``.
 
     For a sandboxed scanner's results directory before the scanner runs: the sweep
     after each spawn removes links the scanner made, and would also remove one that
-    was there before it ran (committed with the scanned tree) without saying so.
-    The walk never follows a link. A missing ``root`` has nothing below it.
+    was there before it ran (committed with the scanned tree) without saying so. A
+    regular file with more than one name is refused too (OutputHardLinkRefused):
+    the scanner can write the results directory, and a write to that file changes
+    every name it has. The walk never follows a link. A missing ``root`` has nothing
+    below it.
     """
     root = Path(os.path.abspath(root))
     if not hasattr(os, "fwalk") or not root.is_dir():
@@ -134,12 +158,14 @@ def refuse_links_below(root: Union[str, Path]) -> None:
     for dirpath, dirnames, filenames, dir_fd in os.fwalk(root, follow_symlinks=False):
         for name in sorted(list(dirnames) + filenames):
             try:
-                mode = os.lstat(name, dir_fd=dir_fd).st_mode
+                status = os.lstat(name, dir_fd=dir_fd)
             except OSError:
                 continue
-            if stat.S_ISLNK(mode):
+            if stat.S_ISLNK(status.st_mode):
                 link = Path(dirpath) / name
                 raise OutputLinkRefused(link, link)
+            if stat.S_ISREG(status.st_mode) and status.st_nlink > 1:
+                raise OutputHardLinkRefused(Path(dirpath) / name, status.st_nlink)
 
 
 def sweep_writable(roots: Iterable[Union[str, Path]]) -> int:
@@ -165,7 +191,9 @@ def sweep_writable(roots: Iterable[Union[str, Path]]) -> int:
 
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _NONBLOCK = getattr(os, "O_NONBLOCK", 0)
-_FILE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW | _NONBLOCK | _BINARY
+# No O_TRUNC: the file is truncated only after fstat shows it is a regular file
+# that no other name refers to (_open_regular).
+_FILE_FLAGS = os.O_WRONLY | os.O_CREAT | _NOFOLLOW | _NONBLOCK | _BINARY
 
 
 def _is_link(name: str, dir_fd: int) -> bool:
@@ -209,22 +237,30 @@ def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path)
         raise
 
 
-def _open_regular(name: str, dir_fd: Optional[int]) -> int:
-    """Open ``name`` for writing; refuse anything but a regular file.
+def _open_regular(name: str, dir_fd: Optional[int], target: Path) -> int:
+    """Open ``name`` for writing, truncated; refuse anything but a file of its own.
 
-    O_NONBLOCK so a FIFO left at the name cannot block the open; the flag is
-    cleared again once the target is known to be a regular file.
+    Opened without O_TRUNC, then checked on the descriptor: it must be a regular
+    file and its only name must be this one (``st_nlink == 1``), or
+    OutputHardLinkRefused is raised for ``target`` and the file is left as it was.
+    Only then is it truncated. O_NONBLOCK so a FIFO left at the name cannot block
+    the open; the flag is cleared again once the target is known to be a regular
+    file.
     """
     if dir_fd is None:
         fd = os.open(name, _FILE_FLAGS, 0o666)
     else:
         fd = os.open(name, _FILE_FLAGS, 0o666, dir_fd=dir_fd)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        status = os.fstat(fd)
+        if not stat.S_ISREG(status.st_mode):
             raise OSError(errno.EINVAL, f"not a regular file: {name}")
+        if status.st_nlink != 1:
+            raise OutputHardLinkRefused(target, status.st_nlink)
         if _NONBLOCK:
             flags = fcntl.fcntl(fd, fcntl.F_GETFL)
             fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~_NONBLOCK)
+        os.ftruncate(fd, 0)
         return fd
     except BaseException:
         os.close(fd)
@@ -257,7 +293,7 @@ def open_for_write(
             if _is_link(name, dir_fd):
                 raise OutputLinkRefused(path, path)
             try:
-                fd = _open_regular(name, dir_fd)
+                fd = _open_regular(name, dir_fd, path)
             except OSError as error:
                 if error.errno == errno.ELOOP:
                     raise OutputLinkRefused(path, path) from error

@@ -132,7 +132,10 @@
   component of the path now stops the write (`OutputLinkRefused`) and the scanner is
   `ERROR`; under a sandbox, a link already below a results directory when its
   scanner starts is refused the same way, where the sweep after the spawn used to
-  remove it.
+  remove it. A file at one of those paths that another name also refers to (a hard
+  link, which an archive can carry) is refused too (`OutputHardLinkRefused`), before
+  it is truncated: the file was opened with `O_TRUNC`, so a hard link to a file
+  elsewhere on the filesystem was emptied and overwritten.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it

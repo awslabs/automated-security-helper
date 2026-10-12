@@ -15,6 +15,7 @@ outside every output directory, which is opened as ``open()`` would.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -41,6 +42,10 @@ pytestmark = pytest.mark.skipif(
 ORIGINAL = "outside content\n"
 REFUSAL = (
     "is a symlink, and ASH does not write through a symlink below its output directory"
+)
+HARD_LINK_REFUSAL = (
+    "and ASH does not write to a file below its output directory that another name "
+    "refers to"
 )
 
 
@@ -125,8 +130,25 @@ class TestOpenForWrite:
         assert REFUSAL in str(refused.value)
         assert target.read_text() == ORIGINAL
 
-    def test_the_refusal_is_an_oserror(self):
+    def test_a_file_another_name_refers_to_is_refused(self, layout):
+        """A hard link to a file outside the output directory, as an archive can hold."""
+        source, output, target = layout
+        _context(source, output)
+        path = output / "scanners" / "tool" / "source" / "out.log"
+        path.parent.mkdir(parents=True)
+        os.link(target, path)
+
+        with pytest.raises(fs_guard.OutputHardLinkRefused) as refused:
+            fs_guard.open_for_write(path)
+
+        assert HARD_LINK_REFUSAL in str(refused.value)
+        assert str(path) in str(refused.value)
+        assert target.read_bytes() == ORIGINAL.encode(), "the file was truncated"
+        assert os.stat(path).st_nlink == 2, "the refusal leaves both names in place"
+
+    def test_the_refusals_are_oserrors(self):
         assert issubclass(fs_guard.OutputLinkRefused, OSError)
+        assert issubclass(fs_guard.OutputHardLinkRefused, OSError)
 
     def test_a_regular_file_there_is_written(self, layout):
         source, output, _target = layout
@@ -154,6 +176,31 @@ class TestOpenForWrite:
         assert target.read_text() == "written\n"
 
 
+class TestRefuseLinksBelow:
+    """The check of a sandboxed scanner's results directory before the scanner runs."""
+
+    def test_a_file_another_name_refers_to_is_refused(self, layout):
+        _source, output, target = layout
+        results = output / "scanners" / "tool"
+        (results / "source").mkdir(parents=True)
+        os.link(target, results / "source" / "out.sarif")
+
+        with pytest.raises(fs_guard.OutputHardLinkRefused) as refused:
+            fs_guard.refuse_links_below(results)
+
+        assert HARD_LINK_REFUSAL in str(refused.value)
+        assert target.read_bytes() == ORIGINAL.encode()
+
+    def test_regular_files_and_directories_pass(self, layout):
+        _source, output, _target = layout
+        results = output / "scanners" / "tool"
+        (results / "source" / "nested").mkdir(parents=True)
+        (results / "source" / "out.sarif").write_text("{}\n")
+        (results / "source" / "nested" / "out.log").write_text("log\n")
+
+        fs_guard.refuse_links_below(results)
+
+
 class TestStreamLogs:
     def test_a_link_at_a_stream_log_is_not_written_through(self, layout):
         from automated_security_helper.utils.subprocess_utils import (
@@ -175,6 +222,27 @@ class TestStreamLogs:
 
         assert target.read_text() == ORIGINAL
         assert REFUSAL in str(response.get("error", "")), response
+
+    def test_a_stream_log_another_name_refers_to_is_not_written(self, layout):
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_with_output_handling,
+        )
+
+        source, output, target = layout
+        _context(source, output)
+        results = output / "scanners" / "tool" / "source"
+        results.mkdir(parents=True)
+        os.link(target, results / "Probe.stdout.log")
+
+        response = run_command_with_output_handling(
+            [sys.executable, "-c", "print('tool output')"],
+            results_dir=results,
+            class_name="Probe",
+            stdout_preference="write",
+        )
+
+        assert target.read_bytes() == ORIGINAL.encode()
+        assert HARD_LINK_REFUSAL in str(response.get("error", "")), response
 
     def test_a_regular_stream_log_is_written(self, layout):
         from automated_security_helper.utils.subprocess_utils import (
@@ -244,6 +312,25 @@ class TestDetectSecretsWrites:
             f"--sandbox {mode}: the row was graded {row.status.value}"
         )
         assert any(REFUSAL in str(error) for error in row.errors), row.errors
+
+    @pytest.mark.parametrize("mode", ["off", "bwrap"])
+    @pytest.mark.parametrize("write", sorted(DETECT_SECRETS_WRITES))
+    def test_a_file_another_name_refers_to_is_refused(self, layout, mode, write):
+        source, output, target = layout
+        context = _context(source, output, mode)
+        planted = output / "scanners" / "detect-secrets" / DETECT_SECRETS_WRITES[write]
+        planted.parent.mkdir(parents=True)
+        os.link(target, planted)
+
+        _scanner, row = _detect_secrets_row(context)
+
+        assert target.read_bytes() == ORIGINAL.encode(), (
+            f"the {write} file was written through a hard link with --sandbox {mode}"
+        )
+        assert row.status == ScannerStatus.ERROR, (
+            f"--sandbox {mode}: the row was graded {row.status.value}"
+        )
+        assert any(HARD_LINK_REFUSAL in str(error) for error in row.errors), row.errors
 
     @pytest.mark.parametrize("mode", ["off", "bwrap"])
     def test_a_link_at_the_directory_that_holds_its_files_is_refused(

@@ -153,8 +153,12 @@ it needs.
   file name included, stops the write with "`<path>` was not written: `<link>` is a
   symlink, and ASH does not write through a symlink below its output directory"
   (`OutputLinkRefused`, an `OSError`). Nothing is written where the link points, the
-  link is left in place, and the scanner whose write was refused is `ERROR`. Links at
-  or above the output directory itself are not examined, as above. A process the scanner leaves running cannot keep
+  link is left in place, and the scanner whose write was refused is `ERROR`. A file
+  there that another name also refers to (a hard link, which an extracted archive can
+  hold) is refused the same way, before anything in it is changed, with "`<path>`
+  was not written: `<n>` names refer to it" (`OutputHardLinkRefused`); so is one
+  already below a sandboxed scanner's results directory when the scanner starts.
+  Links at or above the output directory itself are not examined, as above. A process the scanner leaves running cannot keep
   planting links afterwards: bwrap and firejail end the whole process tree with the
   scanner, and the Landlock wrapper is a child subreaper that kills any process its
   scanner left behind before it exits. On a timeout ASH sends a sandboxed process

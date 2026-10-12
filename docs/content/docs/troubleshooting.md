@@ -633,6 +633,12 @@ without `--sandbox`. With a sandbox, a symlink anywhere below the scanner's resu
 directory before the scanner starts is refused the same way. The default output
 directory is inside the scanned tree, so the link usually came with the repository.
 
+An error that ends with `<n> names refer to it, and ASH does not write to a file
+below its output directory that another name refers to` is the same refusal for a
+hard link: the file at that path is also reachable under another name, possibly
+outside the output directory, so ASH did not change it. Archives can carry hard
+links.
+
 **Fix**
 
 Remove the link, or pass an `--output-dir` outside the scanned tree.
