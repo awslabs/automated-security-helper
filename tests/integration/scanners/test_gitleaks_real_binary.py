@@ -48,6 +48,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
     GitleaksScannerConfigOptions,
 )
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.secret_masking import MASKED_LINE
 from automated_security_helper.utils.tool_downloads import TOOL_VERSIONS
 from tests.utils.gitleaks_fixture import TEMPLATE, fabricated_tokens, materialize
 
@@ -596,7 +597,8 @@ def test_an_unparseable_operator_config_fails_rather_than_reports_clean(
     source = _copy_fixture(tmp_path)
     broken = tmp_path / "broken.toml"
     broken.write_text("this is [ not toml\n", encoding="utf-8")
-    with pytest.raises(ScannerError, match="gitleaks exited 1"):
+    # The scanner template refuses the run before gitleaks' own results reader.
+    with pytest.raises(ScannerError, match="exited with code 1"):
         _scan_direct(source, tmp_path / "out", config_file=str(broken))
 
 
@@ -702,10 +704,13 @@ def test_ash_scan_reports_critical_findings_and_writes_no_secret(
         for r in results
     } == REPORTED, log
     assert {r["level"] for r in results} == {"error"}, log
+    # A gitleaks finding is a secret finding, so its line is masked in the reports,
+    # its own snippet included, over the REDACTED gitleaks writes.
     assert all(
-        r["locations"][0]["physicalLocation"]["region"]["snippet"]["text"] == REDACTED
+        r["locations"][0]["physicalLocation"]["region"]["snippet"]["text"]
+        == MASKED_LINE
         for r in results
-    )
+    ), [r["locations"][0]["physicalLocation"]["region"]["snippet"] for r in results]
 
     # The control for the exclusion: gitleaks itself did report the planted copy.
     raw = json.loads(
@@ -716,6 +721,12 @@ def test_ash_scan_reports_critical_findings_and_writes_no_secret(
     assert any(
         uri.startswith(".ash/ash_output/previous/") for _, uri, _ in _raw_findings(raw)
     ), raw
+    # And gitleaks' own report holds its redaction, not the value.
+    assert {
+        r["locations"][0]["physicalLocation"]["region"]["snippet"]["text"]
+        for run in raw["runs"]
+        for r in run.get("results", [])
+    } == {REDACTED}, raw
 
     row = _gitleaks_row(output)
     assert row.get("status") == "FAILED", row
