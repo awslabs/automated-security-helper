@@ -95,12 +95,33 @@ def scan(run_cli, monkeypatch):
     return _scan
 
 
+def _normalized(command: list[str]) -> list[str]:
+    """The command with this interpreter's path and its safe-path flags as placeholders.
+
+    The inner scan runs on this interpreter, whose path differs between hosts, and
+    the flags that keep the working directory off sys.path differ between Python
+    versions (``-P`` exists from 3.11). The placeholder stands for exactly this
+    version's flags, so a command that left them out would not match.
+    """
+    from automated_security_helper.utils.python_child import _SAFE_PATH_FLAGS
+
+    out: list[str] = []
+    i = 0
+    while i < len(command):
+        part = command[i]
+        i += 1
+        if part != sys.executable:
+            out.append(part)
+            continue
+        out.append("<PYTHON>")
+        if command[i : i + len(_SAFE_PATH_FLAGS)] == _SAFE_PATH_FLAGS:
+            out.append("<SAFE_PATH_FLAGS>")
+            i += len(_SAFE_PATH_FLAGS)
+    return out
+
+
 def _seen(result, shell: FakeNixShell) -> dict:
-    # The inner scan runs on this interpreter, whose path differs between hosts.
-    commands = [
-        ["<PYTHON>" if part == sys.executable else part for part in command]
-        for command in shell.commands
-    ]
+    commands = [_normalized(command) for command in shell.commands]
     return {
         **result,
         "nix_commands": commands,
