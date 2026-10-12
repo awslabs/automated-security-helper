@@ -765,6 +765,32 @@
   archive converter, with the same result and exit code, and prints a warning to
   stderr naming `archive`.
 
+- **Plugin install commands start in an empty directory.** `ash dependencies install`
+  takes the current directory as the source tree, and it used to run every plugin's
+  install commands there, so a package manager read the repository's settings: npm a
+  project `.npmrc`, `gem install -g` the Gemfile, Bundler `.bundle/config`, and
+  `python -m pip` or a `python -c` script a `pip/` or `automated_security_helper/`
+  package. Each command now starts in a new empty directory that is removed when it
+  ends. Your own settings, in your home directory or set globally, still apply.
+  - For plugin authors: an install command, from `get_installation_commands`,
+    `custom_install_commands` or `uv_tool_install_commands`, can no longer rely on
+    starting in the current directory. Name files by absolute path; a relative path,
+    or an `npm install` into the repository's `node_modules`, now refers to the empty
+    directory.
+  - A command that starts ASH's own interpreter with `-m` or `-c` also gets `-P` on
+    Python 3.11 and later. The detect-secrets worker starts the same way, in an
+    empty directory under its work directory, instead of in the scanner's results
+    directory.
+  - A uv command other than `uv tool` or `uvx` also gets `UV_NO_PROJECT=1` and
+    `UV_PYTHON` set to ASH's interpreter, because uv looks for a project and a
+    `.venv` in every parent directory too. A command that names `--project`,
+    `--python`, `-p` or `--system` keeps its own choice, and so does a `UV_PYTHON` or
+    `UV_SYSTEM_PYTHON` you set.
+  - `ASH_BIN_PATH` is made absolute where ASH reads it, so a relative value names
+    the same directory for every command. An empty value now counts as unset; it
+    used to mean the current directory. `--bin-path` shows its default as
+    `~/.ash/bin`.
+
 - **grype, opengrep, syft and trivy are bumped to v0.120.1, v1.30.2, v1.54.1 and
   v0.75.0** (from v0.111.0, v1.15.1, v1.42.4 and v0.69.3), with every archive and
   executable digest in `utils/tool_downloads.py` re-taken from the new releases. No
