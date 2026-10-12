@@ -475,6 +475,70 @@ print(f"{time.monotonic() - started:.3f}")
 """
 
 
+#: A value holding the quote character its message quotes it with.
+QUOTED_VALUE = "ab'" + _derived("masking-unit-quoted", 10)
+
+
+class TestQuotesInsideTheValue:
+    """The quoted value runs to the last quote of the message, not the first.
+
+    bandit writes the raw value between single quotes, so a value holding a
+    quote cut the match short and left its tail in clear.
+    """
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [HARDCODED, "Credit card (confidence: 15.0% - LOW). Matched text: "],
+        ids=["bandit", "ferret"],
+    )
+    def test_the_whole_value_is_masked_in_its_message(self, prefix):
+        model = _results(
+            _result("B105", "app.py", 1, prefix + "'" + QUOTED_VALUE + "'"),
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=f'run("{QUOTED_VALUE}")\n',
+            ),
+        )
+
+        mask_secrets_in_results(model)
+
+        message = _message(model.sarif.runs[0].results[0])
+        assert message == prefix + "'" + _mask_secret_value(QUOTED_VALUE) + "'"
+        assert QUOTED_VALUE[3:] not in message
+        # The whole value is the one masked where it is reused.
+        assert QUOTED_VALUE[3:] not in _region_text(model.sarif.runs[0].results[1])
+
+    def test_bandits_own_masking_masks_the_whole_value(self):
+        from automated_security_helper.utils.secret_masking import mask_secret_in_text
+
+        masked = mask_secret_in_text(HARDCODED + "'" + QUOTED_VALUE + "'", "B105")
+
+        assert masked == HARDCODED + "'" + _mask_secret_value(QUOTED_VALUE) + "'"
+
+    def test_a_double_quoted_value_holding_a_double_quote(self):
+        value = 'cd"' + _derived("masking-unit-dquoted", 10)
+        model = _results(_result("B105", "app.py", 1, HARDCODED + '"' + value + '"'))
+
+        mask_secrets_in_results(model)
+
+        assert _message(model.sarif.runs[0].results[0]) == (
+            HARDCODED + '"' + _mask_secret_value(value) + '"'
+        )
+
+    def test_text_after_the_closing_quote_still_masks_the_value(self):
+        """Fail closed: a message that does not end at the quote is matched as before."""
+        model = _results(
+            _result("B105", "app.py", 1, HARDCODED + "'" + VALUE + "' (in a test)")
+        )
+
+        mask_secrets_in_results(model)
+
+        assert VALUE not in _message(model.sarif.runs[0].results[0])
+
+
 class TestPathologicalInput:
     def test_a_line_of_backslashes_is_masked_in_bounded_time(self, tmp_path):
         """One line in a scanned file must not stall the scan or an MCP server.

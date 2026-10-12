@@ -42,20 +42,9 @@ def _mask_bandit_password_secret(text: str) -> str:
     Returns:
         The text with the secret value masked
     """
-    # Pattern to match Bandit password messages with quoted secrets.
-    # Uses a non-greedy match that handles escaped quotes and stops at
-    # the matching closing delimiter (single or double quote).
-    pattern = r"""(Possible hardcoded password:\s*)(["'])((?:(?!\2).)*)\2"""
-
-    def mask_replacement(match):
-        prefix = match.group(1)  # "Possible hardcoded password: "
-        quote = match.group(2)  # The quote character (' or ")
-        secret = match.group(3)  # The actual secret
-
-        masked_secret = _mask_secret_value(secret)
-        return f"{prefix}{quote}{masked_secret}{quote}"
-
-    return re.sub(pattern, mask_replacement, text)
+    # bandit writes the raw value between quotes at the end of its message, so
+    # the value runs to the last quote, not the first; see _quoted_values.
+    return _mask_spans(text, _quoted_values(text, _HARDCODED_PASSWORD_LABEL))
 
 
 _mask_bandit_b105_secret = _mask_bandit_password_secret
@@ -209,11 +198,53 @@ def _is_detection_tag(tag: Any) -> bool:
     )
 
 
-#: Messages that quote the value a finding matched.
-_VALUE_IN_MESSAGE = (
-    re.compile(r"""Possible hardcoded password:\s*(["'])((?:(?!\1).)*)\1"""),
-    re.compile(r"""Matched text:\s*(["'])((?:(?!\1).)*)\1"""),
-)
+#: How bandit's B105-B107 and ferret-scan's messages introduce the value they quote.
+_HARDCODED_PASSWORD_LABEL = "Possible hardcoded password:"
+_MATCHED_TEXT_LABEL = "Matched text:"
+
+
+def _value_patterns(label: str) -> Tuple[re.Pattern, re.Pattern]:
+    """(the quoted value ending the message, the first quoted value after ``label``).
+
+    The value is written raw, so it can hold its own quote character, and it
+    ends the message: the first pattern takes everything to the last matching
+    quote at the end. The second, to the first matching quote, is for a message
+    that goes on after the value, which neither tool writes; it fails closed
+    by still masking what it can.
+    """
+    escaped = re.escape(label)
+    return (
+        re.compile(escaped + r"""\s*(["'])(.*)\1\s*\Z""", re.DOTALL),
+        re.compile(escaped + r"""\s*(["'])((?:(?!\1).)*)\1"""),
+    )
+
+
+_VALUE_PATTERNS: Dict[str, Tuple[re.Pattern, re.Pattern]] = {
+    label: _value_patterns(label)
+    for label in (_HARDCODED_PASSWORD_LABEL, _MATCHED_TEXT_LABEL)
+}
+
+
+def _quoted_values(text: str, label: Optional[str] = None) -> List[Tuple[int, int]]:
+    """The (start, end) of each value a message quotes, for one label or all."""
+    spans: List[Tuple[int, int]] = []
+    for name, (ending, first) in _VALUE_PATTERNS.items():
+        if label is not None and name != label:
+            continue
+        match = ending.search(text)
+        if match is not None:
+            spans.append(match.span(2))
+        else:
+            spans.extend(found.span(2) for found in first.finditer(text))
+    return sorted(set(spans))
+
+
+def _mask_spans(text: str, spans: Iterable[Tuple[int, int]]) -> str:
+    """``text`` with each (start, end) span masked; spans are replaced last to first."""
+    for start, end in sorted(set(spans), reverse=True):
+        text = text[:start] + _mask_secret_value(text[start:end]) + text[end:]
+    return text
+
 
 #: Values shorter than this are masked in their own finding's message only, not
 #: wherever they occur: replacing a two- or three-character token across every
@@ -356,7 +387,7 @@ def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> b
     if SECRETS_TOOL_TYPE in result_tool_types(result):
         return True
     text = _text_of(getattr(result, "message", None)) or ""
-    return any(pattern.search(text) for pattern in _VALUE_IN_MESSAGE)
+    return bool(_quoted_values(text))
 
 
 class _SecretIndex:
@@ -499,21 +530,8 @@ def _propagates(value: str) -> bool:
 
 
 def _mask_message_values(text: str) -> str:
-    """``text`` with each value a message pattern quotes masked."""
-
-    def replace(match: "re.Match[str]") -> str:
-        start, end = match.span(2)
-        whole_start = match.start(0)
-        segment = match.group(0)
-        return (
-            segment[: start - whole_start]
-            + _mask_secret_value(match.group(2))
-            + segment[end - whole_start :]
-        )
-
-    for pattern in _VALUE_IN_MESSAGE:
-        text = pattern.sub(replace, text)
-    return text
+    """``text`` with each value a message quotes masked (``_quoted_values``)."""
+    return _mask_spans(text, _quoted_values(text))
 
 
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
@@ -535,9 +553,8 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
                 getattr(region, "endLine", None),
             )
         text = _text_of(getattr(result, "message", None)) or ""
-        for pattern in _VALUE_IN_MESSAGE:
-            for match in pattern.finditer(text):
-                index.add_values(_exposed_values(match.group(2).strip(), result))
+        for start, end in _quoted_values(text):
+            index.add_values(_exposed_values(text[start:end].strip(), result))
     return index
 
 
