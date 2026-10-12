@@ -221,6 +221,10 @@ PermitBase = Callable[[Path], bool]
 #: "Environment variables" in the module docstring.
 RefuseEnv = Callable[[Path], bool]
 
+#: Decides whether one config file is the operator's, so its relative paths are
+#: taken from its directory (``config/operator_paths.py``). True anchors them.
+AnchorPaths = Callable[[Path], bool]
+
 SOURCE_KIND_EXPLICIT = "explicit"
 SOURCE_KIND_DEDICATED = "dedicated"
 SOURCE_KIND_ASHRC = "ashrc"
@@ -672,6 +676,7 @@ class _ChainState:
     root: Path
     permit_base: Optional[PermitBase] = None
     refuse_env: RefuseEnv = config_is_client_delivered
+    anchor_relative_paths: Optional[AnchorPaths] = None
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
@@ -916,6 +921,18 @@ def _resolve(
 
     state.documents.setdefault(real, copy.deepcopy(data))
     state.reached(real, named)
+    anchor = state.anchor_relative_paths is not None and (
+        state.anchor_relative_paths(real) and state.anchor_relative_paths(named)
+    )
+    if anchor:
+        # Each operator file's own relative paths are taken from its directory,
+        # before the merge loses which file set them (config/operator_paths.py).
+        # ``documents`` keeps what the file holds, for the checks of who set what.
+        from automated_security_helper.config.operator_paths import (
+            anchor_relative_paths,
+        )
+
+        data = anchor_relative_paths(data, real.parent)
     if not isinstance(data, dict) or (
         EXTENDS_KEY not in data and PATCH_KEY not in data
     ):
@@ -926,6 +943,12 @@ def _resolve(
         own = dict(data)
         refs = _extends_refs(own.pop(EXTENDS_KEY, None), real)
         ops = own.pop(PATCH_KEY, None)
+        if anchor:
+            from automated_security_helper.config.operator_paths import (
+                anchor_patch_operations,
+            )
+
+            ops = anchor_patch_operations(ops, real.parent)
         merged: Any = {}
         for base_ref in refs:
             base_path = _resolve_base_path(
@@ -967,6 +990,7 @@ def resolve_config_document(
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
     refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
 ) -> ResolvedConfigDocument:
     """Read `config_path` and every base it extends into one merged document.
 
@@ -975,6 +999,11 @@ def resolve_config_document(
     itself, which the caller chose and is responsible for having checked.
     `refuse_env` decides which files of the chain resolve no ``!ENV``; None
     refuses the files an MCP client delivered. See "Environment variables".
+    `anchor_relative_paths` judges each file of the chain by its resolved path
+    and by the path it was reached by; for a file it accepts under both, the
+    relative paths the file sets for the options in ``config/operator_paths.py``
+    are taken from its directory. ``resolve_config`` passes one that accepts the
+    operator's files. ``documents`` holds each file as written either way.
     """
     config_path = Path(config_path)
     root = (
@@ -986,6 +1015,7 @@ def resolve_config_document(
         root=root,
         permit_base=permit_base,
         refuse_env=refuse_env or config_is_client_delivered,
+        anchor_relative_paths=anchor_relative_paths,
     )
     data = _resolve(config_path, (), state)
     return ResolvedConfigDocument(
@@ -1002,10 +1032,12 @@ def load_config_document(
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
     refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
 ) -> Any:
     return resolve_config_document(
         config_path,
         confine_to=confine_to,
         permit_base=permit_base,
         refuse_env=refuse_env,
+        anchor_relative_paths=anchor_relative_paths,
     ).data

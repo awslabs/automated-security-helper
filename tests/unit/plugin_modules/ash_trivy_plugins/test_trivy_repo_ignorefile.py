@@ -89,6 +89,28 @@ def test_trivy_ignorefile_from_the_environment_is_passed(tmp_path, monkeypatch):
     assert _ignorefile(_argv(tmp_path, source)) == operator.resolve()
 
 
+@pytest.mark.parametrize(
+    ("env", "flag"),
+    [
+        ("TRIVY_IGNOREFILE", "--ignorefile="),
+        ("TRIVY_SECRET_CONFIG", "--secret-config="),
+    ],
+)
+def test_a_relative_path_in_the_environment_is_taken_from_the_working_directory(
+    tmp_path, monkeypatch, env, flag
+):
+    """The variable is the operator's, set where ASH runs, not in the scanned tree."""
+    source = _tree(tmp_path)
+    (source / "operator-file").write_text("github-pat\n")
+    workdir = tmp_path / "ci"
+    workdir.mkdir()
+    (workdir / "operator-file").write_text("github-pat\n")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv(env, "operator-file")
+    values = [a.split("=", 1)[1] for a in _argv(tmp_path, source) if a.startswith(flag)]
+    assert [Path(v) for v in values] == [(workdir / "operator-file").resolve()]
+
+
 @pytest.mark.parametrize("value", [".trivyignore", "sub/ignore"])
 def test_an_ignore_file_inside_the_tree_is_not_passed(tmp_path, value):
     source = _tree(tmp_path)

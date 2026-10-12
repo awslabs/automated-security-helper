@@ -95,7 +95,7 @@ class GrypeScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to Grype configuration file, relative to the source directory."
+            description="Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory."
             " Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree.",
         ),
     ] = None

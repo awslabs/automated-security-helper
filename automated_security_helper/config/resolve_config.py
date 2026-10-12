@@ -11,6 +11,7 @@ from automated_security_helper.config.client_config_policy import (
     clear_client_supplied_marks,
 )
 from automated_security_helper.config.config_sources import (
+    AnchorPaths,
     ChainNames,
     RefuseEnv,
     ResolvedConfigDocument,
@@ -28,6 +29,10 @@ from automated_security_helper.config.config_sources import (
 from automated_security_helper.config.default_config import (
     default_config_document,
     get_default_config,
+)
+from automated_security_helper.config.operator_paths import (
+    anchor_override_paths,
+    the_operators_files,
 )
 from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
@@ -318,14 +323,31 @@ def resolve_config(
         # untrusted_config treats every file of the chain as the caller's, which
         # would include the overlay, the operator's own file.
         raise ValueError("overlay_config_path cannot be combined with untrusted_config")
+    if client_config_policy is None and config_overrides:
+        # The operator's --config-overrides: a relative path in one is taken from
+        # the working directory ASH runs in, not the scanned tree
+        # (config/operator_paths.py). Anchored once here, so the config and every
+        # replay onto the trusted base below read the same value.
+        config_overrides = anchor_override_paths(config_overrides, Path.cwd())
     chain: List[Path] = []
     documents: Dict[Path, Any] = {}
     names: Dict[Path, Tuple[Path, ...]] = {}
     refuse_env = env_refused_for(
         remote_client, getattr(client_config_policy, "session_id", None)
     )
+    trees = scanned_trees(
+        Path(
+            scanned_root
+            if scanned_root is not None
+            else (source_dir if source_dir is not None else Path.cwd())
+        )
+    )
+    # The files whose relative paths are taken from their own directory.
+    operators_files = the_operators_files(trees)
     overlay = (
-        _load_overlay(overlay_config_path, source_dir, permit_base, refuse_env)
+        _load_overlay(
+            overlay_config_path, source_dir, permit_base, refuse_env, operators_files
+        )
         if overlay_config_path is not None
         else None
     )
@@ -341,6 +363,7 @@ def resolve_config(
         overlay=overlay,
         names=names,
         untrusted_config=untrusted_config,
+        anchor_paths=None if untrusted_config else operators_files,
     )
     if config is None:
         return config
@@ -374,7 +397,6 @@ def resolve_config(
     )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
-    trees = scanned_trees(Path(scanned_root))
     default_in_tree = _not_the_operators(default_chain, trees, default_names)
     if chain:
         in_tree = (
@@ -389,7 +411,9 @@ def resolve_config(
         in_tree = [*in_tree, Path("config_overrides")]
     if not in_tree:
         return config
-    operator = _load_operator_config(trusted_config_path, source_dir, permit_base)
+    operator = _load_operator_config(
+        trusted_config_path, source_dir, permit_base, operators_files
+    )
     if operator is not None and not _not_the_operators(operator[1], trees, operator[2]):
         trusted = operator[0]
     else:
@@ -571,6 +595,7 @@ def _load_operator_config(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
+    anchor_paths: Optional[AnchorPaths] = None,
 ) -> Optional[Tuple[AshConfig, List[Path], Dict[Path, Tuple[Path, ...]]]]:
     """The operator's config file, the files it was built from, and their names, or None.
 
@@ -584,6 +609,7 @@ def _load_operator_config(
         path,
         confine_to=default_confinement_root(path, source_dir),
         permit_base=permit_base,
+        anchor_relative_paths=anchor_paths,
     )
     try:
         config = AshConfig.model_validate(document.data, strict=True)
@@ -600,6 +626,7 @@ def _load_overlay(
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
     refuse_env: RefuseEnv,
+    anchor_paths: Optional[AnchorPaths] = None,
 ) -> ResolvedConfigDocument:
     """The overlay file's merged document, read as the operator's config is.
 
@@ -619,6 +646,7 @@ def _load_overlay(
             confine_to=default_confinement_root(path, source_dir),
             permit_base=permit_base,
             refuse_env=refuse_env,
+            anchor_relative_paths=anchor_paths,
         )
     except ASHConfigValidationError:
         raise
@@ -663,11 +691,14 @@ def _resolve_config(
     overlay: Optional[ResolvedConfigDocument] = None,
     names: Optional[Dict[Path, Tuple[Path, ...]]] = None,
     untrusted_config: bool = False,
+    anchor_paths: Optional[AnchorPaths] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
     Appends every file read to ``chain``, each file's parsed document to
     ``documents``, and the paths each was reached by to ``names``.
+    ``anchor_paths`` accepts the files whose relative paths are taken from their
+    own directory (``config/operator_paths.py``).
     ``refuse_env`` decides which files of the chain resolve no ``!ENV``
     (``config_sources``). ``overlay`` is ``overlay_config_path``'s document,
     merged over the selected file's, and used alone wherever the default config
@@ -781,6 +812,7 @@ def _resolve_config(
                 confine_to=confine_to,
                 permit_base=permit_base,
                 refuse_env=refuse_env,
+                anchor_relative_paths=anchor_paths,
             )
             data = document.data
             if overlay is not None and isinstance(data, dict):

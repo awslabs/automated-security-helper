@@ -127,7 +127,7 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
     baseline_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+            description="Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
         ),
     ] = None
     scan_settings: Annotated[

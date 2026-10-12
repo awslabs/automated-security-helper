@@ -172,7 +172,7 @@ scanners:
     options:
       severity_threshold: "MEDIUM"   # ALL, LOW, MEDIUM, HIGH, CRITICAL
       offline: false                 # Skip database updates
-      config_file: null              # Explicit grype config, relative to the source directory
+      config_file: null              # Explicit grype config, relative to the config file that sets it
 ```
 
 **Key Checks**:

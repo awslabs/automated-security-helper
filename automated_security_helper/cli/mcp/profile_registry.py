@@ -115,7 +115,16 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 f"--profile {name!r} points at missing file: {path}"
             )
         try:
-            cfg = AshConfig.from_file(path)
+            from automated_security_helper.config.operator_paths import (
+                not_delivered_by_a_client,
+            )
+
+            # The operator's file: a relative path in it is taken from its
+            # directory, before the session's copy is written somewhere else
+            # (config/operator_paths.py).
+            cfg = AshConfig.from_file(
+                path, anchor_relative_paths=not_delivered_by_a_client
+            )
         except yaml.YAMLError as exc:
             raise ProfileRegistryError(
                 f"--profile {name!r} failed to parse {path}: {exc}"

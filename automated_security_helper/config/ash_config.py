@@ -1496,6 +1496,7 @@ class AshConfig(BaseModel):
         confine_to: Optional[Path] = None,
         permit_base: Optional[Callable[[Path], bool]] = None,
         refuse_env: Optional[Callable[[Path], bool]] = None,
+        anchor_relative_paths: Optional[Callable[[Path], bool]] = None,
     ) -> "AshConfig":
         """Load configuration from a file, following any ``extends`` chain.
 
@@ -1504,7 +1505,10 @@ class AshConfig(BaseModel):
         ``patch`` are resolved by ``config/config_sources.py``, which documents
         the merge rules, the confinement of base paths to ``confine_to`` and
         ``permit_base``, and which files ``refuse_env`` keeps from resolving
-        ``!ENV``.
+        ``!ENV``. ``anchor_relative_paths`` takes the relative paths each file it
+        accepts sets from that file's directory (``config/operator_paths.py``),
+        as a scan reads the operator's files; leave it None to get back what the
+        file holds.
         """
         from automated_security_helper.config.config_sources import (
             load_config_document,
@@ -1515,6 +1519,7 @@ class AshConfig(BaseModel):
             confine_to=confine_to,
             permit_base=permit_base,
             refuse_env=refuse_env,
+            anchor_relative_paths=anchor_relative_paths,
         )
         return cls.model_validate(config_data, strict=True)
 

@@ -57,14 +57,16 @@ def test_a_repositorys_config_does_not_choose_the_tool_config(
 
 @pytest.mark.parametrize("scanner", SCANNERS)
 def test_an_override_names_the_tool_config_even_inside_the_tree(
-    tmp_path: Path, scanner: str
+    tmp_path: Path, scanner: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A relative override is taken from the working directory, here the tree."""
     repo = _repo(tmp_path, {scanner: {"options": {"config_file": ".ash/other.yaml"}}})
+    monkeypatch.chdir(repo)
     config = resolve_config(
         source_dir=repo,
         config_overrides=[f"scanners.{scanner}.options.config_file=.ash/tool.yaml"],
     )
-    assert _config_file(config, scanner) == ".ash/tool.yaml"
+    assert Path(_config_file(config, scanner)) == repo / ".ash" / "tool.yaml"
 
 
 @pytest.mark.parametrize("scanner", SCANNERS)
@@ -128,7 +130,10 @@ def test_an_mcp_clients_overrides_are_not_replayed_as_the_operators(
     from_the_operator = resolve_config(source_dir=repo, config_overrides=[override])
 
     assert read(from_the_client) is None
-    assert read(from_the_operator) == override.partition("=")[2]
+    # The operator's relative path is taken from the working directory.
+    written = override.partition("=")[2]
+    expected = str(Path.cwd() / written) if written.startswith(".ash/") else written
+    assert read(from_the_operator) == expected
 
 
 #: opengrep's and semgrep's rules and metrics setting, each with a value other

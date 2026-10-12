@@ -335,7 +335,7 @@ scanners:
   detect-secrets:
     enabled: true
     options:
-      baseline_file: null   # Path to a detect-secrets baseline, relative to the source directory
+      baseline_file: null   # Path to a detect-secrets baseline, relative to the config file that sets it
 
   checkov:
     enabled: true
@@ -678,6 +678,29 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
+## Relative paths in the operator's settings
+
+A relative path in one of the operator's settings is taken from where it was set,
+not from the source directory being scanned:
+
+- in a config file outside the tree (`--config`, `ASH_CONFIG`, a workspace's
+  `--config`, an MCP profile), from that file's directory; in an `extends` base,
+  from the base's directory; and in a `patch` operation, from the directory of the
+  file that holds it;
+- in `--config-overrides`, in a CLI flag, and in `TRIVY_IGNOREFILE` or
+  `TRIVY_SECRET_CONFIG`, from the working directory ASH runs in.
+
+This covers `config_file` of bandit, checkov, ferret-scan, grype and syft,
+detect-secrets' `baseline_file` and the `file://` entries of its `scan_settings`,
+trivy-repo's `ignore_file` and `secret_config_file`, opengrep's and semgrep's
+`config` when a file or directory is there (otherwise it is a registry entry such
+as `p/ci`), and `sandbox.extra_read_paths`. A path that starts with `~`, or is
+absolute, is used as written. A config file inside the scanned tree does not set
+these options (see
+[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)).
+To name a file in the scanned repository, give its absolute path, or a path
+relative to where you run ASH with `--config-overrides`.
+
 ## Extending another configuration
 
 A config can build on one or more base configs with `extends`, and adjust the
@@ -808,7 +831,7 @@ scanners:
   detect-secrets:
     enabled: true
     options:
-      baseline_file: null   # Explicit .secrets.baseline path, relative to the source directory
+      baseline_file: null   # Explicit .secrets.baseline path, relative to the config file that sets it
       scan_timeout: 1800    # Seconds before the detect-secrets invocation is killed
 ```
 

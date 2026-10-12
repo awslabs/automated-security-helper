@@ -14,7 +14,14 @@ def get_default_config():
         ASH_LOGGER.info(
             f"Using ASH config path found in ASH_CONFIG variable: {config_env_var}"
         )
-        return AshConfig.from_file(config_env_var)
+        from automated_security_helper.config.operator_paths import (
+            not_delivered_by_a_client,
+        )
+
+        # The operator's file: its relative paths are taken from its directory.
+        return AshConfig.from_file(
+            config_env_var, anchor_relative_paths=not_delivered_by_a_client
+        )
 
     return AshConfig()
 

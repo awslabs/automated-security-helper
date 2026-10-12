@@ -902,6 +902,24 @@
 
 ### Breaking changes
 
+- **A relative path in the operator's settings is taken from where it was set,
+  not from the source directory being scanned.** In a config file outside the tree (`--config`,
+  `ASH_CONFIG`, a workspace's `--config`, an MCP profile) it is taken from that
+  file's directory, in an `extends` base from the base's directory, and in
+  `--config-overrides`, `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG` from the
+  working directory. Before, the scanners joined it to the source directory, so
+  an operator config naming `bandit.yaml` had bandit read a `bandit.yaml` at the
+  root of the scanned repository. It covers `config_file` of bandit, checkov,
+  ferret-scan, grype and syft, detect-secrets' `baseline_file` and `file://`
+  plugin and filter paths, trivy-repo's `ignore_file` and `secret_config_file`,
+  opengrep's and semgrep's `config` when a file or directory is there, and
+  `sandbox.extra_read_paths`, which ignored a relative path before. An operator
+  config that named a file in the scanned repository by a relative path now
+  names one beside the config instead; to keep using the repository's file, give
+  its absolute path, or a path relative to where ASH runs with
+  `--config-overrides`. See
+  [Relative paths in the operator's settings](docs/content/docs/configuration-guide.md#relative-paths-in-the-operators-settings).
+
 - **In workspace mode, every field the operator's `--config` (or `ASH_CONFIG`)
   sets is final for every project.** Before, `ash --workspace ... --config <file>`
   used the file only for a project with no config of its own, and a project's own

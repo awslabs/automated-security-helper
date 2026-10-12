@@ -270,6 +270,9 @@ def _forms_setup(tmp_path: Path, monkeypatch, name: str):
 @pytest.mark.parametrize("form", _FORMS)
 def test_checkov_passes_exactly_the_path_that_was_checked(tmp_path, monkeypatch, form):
     source, value_for, expected = _forms_setup(tmp_path, monkeypatch, "ck.yaml")
+    # A relative override is taken from the working directory; run from the
+    # source directory so each form names the file it names from there.
+    monkeypatch.chdir(source)
     value = value_for(form)
     argv = _checkov_argv(
         source,

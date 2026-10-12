@@ -93,8 +93,10 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy ignore file, passed as --ignorefile. Used only when it is "
-                "outside the scanned tree; a relative path is taken from the source "
-                "directory. Unset, TRIVY_IGNOREFILE is used the same way, and "
+                "outside the scanned tree; a relative path is taken from the "
+                "directory of the config file that sets it, or from the working "
+                "directory for --config-overrides and the environment variable. "
+                "Unset, TRIVY_IGNOREFILE is used the same way, and "
                 "otherwise trivy gets an empty one, so a .trivyignore in the scanned "
                 "repository does not remove findings."
             ),
@@ -106,7 +108,9 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
                 "--secret-config. Used only when it is outside the scanned tree; a "
-                "relative path is taken from the source directory. Unset, "
+                "relative path is taken from the directory of the config file that "
+                "sets it, or from the working directory for --config-overrides and "
+                "the environment variable. Unset, "
                 "TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets "
                 "an empty one, so a trivy-secret.yaml in the scanned repository does "
                 "not disable secret rules."
@@ -302,12 +306,16 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         """
         context_config = getattr(self.context, "config", None)
         source_dir = Path(self.context.source_dir)
+        from automated_security_helper.config.operator_paths import anchored_path
+
         for key, value in (
             (
                 f"scanners.trivy-repo.options.{option}",
                 getattr(self.config.options, option),
             ),
-            (env, os.environ.get(env)),
+            # The variable is the operator's, set where ASH runs: a relative path
+            # in it is taken from the working directory (config/operator_paths.py).
+            (env, anchored_path(os.environ.get(env), Path.cwd())),
         ):
             if not value:
                 continue
