@@ -554,8 +554,15 @@ class TestTheWeeklyRunWhenOneRepositoryRefusesTheToken:
                 url = f"https://pypi.org/pypi/{pin.project}/json"
                 answers[url] = {"info": {"version": pin.version}}
             elif pin.ecosystem == checker.RUBYGEMS:
-                url = f"https://rubygems.org/api/v1/versions/{pin.project}/latest.json"
-                answers[url] = {"version": pin.version}
+                url = f"https://rubygems.org/api/v1/versions/{pin.project}.json"
+                answers[url] = [
+                    {
+                        "number": pin.version,
+                        "prerelease": False,
+                        "platform": "ruby",
+                        "ruby_version": ">= 0",
+                    }
+                ]
             else:
                 raise AssertionError(f"no fake upstream for {pin.ecosystem}")
         assert _TRIVY_LATEST in answers, "trivy is no longer a GitHub-release pin"

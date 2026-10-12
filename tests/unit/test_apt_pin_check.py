@@ -341,17 +341,31 @@ class TestMain:
         monkeypatch.setattr(
             checker, "APT_INDEX_FETCHER", lambda url: recorded(url, overrides)
         )
+
+        def pinned(project: str) -> str:
+            return {
+                p.project: p.version
+                for p in checker.enumerate_pins(checker.load_pins_module())
+            }[project]
+
+        def gem_releases(project: str) -> "list[dict[str, object]]":
+            # A RubyGems versions answer listing only the pinned release.
+            return [
+                {
+                    "number": pinned(project),
+                    "prerelease": False,
+                    "platform": "ruby",
+                    "ruby_version": ">= 0",
+                }
+            ]
+
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
             {
-                eco: (
-                    lambda project: {
-                        p.project: p.version
-                        for p in checker.enumerate_pins(checker.load_pins_module())
-                    }[project]
-                )
-                for eco in (checker.GITHUB, checker.PYPI, checker.RUBYGEMS)
+                checker.GITHUB: pinned,
+                checker.PYPI: pinned,
+                checker.RUBYGEMS: gem_releases,
             },
         )
         code = checker.main(list(argv))

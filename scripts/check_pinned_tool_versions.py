@@ -75,9 +75,16 @@ What was rejected
 Known limitations
 -----------------
 * "Latest" is each upstream's own notion: GitHub's ``releases/latest`` (which
-  skips drafts and pre-releases), PyPI's ``info.version`` and RubyGems'
-  ``latest.json``. A project that marks a release "latest" out of version order
-  is reported as it marks it.
+  skips drafts and pre-releases) and PyPI's ``info.version``. A project that marks a
+  release "latest" out of version order is reported as it marks it.
+* A gem is compared with the newest final release for the ``ruby`` platform whose
+  required Ruby version admits the Ruby the image installs, read from the
+  Dockerfile's ``ruby=`` apt pin, so ``--fail-on-outdated`` fails only when the image
+  could install a newer release. A newer release that needs a newer Ruby is named in
+  the report and does not fail. The apt pin gives only major.minor, so the image's
+  Ruby is compared as major.minor.0, and a release needing a later patch of the same
+  minor is not counted. A Ruby pin or a required Ruby version this script cannot read
+  is refused (exit 2), not guessed at.
 * A pin newer than upstream's latest is reported as ``ahead`` and does not fail.
   That happens when a release is yanked or demoted after it was pinned, and it is a
   reason to look, not something this script can decide.
@@ -216,10 +223,18 @@ class Pin:
 
 @dataclass(frozen=True)
 class Result:
+    """One pin against its upstream.
+
+    ``latest`` is what the pin is compared with. For a gem, that is the newest
+    release whose required Ruby version admits the Ruby the image installs, and
+    ``note`` names the newest release when it needs a newer Ruby than that.
+    """
+
     pin: Pin
     latest: str | None
     status: str  # "current" | "outdated" | "ahead" | "error"
     detail: str = ""
+    note: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -576,33 +591,155 @@ def latest_pypi_release(distribution: str) -> str:
     )
 
 
-def latest_rubygems_release(gem: str) -> str:
-    return str(
-        _get_json(f"https://rubygems.org/api/v1/versions/{gem}/latest.json")["version"]
-    )
+def rubygems_releases(gem: str) -> Any:
+    """Every release of ``gem``, with its required Ruby version: one request.
+
+    RubyGems' versions list, newest first, one entry per release and platform, each
+    with ``number``, ``prerelease``, ``platform`` and ``ruby_version``.
+    """
+    return _get_json(f"https://rubygems.org/api/v1/versions/{gem}.json")
 
 
-Fetchers = dict[str, Callable[[str], str]]
+# One clause of a RubyGems requirement, as ``ruby_version`` writes it: ">= 3.1.0".
+_REQUIREMENT_CLAUSE = re.compile(r"^\s*(~>|>=|<=|!=|=|>|<)?\s*(\d+(?:\.\d+)*)\s*$")
+
+
+def _trimmed(numbers: Iterable[int]) -> tuple[int, ...]:
+    """``numbers`` without trailing zeros, so 3.1 and 3.1.0 compare equal."""
+    values = list(numbers)
+    while len(values) > 1 and values[-1] == 0:
+        values.pop()
+    return tuple(values)
+
+
+def ruby_admits(requirement: object, ruby: tuple[int, int]) -> bool:
+    """Whether a gem release's required Ruby version admits Ruby ``major.minor``.
+
+    ``requirement`` is the release's ``ruby_version`` from RubyGems: comma-separated
+    clauses such as ``>= 3.1.0`` or ``~> 2.2``, or None or empty for no requirement.
+    The image's Ruby is known only as major.minor (the Dockerfile's apt pin), so it is
+    compared as major.minor.0: a release that needs 3.1.3 is not counted as
+    installable on 3.1, even though the image's 3.1 patch release might be newer.
+
+    Raises:
+        ValueError: for a requirement this cannot read. A release whose Ruby cannot be
+            judged is refused, not guessed at.
+    """
+    if requirement is None or requirement == "":
+        return True
+    if not isinstance(requirement, str):
+        raise ValueError(f"cannot read the required Ruby version {requirement!r}")
+    have = _trimmed(ruby)
+    for clause in requirement.split(","):
+        match = _REQUIREMENT_CLAUSE.match(clause)
+        if match is None:
+            raise ValueError(f"cannot read the required Ruby version {requirement!r}")
+        operator = match.group(1) or "="
+        segments = [int(part) for part in match.group(2).split(".")]
+        want = _trimmed(segments)
+        if operator == "~>":
+            # Pessimistic: at least this version, below the next release of its
+            # second-to-last segment. ~> 2.2 is >= 2.2 and < 3; ~> 3.0.1 is < 3.1.
+            upper = segments[:-1] if len(segments) > 1 else list(segments)
+            upper[-1] += 1
+            admitted = want <= have < _trimmed(upper)
+        else:
+            admitted = {
+                "=": have == want,
+                "!=": have != want,
+                ">": have > want,
+                "<": have < want,
+                ">=": have >= want,
+                "<=": have <= want,
+            }[operator]
+        if not admitted:
+            return False
+    return True
+
+
+def newest_installable(
+    releases: Any, ruby: tuple[int, int], pinned: str
+) -> tuple[str, str]:
+    """(the release a gem pin is compared with, a note about a newer one or "").
+
+    The newest final release for the ``ruby`` platform whose required Ruby version
+    admits ``ruby``. Releases no newer than ``pinned`` are not judged: when none newer
+    is installable, the pin is compared with itself. When the newest release needs a
+    newer Ruby, the note says so and names it.
+
+    Raises:
+        ValueError: for an answer that is not a list of releases, a release with no
+            version number, or a required Ruby version that cannot be read.
+    """
+    if not isinstance(releases, list):
+        raise ValueError(f"RubyGems answered {type(releases).__name__}, not a list")
+    finals = []
+    for release in releases:
+        if not isinstance(release, dict) or not isinstance(release.get("number"), str):
+            raise ValueError(f"RubyGems listed a release with no number: {release!r}")
+        if release.get("prerelease") or release.get("platform", "ruby") != "ruby":
+            continue
+        finals.append(release)
+    if not finals:
+        raise ValueError("RubyGems lists no final release for the ruby platform")
+    finals.sort(key=lambda release: parse_version(release["number"]), reverse=True)
+    newest, pin_key = finals[0], parse_version(pinned)
+    if parse_version(newest["number"]) < pin_key:
+        return newest["number"], ""
+    target = pinned
+    for release in finals:
+        if parse_version(release["number"]) <= pin_key:
+            break
+        if ruby_admits(release.get("ruby_version"), ruby):
+            target = release["number"]
+            break
+    note = ""
+    if parse_version(newest["number"]) > parse_version(target):
+        note = (
+            f"{newest['number']} is the newest release, but it needs Ruby "
+            f"{newest.get('ruby_version')} and the image installs Ruby "
+            f"{ruby[0]}.{ruby[1]}; {target} is the newest release the image can run"
+        )
+    return target, note
+
+
+Fetchers = dict[str, Callable[[str], Any]]
 
 DEFAULT_FETCHERS: Fetchers = {
     GITHUB: latest_github_release,
     PYPI: latest_pypi_release,
-    RUBYGEMS: latest_rubygems_release,
+    RUBYGEMS: rubygems_releases,
 }
 
 
-def check(pins: Iterable[Pin], fetchers: Fetchers | None = None) -> list[Result]:
-    """Look up each pin's latest release and classify it."""
+def check(
+    pins: Iterable[Pin],
+    fetchers: Fetchers | None = None,
+    ruby: tuple[int, int] | None = None,
+) -> list[Result]:
+    """Look up each pin's latest release and classify it.
+
+    A gem is compared with the newest release the image's Ruby can run
+    (``newest_installable``). ``ruby`` is that Ruby as (major, minor); when None it
+    is read from the Dockerfile's apt pin the first time a gem needs it.
+    """
     fetchers = fetchers or DEFAULT_FETCHERS
     results = []
     for pin in pins:
+        note = ""
         try:
-            latest = fetchers[pin.ecosystem](pin.project)
+            answer = fetchers[pin.ecosystem](pin.project)
+            if pin.ecosystem == RUBYGEMS:
+                if ruby is None:
+                    ruby = image_ruby(enumerate_apt_pins())
+                latest, note = newest_installable(answer, ruby, pin.version)
+            else:
+                latest = answer
             status = compare(pin.version, latest)
         except Exception as exc:  # reported per pin, and it fails the run
             results.append(Result(pin, None, "error", f"{type(exc).__name__}: {exc}"))
             continue
-        results.append(Result(pin, latest, status))
+        results.append(Result(pin, latest, status, note=note))
     return results
 
 
@@ -1012,6 +1149,35 @@ def enumerate_apt_pins(dockerfile: Path = DOCKERFILE) -> list[AptPin]:
     ]
 
 
+# The Debian package that installs the Ruby the image runs the gems with. Its version
+# is the interpreter's major.minor, behind an epoch: ruby=1:3.1 installs Ruby 3.1.
+_RUBY_PACKAGE = "ruby"
+
+
+def image_ruby(apt_pins: Iterable[AptPin]) -> tuple[int, int]:
+    """The Ruby the image installs, as (major, minor), read from its apt pin.
+
+    Raises:
+        PinEnumerationError: when no apt pin installs ``ruby``, or its version names
+            no major.minor. A gem release cannot then be judged installable, and the
+            check refuses rather than guess.
+    """
+    versions = [pin.version for pin in apt_pins if pin.package == _RUBY_PACKAGE]
+    if not versions:
+        raise PinEnumerationError(
+            f"no apt-get install in the Dockerfile pins {_RUBY_PACKAGE}, so this script "
+            "cannot tell which gem releases the image's Ruby can run"
+        )
+    match = re.match(r"^(?:\d+:)?(\d+)\.(\d+)(?:[.+~-]|$)", versions[0])
+    if match is None:
+        raise PinEnumerationError(
+            f"the Dockerfile pins {_RUBY_PACKAGE}={versions[0]}, which names no "
+            "major.minor Ruby version, so this script cannot tell which gem releases "
+            "the image's Ruby can run"
+        )
+    return int(match.group(1)), int(match.group(2))
+
+
 def apt_indexes(dockerfile: Path = DOCKERFILE) -> list[AptIndex]:
     """The indexes apt reads in the image the Dockerfile builds.
 
@@ -1320,6 +1486,13 @@ def render_report(pins: Any, results: list[Result], markdown: bool = False) -> s
     heading = "### " if markdown else ""
     bullet = "- " if markdown else "  - "
 
+    noted = [r for r in results if r.note]
+    if noted:
+        out.append("")
+    for r in noted:
+        note = f"{r.pin.tool}: {r.note}"
+        out.append(f"{bullet}{_escape_markdown(note) if markdown else note}")
+
     for r in outdated:
         out.append(
             f"\n{heading}{r.pin.tool}: {r.pin.version} -> {r.latest}"
@@ -1351,7 +1524,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--fail-on-outdated",
         action="store_true",
-        help="exit 1 when any pin is behind its upstream's latest release",
+        help=(
+            "exit 1 when any pin is behind its upstream's latest release (for a gem, "
+            "the newest release the image's Ruby can run)"
+        ),
     )
     parser.add_argument(
         "--markdown",
@@ -1365,11 +1541,12 @@ def main(argv: list[str] | None = None) -> int:
         pin_list = enumerate_pins(pins)
         apt_pins = enumerate_apt_pins()
         indexes = apt_indexes()
+        ruby = image_ruby(apt_pins)
     except PinEnumerationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    results = check(pin_list)
+    results = check(pin_list, ruby=ruby)
     apt_results = check_apt(apt_pins, indexes, APT_INDEX_FETCHER)
     sys.stdout.write(render_report(pins, results, markdown=args.markdown))
     sys.stdout.write(render_apt_report(apt_results, markdown=args.markdown))

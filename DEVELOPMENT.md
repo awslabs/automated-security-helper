@@ -302,7 +302,9 @@ uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdow
 For each pin that is behind it lists every value the bump has to change: the entries
 in `tool_downloads.py`, the Dockerfile ARG, and each tracked file that repeats one of
 the pin's digests, found with `git grep` (nix's SRI copies, a CI install check, test
-fixtures).
+fixtures). A gem (cfn-nag, Bundler) is compared with the newest release the image's
+Ruby can run, read from the Dockerfile's `ruby=` apt pin; a newer release that needs
+a newer Ruby is named in the report but does not count as outdated.
 
 It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
 behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and

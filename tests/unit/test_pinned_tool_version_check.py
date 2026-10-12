@@ -286,6 +286,32 @@ def _pin(tool="grype", version="v1.0.0", ecosystem=None):
     )
 
 
+def _releases(
+    *entries: "tuple[str, str | None] | dict[str, Any]",
+) -> list[dict[str, Any]]:
+    """A RubyGems versions answer: (number, required Ruby) pairs, or whole entries."""
+    releases: list[dict[str, Any]] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            releases.append(entry)
+        else:
+            number, ruby_version = entry
+            releases.append(
+                {
+                    "number": number,
+                    "prerelease": False,
+                    "platform": "ruby",
+                    "ruby_version": ruby_version,
+                }
+            )
+    return releases
+
+
+def _as_gem_answer(lookup: Any) -> Any:
+    """``lookup``'s version as the one release a RubyGems versions answer lists."""
+    return lambda project: _releases((lookup(project), ">= 0"))
+
+
 def _fetchers(latest: dict[str, str]):
     def lookup(project: str) -> str:
         value = latest[project.rsplit("/", 1)[-1]]
@@ -293,7 +319,11 @@ def _fetchers(latest: dict[str, str]):
             raise value
         return value
 
-    return {checker.GITHUB: lookup, checker.PYPI: lookup, checker.RUBYGEMS: lookup}
+    return {
+        checker.GITHUB: lookup,
+        checker.PYPI: lookup,
+        checker.RUBYGEMS: _as_gem_answer(lookup),
+    }
 
 
 class TestCheckWithMockedFetchers:
@@ -331,7 +361,11 @@ class TestExitCode:
         monkeypatch.setattr(
             checker,
             "DEFAULT_FETCHERS",
-            {checker.GITHUB: lookup, checker.PYPI: lookup, checker.RUBYGEMS: lookup},
+            {
+                checker.GITHUB: lookup,
+                checker.PYPI: lookup,
+                checker.RUBYGEMS: _as_gem_answer(lookup),
+            },
         )
         code = checker.main(argv)
         return code, capsys.readouterr().out
@@ -402,6 +436,195 @@ class TestExitCode:
         code, out = self._run(monkeypatch, capsys, broken, [])
         assert code == 2
         assert "lookup failed" in out
+
+
+def _gem_pin(tool: str, version: str) -> Any:
+    return checker.Pin(
+        tool=tool,
+        version=version,
+        ecosystem=checker.RUBYGEMS,
+        project=tool,
+        pinned_in=("x",),
+        kind=checker.GEM,
+    )
+
+
+#: bundler's real releases around its pin, as RubyGems lists them (2026-10-12).
+_BUNDLER_RELEASES = _releases(
+    ("4.0.22", ">= 3.2.0"),
+    ("2.7.2", ">= 3.2.0"),
+    ("2.6.9", ">= 3.1.0"),
+    ("2.5.23", ">= 3.0.0"),
+    ("2.4.22", ">= 2.6.0"),
+)
+
+
+def _judged(pin: Any, releases: Any, ruby: "tuple[int, int]" = (3, 1)) -> Any:
+    fetchers = {checker.RUBYGEMS: lambda project: releases}
+    return checker.check([pin], fetchers, ruby=ruby)[0]
+
+
+class TestGemsAreJudgedByTheImagesRuby:
+    """A gem is outdated only when a newer release the image's Ruby can run exists."""
+
+    def test_a_newer_release_this_ruby_can_run_is_the_target(self) -> None:
+        result = _judged(_gem_pin("bundler", "2.4.22"), _BUNDLER_RELEASES)
+        assert (result.status, result.latest) == ("outdated", "2.6.9"), result
+        assert "4.0.22" in result.note and ">= 3.2.0" in result.note, result.note
+        assert "3.1" in result.note, result.note
+
+    def test_the_newest_release_this_ruby_can_run_is_current(self) -> None:
+        result = _judged(_gem_pin("bundler", "2.6.9"), _BUNDLER_RELEASES)
+        assert (result.status, result.latest) == ("current", "2.6.9"), result
+        assert "4.0.22" in result.note, "the newest release is still shown"
+
+    def test_with_a_newer_ruby_the_newest_release_is_the_target(self) -> None:
+        result = _judged(_gem_pin("bundler", "2.4.22"), _BUNDLER_RELEASES, (3, 3))
+        assert (result.status, result.latest, result.note) == ("outdated", "4.0.22", "")
+
+    def test_prereleases_and_other_platforms_are_never_the_target(self) -> None:
+        releases = _releases(
+            {
+                "number": "2.7.0.pre.1",
+                "prerelease": True,
+                "platform": "ruby",
+                "ruby_version": ">= 3.1.0",
+            },
+            {
+                "number": "2.6.10",
+                "prerelease": False,
+                "platform": "java",
+                "ruby_version": ">= 3.1.0",
+            },
+            ("2.6.9", ">= 3.1.0"),
+        )
+        result = _judged(_gem_pin("bundler", "2.6.9"), releases)
+        assert (result.status, result.latest) == ("current", "2.6.9"), result
+
+    def test_a_pin_newer_than_every_release_is_ahead(self) -> None:
+        result = _judged(_gem_pin("bundler", "9.0.0"), _BUNDLER_RELEASES)
+        assert result.status == "ahead", result
+
+    @pytest.mark.parametrize(
+        "requirement",
+        ["between 3 and 4", ">= three", ">= 3.1.0, banana", "=> 3.1"],
+    )
+    def test_a_required_ruby_it_cannot_read_is_refused(self, requirement: str) -> None:
+        releases = _releases(("2.7.0", requirement), ("2.6.9", ">= 3.1.0"))
+        result = _judged(_gem_pin("bundler", "2.6.9"), releases)
+        assert result.status == "error", result
+        assert requirement in result.detail, result.detail
+
+    def test_an_answer_that_is_not_a_versions_list_is_refused(self) -> None:
+        result = _judged(_gem_pin("bundler", "2.6.9"), {"version": "4.0.22"})
+        assert result.status == "error", result
+
+    def test_cfn_nag_goes_through_the_same_path(self) -> None:
+        pin = _gem_pin("cfn-nag", "0.8.10")
+        newer_ruby = _judged(pin, _releases(("0.9.0", ">= 3.3"), ("0.8.10", ">= 2.5")))
+        assert (newer_ruby.status, newer_ruby.latest) == ("current", "0.8.10")
+        assert "0.9.0" in newer_ruby.note
+        runnable = _judged(pin, _releases(("0.9.0", ">= 2.5"), ("0.8.10", ">= 2.5")))
+        assert (runnable.status, runnable.latest) == ("outdated", "0.9.0")
+
+    @pytest.mark.parametrize(
+        ("requirement", "admits"),
+        [
+            (None, True),
+            ("", True),
+            (">= 0", True),
+            (">= 3.1.0", True),
+            (">= 3.1", True),
+            (">= 3.2.0", False),
+            ("> 3.1", False),
+            ("< 3.2", True),
+            ("< 3.1", False),
+            ("<= 3.1.0", True),
+            ("= 3.1", True),
+            ("3.1", True),
+            ("!= 3.1.0", False),
+            ("~> 2.2", False),
+            ("~> 3.0", True),
+            ("~> 3.1.0", True),
+            ("~> 3.0.1", False),
+            ("~> 3", True),
+            (">= 2.3.0, < 4", True),
+            (">= 2.3.0, < 3.1", False),
+        ],
+    )
+    def test_required_ruby_against_ruby_3_1(
+        self, requirement: str | None, admits: bool
+    ) -> None:
+        assert checker.ruby_admits(requirement, (3, 1)) is admits
+
+    def test_the_image_ruby_is_read_from_its_apt_pin(self) -> None:
+        pinned = re.search(
+            r"\bruby=(?:\d+:)?(\d+)\.(\d+)\b",
+            DOCKERFILE.read_text(encoding="utf-8"),
+        )
+        assert pinned, "the Dockerfile installs no pinned ruby"
+        expected = (int(pinned.group(1)), int(pinned.group(2)))
+        assert checker.image_ruby(checker.enumerate_apt_pins()) == expected
+
+    @pytest.mark.parametrize(
+        "apt_pins",
+        [
+            [],
+            [("ruby-dev", "1:3.1")],
+            [("ruby", "1:latest")],
+        ],
+        ids=["no ruby pin", "only ruby-dev", "no major.minor"],
+    )
+    def test_a_ruby_pin_it_cannot_read_refuses_the_run(
+        self,
+        apt_pins: "list[tuple[str, str]]",
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        fake = [checker.AptPin(name, version, (1,)) for name, version in apt_pins]
+        monkeypatch.setattr(checker, "enumerate_apt_pins", lambda *a, **k: fake)
+        monkeypatch.setattr(checker, "apt_indexes", lambda *a, **k: [])
+        assert checker.main([]) == checker.EXIT_ERROR
+        err = capsys.readouterr().err
+        assert "ruby" in err and "Dockerfile" in err, err
+
+    def test_fail_on_outdated_fails_only_for_a_release_the_image_can_run(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pins = checker.enumerate_pins(checker.load_pins_module())
+        versions = {p.project: p.version for p in pins}
+        bundler = versions["bundler"]
+
+        def run(bundler_releases: "list[dict[str, Any]]") -> "tuple[int, str]":
+            def gem(project: str) -> "list[dict[str, Any]]":
+                if project == "bundler":
+                    return bundler_releases
+                return _releases((versions[project], ">= 0"))
+
+            monkeypatch.setattr(
+                checker,
+                "DEFAULT_FETCHERS",
+                {
+                    checker.GITHUB: versions.__getitem__,
+                    checker.PYPI: versions.__getitem__,
+                    checker.RUBYGEMS: gem,
+                },
+            )
+            code = checker.main(["--fail-on-outdated"])
+            return code, capsys.readouterr().out
+
+        code, out = run(_releases(("99.0.0", ">= 99.0"), (bundler, ">= 2.6.0")))
+        assert code == checker.EXIT_OK, out
+        assert re.search(rf"bundler\s+{re.escape(bundler)}\s+\S+\s+current", out), out
+        assert "99.0.0" in out and ">= 99.0" in out, "the newest release is shown"
+
+        code, out = run(
+            _releases(
+                ("99.0.0", ">= 99.0"), ("98.0.0", ">= 3.0"), (bundler, ">= 2.6.0")
+            )
+        )
+        assert code == checker.EXIT_OUTDATED, out
+        assert re.search(rf"bundler\s+{re.escape(bundler)}\s+98\.0\.0\s+outdated", out)
 
 
 class TestBumpGuidance:
@@ -922,7 +1145,7 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
         [
             "https://api.github.com/repos/anchore/syft/releases/latest",
             "https://pypi.org/pypi/bandit/json",
-            "https://rubygems.org/api/v1/versions/cfn-nag/latest.json",
+            "https://rubygems.org/api/v1/versions/cfn-nag.json",
         ],
     )
     def test_positive_control_each_upstream_api_is_opened(self, url, monkeypatch):

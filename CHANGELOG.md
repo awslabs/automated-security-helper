@@ -1734,8 +1734,11 @@
   and the Bundler the image installs it with) with its upstream's latest release and
   fails when one is behind, listing every
   value the bump has to change: the module's entries, the Dockerfile ARG, and each
-  tracked file that repeats one of the pin's digests. A license entry that no download
-  pin names is refused rather than reported with part of its steps. It sends the job's
+  tracked file that repeats one of the pin's digests. A gem is compared with the newest
+  release whose required Ruby version admits the Ruby the image installs (the
+  Dockerfile's `ruby=` apt pin); a newer release that needs a newer Ruby is named in
+  the report and does not fail it. A license entry that no download pin names is
+  refused rather than reported with part of its steps. It sends the job's
   `GITHUB_TOKEN` to the GitHub API only to lift the anonymous rate limit: a lookup
   refused with 403 is retried once without the token, with GitHub's error message in
   the job log, and the token goes with a redirect only when the redirect stays on the
