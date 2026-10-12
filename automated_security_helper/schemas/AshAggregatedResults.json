@@ -17161,6 +17161,35 @@
       "title": "ScoreMethod",
       "type": "string"
     },
+    "SecretValueShape": {
+      "description": "What the masked form of a value shows: its visible prefix and suffix and its length.\n\nRecorded with the results (``AshAggregatedResults.secret_value_shapes``) so that\na union of result sets built in another process -- ``ash merge`` of shard\nresults -- can mask a value that no shard holds any more. It holds only what\n``_mask_secret_value`` already shows in every masked message, never a digest:\na digest of a short value can be reversed by trying values.",
+      "properties": {
+        "length": {
+          "title": "Length",
+          "type": "integer"
+        },
+        "prefix": {
+          "title": "Prefix",
+          "type": "string"
+        },
+        "spans_whitespace": {
+          "default": false,
+          "title": "Spans Whitespace",
+          "type": "boolean"
+        },
+        "suffix": {
+          "title": "Suffix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prefix",
+        "suffix",
+        "length"
+      ],
+      "title": "SecretValueShape",
+      "type": "object"
+    },
     "SecuredBy": {
       "additionalProperties": false,
       "properties": {
@@ -22846,6 +22875,14 @@
       },
       "title": "Scanner Results",
       "type": "object"
+    },
+    "secret_value_shapes": {
+      "description": "The shape of each value a secret finding exposed, as its masked form shows it: visible prefix, visible suffix and length, never the value. Every token of these shapes is masked whenever the results are masked, which is how `ash merge` masks, in one shard's findings, a value another shard exposed.",
+      "items": {
+        "$ref": "#/$defs/SecretValueShape"
+      },
+      "title": "Secret Value Shapes",
+      "type": "array"
     },
     "used_suppressions": {
       "description": "Set of suppression IDs that were actually applied to findings during the scan.",

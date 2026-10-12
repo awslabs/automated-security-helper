@@ -55,7 +55,7 @@ import json
 import string
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import pytest
 
@@ -400,8 +400,15 @@ def write_fixture_tree(source_dir: Path) -> None:
         (source_dir / name).write_text(text, encoding="utf-8")
 
 
-def use_canned_bandit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make ``BanditScanner`` run without the bandit tool, writing ``bandit_sarif()``."""
+def use_canned_bandit(
+    monkeypatch: pytest.MonkeyPatch,
+    sarif_for: Callable[[Path], Dict[str, Any]] | None = None,
+) -> None:
+    """Make ``BanditScanner`` run without the bandit tool, writing canned SARIF.
+
+    ``bandit_sarif()`` unless ``sarif_for`` is given, which is called with the
+    scan's source directory, so that each project of a workspace gets its own.
+    """
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScanner,
     )
@@ -413,8 +420,13 @@ def use_canned_bandit(monkeypatch: pytest.MonkeyPatch) -> None:
     def _run_canned_bandit(self, command, results_dir, *args, **kwargs):
         results_dir = Path(results_dir)
         results_dir.mkdir(parents=True, exist_ok=True)
+        document = (
+            bandit_sarif()
+            if sarif_for is None
+            else sarif_for(Path(self.context.source_dir))
+        )
         (results_dir / "bandit.sarif").write_text(
-            json.dumps(bandit_sarif()), encoding="utf-8"
+            json.dumps(document), encoding="utf-8"
         )
         # Bandit exits 1 when it reports findings.
         self.exit_code = 1
@@ -529,6 +541,139 @@ def run_secret_bearing_workspace_scan(root: Path) -> Path:
             output_dir=str(output_dir),
             workspace_plan=plan,
             scanners=["bandit", "detect-secrets"],
+            offline=True,
+            progress=False,
+            quiet=True,
+            show_summary=False,
+            fail_on_findings=False,
+            color=False,
+        )
+    return output_dir
+
+
+#: One value two projects of a workspace share: ``api`` assigns it, and B105
+#: quotes it in its message; ``web`` passes it on a command line, where only
+#: bandit's B602 reports the line. 14 lower-case letters or digits.
+SHARED_VALUE = _derived("shared-project-value", _LOWER, 14)
+
+#: The two projects' files: {project: {file name: text}}.
+TWO_PROJECT_FILES: Dict[str, Dict[str, str]] = {
+    "api": {
+        "settings.py": "DB_" + _KEYWORD_NAME.upper() + ' = "' + SHARED_VALUE + '"\n'
+    },
+    "web": {
+        "deploy.py": (
+            "import subprocess\n"
+            'subprocess.call("deploy --pw ' + SHARED_VALUE + '", shell=True)\n'
+        )
+    },
+}
+
+
+def _two_project_bandit_sarif(source_dir: Path) -> Dict[str, Any]:
+    """Bandit's SARIF for whichever of the two projects ``source_dir`` is."""
+    if (source_dir / "settings.py").is_file():
+        findings = [
+            ("B105", "settings.py", 1, "note", "LOW", _value_message(SHARED_VALUE))
+        ]
+        files = TWO_PROJECT_FILES["api"]
+    else:
+        findings = [("B602", "deploy.py", 2, "error", "HIGH", _B602_UNSAFE)]
+        files = TWO_PROJECT_FILES["web"]
+    results = []
+    for rule, name, line, level, severity, message in findings:
+        lines = files[name].splitlines(keepends=True)
+        results.append(
+            {
+                "message": {"text": message},
+                "level": level,
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "region": {
+                                "snippet": {"text": lines[line - 1]},
+                                "startLine": line,
+                                "endLine": line,
+                            },
+                            "artifactLocation": {"uri": name},
+                            "contextRegion": {
+                                "snippet": {"text": "".join(lines[:line])},
+                                "startLine": 1,
+                                "endLine": line,
+                            },
+                        }
+                    }
+                ],
+                "properties": {"issue_confidence": "HIGH", "issue_severity": severity},
+                "ruleId": rule,
+            }
+        )
+    return {
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "Bandit",
+                        "rules": [
+                            {
+                                "id": rule_id,
+                                "name": rule_name,
+                                "properties": {"tags": ["security", cwe]},
+                            }
+                            for rule_id, rule_name, cwe, _, _ in _BANDIT_RULES
+                        ],
+                        "version": "1.9.4",
+                    }
+                },
+                "invocations": [{"executionSuccessful": True}],
+                "results": results,
+            }
+        ],
+        "version": "2.1.0",
+    }
+
+
+def run_two_project_workspace_scan(root: Path) -> Path:
+    """Scan ``TWO_PROJECT_FILES`` as the two projects of one workspace (bandit only).
+
+    Each project's scan is masked against its own findings, so ``web`` alone
+    cannot know that the value on its command line is the one ``api``'s B105
+    reported. Returns the output directory.
+    """
+    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+    from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+
+    projects = []
+    for key, files in TWO_PROJECT_FILES.items():
+        project_dir = root / key
+        project_dir.mkdir(parents=True, exist_ok=True)
+        for name, text in files.items():
+            (project_dir / name).write_text(text, encoding="utf-8")
+        projects.append(
+            ProjectPlan(
+                key=key,
+                relative_path=key,
+                path=project_dir.as_posix(),
+                label=key,
+                display_label=key,
+                severity_threshold="LOW",
+            )
+        )
+    output_dir = root / "out"
+    plan = WorkspacePlan(
+        workspace_file=(root / "dev.code-workspace").as_posix(),
+        workspace_root=root.as_posix(),
+        projects=projects,
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        use_canned_bandit(monkeypatch, _two_project_bandit_sarif)
+        isolate_from_aws(monkeypatch, root)
+        run_ash_scan(
+            source_dir=str(root),
+            output_dir=str(output_dir),
+            workspace_plan=plan,
+            scanners=["bandit"],
             offline=True,
             progress=False,
             quiet=True,

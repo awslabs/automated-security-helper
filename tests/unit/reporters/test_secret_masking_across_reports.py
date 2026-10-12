@@ -37,12 +37,14 @@ from tests.utils.secret_bearing_scan import (
     KEY_ID_USE_LINE,
     RUN_LINE,
     SECRETS,
+    SHARED_VALUE,
     SYNC_PREFIX,
     find_result,
     isolate_from_aws,
     results_without_masking,
     run_secret_bearing_scan,
     run_secret_bearing_workspace_scan,
+    run_two_project_workspace_scan,
     sarif_results,
     snippet,
 )
@@ -340,6 +342,77 @@ class TestWorkspaceScan:
 
         assert "B105" in text, f"{relative} lists no B105 finding; this checks nothing"
         assert SECRETS.found_in(text) == [], f"{relative} holds a secret value"
+
+
+@pytest.fixture(scope="module")
+def two_project_output(tmp_path_factory):
+    """One workspace scan of two projects that share one value; see TWO_PROJECT_FILES."""
+    return run_two_project_workspace_scan(
+        tmp_path_factory.mktemp("two-project-workspace")
+    )
+
+
+def _written_outside_tool_output(output_dir):
+    """Every file a scan wrote, except the tools' own output.
+
+    ``scanners/<name>/`` and ``converted/`` hold what the tools wrote, which
+    output-formats.md says is not masked.
+    """
+    for path in sorted(output_dir.rglob("*")):
+        parts = set(path.relative_to(output_dir).parts)
+        if path.is_file() and not parts & {"scanners", "converted"}:
+            yield path
+
+
+class TestWorkspaceAcrossProjects:
+    """A value one project's finding exposes is masked in every project's output.
+
+    ``api``'s B105 quotes the value; ``web`` has it on a command line that only a
+    B602 reports. Each project's scan is masked against its own findings, so the
+    workspace masks all of them again with the values every project exposed.
+    """
+
+    def test_the_projects_report_what_this_relies_on(self, two_project_output):
+        api = _read(two_project_output, "projects/api/ash_aggregated_results.json")
+        web = _read(two_project_output, "projects/web/ash_aggregated_results.json")
+        unified = _read(two_project_output, "ash_aggregated_results.json")
+        assert "B105" in api
+        assert "B602" in web
+        assert "B105" in unified and "B602" in unified
+        # web's findings really carry the value: its scanner wrote it in clear.
+        raw = [
+            path
+            for path in (two_project_output / "projects" / "web").rglob("*")
+            if path.is_file()
+            and "scanners" in path.parts
+            and SHARED_VALUE in path.read_text(encoding="utf-8", errors="replace")
+        ]
+        assert raw, "web's scanner output does not hold the shared value"
+
+    def test_no_output_holds_the_value_another_project_exposed(
+        self, two_project_output
+    ):
+        written = list(_written_outside_tool_output(two_project_output))
+        assert any(path.name == "ash.sarif" for path in written)
+
+        leaks = [
+            str(path.relative_to(two_project_output))
+            for path in written
+            if SHARED_VALUE in path.read_text(encoding="utf-8", errors="replace")
+        ]
+
+        assert leaks == []
+
+    def test_the_masked_line_keeps_its_other_text(self, two_project_output):
+        """Control: the value is masked, not the command line around it."""
+        results = sarif_results(
+            json.loads(_read(two_project_output, "ash_aggregated_results.json"))[
+                "sarif"
+            ]
+        )
+        b602 = next(result for result in results if result["ruleId"] == "B602")
+
+        assert snippet(b602, "region").startswith('subprocess.call("deploy --pw ')
 
 
 class TestStoredResultsRerendered:

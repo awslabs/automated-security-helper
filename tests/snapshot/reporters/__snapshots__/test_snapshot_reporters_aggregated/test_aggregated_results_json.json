@@ -2556,5 +2556,13 @@
   "used_suppressions": [
     "app/app.py|SECRET-SECRET-KEYWORD|5|5"
   ],
-  "workspace": null
+  "workspace": null,
+  "secret_value_shapes": [
+    {
+      "prefix": "hu",
+      "suffix": "t",
+      "length": 25,
+      "spans_whitespace": false
+    }
+  ]
 }

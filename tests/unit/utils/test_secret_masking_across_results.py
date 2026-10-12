@@ -21,7 +21,9 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.secret_masking import (
     MASKED_LINE,
+    SecretValueShape,
     _mask_secret_value,
+    exposed_secret_values,
     mask_secrets_in_results,
 )
 
@@ -668,6 +670,49 @@ class TestStoredResultsAreMaskedWhenRead:
         assert all(VALUE not in finding.model_dump_json() for finding in flat)
 
 
+def _write_shards(tmp_path, shards):
+    """Write one results file per (owned scanners, result), stamped as ``ash scan --shard-*``.
+
+    Saved with ``save_model``, as a shard's own scan saves it.
+    """
+    from automated_security_helper.cli.merge import stamp_shard_assignment
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.core.enums import ScannerStatus
+    from automated_security_helper.core.sharding import ShardAssignment
+    from automated_security_helper.models.asharp_model import ScannerTargetStatusInfo
+
+    scanners = sorted({name for owned, _ in shards for name in owned})
+    dirs = []
+    for index, (owned, result) in enumerate(shards):
+        model = _results(result)
+        # Every shard records the config it scanned under; ash merge refuses a
+        # shard that records none.
+        model.ash_config = AshConfig()
+        for name in scanners:
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.FAILED,
+                excluded=False,
+                dependencies_satisfied=True,
+            )
+            model.additional_reports[name] = {
+                "source": {"scanner_name": name, "status": "FAILED", "duration": 1}
+            }
+        stamp_shard_assignment(
+            model,
+            ShardAssignment(
+                shard_index=index,
+                shard_count=len(shards),
+                assigned_scanners=owned,
+                candidate_scanners=scanners,
+            ),
+        )
+        shard_dir = tmp_path / f"shard{index}"
+        shard_dir.mkdir()
+        model.save_model(shard_dir)
+        dirs.append(shard_dir)
+    return dirs
+
+
 class TestMergedShards:
     """``ash merge`` masks the merged results against every shard's secret findings.
 
@@ -678,16 +723,6 @@ class TestMergedShards:
     """
 
     def _shards(self, tmp_path):
-        import json as _json
-
-        from automated_security_helper.cli.merge import stamp_shard_assignment
-        from automated_security_helper.config.ash_config import AshConfig
-        from automated_security_helper.core.enums import ScannerStatus
-        from automated_security_helper.core.sharding import ShardAssignment
-        from automated_security_helper.models.asharp_model import (
-            ScannerTargetStatusInfo,
-        )
-
         detect_secrets = _result(
             "SECRET-SECRET-KEYWORD",
             "app.py",
@@ -704,44 +739,76 @@ class TestMergedShards:
             context=(1, OTHER_LINE + ASSIGN_LINE),
             scanner="bandit",
         )
-        scanners = ["bandit", "detect-secrets"]
-        dirs = []
-        for index, (owned, result) in enumerate(
-            ((["detect-secrets"], detect_secrets), (["bandit"], bandit))
-        ):
-            model = _results(result)
-            # Every shard records the config it scanned under; ash merge refuses a
-            # shard that records none.
-            model.ash_config = AshConfig()
-            for name in scanners:
-                model.scanner_results[name] = ScannerTargetStatusInfo(
-                    status=ScannerStatus.FAILED,
-                    excluded=False,
-                    dependencies_satisfied=True,
-                )
-                model.additional_reports[name] = {
-                    "source": {"scanner_name": name, "status": "FAILED", "duration": 1}
-                }
-            stamp_shard_assignment(
-                model,
-                ShardAssignment(
-                    shard_index=index,
-                    shard_count=2,
-                    assigned_scanners=owned,
-                    candidate_scanners=scanners,
-                ),
-            )
-            shard_dir = tmp_path / f"shard{index}"
-            shard_dir.mkdir()
-            dumped = _json.loads(model.model_dump_json(by_alias=True))
-            # The bandit shard is written as its own scan wrote it: masked against
-            # its own findings only, which leaves the neighbor's line in clear.
-            (shard_dir / "ash_aggregated_results.json").write_text(
-                _json.dumps(dumped), encoding="utf-8"
-            )
-            dirs.append(shard_dir)
+        # The bandit shard is written as its own scan wrote it: masked against its
+        # own findings only, which leaves the neighbor's line in clear.
+        dirs = _write_shards(
+            tmp_path,
+            [(["detect-secrets"], detect_secrets), (["bandit"], bandit)],
+        )
         assert VALUE in (dirs[1] / "ash_aggregated_results.json").read_text()
         return dirs
+
+    def _value_shards(self, tmp_path, exposing_shard_first=True):
+        """One shard's B105 exposes VALUE; the other's semgrep finding has it in a snippet."""
+        b105 = _result(
+            "B105",
+            "settings.py",
+            1,
+            # As BanditScanner writes it: the value already masked in the message.
+            HARDCODED + "'" + _mask_secret_value(VALUE) + "'",
+            snippet=ASSIGN_LINE,
+            scanner="bandit",
+        )
+        semgrep = _result(
+            "python.lang.security.audit.subprocess-shell-true",
+            "deploy.py",
+            5,
+            "Found 'subprocess' function with 'shell=True'",
+            snippet=REUSE_LINE,
+            scanner="semgrep",
+        )
+        shards = [(["bandit"], b105), (["semgrep"], semgrep)]
+        if not exposing_shard_first:
+            shards.reverse()
+        dirs = _write_shards(tmp_path, shards)
+        exposing, other = dirs if exposing_shard_first else reversed(dirs)
+        assert VALUE not in (exposing / "ash_aggregated_results.json").read_text()
+        assert VALUE in (other / "ash_aggregated_results.json").read_text()
+        return dirs
+
+    @pytest.mark.parametrize(
+        "exposing_shard_first", [True, False], ids=["exposing-first", "exposing-last"]
+    )
+    def test_a_value_one_shard_exposed_is_masked_in_another_shards_findings(
+        self, tmp_path, monkeypatch, exposing_shard_first
+    ):
+        """No shard holds the value any more: one masked it, the other never knew.
+
+        The exposing shard recorded the value's shape -- its visible prefix and
+        suffix and its length -- and the merge masks every token of that shape in
+        every shard, whichever shard index recorded it.
+        """
+        from automated_security_helper.cli.merge import merge_command
+
+        monkeypatch.chdir(tmp_path)
+        out = tmp_path / "merged"
+
+        merge_command(
+            results=[
+                str(path) for path in self._value_shards(tmp_path, exposing_shard_first)
+            ],
+            output_dir=str(out),
+            output_formats=["sarif"],
+            fail_on_findings=False,
+            fail_on_incomplete_scanners=False,
+        )
+
+        for relative in ("ash_aggregated_results.json", "reports/ash.sarif"):
+            text = (out / relative).read_text(encoding="utf-8")
+            assert "subprocess-shell-true" in text, relative
+            assert VALUE not in text, relative
+            # Control: the command line around the value is kept.
+            assert "login --token " in text, relative
 
     def test_merge_shard_results_masks_across_shards(self, tmp_path):
         from automated_security_helper.cli.merge import merge_shard_results
@@ -780,3 +847,120 @@ class TestMergedShards:
             text = (out / relative).read_text(encoding="utf-8")
             assert "B404" in text, relative
             assert VALUE not in text, relative
+
+
+class TestValuesAcrossResultSets:
+    """What one masking learns is kept, so a later union of result sets can use it.
+
+    After a result set is masked it no longer holds its values: the message shows
+    the masked form and the line is masked by location. So each masking records
+    the raw values it found on the model, where they are never serialized, and
+    each value's shape -- its visible prefix, visible suffix and length -- which
+    is written with the results. A workspace masks every project with the values;
+    ``ash merge``, whose shards are separate processes, with the shapes.
+    """
+
+    def _masked_unit(self):
+        model = _results(
+            _result(
+                "B105",
+                "app.py",
+                1,
+                HARDCODED + "'" + VALUE + "'",
+                snippet=ASSIGN_LINE,
+                scanner="bandit",
+            ),
+        )
+        mask_secrets_in_results(model)
+        return model
+
+    def _other_unit(self, snippet_text=REUSE_LINE):
+        return _results(
+            _result(
+                "B602",
+                "deploy.py",
+                5,
+                "subprocess call",
+                snippet=snippet_text,
+                scanner="bandit",
+            ),
+        )
+
+    def test_a_masking_records_the_values_it_found_without_serializing_them(self):
+        model = self._masked_unit()
+
+        assert exposed_secret_values(model) == {VALUE}
+        assert VALUE not in model.model_dump_json()
+
+    def test_a_masking_records_each_values_shape_with_the_results(self):
+        import json
+
+        model = self._masked_unit()
+
+        shape = SecretValueShape(prefix=VALUE[:2], suffix=VALUE[-1], length=len(VALUE))
+        assert model.secret_value_shapes == [shape]
+        assert json.loads(model.model_dump_json())["secret_value_shapes"] == [
+            {
+                "prefix": VALUE[:2],
+                "suffix": VALUE[-1],
+                "length": len(VALUE),
+                "spans_whitespace": False,
+            }
+        ]
+
+    def test_results_without_secret_findings_carry_no_shapes(self):
+        model = self._other_unit()
+
+        mask_secrets_in_results(model)
+
+        assert "secret_value_shapes" not in model.model_dump_json()
+
+    def test_values_passed_in_are_masked(self):
+        """How a workspace masks one project with the values the others exposed."""
+        model = self._other_unit()
+
+        mask_secrets_in_results(model, values={VALUE})
+
+        assert VALUE not in _region_text(model.sarif.runs[0].results[0])
+        assert exposed_secret_values(model) == {VALUE}
+
+    def test_a_recorded_shape_masks_a_token_of_that_shape(self):
+        """How ``ash merge`` masks one shard with what another shard recorded."""
+        import json
+
+        other_shape = "q" + VALUE[1:]
+        dumped = json.loads(
+            self._other_unit(f'run("{VALUE}")\nrun("{other_shape}")\n').model_dump_json(
+                by_alias=True
+            )
+        )
+        dumped["secret_value_shapes"] = json.loads(
+            self._masked_unit().model_dump_json()
+        )["secret_value_shapes"]
+
+        model = AshAggregatedResults.model_validate(dumped)
+
+        text = _region_text(model.sarif.runs[0].results[0])
+        assert VALUE not in text
+        assert f'run("{_mask_secret_value(VALUE)}")' in text
+        # A token that differs in a visible character is not that shape.
+        assert f'run("{other_shape}")' in text
+
+    def test_shapes_passed_in_are_recorded_and_masked(self):
+        model = self._other_unit()
+        shape = SecretValueShape(prefix=VALUE[:2], suffix=VALUE[-1], length=len(VALUE))
+
+        mask_secrets_in_results(model, shapes=[shape])
+
+        assert VALUE not in _region_text(model.sarif.runs[0].results[0])
+        assert model.secret_value_shapes == [shape]
+
+    def test_masking_by_shape_twice_changes_nothing_more(self):
+        model = self._other_unit()
+        shape = SecretValueShape(prefix=VALUE[:2], suffix=VALUE[-1], length=len(VALUE))
+        mask_secrets_in_results(model, shapes=[shape])
+        once = model.model_dump_json()
+
+        mask_secrets_in_results(model)
+
+        assert model.model_dump_json() == once

@@ -1841,6 +1841,18 @@
   values on to the reports and responses rendered from it. `ash merge` masks the
   merged results against every shard's secret findings before it writes them.
 
+- **A value one project or shard exposes is masked in the others' findings.**
+  Each workspace project and each `ash merge` shard was masked against its own
+  secret findings only, so a value project A's B105 reported stayed in clear where
+  project B's finding showed it, in B's files and in the unified results and
+  reports. A workspace scan now masks every project's `projects/<key>/` results
+  and reports, and the unified results, again with the values every project
+  exposed. Results files now record, under `secret_value_shapes`, the visible
+  prefix, visible suffix and length of each value they masked, never the value,
+  and `ash merge` masks every token of those shapes in every shard. Masking by
+  shape can also mask a different token with the same visible characters and
+  length.
+
 - **ferret-scan's bundled profiles no longer turn on `show_match`.** The
   `comprehensive`, `json-api`, `debug`, `person-name`, `enhanced-metadata` and
   `social-media` profiles in the bundled `ferret-config.yaml` set it to `true`, so

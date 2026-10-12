@@ -33,7 +33,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.secret_masking import mask_secrets_in_results
+from automated_security_helper.utils.secret_masking import (
+    SecretValueShape,
+    mask_secrets_in_results,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -728,11 +731,33 @@ class AshAggregatedResults(BaseModel):
         ),
     ] = None
 
+    secret_value_shapes: Annotated[
+        List[SecretValueShape],
+        Field(
+            default_factory=list,
+            # Left out of a file with no secret findings, so its shape is
+            # unchanged.
+            exclude_if=lambda shapes: not shapes,
+            description=(
+                "The shape of each value a secret finding exposed, as its masked "
+                "form shows it: visible prefix, visible suffix and length, never "
+                "the value. Every token of these shapes is masked whenever the "
+                "results are masked, which is how `ash merge` masks, in one shard's "
+                "findings, a value another shard exposed."
+            ),
+        ),
+    ]
+
     # Private cache for to_flat_vulnerabilities() — the method mutates
     # summary_stats.suppressed and scanner_results as a side effect, so
     # we memoize the result to keep the method idempotent when reporters
     # call it multiple times during rendering.
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
+
+    # The raw values the masking of these results found (utils/secret_masking.py),
+    # never serialized. A workspace masks each project's outputs with the values
+    # every project exposed.
+    _secret_values: set = PrivateAttr(default_factory=set)
 
     # Each of the three entry points below retries the AshConfig forward-reference
     # rebuild before doing anything else, because the attempt made when this

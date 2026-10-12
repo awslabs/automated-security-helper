@@ -440,9 +440,26 @@ Results that are read back from an existing `ash_aggregated_results.json` are
 masked the same way as they are loaded, whatever wrote the file (an older ASH, or
 another tool): `ash report`, `ash scan --use-existing`, `ash merge`, the MCP tools
 that read stored results (`explain_finding`, `diff_scan_results`, `get_scan_results`),
-the findings browser and a workspace's unified reports. `ash merge` masks the
-merged results against the secret findings of every shard, since a secret one
-shard's scanner reports can sit in another shard's snippets.
+the findings browser and a workspace's unified reports.
+
+Masking also crosses result sets. `ash merge` masks the merged results by location
+against the secret findings of every shard, since a secret one shard's scanner
+reports can sit in another shard's snippets. A value is harder: each shard was
+masked in its own process, and none holds the value any more. So every results
+file records, under `secret_value_shapes`, the shape of each value it masked: the
+visible prefix, the visible suffix and the length, which the masked form already
+shows. The value itself, or a digest of it, is never written. `ash merge` masks
+every whole token of one of those shapes in every shard, and so does every later
+reading of a results file that records shapes. Masking by shape is approximate: a
+different token with the same visible characters and the same length is masked
+too.
+
+A workspace scan masks each project against its own findings while the project
+runs. Once every project has finished, it masks each project's results file and
+reports under `projects/<key>/`, and the unified results, again with the values
+every project's secret findings exposed, so a value one project reports is masked
+where another project's finding shows it. A project abandoned at its
+`project_timeout` contributes no values.
 
 The scanner's own output files under `scanners/<name>/` are what the tool wrote,
 and are not masked.

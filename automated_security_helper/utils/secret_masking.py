@@ -1,9 +1,11 @@
 """Utility functions for masking secrets in security findings."""
 
+import html
+import json
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 def mask_secret_in_text(text: str, rule_id: str | None = None) -> str:
@@ -59,6 +61,21 @@ def _mask_bandit_password_secret(text: str) -> str:
 _mask_bandit_b105_secret = _mask_bandit_password_secret
 
 
+def _visible_lengths(length: int) -> Tuple[int, int]:
+    """How many leading and trailing characters ``_mask_secret_value`` leaves visible."""
+    # For very short secrets (< 4 chars), mask completely
+    if length < 4:
+        return 0, 0
+    # For secrets of length 4-7, show only the first character
+    if length <= 7:
+        return 1, 0
+    # For secrets of length 8-12, show first and last character
+    if length <= 12:
+        return 1, 1
+    # For long secrets, show first 2 and last 1 character
+    return 2, 1
+
+
 def _mask_secret_value(secret: str) -> str:
     """
     Mask a secret value while preserving some structure for analysis.
@@ -74,21 +91,55 @@ def _mask_secret_value(secret: str) -> str:
         return secret
 
     length = len(secret)
+    shown_prefix, shown_suffix = _visible_lengths(length)
+    return (
+        secret[:shown_prefix]
+        + "*" * (length - shown_prefix - shown_suffix)
+        + secret[length - shown_suffix :]
+    )
 
-    # For very short secrets (< 4 chars), mask completely
-    if length < 4:
-        return "*" * length
 
-    # For secrets of length 4-7, show only the first character
-    if length <= 7:
-        return secret[0] + "*" * (length - 1)
+class SecretValueShape(BaseModel):
+    """What the masked form of a value shows: its visible prefix and suffix and its length.
 
-    # For secrets of length 8-12, show first and last character
-    if length <= 12:
-        return secret[0] + "*" * (length - 2) + secret[-1]
+    Recorded with the results (``AshAggregatedResults.secret_value_shapes``) so that
+    a union of result sets built in another process -- ``ash merge`` of shard
+    results -- can mask a value that no shard holds any more. It holds only what
+    ``_mask_secret_value`` already shows in every masked message, never a digest:
+    a digest of a short value can be reversed by trying values.
+    """
 
-    # For long secrets, show first 2 and last 1 character
-    return secret[:2] + "*" * (length - 3) + secret[-1]
+    model_config = ConfigDict(frozen=True)
+
+    prefix: str
+    suffix: str
+    length: int
+    #: Whether the value holds whitespace, which decides whether a token of this
+    #: shape may span it.
+    spans_whitespace: bool = False
+
+
+def secret_value_shape(value: str) -> SecretValueShape:
+    """The shape of ``value``'s masked form."""
+    shown_prefix, shown_suffix = _visible_lengths(len(value))
+    return SecretValueShape(
+        prefix=value[:shown_prefix],
+        suffix=value[len(value) - shown_suffix :],
+        length=len(value),
+        spans_whitespace=any(character.isspace() for character in value),
+    )
+
+
+def _shape_key(shape: SecretValueShape) -> Tuple[int, str, str, bool]:
+    return (shape.length, shape.prefix, shape.suffix, shape.spans_whitespace)
+
+
+def shapes_of_secret_values(values: Iterable[str]) -> List[SecretValueShape]:
+    """The shapes of the values that are masked wherever they occur, in a stable order."""
+    return sorted(
+        {secret_value_shape(value) for value in values if _propagates(value)},
+        key=_shape_key,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +367,38 @@ class _SecretIndex:
         self.lines: Dict[str, Optional[Set[int]]] = {}
         self._by_basename: Dict[str, List[str]] = {}
         self.values: Set[str] = set()
+        self.shapes: Set[SecretValueShape] = set()
         self._pattern: Optional[re.Pattern] = None
+
+    def add_values(self, values: Iterable[str]) -> None:
+        """Add the values that are masked wherever they occur (``_propagates``)."""
+        for value in values:
+            if isinstance(value, str) and _propagates(value):
+                self.values.add(value)
+                self._pattern = None
+
+    def add_shapes(self, shapes: Iterable[Any]) -> None:
+        """Add shapes of values whose tokens are masked wherever they occur.
+
+        A shape read from a results file is checked against what
+        ``_mask_secret_value`` would have shown for its length; one that does not
+        match was not written by ASH and is ignored.
+        """
+        for shape in shapes:
+            if isinstance(shape, dict):
+                try:
+                    shape = SecretValueShape.model_validate(shape)
+                except ValueError:
+                    continue
+            if not isinstance(shape, SecretValueShape):
+                continue
+            if shape.length < MIN_PROPAGATED_VALUE_LENGTH or (
+                len(shape.prefix),
+                len(shape.suffix),
+            ) != _visible_lengths(shape.length):
+                continue
+            self.shapes.add(shape)
+            self._pattern = None
 
     def add_location(self, uri: str, start: Optional[int], end: Optional[int]) -> None:
         if uri not in self.lines:
@@ -361,16 +443,59 @@ class _SecretIndex:
         return (whole, lines) if matched else None
 
     def mask_values(self, text: str) -> str:
-        if not self.values:
+        """``text`` with each value, and each token of a recorded shape, masked."""
+        if not self.values and not self.shapes:
             return text
         if self._pattern is None:
-            alternatives = []
-            for value in sorted(self.values, key=len, reverse=True):
-                left = r"(?<!\w)" if _WORD_CHARACTER.match(value[0]) else ""
-                right = r"(?!\w)" if _WORD_CHARACTER.match(value[-1]) else ""
-                alternatives.append(left + re.escape(value) + right)
+            alternatives = [
+                _token_pattern(re.escape(value), value[0], value[-1])
+                for value in sorted(self.values, key=len, reverse=True)
+            ]
+            alternatives.extend(
+                _shape_pattern(shape)
+                for shape in sorted(self.shapes, key=_shape_key, reverse=True)
+            )
             self._pattern = re.compile("|".join(alternatives))
         return self._pattern.sub(lambda match: _mask_secret_value(match.group(0)), text)
+
+
+def _token_pattern(body: str, first: Optional[str], last: Optional[str]) -> str:
+    """``body`` as a whole token: not preceded or followed by a word character.
+
+    A boundary is asserted only on a side whose own character is a word character
+    (or unknown), so a value that starts or ends with punctuation still matches
+    next to a word.
+    """
+    left = r"(?<!\w)" if first is None or _WORD_CHARACTER.match(first) else ""
+    right = r"(?!\w)" if last is None or _WORD_CHARACTER.match(last) else ""
+    return left + body + right
+
+
+def _shape_pattern(shape: SecretValueShape) -> str:
+    """A token of ``shape``: its prefix, the right number of characters, its suffix.
+
+    The hidden characters may be any non-whitespace character, or any character
+    but a line break for a value that held whitespace. Every token of the shape is
+    masked, including ones that are not the value: over-masking is the accepted
+    cost of masking a value no result set holds any more.
+    """
+    hidden = shape.length - len(shape.prefix) - len(shape.suffix)
+    character = r"[^\r\n]" if shape.spans_whitespace else r"\S"
+    return _token_pattern(
+        re.escape(shape.prefix)
+        + character
+        + "{"
+        + str(hidden)
+        + "}"
+        + re.escape(shape.suffix),
+        shape.prefix[:1] or None,
+        shape.suffix[-1:] or None,
+    )
+
+
+def _propagates(value: str) -> bool:
+    """Whether ``value`` is masked wherever it occurs, not only in its own finding."""
+    return len(value) >= MIN_PROPAGATED_VALUE_LENGTH and "\n" not in value
 
 
 def _mask_message_values(text: str) -> str:
@@ -412,9 +537,7 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
         text = _text_of(getattr(result, "message", None)) or ""
         for pattern in _VALUE_IN_MESSAGE:
             for match in pattern.finditer(text):
-                for value in _exposed_values(match.group(2).strip(), result):
-                    if len(value) >= MIN_PROPAGATED_VALUE_LENGTH and "\n" not in value:
-                        index.values.add(value)
+                index.add_values(_exposed_values(match.group(2).strip(), result))
     return index
 
 
@@ -596,12 +719,24 @@ def _mask_tree(node: Any, index: _SecretIndex, seen: Set[int]) -> Any:
     return node
 
 
-def _mask_report(sarif_report: Any) -> Optional[_SecretIndex]:
-    """Mask a SARIF report in place; returns the index it masked by."""
-    if sarif_report is None or not getattr(sarif_report, "runs", None):
-        return None
+def _mask_report(
+    sarif_report: Any,
+    values: Iterable[str] = (),
+    shapes: Iterable[Any] = (),
+) -> _SecretIndex:
+    """Mask a SARIF report in place; returns the index it masked by.
+
+    ``values`` and ``shapes`` are masked as well as what the report's own secret
+    findings expose; every value's shape joins the index's shapes.
+    """
+    has_runs = sarif_report is not None and bool(getattr(sarif_report, "runs", None))
     # Indexed before the messages are masked, which removes the values from them.
-    index = _index_secrets(sarif_report)
+    index = _index_secrets(sarif_report) if has_runs else _SecretIndex()
+    index.add_values(values)
+    index.add_shapes(shapes)
+    index.add_shapes(secret_value_shape(value) for value in index.values)
+    if not has_runs:
+        return index
     for result in sarif_report.get_all_results() or []:
         message = getattr(result, "message", None)
         root = getattr(message, "root", message)
@@ -610,7 +745,7 @@ def _mask_report(sarif_report: Any) -> Optional[_SecretIndex]:
             masked = _mask_message_values(text)
             if masked != text:
                 root.text = masked
-    if index.lines or index.values:
+    if index.lines or index.values or index.shapes:
         seen: Set[int] = set()
         for run in sarif_report.runs:
             _mask_tree(run, index, seen)
@@ -623,16 +758,112 @@ def mask_secrets_in_sarif_report(sarif_report: Any) -> Any:
     return sarif_report
 
 
-def mask_secrets_in_results(results: Any) -> Any:
+def exposed_secret_values(results: Any) -> Set[str]:
+    """The raw values the maskings of ``results`` found, in this process.
+
+    Kept on the model in a private attribute, which is never serialized, so that
+    a union of result sets built in the same process -- a workspace's projects --
+    can mask each one with the values the others exposed.
+    """
+    try:
+        recorded = getattr(results, "_secret_values")
+    except AttributeError:
+        return set()
+    return set(recorded or ())
+
+
+def _record(results: Any, index: _SecretIndex) -> None:
+    """Keep the index's values on ``results`` (privately) and its shapes (serialized)."""
+    try:
+        results._secret_values = set(index.values)
+    except (AttributeError, TypeError, ValueError):
+        pass
+    fields = getattr(type(results), "model_fields", None) or {}
+    if "secret_value_shapes" in fields:
+        shapes = sorted(index.shapes, key=_shape_key)
+        if list(getattr(results, "secret_value_shapes", None) or []) != shapes:
+            results.secret_value_shapes = shapes
+
+
+def mask_secrets_in_results(
+    results: Any,
+    values: Iterable[str] = (),
+    shapes: Iterable[Any] = (),
+) -> Any:
     """Mask, in place, every secret value the findings of an aggregated result set expose.
 
     Covers the SARIF report and the values in ``additional_reports``. Called once
     a scan's results are merged, before ``ash_aggregated_results.json`` is saved
     and before any reporter runs, and on every load of a stored results file.
+
+    Also masks ``values`` (raw values other result sets exposed) and every token
+    of ``shapes`` and of the shapes ``results`` already records
+    (``secret_value_shapes``). What this masking found is recorded on
+    ``results`` for the next one: the raw values privately
+    (``exposed_secret_values``), their shapes in ``secret_value_shapes``.
     Returns ``results``.
     """
-    index = _mask_report(getattr(results, "sarif", None))
+    known_values = set(values) | exposed_secret_values(results)
+    known_shapes = list(shapes) + list(
+        getattr(results, "secret_value_shapes", None) or []
+    )
+    index = _mask_report(getattr(results, "sarif", None), known_values, known_shapes)
     additional = getattr(results, "additional_reports", None)
-    if index is not None and index.values and isinstance(additional, dict):
+    if (index.values or index.shapes) and isinstance(additional, dict):
         _mask_tree(additional, index, set())
+    _record(results, index)
     return results
+
+
+def mask_secret_values_in_tree(
+    tree: Any, values: Iterable[str], shapes: Iterable[Any] = ()
+) -> Any:
+    """Mask, in place, ``values`` and tokens of ``shapes`` in every string of ``tree``.
+
+    For results already reduced to plain JSON data (a workspace's spooled SARIF
+    runs). Identifiers (``_SKIPPED_FIELDS``) are left alone. Returns ``tree``.
+    """
+    index = _SecretIndex()
+    index.add_values(values)
+    index.add_shapes(shapes)
+    index.add_shapes(secret_value_shape(value) for value in index.values)
+    if index.values or index.shapes:
+        _mask_tree(tree, index, set())
+    return tree
+
+
+#: How a value is written into the text formats reports use: as is, inside a JSON
+#: string, HTML or XML text and attributes, and doubled quotes (CSV, YAML).
+_TEXT_ENCODINGS: Tuple[Callable[[str], str], ...] = (
+    lambda value: value,
+    lambda value: json.dumps(value)[1:-1],
+    lambda value: html.escape(value, quote=True),
+    lambda value: html.escape(value, quote=False),
+    lambda value: value.replace('"', '""'),
+    lambda value: value.replace("'", "''"),
+)
+
+
+def mask_secret_values_in_text(text: str, values: Iterable[str]) -> str:
+    """``text`` with each of ``values`` masked in every form a report writes it.
+
+    For a rendered report that cannot be re-rendered from masked results: each
+    value is matched as a whole token in each of ``_TEXT_ENCODINGS`` and replaced
+    by its masked form in the same encoding.
+    """
+    replacements: Dict[str, str] = {}
+    for value in values:
+        if not isinstance(value, str) or not _propagates(value):
+            continue
+        masked = _mask_secret_value(value)
+        for encode in _TEXT_ENCODINGS:
+            replacements.setdefault(encode(value), encode(masked))
+    if not replacements:
+        return text
+    pattern = re.compile(
+        "|".join(
+            _token_pattern(re.escape(form), form[0], form[-1])
+            for form in sorted(replacements, key=len, reverse=True)
+        )
+    )
+    return pattern.sub(lambda match: replacements[match.group(0)], text)

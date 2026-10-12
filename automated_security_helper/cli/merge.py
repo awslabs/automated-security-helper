@@ -966,8 +966,13 @@ def merge_shard_results(
     # Each shard was masked against its own secret findings only, and shards split
     # by scanner, so a secret one shard's scanner reports can sit in another
     # shard's snippets. The merged set is masked against all of them before
-    # anything is written; see utils/secret_masking.py.
-    mask_secrets_in_results(merged)
+    # anything is written; see utils/secret_masking.py. By location from the
+    # findings themselves; by value from the shapes every shard recorded, since
+    # no shard holds the values any more once it has masked them.
+    mask_secrets_in_results(
+        merged,
+        shapes=[shape for _, shard, _ in shards for shape in shard.secret_value_shapes],
+    )
 
     # Recomputes summary_stats and per-scanner counts from the merged SARIF, the
     # same call the execution engine makes before the report phase. Without it

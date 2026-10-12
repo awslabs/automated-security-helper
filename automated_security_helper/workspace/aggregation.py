@@ -903,6 +903,7 @@ class WorkspaceAggregator:
         max_parallel_projects: Optional[int] = None,
         project_timeout: Optional[float] = None,
         project_name: Optional[str] = None,
+        secret_value_shapes: Optional[Sequence[Any]] = None,
     ) -> Path:
         """Stream the unified results file and return its path.
 
@@ -910,6 +911,10 @@ class WorkspaceAggregator:
         one project's SARIF is in memory at a time. Two tests read the result back
         -- one as JSON, one as ``AshAggregatedResults`` -- because hand-assembled
         JSON is exactly the kind of thing that is subtly wrong.
+
+        ``secret_value_shapes`` are the shapes of the values every project's
+        secret findings exposed (``AshAggregatedResults.secret_value_shapes``),
+        written only when there are any, as the model writes them.
         """
         payload = self.results_payload(
             exit_code,
@@ -959,6 +964,11 @@ class WorkspaceAggregator:
             "validation_checkpoints": [],
             "used_suppressions": [],
         }
+        if secret_value_shapes:
+            header["secret_value_shapes"] = [
+                shape.model_dump(mode="json") if hasattr(shape, "model_dump") else shape
+                for shape in secret_value_shapes
+            ]
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         target = self.output_dir / RESULTS_FILENAME

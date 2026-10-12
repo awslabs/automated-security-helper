@@ -2173,6 +2173,11 @@ scanner_results:
       suppressed: 0
     status: PASSED
     suppressed_finding_count: 0
+secret_value_shapes:
+- length: 25
+  prefix: hu
+  spans_whitespace: false
+  suffix: t
 used_suppressions:
 - app/app.py|SECRET-SECRET-KEYWORD|5|5
 validation_checkpoints: []

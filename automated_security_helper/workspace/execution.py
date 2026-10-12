@@ -290,6 +290,13 @@ from automated_security_helper.utils.output_dir_links import (
     refuse_linked_output_dir,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import (
+    exposed_secret_values,
+    mask_secret_values_in_text,
+    mask_secret_values_in_tree,
+    mask_secrets_in_results,
+    shapes_of_secret_values,
+)
 from automated_security_helper.workspace.aggregation import (
     RESULTS_FILENAME,
     WorkspaceAggregator,
@@ -408,6 +415,9 @@ class _ProjectRun:
 
     outcome: WorkspaceProjectResult
     run: Optional[Dict[str, Any]] = None
+    #: The raw values the project's own masking found (``exposed_secret_values``),
+    #: so every other project's outputs can be masked with them too.
+    secret_values: Set[str] = field(default_factory=set)
 
 
 def workspace_plugin_modules(
@@ -876,7 +886,9 @@ def _scan_one_project(
         ceiling_unreachable_findings=unreachable,
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
-    return _ProjectRun(outcome=outcome, run=run)
+    return _ProjectRun(
+        outcome=outcome, run=run, secret_values=exposed_secret_values(results)
+    )
 
 
 def _ignore_file_exclusions_of(results: Any) -> Optional[IgnoreFileExclusions]:
@@ -1259,6 +1271,64 @@ def _scanner_statuses(results: Any) -> Dict[str, str]:
     return statuses
 
 
+#: The tools' own output in a project's output tree, which output-formats.md says
+#: is not masked: what each scanner wrote, and the converted copies of the source.
+_TOOL_OUTPUT_DIRS = frozenset({"scanners", ASH_WORK_DIR_NAME})
+
+
+def _mask_project_output(
+    project_output: Path, values: Set[str], shapes: List[Any]
+) -> None:
+    """Mask a finished project's output tree with the values every project exposed.
+
+    The results file is read back as a model, masked with ``values`` and
+    ``shapes`` and rewritten, so it records the workspace's shapes too. Every
+    other file -- the project's own reports, which cannot be re-rendered without
+    running its reporters again -- has each value masked in every text form a
+    report writes it (``mask_secret_values_in_text``). The tools' own output
+    (``_TOOL_OUTPUT_DIRS``) and links are left alone.
+    """
+    if not project_output.is_dir():
+        return
+    results_file = project_output / RESULTS_FILENAME
+    for path in sorted(project_output.rglob("*")):
+        relative = path.relative_to(project_output)
+        if relative.parts[0] in _TOOL_OUTPUT_DIRS:
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path == results_file:
+            _remask_results_file(path, values, shapes)
+            continue
+        data = path.read_bytes()
+        try:
+            text, encoding = data.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            # Not UTF-8: read byte for byte, so the rewrite changes nothing else.
+            text, encoding = data.decode("latin-1"), "latin-1"
+        masked = mask_secret_values_in_text(text, values)
+        if masked != text:
+            write_text_atomically(path, masked, encoding=encoding)
+
+
+def _remask_results_file(path: Path, values: Set[str], shapes: List[Any]) -> None:
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    try:
+        model = AshAggregatedResults.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+    except ValueError as error:
+        # A file this run wrote moments ago that no longer parses: mask it as text
+        # rather than leave it as it is.
+        ASH_LOGGER.warning(f"Could not read {path} to mask it again: {error}")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        write_text_atomically(path, mask_secret_values_in_text(text, values))
+        return
+    mask_secrets_in_results(model, values=values, shapes=shapes)
+    write_text_atomically(path, model.model_dump_json(indent=2, by_alias=True))
+
+
 def _write_project_results(project_output: Path, results: Any) -> None:
     """Write the project's own ``ash_aggregated_results.json``.
 
@@ -1393,10 +1463,26 @@ def execute_workspace(
 
     collected.update(_run_projects(active, settings, orchestrator_factory, bound))
 
+    # A value one project's secret finding exposed is masked in every project's
+    # output, not only its own: one password used by two services is reported in
+    # one and passed on a command line in the other. Each project's scan masked
+    # its outputs against its own findings, so they are masked again here with
+    # the values all of them exposed, and the runs before they are spooled.
+    exposed = set().union(*(entry.secret_values for entry in collected.values()))
+    shapes = shapes_of_secret_values(exposed)
+    if exposed:
+        for project in plan.projects:
+            if project.key in collected:
+                _mask_project_output(
+                    _project_output_dir(settings, project), exposed, shapes
+                )
+
     for project in plan.projects:
         run = collected.get(project.key)
         if run is None:
             continue
+        if exposed and run.run is not None:
+            mask_secret_values_in_tree(run.run, exposed, shapes)
         aggregator.add(run.outcome, run.run, project)
         # Drop the run as soon as it is spooled: peak memory is what makes a
         # 20-project workspace viable.
@@ -1409,6 +1495,7 @@ def execute_workspace(
         wall_clock_seconds=wall_clock,
         max_parallel_projects=configured_bound,
         project_timeout=settings.project_timeout,
+        secret_value_shapes=shapes,
     )
     payload = aggregator.results_payload(
         exit_code,
