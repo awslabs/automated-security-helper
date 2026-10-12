@@ -670,9 +670,14 @@ class TestNonZeroExitWithAnEmptyResultsFile:
     ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``.
     """
 
-    @staticmethod
-    def _failed_tool_writing_an_empty_file(plugin_context, scanner_config, target):
-        """A scanner whose tool exits 1 and leaves a zero-byte results file."""
+    #: What the failed tool leaves in its results file.
+    RESULTS = ""
+
+    def _failed_tool_writing_an_empty_file(
+        self, plugin_context, scanner_config, target
+    ):
+        """A scanner whose tool exits 1 and leaves RESULTS in its results file."""
+        results_text = self.RESULTS
 
         class FailedToolScanner(ScannerPluginBase):
             offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
@@ -693,7 +698,7 @@ class TestNonZeroExitWithAnEmptyResultsFile:
                 results_dir = self.results_dir / target_type
                 results_dir.mkdir(parents=True, exist_ok=True)
                 results_file = results_dir / "failing.sarif"
-                results_file.write_text("", encoding="utf-8")
+                results_file.write_text(results_text, encoding="utf-8")
                 return ["failing-tool", "--scan"], results_file, None
 
         scanner = FailedToolScanner(config=scanner_config, context=plugin_context)
@@ -793,6 +798,20 @@ class TestNonZeroExitWithAnEmptyResultsFile:
         row = self._row(plugin_context, scanner_config, tmp_path)
 
         assert row.status == ScannerStatus.ERROR, (
-            "a tool that exited 1 with success_exit_codes={0, 2} and wrote an empty "
-            f"report was graded {row.status.value}"
+            "a tool that exited 1 with success_exit_codes={0, 2} and wrote "
+            f"{self.RESULTS!r} was graded {row.status.value}"
         )
+
+
+class TestNonZeroExitWithAOneRunResultsFile(TestNonZeroExitWithAnEmptyResultsFile):
+    """The same failed tool, with a results file holding one well-formed run.
+
+    An empty file is ERROR on its own, so the class above passes without the
+    exit-code rule. With a valid one-run report the rejected exit code is the only
+    thing that makes the row ERROR.
+    """
+
+    RESULTS = (
+        '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": '
+        '"failing-tool"}}, "results": []}]}'
+    )

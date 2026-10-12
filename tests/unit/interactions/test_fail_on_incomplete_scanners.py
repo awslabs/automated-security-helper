@@ -1338,9 +1338,24 @@ class TestAHardFailureReachesTheGate:
     ``tests/unit/core/phases/test_scanner_executor_rejected_exit_codes.py``.
     """
 
+    #: The report the failed tool leaves: grype's measured zero-byte one, and a
+    #: well-formed one-run report, with which the rejected exit code is the only
+    #: thing that makes the row ERROR.
+    REPORTS = pytest.mark.parametrize(
+        "report",
+        [
+            "",
+            (
+                '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": '
+                '"grype"}}, "results": []}]}'
+            ),
+        ],
+        ids=["zero-byte-report", "one-run-report"],
+    )
+
     @staticmethod
-    def _hard_failure_row(tmp_path):
-        """grype's measured failure through ScannerExecutor: exit 1, zero-byte report."""
+    def _hard_failure_row(tmp_path, report=""):
+        """grype's measured failure through ScannerExecutor: exit 1, ``report`` left."""
         from typing import ClassVar, Literal
 
         from automated_security_helper.base.plugin_context import PluginContext
@@ -1377,7 +1392,7 @@ class TestAHardFailureReachesTheGate:
                 results_dir = self.results_dir / target_type
                 results_dir.mkdir(parents=True, exist_ok=True)
                 results_file = results_dir / "results_sarif.sarif"
-                results_file.write_text("", encoding="utf-8")
+                results_file.write_text(report, encoding="utf-8")
                 return ["grype", "dir:."], results_file, None
 
         source = tmp_path / "src"
@@ -1410,8 +1425,9 @@ class TestAHardFailureReachesTheGate:
             )
         return row
 
-    def test_a_rejected_exit_code_is_graded_error(self, tmp_path):
-        row = self._hard_failure_row(tmp_path)
+    @REPORTS
+    def test_a_rejected_exit_code_is_graded_error(self, tmp_path, report):
+        row = self._hard_failure_row(tmp_path, report)
 
         assert row.exit_code == 1
         assert row.status == ScannerStatus.ERROR, (
@@ -1420,9 +1436,12 @@ class TestAHardFailureReachesTheGate:
             "as a scanner that completed"
         )
 
-    def test_the_error_row_fails_the_scan_unless_the_gate_is_off(self, tmp_path):
+    @REPORTS
+    def test_the_error_row_fails_the_scan_unless_the_gate_is_off(
+        self, tmp_path, report
+    ):
         """The row the executor produced, as the gate reads it, in all three positions."""
-        row = self._hard_failure_row(tmp_path)
+        row = self._hard_failure_row(tmp_path, report)
 
         results = MagicMock()
         results.sarif = MagicMock()
