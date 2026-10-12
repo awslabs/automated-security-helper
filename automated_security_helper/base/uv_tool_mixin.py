@@ -71,6 +71,11 @@ def _uv_unavailable(runner: Any) -> str:
 class UVToolMixin:
     """UV tool management methods extracted from PluginBase."""
 
+    if TYPE_CHECKING:
+        # PluginBase declares it, as a PrivateAttr defaulting to None, which
+        # resolve_deferred_tool_version sets again once the probe has run.
+        _deferred_tool_version_probe: Optional[tuple[str, Optional[str]]]
+
     # ------------------------------------------------------------------
     # Version detection
     # ------------------------------------------------------------------

@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Callable, Dict, List, Literal
+from typing import Annotated, Any, Callable, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
@@ -408,7 +408,7 @@ class PluginBase(UVToolMixin, BaseModel):
         cwd: Path | str | None = None,
         env: Dict[str, str] | None = None,
         timeout: float | None = None,
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Any]:
         """Run a subprocess with the given command.
 
         This method supports both direct command execution and UV tool execution
