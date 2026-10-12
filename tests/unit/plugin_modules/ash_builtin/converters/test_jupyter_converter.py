@@ -820,7 +820,8 @@ class TestConvert:
         assert len(results) == 1
         assert results[0].name.endswith(expected_output_name(good))
         assert not any("broken" in p.name for p in results)
-        # Exactly one failure was reported, and nbconvert's diagnosis was kept.
+        # Exactly one failure was recorded, without a sandbox as with one, and
+        # nbconvert's diagnosis was kept.
         errors = messages_at(ash_log_records, logging.ERROR)
         assert errors == [
             "Could not convert 'broken.ipynb': nbconvert exited with code 1"
@@ -893,7 +894,10 @@ class TestConvert:
         assert results[0].name.endswith(expected_output_name(second))
         errors = messages_at(ash_log_records, logging.ERROR)
         assert errors == [
-            "Could not convert 'first.ipynb': ValueError: something unexpected"
+            "Could not convert 'first.ipynb': conversion raised ValueError"
+        ], "the error's own text is left out: it can quote the notebook"
+        assert [r.reason for r in converter.failed_inputs] == [
+            "conversion raised ValueError"
         ]
         assert any(
             "Traceback (most recent call last)" in m

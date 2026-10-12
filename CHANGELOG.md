@@ -115,10 +115,14 @@
   `/opt`) stays readable. The convert phase applies the same
   scope to every converter. A notebook the sandbox refused (no backend can be used,
   or the backend cannot plan its run) is listed in the converter's `refused_inputs`;
-  that notebook and one nbconvert failed on inside the sandbox are listed in its
-  `failed_inputs`, and any converter process the sandbox refused is named in the
-  converter row's `failure`, so the scan exits 1 while `fail_on_incomplete_scanners`
-  is on. A scanner's own version probe at construction,
+  that notebook and one nbconvert failed on are listed in its `failed_inputs`, and
+  any converter process the sandbox refused is named in the converter row's
+  `failure`, so the scan exits 1 while `fail_on_incomplete_scanners` is on. A
+  notebook nbconvert fails on (one that is not JSON, a timeout, a run that writes no
+  output) counts this way with or without a sandbox; under a sandbox its reason says
+  so, and a conversion that raises is recorded by the exception's type, not its
+  message, which can quote the notebook. Exclude a notebook that is malformed on
+  purpose with `ignore_paths`. A scanner's own version probe at construction,
   which a sandboxed scan refused with a misleading "renamed by a config file" reason,
   now runs sandboxed as documented. A probe the sandbox refused never ran, so its
   outcome is not remembered for the rest of the process: uv's availability, a

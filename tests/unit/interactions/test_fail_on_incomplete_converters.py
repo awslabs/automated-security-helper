@@ -524,4 +524,6 @@ def test_the_advice_covers_files_that_could_not_be_converted(monkeypatch):
     )
 
     advice = " ".join(printed)
-    assert "fix or exclude the files it could not convert" in advice
+    assert (
+        "fix the files it could not convert or exclude them with ignore_paths" in advice
+    )

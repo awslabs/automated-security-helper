@@ -107,6 +107,14 @@ def _is_uv_error(stderr: object) -> bool:
     return first.startswith(("error:", "\u00d7"))
 
 
+class _NbconvertNotRun(FileNotFoundError):
+    """No nbconvert could be run for a notebook.
+
+    Its message is ASH's own and quotes nothing from the notebook, so the failed
+    input records it in full, where any other error is recorded by its type only.
+    """
+
+
 @ash_converter_plugin
 class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
@@ -549,7 +557,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         if nbconvert is None:
             refusal = self._direct_nbconvert[1] if self._direct_nbconvert else None
             reason = refusal or "no jupyter-nbconvert executable was found on PATH"
-            raise FileNotFoundError(
+            raise _NbconvertNotRun(
                 reason if sandboxed else f"uv could not run nbconvert, and {reason}"
             )
         direct = [nbconvert, *cmd[2:]]
@@ -635,6 +643,16 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         why = f"nbconvert was not run on it, the scanner sandbox refused it: {reason}"
         self.record_refused_input(TreeInputRefused(display, why))
         self.record_failed_input(ipynb_file, why)
+
+    def _record_failure(self, ipynb_file: str, reason: str) -> None:
+        """Record a notebook nbconvert ran on and did not convert.
+
+        Recorded with or without a sandbox, and the completeness gate counts it as
+        lost coverage either way: its contents reached no scanner. Under a sandbox
+        the reason says so, since the confinement can be the cause.
+        """
+        where = " under the scanner sandbox" if sandbox_requested(self.context) else ""
+        self.record_failed_input(ipynb_file, f"{reason}{where}")
 
     def convert(self) -> List[Path]:
         """Converts Jupyter notebooks (.ipynb files) in the source_dir to Python files using CLI.
@@ -731,7 +749,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     converted = self._move_output(output_dir, target_base)
 
                 if converted is None:
-                    self.record_failed_input(
+                    self._record_failure(
                         ipynb_file, "nbconvert exited 0 but wrote no output"
                     )
                     continue
@@ -743,18 +761,25 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 self._refuse_unconfinable(ipynb_file, str(refusal))
             # Every failure is recorded, not only logged: the completeness gate reads
             # failed_inputs, and a notebook that was not converted is coverage lost.
+            except _NbconvertNotRun as e:
+                self._record_failure(ipynb_file, f"FileNotFoundError: {e}")
             except subprocess.TimeoutExpired as e:
-                self.record_failed_input(
+                self._record_failure(
                     ipynb_file, f"nbconvert did not finish within {e.timeout}s"
                 )
             except subprocess.CalledProcessError as e:
-                self.record_failed_input(
+                self._record_failure(
                     ipynb_file, f"nbconvert exited with code {e.returncode}"
                 )
                 if e.stderr:
                     ASH_LOGGER.debug(f"nbconvert stderr: {e.stderr}", extra=NO_MARKUP)
             except Exception as e:
-                self.record_failed_input(ipynb_file, f"{type(e).__name__}: {e}")
+                # The type only: the message of an error raised reading the
+                # notebook can quote its content, and a failed input's reason is
+                # recorded without the input's content.
+                self._record_failure(
+                    ipynb_file, f"conversion raised {type(e).__name__}"
+                )
                 import traceback
 
                 ASH_LOGGER.debug(

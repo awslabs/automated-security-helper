@@ -89,12 +89,23 @@ def nbconvert(argv):
     if "--version" in argv:
         print("7.17.1")
         return 0
+    # As nbconvert does: a notebook that is not JSON is an error, and the script
+    # exporter names its file with the notebook language's extension.
+    try:
+        notebook = json.loads(Path(argv[argv.index("--to") + 2]).read_text())
+    except ValueError:
+        print("Notebook does not appear to be JSON", file=sys.stderr)
+        return 1
+    extension = ".py"
+    if argv[argv.index("--to") + 1] == "script":
+        language = notebook.get("metadata", {{}}).get("language_info", {{}})
+        extension = language.get("file_extension", ".txt")
     output = argv[argv.index("--output") + 1]
     if "--output-dir" in argv:
         target = Path(argv[argv.index("--output-dir") + 1], output)
     else:
         target = Path(output)
-    target.with_name(target.name + ".py").write_text("x = 1\\n", encoding="utf-8")
+    target.with_name(target.name + extension).write_text("x = 1\\n", encoding="utf-8")
     return 0
 
 
@@ -247,6 +258,19 @@ def _run_convert_phase(context) -> AshAggregatedResults:
         progress_display=MagicMock(),
     )._execute_phase(aggregated_results=results)
     return results
+
+
+def _failed(results: AshAggregatedResults) -> list:
+    """``(path, reason)`` of each input the jupyter converter's row lists as failed."""
+    return [
+        (record.path, record.reason)
+        for record in results.converter_results["jupyter"].failed_inputs
+    ]
+
+
+def _where(mode: str) -> str:
+    """The suffix a failed conversion's reason has under a sandbox."""
+    return "" if mode == "off" else " under the scanner sandbox"
 
 
 def _inside(path, roots) -> bool:
@@ -617,11 +641,41 @@ class TestAFailedSandboxedConversionIsLostCoverage:
         listed = self._incomplete(results)
         assert [name for name, _ in listed] == ["jupyter"], listed
         assert "analysis.ipynb" in listed[0][1], listed
-        # The reason is kept on the row's failed input.
-        assert [
-            (record.path, record.reason)
-            for record in results.converter_results["jupyter"].failed_inputs
-        ] == [("analysis.ipynb", "nbconvert exited with code 2")]
+        # The reason is kept on the row's failed input, and says the sandbox was on.
+        assert _failed(results) == [
+            ("analysis.ipynb", "nbconvert exited with code 2 under the scanner sandbox")
+        ]
+
+    def test_nbconvert_timing_out_inside_the_sandbox_records_the_notebook(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        import subprocess
+
+        from automated_security_helper.plugin_modules.ash_builtin.converters import (
+            jupyter_converter,
+        )
+
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        real_spawn_run = jupyter_converter.spawn_run
+
+        def spawn_run(cmd, *args, **kwargs):
+            if "--to" in cmd:
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 60))
+            return real_spawn_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(jupyter_converter, "spawn_run", spawn_run)
+
+        results = _run_convert_phase(_context(tree, "bwrap"))
+
+        listed = self._incomplete(results)
+        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert _failed(results) == [
+            (
+                "analysis.ipynb",
+                "nbconvert did not finish within 60s under the scanner sandbox",
+            )
+        ]
 
     def test_a_sandboxed_conversion_that_succeeds_is_complete(
         self, tmp_path, tree, backend, monkeypatch
@@ -634,6 +688,99 @@ class TestAFailedSandboxedConversionIsLostCoverage:
 
         assert tools.conversions()
         assert self._incomplete(results) == []
+
+
+@pytest.mark.parametrize("mode", ["off", "bwrap"])
+class TestAFailedConversionIsLostCoverageInEitherMode:
+    """A notebook that is not converted makes the scan incomplete, sandbox or not.
+
+    The same input and the same lost coverage give the same verdict: a malformed
+    notebook, a conversion that exits 0 and writes nothing, and one that raises.
+    A notebook in another language, which nbconvert's script exporter writes with
+    that language's extension, is converted, not lost.
+    """
+
+    @staticmethod
+    def _incomplete(results):
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
+        )
+
+        return incomplete_converters(results)
+
+    def test_a_malformed_notebook_is_listed(
+        self, tmp_path, tree, backend, monkeypatch, mode
+    ):
+        (tree[0] / "broken.ipynb").write_text('{"cells": [', encoding="utf-8")
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+
+        results = _run_convert_phase(_context(tree, mode))
+
+        listed = self._incomplete(results)
+        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert "broken.ipynb" in listed[0][1], listed
+        assert "analysis.ipynb" not in listed[0][1], "the good notebook converted"
+
+    def test_a_conversion_that_writes_nothing_is_listed(
+        self, tmp_path, tree, backend, monkeypatch, mode
+    ):
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        monkeypatch.setattr(JupyterConverter, "_run_nbconvert", lambda *a, **k: None)
+
+        results = _run_convert_phase(_context(tree, mode))
+
+        listed = self._incomplete(results)
+        assert [name for name, _ in listed] == ["jupyter"], listed
+        assert _failed(results) == [
+            ("analysis.ipynb", f"nbconvert exited 0 but wrote no output{_where(mode)}")
+        ]
+
+    def test_a_conversion_that_raises_is_listed(
+        self, tmp_path, tree, backend, monkeypatch, mode
+    ):
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+
+        def raising(*args, **kwargs):
+            raise FileNotFoundError("jupyter")
+
+        monkeypatch.setattr(JupyterConverter, "_run_nbconvert", raising)
+
+        results = _run_convert_phase(_context(tree, mode))
+
+        listed = self._incomplete(results)
+        assert [name for name, _ in listed] == ["jupyter"], listed
+        # The type only: an error's message can quote the notebook.
+        assert _failed(results) == [
+            ("analysis.ipynb", f"conversion raised FileNotFoundError{_where(mode)}")
+        ]
+
+    def test_a_notebook_in_another_language_is_converted(
+        self, tmp_path, tree, backend, monkeypatch, mode
+    ):
+        (tree[0] / "analysis.ipynb").write_text(
+            json.dumps(
+                {
+                    "cells": [],
+                    "metadata": {
+                        "language_info": {"name": "R", "file_extension": ".r"}
+                    },
+                    "nbformat": 4,
+                    "nbformat_minor": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+        tools = _Tools(tmp_path, installed=True)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        converter = _converter(_context(tree, mode))
+
+        converted = converter.convert()
+
+        assert [path.suffix for path in converted] == [".r"], converted
+        assert converter.failed_inputs == []
 
 
 class TestTheConverterConfinesItselfOutsideThePhase:
@@ -649,23 +796,63 @@ class TestTheConverterConfinesItselfOutsideThePhase:
     def test_construction_and_the_dependency_check_are_planned(
         self, tmp_path, tree, backend, monkeypatch
     ):
+        """Every process each step runs was planned by the backend, counted.
+
+        Construction and the dependency check are counted apart, so the check's own
+        scope is what plans its calls, and by count rather than by argv alone: a
+        second, unplanned run of a planned command shows up too.
+        """
+        from collections import Counter
+
         tools = _Tools(tmp_path, installed=True)
         _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
 
-        converter = _converter(_context(tree, "bwrap"))
-        converter.validate_plugin_dependencies()
+        def ran_since(calls_before):
+            return Counter(tuple(c) for c in tools.calls()[calls_before:])
 
-        ran = [c for c in tools.calls() if _mentions_nbconvert(c)]
-        assert ran, f"no nbconvert process ran; calls: {tools.calls()}"
-        planned = [argv for argv, _policy, _env in backend.spawns]
-        unplanned = [
-            c
-            for c in ran
-            if not any(
-                Path(argv[0]).name == c[0] and argv[1:] == c[1:] for argv in planned
+        def planned_since(spawns_before):
+            return Counter(
+                (Path(argv[0]).name, *argv[1:])
+                for argv, _policy, _env in backend.spawns[spawns_before:]
             )
-        ]
-        assert unplanned == [], f"ran without the sandbox backend: {unplanned}"
+
+        converter = _converter(_context(tree, "bwrap"))
+        construction_ran = ran_since(0)
+        calls_after_construction = len(tools.calls())
+        spawns_after_construction = len(backend.spawns)
+
+        converter.validate_plugin_dependencies()
+        check_ran = ran_since(calls_after_construction)
+
+        assert construction_ran, "construction ran nothing to check"
+        assert check_ran, f"the dependency check ran nothing; calls: {tools.calls()}"
+        assert construction_ran - planned_since(0) == Counter(), (
+            "construction ran a process the sandbox backend did not plan"
+        )
+        assert check_ran - planned_since(spawns_after_construction) == Counter(), (
+            "the dependency check ran a process the sandbox backend did not plan: "
+            f"{check_ran - planned_since(spawns_after_construction)}"
+        )
+
+    def test_a_fallback_check_the_sandbox_refuses_reports_unavailable(
+        self, tmp_path, tree, backend, monkeypatch
+    ):
+        """The direct ``jupyter nbconvert --version`` check: a refusal is False."""
+        from automated_security_helper.plugin_modules.ash_builtin.converters import (
+            jupyter_converter,
+        )
+        from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
+        tools = _Tools(tmp_path, installed=False)
+        _isolate_tool_lookup(monkeypatch, tools, tree[2], online=True)
+        converter = _converter(_context(tree, "bwrap"))
+
+        def refused(*args, **kwargs):
+            raise SandboxUnavailable("the backend cannot plan this spawn")
+
+        monkeypatch.setattr(jupyter_converter, "spawn_run", refused)
+
+        assert converter.validate_plugin_dependencies() is False
 
     def test_the_install_guard_holds_without_a_scope(
         self, tmp_path, tree, backend, monkeypatch

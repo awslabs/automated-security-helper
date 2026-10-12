@@ -390,10 +390,13 @@ to every converter, so a third-party converter's tool is confined the same way.
 
 If no sandbox backend can be used, or the backend cannot plan one notebook's run,
 nbconvert is not run on that notebook, and it is listed in the converter's
-`refused_inputs` with the reason. A notebook nbconvert fails on inside the sandbox
-(a non-zero exit, a timeout) is not converted either. Each such notebook is listed in
+`refused_inputs` with the reason. A notebook nbconvert fails on (a non-zero exit,
+as for a notebook that is not JSON, a timeout, or a run that writes no output) is
+not converted either, with or without a sandbox. Each such notebook is listed in
 the converter row's `failed_inputs`, which the completeness gate reads, so with
-`fail_on_incomplete_scanners` on (the default) the scan exits 1. The same holds for
+`fail_on_incomplete_scanners` on (the default) the scan exits 1; exclude a notebook
+that is malformed on purpose, such as a test fixture, with `ignore_paths`. The same
+holds for
 any converter: a process its `convert()` started that the sandbox refused is named
 in its `failure`. Nothing a converter starts runs unsandboxed under a sandbox.
 
