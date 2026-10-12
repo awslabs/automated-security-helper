@@ -44,7 +44,7 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
     exclude: Annotated[
         List[IgnorePathWithReason],
         Field(
-            description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
+            description='Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "*/" or "**/", and syft fails the scan on any other. "*" does not match across "/" and "**" does: "./dir1/**" skips the top-level "dir1", and "**/dir1/**" skips every directory named "dir1".',
         ),
     ] = []
     additional_outputs: Annotated[

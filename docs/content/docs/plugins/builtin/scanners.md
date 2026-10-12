@@ -329,7 +329,7 @@ scanners:
     enabled: true
     options:
       additional_outputs: ["syft-table"]   # Extra output formats beyond CycloneDX
-      exclude: []                          # Paths to skip, matched as regular expressions
+      exclude: []                          # Paths to skip, as globs starting ./, */ or **/
       offline: false                       # Skip update checks
 ```
 

@@ -576,7 +576,7 @@ scanners:
   syft:
     enabled: true
     options:
-      exclude: []           # Paths to skip, matched as regular expressions
+      exclude: []           # Paths to skip, as globs starting ./, */ or **/
 ```
 
 Two conventions differ between fields, and both are enforced: `severity_threshold`
