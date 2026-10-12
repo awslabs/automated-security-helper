@@ -2328,20 +2328,33 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
     single-directory scan: the file was meant to configure this run, and running
     without it is not the run the operator asked for.
     """
+    return resolve_workspace_execution_config(
+        opts.source_dir, opts.config, opts.config_base_gate
+    )
+
+
+def resolve_workspace_execution_config(
+    workspace_root: Path,
+    config: Optional[str] = None,
+    permit: Optional[Callable[[Path], bool]] = None,
+):
+    """``_resolve_workspace_execution_config`` from its three inputs.
+
+    Public so workspace planning (``ash scan --workspace ... --dry-run`` and MCP
+    ``resolve_workspace``) refuses the workspace root's config exactly as the
+    run does: a plan reported as fine for a config the run refuses with exit 3
+    would answer the question a dry run exists to ask the wrong way.
+    """
     from automated_security_helper.config.ash_config import WorkspaceExecutionConfig
 
-    config_path_str = opts.config
+    config_path_str = config
     if config_path_str is None:
-        config_path_str = _discovered_config_path(
-            opts.source_dir, permit=opts.config_base_gate
-        )
+        config_path_str = _discovered_config_path(workspace_root, permit=permit)
 
     if config_path_str is None:
         return WorkspaceExecutionConfig()
 
-    return _load_with_confinement(
-        config_path_str, opts.source_dir, opts.config_base_gate
-    ).workspace
+    return _load_with_confinement(config_path_str, workspace_root, permit).workspace
 
 
 def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":

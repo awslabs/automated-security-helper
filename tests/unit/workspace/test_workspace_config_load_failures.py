@@ -258,6 +258,25 @@ class TestAshScanWorkspaceCommand:
         assert scan_started == []
         assert result.exit_code == 3, result.output[-2000:]
 
+    def test_dry_run_with_a_workspace_root_config_that_does_not_parse_exits_three(
+        self, tmp_path, monkeypatch, scan_started
+    ):
+        """The workspace root's config sets how the run executes, and the real run
+        refuses it with exit 3; the dry run must not report the plan as fine."""
+        monkeypatch.chdir(tmp_path)
+        _workspace(tmp_path, "api", "web")
+        _write(tmp_path / "api" / ".ash" / ".ash.yaml", GOOD_YAML)
+        _write(tmp_path / "web" / ".ash" / ".ash.yaml", GOOD_YAML)
+        _write(
+            tmp_path / ".ash" / ".ash.yaml", "workspace:\n  max_parallel_projects: [\n"
+        )
+
+        result = _cli(tmp_path, "--dry-run")
+
+        assert scan_started == []
+        assert result.exit_code == 3, result.output[-2000:]
+        assert ".ash.yaml" in result.output
+
     def test_control_dry_run_with_a_loadable_project_config_exits_zero(
         self, tmp_path, monkeypatch, scan_started
     ):

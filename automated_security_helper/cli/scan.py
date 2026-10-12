@@ -31,6 +31,7 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_scan import (
+    resolve_workspace_execution_config,
     run_ash_scan,
 )
 from automated_security_helper.core.enums import ExportFormat
@@ -198,6 +199,14 @@ def _handle_workspace_mode(
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
+    except ASHConfigValidationError as exc:
+        _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
+
+    # The workspace root's own config sets how the run executes (parallelism,
+    # timeouts), and the run refuses one that cannot be loaded with exit 3. Read
+    # here too, so --dry-run does not report a plan the run would refuse.
+    try:
+        resolve_workspace_execution_config(Path(plan.workspace_root), default_config)
     except ASHConfigValidationError as exc:
         _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
 
