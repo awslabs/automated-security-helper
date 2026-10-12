@@ -146,6 +146,7 @@ from pydantic import ValidationError
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
 # reasons about this exact import form.
 from rich import print  # noqa: A004
+from rich.markup import escape
 
 from automated_security_helper.base.plugin_context import PluginContext
 
@@ -1392,7 +1393,9 @@ def merge_command(
             )
         )
     except PluginModuleError as exc:
-        print(f"[red]Invalid configuration: {exc}[/red]")
+        # Escaped: the message quotes the configured name, which may hold markup
+        # characters.
+        print(f"[red]Invalid configuration: {escape(str(exc))}[/red]")
         raise typer.Exit(3)
 
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))

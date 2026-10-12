@@ -254,3 +254,48 @@ class TestCommandsExitThree:
         assert result.exit_code == EXIT_INVALID_CONFIG, result.output
         assert REFUSED not in sys.modules
         assert not (tmp_path / "merged" / "ash_aggregated_results.json").exists()
+
+
+#: A refused name holding console markup: the refusal message quotes it, so the
+#: message must be printed as text.
+MARKUP_NAME = "zz[/]markup"
+
+
+class TestARefusalQuotingMarkupStillExitsThree:
+    def test_report(self, packages, tmp_path):
+        result = _invoke(
+            [
+                "report",
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--config",
+                str(_config_file(tmp_path, MARKUP_NAME)),
+            ]
+        )
+
+        assert result.exit_code == EXIT_INVALID_CONFIG, (
+            result.output,
+            result.exception,
+        )
+        assert MARKUP_NAME in result.output
+
+    def test_merge(self, packages, tmp_path, monkeypatch):
+        reporters = MagicMock()
+        reporters.plugin_modules.return_value = []
+        monkeypatch.setattr(
+            "automated_security_helper.cli.merge.ash_plugin_manager", reporters
+        )
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config.ash_plugin_modules = [MARKUP_NAME]
+        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        for path in write_shards(tmp_path / "artifacts", shards):
+            args += ["--results", path]
+
+        result = _invoke(args)
+
+        assert result.exit_code == EXIT_INVALID_CONFIG, (
+            result.output,
+            result.exception,
+        )
+        assert MARKUP_NAME in result.output

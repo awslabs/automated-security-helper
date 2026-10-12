@@ -13,6 +13,7 @@ import typer
 # reasons about this exact import form.
 from rich import print, print_json  # noqa: A004
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import off_host_reporter_refused
@@ -200,8 +201,9 @@ def report_command(
         load_plugins(plugin_context=plugin_context)
     except PluginModuleError as e:
         # A plugin module outside the plugin namespace, refused before import, or
-        # a named module that does not import
-        print(f"[red]Invalid configuration: {e}[/red]")
+        # a named module that does not import. Escaped: the message quotes the
+        # configured name, which may hold markup characters.
+        print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
         raise typer.Exit(3)
 
     # Load the results file
