@@ -244,10 +244,15 @@ def confine_scanner_config_files(
     ignored.extend(_confine_settings_files(config, trusted_config))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
+        tail = (
+            f"{source.scanner_steps_note}."
+            if source.scanner_steps_note
+            else f"Set them with {source.remedy}."
+        )
         ASH_LOGGER.warning(
             f"Ignoring {', '.join(sorted(set(ignored)))} from {files}: these choose "
             "a scanner's own configuration, which is the operator's choice, and "
-            f"{source.reason}. Set them with {source.remedy}."
+            f"{source.reason}. {tail}"
         )
 
 

@@ -29,6 +29,7 @@ destination the operator chose.
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,9 @@ class UntrustedSource:
         enabled_from_trusted_only: Take ``enabled`` of each reporter whose
             ``enabled`` is the operator's from the trusted base alone, in both
             directions, rather than also applying the config's ``enabled: false``.
+        scanner_steps_note: What the sandbox and scanner-config steps' warnings
+            say in place of their remedy, where no scanner runs. None gives the
+            remedy.
     """
 
     reason: str
@@ -53,6 +57,7 @@ class UntrustedSource:
     modules_remedy: str
     named_modules_only: bool = False
     enabled_from_trusted_only: bool = False
+    scanner_steps_note: Optional[str] = None
 
 
 #: A config file inside the scanned tree, or one an MCP client delivered.
@@ -74,4 +79,8 @@ SHARD_RECORDED = UntrustedSource(
     modules_remedy="ash merge's --config-overrides or --config",
     named_modules_only=True,
     enabled_from_trusted_only=True,
+    scanner_steps_note=(
+        "No scanner runs during a merge, so this changes only the merged results, "
+        "which record the operator's value"
+    ),
 )

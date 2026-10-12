@@ -925,6 +925,36 @@ class TestMergeWarnings:
         assert recorded["sandbox"]["extra_read_paths"] == []
         assert str(bandit_config) not in json.dumps(recorded)
 
+    def test_the_scanner_step_warnings_say_no_scanner_runs(self, harness):
+        """The sandbox and scanner-config warnings give no remedy that changes nothing."""
+        outside = harness.tmp_path / "elsewhere"
+        outside.mkdir()
+        bandit_config = outside / "bandit.yaml"
+        bandit_config.write_text("skips: []\n", encoding="utf-8")
+        shard_paths = harness.write_shards(
+            {
+                "sandbox": {"extra_read_paths": [str(outside)]},
+                "scanners": {
+                    "bandit": {"options": {"config_file": str(bandit_config)}}
+                },
+            }
+        )
+
+        result = harness.merge(shard_paths)
+
+        _assert_merged(result, harness)
+        messages = [
+            m
+            for m in harness.ignoring()
+            if "sandbox.extra_read_paths" in m
+            or "scanners.bandit.options.config_file" in m
+        ]
+        assert len(messages) == 2, harness.warnings
+        for message in messages:
+            assert "No scanner runs during a merge" in message, message
+            assert "Set these with" not in message, message
+            assert "Set them with" not in message, message
+
 
 class TestRecordedThirdPartyModules:
     MODULE = "merge_probe_ash_plugins"

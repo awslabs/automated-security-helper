@@ -188,9 +188,13 @@ def confine_sandbox_grants(
     sandbox.network_limit = list(limit) if limit is not None else None
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
-        ASH_LOGGER.warning(
-            f"Ignoring {', '.join(ignored)} from {files}: {source.reason}. A "
-            "network_scanners list there still removes network from scanners it "
-            "does not name, and a sandbox mode there still applies when nothing "
+        tail = (
+            f"{source.scanner_steps_note}."
+            if source.scanner_steps_note
+            else "A network_scanners list there still removes network from scanners "
+            "it does not name, and a sandbox mode there still applies when nothing "
             f"else turns the sandbox on. Set these with {source.remedy}."
+        )
+        ASH_LOGGER.warning(
+            f"Ignoring {', '.join(ignored)} from {files}: {source.reason}. {tail}"
         )
