@@ -385,6 +385,32 @@ def test_a_project_config_does_not_turn_on_a_reporter_the_operator_turned_off(
     assert len(_ignoring(result["warnings"], enabled_key)) == 1, result["warnings"]
 
 
+def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_off(
+    tmp_path, site
+):
+    """Built from its own default, the reporter would be on: the operator's off
+    holds, and since the section wrote no ``enabled``, nothing about it is warned."""
+    project = _write(
+        tmp_path / "repo" / ".ash" / ".ash.yaml",
+        {"reporters": {REPORTER: {"options": {"title": "repo title"}}}},
+    )
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {REPORTER: {"enabled": False}}},
+    )
+
+    result = _scan(
+        tmp_path,
+        site,
+        config_path=str(project),
+        trusted_config_path=str(operator),
+    )
+
+    assert result["sent"] is None, result
+    enabled_key = f"reporters.{REPORTER}.enabled"
+    assert not _ignoring(result["warnings"], enabled_key), result["warnings"]
+
+
 @pytest.mark.parametrize("on", [False, True], ids=["operator-off", "operator-on"])
 def test_a_null_section_in_a_project_config_reads_as_an_empty_one(tmp_path, site, on):
     """Left null, the section would build the reporter from its defaults: on, and

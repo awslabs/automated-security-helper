@@ -607,6 +607,75 @@ def test_off_by_default_a_delivered_config_cannot_enable_it(
     assert _enabled(config, reporter) is False
 
 
+#: A section that sets an option a repository's config may still set, and no
+#: ``enabled``. Security Hub's and CloudWatch Logs' options models have no such
+#: option, so their sections hold an empty ``options``.
+_OPTIONS_ONLY: Dict[str, dict] = {
+    "s3": {"options": {"file_format": "yaml"}},
+    "bedrock-summary-reporter": {"options": {"temperature": 0.1}},
+    "aws-security-hub": {"options": {}},
+    "cloudwatch-logs": {"options": {}},
+}
+
+
+def _narrow_client_rules():
+    """A client policy that denies none of the reporter fields, so a delivered
+    section reaches the confinement rather than being refused first."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.client_config_policy import rules_from
+
+    return rules_from(
+        AshConfig.model_validate(
+            {
+                "global_settings": {
+                    "mcp": {
+                        "runtime_overrides": {
+                            "denied_paths": ["/fail_on_findings"],
+                            "replace_default_denied_paths": True,
+                        }
+                    }
+                }
+            }
+        )
+    )
+
+
+def test_every_off_host_reporter_has_an_options_only_section():
+    assert set(_OPTIONS_ONLY) == set(REPORTER_ENABLED_DEFAULTS)
+
+
+@pytest.mark.parametrize("route", ["tree", "delivered"])
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_off(
+    tmp_path, ash_log, reporter, route
+):
+    """The section's reporter would be built from its own default, which is on:
+    the operator's off still holds, and since the section wrote no ``enabled``,
+    nothing about ``enabled`` is warned."""
+    section = {reporter: _OPTIONS_ONLY[reporter]}
+    source = tmp_path / "repo"
+    source.mkdir()
+    if route == "tree":
+        written = _write_config(source / ".ash" / ".ash.yaml", section)
+        delivered = {}
+    else:
+        written = _write_config(tmp_path / "upload" / "ash.yaml", section)
+        delivered = {
+            "untrusted_config": True,
+            "client_config_policy": _narrow_client_rules(),
+        }
+
+    config = resolve_config(
+        config_path=written,
+        source_dir=source,
+        trusted_config_path=_operator_off(tmp_path, reporter),
+        **delivered,
+    )
+
+    assert _enabled(config, reporter) is False
+    assert not any("enabled" in message for message in _warnings(ash_log))
+
+
 # The scan engine over a config whose tree file turns every off-host reporter on,
 # with the reporters' models patched to default off and the table left as it is,
 # so only the check after the plugin package is loaded can catch it.
