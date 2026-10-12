@@ -29,6 +29,7 @@ warns naming each option it ignored.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -279,6 +280,10 @@ def test_the_cli_route_with_no_operator_config_keeps_the_trees_destinations(
 def test_the_workspace_route_keeps_the_trees_destinations_and_off_switch(
     tmp_path, ash_log, reporter, section, hyphenated
 ):
+    """The operator's config is merged over the project's, final per field, so its
+    ``enabled: false`` replaces the tree's ``true`` in that merge, silently, as
+    every field the operator sets does: the reporter is off and no ``enabled``
+    warning names the tree. Its destination options are confined and named."""
     project = _write(
         tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml",
         {"reporters": {section: _tree_section(reporter, hyphenated)}},
@@ -291,7 +296,8 @@ def test_the_workspace_route_keeps_the_trees_destinations_and_off_switch(
     )
     assert found.get("enabled") is False
     assert built.config.enabled is False
-    assert f"reporters.{section}.enabled" in _warnings(ash_log)
+    named = [w for w in _warnings(ash_log).splitlines() if re.search(r"\.enabled\b", w)]
+    assert not named, named
 
 
 @pytest.mark.parametrize("reporter,section,hyphenated", _CASES, ids=_IDS)
