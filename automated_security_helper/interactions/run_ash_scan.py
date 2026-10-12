@@ -2874,9 +2874,11 @@ def _run_local_mode(
         sys.exit(1)
     except ExistingResultsRefused as e:
         # --use-existing named results that hold no scan: reported on, they would
-        # read as a clean one. The operator's input, not a fault, so no traceback.
-        print(f"[bold red]ERROR (1) {escape_markup(str(e))}[/bold red]")
-        sys.exit(1)
+        # read as a clean one. An input ASH cannot use, as an invalid config is, so
+        # exit 3; not a fault, so no traceback. The message names the file and
+        # quotes nothing from it.
+        print(f"[bold red]ERROR (3) {escape_markup(str(e))}[/bold red]")
+        sys.exit(3)
     except ReportPathRefused as e:
         # A report path was refused: by the report phase before any reporter wrote
         # (a link at the reports directory or at a report file, a report file name

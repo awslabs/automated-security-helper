@@ -143,8 +143,11 @@ def test_existing_results_without_scanner_results_are_refused(tmp_path):
     assert not (output / "reports" / "ash.yaml").exists()
 
 
-def test_a_refusal_only_results_file_then_use_existing_exits_1(tmp_path):
-    """Through ``ash scan --use-existing``'s own path, which used to exit 0 here."""
+def test_a_refusal_only_results_file_then_use_existing_exits_3(tmp_path):
+    """Through ``ash scan --use-existing``'s own path, which used to exit 0 here.
+
+    3, as for any input ASH cannot use: the file holds no scan to report on.
+    """
     from unittest.mock import MagicMock
 
     from automated_security_helper.interactions.run_ash_scan import (
@@ -178,4 +181,4 @@ def test_a_refusal_only_results_file_then_use_existing_exits_1(tmp_path):
             MagicMock(),
         )
 
-    assert exited.value.code == 1
+    assert exited.value.code == 3

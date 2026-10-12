@@ -69,7 +69,7 @@ outer process reads the inner run's results back only when they carry a
 `run_completed` validation checkpoint with the ID it gave that run
 (`ASH_OUTER_RUN_ID`); otherwise it exits 1, saying the inner run did not complete.
 
-`--use-existing` exits 1 rather than report on a results file that holds no scan:
+`--use-existing` exits 3 rather than report on a results file that holds no scan:
 one with neither scanner results nor findings, as a run that stopped before its
 scan recorded anything leaves, or one that records a refused run. Run the scan
 again without

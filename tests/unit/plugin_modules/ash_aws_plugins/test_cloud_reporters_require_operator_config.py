@@ -248,7 +248,8 @@ class TestCloudReportersNeedTheOperator:
         self, tmp_path, cloud, reports_run
     ):
         """Results with no scanner entry and no finding read as a clean scan, so
-        ``--use-existing`` refuses them before any reporter runs."""
+        ``--use-existing`` refuses them before any reporter runs, with the exit code
+        of an input ASH cannot use (3)."""
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
         output_dir, results_file, operator_config = self._stored(
@@ -258,7 +259,7 @@ class TestCloudReportersNeedTheOperator:
         with pytest.raises(SystemExit) as exited:
             self._rerender(tmp_path, output_dir, results_file, operator_config)
 
-        assert exited.value.code == 1
+        assert exited.value.code == 3
         assert not (output_dir / "reports" / "ash.sarif").exists()
         assert not cloud.any(), cloud.summary()
         assert reports_run == []
