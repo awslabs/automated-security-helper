@@ -117,6 +117,11 @@ def git_calls(repo, tmp_path, monkeypatch):
     )
     shim.chmod(0o755)
     monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    # ASH runs git by the absolute path find_executable resolved, and caches that
+    # lookup by name, so a git found before this test would skip the shim.
+    from automated_security_helper.utils import subprocess_utils
+
+    subprocess_utils.clear_find_executable_cache()
 
     def calls() -> list[list[str]]:
         if not log.exists():
@@ -131,7 +136,8 @@ def git_calls(repo, tmp_path, monkeypatch):
                 recorded[-1].append(part)
         return recorded
 
-    return calls
+    yield calls
+    subprocess_utils.clear_find_executable_cache()
 
 
 class TestPlainGitReadsTheseValuesAsOptions:
