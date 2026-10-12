@@ -377,3 +377,166 @@ def test_a_source_path_is_passed_as_a_value_and_not_run(
     assert not (tmp_path / "marker").exists(), "the path was parsed as PowerShell"
     args = (tmp_path / "docker-args.txt").read_text(encoding="utf-8").splitlines()
     assert f"type=bind,source={source},destination=/src,readonly" in args
+
+
+# ---------------------------------------------------------------------------
+# What reaches the run command: the config, the stage, the scanner lists
+# ---------------------------------------------------------------------------
+
+
+def _mount_at(args: List[str], destination: str) -> str:
+    values = [
+        args[i + 1]
+        for i, arg in enumerate(args[:-1])
+        if arg == "--mount" and f"destination={destination}," in args[i + 1] + ","
+    ]
+    assert len(values) == 1, f"expected one mount at {destination} in {args}"
+    return values[0]
+
+
+@_POSIX_ONLY
+def test_an_operator_config_outside_the_checkout_is_mounted_read_only(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    config = tmp_path / "operator" / "ash.yaml"
+    config.write_text("project_name: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir repo/svc -OutputDir out -Config '{config}'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert (
+        _mount_at(args, "/ash-config/ash.yaml")
+        == f"type=bind,source={config},destination=/ash-config/ash.yaml,readonly"
+    )
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert "--config-from-scanned-repository" not in args
+
+
+@_POSIX_ONLY
+def test_a_config_elsewhere_in_the_checkout_is_marked_as_the_repositorys(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    (checkout / "ci" / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/ci/ash.yaml",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert "--config-from-scanned-repository" in args
+
+
+@_POSIX_ONLY
+def test_a_config_reached_through_a_link_out_of_the_checkout_is_refused(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    (tmp_path / "operator" / "ash.yaml").write_text(
+        "project_name: p\n", encoding="utf-8"
+    )
+    (checkout / "linked").symlink_to(tmp_path / "operator", target_is_directory=True)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/linked/ash.yaml",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+
+
+@_POSIX_ONLY
+def test_a_config_inside_the_source_is_read_through_src_with_no_mount(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    (checkout / "svc" / ".ash").mkdir()
+    (checkout / "svc" / ".ash" / "ash.yaml").write_text(
+        "project_name: p\n", encoding="utf-8"
+    )
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/svc/.ash/ash.yaml",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/src/.ash/ash.yaml"
+    assert sorted(_mount_destinations(args)) == ["/out", "/src"]
+    assert "--config-from-scanned-repository" not in args
+
+
+@_POSIX_ONLY
+def test_ci_variables_do_not_choose_the_stage(
+    pwsh, recording_docker, tmp_path, monkeypatch
+):
+    """Windows defaults to ci on its own; elsewhere the stage is non-root unless
+    -BuildTarget names another, CI or not."""
+    for name, value in (("CI", "true"), ("IsCI", "1"), ("CODEBUILD_BUILD_ID", "p:1")):
+        monkeypatch.setenv(name, value)
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(pwsh, tmp_path, recording_docker, "-SourceDir src -OutputDir out")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert "automated-security-helper:non-root" in args
+    assert "automated-security-helper:ci" not in args
+
+
+@_POSIX_ONLY
+def test_the_scanner_lists_reach_the_scan(pwsh, recording_docker, tmp_path):
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir out -Scanners bandit,checkov -ExcludeScanners grype",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    inner = args[args.index("ash") + 1 :]
+    pairs = [
+        (inner[i], inner[i + 1])
+        for i in range(len(inner) - 1)
+        if inner[i] in ("--scanners", "--exclude-scanners")
+    ]
+    assert pairs == [
+        ("--scanners", "bandit"),
+        ("--scanners", "checkov"),
+        ("--exclude-scanners", "grype"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        pytest.param("-SourceDir src -OutputDir 'a,b'", id="unmountable-output"),
+        pytest.param("-SourceDir src -OutputDir out -Config missing.yaml", id="config"),
+    ],
+)
+def test_a_build_without_a_run_checks_nothing_it_would_mount(
+    arguments, pwsh, recording_docker, tmp_path
+):
+    """-NoRun mounts nothing, so neither the mount paths nor the config are checked."""
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(pwsh, tmp_path, recording_docker, f"-NoRun {arguments}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
