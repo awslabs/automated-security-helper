@@ -474,6 +474,10 @@ class TestRecordedReporterDestinations:
             (harness.output_dir / "reports" / "ash.endpoint.json").read_text("utf-8")
         )
         assert written == {"endpoint": ENDPOINT_DEFAULT}
+        # The merged results are written after the plugin load too, so they record
+        # the declared destination as confined.
+        merged = (harness.output_dir / RESULTS_FILE_NAME).read_text("utf-8")
+        assert "https://shard.invalid/" not in merged
         named = [m for m in harness.ignoring() if "endpoint-reporter" in m]
         assert named, harness.warnings
         assert "reporters.endpoint-reporter.options.endpoint" in harness.ignored_keys(
