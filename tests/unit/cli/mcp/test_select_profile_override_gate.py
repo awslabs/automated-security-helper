@@ -795,17 +795,24 @@ def test_a_section_turning_a_reporter_off_may_not_carry_anything_else(
         assert "denied_paths entry" in result["error"], result["error"]
 
 
-def test_removing_a_reporters_off_is_still_refused(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "op",
+    [
+        {"op": "remove", "path": "/reporters/s3/enabled"},
+        # A remove carrying a value is still a remove, not an enabled: false.
+        {"op": "remove", "path": "/reporters/s3/enabled", "value": False},
+    ],
+    ids=["remove", "remove-with-value"],
+)
+def test_removing_a_reporters_off_is_still_refused(
+    tmp_path: Path, op: Dict[str, Any]
+) -> None:
     """Removing ``enabled`` returns the reporter to its own default."""
     document = _profile(allowed_paths=["/**"])
     document["reporters"] = {"s3": {"enabled": False}}
     _install(tmp_path, document)
 
-    patched = mcp_select_profile(
-        "op",
-        patch_ops=[{"op": "remove", "path": "/reporters/s3/enabled"}],
-        session_id="patch",
-    )
+    patched = mcp_select_profile("op", patch_ops=[op], session_id="patch")
 
     assert patched["success"] is False, patched
     assert "denied_paths entry" in patched["error"], patched["error"]
