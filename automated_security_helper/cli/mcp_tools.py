@@ -1413,6 +1413,7 @@ def mcp_get_config(
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         file_identity,
+        named_text_stream,
         read_config_bytes,
         read_config_file,
     )
@@ -1486,12 +1487,8 @@ def mcp_get_config(
             if path.name.endswith(".toml"):
                 # pyproject.toml yields its [tool.ash] table, as when it is loaded.
                 return read_config_file(path, expect=checked) or {}
-            return (
-                load_config_yaml(
-                    read_config_bytes(path, expect=checked).decode("utf-8")
-                )
-                or {}
-            )
+            text = read_config_bytes(path, expect=checked).decode("utf-8")
+            return load_config_yaml(named_text_stream(text, path)) or {}
         except (
             ASHConfigValidationError,
             OSError,

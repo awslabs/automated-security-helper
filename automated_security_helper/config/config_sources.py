@@ -759,10 +759,21 @@ def read_config_file(path: Path, expect: Optional[FileIdentity] = None) -> Any:
                 )
             document = table
         return _resolve_toml_env(document)
-    stream = io.StringIO(read_config_bytes(path, expect=expect).decode("utf-8"))
-    # The name a parse error quotes, as it quoted the open file's.
+    return load_yaml_config(
+        named_text_stream(read_config_bytes(path, expect=expect).decode("utf-8"), path)
+    )
+
+
+def named_text_stream(text: str, path: Path) -> io.StringIO:
+    """`text` as a stream named `path`, for a YAML parser.
+
+    A parse error then names the file and gives its line and column, as it did
+    when the parser read the open file, rather than "<unicode string>" followed
+    by a copy of the offending line.
+    """
+    stream = io.StringIO(text)
     stream.name = os.fspath(path)
-    return load_yaml_config(stream)
+    return stream
 
 
 def default_confinement_root(

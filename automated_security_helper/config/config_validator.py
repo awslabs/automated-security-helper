@@ -15,6 +15,7 @@ from automated_security_helper.config.config_sources import (
     PATCH_KEY,
     default_confinement_root,
     describe_config_path,
+    named_text_stream,
     read_config_bytes,
     read_config_file,
     resolve_config_document,
@@ -139,7 +140,9 @@ class ConfigValidator:
                     config_data = json.loads(raw_content)
                 else:
                     raw_content = data.decode("utf-8")
-                    config_data = load_config_yaml(raw_content)
+                    config_data = load_config_yaml(
+                        named_text_stream(raw_content, config_path)
+                    )
 
             if not isinstance(config_data, dict):
                 errors.append(

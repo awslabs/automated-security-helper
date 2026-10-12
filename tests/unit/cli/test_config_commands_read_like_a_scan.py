@@ -166,6 +166,22 @@ class TestAConfigThatCannotBeLoadedExits3:
         assert result.exit_code == 3, result.output
         assert "pyproject.toml" in result.output
 
+    def test_the_validator_and_linter_name_the_file_in_a_yaml_error(self, tmp_path):
+        """As the parser did when it read the open file: the path and the line,
+        not "<unicode string>" and a copy of the line."""
+        from automated_security_helper.config.config_linter import ConfigLinter
+        from automated_security_helper.config.config_validator import ConfigValidator
+
+        path = tmp_path / "cfg.yaml"
+        path.write_text("project_name: [unclosed\n", encoding="utf-8")
+
+        _, errors = ConfigValidator.validate_config_file(path)
+        issues = " ".join(str(i) for i in ConfigLinter.lint(config_path=path).issues)
+
+        for text in (" ".join(errors), issues):
+            assert f'in "{path}", line 1' in text, text
+            assert "<unicode string>" not in text
+
     def test_control_a_loadable_file_with_problems_is_still_exit_1(self, tmp_path):
         path = tmp_path / ".ash.yaml"
         path.write_text("project_name: x\nbuild: {}\n", encoding="utf-8")

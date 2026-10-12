@@ -23,6 +23,7 @@ import yaml
 
 from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.config_sources import (
+    named_text_stream,
     read_config_bytes,
     read_config_file,
 )
@@ -472,7 +473,9 @@ class ConfigLinter:
         data = read_config_bytes(config_path)
         if str(config_path).endswith(".json"):
             return json.loads(data.decode("utf-8-sig"))
-        return load_config_yaml(data.decode("utf-8")) or {}
+        return (
+            load_config_yaml(named_text_stream(data.decode("utf-8"), config_path)) or {}
+        )
 
     @classmethod
     def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:
