@@ -30,6 +30,10 @@ from automated_security_helper.utils.suppression_matcher import (
     file_path_matches as path_matches_pattern,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.subprocess_utils import (
+    child_environ,
+    resolve_command,
+)
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     refusal_reason,
@@ -153,14 +157,16 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     f"UV tool installation failed for {self.command}, attempting fallback validation"
                 )
 
-        # Fallback to checking if jupyter command is available via direct execution
+        # Fallback to checking if jupyter command is available via direct execution.
+        # Resolved as the spawn helpers resolve a program: never a copy found
+        # through the working directory.
         try:
-            result = subprocess.run(  # nosec B603 B607 — list args, validated jupyter executable
-                ["jupyter", "nbconvert", "--version"],
+            result = subprocess.run(  # nosec B603 — list args, program from resolve_command
+                resolve_command(["jupyter", "nbconvert", "--version"]),
                 capture_output=True,
                 text=True,
                 timeout=10,
-                env=snapshot_environ(),
+                env=child_environ(snapshot_environ()),
             )
             if result.returncode == 0:
                 ASH_LOGGER.debug("Found jupyter nbconvert via direct execution")
@@ -387,13 +393,13 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             ASH_LOGGER.warning(
                 f"UV tool execution failed for {display}, trying direct execution"
             )
-        result = subprocess.run(  # nosec B603 — list args from validated nbconvert command
-            cmd,
+        result = subprocess.run(  # nosec B603 — list args, program from resolve_command
+            resolve_command(cmd, cwd=run_dir),
             capture_output=True,
             text=True,
             timeout=60,
             cwd=run_dir,
-            env=snapshot_environ(),
+            env=child_environ(snapshot_environ()),
         )
         if result.returncode != 0:
             raise subprocess.CalledProcessError(

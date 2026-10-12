@@ -164,8 +164,21 @@ def _probe_run(
     return _exit_failure(_probe_process(argv, env))
 
 
+def _sandbox_program(name: str) -> Optional[str]:
+    """A program the sandbox itself runs, never one from the cwd.
+
+    Not ``shutil.which``: with an empty or ``.`` PATH entry that answers from the
+    working directory, which is usually the repository being scanned, and the
+    sandbox's own programs decide what a scanner can reach. See
+    ``subprocess_utils.find_executable``.
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    return find_executable(name)
+
+
 def _true() -> str:
-    return shutil.which("true") or "/bin/true"
+    return _sandbox_program("true") or "/bin/true"
 
 
 def _real(path: Path) -> Path:
@@ -213,7 +226,7 @@ class BwrapBackend(SandboxBackend):
         self._overlay = False
 
     def _probe(self) -> Optional[str]:
-        found = shutil.which("bwrap")
+        found = _sandbox_program("bwrap")
         if not found:
             return "bwrap is not installed (install the 'bubblewrap' package)"
         self._executable = found
@@ -383,12 +396,12 @@ class FirejailBackend(SandboxBackend):
         self._executable: Optional[str] = None
 
     def _probe(self) -> Optional[str]:
-        found = shutil.which("firejail")
+        found = _sandbox_program("firejail")
         if not found:
             return "firejail is not installed"
         readlink = next(
             (path for path in _SYSTEM_READLINK if os.access(path, os.X_OK)), None
-        ) or shutil.which("readlink")
+        ) or _sandbox_program("readlink")
         if not readlink:
             return (
                 "readlink is not installed, so ASH cannot check that firejail "
@@ -584,7 +597,9 @@ class LandlockBackend(SandboxBackend):
         private_home.mkdir()
         _link_policy_paths_into(private_home, policy)
         resolved_argv0 = (
-            argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0])
+            argv[0]
+            if os.path.isabs(argv[0])
+            else (_sandbox_program(argv[0]) or argv[0])
         )
         document = {
             # Caches are read-only: Landlock cannot discard a write, so one in place

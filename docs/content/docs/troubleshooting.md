@@ -145,6 +145,8 @@ Scanner 'checkov' skipped: required tool 'checkov' not found on PATH
 
 Local mode requires each scanner's underlying tool to be installed and resolvable. If the tool isn't present, the scanner self-disables rather than failing the entire run.
 
+ASH searches only the absolute entries on PATH, plus its own bin directory. An entry that is relative (`bin`, `.`) or empty names a directory under the working directory, usually the repository being scanned, so ASH skips it: a tool reachable only through such an entry is reported as not found, and a command naming it fails with exit 127 and a reason that names the copy ASH did not run. If the tool is installed in a project directory such as `node_modules/.bin`, add that directory to PATH by its absolute path.
+
 **Fix**
 
 Install the missing tool. Most tools are Python packages installable via `uv tool install`:

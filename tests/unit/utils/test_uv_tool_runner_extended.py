@@ -327,7 +327,9 @@ class TestGetToolVersionOffline:
         monkeypatch.delenv("UV_OFFLINE", raising=False)
         version, call = self._probe(runner)
         command = call.args[0]
-        assert command[:4] == ["uv", "tool", "run", "--offline"]
+        # uv as the spawn helper resolved it, by absolute path when it is installed.
+        assert Path(command[0]).stem == "uv"
+        assert command[1:4] == ["tool", "run", "--offline"]
         assert command[-2:] == ["semgrep", "--version"]
         assert call.kwargs["env"]["UV_OFFLINE"] == "1"
         assert version == "1.172.0"

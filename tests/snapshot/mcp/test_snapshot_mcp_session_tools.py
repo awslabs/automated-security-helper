@@ -78,6 +78,10 @@ def fake_git(monkeypatch):
 
     behavior = {"returncode": 0, "stderr": ""}
     calls = []
+    # The resolved path is machine-specific, so the recorded argv keeps "git" in
+    # its place. The resolution itself is tested in
+    # tests/unit/cli/mcp/test_source_delivery.py.
+    monkeypatch.setattr(source_delivery, "_git_executable", lambda: "git")
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)

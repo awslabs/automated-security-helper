@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -418,6 +417,13 @@ def _symlink_hops(path: Path) -> List[Path]:
     return hops
 
 
+def _lookup(name: str) -> Optional[str]:
+    """``find_executable``: never from the working directory."""
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    return find_executable(name)
+
+
 def _executable_prefix(argv0: str) -> List[Path]:
     """The executable's directory, and its install prefix when it sits in a bin dir.
 
@@ -425,7 +431,7 @@ def _executable_prefix(argv0: str) -> List[Path]:
     beside the bin directory (``<prefix>/bin/tool`` with ``<prefix>/lib``), so the
     prefix is what has to be visible, not only the file.
     """
-    found = argv0 if os.path.isabs(argv0) else shutil.which(argv0)
+    found = argv0 if os.path.isabs(argv0) else _lookup(argv0)
     if not found:
         return []
     home = Path.home()
@@ -476,7 +482,7 @@ def _shebang_interpreter(script: Path) -> Optional[Path]:
         names = [w for w in words[1:] if not w.startswith("-")]
         if not names:
             return None
-        program = shutil.which(names[0]) or ""
+        program = _lookup(names[0]) or ""
     return Path(program) if os.path.isabs(program) else None
 
 

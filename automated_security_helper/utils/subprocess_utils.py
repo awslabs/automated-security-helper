@@ -1,5 +1,6 @@
 """Centralized subprocess execution utilities for ASH."""
 
+import errno
 import logging
 import os
 import platform
@@ -32,8 +33,37 @@ def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
     ``[Errno 14] Bad address``. A copy is built into a fresh ``envp`` that no other
     thread can touch, and the child sees the same variables. See
     ``utils/process_env.py``.
+
+    PATH keeps its anchored entries only (see :func:`_is_anchored`). A child looks
+    programs up by name itself, through a ``#!/usr/bin/env node`` line, a binstub or
+    a scanner starting git, and a relative or empty entry would let that search
+    answer from the child's working directory.
     """
-    return env if env is not None else snapshot_environ()
+    env = env if env is not None else snapshot_environ()
+    return _with_anchored_path_entries(env)
+
+
+def _with_anchored_path_entries(env: Dict[str, str]) -> Dict[str, str]:
+    """``env`` with PATH's entries that are not anchored taken off.
+
+    Returned unchanged when there are none. When no entry is left, PATH is
+    ``os.defpath``: an empty PATH is read as the working directory.
+    """
+    path_value = env.get("PATH")
+    if not path_value:
+        return env
+    entries = path_value.split(os.pathsep)
+    kept = [entry for entry in entries if entry and _is_anchored(entry)]
+    if len(kept) == len(entries):
+        return env
+    env = dict(env)
+    env["PATH"] = os.pathsep.join(kept) if kept else os.defpath
+    return env
+
+
+def child_environ(env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """The environment to start a child with: see :func:`_spawn_env`."""
+    return _spawn_env(env)
 
 
 # Exit code reported for a command killed at its timeout, matching coreutils
@@ -182,8 +212,60 @@ def _executable_candidate_names(command: str) -> List[str]:
     return [f"{command}{suffix}" for suffix in suffixes] + [command]
 
 
+def _is_anchored(path: str, pathmod: Any = os.path) -> bool:
+    """Whether ``path`` names a location without reference to the cwd.
+
+    ``isabs`` alone is not enough on Windows: before Python 3.13 ``\\tools`` counts
+    as absolute there, but it is rooted on whichever drive is current. A drive
+    letter or UNC share is required as well.
+    """
+    if not pathmod.isabs(path):
+        return False
+    if pathmod.__name__ == "ntpath":
+        return bool(pathmod.splitdrive(path)[0])
+    return True
+
+
+def _absolute_path_entries() -> List[str]:
+    """The PATH entries that name a directory without reference to the cwd."""
+    return [
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and _is_anchored(entry)
+    ]
+
+
+def _which_outside_working_directory(cmd: str) -> Optional[str]:
+    """``shutil.which(cmd)``, except that nothing is found through the cwd.
+
+    ``shutil.which`` on Windows looks in the working directory before PATH, and on
+    every platform a relative PATH entry (``.``, an empty entry, ``bin``) names a
+    directory under it. ASH usually runs from the repository it scans, so a file
+    found that way is part of the repository. Both kinds of hit come back as a path
+    that is not anchored; when ``which`` returns one for a bare name, the search is
+    made again over the anchored PATH entries alone. A ``cmd`` with a directory
+    part is answered only when it is anchored itself: ``./tool`` is a path into
+    the working directory.
+    """
+    if os.path.dirname(cmd):
+        return shutil.which(cmd) if _is_anchored(cmd) else None
+    found = shutil.which(cmd)
+    if found is None or _is_anchored(found):
+        return found
+    for entry in _absolute_path_entries():
+        found = shutil.which(os.path.join(entry, cmd))
+        if found:
+            return found
+    return None
+
+
 def find_executable(command: str) -> Optional[str]:
     """Find the full path to an executable.
+
+    Nothing is found through the working directory, which is usually the
+    repository being scanned: PATH entries that are relative or empty are not
+    searched (see :func:`_which_outside_working_directory`), and a ``command``
+    with a directory part is answered only when it is an absolute path.
 
     Args:
         command: The command to find
@@ -196,12 +278,17 @@ def find_executable(command: str) -> Optional[str]:
 
     for cmd in _executable_candidate_names(command):
         try:
-            found = shutil.which(cmd)
+            found = _which_outside_working_directory(cmd)
             if found:
                 _find_executable_cache[command] = found
                 return found
+            if os.path.dirname(cmd):
+                continue
+            # Anchored only: a relative ASH_BIN_PATH would be read against the cwd.
             possibles = [
-                directory.joinpath(cmd) for directory in path_independent_dirs()
+                directory.joinpath(cmd)
+                for directory in path_independent_dirs()
+                if _is_anchored(str(directory))
             ]
             for poss in possibles:
                 ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
@@ -214,6 +301,117 @@ def find_executable(command: str) -> Optional[str]:
 
     _find_executable_cache[command] = None
     return None
+
+
+def started_from_working_directory(
+    name: str,
+    cwd: "str | os.PathLike[str] | None" = None,
+    env: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """The file the OS would start for the bare ``name`` through a working directory.
+
+    Two searches look there. Windows ``CreateProcess`` tries ASH's working directory
+    before PATH. And on every platform a PATH entry that is not anchored (an empty
+    entry, ``.``, ``bin``) names a directory under one: ASH's on Windows, and on
+    POSIX the child's, ``cwd``, because the search runs after the child changes
+    directory. ASH usually runs from the repository it scans, and a scanner's
+    ``cwd`` is often the tree itself.
+
+    Returns:
+        The file, or None when neither search would find one.
+    """
+    if os.path.dirname(name):
+        return None
+    windows = platform.system().lower() == "windows"
+    path_value = (env if env is not None else os.environ).get("PATH", os.defpath)
+    directories = [
+        entry for entry in path_value.split(os.pathsep) if not _is_anchored(entry)
+    ]
+    if windows:
+        directories.insert(0, os.curdir)
+    base = os.getcwd() if windows or cwd is None else os.fspath(cwd)
+    names = _executable_candidate_names(name)
+    if windows:
+        names.append(f"{name}.com")
+    for directory in directories:
+        for candidate in names:
+            path = os.path.join(base, directory, candidate)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+#: Whether a bare name ASH's lookup cannot resolve is refused on Windows instead of
+#: handed to CreateProcess, whose own search includes directories ASH does not check.
+_refuse_unresolved_on_windows = True
+
+
+def _resolve_for_spawn(
+    args: List[str],
+    cwd: "str | os.PathLike[str] | None" = None,
+    env: Optional[Dict[str, str]] = None,
+) -> Optional[FileNotFoundError]:
+    """Point ``args[0]`` at the file :func:`find_executable` finds for it.
+
+    Returned, for the caller to raise where it reports a command that could not
+    start, as the ``FileNotFoundError`` ``subprocess`` raises for a missing
+    program, when the program would otherwise come from the working directory:
+
+    * a path with a directory part that is not anchored, such as ``./tool``;
+    * a bare name it did not find that the operating system would start from a
+      working directory (:func:`started_from_working_directory`);
+    * on Windows, any bare name it did not find: ``CreateProcess`` has search
+      locations of its own that ASH's lookup does not check.
+
+    Any other name it does not find is passed on as it was, for ``subprocess`` to
+    start or fail on.
+    """
+    name = args[0]
+    if os.path.dirname(name) and not _is_anchored(name):
+        return FileNotFoundError(
+            errno.ENOENT,
+            f"{name} is a path relative to the working directory, which is not run",
+            name,
+        )
+    found = find_executable(name)
+    if found:
+        args[0] = found
+        return None
+    if os.path.dirname(name):
+        return None
+    local = started_from_working_directory(name, cwd, env)
+    if local is not None:
+        return FileNotFoundError(
+            errno.ENOENT,
+            f"{name} is not on PATH, and the copy found through the working "
+            f"directory, {local}, is not run",
+            name,
+        )
+    if platform.system().lower() == "windows" and _refuse_unresolved_on_windows:
+        return FileNotFoundError(errno.ENOENT, f"{name} was not found on PATH", name)
+    return None
+
+
+def resolve_command(
+    args: List[str],
+    cwd: "str | os.PathLike[str] | None" = None,
+    env: Optional[Dict[str, str]] = None,
+) -> List[str]:
+    """A copy of ``args`` with its program resolved as the spawn helpers resolve it.
+
+    For a caller that starts the process itself.
+
+    Raises:
+        FileNotFoundError: the program would come from the working directory (see
+            :func:`_resolve_for_spawn`), the error ``subprocess`` raises for a
+            program that is not installed.
+    """
+    resolved = list(args)
+    if resolved:
+        refused = _resolve_for_spawn(resolved, cwd, env)
+        if refused is not None:
+            raise refused
+    return resolved
 
 
 def _prepare_spawn(
@@ -309,7 +507,14 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     Same arguments, same return value, same exceptions as ``subprocess.run``, for the
     call sites that rely on its exact semantics (``check=True`` raising,
     ``TimeoutExpired`` propagating) and so cannot move to :func:`run_command`.
+    The program is resolved first, and refused where :func:`_resolve_for_spawn`
+    refuses it, raising the ``FileNotFoundError`` ``subprocess.run`` would.
     """
+    if args and not kwargs.get("shell", False):
+        args = list(args)
+        refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
+        if refused is not None:
+            raise refused
     plan = _prepare_spawn(
         args, kwargs.get("env"), kwargs.get("cwd"), bool(kwargs.get("shell", False))
     )
@@ -359,11 +564,9 @@ def run_command(
     # Copy args to avoid mutating the caller's list
     args = list(args)
 
-    # Resolve the full path to the executable if possible
-    if args and not shell:
-        binary_full_path = find_executable(args[0])
-        if binary_full_path:
-            args[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the try below, so it is reported as a command that could not start.
+    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
@@ -375,6 +578,8 @@ def run_command(
 
     sandbox_plan = None
     try:
+        if refused is not None:
+            raise refused
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env
@@ -545,11 +750,9 @@ def run_command_with_output_handling(
         A command the OS could not start returns returncode 127 and
         ``spawn_failed: True``, with the reason as its stderr.
     """
-    # Resolve the full path to the executable if possible
-    if command and not shell:
-        binary_full_path = find_executable(command[0])
-        if binary_full_path:
-            command[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the spawn's try below, so it is reported as a command that could not start.
+    refused = _resolve_for_spawn(command, cwd, env) if command and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(command) if isinstance(command, list) else command
@@ -565,6 +768,9 @@ def run_command_with_output_handling(
             # Inside the spawn's own try: a sandbox that cannot be provided raises
             # SandboxUnavailable, an OSError, which is reported like any command
             # that could not start, and never falls through to an unsandboxed run.
+            # A program refused by _resolve_for_spawn is reported the same way.
+            if refused is not None:
+                raise refused
             spawn_command, spawn_env = command, env
             sandbox_plan = _prepare_spawn(command, env, cwd, shell)
             if sandbox_plan is not None:
@@ -716,11 +922,9 @@ def run_command_stream_output(
     Returns:
         The exit code of the command
     """
-    # Resolve the full path to the executable if possible
-    if args and not shell:
-        binary_full_path = find_executable(args[0])
-        if binary_full_path:
-            args[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the try below, so it is reported as a command that could not start.
+    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
@@ -732,6 +936,8 @@ def run_command_stream_output(
 
     sandbox_plan = None
     try:
+        if refused is not None:
+            raise refused
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env
@@ -869,11 +1075,9 @@ def create_process_with_pipes(
     Returns:
         A Popen object with pipes for stdout and stderr
     """
-    # Resolve the full path to the executable if possible
-    if args and not shell:
-        binary_full_path = find_executable(args[0])
-        if binary_full_path:
-            args[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the try below, which logs and re-raises it as it does a failed Popen.
+    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
@@ -886,6 +1090,8 @@ def create_process_with_pipes(
         encoding = "utf-8"
 
     try:
+        if refused is not None:
+            raise refused
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env

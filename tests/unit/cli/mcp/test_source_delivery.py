@@ -19,6 +19,15 @@ from automated_security_helper.cli.mcp import source_delivery as sd
 
 _SESSION = "session-test"
 
+#: What ``_git_executable`` answers in the tests that replace ``subprocess.run``, so
+#: the argv they assert is the same on every machine.
+GIT = "/opt/git/bin/git"
+
+
+@pytest.fixture(autouse=True)
+def resolved_git(monkeypatch):
+    monkeypatch.setattr(sd, "_git_executable", lambda: GIT)
+
 
 # ---------------------------------------------------------------------------
 # Workspace-root resolution.
@@ -146,7 +155,8 @@ class TestSetSourceGit:
             )
 
         assert target == tmp_path / _SESSION / "source"
-        assert called["cmds"][0][0:4] == ["git", "clone", "--depth", "1"]
+        # git by the absolute path it resolved to, never by name.
+        assert called["cmds"][0][0:4] == [GIT, "clone", "--depth", "1"]
         # "--" fences the url off from git's option parsing, so it sits after
         # the end-of-options marker rather than directly after the depth.
         assert called["cmds"][0][4] == "--"
@@ -181,7 +191,7 @@ class TestSetSourceGit:
             res = MagicMock()
             res.stdout = ""
             res.stderr = ""
-            if cmd[:2] == ["git", "clone"]:
+            if cmd[:2] == [GIT, "clone"]:
                 res.returncode = 0
             elif "checkout" in cmd:
                 res.returncode = 1

@@ -32,6 +32,17 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 
 
+#: What ``_git_executable`` answers in these tests, so the argv is known exactly.
+GIT = "/opt/git/bin/git"
+
+
+@pytest.fixture(autouse=True)
+def resolved_git(monkeypatch):
+    monkeypatch.setattr(
+        "automated_security_helper.utils.get_scan_set._git_executable", lambda: GIT
+    )
+
+
 class TestGetChangedFiles:
     """Unit tests for the get_changed_files helper."""
 
@@ -44,8 +55,10 @@ class TestGetChangedFiles:
         ) as mock_run:
             result = get_changed_files("origin/main")
 
+        # git by the absolute path it resolved to, never by name: a name is looked
+        # for through PATH entries that may be relative to the scanned repo.
         mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/main...HEAD"],
+            [GIT, "diff", "--name-only", "origin/main...HEAD"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -102,7 +115,7 @@ class TestGetChangedFiles:
             result = get_changed_files("origin/develop")
 
         mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/develop...HEAD"],
+            [GIT, "diff", "--name-only", "origin/develop...HEAD"],
             capture_output=True,
             text=True,
             timeout=30,

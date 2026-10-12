@@ -465,9 +465,12 @@ def uv_tool_dir() -> Path:
     into a pipe, and the escape codes then become part of a path that does not
     exist.
     """
+    uv = _on_absolute_path("uv")
+    if uv is None:
+        raise SystemExit("`uv tool dir` failed: uv was not found on PATH")
     try:
-        result = subprocess.run(  # nosec B603 B607 - uv is on PATH in every stage that runs this
-            ["uv", "--color", "never", "tool", "dir"],
+        result = subprocess.run(  # nosec B603 - uv is on PATH in every stage that runs this
+            [uv, "--color", "never", "tool", "dir"],
             capture_output=True,
             text=True,
             timeout=_VERSION_TIMEOUT_SECONDS,
@@ -774,14 +777,31 @@ def python_package_files(site_dirs: "list[str] | None" = None) -> "set[str]":
     return owned
 
 
+def _absolute_entries(search_path: "str | None") -> "list[str]":
+    """The absolute entries of ``search_path``, or of PATH.
+
+    A relative or empty entry names a directory under the working directory, so a
+    program found through one is not counted or run.
+    """
+    entries = (search_path or os.environ.get("PATH", "")).split(os.pathsep)
+    return [entry for entry in entries if entry and os.path.isabs(entry)]
+
+
+def _on_absolute_path(executable: str) -> "str | None":
+    """``shutil.which(executable)`` over PATH's absolute entries only."""
+    directories = _absolute_entries(None)
+    if not directories:
+        return None
+    return shutil.which(executable, path=os.pathsep.join(directories))
+
+
 def _copies_on_path(executable: str, search_path: "str | None") -> "list[str]":
     """Every executable file named ``executable`` on the path, once per real file."""
-    directories = (search_path or os.environ.get("PATH", "")).split(os.pathsep)
     copies, seen = [], set()
-    for directory in directories:
+    for directory in _absolute_entries(search_path):
         candidate = os.path.join(directory, executable)
         real = os.path.realpath(candidate)
-        if directory and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             if real not in seen:
                 seen.add(real)
                 copies.append(candidate)

@@ -264,7 +264,10 @@ class TestValidatePluginDependencies:
             assert converter.validate_plugin_dependencies() is True
 
         run.assert_called_once()
-        assert run.call_args.args[0] == ["jupyter", "nbconvert", "--version"]
+        # jupyter by name when it is not installed, by absolute path when it is.
+        argv = run.call_args.args[0]
+        assert Path(argv[0]).stem == "jupyter"
+        assert argv[1:] == ["nbconvert", "--version"]
         assert run.call_args.kwargs["timeout"] == 10
         assert any(
             "UV tool installation failed" in m

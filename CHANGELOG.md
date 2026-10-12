@@ -952,6 +952,25 @@
   a complete account of that run; it does not protect the file from code running
   as the inner run's user.
 
+- **ASH finds tools through absolute PATH entries only.** A PATH entry that is
+  relative (`bin`, `.`) or empty names a directory under the working directory, and
+  ASH is usually run from, and starts its tools in, the repository it scans. Tool
+  lookup now skips those entries, and a tool reachable only through one is reported
+  as not installed: its scanner is MISSING, and a command that names it is reported
+  as one that could not start (exit 127), with the copy it did not run named in the
+  reason. A program path with a directory part, such as `./tool`, is run only when
+  it is absolute. The same rule covers every lookup: the spawn helpers, the uv tool
+  runner, git for `--changed-files-only` and MCP source delivery, the Jupyter
+  converter's `jupyter`, the scanner sandbox's own programs (`bwrap`, `firejail`,
+  `readlink`, `true`), the interpreter a tool's `#!` line names, and the image build's
+  checks. Programs ASH starts get a PATH with only its absolute entries, so a
+  `#!/usr/bin/env node` line or a binstub cannot reach a relative one either; when
+  no absolute entry is left, they get the system default path. On Windows, a name
+  ASH's own lookup does not find is not handed to the operating system's search,
+  which looks in the working directory first. To use a tool that sits in a
+  directory such as `node_modules/.bin`, put that directory on PATH by its absolute
+  path.
+
 ### Breaking changes
 
 - **A relative path in the operator's settings is taken from where it was set,
