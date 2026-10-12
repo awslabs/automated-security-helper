@@ -437,9 +437,15 @@ above, the Bedrock summary and MCP responses get the masked results:
   or words joined by spaces, dots, hyphens or underscores), is not a template
   placeholder such as `${NAME}` or `{name}`, and is not repetitive (at least 2.5
   bits of entropy per character). A hard-coded password check quotes ordinary
-  words such as `password` as often as credentials, and those are masked in their
-  own finding only. The masked form keeps at most the first two and the last
-  character, for example `hu*************t`.
+  words such as `password` as often as credentials, so a value that does not look
+  like a secret is masked only in its own finding and in the findings that
+  overlap it: those whose region or context, in the same file, covers a line the
+  secret finding reports (or gives a snippet with no line number, or is in a file
+  where the secret finding gives none). There every field is masked, messages and
+  properties included, whatever the value's length or entropy. A short or
+  all-letter secret is therefore left as it is in a finding on another line or in
+  another file, where only masking by location applies. The masked form keeps at
+  most the first two and the last character, for example `hu*************t`.
 
 A secret finding is one from a secrets scanner (detect-secrets, ferret-scan, or a
 result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit

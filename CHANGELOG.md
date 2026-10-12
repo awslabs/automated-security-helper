@@ -1962,6 +1962,10 @@
   placeholder, not repetitive), and only in what findings report, never in rule
   metadata, tags or identifiers. A secret finding that quotes no value (semgrep's
   and opengrep's `generic.secrets.*`) gives the value its own region matched.
+  Any value, whatever it looks like, is also masked in every finding whose region
+  or context covers a line the secret finding reports, so a second scanner's
+  finding on that line no longer quotes it. A short or all-letter secret is still
+  left as it is in findings on other lines and in other files.
 
 - **A value one project or shard exposes is masked in the others' findings.**
   Each workspace project and each `ash merge` shard was masked against its own
