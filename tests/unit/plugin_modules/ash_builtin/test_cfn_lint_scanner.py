@@ -753,7 +753,10 @@ class TestOptionsOnlyTheOperatorMaySet:
         scanner = _scanner(repo, ignore_checks=["E", "W"])
         with caplog.at_level("WARNING"):
             args = self._args(scanner, repo)
-        assert "--ignore-checks" not in args
+        # Only the placeholder that keeps a template's own list out (see
+        # TestTemplateIgnoresAreOffByDefault).
+        start = args.index("--ignore-checks") + 1
+        assert args[start] == "W0000" and args[start + 1].startswith("--")
         assert "Ignoring scanners.cfn-lint.options.ignore_checks" in caplog.text
 
     @pytest.mark.parametrize("how", ["outside-config", "override"])
@@ -849,6 +852,33 @@ class TestTemplateIgnoresAreOffByDefault:
     def test_with_no_ignores_every_rule_is_mandatory(self, repo):
         mandatory = _mandatory(self._args(_scanner(repo), repo))
         assert all(_is_mandatory(rule, mandatory) for rule in _SAMPLE_IDS)
+
+    def test_with_no_ignores_a_placeholder_keeps_a_templates_list_out(self, repo):
+        """cfn-lint reads the next template with the last decoded template's
+        Metadata config still set, and drops its E0000 when that config's
+        ignore_checks name E0000, without consulting --mandatory-checks (measured
+        with 1.43.3 and 1.57.2). A command-line --ignore-checks replaces a
+        template's list, so ASH always passes one: W0000 when there is nothing to
+        ignore. It is not a prefix of E0000, and every rule is mandatory, so it
+        ignores nothing."""
+        args = self._args(_scanner(repo), repo)
+        start = args.index("--ignore-checks") + 1
+        assert args[start] == "W0000" and args[start + 1].startswith("--")
+        assert not "E0000".startswith("W0000")
+        mandatory = _mandatory(args)
+        assert all(_is_mandatory(rule, mandatory) for rule in _SAMPLE_IDS)
+
+    def test_the_placeholder_is_left_out_when_the_operator_ignores_something(
+        self, repo
+    ):
+        args = self._args(_scanner(repo, operator=True, ignore_checks=["W2001"]), repo)
+        start = args.index("--ignore-checks") + 1
+        assert args[start] == "W2001" and args[start + 1].startswith("--")
+
+    def test_with_template_ignores_on_no_placeholder_is_passed(self, repo):
+        """It would replace the template-level ignore_checks the operator let in."""
+        scanner = _scanner(repo, operator=True, honor_inline_ignores=True)
+        assert "--ignore-checks" not in self._args(scanner, repo)
 
     @pytest.mark.parametrize(
         "ignores", [["W2001"], ["W"], ["W2001", "E30", "I"], ["W200", "W2001"]]

@@ -672,6 +672,60 @@ def test_a_template_cannot_configure_its_findings_away(tmp_path):
     assert with_operator_rules == by_default - {"E3031"}, with_operator_rules
 
 
+#: Two resources under one name: cfn-lint cannot decode the template and reports
+#: E0000, which ASH's template discovery does not check for.
+_DUPLICATE_KEYS = """AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+  Topic:
+    Type: AWS::SNS::Topic
+"""
+
+#: Ignores every E rule for itself. cfn-lint sorts the templates it is given by
+#: path, so this one is linted just before the duplicate-keys template.
+_IGNORES_E = """AWSTemplateFormatVersion: "2010-09-09"
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks: [E]
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+"""
+
+
+def test_a_template_cannot_hide_the_next_templates_parse_errors(tmp_path):
+    """cfn-lint keeps the last decoded template's Metadata config while it reads
+    the next template, and drops that template's E0000 when the kept
+    ignore_checks name it, without consulting --mandatory-checks (measured with
+    1.43.3 and 1.57.2). So a template that ignores E for itself made the next
+    template's parse errors disappear."""
+    _require_cfn_lint()
+
+    def parse_errors(*names: str) -> list:
+        root = tmp_path / "-".join(names)
+        source = root / "repo"
+        (source / "templates").mkdir(parents=True)
+        texts = {"a-ignores-e": _IGNORES_E, "b-duplicate-keys": _DUPLICATE_KEYS}
+        for name in names:
+            (source / "templates" / f"{name}.yaml").write_text(
+                texts[name], encoding="utf-8"
+            )
+        proc, output = _scan_with_tree_config(root, {})
+        log = proc.stdout[-3000:] + proc.stderr[-3000:]
+        assert _scanner_results(output)["cfn-lint"]["status"] != "ERROR", log
+        return sorted(
+            r["ruleId"]
+            for r in _results(output, "cfn-lint")
+            if _where(r)[0] == "templates/b-duplicate-keys.yaml"
+        )
+
+    alone = parse_errors("b-duplicate-keys")
+    assert alone == ["E0000", "E0000"], alone
+    assert parse_errors("a-ignores-e", "b-duplicate-keys") == alone
+
+
 def test_the_operator_can_name_a_cfnlintrc_outside_the_tree(tmp_path):
     """The control: the same kind of rules file is imported when the operator names it."""
     _require_cfn_lint()

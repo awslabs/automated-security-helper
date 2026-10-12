@@ -194,6 +194,13 @@ _OPTION_CHAR_BUDGET = 20000
 #: measured with 1.43.3 and 1.57.2, it changes no finding on the fixture templates.
 _NO_OP_CONFIGURE_RULE = "E3012:strict=false"
 
+#: The ``--ignore-checks`` value passed when nothing is ignored, so that a
+#: template's own ignore_checks never stand in for the command line's (see
+#: ``_honor_inline_ignores``). It ignores nothing: every rule is mandatory then,
+#: and mandatory outranks ignored. It is not a prefix of E0000, which cfn-lint
+#: tests against ignore_checks alone.
+_NO_OP_IGNORE_CHECK = "W0000"
+
 #: What a configure_rules key may be when it is passed on the command line.
 _CONFIG_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -338,9 +345,12 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "and the config_file's ignore_checks is passed to cfn-lint as "
                 "mandatory, and the config_file's configure_rules are passed on the "
                 "command line, which cfn-lint takes instead of a template's, so a "
-                "template cannot hide its own findings, which reach ASH, where "
-                "suppressions are reported and counted. A config_file that sets "
-                "merge_configs then fails the scan. Honored only when set by "
+                "template cannot hide its own findings or the next template's "
+                "parse errors, which reach ASH, where suppressions are reported "
+                "and counted. A config_file setting the command line cannot carry "
+                "(a list of more than one item, or a value with a comma, colon or "
+                "equals sign) is then left out with a warning, and a config_file "
+                "that sets merge_configs fails the scan. Honored only when set by "
                 "--config-overrides or a config file outside the scanned tree; from "
                 "a config in the scanned tree it is ignored with a warning."
             ),
@@ -566,6 +576,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     ignore_checks.append(check)
         if ignore_checks:
             args.extend(["--ignore-checks", *ignore_checks])
+        elif not honor_inline_ignores:
+            args.extend(["--ignore-checks", _NO_OP_IGNORE_CHECK])
         if options.include_checks:
             args.extend(["--include-checks", *options.include_checks])
         if not honor_inline_ignores:
@@ -612,6 +624,21 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         any, whole, not rule by rule (cfnlint/config.py ``_get_argument_value``),
         so ``_option_args`` passes them on the command line too
         (``_configure_rule_args``).
+
+        A template's ignore_checks also reached the next template. cfn-lint keeps
+        the last decoded template's Metadata config while it reads the next one,
+        and when that one cannot be decoded it drops the E0000 results if the
+        kept ignore_checks name E0000 (cfnlint/runner/template/runner.py
+        ``run_template_by_file_path``), without consulting --mandatory-checks.
+        Measured with 1.43.3 and 1.57.2: a template with duplicate keys reported
+        two E0000 alone and none after a template ignoring ``[E]`` for itself.
+        A command-line --ignore-checks replaces the template's list, so one is
+        always passed, ``_NO_OP_IGNORE_CHECK`` when nothing is ignored. Nothing
+        else a template sets reached the next one: resource ignore_checks,
+        configure_rules, regions and ignore_bad_template all left it unchanged.
+        With this option on, no placeholder is passed, since it would replace
+        the template-level ignore_checks the operator let in, and a template's
+        ignore_checks can still drop the next template's E0000.
         """
         if not self._options().honor_inline_ignores:
             return False
