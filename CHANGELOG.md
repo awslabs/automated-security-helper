@@ -237,7 +237,10 @@
     scan uses one, otherwise an empty one ASH ships), so a `trivy.yaml` in the
     scanned repository cannot change where the database comes from. Both scanners
     take their `--config` the same way: `config_file` from the operator, else
-    `TRIVY_CONFIG` for a file outside the scanned tree, else the empty config. An image built with `OFFLINE=YES`
+    `TRIVY_CONFIG` for a file outside the scanned tree, else the empty config. The
+    container image keeps trivy's cache in `/deps/.trivy`, owned like grype's
+    database cache (see "The container image no longer has directories every user
+    can write" under Behavior changes). An image built with `OFFLINE=YES`
     ships the database (its build fails if the download does) and holds it to `warn` rather than `fail`: from a day after it
     was published that image's scans still pass, and every report records the stale
     database, while grype's database and the offline rulesets keep `fail`.
@@ -1003,11 +1006,13 @@
   the grype database cache and the offline semgrep and opengrep rule caches under it
   were mode 777, and `/.ash/bin`, first on `PATH`, was `chmod -R 777`. They are
   root-owned and writable by root only. The grype database
-  cache is owned by the user the image runs as (root in `ci`, the unprivileged user in
-  `non-root`), because its update writes it at scan time; in an offline image, which never
-  updates it, it stays root's. A `non-root` image started under another UID than it
+  cache, and the trivy cache the new trivy scanner adds (`/deps/.trivy`), are owned by
+  the user the image runs as (root in `ci`, the unprivileged user in `non-root`),
+  because their updates write them at scan time; in an offline image, which never
+  updates them, they stay root's. A `non-root` image started under another UID than it
   was built with can therefore no longer update grype's database, and grype reports
-  ERROR, failing the scan, where it used to write the shared cache. `/src` and `/out` stay
+  ERROR, failing the scan, where it used to write the shared cache; trivy's update
+  fails the same way. `/src` and `/out` stay
   writable by every user in the `ci` stage, now with the sticky bit. Files an
   installer left writable by every user elsewhere in the image (uv's lock files at 666,
   some gems' files under `/var/lib/gems` at 777) lose group and other write too. See

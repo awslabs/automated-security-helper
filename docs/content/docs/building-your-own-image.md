@@ -107,8 +107,8 @@ Who owns each of the image's directories, and who else may write it:
 | Directory | Owner | Why |
 |---|---|---|
 | `/deps`, `/deps/.semgrep`, `/deps/.opengrep` (offline rules), `/ash`, `/.ash/bin` (bundled tools, first on `PATH`) | root, not writable by others | Nothing writes there at scan time |
-| `/deps/.grype` (grype's database) | the user the image runs as: root in `ci`, the unprivileged user in `non-root`; root in an offline image | grype's database update writes it at scan time; an offline image never updates it |
-| `/src`, `/out` | writable by every user, with the sticky bit (`ci`); the unprivileged user (`non-root`) | A run mounts the source and the output here; without those mounts, these two stay writable when the `ci` image is started under another UID (the grype database does not, see below) |
+| `/deps/.grype` (grype's database), `/deps/.trivy` (trivy's cache, `TRIVY_CACHE_DIR`) | the user the image runs as: root in `ci`, the unprivileged user in `non-root`; root in an offline image | grype's and trivy's database updates write them at scan time; an offline image never updates them |
+| `/src`, `/out` | writable by every user, with the sticky bit (`ci`); the unprivileged user (`non-root`) | A run mounts the source and the output here; without those mounts, these two stay writable when the `ci` image is started under another UID (the database caches do not, see below) |
 
 Outside `/src`, `/out` and the sticky scratch directories (`/tmp`, `/var/tmp`,
 `/run/lock`), nothing in the image is writable by every user. Each stage ends by
@@ -119,10 +119,11 @@ gems ship mode 777 under `/var/lib/gems`.
 An image you extend with `--custom-containerfile` keeps these modes unless your
 Dockerfile changes them.
 
-Because only its own user may write the grype database cache, an image started under a
-different UID than the one that owns that cache cannot update the database: grype then
-reports ERROR and the scan fails, rather than scanning against a database it could not
-refresh. In a `non-root` image that owner is the UID it was built with
+Because only its own user may write the grype and trivy database caches, an image
+started under a different UID than the one that owns them cannot update the databases:
+grype or trivy then reports ERROR and the scan fails, rather than scanning against a
+database it could not refresh. In a `non-root` image that
+owner is the UID it was built with
 (`--container-uid`, or the host's); in `ci` it is root, so a `ci` image has to run as
 root, which is how ASH's own runner starts it. Build a `non-root` image with the UID it
 will run as, or use `ci` and run it as root. A platform that starts every container

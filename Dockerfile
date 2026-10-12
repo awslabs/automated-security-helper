@@ -456,8 +456,12 @@ ARG TRIVY_VERSION="v0.75.0"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
-# trivy's cache, shared by the trivy and trivy-repo scanners and writable by the
-# non-root user, as GRYPE_DB_CACHE_DIR is for grype. An offline image downloads the
+# trivy's cache, shared by the trivy and trivy-repo scanners. It is owned the way
+# GRYPE_DB_CACHE_DIR is: root's and writable by root only here, handed to the
+# non-root stage's user there because trivy's database update writes it at scan time,
+# and left root's in an offline image, which never updates it. Not mode 777: only
+# /src and /out may be writable by every user (see the chmod of /ash below), and a
+# scan reads the database in this cache. An offline image downloads the
 # vulnerability database into it here; trivy is a default scanner, and offline with no
 # database it is MISSING, which fails the scan. trivy's own bound for that database is
 # 24 hours (utils/content_databases.py); in this image ASH holds it to `warn` rather
@@ -469,10 +473,10 @@ RUN trivy --version
 # `&&` chain, a failed download skipped the emptiness check below and the step still
 # printed "verified" and exited 0.
 ENV TRIVY_CACHE_DIR="/deps/.trivy"
-RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 777 "${TRIVY_CACHE_DIR}"; \
+RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 755 "${TRIVY_CACHE_DIR}"; \
     if [ "${OFFLINE}" = "YES" ]; then \
         with-retry "trivy image --download-db-only --no-progress --cache-dir ${TRIVY_CACHE_DIR}"; \
-        chmod -R 777 "${TRIVY_CACHE_DIR}"; \
+        chmod -R u=rwX,go=rX "${TRIVY_CACHE_DIR}"; \
         if [ -z "$(ls -A "${TRIVY_CACHE_DIR}/db" 2>/dev/null)" ]; then \
             echo "OFFLINE=YES but ${TRIVY_CACHE_DIR}/db is empty: the trivy database was not downloaded." >&2; \
             exit 1; \
@@ -663,10 +667,11 @@ RUN adduser --disabled-password --disabled-login \
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
 #
-# GRYPE_DB_CACHE_DIR is handed to this user because grype's database update writes
-# it at scan time (utils/content_db_refresh.py); one owner, not writable by others.
-# Not in an offline image: its database was downloaded at build time and is never
-# updated at scan time, so it stays root's and the scan user can only read it.
+# GRYPE_DB_CACHE_DIR and TRIVY_CACHE_DIR are handed to this user because grype's
+# and trivy's database updates write them at scan time (utils/content_db_refresh.py);
+# one owner, not writable by others. Not in an offline image: its databases were
+# downloaded at build time and are never updated at scan time, so they stay root's
+# and the scan user can only read them.
 # ASH_BIN_PATH is handed over only for this stage's own `ash dependencies install`
 # below, which puts this user's cfn-nag binstub and its own copy of the pinned tools
 # there, and is given back to root right after it.
@@ -674,7 +679,7 @@ RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
     chmod 750 -R ${ASHUSER_HOME} /src /out && \
     chown -R ${UID}:${GID} ${ASH_BIN_PATH} && \
     if [ "${OFFLINE}" != "YES" ]; then \
-        chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR}; \
+        chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR} ${TRIVY_CACHE_DIR}; \
     fi
 
 # The rules bundle a scan trusts is still root's after every change above.
