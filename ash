@@ -107,11 +107,26 @@ while (("$#")); do
       COLOR_OUTPUT="false"
       ASH_ARGS="${ASH_ARGS} --no-color"
       ;;
+    --workspace | --workspace=*)
+      WORKSPACE_GIVEN="YES"
+      ASH_ARGS="${ASH_ARGS} $1"
+      ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
   esac
   shift
 done
+
+# ./ash scans one directory: it hands the scan inside --source-dir /src, which that
+# scan refuses next to --workspace, after the container has started. It also cannot
+# tell the scan inside that a workspace's --config was written by the repository
+# (a workspace scan refuses --config-from-scanned-repository), so a config in the
+# checkout but outside the workspace would be read there as the operator's. Refused
+# with exit 3 before anything is built or mounted.
+if [[ "${WORKSPACE_GIVEN:-NO}" = "YES" ]]; then
+  echo "ERROR: ./ash scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead." >&2
+  exit 3
+fi
 
 # The build reads stage names in any case, so --build-target NON-ROOT is non-root:
 # lower-cased once, here, so every check below and the image tag see that name.

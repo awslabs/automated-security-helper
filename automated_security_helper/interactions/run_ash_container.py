@@ -1182,9 +1182,11 @@ def _require_mountable_inputs(
     if config:
         _refuse_config_linked_out_of_the_tree(config, source)
         _refuse_absolute_extends(config)
-        _host_file_in_container(
+        _, _, config_files = _host_file_in_container(
             config, source, CONTAINER_CONFIG_ROOT, follow_extends=True
         )
+        if workspace_relative_file is not None:
+            _refuse_repository_config_in_a_workspace(config, config_files, source)
     if workspace_config and workspace_relative_file is not None:
         _refuse_config_linked_out_of_the_tree(
             workspace_config, source, "workspace policy"
@@ -1327,6 +1329,37 @@ def _written_by_the_scanned_repository(
     from automated_security_helper.config.sandbox_grants import repository_written
 
     return bool(repository_written(files, Path(source_dir), named))
+
+
+def _refuse_repository_config_in_a_workspace(
+    config: str, config_files: List[Path], source_dir: Path
+) -> None:
+    """Refuse, in workspace mode, a mounted config a one-directory scan would mark.
+
+    A one-directory scan passes CONFIG_FROM_SCANNED_REPOSITORY_FLAG for a config whose
+    mounted files the repository could have written (:func:`_written_by_the_scanned_repository`),
+    and the scan inside limits it. A workspace scan inside the container refuses that
+    flag, because it applies only to a single-directory scan, so the verdict cannot
+    be handed over; unmarked, the file at /ash-config is in no checkout there and would
+    get the operator's grants. Such a config is refused instead, whichever file of its
+    chain makes it so, before anything is built or mounted. A config inside the
+    workspace root mounts no file of its own (it is read through /src and judged by
+    the scan inside), and one outside every checkout is the operator's; both are used
+    as before.
+    """
+    from automated_security_helper.config.sandbox_grants import repository_written
+
+    written = repository_written(config_files, Path(source_dir), [Path(config)])
+    if not config_files or not written:
+        return
+    raise ContainerInputError(
+        f"The config file {config!r} is one the repository being scanned could have "
+        f"written: {', '.join(path.as_posix() for path in written)} is in a git "
+        "checkout, or reached through one, and outside the workspace root "
+        f"{Path(source_dir).as_posix()}. A workspace scan inside the container cannot "
+        "be told so, and would give it the operator's grants, so container mode "
+        "refuses it. Keep --config outside the checkout, or inside the workspace."
+    )
 
 
 def _extends_refs_of(path: Path) -> List[str]:
@@ -1654,6 +1687,11 @@ def _assemble_run_command(
         # A config inside the source directory is read through /src, which is the
         # inner scan's own tree, and mounts no host file; one mounted from elsewhere
         # needs the host's verdict, judged by its files and the name it was given.
+        # A workspace scan cannot take the verdict, so there a config that would be
+        # marked is refused, here as well as before the build, so the rule holds
+        # whichever checks a caller ran first.
+        if workspace_relative_file is not None:
+            _refuse_repository_config_in_a_workspace(config, config_files, source_dir)
         config_from_scanned_repository = (
             workspace_relative_file is None
             and bool(config_files)

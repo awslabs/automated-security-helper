@@ -493,6 +493,36 @@ def test_a_source_path_is_passed_as_a_value_and_not_run(
     assert f"type=bind,source={source},destination=/src,readonly" in args
 
 
+@pytest.mark.parametrize(
+    "flag",
+    ["--workspace /src/ash.code-workspace", "--workspace=/src/ash.code-workspace"],
+    ids=["separate", "joined"],
+)
+def test_a_workspace_scan_is_refused(flag, pwsh, recording_docker, tmp_path):
+    """Invoke-ASH scans one directory and hands the scan inside ``--source-dir
+    /src``, which that scan refuses next to ``--workspace``, so it cannot run a
+    workspace scan or mark a workspace's -Config. A --workspace passed through is
+    refused with exit 3 before anything is built or mounted; the case that matters is
+    a config in the checkout but outside the workspace."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "ws" / "proj").mkdir(parents=True)
+    config = repo / "other" / "ash-config.yaml"
+    config.parent.mkdir()
+    config.write_text("project_name: tier\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir repo/ws -OutputDir out -Config '{config.as_posix()}' {flag}",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not (tmp_path / "docker-args.txt").exists()
+    assert "ash --mode container --workspace" in " ".join(result.stderr.split())
+
+
 def _self_recording_runner(directory: Path, log: Path) -> Path:
     """A ``docker`` that appends its own path and its first argument to *log*."""
     directory.mkdir(parents=True)

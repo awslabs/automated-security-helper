@@ -502,6 +502,20 @@
   is looked up on `PATH` as before. `./ash` (`OCI_RUNNER`) and `ash --mode container`
   (`--oci-runner`) already ran the path they were given, and now have tests that
   pin it.
+- **A container workspace scan refuses a `--config` the repository could have written.**
+  A one-directory container scan marks a config from outside `--source-dir` that is in
+  a git checkout (`--config-from-scanned-repository`), and the scan inside limits it as
+  repository-written. A workspace scan inside the container refuses that mark, so in
+  workspace mode the host passed such a config unmarked, and the scan inside gave it
+  the operator's grants (`sandbox.extra_read_paths` and the other sandbox settings).
+  `ash --mode container --workspace` now refuses it with exit 3 before anything is
+  built, mounted or cleared: a config in the scanned checkout or another one, or named
+  through a link to such a file, outside the workspace root. Keep `--config` outside
+  the checkout, or inside the workspace. A config inside the workspace root, read
+  through `/src`, and one outside every checkout are used as before. `./ash` and
+  `Invoke-ASH`, which scan one directory and hand the scan inside `--source-dir /src`,
+  now refuse a `--workspace` passed through with exit 3 instead of starting a
+  container that refused it.
 - **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
   Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
   and GID 100, which cannot write an output directory the caller owns, and checked

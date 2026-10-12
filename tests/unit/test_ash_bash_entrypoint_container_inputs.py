@@ -946,6 +946,46 @@ class TestAnExplicitRunnerPathRunsThatPath:
         assert log.read_text(encoding="utf-8").splitlines() == [f"{expected} run"]
 
 
+class TestAWorkspaceScanIsRefused:
+    """``./ash`` scans one directory: it hands the scan inside ``--source-dir /src``,
+    which that scan refuses next to ``--workspace``, after the container has started.
+    So it cannot run a workspace scan, and cannot mark a workspace's ``--config``
+    either. A ``--workspace`` passed through is refused with exit 3 before anything
+    is built or mounted, naming ``ash --mode container --workspace``, whatever the
+    config; the case that matters is a config in the checkout but outside the
+    workspace, which the scan inside would read as the operator's."""
+
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            ["--workspace", "/src/ash.code-workspace"],
+            ["--workspace=/src/ash.code-workspace"],
+        ],
+        ids=["separate", "joined"],
+    )
+    def test_it_is_refused(self, flag, fake_runner, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / "ws" / "proj").mkdir(parents=True)
+        config = repo / "other" / "ash-config.yaml"
+        config.parent.mkdir()
+        config.write_text("project_name: tier\n", encoding="utf-8")
+
+        rc, text, calls = _run_ash_status(
+            fake_runner, repo / "ws", ["--config", str(config), *flag]
+        )
+
+        assert rc == 3, text
+        assert calls == []
+        assert "ash --mode container --workspace" in text
+
+    def test_a_one_directory_scan_runs(self, fake_runner, project):
+        """Control: without --workspace, as before."""
+        calls = run_ash(fake_runner, project, ["--no-build"])
+
+        assert [call[0] for call in calls] == ["run"]
+
+
 class TestAnOutsideConfigThatExtendsIsRefused:
     """``./ash`` mounts a config from outside the source directory on its own, so the
     files it extends are not in the container. A config there with an ``extends``
