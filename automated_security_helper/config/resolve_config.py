@@ -80,6 +80,7 @@ from automated_security_helper.config.sandbox_grants import (
     repository_written,
     scanned_trees,
     tree_holding,
+    untrusted_path,
 )
 from automated_security_helper.config.secret_verification_trust import (
     confine_detect_secrets_settings,
@@ -241,7 +242,9 @@ def read_config_document(
 
 
 def _warnings_when_discovered(
-    config_path: Path, source_dir: Path, permit_base=None
+    config_path: Path,
+    source_dir: Path,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> List[str]:
     """Discovery's warnings for ``source_dir`` when ``config_path`` is the source it selects.
 
@@ -1080,20 +1083,20 @@ def _operator_paths(
     """Which tool paths in the config the operator named; see path_trust.
 
     The chain's merged ``document`` (or, with no config file, the default
-    config's) when no file of the chain is inside the scanned tree or an MCP
-    client's (``path_trust.operator_reason``, under every name); only the selected
-    file's own document when that file is the operator's and a base it extends is
-    not; and what ``overrides`` set.
+    config's) when every file of the chain is the operator's
+    (:func:`_operator_wrote`, under every name); only the selected file's own
+    document when that file is the operator's and a base it extends is not; and
+    what ``overrides`` set.
     """
     record = OperatorPaths(overrides=parse_overrides(overrides))
     if untrusted:
         return record
-    if all(operator_reason(path, scan_root) is None for path in [*chain, *names]):
+    if all(_operator_wrote(path, scan_root) for path in [*chain, *names]):
         if document is None:
             document = get_default_config().model_dump()
         record.documents = [document]
     elif chain and all(
-        operator_reason(path, scan_root) is None for path in [chain[-1], *root_names]
+        _operator_wrote(path, scan_root) for path in [chain[-1], *root_names]
     ):
         try:
             own = read_config_file(chain[-1])
@@ -1102,6 +1105,22 @@ def _operator_paths(
         if isinstance(own, dict):
             record.documents = [own]
     return record
+
+
+def _operator_wrote(path: Path, scan_root: Path) -> bool:
+    """Whether the tool paths config file ``path`` names are the operator's.
+
+    By the tier ``repository_written`` gives config files, the one the five
+    confinements use (``sandbox_grants.untrusted_path``: inside any git checkout,
+    or inside the scan root, by any name): a file in an ops checkout beside the
+    scanned one may not grant, so the paths it names are not the operator's
+    either. Nor are those of a file an MCP client delivered or a session profile
+    a client's patch changed (``path_trust.operator_reason``).
+    """
+    return (
+        not untrusted_path(Path(path), scan_root)
+        and operator_reason(path, scan_root) is None
+    )
 
 
 def _own_sandbox_settings(path: Path) -> Dict[str, Any]:

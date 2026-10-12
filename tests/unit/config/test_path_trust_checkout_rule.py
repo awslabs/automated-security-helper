@@ -271,10 +271,13 @@ def test_one_config_is_confined_by_both_rules(tmp_path, monkeypatch, supplied_by
 # --- Who named the path ------------------------------------------------------
 #
 # Maintainer's ruling: a tool config path the operator named (--config-overrides,
-# a config file outside the scanned tree, an environment variable) is honored
-# from another checkout, such as an ops repository. It is refused only inside the
-# scanned tree itself or when an MCP client delivered it. A path a config inside
-# the scanned tree names keeps the stricter rule.
+# a config file outside every git checkout and the scanned directory, an
+# environment variable) is honored from another checkout, such as an ops
+# repository. It is refused only inside the scanned tree itself or when an MCP
+# client delivered it. A path a config file inside any git checkout or the scanned
+# directory names keeps the stricter rule: such a file may not grant sandbox access
+# either (sandbox_grants.repository_written), so it does not name paths as the
+# operator.
 
 CHECKOV_KEY = "scanners.checkov.options.config_file"
 
@@ -297,13 +300,27 @@ def _honored(value, target, config, key=CHECKOV_KEY):
     return honored_path(str(value), source_dir=target, key=key, config=config)
 
 
-def test_an_operator_config_file_names_a_tool_config_in_its_own_checkout(tmp_path):
-    rules = _ops_rules(tmp_path)
-    operator = rules.parent / "ash.yaml"
-    operator.write_text(
+def _config_naming(path: Path, rules: Path) -> Path:
+    path.write_text(
         f"project_name: ops\nscanners:\n  checkov:\n    options:\n"
         f"      config_file: {rules.as_posix()}\n"
     )
+    return path
+
+
+def test_a_config_file_in_an_ops_checkout_does_not_name_a_tool_config_in_it(tmp_path):
+    rules = _ops_rules(tmp_path)
+    config_file = _config_naming(rules.parent / "ash.yaml", rules)
+    target = _scanned_checkout(tmp_path)
+    config = resolve_config(config_path=config_file, source_dir=target)
+    assert _honored(rules, target, config) is None
+
+
+def test_an_operator_config_file_names_a_tool_config_in_an_ops_checkout(tmp_path):
+    rules = _ops_rules(tmp_path)
+    outside = tmp_path / "etc"
+    outside.mkdir()
+    operator = _config_naming(outside / "ash.yaml", rules)
     target = _scanned_checkout(tmp_path)
     config = resolve_config(config_path=operator, source_dir=target)
     assert _honored(rules, target, config) == rules.resolve()
@@ -341,7 +358,10 @@ def test_a_repository_config_still_cannot_name_a_file_in_another_checkout(
     (message,) = [
         r.getMessage() for r in caplog.records if "Ignoring" in r.getMessage()
     ]
-    assert "--config-overrides or in a config file outside the scanned tree" in message
+    assert (
+        "move the file outside every git checkout, or pass the setting with "
+        "--config-overrides" in message
+    )
 
 
 def test_an_operator_named_file_inside_the_scanned_tree_is_still_refused(

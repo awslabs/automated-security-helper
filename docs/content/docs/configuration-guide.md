@@ -768,17 +768,22 @@ outside every checkout.
 
 A file that one of the path settings below names is judged by who named it:
 
-- **Named by the operator**, with `--config-overrides`, in a config file outside the
-  scanned tree, or through an environment variable such as `TRIVY_IGNOREFILE`: it is
-  passed to the tool unless it is inside the scanned tree or an MCP client delivered
-  it. A tool config or ignore file kept in an ops repository works.
-- **Named by a config inside the scanned tree or one an MCP client delivered**, or
-  found by name in the source directory: it is passed only when the file is not
+- **Named by the operator**, with `--config-overrides`, in a config file that is not
+  repository-written (outside every git checkout and the source directory), or
+  through an environment variable such as `TRIVY_IGNOREFILE`: it is passed to the
+  tool unless it is inside the scanned tree or an MCP client delivered it. A tool
+  config or ignore file kept in an ops repository works.
+- **Named by a repository-written config or one an MCP client delivered**, or found
+  by name in the source directory: it is passed only when the file is not
   repository-written, so the repository cannot point a tool at a file in someone's
-  checkout.
+  checkout. A config file kept in an ops checkout is repository-written too, as it
+  is for the other settings here, so the paths it names follow this rule, a tool
+  config in that same checkout included. The warning says how to keep the setting:
+  move the config file outside every git checkout, or pass the setting with
+  `--config-overrides`.
 
-When the operator's config file extends one inside the scanned tree, only the paths
-the operator's file writes itself count as the operator's. An MCP client's
+When the operator's config file extends a repository-written one, only the paths the
+operator's file writes itself count as the operator's. An MCP client's
 `config_overrides`, and a session profile its `select_profile` `patch_ops` or
 `override_yaml` changed, count as the client's.
 

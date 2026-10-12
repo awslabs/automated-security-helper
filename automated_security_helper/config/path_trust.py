@@ -6,16 +6,19 @@
 Some scanner options name a file the scanner's tool reads as its own configuration,
 or a file it loads as a plugin. Who named the path decides which rule applies:
 
-- A path the operator named (``--config-overrides``, a config file outside the
-  scanned tree, or an environment variable) is refused only when it is inside the
-  scanned tree itself (``sandbox_grants.in_tree_reason``: the scan root, or the
-  outermost checkout holding it) or an MCP client delivered it. The operator may
-  keep tool configs in a checkout of their own, such as an ops repository.
-- A path a config file inside the scanned tree named, or a file ASH found by name
-  in the source directory, is refused when the scanned repository could have
-  written it (``sandbox_grants.untrusted_path``: inside any git checkout, or the
-  scan root under each name it has). The repository cannot point a tool at a
-  file in someone's checkout.
+- A path the operator named (``--config-overrides``, a config file outside every
+  git checkout and the scanned directory, or an environment variable) is refused
+  only when it is inside the scanned tree itself (``sandbox_grants.in_tree_reason``:
+  the scan root, or the outermost checkout holding it) or an MCP client delivered
+  it. The operator may keep tool configs in a checkout of their own, such as an
+  ops repository.
+- A path a config file inside any git checkout or the scanned directory named, or
+  a file ASH found by name in the source directory, is refused when the scanned
+  repository could have written it (``sandbox_grants.untrusted_path``: inside any
+  git checkout, or the scan root under each name it has). The repository cannot
+  point a tool at a file in someone's checkout. A config file in an ops checkout
+  counts here: it is the tier ``sandbox_grants.repository_written`` gives config
+  files, so a file that may not grant does not name tool paths as the operator.
 
 Every name the path has is checked: as written, resolved, and every symlink on
 the way. ``OperatorPaths``, recorded on the config by ``resolve_config``, says
@@ -34,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -456,11 +460,10 @@ def honored_path(
             )
         else:
             advice = (
-                "A file that a config inside the scanned tree names, or that ASH "
-                "finds there, is passed to the tool only from outside every git "
-                "checkout and the scanned directory. To use a file in a checkout of "
-                "your own, name it with --config-overrides or in a config file "
-                "outside the scanned tree."
+                "A file that a config file inside a git checkout or the scanned "
+                "directory names, or that ASH finds in the scanned directory, is "
+                "passed to the tool only from outside every git checkout and the "
+                f"scanned directory. {KEEP_A_SETTING}"
             )
         ASH_LOGGER.warning(f"Ignoring {key} ({named.as_posix()}): {reason}. {advice}")
     return None

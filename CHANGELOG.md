@@ -184,6 +184,17 @@
   it said `Config file not found: <path>`. Plugin options are still checked by the scan
   inside, which loads the plugin. The `Invalid configuration` message no longer drops
   bracketed text, such as the `[type=..., input_value=...]` detail of a validation error.
+- **A config file in an ops checkout no longer names tool config paths as the
+  operator.** A config file inside any git checkout or the source directory may not
+  grant sandbox access or choose the other limited settings, and that includes a
+  checkout of your own. The tool config and plugin paths it names (such as
+  `scanners.checkov.options.config_file`) now follow the same rule: they are passed
+  to the tool only from outside every git checkout and the source directory. A config
+  file in an ops checkout could point a tool at a file in that checkout before. Paths
+  named with `--config-overrides`, by an environment variable, or in a config file
+  outside every checkout keep the operator's rule and may be in an ops checkout. The
+  warning for a refused path now ends "To keep a setting, move the file outside every
+  git checkout, or pass the setting with --config-overrides."
 - **A scan uses only the plugin modules it names.** A scan's converters,
   scanners, reporters and event handlers are ASH's built-in ones plus those of the
   modules its own `ash_plugin_modules` and `--ash-plugin-modules` name. This holds in
