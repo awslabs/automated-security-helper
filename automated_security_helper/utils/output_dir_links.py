@@ -29,7 +29,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
-from typing import IO, Optional, Tuple, Union
+from typing import IO, Any, Optional, Tuple, Union
 
 PathLike = Union[str, "os.PathLike[str]"]
 
@@ -85,7 +85,7 @@ class OutputDirLinkRefused(ValueError):
         self.remedy = remedy
         super().__init__(f"{found[0].upper()}{found[1:]}. {remedy}")
 
-    def __reduce__(self):
+    def __reduce__(self) -> Tuple[type, Tuple[Any, ...]]:
         # Rebuilt from its own arguments, not from the formatted message.
         return (type(self), (self.found, self.remedy))
 

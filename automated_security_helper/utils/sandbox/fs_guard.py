@@ -47,6 +47,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     IO,
+    Any,
     Dict,
     FrozenSet,
     Iterable,
@@ -86,9 +87,11 @@ class OutputLinkRefused(OSError, OutputDirLinkRefused):
         where: str = "below its output directory",
     ) -> None:
         found = f"{Path(link).as_posix()} is a symlink"
-        # OSError's own __init__: OutputDirLinkRefused's is not called, and its
-        # attribute is set below.
-        super().__init__(
+        # OSError's own __init__, named rather than reached through super(): it is
+        # the next __init__ in the MRO, and OutputDirLinkRefused's is not called;
+        # its attribute is set below.
+        OSError.__init__(
+            self,
             errno.ELOOP,
             f"{Path(path).as_posix()} was not written: {found}, and ASH does not "
             f"write through a symlink {where}",
@@ -98,7 +101,7 @@ class OutputLinkRefused(OSError, OutputDirLinkRefused):
         self.link = Path(link)
         self.where = where
 
-    def __reduce__(self):
+    def __reduce__(self) -> Tuple[type, Tuple[Any, ...]]:
         # Rebuilt from its own arguments: the default rebuilds from OSError's args,
         # which this __init__ does not take.
         return (type(self), (self.path, self.link, self.where))
@@ -115,7 +118,9 @@ class OutputHardLinkRefused(OSError, OutputDirLinkRefused):
 
     def __init__(self, path: Union[str, Path], links: int) -> None:
         found = f"{links} names refer to {Path(path).as_posix()}"
-        super().__init__(
+        # OSError's own __init__, as in OutputLinkRefused.
+        OSError.__init__(
+            self,
             errno.EMLINK,
             f"{Path(path).as_posix()} was not written: {links} names refer to it, and "
             "ASH does not write to a file below its output directory that another "
@@ -125,7 +130,7 @@ class OutputHardLinkRefused(OSError, OutputDirLinkRefused):
         self.path = Path(path)
         self.links = links
 
-    def __reduce__(self):
+    def __reduce__(self) -> Tuple[type, Tuple[Any, ...]]:
         return (type(self), (self.path, self.links))
 
 
@@ -198,7 +203,7 @@ def release_writable_root_later(root: Path) -> None:
 #: run_roots() block, so the block can make them when it ends. A ContextVar: the
 #: scan phase runs scanners through contextvars.copy_context(), so an object made in
 #: a worker thread is the run's too.
-_RUN_RELEASES: "contextvars.ContextVar[Optional[List[weakref.finalize]]]" = (
+_RUN_RELEASES: "contextvars.ContextVar[Optional[List[weakref.finalize[..., Any]]]]" = (
     contextvars.ContextVar("ash_fs_guard_run_releases", default=None)
 )
 
@@ -222,7 +227,7 @@ def release_with_holder(holder: object, root: Path) -> None:
 @contextmanager
 def run_roots() -> Iterator[None]:
     """One scan: every release_with_holder made inside is made when the block ends."""
-    releases: List[weakref.finalize] = []
+    releases: List[weakref.finalize[..., Any]] = []
     token = _RUN_RELEASES.set(releases)
     try:
         yield
@@ -571,7 +576,7 @@ def open_for_atomic_write(
     binary: bool = False,
     newline: Optional[str] = None,
     root: Optional[Union[str, Path]] = None,
-) -> Iterator[IO]:
+) -> Iterator[IO[Any]]:
     """Write ``path`` through a staging file that replaces it when the block ends.
 
     ``with open_for_atomic_write(path) as handle:`` yields a handle, text unless
@@ -604,7 +609,7 @@ def open_for_atomic_write(
     from automated_security_helper.utils.atomic_write import _replace
 
     open_mode = "wb" if binary else "w"
-    text = (
+    text: Dict[str, Any] = (
         {} if binary else {"encoding": encoding, "errors": errors, "newline": newline}
     )
     path = Path(os.path.abspath(path))
@@ -669,7 +674,7 @@ def open_for_write(
     make_parents: bool = False,
     root: Optional[Union[str, Path]] = None,
     exclusive: bool = False,
-) -> IO:
+) -> IO[Any]:
     """Open ``path`` for writing, text unless ``binary``, truncated unless ``append``.
 
     Below a registered root (the output directory of a PluginContext, or a
@@ -702,7 +707,7 @@ def open_for_write(
     if exclusive and append:
         raise ValueError("exclusive creates the file; it cannot also append")
     open_mode = ("x" if exclusive else "a" if append else "w") + ("b" if binary else "")
-    text = (
+    text: Dict[str, Any] = (
         {} if binary else {"encoding": encoding, "errors": errors, "newline": newline}
     )
     path = Path(os.path.abspath(path))
