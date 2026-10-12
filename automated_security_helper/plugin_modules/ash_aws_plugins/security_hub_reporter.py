@@ -130,8 +130,11 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
                 self.config.options.account_id = identity["Account"]
 
             self.dependencies_satisfied = True
+            # The region is named by its option, not its value, which a config
+            # file can read from the environment.
             ASH_LOGGER.info(
-                f"Security Hub reporter validated for region {self.config.options.aws_region}"
+                "Security Hub reporter validated for the region in its aws_region "
+                "option"
             )
 
         except NoCredentialsError:

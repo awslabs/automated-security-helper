@@ -399,9 +399,9 @@ def test_a_client_s_refused_patch_does_not_show_the_profile(tmp_path, monkeypatc
 
 def test_ash_report_does_not_show_a_section_it_cannot_build(tmp_path, ash_log):
     """``ash report`` builds the reporter from a section its options model refuses:
-    the command's output does not hold the value, and no log record does but the
-    debug lines that print the config itself, which are not a validation error's
-    and which ``--debug`` shows."""
+    neither the command's output nor any log record holds the value, the debug
+    lines that show an override, a plugin's section or the plugin context
+    included, since they name keys and never values."""
     from typer.testing import CliRunner
 
     from automated_security_helper.cli.main import app
@@ -443,14 +443,7 @@ def test_ash_report_does_not_show_a_section_it_cannot_build(tmp_path, ash_log):
 
     assert result.exit_code != 0, result.output
     assert CANARY not in result.output, result.output
-    config_dumps = (
-        "Applied config override",
-        "Found config for",
-        "Plugin manager context set",
-    )
-    others = [
-        record
-        for record in ash_log
-        if CANARY in record and not record.startswith(config_dumps)
-    ]
-    assert others == [], others
+    # The control: the debug lines that once printed values were recorded.
+    assert any(record.startswith("Applied a config override") for record in ash_log)
+    leaked = [record for record in ash_log if CANARY in record]
+    assert leaked == [], leaked

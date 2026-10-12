@@ -525,10 +525,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
                 for plugin_type in secret_type_to_class().values()
             ]
-            settings = self.config.options.scan_settings.model_dump(
-                exclude_defaults=True, exclude_none=True, exclude_unset=True
+            ASH_LOGGER.debug(
+                "Default settings identified: "
+                f"{len(self.config.options.scan_settings.plugins_used)} plugins"
             )
-            ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
 
@@ -1029,8 +1029,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
             return False
 
-        ASH_LOGGER.debug(f"self.config: {self.config}")
-        ASH_LOGGER.debug(f"config: {config}")
+        # Which settings, never their values (ScannerPluginBase._setting_names).
+        ASH_LOGGER.debug(f"self.config setting: {self._setting_names(self.config)}")
+        ASH_LOGGER.debug(f"config setting: {self._setting_names(config)}")
 
         try:
             secrets_collection_cls, _, _ = _detect_secrets_api()
@@ -1273,7 +1274,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # from ``scannable`` so the baseline exclude patterns above still
             # match against the paths they were written for.
             scan_paths = [str(Path(item).absolute()) for item in scannable]
-            ASH_LOGGER.debug(f"Settings: {scan_settings_dict}")
+            from automated_security_helper.config.environment_record import (
+                setting_names,
+            )
+
+            # Which settings, never their values.
+            ASH_LOGGER.debug(
+                f"Settings: {setting_names(scan_settings_dict)}", extra=NO_MARKUP
+            )
             scanned = self._scan_in_worker(
                 baseline=baseline_document,
                 scan_paths=scan_paths,

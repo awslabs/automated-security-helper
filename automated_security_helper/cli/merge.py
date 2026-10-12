@@ -181,6 +181,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shlex
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple, Type
@@ -227,7 +228,11 @@ from automated_security_helper.config.resolve_config import (
     confine_to_trusted_base,
     resolve_config,
 )
-from automated_security_helper.config.config_sources import describe_config_path
+from automated_security_helper.config.config_sources import (
+    default_confinement_root,
+    describe_config_path,
+    resolve_config_document,
+)
 from automated_security_helper.config.untrusted_source import SHARD_RECORDED
 from automated_security_helper.core.enums import (
     AshLogLevel,
@@ -1451,6 +1456,67 @@ def apply_operator_overrides(
             )
 
 
+def named_config_document(config_path: Optional[str]) -> Any:
+    """The merged document of the config file the operator named, or None.
+
+    ``config_path`` (``--config``), else the file ``ASH_CONFIG`` names, as
+    :func:`resolve_operator_config` reads them. For which settings the file
+    writes; one that does not read is None, as though it wrote none.
+    """
+    named = config_path or os.environ.get("ASH_CONFIG")
+    if not named:
+        return None
+    path = Path(named)
+    try:
+        return resolve_config_document(
+            path, confine_to=default_confinement_root(path)
+        ).data
+    except (ASHConfigSourceError, OSError, ValueError, yaml.YAMLError):
+        return None
+
+
+def supply_unread_recorded_fields(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+    trusted_config: AshConfig,
+    config_path: Optional[str],
+    config_overrides: Sequence[str],
+) -> None:
+    """Supply, from the operator, each recorded field a shard's results could not
+    read, in place.
+
+    A shard records a value its scan read from the environment as the reference
+    its config file wrote. A field that takes a fixed choice, a boolean or a
+    number cannot hold one, and reads as its default
+    (``config/environment_record.py``). The merge computes its reports and its
+    verdict from these fields, so each one comes from ``--config-overrides`` or
+    the file ``--config`` names, or the merge is refused: the default in place of
+    the scan's severity threshold could drop findings from the merged report.
+
+    Raises:
+        ASHConfigValidationError: A field neither supplies, named with the
+            reference, never a value.
+    """
+    from automated_security_helper.config.environment_record import (
+        supply_unread_references,
+    )
+
+    if not any(
+        getattr(results.ash_config, "_unread_references", ()) for _, results in loaded
+    ):
+        return
+    document = named_config_document(config_path)
+    for _, results in loaded:
+        if results.ash_config is not None:
+            results.ash_config = supply_unread_references(
+                results.ash_config,
+                overrides=config_overrides,
+                overrides_applied=True,
+                operator_config=trusted_config,
+                operator_document=document,
+                command="ash merge",
+            )
+
+
 def confine_recorded_config(
     config: AshConfig,
     trusted_config: AshConfig,
@@ -1972,6 +2038,7 @@ def merge_command(
         trusted_config = resolve_operator_config(config)
         loaded = load_shard_results(results)
         apply_operator_overrides(loaded, overrides)
+        supply_unread_recorded_fields(loaded, trusted_config, config, overrides)
         # Before the completion gate below, which reads one shard's
         # fail_on_incomplete_scanners: shards that disagree on it, or on any other
         # verdict setting, are refused the same way whichever shard that is.
@@ -2080,6 +2147,14 @@ def merge_command(
     # post-suppression one -- two artifacts of the same run disagreeing about
     # which findings are actionable.
     merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
+    if merged.ash_config is not None:
+        # What the confinement took from the operator's config is recorded as
+        # that file wrote it, as a shard records its own
+        # (config/environment_record.py).
+        merged.ash_config._environment_references = (
+            *merged.ash_config._environment_references,
+            *trusted_config._environment_references,
+        )
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
 

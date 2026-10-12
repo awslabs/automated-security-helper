@@ -218,8 +218,11 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             "message": output,
         }
 
+        # The destination is named by its options, not their values, which a
+        # config file can read from the environment.
         ASH_LOGGER.verbose(
-            f"Publishing event to CloudWatch Logs log group {self.config.options.log_group_name}@{self.config.options.aws_region}",
+            "Publishing event to CloudWatch Logs, to the log group and region in "
+            "the reporter's log_group_name and aws_region options",
         )
         ASH_LOGGER.verbose(output)
 
@@ -264,7 +267,7 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 == "ResourceAlreadyExistsException"
             ):
                 ASH_LOGGER.debug(
-                    f"Log stream already exists: {self.config.options.log_stream_name}"
+                    "The log stream the log_stream_name option names already exists"
                 )
             else:
                 self._plugin_log(

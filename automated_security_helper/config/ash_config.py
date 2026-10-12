@@ -112,7 +112,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
 def config_env_var_is_interpolatable(var_name: str) -> bool:
@@ -306,22 +306,36 @@ class EnvReferenceNotResolved(Exception):
         self.line = line
 
 
+#: What ``load_yaml_config(..., env="written")`` puts before a reference the file
+#: tags explicitly, so the reference reads as the file wrote it.
+EXPLICIT_ENV_TAG = "!ENV "
+
+
 def load_yaml_config(
-    stream: Any, env: Literal["resolve", "refuse", "keep"] = "resolve"
+    stream: Any, env: Literal["resolve", "refuse", "keep", "written"] = "resolve"
 ) -> Any:
     """Parse an ASH YAML config, resolving ``!ENV`` references as it goes.
 
     With ``env="refuse"``, the first ``!ENV`` value, tagged or matched by the
     implicit resolver, raises ``EnvReferenceNotResolved`` before anything is read
     from the environment. With ``env="keep"``, each one is the reference as
-    written, which is what a raw view of the file shows.
+    written, which is what a raw view of the file shows. ``env="written"`` is
+    ``keep``, except that a value the file tags ``!ENV`` itself keeps the tag
+    (``EXPLICIT_ENV_TAG``): the reference exactly as the file wrote it, which is
+    what a record of the configuration holds (``config/environment_record.py``).
 
     Aliases are refused, as in ``load_config_yaml``.
     """
 
     # Use a local subclass to avoid mutating the global SafeLoader
     class _AshConfigLoader(_NoAliasSafeLoader):
-        pass
+        def compose_scalar_node(self, anchor):
+            # The tag is known only from the event: a node the implicit resolver
+            # tagged !ENV and one the file tagged look the same once composed.
+            explicit = self.peek_event().tag == "!ENV"
+            node = super().compose_scalar_node(anchor)
+            node.ash_explicit_env = explicit
+            return node
 
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
 
@@ -330,6 +344,11 @@ def load_yaml_config(
             raise EnvReferenceNotResolved(node.start_mark.line + 1)
         if env == "keep":
             return loader.construct_scalar(node)
+        if env == "written":
+            scalar = loader.construct_scalar(node)
+            if getattr(node, "ash_explicit_env", False):
+                return f"{EXPLICIT_ENV_TAG}{scalar}"
+            return scalar
         return resolve_env_references(loader.construct_scalar(node))
 
     _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
@@ -349,6 +368,24 @@ def _represent_config_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNod
 
 
 _ConfigDumper.add_representer(str, _represent_config_str)
+
+
+class TaggedReference(str):
+    """A reference ``AshConfig.save(as_written=True)`` writes tagged ``!ENV``, so
+    the file reads it from the environment when it is loaded. Any other string
+    that reads as a reference is still written quoted."""
+
+    __slots__ = ()
+
+
+def represent_tagged_reference(
+    dumper: Any, value: "TaggedReference"
+) -> yaml.ScalarNode:
+    """``value`` as an ``!ENV`` scalar, the reference without a tag it wrote."""
+    return dumper.represent_scalar("!ENV", str(value).removeprefix(EXPLICIT_ENV_TAG))
+
+
+_ConfigDumper.add_representer(TaggedReference, represent_tagged_reference)
 
 
 class _QuotedStr(str):
@@ -1586,6 +1623,17 @@ class AshConfig(BaseModel):
     # no file of the chain needs it; the config's own entries are trusted then.
     _trusted_plugin_modules: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
 
+    # What the files this config was resolved from read from the environment
+    # (config/environment_record.EnvironmentReference), set by resolve_config. A
+    # record of the config, such as a results file's ash_config, holds each as the
+    # file wrote it instead of its value. In memory only, never serialized.
+    _environment_references: Tuple[Any, ...] = PrivateAttr(default=())
+
+    # The fields of a recorded config that held a reference they cannot hold, and
+    # read as their defaults (environment_record.load_recorded_config). ash merge
+    # and ash report refuse them unless the operator supplies them.
+    _unread_references: Tuple[Any, ...] = PrivateAttr(default=())
+
     # Project information
     project_name: Annotated[
         str,
@@ -1842,7 +1890,13 @@ class AshConfig(BaseModel):
         )
         return cls.model_validate(config_data, strict=True)
 
-    def save(self, config_path: Path, exclude_unset: bool = False):
+    def save(
+        self,
+        config_path: Path,
+        exclude_unset: bool = False,
+        as_written: bool = False,
+        env_tags: bool = True,
+    ):
         """Save configuration to a file.
 
         The file loads back as the values saved. A string that reads as an
@@ -1855,14 +1909,54 @@ class AshConfig(BaseModel):
         ``exclude_unset`` writes only the fields the config was loaded or built
         with, so the file sets what the original set and nothing else; it still
         loads back as the same values.
+
+        ``as_written`` writes each value and key the config's files read from the
+        environment (``_environment_references``) as its reference, tagged
+        ``!ENV``, instead of the value, so loading the file reads it from the
+        environment again. Only where the whole string is the value: one the
+        load changed after reading it (a relative path taken from the file's
+        directory) is written as it is now. With ``env_tags`` False the reference
+        is written as quoted text instead, which nothing resolves on its own: the
+        copy of a profile a client patched, in a directory where ``!ENV`` is not
+        resolved, which a scan fills from the operator's copy
+        (``environment_record.fill_environment_references``).
         """
-        with open(config_path, mode="w", encoding="utf-8") as f:
-            yaml.dump(
-                self.model_dump(by_alias=True, exclude_unset=exclude_unset),
-                f,
-                Dumper=_ConfigDumper,
-                indent=2,
+        data = self.model_dump(by_alias=True, exclude_unset=exclude_unset)
+        if as_written and self._environment_references:
+            from automated_security_helper.config.environment_record import (
+                record_environment_references,
+                written_without_tag,
             )
+
+            data = record_environment_references(
+                data,
+                self._environment_references,
+                mark=TaggedReference if env_tags else written_without_tag,
+                whole_only=True,
+            )
+        with open(config_path, mode="w", encoding="utf-8") as f:
+            yaml.dump(data, f, Dumper=_ConfigDumper, indent=2)
+
+    def __repr_args__(self):
+        """The fields as pydantic's repr shows them, except that a config whose
+        files read values from the environment shows each as the file wrote it.
+
+        A debug line that formats the config, or an object holding it (the
+        plugin context), would otherwise print the values. Those fields are
+        shown as the record holds them (config/environment_record.py), as plain
+        data rather than nested models.
+        """
+        if not self._environment_references:
+            yield from super().__repr_args__()
+            return
+        from automated_security_helper.config.environment_record import (
+            record_environment_references,
+        )
+
+        recorded = record_environment_references(
+            self.model_dump(by_alias=True), self._environment_references
+        )
+        yield from recorded.items()
 
     def get_plugin_config(
         self,
@@ -1870,6 +1964,7 @@ class AshConfig(BaseModel):
         plugin_name: str,
     ):
         found = None
+        found_key = plugin_name
         # Reduce the provided plugin_name in case the class name was passed in,
         # as the config itself uses kebab-case keys while the classes use PascalCase
         # for class names.
@@ -1935,22 +2030,38 @@ class AshConfig(BaseModel):
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} with direct match"
             )
-            found = item_dict[og_plugin_name]
+            found_key = og_plugin_name
+            found = item_dict[found_key]
         # Then the reduced form, against the reduced spellings of each key.
         elif plugin_name in item_dict:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} with direct match"
             )
-            found = item_dict[plugin_name]
+            found_key = plugin_name
+            found = item_dict[found_key]
         elif plugin_name in key_map:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
             )
-            found = item_dict[key_map[plugin_name]]
+            found_key = key_map[plugin_name]
+            found = item_dict[found_key]
 
         if found is not None:
+            from automated_security_helper.config.environment_record import (
+                setting_names,
+            )
+
+            # Which settings the section holds, never their values: a value can
+            # be one the file read from the environment, or a credential.
+            names = setting_names(
+                found,
+                self._environment_references,
+                at=(f"{plugin_type}s", found_key),
+            )
             ASH_LOGGER.debug(
-                f"Found config for {plugin_type} plugin {og_plugin_name}: {found}"
+                f"Found config for {plugin_type} plugin {og_plugin_name}, "
+                f"setting: {names}",
+                extra=NO_MARKUP,
             )
 
         return found

@@ -23,7 +23,7 @@ from typing import (
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from automated_security_helper.plugins.events import AshEventType
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
@@ -120,7 +120,14 @@ class AshPluginManager(BaseModel):
             context: The PluginContext to use for plugin discovery and operations
         """
         self.context = context
-        ASH_LOGGER.debug(f"Plugin manager context set: {context}")
+        # The directories only: the context holds the whole config, whose values
+        # can be read from the environment or be credentials.
+        ASH_LOGGER.debug(
+            "Plugin manager context set: source "
+            f"{getattr(context, 'source_dir', None)}, output "
+            f"{getattr(context, 'output_dir', None)}",
+            extra=NO_MARKUP,
+        )
 
     def subscribe(self, event_type, callback):
         """Subscribe a callback to a specific event type, at most once.

@@ -477,11 +477,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
             # Validate the configured model
             model_id = self.config.options.model_id
-            is_valid, error_message = validate_bedrock_model(bedrock_client, model_id)
+            label = self._model_label(model_id)
+            is_valid, error_message = validate_bedrock_model(
+                bedrock_client, model_id, label=label
+            )
 
             if not is_valid:
                 self._plugin_log(
-                    f"Configured model '{model_id}' is not valid: {error_message}",
+                    f"Configured model '{label}' is not valid: {error_message}",
                     level=logging.WARNING,
                     target_type="source",
                     append_to_stream="stderr",
@@ -1013,6 +1016,25 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     # Client factory
     # ------------------------------------------------------------------
 
+    def _model_label(self, model_id: str) -> str:
+        """How the logs and the error text name ``model_id``: the configured ID
+        as the config file wrote it when the file read it from the environment
+        (config/environment_record.py), else the ID itself. A fallback model's
+        ID is ASH's own."""
+        if model_id != self.config.options.model_id:
+            return model_id
+        from automated_security_helper.config.environment_record import (
+            record_environment_references,
+        )
+
+        ash_config = getattr(self.context, "config", None)
+        shown = record_environment_references(
+            {"model_id": model_id},
+            getattr(ash_config, "_environment_references", ()) or (),
+            at=("reporters", "bedrock-summary-reporter", "options"),
+        )["model_id"]
+        return str(shown)
+
     def _make_model_client(self, bedrock_runtime: Any) -> BedrockModelClient:
         opts = self.config.options
         return BedrockModelClient(
@@ -1024,6 +1046,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             max_retries=opts.max_retries,
             base_delay=opts.base_delay,
             max_delay=opts.max_delay,
+            model_label=self._model_label(opts.model_id),
         )
 
     # ------------------------------------------------------------------
@@ -1234,7 +1257,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         client = self._make_model_client(bedrock_runtime)
 
         bedrock_client = boto3.client("bedrock", region_name=opts.aws_region)
-        is_valid, error_message = validate_bedrock_model(bedrock_client, opts.model_id)
+        label = self._model_label(opts.model_id)
+        is_valid, error_message = validate_bedrock_model(
+            bedrock_client, opts.model_id, label=label
+        )
         if not is_valid:
             if opts.enable_fallback_models:
                 prepared = self._prepare_prompt(user_message)
@@ -1250,7 +1276,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         "topP": opts.top_p,
                     },
                 )
-            return f"*Error: Primary model {opts.model_id} validation failed: {error_message}*"
+            return f"*Error: Primary model {label} validation failed: {error_message}*"
 
         prepared = builder.prepare_prompt(
             user_message,
@@ -1287,7 +1313,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """Try fallback models when the primary model fails."""
         fallback_model = get_fallback_model(failed_model_id)
         if not fallback_model or fallback_model == failed_model_id:
-            return f"*Error: No suitable fallback model found for {failed_model_id}*"
+            return (
+                "*Error: No suitable fallback model found for "
+                f"{self._model_label(failed_model_id)}*"
+            )
         ASH_LOGGER.info(f"Trying fallback model: {fallback_model}")
         is_valid, _err = validate_bedrock_model(bedrock_client, fallback_model)
         if not is_valid:
@@ -1348,6 +1377,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             max_retries=opts.max_retries,
             base_delay=opts.base_delay,
             max_delay=opts.max_delay,
+            model_label=self._model_label(model_id),
         )
         prompt_text = ""
         if messages and messages[0].get("content"):

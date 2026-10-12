@@ -250,6 +250,10 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigUnsetVariableError,
 )
+from automated_security_helper.config.environment_record import (
+    EnvironmentReference,
+    environment_references,
+)
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -904,6 +908,7 @@ def read_config_file(
     path: Path,
     expect: Optional[FileIdentity] = None,
     refuse_env: Optional[RefuseEnv] = None,
+    references: Optional[List[EnvironmentReference]] = None,
 ) -> Any:
     """Parse one config file, without resolving its `extends`.
 
@@ -913,12 +918,44 @@ def read_config_file(
     ``refuse_env`` refuses (by default, one an MCP client delivered) is refused
     if it uses ``!ENV``; see "Environment variables". JSON has no ``!ENV``.
     ``expect`` is passed to ``read_config_bytes``.
+
+    ``references``, when given, is extended with what the file read from the
+    environment, at paths in the file's own document. They are found by parsing
+    the text the file was read as a second time, with each reference left as
+    the file wrote it (``config/environment_record.py``); a YAML text that can
+    hold no reference is parsed once.
     """
-    path = Path(path)
+    data, found = _read_config_file(Path(path), expect, refuse_env)
+    if references is not None:
+        references.extend(found)
+    return data
+
+
+def read_config_file_and_references(
+    path: Path,
+    expect: Optional[FileIdentity] = None,
+    refuse_env: Optional[RefuseEnv] = None,
+) -> Tuple[Any, List[EnvironmentReference]]:
+    """``read_config_file``, and what the file read from the environment."""
+    found: List[EnvironmentReference] = []
+    data = read_config_file(
+        path, expect=expect, refuse_env=refuse_env, references=found
+    )
+    return data, found
+
+
+def _read_config_file(
+    path: Path,
+    expect: Optional[FileIdentity],
+    refuse_env: Optional[RefuseEnv],
+) -> Tuple[Any, List[EnvironmentReference]]:
     if path.name.endswith(".json"):
         # utf-8-sig: a leading byte order mark is dropped, as YAML and TOML drop
         # it; Windows PowerShell 5 writes one.
-        return json.loads(read_config_bytes(path, expect=expect).decode("utf-8-sig"))
+        return (
+            json.loads(read_config_bytes(path, expect=expect).decode("utf-8-sig")),
+            [],
+        )
     delivered = (refuse_env or config_is_client_delivered)(path)
     if path.name.endswith(".toml"):
         try:
@@ -952,22 +989,28 @@ def read_config_file(
             key = _toml_env_reference(document)
             if key is not None:
                 raise _env_not_resolved(path, f"key {key}")
-            return document
+            return document, []
         try:
-            return _resolve_toml_env(document)
+            resolved = _resolve_toml_env(document)
         except ASHConfigUnsetVariableError as exc:
             raise _unset_variable_in(path, exc) from None
+        return resolved, environment_references(document, resolved)
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
     try:
-        return load_yaml_config(
-            named_text_stream(
-                read_config_bytes(path, expect=expect).decode("utf-8"), path
-            ),
+        resolved = load_yaml_config(
+            named_text_stream(text, path),
             env="refuse" if delivered else "resolve",
         )
     except EnvReferenceNotResolved as exc:
         raise _env_not_resolved(path, f"line {exc.line}") from exc
     except ASHConfigUnsetVariableError as exc:
         raise _unset_variable_in(path, exc) from None
+    if delivered or ("$" not in text and "\\" not in text):
+        # No reference: one holds a "$", written as itself or, in a
+        # double-quoted scalar a file tags !ENV, as an escape.
+        return resolved, []
+    written = load_yaml_config(named_text_stream(text, path), env="written")
+    return resolved, environment_references(written, resolved)
 
 
 def _unset_variable_in(
@@ -1069,6 +1112,10 @@ class ResolvedConfigDocument:
     named: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
     names: Dict[Path, Tuple[Path, ...]] = field(default_factory=dict)
+    #: What the files of the chain read from the environment, each at the path
+    #: it holds in ``data``'s terms: a ``patch`` operation's value at the place
+    #: the operation puts it (``config/environment_record.py``).
+    environment_references: List[EnvironmentReference] = field(default_factory=list)
 
 
 #: The paths each file of a chain was reached by; see ``ResolvedConfigDocument``.
@@ -1106,6 +1153,8 @@ class _ChainState:
     names: Dict[Path, List[Path]] = field(default_factory=dict)
     #: For each base, the paths of the files above it in the chain.
     above: Dict[Path, List[Path]] = field(default_factory=dict)
+    #: ``ResolvedConfigDocument.environment_references``.
+    references: List[EnvironmentReference] = field(default_factory=list)
 
     def reached(self, real: Path, named: Path) -> None:
         spellings = self.names.setdefault(real, [])
@@ -1399,33 +1448,83 @@ def _apply_patch(document: Dict[str, Any], ops: Any, path: Path) -> Any:
             f"got {type(ops).__name__}"
         )
     result: Any = document
+    # The messages below name an entry's position, its op and its path, never a
+    # value the entry or the document holds: either can be one a file read from
+    # the environment.
     for index, op in enumerate(ops):
         if not isinstance(op, dict) or not isinstance(op.get("path"), str):
+            got = (
+                f"a mapping with keys {', '.join(sorted(map(str, op)))}"
+                if isinstance(op, dict)
+                else f"a {type(op).__name__}"
+            )
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where} must be a mapping with "
-                f"'op' and 'path', got {op!r}"
+                f"'op' and 'path', got {got}"
             )
         op_name = op.get("op")
         if not isinstance(op_name, str) or op_name not in _PATCH_OPS:
             raise ASHConfigSourceError(
-                f"'{PATCH_KEY}' entry {index} in {where} uses op {op.get('op')!r}; "
-                f"allowed ops are {', '.join(sorted(_PATCH_OPS))}"
+                f"'{PATCH_KEY}' entry {index} in {where} uses an op that is not "
+                f"one of the allowed ops, {', '.join(sorted(_PATCH_OPS))}"
             )
         normalized = dict(op, path=_normalize_pointer(result, op["path"]))
         try:
             result = jsonpatch.apply_patch(result, [normalized], in_place=False)
-        except jsonpatch.JsonPatchTestFailed as exc:
+        except jsonpatch.JsonPatchTestFailed:
             # jsonpatch's own message quotes the value it found, which may come
             # from a base the author of this file did not write.
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where}: the value at "
                 f"{op['path']!r} does not equal the value the test op gives"
-            ) from exc
+            ) from None
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
+            # jsonpatch's message quotes the document it patches.
             raise ASHConfigSourceError(
-                f"'{PATCH_KEY}' entry {index} in {where} ({op!r}) failed: {exc}"
-            ) from exc
+                f"'{PATCH_KEY}' entry {index} in {where} ({op_name} at "
+                f"{op['path']!r}) failed: {type(exc).__name__}, the path does not "
+                "fit the document it patches"
+            ) from None
     return result
+
+
+def _placed_references(
+    references: List[EnvironmentReference], data: Any
+) -> List[EnvironmentReference]:
+    """``references``, one file's, each at the path it holds once the file merges.
+
+    One under ``extends`` names a base, which is not part of the merged
+    configuration, and is left out. One in a ``patch`` operation's ``value`` is
+    moved to the operation's ``path``; a pointer ending in ``-`` (append) is a
+    list position like any other. Any other reference under ``patch`` sets no
+    value, and is left out too.
+    """
+    placed: List[EnvironmentReference] = []
+    for reference in references:
+        head = reference.path[:1]
+        if head == (EXTENDS_KEY,):
+            continue
+        if head != (PATCH_KEY,):
+            placed.append(reference)
+            continue
+        ops = data.get(PATCH_KEY) if isinstance(data, dict) else None
+        index = reference.path[1] if len(reference.path) > 2 else None
+        if (
+            not isinstance(ops, list)
+            or not isinstance(index, int)
+            or not 0 <= index < len(ops)
+            or reference.path[2] != "value"
+            or not isinstance(ops[index], dict)
+            or not isinstance(ops[index].get("path"), str)
+        ):
+            continue
+        pointer = ops[index]["path"]
+        segments: List[Any] = [
+            0 if segment == "-" or segment.isdigit() else _unescape(segment)
+            for segment in pointer.split("/")[1:]
+        ]
+        placed.append(reference.at((*segments, *reference.path[3:])))
+    return placed
 
 
 def _resolve(
@@ -1463,7 +1562,10 @@ def _resolve(
         # Read and judged as named rather than as `real`, so a refusal names the
         # path the caller gave and not the target of a symlink.
         env_refused = state.refuse_env(path)
-        data = read_config_file(path, expect=expect, refuse_env=_env_rule(env_refused))
+        read: List[EnvironmentReference] = []
+        data = read_config_file(
+            path, expect=expect, refuse_env=_env_rule(env_refused), references=read
+        )
     else:
         extending = stack[-1]
         if not is_regular_file(real):
@@ -1477,9 +1579,13 @@ def _resolve(
             env_refused_above or state.refuse_env(named) or state.refuse_env(real)
         )
         unquoted: Optional[str] = None
+        read = []
         try:
             data = read_config_file(
-                real, expect=expect, refuse_env=_env_rule(env_refused)
+                real,
+                expect=expect,
+                refuse_env=_env_rule(env_refused),
+                references=read,
             )
         except ASHConfigUnsetVariableError as exc:
             # A base can be named through an environment variable, so its path
@@ -1529,6 +1635,11 @@ def _resolve(
             )
 
     state.documents.setdefault(real, copy.deepcopy(data))
+    # In read order, so a file's own come before those of the bases it extends,
+    # which are read below. The order decides only which of two references at
+    # one position that resolved to the same text is recorded: the extending
+    # file's, whose value the merge keeps.
+    state.references.extend(_placed_references(read, data))
     state.reached(real, named)
     # The file that names a base chose it, so a base is judged by the paths of
     # the files above it too, as env_refused_above carries a refusal down.
@@ -1646,7 +1757,23 @@ def resolve_config_document(
         named=state.named,
         documents=state.documents,
         names=state.all_names(),
+        environment_references=state.references,
     )
+
+
+def load_config_with_references(
+    config_path: Path,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
+) -> AshConfig:
+    """``AshConfig.from_file``, keeping what the file and its bases read from the
+    environment (``AshConfig._environment_references``), for a caller that
+    writes the config out again (``config/environment_record.py``)."""
+    document = resolve_config_document(
+        Path(config_path), anchor_relative_paths=anchor_relative_paths
+    )
+    config = AshConfig.model_validate(document.data, strict=True)
+    config._environment_references = tuple(document.environment_references)
+    return config
 
 
 def load_config_document(

@@ -279,6 +279,36 @@
   config may read is unchanged: names beginning with `ASH_`, plus `AWS_REGION`,
   `AWS_DEFAULT_REGION` and `AWS_PROFILE`. A reference to any other name, with or
   without a default, is still left as written and never read.
+- **What ASH writes of a configuration holds a value read from the environment as
+  its reference, never the value.** A scan records its configuration in
+  `ash_aggregated_results.json`, and with `${VAR}` now read, that record held
+  the variable's value. `ash merge` then copied the value into the merged results,
+  and `--debug` printed it. Now the record holds each value and key a config file
+  read from the environment exactly as the file wrote it: `${VAR}`,
+  `${VAR:default}`, or `!ENV ${VAR}`, with any text after the reference. The
+  reference is replaced only at its own position, so another field that happens
+  to hold the same text keeps it. A reference whose variable is unset records the
+  default the file wrote, and one that resolves to nothing records null. A `scanners`
+  key read from the environment is recorded the same way in
+  `metadata.expected_scanners`, and the body an off-host reporter sends holds
+  references too. The scan itself, and the reports it renders, use the values.
+  `ash merge` and `ash report` do not read the environment for a recorded
+  reference. A free-text field loads back as the reference. A field that takes a
+  fixed choice, a boolean or a number cannot hold one, so those commands exit 3,
+  naming the field and the reference, unless `--config-overrides` or the file
+  `--config` names supplies the field. Any other reader of the results takes that
+  field's default, with a warning. Also changed:
+  - MCP `get_config` shows such a value as `<from ${VAR}>`.
+  - `ash config get` shows the reference.
+  - `ash config update` and `ash config wizard` write the reference back, tagged
+    `!ENV`.
+  - The profile copies the MCP server writes for a session hold the reference.
+    The scan reads the value from the environment when it loads the operator's
+    copy, and from the operator's copy for the copy a client patched.
+  - Debug and info lines that showed a config section, an override or the plugin
+    context now name the keys and never the values. Lines naming a reporter's
+    destination or a Bedrock model name the option or the reference instead.
+  - A `patch` operation that fails names its op and path and no value.
 - **`--mode container` and `--mode nix` refuse an unusable config before anything
   starts.** The config file the scan inside the image or Nix shell will use (`--config`,
   the file `ASH_CONFIG` names, or the one found in the source directory) is read on the

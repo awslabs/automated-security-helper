@@ -172,18 +172,20 @@ def test_the_scan_tool_judges_the_named_config_for_the_caller(own, target) -> No
 
 @pytest.mark.parametrize(
     "raw, shown",
-    [(True, f"${{{PROBE_VAR}:unset}}"), (False, PROBE)],
+    [(True, f"${{{PROBE_VAR}:unset}}"), (False, f"<from ${{{PROBE_VAR}:unset}}>")],
     ids=["raw", "resolved"],
 )
 def test_get_config_judges_the_named_config_for_the_caller(
     own, raw: bool, shown: str
 ) -> None:
-    """Raw shows an operator file's reference as written; resolved, its value."""
+    """Raw shows an operator file's reference as written; resolved, the value it
+    read as the reference, marked, never the value."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
 
     got = mcp_get_config(config_path=str(own), raw=raw, session_id=MINE)
 
     assert got.get("project_name") == shown, got
+    assert PROBE not in json.dumps(got), got
     assert got.get("fail_on_findings") is False, got
 
 

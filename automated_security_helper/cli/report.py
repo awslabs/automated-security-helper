@@ -249,6 +249,29 @@ def report_command(
         print(f"[red]Error loading results file: {e}[/red]")
         raise typer.Exit(1)
 
+    # A field the recorded configuration could not read, because the scan read
+    # it from the environment and the field cannot hold the reference recorded in
+    # its place, comes from the operator or refuses the report, as in ash merge
+    # (config/environment_record.py).
+    if model.ash_config is not None and model.ash_config._unread_references:
+        from automated_security_helper.cli.merge import named_config_document
+        from automated_security_helper.config.environment_record import (
+            supply_unread_references,
+        )
+
+        try:
+            model.ash_config = supply_unread_references(
+                model.ash_config,
+                overrides=list(config_overrides or []),
+                overrides_applied=False,
+                operator_config=ash_config,
+                operator_document=named_config_document(config),
+                command="ash report",
+            )
+        except ASHConfigValidationError as e:
+            print(f"[red]Invalid configuration: {escape_markup(str(e))}[/red]")
+            raise typer.Exit(3)
+
     # Find the reporter plugin
     reporter_plugins = ash_plugin_manager.plugin_modules(
         plugin_type="reporter",

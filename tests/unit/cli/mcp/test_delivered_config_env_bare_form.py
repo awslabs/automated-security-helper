@@ -100,4 +100,6 @@ def test_control_an_operator_config_still_resolves(server, reference):
 
     result = mcp_get_config(config_path=str(own), session_id=SESSION)
 
-    assert result.get("project_name") == VALUE, result
+    # The value read is shown as the reference, marked, never as the value.
+    assert result.get("project_name") == f"<from {reference}>", result
+    assert VALUE not in repr(result)

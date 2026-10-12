@@ -113,7 +113,7 @@ from automated_security_helper.utils.display_text import (
     escape_controls_in,
     path_spellings,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
 class LoggedResolutionWarning(str):
@@ -387,18 +387,18 @@ def _apply_config_override(
     # Parse the value
     parsed_value = _parse_config_value(value)
 
-    # Handle append mode for lists
+    # Handle append mode for lists. The log lines name the key, never the value,
+    # which can be a credential an override passes.
     if append_mode and final_key in current and isinstance(current[final_key], list):
         if isinstance(parsed_value, list):
             current[final_key].extend(parsed_value)
-            ASH_LOGGER.debug(f"Appended to list at {key_path}: {parsed_value}")
         else:
             current[final_key].append(parsed_value)
-            ASH_LOGGER.debug(f"Appended to list at {key_path}: {parsed_value}")
+        ASH_LOGGER.debug(f"Appended to the list at {key_path}", extra=NO_MARKUP)
     else:
         # Set the value
         current[final_key] = parsed_value
-        ASH_LOGGER.debug(f"Applied config override: {key_path}={parsed_value}")
+        ASH_LOGGER.debug(f"Applied a config override to {key_path}", extra=NO_MARKUP)
 
 
 def _parse_config_value(value: str) -> Any:
@@ -503,12 +503,18 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Convert back to AshConfig
     try:
-        return AshConfig.model_validate(config_dict)
+        updated = AshConfig.model_validate(config_dict)
     except ValidationError as e:
         raise ASHConfigValidationError(
             "Configuration is invalid after applying the requested overrides "
             f"{config_overrides}: {e}"
         ) from e
+    # What the config read from the environment, so a record of the overridden
+    # config still holds it as the file wrote it (config/environment_record.py),
+    # and the recorded fields it could not read, which an override may supply.
+    updated._environment_references = config._environment_references
+    updated._unread_references = config._unread_references
+    return updated
 
 
 def resolve_config(
@@ -653,6 +659,10 @@ def resolve_config(
     merged: List[Any] = []
     documents: Dict[Path, Any] = {}
     names: Dict[Path, Tuple[Path, ...]] = {}
+    # What every file a value of the config can come from read from the
+    # environment: the selected chain, the overlay, the default config's file and
+    # the operator's trusted base (AshConfig._environment_references).
+    references: List[Any] = []
     refuse_env = env_refused_for(
         remote_client, getattr(client_config_policy, "session_id", None)
     )
@@ -679,6 +689,24 @@ def resolve_config(
             if scanned_root is not None
             else (source_dir if source_dir is not None else Path.cwd()),
         )
+    # The copy of a profile a client patched holds each value the profile read
+    # from the environment as its reference; it is read from the operator's copy
+    # it was built from (cli/mcp/profile_registry.is_client_copy_of).
+    fill: List[Any] = []
+    if config_path is not None and trusted_config_path is not None:
+        from automated_security_helper.cli.mcp.profile_registry import (
+            is_client_copy_of,
+        )
+
+        if is_client_copy_of(config_path, trusted_config_path):
+            fill = list(
+                read_config_document(
+                    Path(trusted_config_path),
+                    confine_to=default_confinement_root(Path(trusted_config_path)),
+                    permit_base=permit_base,
+                ).environment_references
+            )
+            references.extend(fill)
     config = _resolve_config(
         config_path,
         source_dir,
@@ -695,10 +723,16 @@ def resolve_config(
         named=named,
         spelled=spelled,
         merged=merged,
+        references=references,
+        fill=fill,
     )
     if config is None:
         return config
+    if overlay is not None:
+        references.extend(overlay.environment_references)
     default_document = default_config_document()
+    if default_document is not None:
+        references.extend(default_document.environment_references)
     default_chain = list(default_document.chain) if default_document else []
     default_names = dict(default_document.names) if default_document else {}
     if not chain and default_document is not None:
@@ -768,10 +802,13 @@ def resolve_config(
         # Named in the warnings as the source of what is confined.
         in_tree = [*in_tree, Path("config_overrides")]
     if not in_tree:
+        config._environment_references = tuple(references)
         return config
     operator = _load_operator_config(
         trusted_config_path, source_dir, permit_base, operators_files
     )
+    if operator is not None:
+        references.extend(operator.environment_references)
     own_mode = False
     if (
         operator is not None
@@ -852,6 +889,7 @@ def resolve_config(
     )
     confine_honor_ignore_files(config, trusted, operator_overrides, in_tree, reason)
     confine_archive_limits(config, trusted, operator_overrides, in_tree)
+    config._environment_references = tuple(references)
     return config
 
 
@@ -1308,6 +1346,9 @@ class OperatorConfig(NamedTuple):
     named: List[Path]
     #: The same names by file (``ResolvedConfigDocument.names``).
     names: Dict[Path, Tuple[Path, ...]]
+    #: What those files read from the environment
+    #: (``ResolvedConfigDocument.environment_references``).
+    environment_references: Tuple[Any, ...] = ()
 
 
 def _load_operator_config(
@@ -1337,6 +1378,7 @@ def _load_operator_config(
         chain=list(document.chain),
         named=list(document.named),
         names=dict(document.names),
+        environment_references=tuple(document.environment_references),
     )
 
 
@@ -1524,6 +1566,8 @@ def _resolve_config(
     named: Optional[List[Path]] = None,
     spelled: Optional[List[Path]] = None,
     merged: Optional[List[Any]] = None,
+    references: Optional[List[Any]] = None,
+    fill: Sequence[Any] = (),
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
@@ -1531,8 +1575,11 @@ def _resolve_config(
     ``documents``, and the paths each was reached by to ``names``. It also
     appends the root config file's path as it was named (passed or discovered)
     to ``named``, every file read by the path that named it
-    (``ResolvedConfigDocument.named``) to ``spelled``, and the merged document,
-    before any override, to ``merged``.
+    (``ResolvedConfigDocument.named``) to ``spelled``, the merged document,
+    before any override, to ``merged``, and what the files read from the
+    environment to ``references``. ``fill`` is what the operator's copy of a
+    profile read from the environment, when the selected file is the copy a
+    client patched (``environment_record.fill_environment_references``).
     ``anchor_paths`` accepts the files whose relative paths are taken from their
     own directory (``config/operator_paths.py``).
     ``refuse_env`` decides which files of the chain resolve no ``!ENV``
@@ -1658,6 +1705,18 @@ def _resolve_config(
                 unquoted=bool(untrusted_config),
             )
             data = document.data
+            if fill:
+                from automated_security_helper.config.environment_record import (
+                    fill_environment_references,
+                )
+
+                # The documents too: the checks of who set what compare each
+                # file's values with the trusted base's.
+                data = fill_environment_references(data, fill)
+                document.documents = {
+                    path: fill_environment_references(text, fill)
+                    for path, text in document.documents.items()
+                }
             if overlay is not None and isinstance(data, dict):
                 # A document that is not a mapping is left as it is, so its
                 # validation error is still raised rather than replaced by the
@@ -1679,6 +1738,8 @@ def _resolve_config(
                 raise refused
             chain.extend(document.chain)
             documents.update(document.documents)
+            if references is not None:
+                references.extend(document.environment_references)
             if names is not None:
                 names.update(document.names)
             if named is not None:

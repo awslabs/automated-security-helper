@@ -121,10 +121,17 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 not_delivered_by_a_client,
             )
 
+            from automated_security_helper.config.config_sources import (
+                load_config_with_references,
+            )
+
             # The operator's file: a relative path in it is taken from its
             # directory, before the session's copy is written somewhere else
-            # (config/operator_paths.py).
-            cfg = AshConfig.from_file(
+            # (config/operator_paths.py). Read as AshConfig.from_file reads it,
+            # keeping what it read from the environment, so the session's copy
+            # holds each such value as the file wrote it and the scan reads it
+            # from the environment itself (materialize_session_config).
+            cfg = load_config_with_references(
                 path, anchor_relative_paths=not_delivered_by_a_client
             )
         except yaml.YAMLError as exc:
@@ -328,6 +335,35 @@ def is_call_profile_filename(name: str) -> bool:
     return _CALL_PROFILE_NAME.fullmatch(name) is not None
 
 
+def is_client_copy_of(config_path: Path | str, trusted_config_path: Path | str) -> bool:
+    """Whether ``config_path`` is the copy of a profile a client patched, in a
+    session's ``client-config/``, and ``trusted_config_path`` the operator's copy
+    it was built from, in the same session's ``config/``
+    (``materialize_session_binding``). Such a copy holds the values the profile
+    read from the environment as their references, which ``resolve_config``
+    fills from the operator's copy."""
+    from automated_security_helper.cli.mcp.sandbox import (
+        CLIENT_CONFIG_DIR_NAME,
+        CONFIG_DIR_NAME,
+    )
+
+    client, trusted = Path(config_path), Path(trusted_config_path)
+    if (
+        client.name != SESSION_CONFIG_FILENAME
+        or trusted.name != SESSION_CONFIG_FILENAME
+    ):
+        return False
+    if (
+        client.parent.name != CLIENT_CONFIG_DIR_NAME
+        or trusted.parent.name != CONFIG_DIR_NAME
+    ):
+        return False
+    try:
+        return client.parent.parent.resolve() == trusted.parent.parent.resolve()
+    except OSError:
+        return False
+
+
 def materialize_session_config(
     session_id: Optional[str],
     config: AshConfig,
@@ -429,7 +465,21 @@ def materialize_session_config(
     # another call writes it reads the old content or the new, never part of one.
     partial = config_dir / f".{filename}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
-        config.save(partial, exclude_unset=not client_patched)
+        # Each value the profile's files read from the environment is written as
+        # the file wrote it, never the value. The operator's copy tags it !ENV,
+        # and the scan reads it from the environment when it loads the copy. The
+        # client's copy, in a directory where !ENV is not resolved
+        # (config_sources), holds it as quoted text, which a scan fills from the
+        # operator's copy (is_client_copy_of, resolve_config).
+        if getattr(config, "_environment_references", ()):
+            config.save(
+                partial,
+                exclude_unset=not client_patched,
+                as_written=True,
+                env_tags=not client_patched,
+            )
+        else:
+            config.save(partial, exclude_unset=not client_patched)
         os.replace(partial, target)
     finally:
         partial.unlink(missing_ok=True)
@@ -463,6 +513,10 @@ def materialize_session_binding(
     from automated_security_helper.cli.mcp.sandbox import session_sandbox
 
     if patched is not None:
+        # The client's copy is built from the registered profile, so it holds the
+        # values that profile read from the environment where the client did not
+        # change them; it records them as the profile wrote them.
+        patched._environment_references = registered._environment_references
         config_path = materialize_session_config(
             session_id, patched, client_patched=True
         )

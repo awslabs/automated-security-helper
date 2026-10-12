@@ -11,6 +11,8 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializerFunctionWrapHandler,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -705,6 +707,20 @@ class ReportMetadata(BaseModel):
             )
 
 
+def _recorded_config(config: Any, data: Any) -> Any:
+    """``data``, a dump of ``config``, as a record of the config holds it: each
+    value and key the config's files read from the environment as the file
+    wrote it, never the value (config/environment_record.py)."""
+    references = getattr(config, "_environment_references", ()) if config else ()
+    if not references:
+        return data
+    from automated_security_helper.config.environment_record import (
+        record_environment_references,
+    )
+
+    return record_environment_references(data, references)
+
+
 class AshAggregatedResults(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
@@ -871,6 +887,21 @@ class AshAggregatedResults(BaseModel):
         _resolve_forward_refs()
         return super().model_validate_json(*args, **kwargs)
 
+    @field_validator("ash_config", mode="before")
+    @classmethod
+    def read_recorded_ash_config(cls, v: Any):
+        """A recorded configuration read back: a reference to the environment
+        that a field cannot hold reads as the field's default, with a warning,
+        and is noted for ash merge and ash report (config/environment_record.py).
+        Before pydantic validates the field, which would refuse the reference."""
+        if isinstance(v, dict):
+            from automated_security_helper.config.environment_record import (
+                load_recorded_config,
+            )
+
+            return load_recorded_config(v)
+        return v
+
     @field_validator("ash_config")
     @classmethod
     def validate_ash_config(cls, v: Any):
@@ -883,6 +914,37 @@ class AshAggregatedResults(BaseModel):
         if v is None:
             return None
         return AshConfig.model_validate(v)
+
+    @field_serializer("ash_config", mode="wrap")
+    def _record_ash_config(self, value: Any, handler: SerializerFunctionWrapHandler):
+        """The configuration as a record holds it: each value and key its files
+        read from the environment as the file wrote it, never the value
+        (config/environment_record.py). The model itself keeps the live
+        configuration, so what the run computes from it, its reports included,
+        does not change."""
+        return _recorded_config(value, handler(value))
+
+    @field_serializer("metadata", mode="wrap")
+    def _record_metadata(self, value: Any, handler: SerializerFunctionWrapHandler):
+        """``expected_scanners`` lists the configuration's ``scanners`` keys, so a
+        key read from the environment is recorded as the file wrote it there
+        too (``_record_ash_config``)."""
+        data = handler(value)
+        config = self.ash_config
+        references = getattr(config, "_environment_references", ()) if config else ()
+        if not references or not isinstance(data, dict):
+            return data
+        names = data.get("expected_scanners")
+        if not isinstance(names, list):
+            return data
+        from automated_security_helper.config.environment_record import (
+            recorded_names,
+        )
+
+        return {
+            **data,
+            "expected_scanners": recorded_names(names, references, ("scanners",)),
+        }
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
@@ -919,8 +981,13 @@ class AshAggregatedResults(BaseModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
+        # As a record of the config holds it (_record_ash_config): the off-host
+        # reporters send this dict.
         conf = (
-            self.ash_config.model_dump(by_alias=True, exclude_unset=True)
+            _recorded_config(
+                self.ash_config,
+                self.ash_config.model_dump(by_alias=True, exclude_unset=True),
+            )
             if self.ash_config is not None
             else None
         )

@@ -283,7 +283,7 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
 
 
 def validate_bedrock_model(
-    bedrock_client: Any, model_id: str
+    bedrock_client: Any, model_id: str, label: Optional[str] = None
 ) -> tuple[bool, Optional[str]]:
     """
     Validate that a Bedrock model is available and accessible.
@@ -291,10 +291,14 @@ def validate_bedrock_model(
     Args:
         bedrock_client: Boto3 Bedrock client
         model_id: The model ID to validate
+        label: How the log lines and the error message name the model, when not
+            by its ID: the reference a config file wrote for an ID it read from
+            the environment (config/environment_record.py).
 
     Returns:
         Tuple of (is_valid, error_message)
     """
+    shown = label or model_id
     try:
         # Get all available models
         available_models = get_available_models(bedrock_client)
@@ -307,14 +311,15 @@ def validate_bedrock_model(
 
         # Check if the requested model is in the available models
         if model_id in available_model_ids:
-            ASH_LOGGER.debug(f"Model {model_id} is available")
+            ASH_LOGGER.debug(f"Model {shown} is available")
             return True, None
 
         # If model not found directly, try to find a matching model ID (case insensitive)
         for available_id in available_model_ids:
             if available_id and model_id and available_id.lower() == model_id.lower():
                 ASH_LOGGER.debug(
-                    f"Found model {available_id} matching {model_id} (case insensitive)"
+                    f"Found model {available_id if label is None else 'one'} "
+                    f"matching {shown} (case insensitive)"
                 )
                 return True, None
 
@@ -324,16 +329,14 @@ def validate_bedrock_model(
                 model.get("inferenceType") == "INFERENCE_PROFILE"
                 and model.get("modelId") == model_id
             ):
-                ASH_LOGGER.debug(
-                    f"Model {model_id} is available as an inference profile"
-                )
+                ASH_LOGGER.debug(f"Model {shown} is available as an inference profile")
                 return True, None
 
         # Model not found in available models
         ASH_LOGGER.warning(
-            f"Model {model_id} not found in available models: {available_model_ids}"
+            f"Model {shown} not found in available models: {available_model_ids}"
         )
-        return False, f"Model {model_id} not found in available models"
+        return False, f"Model {shown} not found in available models"
 
     except botocore.exceptions.ClientError as e:
         error_code = e.response.get("Error", {}).get("Code")
@@ -342,11 +345,11 @@ def validate_bedrock_model(
         ASH_LOGGER.warning(f"Bedrock API error ({error_code}): {error_message}")
 
         if error_code == "AccessDeniedException":
-            return False, f"Access denied to model {model_id}: {error_message}"
+            return False, f"Access denied to model {shown}: {error_message}"
         elif error_code == "ResourceNotFoundException":
-            return False, f"Model {model_id} not found: {error_message}"
+            return False, f"Model {shown} not found: {error_message}"
         else:
-            return False, f"Error validating model {model_id}: {error_message}"
+            return False, f"Error validating model {shown}: {error_message}"
     except Exception as e:
-        ASH_LOGGER.warning(f"Unexpected error validating model {model_id}: {str(e)}")
-        return False, f"Unexpected error validating model {model_id}: {str(e)}"
+        ASH_LOGGER.warning(f"Unexpected error validating model {shown}: {str(e)}")
+        return False, f"Unexpected error validating model {shown}: {str(e)}"

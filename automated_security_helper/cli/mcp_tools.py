@@ -1782,9 +1782,16 @@ def mcp_get_config(
         file_identity,
         named_text_stream,
         read_config_bytes,
-        read_config_file,
+        read_config_file_and_references,
     )
-    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.default_config import (
+        default_config_document,
+        get_default_config,
+    )
+    from automated_security_helper.config.environment_record import (
+        environment_marker,
+        record_environment_references,
+    )
     from automated_security_helper.core.exceptions import (
         ASHConfigFieldDeniedError,
         ASHConfigEnvNotResolvedError,
@@ -1849,7 +1856,14 @@ def mcp_get_config(
             return _config_refusal(refusal, "get_config")
 
     if path is None:
-        return get_default_config().model_dump()
+        # The default config is the file ASH_CONFIG names, when it names one.
+        # Each value it read from the environment is shown as `<from ${VAR}>`.
+        default_document = default_config_document()
+        return record_environment_references(
+            get_default_config().model_dump(),
+            default_document.environment_references if default_document else (),
+            mark=environment_marker,
+        )
 
     # Which files resolve no !ENV for this caller: for a remote one, every file
     # the operator did not set aside, named or discovered; see "Environment
@@ -1866,9 +1880,12 @@ def mcp_get_config(
             # parser would unless the file uses !ENV, and refuses it then as a
             # scan of it would.
             if path.name.endswith((".toml", ".json")) or refuse_env(path):
-                return (
-                    read_config_file(path, expect=checked, refuse_env=refuse_env) or {}
+                # A TOML string read from the environment is shown as the file
+                # wrote it, as a YAML reference is below.
+                data, references = read_config_file_and_references(
+                    path, expect=checked, refuse_env=refuse_env
                 )
+                return record_environment_references(data, references) or {}
             # Any other YAML file shows a reference as written, without resolving
             # it, which read_config_file would do.
             text = read_config_bytes(path, expect=checked).decode("utf-8")
@@ -1939,7 +1956,14 @@ def mcp_get_config(
     except ASHConfigValidationError as exc:
         # After the arms above, which are ASHConfigValidationErrors too.
         return _config_load_failure(exc, path)
-    return resolved.model_dump()
+    # Each value the config's files read from the environment as `<from ${VAR}>`,
+    # the reference the file writes, never the value: the server's environment is
+    # not the client's.
+    return record_environment_references(
+        resolved.model_dump(),
+        resolved._environment_references,
+        mark=environment_marker,
+    )
 
 
 def mcp_validate_config(

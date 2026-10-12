@@ -234,6 +234,19 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   holds in YAML, TOML and `pyproject.toml` alike. A reference must also be the
   whole value, not part of a longer string.
 
+  The scan, and the reports it renders, use the value. What ASH writes of the
+  configuration holds the reference as the file wrote it instead: the
+  `ash_config` a scan records in `ash_aggregated_results.json`, the merged
+  results, what an off-host reporter sends, `ash config get`, and the MCP
+  `get_config` tool, which shows `<from ${VAR_NAME}>`. Debug output names a
+  section's keys, never its values. A reference whose variable is unset records
+  the default the file wrote. `ash merge` and `ash report` do not read the
+  environment for a recorded reference. A field that takes a fixed choice, a
+  boolean or a number, such as `global_settings.severity_threshold`, cannot hold
+  one, so they exit 3 and name the field until you supply it, as in
+  `--config-overrides 'global_settings.severity_threshold=MEDIUM'` or in the
+  file `--config` names.
+
   Under the MCP server, a configuration file an MCP client delivered may not use
   `!ENV` at all, whatever the name, and for a remote client neither may any other
   file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own `config/`

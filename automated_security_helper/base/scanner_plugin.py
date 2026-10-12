@@ -311,6 +311,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         return None
 
+    def _setting_names(self, config: Any) -> str:
+        """Which settings ``config``, this scanner's section, holds, never their
+        values, for the debug lines: a value can be one the config file read from
+        the environment, or a credential (``config/environment_record.py``)."""
+        from automated_security_helper.config.environment_record import (
+            setting_names,
+        )
+
+        ash_config = getattr(self.context, "config", None)
+        return setting_names(
+            config,
+            getattr(ash_config, "_environment_references", ()) or (),
+            at=("scanners", str(getattr(self.config, "name", "") or "")),
+        )
+
     def validate_plugin_dependencies(self) -> bool:
         """Check whether the scanner's command is available on PATH.
 
@@ -490,7 +505,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             level=logging.INFO,
         )
         self._plugin_log(
-            f"self.config: {self.config}",
+            f"self.config setting: {self._setting_names(self.config)}",
             target_type=target_type,
             level=logging.DEBUG,
         )
@@ -499,7 +514,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 config = config.model_dump(by_alias=True)
             self.config = self.config.__class__.model_validate(config)
         self._plugin_log(
-            f"config: {config}",
+            f"config setting: {self._setting_names(config)}",
             target_type=target_type,
             level=logging.DEBUG,
         )

@@ -21,7 +21,7 @@ from automated_security_helper.models.scan_results_container import (
     InputNotScanned,
     ScanResultsContainer,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import (
     refuse_links_below,
     sweep_writable,
@@ -353,7 +353,21 @@ class ScannerExecutor:
             scanner_config = scanner_plugin.config
             if scanner_config is None:
                 raise ValueError(f"Scanner {scanner_name} has no config")
-            ASH_LOGGER.debug(f"scanner_plugin.config: {scanner_config}")
+            # Which settings, never their values: a value can be one the config
+            # file read from the environment, or a credential.
+            from automated_security_helper.config.environment_record import (
+                setting_names,
+            )
+
+            ash_config = getattr(
+                getattr(scanner_plugin, "context", None), "config", None
+            )
+            names = setting_names(
+                scanner_config,
+                getattr(ash_config, "_environment_references", ()) or (),
+                at=("scanners", str(getattr(scanner_config, "name", "") or "")),
+            )
+            ASH_LOGGER.debug(f"scanner_plugin.config setting: {names}", extra=NO_MARKUP)
 
             for target_info in scan_targets:
                 scan_target = target_info["path"]

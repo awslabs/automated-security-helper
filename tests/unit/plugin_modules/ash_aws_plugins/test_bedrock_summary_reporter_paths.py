@@ -721,7 +721,7 @@ class TestFallbackModels:
         monkeypatch.setattr(f"{MODULE}.boto3.client", lambda *a, **k: object())
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
-            lambda client, model: (False, "not enabled"),
+            lambda client, model, label=None: (False, "not enabled"),
         )
         captured = {}
 
@@ -753,7 +753,7 @@ class TestFallbackModels:
         monkeypatch.setattr(f"{MODULE}.boto3.client", lambda *a, **k: object())
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
-            lambda client, model: (False, "not enabled"),
+            lambda client, model, label=None: (False, "not enabled"),
         )
 
         out = reporter._call_bedrock(RuntimeDouble(), "msg", "sys")

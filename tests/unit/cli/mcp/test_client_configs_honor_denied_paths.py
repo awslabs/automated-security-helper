@@ -457,10 +457,14 @@ def test_a_config_named_in_another_checkout_resolves_no_env(
     assert "server-only-value" not in json.dumps(refused)
 
     # Positive control: in a directory the operator set aside, the file is the
-    # operator's and resolves !ENV as before.
+    # operator's and resolves !ENV as before. get_config shows the value it read
+    # as the reference, marked, not the value.
     monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(other.parent))
     resolved = mcp_get_config(config_path=str(other), session_id=SESSION)
-    assert resolved.get("project_name") == "server-only-value", resolved
+    assert resolved.get("project_name") == "<from ${ASH_TEST_SERVER_VALUE:unset}>", (
+        resolved
+    )
+    assert "server-only-value" not in json.dumps(resolved)
 
 
 def test_a_link_a_client_delivered_is_the_clients_wherever_it_points(

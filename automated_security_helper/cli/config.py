@@ -25,13 +25,16 @@ from automated_security_helper.config.ash_config import (
     ConverterConfigSegment,
     ReporterConfigSegment,
     ScannerConfigSegment,
+    TaggedReference,
     load_config_yaml,
+    represent_tagged_reference,
 )
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
     describe_config_path,
     is_regular_file,
+    load_config_with_references,
     read_config_bytes,
     read_config_file,
 )
@@ -132,6 +135,9 @@ def _rewrite_refusal(config_path: Path) -> str | None:
 class IndentableYamlDumper(yaml.Dumper):
     def increase_indent(self, flow=False, indentless=False):
         return super(IndentableYamlDumper, self).increase_indent(flow, indentless)
+
+
+IndentableYamlDumper.add_representer(TaggedReference, represent_tagged_reference)
 
 
 @config_app.command()
@@ -295,13 +301,22 @@ def get(
             fg=typer.colors.RED,
         )
         raise typer.Exit(3)
+    from automated_security_helper.config.environment_record import (
+        record_environment_references,
+    )
+
     print(
         Syntax(
             code=yaml.dump(
-                resolved.model_dump(
-                    by_alias=True,
-                    exclude_defaults=False,
-                    exclude_none=False,
+                # Each value the config's files read from the environment as the
+                # file wrote it, as a scan's record of its config holds it.
+                record_environment_references(
+                    resolved.model_dump(
+                        by_alias=True,
+                        exclude_defaults=False,
+                        exclude_none=False,
+                    ),
+                    resolved._environment_references,
                 ),
                 Dumper=IndentableYamlDumper,
                 default_flow_style=False,
@@ -373,7 +388,9 @@ def update(
         typer.secho(f"Cannot update {config_path}: {refusal}", fg=typer.colors.RED)
         raise typer.Exit(1)
     try:
-        config = AshConfig.from_file(config_path=config_path)
+        # Keeping what the file reads from the environment, so the file is
+        # written back with each such value as its reference, not the value.
+        config = load_config_with_references(config_path)
     except Exception as e:
         typer.secho(f"Error loading config file: {e}", fg=typer.colors.RED)
         raise typer.Exit(1)
@@ -398,7 +415,8 @@ def update(
             # Split at the first equals sign
             key_path, value = mod.split("=", 1)
             _apply_config_override(config_dict, key_path, value)
-            logger.info(f"Applied modification: {key_path}={value}")
+            # The key only: the value can be a credential.
+            logger.info(f"Applied a modification to {key_path}")
         except ValueError:
             typer.secho(
                 f"Invalid modification format: {mod}. Expected format: key.path=value",
@@ -439,13 +457,24 @@ def update(
             "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json"
         )
 
-    # Add the updated config
+    # Add the updated config, each value the file read from the environment
+    # written as its reference, tagged !ENV, so the file reads it from the
+    # environment again (config/environment_record.py).
+    from automated_security_helper.config.environment_record import (
+        record_environment_references,
+    )
+
     config_strings.append(
         yaml.dump(
-            updated_config.model_dump(
-                by_alias=True,
-                exclude_defaults=False,
-                exclude_none=False,
+            record_environment_references(
+                updated_config.model_dump(
+                    by_alias=True,
+                    exclude_defaults=False,
+                    exclude_none=False,
+                ),
+                config._environment_references,
+                mark=TaggedReference,
+                whole_only=True,
             ),
             Dumper=IndentableYamlDumper,
             default_flow_style=False,
@@ -967,7 +996,9 @@ def wizard(
             )
         )
         try:
-            ash_config = AshConfig.from_file(config_path=config_path)
+            # Keeping what the file reads from the environment: the wizard shows
+            # and writes back each such value as its reference.
+            ash_config = load_config_with_references(config_path)
         except Exception as exc:
             # Refused, not replaced by the defaults: the wizard writes its result
             # back over this file, which would drop every setting it does not ask
@@ -987,10 +1018,19 @@ def wizard(
         )
         ash_config = AshConfig()
 
+    from automated_security_helper.config.environment_record import (
+        record_environment_references,
+    )
+
     # --- 1. Project name ---
+    # Offered as the file wrote it: a name read from the environment is shown,
+    # and kept, as its reference.
     project_name = typer.prompt(
         "Project name",
-        default=ash_config.project_name,
+        default=record_environment_references(
+            {"project_name": ash_config.project_name},
+            ash_config._environment_references,
+        )["project_name"],
     )
     ash_config.project_name = project_name
 
@@ -1104,17 +1144,24 @@ def wizard(
 
     config_strings.append(
         yaml.dump(
-            ash_config.model_dump(
-                by_alias=True,
-                exclude_defaults=False,
-                exclude_none=False,
-                exclude={
-                    "build": True,
-                    "mcp_resource_management": True,
-                    "scanners": scanner_exclusions,
-                    "reporters": reporter_exclusions,
-                    "converters": converter_exclusions,
-                },
+            # Each value the file read from the environment as its reference,
+            # tagged !ENV, so the file reads it from the environment again.
+            record_environment_references(
+                ash_config.model_dump(
+                    by_alias=True,
+                    exclude_defaults=False,
+                    exclude_none=False,
+                    exclude={
+                        "build": True,
+                        "mcp_resource_management": True,
+                        "scanners": scanner_exclusions,
+                        "reporters": reporter_exclusions,
+                        "converters": converter_exclusions,
+                    },
+                ),
+                ash_config._environment_references,
+                mark=TaggedReference,
+                whole_only=True,
             ),
             Dumper=IndentableYamlDumper,
             default_flow_style=False,

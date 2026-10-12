@@ -44,6 +44,17 @@ TAGGED = f"project_name: !ENV ${{{PROBE_VAR}:unset}}\n"
 UNTAGGED = f"project_name: ${{{PROBE_VAR}:unset}}\n"
 TOML = f'project_name = "${{{PROBE_VAR}:unset}}"\n'
 ENV_REFUSED = "config_env_not_resolved"
+# What get_config shows for the value a config read from the environment: the
+# reference, marked, and never the value.
+READ = f"<from ${{{PROBE_VAR}:unset}}>"
+
+
+def _assert_read(got: dict) -> None:
+    """get_config's config read ASH_ENV_PROBE from the environment, and shows it
+    as the reference, not the value."""
+    assert got.get("project_name") == READ, got
+    assert PROBE not in json.dumps(got), got
+
 
 ASHConfigEnvNotResolvedError = getattr(
     _exceptions,
@@ -226,8 +237,8 @@ def test_stdio_get_config_of_a_named_repo_config_resolves_env(stdio_repo):
     named = mcp_get_config(config_path=str(stdio_repo / ".ash" / ".ash.yaml"))
     discovered = mcp_get_config(search_dir=str(stdio_repo))
 
-    assert named.get("project_name") == PROBE, named
-    assert discovered.get("project_name") == PROBE, discovered
+    _assert_read(named)
+    _assert_read(discovered)
 
 
 def test_stdio_scan_with_a_named_repo_config_starts_and_resolves_env(stdio_repo):
@@ -353,7 +364,7 @@ def test_remote_set_aside_base_resolves_env_on_its_own(_server, set_aside_base):
 
     got = mcp_get_config(config_path=str(set_aside_base), session_id=SESSION)
 
-    assert got.get("project_name") == PROBE, got
+    _assert_read(got)
 
 
 def test_remote_set_aside_base_of_a_refused_root_is_refused(_server, set_aside_base):
@@ -450,7 +461,7 @@ def test_remote_operator_config_under_the_config_roots_resolves_env(_server):
     got = mcp_get_config(config_path=str(operator), session_id=SESSION)
     _, outcomes = _scan(_server["target"], operator, SESSION)
 
-    assert got.get("project_name") == PROBE, got
+    _assert_read(got)
     assert isinstance(outcomes[-1], AshConfig), outcomes
     assert outcomes[-1].project_name == PROBE
 
@@ -534,7 +545,7 @@ def test_an_operator_ash_config_resolves_env_for_a_remote_caller(_server, monkey
     # As the trusted base a client's config is held to, and the policy source.
     _, held = _scan(_server["target"], untrusted, SESSION)
 
-    assert got.get("project_name") == PROBE, got
+    _assert_read(got)
     assert isinstance(default[-1], AshConfig), default
     assert default[-1].project_name == PROBE
     assert isinstance(held[-1], AshConfig), held
@@ -592,7 +603,7 @@ def test_the_registered_profile_behind_a_session_resolves_env_for_a_remote_calle
     got = mcp_get_config(config_path=str(copy), session_id=SESSION)
     _, bound = _scan(_server["target"], copy, SESSION)
 
-    assert got.get("project_name") == PROBE, got
+    _assert_read(got)
     assert isinstance(bound[-1], AshConfig), bound
     assert bound[-1].project_name == PROBE
 
@@ -676,4 +687,4 @@ def test_stdio_named_repo_file_whose_base_uses_env_resolves(stdio_repo):
 
     got = mcp_get_config(config_path=str(root))
 
-    assert got.get("project_name") == PROBE, got
+    _assert_read(got)
