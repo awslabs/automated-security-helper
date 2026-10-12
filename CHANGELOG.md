@@ -829,7 +829,11 @@
   `--fail-on-findings` and the completeness gate on. The results file of such a run
   is no longer read; the row is `ERROR`, keeps the exit code, and its error names the
   code, the accepted set and the tool's stderr. Each target is judged by its own
-  run's exit code. A tool a signal ended is recorded as `128 + N`, as a shell
+  run's exit code, and its row reports that code: a target the scanner returns from
+  before its tool runs (an empty converted tree, missing dependencies, or a target
+  the sandbox refused) reports 0, where it had reported the previous target's code,
+  and cfn-nag's and npm-audit's invocations record the largest code of that target's
+  runs alone. A tool a signal ended is recorded as `128 + N`, as a shell
   reports it; its absolute value had put SIGHUP, SIGINT and SIGQUIT inside common
   success sets. A run ASH itself failed to carry out (an error in its own runner,
   not the tool's) is recorded as 127, like a tool that could not start, where it had
@@ -843,7 +847,8 @@
   scanned directory or in `TRIVY_EXIT_CODE` turns a trivy-repo run with findings into
   `ERROR`, since that exit cannot be told apart from trivy's own error exit; leave it
   unset. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
-  found"), so a snyk run with findings reports them instead of failing.
+  found"), so a snyk run with findings reports them instead of failing, and its row
+  and invocation keep the 1, which snyk-code used to reset to 0.
 
   More shapes that read as a clean scan are `ERROR` now, even with an accepted exit
   code. An empty results file (or JSON `null`) and SARIF with no run were graded

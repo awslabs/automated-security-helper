@@ -452,9 +452,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         # Top of the method, above all five early returns, for the reason the same pair
         # carries in cdk_nag_scanner: an initialization placed further down is inherited by
         # whichever return sits above it, and the executor then reads stale attributes from
-        # the previous target.
+        # the previous target. ``exit_code`` too: it is the largest code of this target's
+        # cfn_nag_scan runs, and the invocation below reports it.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.exit_code = 0
 
         tool_component = ToolComponent(
             name="cfn_nag",

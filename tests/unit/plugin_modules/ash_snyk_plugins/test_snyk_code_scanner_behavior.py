@@ -563,29 +563,27 @@ def test_exit_code_one_means_findings_not_failure(
     assert len(report.runs[0].results) == 1
 
 
-def test_post_scan_resets_exit_code_one_to_zero(scanner, snyk_on_path):
-    """The _post_scan override normalizes snyk's findings-detected exit code.
+def test_exit_code_one_is_kept_on_the_scanner_and_its_invocation(
+    scanner, snyk_on_path, populated_source, subprocess_double
+):
+    """An accepted 1 is recorded as the tool returned it, as bandit's 1 is."""
+    subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=1)
 
-    Called directly: scan() now resets the exit code at its start, so setting one
-    and reaching _post_scan through scan() would test that reset instead.
-    """
-    scanner.exit_code = 1
+    report = scanner.scan(target=populated_source, target_type="source")
 
-    scanner._post_scan(target=scanner.context.work_dir, target_type="converted")
-
-    assert scanner.exit_code == 0, (
-        "exit code 1 must be normalized to 0 so a findings-detected run is not "
-        "reported as a scanner failure"
-    )
+    assert scanner.exit_code == 1
+    assert report.runs[0].invocations[0].exitCode == 1
 
 
-def test_post_scan_leaves_other_exit_codes_alone(scanner, snyk_on_path):
-    """Only 1 is normalized; a genuine failure code is preserved."""
-    scanner.exit_code = 3
+def test_a_rejected_exit_code_is_kept_on_the_scanner(
+    scanner, snyk_on_path, populated_source, subprocess_double
+):
+    subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=2)
 
-    scanner._post_scan(target=scanner.context.work_dir, target_type="converted")
+    with pytest.raises(ScannerError):
+        scanner.scan(target=populated_source, target_type="source")
 
-    assert scanner.exit_code == 3
+    assert scanner.exit_code == 2
 
 
 def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):

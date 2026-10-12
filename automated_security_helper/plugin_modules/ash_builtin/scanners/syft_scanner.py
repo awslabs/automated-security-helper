@@ -239,6 +239,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Per target; see ScannerPluginBase.scan().
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (

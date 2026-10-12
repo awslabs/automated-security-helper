@@ -949,6 +949,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Per target; see ScannerPluginBase.scan().
+        self.exit_code = 0
         tool_component = ToolComponent(
             name="detect-secrets",
             version=self.tool_version,

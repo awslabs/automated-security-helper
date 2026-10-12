@@ -763,10 +763,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """Template scan: preamble → _execute_scan → read result → inject invocation → postamble.
 
         Subclasses with bespoke logic (file-iteration, Python-API scanners) should
-        override this method directly and leave _execute_scan unimplemented.
+        override this method directly and leave _execute_scan unimplemented, and
+        start it with the same ``exit_code`` reset as this one.
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Per target. One plugin instance scans source and then converted, and
+        # _process_command_response keeps the largest code any run of the instance
+        # returned, so without this a target that returns before its tool runs (an
+        # empty tree, missing dependencies) reports the previous target's code.
+        self.exit_code = 0
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(

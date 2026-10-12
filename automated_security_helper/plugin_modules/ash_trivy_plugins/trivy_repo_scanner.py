@@ -636,6 +636,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         Returns:
             dict: Scan results
         """
+        # Per target; see ScannerPluginBase.scan().
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (

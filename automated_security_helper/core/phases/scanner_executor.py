@@ -367,6 +367,10 @@ class ScannerExecutor:
                 # Set when the scanner's tool reports that a content database it
                 # matches against does not exist; see below.
                 databases_absent: List[str] = []
+                # Whether scan() was called on this target. The plugin's exit_code
+                # belongs to the last target it scanned, so a target it never
+                # scanned (disabled, or refused by the sandbox) keeps the row's 0.
+                scan_called = False
                 scanner_config_name: str = (
                     str(scanner_config.name)
                     if scanner_config
@@ -442,6 +446,7 @@ class ScannerExecutor:
                             heartbeat.start()
                             with sandbox_scope(sandbox):
                                 try:
+                                    scan_called = True
                                     raw_results = scanner_plugin.scan(
                                         target=scan_target,
                                         config=scanner_config,
@@ -676,7 +681,8 @@ class ScannerExecutor:
                             "a dict"
                         )
 
-                    container.exit_code = getattr(scanner_plugin, "exit_code", 0)
+                    if scan_called:
+                        container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 
                     # Carried across the same way exit_code is, so the field is closed for
                     # every container rather than only for the falsy-return branch above. A

@@ -36,6 +36,10 @@ The second half runs each scanner's real class through ``ScannerExecutor`` with 
 the tool replaced, at ``_run_subprocess``: the stand-in writes a well-formed, empty
 results file where the scanner reads it and returns a chosen exit code. A rejected
 code is an ERROR row; an accepted code with the same file is PASSED (the controls).
+
+The last part runs two targets, source then converted, through one plugin instance,
+as a scan does. ``_process_command_response`` keeps the largest code any run of the
+instance returned, so each target's row is checked against the code of its own run.
 """
 
 from __future__ import annotations
@@ -105,8 +109,7 @@ EXIT_CODE_TABLE = {
     ),
 }
 
-#: Scanners whose real class is run through the executor below. snyk-code is left
-#: out: it needs a token and checks its exit code itself.
+#: Scanners whose real class is run through the executor below.
 EXECUTED = [
     "bandit",
     "checkov",
@@ -116,7 +119,18 @@ EXECUTED = [
     "trivy-repo",
     "syft",
     "ferret-scan",
+    "snyk-code",
 ]
+
+#: Rejected codes left out of the one-target error cases. snyk exits 3 when it finds
+#: no project it supports; what that means for a row is the scanner's own decision,
+#: and the two-target snyk case below holds whichever way it is graded.
+GRADED_BY_THE_SCANNER = {"snyk-code": {3}}
+
+
+def _rejected(name: str) -> list[int]:
+    return sorted(EXIT_CODE_TABLE[name][2] - GRADED_BY_THE_SCANNER.get(name, set()))
+
 
 EMPTY_SARIF = json.dumps(
     {
@@ -163,22 +177,30 @@ def plugin_context(tmp_path):
     )
 
 
-_OUTPUT_FLAGS = ("--output", "--sarif-output", "--output-file", "-o")
+_OUTPUT_FLAGS = (
+    "--output",
+    "--sarif-output",
+    "--output-file",
+    "-o",
+    "--sarif-file-output",
+)
 
 
 def _results_paths(command, results_dir: Path):
     """Paths in ``command`` that name a file under ``results_dir``.
 
-    Covers ``--output PATH``, ``--output=PATH`` and syft's ``--output FORMAT=PATH``.
+    Covers ``--output PATH``, ``--output=PATH``, snyk's ``--sarif-file-output=PATH``
+    and syft's ``--output FORMAT=PATH``.
     """
     root = str(results_dir)
     paths = []
     for index, part in enumerate(str(p) for p in command):
         values = []
+        flag, _, inline = part.partition("=")
         if part in _OUTPUT_FLAGS and index + 1 < len(command):
             values.append(str(command[index + 1]))
-        elif part.startswith("--output="):
-            values.append(part.split("=", 1)[1])
+        elif inline and flag in _OUTPUT_FLAGS:
+            values.append(inline)
         for value in values:
             if not value.startswith(root) and "=" in value:
                 value = value.split("=", 1)[1]
@@ -187,11 +209,30 @@ def _results_paths(command, results_dir: Path):
     return paths
 
 
-def _row(plugin_context, monkeypatch, name: str, exit_code: int):
-    """The scanner's row after one run whose tool exits ``exit_code``."""
+def _rows(plugin_context, monkeypatch, name: str, runs):
+    """The scanner's rows after one executor call over source, then converted.
+
+    ``runs`` holds one ``(exit code, results file content)`` pair per target, in
+    that order, on one plugin instance. A ``None`` in place of a pair leaves the
+    converted tree empty, so the scanner has nothing to run there.
+    """
     scanner = _scanner_class(name)(context=plugin_context)
-    content = EMPTY_CYCLONEDX if name == "syft" else EMPTY_SARIF
     captured = {}
+    targets = [{"path": plugin_context.source_dir, "type": "source"}]
+    by_type = {"source": runs[0]}
+    if len(runs) > 1:
+        targets.append({"path": plugin_context.work_dir, "type": "converted"})
+        by_type["converted"] = runs[1]
+        if runs[1] is not None:
+            (plugin_context.work_dir / "converted.py").write_text("total = 2 + 2\n")
+
+    original_pre_scan = scanner._pre_scan
+
+    def pre_scan(*args, **kwargs):
+        captured["target_type"] = kwargs["target_type"]
+        return original_pre_scan(*args, **kwargs)
+
+    monkeypatch.setattr(scanner, "_pre_scan", pre_scan)
 
     if hasattr(scanner, "_execute_scan"):
         original = scanner._execute_scan
@@ -204,13 +245,16 @@ def _row(plugin_context, monkeypatch, name: str, exit_code: int):
         monkeypatch.setattr(scanner, "_execute_scan", capture)
 
     def tool(command, results_dir=None, *args, **kwargs):
+        run = by_type[captured["target_type"]]
+        assert run is not None, "the tool ran on a target left empty"
+        exit_code, content = run
         if "results_file" in captured:
-            targets = [captured["results_file"]]
+            paths = [captured.pop("results_file")]
         else:
-            targets = _results_paths(command, Path(scanner.results_dir))
-        for target in targets:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            paths = _results_paths(command, Path(scanner.results_dir))
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
         response = {
             "returncode": exit_code,
             "stdout": "",
@@ -227,17 +271,23 @@ def _row(plugin_context, monkeypatch, name: str, exit_code: int):
     # The content-database age check runs the scanner's real binary; it is not
     # what is under test here.
     monkeypatch.setattr(executor, "_assess_content_databases", lambda *a, **k: None)
-    (row,) = executor._execute_scanner(
-        str(scanner.config.name),
-        scanner,
-        [{"path": plugin_context.source_dir, "type": "source"}],
-    )
-    return row
+    rows = executor._execute_scanner(str(scanner.config.name), scanner, targets)
+    return {row.target_type: row for row in rows}
+
+
+def _empty_results(name: str) -> str:
+    return EMPTY_CYCLONEDX if name == "syft" else EMPTY_SARIF
+
+
+def _row(plugin_context, monkeypatch, name: str, exit_code: int):
+    """The scanner's row after one run whose tool exits ``exit_code``."""
+    rows = _rows(plugin_context, monkeypatch, name, [(exit_code, _empty_results(name))])
+    return rows["source"]
 
 
 @pytest.mark.parametrize(
     "name, exit_code",
-    [(name, code) for name in EXECUTED for code in sorted(EXIT_CODE_TABLE[name][2])],
+    [(name, code) for name in EXECUTED for code in _rejected(name)],
 )
 def test_a_rejected_exit_code_is_an_error_row(
     plugin_context, monkeypatch, name, exit_code
@@ -268,3 +318,397 @@ def test_an_accepted_exit_code_with_no_findings_is_passed(
         f"{name} exiting {exit_code} with no findings was graded {row.status.value}; "
         f"errors: {row.errors!r}"
     )
+
+
+# Two targets, source then converted, through one plugin instance.
+
+
+def _one_finding_sarif(uri: str) -> str:
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {"name": "tool", "rules": [{"id": "example-rule"}]}
+                    },
+                    "results": [
+                        {
+                            "ruleId": "example-rule",
+                            "level": "error",
+                            "message": {"text": "example finding"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": uri},
+                                        "region": {"startLine": 1},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "name, exit_code",
+    [(name, code) for name in EXECUTED for code in _rejected(name)],
+)
+def test_a_rejected_exit_code_after_an_accepted_one_is_an_error_row(
+    plugin_context, monkeypatch, name, exit_code
+):
+    """Source exits the largest code the scanner accepts, converted a code it rejects.
+
+    For grype that is 2 and then 1, and the largest code across both runs, 2, is one
+    grype accepts.
+    """
+    accepted = max(EXIT_CODE_TABLE[name][1])
+    content = _empty_results(name)
+
+    rows = _rows(
+        plugin_context, monkeypatch, name, [(accepted, content), (exit_code, content)]
+    )
+
+    assert rows["source"].status == ScannerStatus.PASSED, rows["source"].errors
+    assert rows["converted"].status == ScannerStatus.ERROR, (
+        f"{name}'s converted run exited {exit_code}, which it rejects, after a "
+        f"source run that exited {accepted}; the row was graded "
+        f"{rows['converted'].status.value}"
+    )
+    assert rows["converted"].exit_code == exit_code
+
+
+@pytest.mark.parametrize(
+    "name, exit_code",
+    [(name, code) for name in EXECUTED for code in _rejected(name)],
+)
+def test_an_accepted_exit_code_after_a_rejected_one_is_graded_on_its_own(
+    plugin_context, monkeypatch, name, exit_code
+):
+    content = _empty_results(name)
+
+    rows = _rows(
+        plugin_context, monkeypatch, name, [(exit_code, content), (0, content)]
+    )
+
+    assert rows["source"].status == ScannerStatus.ERROR
+    assert rows["converted"].status == ScannerStatus.PASSED, (
+        f"{name}'s converted run exited 0 after a source run that exited "
+        f"{exit_code}; the row was graded {rows['converted'].status.value}, "
+        f"errors: {rows['converted'].errors!r}"
+    )
+    assert rows["converted"].exit_code == 0
+
+
+#: Scanners that start each target at exit code 0. snyk-code is not listed: its
+#: scan() keeps the code it holds until its tool's run records a new one.
+RESET_PER_TARGET = [name for name in EXECUTED if name != "snyk-code"]
+
+
+@pytest.mark.parametrize("name", RESET_PER_TARGET)
+def test_a_target_with_nothing_to_scan_does_not_report_the_previous_exit_code(
+    plugin_context, monkeypatch, name
+):
+    """The converted tree is empty, so the scanner returns before running its tool."""
+    rejected = min(_rejected(name))
+
+    rows = _rows(
+        plugin_context,
+        monkeypatch,
+        name,
+        [(rejected, _empty_results(name)), None],
+    )
+
+    assert rows["source"].exit_code == rejected
+    assert rows["converted"].exit_code == 0, (
+        f"{name} ran nothing on the empty converted tree, and its row reports "
+        f"exit code {rows['converted'].exit_code}, the source run's"
+    )
+    assert rows["converted"].status == ScannerStatus.PASSED
+
+
+def test_snyk_code_grades_the_converted_run_on_its_own_after_a_source_exit_3(
+    plugin_context, monkeypatch
+):
+    """Source exits 3 (no supported project), converted exits 0 with one finding.
+
+    Whatever exit 3 makes of the source row, the converted row is graded on its own
+    run: its finding is counted and its exit code is 0.
+    """
+    rows = _rows(
+        plugin_context,
+        monkeypatch,
+        "snyk-code",
+        [(3, EMPTY_SARIF), (0, _one_finding_sarif("converted.py"))],
+    )
+
+    converted = rows["converted"]
+    assert converted.finding_count == 1, (converted.status, converted.errors)
+    assert converted.exit_code == 0
+    assert converted.status not in (ScannerStatus.ERROR, ScannerStatus.SKIPPED)
+
+
+def test_snyk_code_exit_1_with_a_finding_is_a_finding_not_an_error(
+    plugin_context, monkeypatch
+):
+    """snyk exits 1 when it found issues; the row counts them and keeps the code.
+
+    PASSED or FAILED is then the severity gate's call on the finding.
+    """
+    row = _rows(
+        plugin_context,
+        monkeypatch,
+        "snyk-code",
+        [(1, _one_finding_sarif("app.py"))],
+    )["source"]
+
+    assert row.status not in (ScannerStatus.ERROR, ScannerStatus.SKIPPED), row.errors
+    assert row.finding_count == 1
+    assert row.exit_code == 1
+
+
+def test_a_target_the_sandbox_refused_does_not_report_the_previous_exit_code(
+    plugin_context, monkeypatch
+):
+    """The sandbox refuses the converted target, so nothing runs on it."""
+    from automated_security_helper.core.phases import scanner_executor
+    from automated_security_helper.utils.sandbox import SandboxUnavailable
+
+    original_scope = scanner_executor.scanner_sandbox_scope
+
+    def scope(plugin, context, target):
+        if Path(target) == plugin_context.work_dir:
+            raise SandboxUnavailable("no backend for this target")
+        return original_scope(plugin, context, target)
+
+    monkeypatch.setattr(scanner_executor, "scanner_sandbox_scope", scope)
+
+    rows = _rows(
+        plugin_context,
+        monkeypatch,
+        "bandit",
+        [(2, EMPTY_SARIF), (0, EMPTY_SARIF)],
+    )
+
+    assert rows["source"].exit_code == 2
+    assert rows["converted"].status == ScannerStatus.MISSING
+    assert rows["converted"].exit_code == 0, (
+        "nothing ran on the refused target, and its row reports exit code "
+        f"{rows['converted'].exit_code}, the source run's"
+    )
+
+
+# The scanners that are not in the table: they run their tool once per template or
+# lockfile, or run ASH's own worker.
+
+_SCANNERS = f"{_MODULES}.ash_builtin.scanners"
+OTHER_SCANNERS = {
+    "cfn-nag": f"{_SCANNERS}.cfn_nag_scanner.CfnNagScanner",
+    "npm-audit": f"{_SCANNERS}.npm_audit_scanner.NpmAuditScanner",
+    "cdk-nag": f"{_SCANNERS}.cdk_nag_scanner.CdkNagScanner",
+    "detect-secrets": f"{_SCANNERS}.detect_secrets_scanner.DetectSecretsScanner",
+}
+
+
+def _other_scanner(name: str, plugin_context):
+    module, _, attribute = OTHER_SCANNERS[name].rpartition(".")
+    return getattr(importlib.import_module(module), attribute)(context=plugin_context)
+
+
+def _execute(plugin_context, monkeypatch, scanner, targets):
+    monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
+    executor = ScannerExecutor(
+        plugin_context=plugin_context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+    monkeypatch.setattr(executor, "_assess_content_databases", lambda *a, **k: None)
+    rows = executor._execute_scanner(str(scanner.config.name), scanner, targets)
+    return {row.target_type: row for row in rows}
+
+
+def _two_targets(plugin_context):
+    return [
+        {"path": plugin_context.source_dir, "type": "source"},
+        {"path": plugin_context.work_dir, "type": "converted"},
+    ]
+
+
+def _respond_by_target(scanner, responses):
+    """A ``_run_subprocess`` stand-in that answers by the target being scanned.
+
+    Every run of these scanners writes below ``results_dir/<target type>``. The code
+    is recorded as the real method records it.
+    """
+
+    def run(command, results_dir=None, *args, **kwargs):
+        target_type = Path(results_dir).relative_to(scanner.results_dir).parts[0]
+        response = dict(responses[target_type])
+        scanner._process_command_response(response)
+        return response
+
+    return run
+
+
+CFN_TEMPLATE = """Resources:
+  ExampleQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: example-queue
+"""
+
+
+def _cfn_nag_sarif(results) -> str:
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "cfn_nag", "rules": [{"id": "W48"}]}},
+                    "results": results,
+                }
+            ],
+        }
+    )
+
+
+def test_cfn_nag_grades_the_converted_target_on_its_own_runs(
+    plugin_context, monkeypatch
+):
+    """cfn_nag exits with its count of failing violations: 1 on source, 0 converted."""
+    (plugin_context.source_dir / "queue.yaml").write_text(CFN_TEMPLATE)
+    (plugin_context.work_dir / "queue.yaml").write_text(CFN_TEMPLATE)
+    scanner = _other_scanner("cfn-nag", plugin_context)
+    finding = {
+        "ruleId": "W48",
+        "level": "warning",
+        "message": {"text": "example finding"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "queue.yaml"},
+                    "region": {"startLine": 3},
+                }
+            }
+        ],
+    }
+    responses = {
+        "source": {"stdout": _cfn_nag_sarif([finding]), "stderr": "", "returncode": 1},
+        "converted": {"stdout": _cfn_nag_sarif([]), "stderr": "", "returncode": 0},
+    }
+    monkeypatch.setattr(
+        scanner, "_run_subprocess", _respond_by_target(scanner, responses)
+    )
+
+    rows = _execute(plugin_context, monkeypatch, scanner, _two_targets(plugin_context))
+
+    assert rows["source"].exit_code == 1
+    converted = rows["converted"]
+    assert converted.exit_code == 0, (
+        f"cfn_nag exited 0 on the converted template, and the row reports "
+        f"{converted.exit_code}, the source run's"
+    )
+    (invocation,) = converted.raw_results.runs[0].invocations
+    assert invocation.exitCode == 0
+    assert invocation.executionSuccessful is True
+
+
+def _npm_project(root: Path) -> None:
+    (root / "package.json").write_text(
+        json.dumps({"name": "example-app", "version": "1.0.0"})
+    )
+    (root / "package-lock.json").write_text(
+        json.dumps({"name": "example-app", "lockfileVersion": 3})
+    )
+
+
+NPM_AUDIT_WITH_ONE_ADVISORY = {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+        "unlisted_pkg": {
+            "name": "unlisted_pkg",
+            "severity": "moderate",
+            "isDirect": True,
+            "via": [
+                {
+                    "source": 1,
+                    "name": "unlisted_pkg",
+                    "dependency": "unlisted_pkg",
+                    "title": "Example advisory",
+                    "url": "https://allowed.example/advisories/1",
+                    "severity": "moderate",
+                    "range": "<1.0.1",
+                }
+            ],
+            "effects": [],
+            "range": "<1.0.1",
+            "nodes": ["node_modules/unlisted_pkg"],
+            "fixAvailable": True,
+        }
+    },
+}
+NPM_AUDIT_WITH_NONE = {"auditReportVersion": 2, "vulnerabilities": {}}
+
+
+def test_npm_audit_grades_the_converted_target_on_its_own_runs(
+    plugin_context, monkeypatch
+):
+    """npm audit exits 1 with an advisory on source and 0 with none on converted."""
+    _npm_project(plugin_context.source_dir)
+    _npm_project(plugin_context.work_dir)
+    scanner = _other_scanner("npm-audit", plugin_context)
+    responses = {
+        "source": {
+            "stdout": json.dumps(NPM_AUDIT_WITH_ONE_ADVISORY),
+            "stderr": "",
+            "returncode": 1,
+        },
+        "converted": {
+            "stdout": json.dumps(NPM_AUDIT_WITH_NONE),
+            "stderr": "",
+            "returncode": 0,
+        },
+    }
+    monkeypatch.setattr(
+        scanner, "_run_subprocess", _respond_by_target(scanner, responses)
+    )
+
+    rows = _execute(plugin_context, monkeypatch, scanner, _two_targets(plugin_context))
+
+    assert rows["source"].exit_code == 1
+    assert rows["source"].finding_count == 1
+    converted = rows["converted"]
+    assert converted.exit_code == 0, (
+        f"npm audit exited 0 on the converted lockfile, and the row reports "
+        f"{converted.exit_code}, the source run's"
+    )
+    (invocation,) = converted.raw_results.runs[0].invocations
+    assert invocation.exitCode == 0
+
+
+@pytest.mark.parametrize("name", sorted(OTHER_SCANNERS))
+def test_an_exit_code_held_from_an_earlier_target_is_not_reported_for_an_empty_one(
+    plugin_context, monkeypatch, name
+):
+    """The instance holds 2 from an earlier target; this target's tree is empty.
+
+    cdk-nag and detect-secrets run ASH's own worker and never record a tool's code,
+    so the code is set on the instance here, as an earlier target's runs leave it.
+    """
+    scanner = _other_scanner(name, plugin_context)
+    scanner.exit_code = 2
+
+    rows = _execute(
+        plugin_context,
+        monkeypatch,
+        scanner,
+        [{"path": plugin_context.work_dir, "type": "converted"}],
+    )
+
+    row = rows["converted"]
+    assert row.exit_code == 0, (
+        f"{name} ran nothing on the empty tree, and its row reports exit code "
+        f"{row.exit_code}"
+    )
+    assert row.status != ScannerStatus.ERROR, row.errors

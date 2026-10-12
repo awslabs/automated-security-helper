@@ -625,8 +625,14 @@ def test_execution_successful_treats_zero_and_one_as_success(
 ):
     """cfn_nag exits 1 when it finds violations, so 1 is still a success."""
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
-    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif())
-    scanner.exit_code = exit_code
+
+    def run(self, **kwargs):
+        # The code is recorded as the real _run_subprocess records it.
+        response = {"stdout": cfn_nag_sarif(), "stderr": "", "returncode": exit_code}
+        self._process_command_response(response)
+        return response
+
+    subprocess_double.side_effect = run
 
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 

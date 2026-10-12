@@ -113,6 +113,12 @@ keeps the largest code any of its runs returned), and `_refuse_rejected_exit_cod
 raises `ScannerError` naming the code, the accepted set and the tool's stderr when
 the code is not in `success_exit_codes`.
 
+The executor scans the source tree and then the converted tree with one plugin
+instance, and records `exit_code` on each target's row. Start an override with
+`self.exit_code = 0`, as the template does, so a target it returns from before its
+tool runs (an empty tree, missing dependencies) does not report the previous
+target's code.
+
 ## Scanner Plugin Configuration
 
 Define a configuration class for your scanner:

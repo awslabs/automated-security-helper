@@ -1048,6 +1048,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # targets_attempted stays None, no claim, except offline (_skip_offline).
         self.targets_attempted = None
         self.inputs_not_scanned = []
+        # Per target, and before the report below records it: the largest code of
+        # this target's audits. See ScannerPluginBase.scan().
+        self.exit_code = 0
         tool_component = ToolComponent(
             name="npm-audit",
             version=self.tool_version,

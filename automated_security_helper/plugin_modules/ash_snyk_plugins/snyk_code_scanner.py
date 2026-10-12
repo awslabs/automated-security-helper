@@ -365,15 +365,3 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         except Exception as e:
             # Check if there are useful error details
             raise ScannerError(f"Snyk Code scan failed: {str(e)}")
-
-    def _post_scan(self, target, target_type):
-        # Snyk returns 1 on a successful scan when actionable items are detected
-        if self.exit_code == 1:
-            self._plugin_log(
-                "Snyk scan completed with actionable items detected (1).",
-                target_type=target_type,
-                level=logging.INFO,
-            )
-            self.exit_code = 0  # Reset exit code to 0 for successful scan
-
-        return super()._post_scan(target, target_type)

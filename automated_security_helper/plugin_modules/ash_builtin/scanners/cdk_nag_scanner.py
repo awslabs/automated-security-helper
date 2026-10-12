@@ -851,9 +851,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # third-party ones -- implements. Threading the container through it is a breaking API
         # change, and stashing it on ``self`` instead would be the same shared mutable state
         # wearing a different name.
+        #
+        # ``exit_code`` is per-call state by the same argument; see
+        # ScannerPluginBase.scan().
         self.targets_attempted = 0
         self.targets_failed = 0
         self.errors = []
+        self.exit_code = 0
 
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
