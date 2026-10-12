@@ -387,3 +387,24 @@ def test_ferret_always_gets_an_explicit_config_outside_the_tree(tmp_path):
     passed = Path(values[0])
     assert not passed.resolve().is_relative_to(source.resolve())
     assert passed.read_text().strip() == "{}"
+
+
+def test_ferret_gets_only_the_operators_config_when_one_is_named(tmp_path):
+    """ASH's empty config replaces a missing one; it is never passed beside the operator's."""
+    from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+        FerretScanScanner,
+        FerretScannerConfig,
+    )
+
+    source = _tree(tmp_path, "")
+    operator = _outside(tmp_path, "ferret.yaml")
+    config = resolve_config(source_dir=source)
+    scanner = FerretScanScanner(
+        config=FerretScannerConfig(
+            options={"config_file": str(operator), "use_default_config": False}
+        ),
+        context=_context(source, tmp_path, config),
+    )
+    argv = scanner._resolve_arguments(source, tmp_path / "results.sarif")
+    values = [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == "--config"]
+    assert values == [str(operator.resolve())]
