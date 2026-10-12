@@ -40,6 +40,7 @@ from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     OperatorPath,
     operator_path,
+    operator_paths,
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
@@ -128,11 +129,27 @@ def _scanner_path(scanner: str, option: str, *, outside_tree: bool) -> ScannerPa
     return ScannerPath(scanner, option, _scanner_option(scanner, option), outside_tree)
 
 
-#: The path options of actionlint, cfn-lint, gitleaks, zizmor, trivy and
-#: trivy-repo, each as its scanner checks it. actionlint's ``shellcheck`` and
+def _scanner_list_option(scanner: str, option: str) -> PathOption:
+    """A list of paths, set with one entry and read back by its first."""
+    return PathOption(
+        f"{scanner}.{option}",
+        lambda value: {"scanners": {scanner: {"options": {option: [value]}}}},
+        lambda config: (_options(config, scanner).get(option) or [None])[0],
+        lambda value: f"scanners.{scanner}.options.{option}={json.dumps([value])}",
+    )
+
+
+#: The path options of actionlint, cfn-guard, cfn-lint, gitleaks, zizmor, trivy
+#: and trivy-repo, each as its scanner checks it. actionlint's ``shellcheck`` and
 #: ``pyflakes`` are not here: a bare name there is a program looked up on PATH.
 SCANNER_PATHS: List[ScannerPath] = [
     _scanner_path("actionlint", "config_file", outside_tree=False),
+    ScannerPath(
+        "cfn-guard",
+        "rules_paths",
+        _scanner_list_option("cfn-guard", "rules_paths"),
+        outside_tree=False,
+    ),
     _scanner_path("cfn-lint", "config_file", outside_tree=True),
     _scanner_path("gitleaks", "config_file", outside_tree=False),
     _scanner_path("gitleaks", "baseline_path", outside_tree=False),
@@ -437,10 +454,17 @@ def test_a_home_relative_or_absolute_path_is_left_as_written(
 # --------------------------------------------------------------------------- #
 
 
-def _chosen(
-    config: AshConfig, path: ScannerPath, value: Any, source: Path
-) -> OperatorPath:
-    """What ``config_trust`` hands the scanner for ``value``, asked as it asks."""
+def _chosen(config: AshConfig, path: ScannerPath, source: Path) -> OperatorPath:
+    """What ``config_trust`` hands the scanner for the option, asked as it asks.
+
+    A list (cfn-guard's ``rules_paths``) goes through ``operator_paths`` whole,
+    as the scanner passes it, and its first entry is returned.
+    """
+    value = _options(config, path.scanner).get(path.name)
+    if isinstance(value, list):
+        return operator_paths(
+            config, path.key, value, source, outside_tree=path.outside_tree
+        )[0]
     return operator_path(
         config, path.key, value, source, outside_tree=path.outside_tree
     )
@@ -487,7 +511,7 @@ def test_the_scanner_is_given_the_file_where_the_operator_set_it(
         else:
             config = resolve_config(config_path=operator, source_dir=repo)
 
-    chosen = _chosen(config, path, path.option.read(config), repo)
+    chosen = _chosen(config, path, repo)
 
     assert chosen.path == wanted.resolve(), chosen
     assert chosen.path != decoy.resolve()
@@ -530,8 +554,59 @@ def test_a_config_in_the_tree_is_left_as_written_and_is_not_the_operators(
         config_path=project, source_dir=repo, trusted_config_path=operator
     )
 
-    value = path.option.read(config)
-    assert Path(str(value)) == Path("tools/named.cfg")
-    chosen = _chosen(config, path, value, repo)
+    assert Path(str(path.option.read(config))) == Path("tools/named.cfg")
+    chosen = _chosen(config, path, repo)
     assert chosen.path is None
     assert chosen.refusal == NOT_THE_OPERATORS
+
+
+def test_a_relative_rules_path_appended_by_an_override_is_taken_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``key+=entry`` adds one entry to the list, anchored as a whole list is."""
+    repo = _repo(tmp_path)
+    decoy = _touch(repo / "rules" / "mine.guard")
+    workdir = tmp_path / "ci"
+    wanted = _touch(workdir / "rules" / "mine.guard")
+    monkeypatch.chdir(workdir)
+
+    config = resolve_config(
+        source_dir=repo,
+        config_overrides=["scanners.cfn-guard.options.rules_paths+=rules/mine.guard"],
+    )
+
+    entries = _options(config, "cfn-guard")["rules_paths"]
+    assert len(entries) == 1
+    assert _same_file(entries[0], wanted), entries
+    assert not _same_file(entries[0], decoy)
+
+
+def test_a_relative_rules_path_a_patch_appends_is_taken_from_its_files_directory(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    _touch(repo / "rules" / "mine.guard")
+    absolute = _touch(tmp_path / "shared" / "org.guard")
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {
+            "scanners": {
+                "cfn-guard": {"options": {"rules_paths": [absolute.as_posix()]}}
+            },
+            "patch": [
+                {
+                    "op": "add",
+                    "path": "/scanners/cfn-guard/options/rules_paths/-",
+                    "value": "rules/mine.guard",
+                }
+            ],
+        },
+    )
+    wanted = _touch(operator.parent / "rules" / "mine.guard")
+
+    config = resolve_config(config_path=operator, source_dir=repo)
+
+    entries = _options(config, "cfn-guard")["rules_paths"]
+    assert len(entries) == 2
+    assert entries[0] == absolute.as_posix()
+    assert _same_file(entries[1], wanted), entries

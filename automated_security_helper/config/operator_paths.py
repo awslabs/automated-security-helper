@@ -36,6 +36,9 @@ The options (``SCANNER_PATH_OPTIONS``, ``SCANNER_RULES_OPTIONS``):
 * ``config_file`` of actionlint, bandit, cfn-lint, checkov, ferret-scan, gitleaks,
   grype, syft, trivy, trivy-repo and zizmor;
 * gitleaks' ``baseline_path``;
+* each entry of cfn-guard's ``rules_paths``, a list of rules files and
+  directories, whether the list is set whole, appended to with ``key+=`` or a
+  ``patch`` ``add`` at ``.../rules_paths/-``;
 * detect-secrets' ``baseline_file``, and the ``file://`` entries of its
   ``scan_settings.plugins_used`` and ``filters_used``;
 * trivy's and trivy-repo's ``ignore_file`` and ``secret_config_file``, and
@@ -52,8 +55,8 @@ directory, as the scanner's own check has it.
 A file inside the scanned tree, or one an MCP client delivered, is left as
 written. Such a file does not choose these options: most are replaced by the
 operator's value (``tool_config_trust``, ``sandbox_grants``), and the scanners
-of the rest (actionlint, cfn-lint, gitleaks, trivy, trivy-repo's ``config_file``
-and ``module_dir``, zizmor) use the value only when
+of the rest (actionlint, cfn-guard, cfn-lint, gitleaks, trivy, trivy-repo's
+``config_file`` and ``module_dir``, zizmor) use the value only when
 ``utils/config_trust.set_by_operator`` finds the operator's equal to it. Either
 way the comparison is with the operator's anchored value, so a repository file
 that names a same-named file of its own no longer matches the operator's.
@@ -88,11 +91,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 #: Scanner options whose value names a file or directory the scanner's tool
-#: reads, by scanner. actionlint's ``shellcheck`` and ``pyflakes`` are not here:
-#: a bare name there is a program looked up on PATH, not a path.
+#: reads, or is a list of such paths (cfn-guard's ``rules_paths``), by scanner.
+#: actionlint's ``shellcheck`` and ``pyflakes`` are not here: a bare name there
+#: is a program looked up on PATH, not a path.
 SCANNER_PATH_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "actionlint": ("config_file",),
     "bandit": ("config_file",),
+    "cfn-guard": ("rules_paths",),
     "cfn-lint": ("config_file",),
     "checkov": ("config_file",),
     "detect-secrets": ("baseline_file",),
@@ -193,6 +198,13 @@ def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) ->
     return candidate
 
 
+def _anchored_path_option(value: Any, base_dir: Path) -> Any:
+    """A ``SCANNER_PATH_OPTIONS`` value anchored: one path, or each path of a list."""
+    if isinstance(value, list):
+        return [anchored_path(entry, base_dir) for entry in value]
+    return anchored_path(value, base_dir)
+
+
 def _anchored_file_entry(value: Any, base_dir: Path) -> Any:
     """A ``file://<path>[::<function>]`` entry with a relative path made absolute."""
     if not isinstance(value, str) or not value.startswith(_FILE_SCHEME):
@@ -220,7 +232,9 @@ def _anchor_options(key: str, options: Dict[str, Any], base_dir: Path) -> None:
         if _scanner_matches(key, scanner):
             for name in names:
                 for spelling in _spellings(options, name):
-                    options[spelling] = anchored_path(options[spelling], base_dir)
+                    options[spelling] = _anchored_path_option(
+                        options[spelling], base_dir
+                    )
     for scanner, names in SCANNER_RULES_OPTIONS.items():
         if _scanner_matches(key, scanner):
             for name in names:

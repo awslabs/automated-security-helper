@@ -192,8 +192,10 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
         List[str],
         Field(
             description=(
-                "Your own cfn-guard rules: .guard files or directories of them, "
-                "relative to the source directory. Evaluated in addition to "
+                "Your own cfn-guard rules: .guard files or directories of them. A "
+                "relative path is taken from the directory of the config file that "
+                "sets it, or from the working directory for --config-overrides, not "
+                "from the source directory. Evaluated in addition to "
                 "rule_sets. Honored only when set by --config-overrides or a config "
                 "file outside the scanned tree: cfn-guard prints a rules file it "
                 "cannot parse, so a path the scanned repository chose could put any "

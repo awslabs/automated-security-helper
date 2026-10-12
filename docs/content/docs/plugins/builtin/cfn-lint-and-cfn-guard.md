@@ -159,8 +159,10 @@ scanners:
       rule_sets:
         - wa-Security-Pillar
         - cis-aws-benchmark-level-1
-      # Your own .guard files or directories, relative to the source directory.
-      # Evaluated in addition to rule_sets; set rule_sets: [] to use only these.
+      # Your own .guard files or directories. A relative path is taken from the
+      # directory of this config file (from the working directory for
+      # --config-overrides). Evaluated in addition to rule_sets; set
+      # rule_sets: [] to use only these.
       rules_paths:
         - policy/guard
       # Seconds each per-template cfn-guard run may take.
@@ -171,7 +173,7 @@ A rule-set name with a `.guard` extension or characters outside letters, digits,
 
 `rule_sets` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree. A narrower set drops findings before ASH sees them: `wa-Reliability-Pillar` alone turns the 24 findings on ASH's test template into 9, losing every public-access, encryption and logging finding. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning and `wa-Security-Pillar` is evaluated.
 
-`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree; a path the operator names may be inside the scanned tree. The scanned repository decides what is at such a path, so one that leads out of the tree through a symbolic link in it, to a file or a directory, makes the scanner MISSING and is not read. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning, and if `rule_sets` is empty as well, cfn-guard evaluates the default `wa-Security-Pillar` set instead of nothing. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
+`rules_paths` is honored only when you set it as the operator, with `--config-overrides` or an ASH config file outside the scanned tree; a path the operator names may be inside the scanned tree. A relative entry is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides` (`rules_paths=[...]` or `rules_paths+=<path>`), not from the source directory (see [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings)). The scanned repository decides what is at such a path, so one that leads out of the tree through a symbolic link in it, to a file or a directory, makes the scanner MISSING and is not read. Set by an ASH config inside the tree, or by an MCP client, it is ignored with a warning, and if `rule_sets` is empty as well, cfn-guard evaluates the default `wa-Security-Pillar` set instead of nothing. cfn-guard prints a rules file it cannot parse, all of it, in its error, so a path the scanned repository chose could otherwise put any file the scan can read into the report.
 
 For a directory, ASH collects the files cfn-guard would read from it: `.guard` and `.ruleset` files at any depth, case-sensitively, not entering symlinked subdirectories. cfn-guard follows a symlinked rules file, so one that resolves outside the directory you named is refused with a warning; a link that stays inside it is read. ASH reads each file itself and gives cfn-guard a copy under the scanner's results directory (`cfn-guard-rules/`), which is also why `rules_paths` needs no sandbox grant. A directory with no rules files selects nothing, and when nothing else is selected the scanner is MISSING ("no cfn-guard rules are selected"): cfn-guard given such a directory would report a clean run. A `rules_paths` entry that does not exist, a named file that is not a regular file, or a subdirectory that cannot be listed also makes the scanner MISSING.
 

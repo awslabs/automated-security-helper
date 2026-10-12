@@ -388,9 +388,17 @@ def _cfnlintrc(path: Path, rules: Path) -> Path:
 
 
 def _scan_with_tree_config(
-    tmp_path: Path, tree_config: dict, *extra: str, scanners: str = "cfn-lint"
+    tmp_path: Path,
+    tree_config: dict,
+    *extra: str,
+    scanners: str = "cfn-lint",
+    cwd: Path | None = None,
 ):
-    """``ash scan`` with no --config, so the tree's .ash/.ash.yaml is the config."""
+    """``ash scan`` with no --config, so the tree's .ash/.ash.yaml is the config.
+
+    ``cwd`` is where ASH runs, which a relative --config-overrides path is
+    taken from.
+    """
     source = tmp_path / "repo"
     if not source.exists():
         shutil.copytree(FIXTURE_REPO, source)
@@ -425,6 +433,7 @@ def _scan_with_tree_config(
         text=True,
         timeout=900,
         env={**os.environ, "ASH_OFFLINE": "true"},
+        cwd=cwd,
     )
     return proc, output
 
@@ -880,6 +889,9 @@ def test_an_operator_rules_path_in_the_tree_cannot_be_a_link_out_of_it(tmp_path,
         "--config-overrides",
         f'scanners.cfn-guard.options.rules_paths=["{value}"]',
         scanners="cfn-guard",
+        # A relative override is taken from the working directory, so running
+        # from the source directory makes this name the tree's path.
+        cwd=source,
     )
 
     log = proc.stdout[-3000:] + proc.stderr[-3000:]
