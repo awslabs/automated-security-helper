@@ -224,6 +224,16 @@ _ZIP_DIRECTORY_ENTRY = b"PK\x01\x02"
 _ZIP_DIRECTORY_ENTRY_BYTES = 46
 
 
+def _zipfile_private(name: str) -> Any:
+    """A private name of zipfile's, looked up so a Python without it raises KeyError.
+
+    The type stubs do not declare zipfile's private names. Looked up at call time,
+    a missing one fails the archive it is needed for, a failed input, rather than
+    the converter's import.
+    """
+    return vars(zipfile)[name]
+
+
 def _zip_end_record(handle: BinaryIO) -> Optional[List[Any]]:
     """The zip's end-of-central-directory record as zipfile reads it, or None.
 
@@ -235,7 +245,7 @@ def _zip_end_record(handle: BinaryIO) -> Optional[List[Any]]:
     every Python ASH supports, 3.10 to 3.14; a Python without it fails the archive.
     """
     try:
-        return zipfile._EndRecData(handle)
+        return _zipfile_private("_EndRecData")(handle)
     except (OSError, zipfile.BadZipFile):
         return None
 
@@ -258,10 +268,10 @@ def _zip_has_more_entries_than(handle: BinaryIO, limit: int) -> bool:
     end_record = _zip_end_record(handle)
     if not end_record:
         return False
-    if end_record[zipfile._ECD_ENTRIES_TOTAL] > limit:
+    if end_record[_zipfile_private("_ECD_ENTRIES_TOTAL")] > limit:
         return True
-    directory_bytes = end_record[zipfile._ECD_SIZE]
-    start = end_record[zipfile._ECD_LOCATION] - directory_bytes
+    directory_bytes = end_record[_zipfile_private("_ECD_SIZE")]
+    start = end_record[_zipfile_private("_ECD_LOCATION")] - directory_bytes
     if start < 0:
         return False
     handle.seek(start)
