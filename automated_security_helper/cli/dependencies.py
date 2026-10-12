@@ -6,11 +6,10 @@
 import logging
 import os
 import platform
-import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional, Sequence
+from typing import Annotated, List, Optional
 
 import typer
 
@@ -49,6 +48,7 @@ from automated_security_helper.utils.python_child import (
     empty_directory,
     python_child,
     runs_module_or_code,
+    uv_child_overrides,
 )
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
@@ -214,69 +214,6 @@ def get_architecture() -> str:
         return "arm64"
     else:
         return "unknown"
-
-
-#: uv options that come before the subcommand and take a value (uv 0.12).
-_UV_OPTIONS_WITH_A_VALUE = frozenset(
-    {
-        "--allow-insecure-host",
-        "--cache-dir",
-        "--color",
-        "--config-file",
-        "--directory",
-        "--project",
-        "--python-preference",
-    }
-)
-
-
-def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
-    """The environment a uv command needs to find no project or ``.venv`` near it.
-
-    Measured with uv 0.12.22: ``uv pip`` and ``uv run`` run the python of a ``.venv``
-    in the directory they start in or any parent, and ``uv run`` builds a project it
-    finds there, running the project's build backend. The empty start directory
-    keeps uv out of the scanned tree only while the system's temporary directory is
-    outside it, so a uv command also gets:
-
-    - ``UV_NO_PROJECT=1``, unless it names a ``--project`` itself;
-    - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``--python``,
-      ``-p``, ``--system``) or the operator set ``UV_PYTHON`` or
-      ``UV_SYSTEM_PYTHON``.
-
-    ``uv tool`` commands and ``uvx`` get nothing: they read neither, and an
-    interpreter there would change which Python the tool's environment is built on.
-    Neither does ``UV_NO_CONFIG`` help, which only stops uv reading ``uv.toml``.
-    """
-    if not argv:
-        return {}
-    name = re.split(r"[\\/]", argv[0])[-1].lower().removesuffix(".exe")
-    if name != "uv":
-        return {}
-    rest = list(argv[1:])
-    subcommand = None
-    index = 0
-    while index < len(rest):
-        arg = rest[index]
-        if arg in _UV_OPTIONS_WITH_A_VALUE:
-            index += 2
-            continue
-        if not arg.startswith("-"):
-            subcommand = arg
-            break
-        index += 1
-    if subcommand in (None, "tool"):
-        return {}
-    overrides: Dict[str, str] = {}
-    if not any(a == "--project" or a.startswith("--project=") for a in rest):
-        overrides["UV_NO_PROJECT"] = "1"
-    names_interpreter = any(
-        a in ("--python", "-p", "--system") or a.startswith("--python=") for a in rest
-    )
-    operator_chose = os.environ.get("UV_PYTHON") or os.environ.get("UV_SYSTEM_PYTHON")
-    if not names_interpreter and not operator_chose:
-        overrides["UV_PYTHON"] = sys.executable
-    return overrides
 
 
 def run_command(args: List[str], shell: bool = False):

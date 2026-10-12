@@ -27,8 +27,6 @@ uv uses the interpreter that started it.
 
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -38,60 +36,27 @@ from typing import List
 import pytest
 
 from automated_security_helper.cli import dependencies as dependencies_module
+from tests.utils.planted_uv import (
+    PIP_LIST,
+    RUN,
+    clear_uv_environment,
+    plant_project,
+    plant_venv,
+    uv_binary,
+)
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="the planted .venv python is a shell script"
 )
 
-
-def _uv() -> str:
-    beside = Path(sys.executable).with_name("uv")
-    found = str(beside) if beside.is_file() else shutil.which("uv")
-    if found is None:
-        pytest.skip("no uv binary")
-    return found
-
-
-def _plant_venv(repo: Path, marker: Path) -> None:
-    """A ``.venv`` whose python appends to ``marker`` and then runs ASH's."""
-    bin_dir = repo / ".venv" / "bin"
-    bin_dir.mkdir(parents=True)
-    python = bin_dir / "python"
-    python.write_text(
-        f'#!/bin/sh\necho venv >> "{marker}"\nexec "{sys.executable}" "$@"\n',
-        encoding="utf-8",
-    )
-    python.chmod(0o755)
-    (bin_dir / "python3").symlink_to("python")
-    version = ".".join(map(str, sys.version_info[:3]))
-    (repo / ".venv" / "pyvenv.cfg").write_text(
-        f"home = {Path(sys.executable).parent}\n"
-        f"include-system-site-packages = false\nversion = {version}\n",
-        encoding="utf-8",
-    )
-
-
-def _plant_project(repo: Path, marker: Path) -> None:
-    """A project whose build backend appends to ``marker`` when uv builds it."""
-    (repo / "pyproject.toml").write_text(
-        '[project]\nname = "planted-project"\nversion = "0.0.1"\n\n'
-        '[build-system]\nrequires = []\nbuild-backend = "planted_backend"\n'
-        'backend-path = ["."]\n',
-        encoding="utf-8",
-    )
-    (repo / "planted_backend.py").write_text(
-        f"open({str(marker)!r}, 'a').write('project\\n')\n", encoding="utf-8"
-    )
+_uv = uv_binary
+_plant_venv = plant_venv
+_plant_project = plant_project
 
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
-    for key in list(os.environ):
-        if key.startswith("UV_") and key not in ("UV_CACHE_DIR", "UV_OFFLINE"):
-            monkeypatch.delenv(key)
-    for key in ("VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONSAFEPATH"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("UV_OFFLINE", "1")
+    clear_uv_environment(monkeypatch)
     path = tmp_path / "repo"
     path.mkdir()
     return path
@@ -108,19 +73,9 @@ def _through_the_installer(argv: List[str], repo: Path, monkeypatch) -> None:
 
 
 CASES = [
-    pytest.param(["pip", "list"], _plant_venv, "venv", id="uv-pip-list-venv"),
-    pytest.param(
-        ["run", "--offline", "python", "-c", "pass"],
-        _plant_venv,
-        "venv",
-        id="uv-run-venv",
-    ),
-    pytest.param(
-        ["run", "--offline", "python", "-c", "pass"],
-        _plant_project,
-        "project",
-        id="uv-run-project",
-    ),
+    pytest.param(PIP_LIST, _plant_venv, "venv", id="uv-pip-list-venv"),
+    pytest.param(RUN, _plant_venv, "venv", id="uv-run-venv"),
+    pytest.param(RUN, _plant_project, "project", id="uv-run-project"),
 ]
 
 

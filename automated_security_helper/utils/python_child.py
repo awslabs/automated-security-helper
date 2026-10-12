@@ -32,17 +32,23 @@ package manager that reads settings from its working directory (npm's project
 ``.npmrc``, the Gemfile ``gem install -g`` reads, Bundler's ``.bundle/config``) does
 not read the scanned repository's. The user's own settings, in HOME or set
 globally, still apply.
+
+:func:`uv_child_overrides` is the environment a ``uv`` command needs on top, because
+uv looks for a project and a ``.venv`` in every parent directory as well. Both the
+installer and a scanner's own commands (``PluginBase._run_subprocess``) apply it.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional, Sequence
+from typing import Dict, Iterator, List, Optional, Sequence
 
 #: What makes the interpreter skip the working directory, where it can.
 _SAFE_PATH_FLAGS: List[str] = ["-P"] if sys.version_info >= (3, 11) else []
@@ -126,3 +132,66 @@ def runs_module_or_code(argv: Sequence[str]) -> bool:
         elif not arg.startswith("-") or arg == "-":
             return False
     return False
+
+
+#: uv options that come before the subcommand and take a value (uv 0.12).
+_UV_OPTIONS_WITH_A_VALUE = frozenset(
+    {
+        "--allow-insecure-host",
+        "--cache-dir",
+        "--color",
+        "--config-file",
+        "--directory",
+        "--project",
+        "--python-preference",
+    }
+)
+
+
+def uv_child_overrides(argv: Sequence[str]) -> Dict[str, str]:
+    """The environment a uv command needs to find no project or ``.venv`` near it.
+
+    Measured with uv 0.12.22: ``uv pip`` and ``uv run`` run the python of a ``.venv``
+    in the directory they start in or any parent, and ``uv run`` builds a project it
+    finds there, running the project's build backend. A scanner's commands start in
+    the scanned tree, and the installer's empty start directory keeps uv out of it
+    only while the system's temporary directory is outside it, so a uv command gets:
+
+    - ``UV_NO_PROJECT=1``, unless it names a ``--project`` itself;
+    - ``UV_PYTHON`` set to ASH's interpreter, unless it names one (``--python``,
+      ``-p``, ``--system``) or the operator set ``UV_PYTHON`` or
+      ``UV_SYSTEM_PYTHON``.
+
+    ``uv tool`` commands and ``uvx`` get nothing: they read neither, and an
+    interpreter there would change which Python the tool's environment is built on.
+    Neither does ``UV_NO_CONFIG`` help, which only stops uv reading ``uv.toml``.
+    """
+    if not argv:
+        return {}
+    name = re.split(r"[\\/]", argv[0])[-1].lower().removesuffix(".exe")
+    if name != "uv":
+        return {}
+    rest = list(argv[1:])
+    subcommand = None
+    index = 0
+    while index < len(rest):
+        arg = rest[index]
+        if arg in _UV_OPTIONS_WITH_A_VALUE:
+            index += 2
+            continue
+        if not arg.startswith("-"):
+            subcommand = arg
+            break
+        index += 1
+    if subcommand in (None, "tool"):
+        return {}
+    overrides: Dict[str, str] = {}
+    if not any(a == "--project" or a.startswith("--project=") for a in rest):
+        overrides["UV_NO_PROJECT"] = "1"
+    names_interpreter = any(
+        a in ("--python", "-p", "--system") or a.startswith("--python=") for a in rest
+    )
+    operator_chose = os.environ.get("UV_PYTHON") or os.environ.get("UV_SYSTEM_PYTHON")
+    if not names_interpreter and not operator_chose:
+        overrides["UV_PYTHON"] = sys.executable
+    return overrides

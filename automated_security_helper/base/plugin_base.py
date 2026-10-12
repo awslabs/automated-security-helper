@@ -449,6 +449,16 @@ class PluginBase(UVToolMixin, BaseModel):
                 env, scanner_offline() if callable(scanner_offline) else None
             )
 
+            # A uv command started in the scanned tree (`uv pip ...`, `uv run ...`)
+            # runs the tree's .venv python and builds its project unless told not
+            # to; see utils/python_child.uv_child_overrides.
+            from automated_security_helper.utils import python_child
+            from automated_security_helper.utils.process_env import snapshot_environ
+
+            uv_overrides = python_child.uv_child_overrides(command)
+            if uv_overrides:
+                env = {**(snapshot_environ() if env is None else env), **uv_overrides}
+
             # Attempt UV tool execution if enabled
             if self.use_uv_tool and self.command and len(command) > 0:
                 # Check if the first element of the command is our tool command
