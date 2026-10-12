@@ -719,6 +719,7 @@ runs:
         ash scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
+          --build-target ci \
           --source-dir /tmp/ash-zizmor-selftest \
           --output-dir /tmp/ash-zizmor-selftest/output \
           --scanners zizmor \
@@ -773,6 +774,7 @@ runs:
         ash scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
+          --build-target ci \
           --source-dir /tmp/ash-cfn-selftest \
           --output-dir /tmp/ash-cfn-selftest/output \
           --scanners cfn-lint,cfn-guard \
