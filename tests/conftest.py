@@ -20,6 +20,7 @@ from typing import Any, Iterator, List, Literal, Optional, Sequence
 
 from typing_extensions import Self
 
+from tests.utils import real_home_guard
 from tests.utils.helpers import get_ash_temp_path
 
 # Add the project root to the Python path
@@ -316,6 +317,73 @@ def _enter_session_tmpdir() -> Path:
     return path
 
 
+# The session HOME.
+#
+# Install receipts live under Path.home()/.ash/install-receipts (download_utils
+# .receipt_root), and the default ASH_BIN_PATH, ~/.ash/bin, is computed when
+# core.constants is imported. Twenty-one tests in tests/unit/utils install a fixture
+# grype, opengrep or renamed_file with no HOME of their own, so every run from a shell
+# whose HOME was the user's real home wrote 16 grype.json, 4 opengrep.json and a
+# renamed_file.json into the real receipt store -- thousands of directories on one
+# host. tests/utils/isolated_tool_env.py assumed the harness points HOME at a temp
+# directory; nothing did, locally or in CI. So the session does it, as it does for
+# TMPDIR: the controller makes one private HOME (and USERPROFILE, which Windows
+# reads) before xdist starts workers and before collection imports core.constants,
+# workers inherit it through ASH_TEST_SESSION_HOME, and the creating process restores
+# the original values and removes it at the end. XDG variables and UV_CACHE_DIR are
+# left as the caller set them, so a cache the operator chose is still the one used.
+#
+# It sits beside the session temp directory, not inside it, so a test that looks at
+# what was left in TMPDIR does not count the home's contents, and HOME and TMPDIR stay
+# two separate directories as they are on a real host.
+_SESSION_HOME_ENV = "ASH_TEST_SESSION_HOME"
+_PRE_SESSION_HOME_ENV = "ASH_TEST_PRE_SESSION_HOME"
+_HOME_VARS = ("HOME", "USERPROFILE")
+_created_session_home: Optional[Path] = None
+
+
+def _pre_session_home_env() -> dict:
+    """HOME/USERPROFILE as they were before the session override; unset ones absent."""
+    recorded = os.environ.get(_PRE_SESSION_HOME_ENV)
+    if recorded:
+        return json.loads(recorded)
+    return {var: os.environ[var] for var in _HOME_VARS if os.environ.get(var)}
+
+
+def _enter_session_home(session_tmpdir: Path) -> Path:
+    """Point this process's HOME at the session's private one. Returns it."""
+    global _created_session_home
+    inherited = (os.environ.get(_SESSION_HOME_ENV) or "").strip()
+    if inherited and Path(inherited).is_dir():
+        home = Path(inherited)
+    else:
+        os.environ[_PRE_SESSION_HOME_ENV] = json.dumps(_pre_session_home_env())
+        home = Path(
+            tempfile.mkdtemp(prefix="ash-pytest-home-", dir=str(session_tmpdir.parent))
+        )
+        os.environ[_SESSION_HOME_ENV] = str(home)
+        _created_session_home = home
+    for var in _HOME_VARS:
+        os.environ[var] = str(home)
+    return home
+
+
+def _leave_session_home() -> None:
+    """Restore HOME/USERPROFILE and remove the session home, in the creating process."""
+    global _created_session_home
+    home = _created_session_home
+    if home is None:
+        return
+    _created_session_home = None
+    previous = _pre_session_home_env()
+    for var in _HOME_VARS:
+        if var in previous:
+            os.environ[var] = previous[var]
+        else:
+            os.environ.pop(var, None)
+    shutil.rmtree(home, ignore_errors=True)
+
+
 def _make_writable_and_retry(func: Any, path: str, _exc: BaseException) -> None:
     """rmtree error hook: read-only files (git objects on Windows) block removal."""
     try:
@@ -344,6 +412,9 @@ def pytest_unconfigure(config):
     remove the session temp directory."""
     if hasattr(config, "workerinput"):
         return
+    # HOME first, so an ASH_JSII_CACHE_DIR spelled with ~ names the same root here as
+    # it did when the session configured it.
+    _leave_session_home()
     root = _jsii_package_cache_root()
     if root.is_dir():
         with _exclusive_file_lock(root / _JSII_LOAD_LOCK_NAME):
@@ -356,8 +427,19 @@ def pytest_configure(config):
     # Must happen before anything imports a jsii-backed package. pytest_configure is
     # the earliest per-worker hook, and collection -- which imports test modules --
     # runs after it.
-    _enter_session_tmpdir()
+    session_tmpdir = _enter_session_tmpdir()
     _configure_jsii_package_cache()
+    # After the jsii root is resolved (an ASH_JSII_CACHE_DIR of ~/... keeps meaning
+    # the operator's home) and before collection imports core.constants.
+    _enter_session_home(session_tmpdir)
+    real_home_guard.install(
+        real_home_guard.guarded_roots(
+            [
+                real_home_guard.passwd_home(),
+                *(Path(v) for v in _pre_session_home_env().values()),
+            ]
+        )
+    )
 
     # Register custom markers
     config.addinivalue_line(
@@ -384,6 +466,29 @@ def pytest_configure(config):
             f"{marker}: snapshot of output that needs a real runtime; deselected "
             f"unless {flag} is given",
         )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Fail a test that wrote under the real ~/.ash (see tests/utils/real_home_guard.py).
+
+    Checked on the teardown report, after every fixture has finished, so a write from
+    a fixture's teardown is charged to the test that used it. Writes recorded before
+    the first test (collection, session fixtures) are charged to that first test.
+    """
+    outcome = yield
+    if call.when != "teardown":
+        return
+    writes = real_home_guard.drain()
+    if not writes:
+        return
+    report = outcome.get_result()
+    report.outcome = "failed"
+    report.longrepr = (
+        "wrote under the real user's ~/.ash, which the session's private HOME "
+        "exists to keep tests out of:\n"
+        + "\n".join(f"  {event}: {path}" for event, path in writes)
+    )
 
 
 def pytest_addoption(parser):
@@ -711,33 +816,6 @@ def temp_project_dir(ash_temp_path):
     (project_dir / ".ash").mkdir()
 
     return project_dir
-
-
-@pytest.fixture
-def temp_env_vars():
-    """Create a fixture for temporarily setting environment variables.
-
-    Returns:
-        Function that sets environment variables for the duration of a test
-    """
-    original_env = {}
-
-    def _set_env_vars(**kwargs):
-        for key, value in kwargs.items():
-            if key in os.environ:
-                original_env[key] = os.environ[key]
-            os.environ[key] = str(value)
-
-    yield _set_env_vars
-
-    # Restore original environment variables
-    for key in original_env:
-        os.environ[key] = original_env[key]
-
-    # Remove environment variables that were not originally set
-    for key in os.environ.keys() - original_env.keys():
-        if key in os.environ:
-            del os.environ[key]
 
 
 @pytest.fixture

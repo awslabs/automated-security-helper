@@ -24,8 +24,8 @@ So a subprocess built with these helpers gets:
   :func:`install_refusing_installers`, which exit non-zero without installing
   anything.
 
-HOME and USERPROFILE are left to the harness, which already points them at a temp
-directory of its own.
+HOME and USERPROFILE are left alone: tests/conftest.py already points both at a
+private directory for the whole session (see "The session HOME" there).
 """
 
 from __future__ import annotations

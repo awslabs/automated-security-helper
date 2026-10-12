@@ -117,7 +117,11 @@ The framework provides several common fixtures to simplify test setup:
 - `temp_config_dir`: Creates a temporary directory for configuration files
 - `temp_output_dir`: Creates a temporary directory for output files
 - `temp_project_dir`: Creates a temporary directory with a basic project structure
-- `temp_env_vars`: Sets environment variables for the duration of a test
+
+For environment variables, use pytest's built-in `monkeypatch.setenv`, which puts the
+previous value back when the test ends. Every test session also runs with a private
+`HOME`, so a test that installs a tool or writes an install receipt never touches the
+real user's `~/.ash`; a test whose own process writes there anyway fails.
 
 Example:
 ```python
