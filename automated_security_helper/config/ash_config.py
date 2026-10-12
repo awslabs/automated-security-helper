@@ -1069,10 +1069,11 @@ class RuntimeOverridesConfig(BaseModel):
         "/scanners/trivy/options/scanners",
         "/scanners/trivy/options/ignore_unfixed",
         # Options that can leave findings out without naming them. A scanner
-        # set offline runs on whatever data is cached, and npm audit offline
-        # reports no advisories at all (npm 10.9, exit 0). max_live_bytes bounds
-        # how much extracted content ferret-scan holds at once, and gitleaks
-        # skips every file larger than max_target_megabytes.
+        # set offline runs on whatever data is cached, and npm audit keeps no
+        # advisory data: offline it skips the advisory request, reports none
+        # and exits 0 (npm 10.9). max_live_bytes bounds how much extracted
+        # content ferret-scan holds at once, and gitleaks skips every file
+        # larger than max_target_megabytes.
         "/scanners/*/options/offline",
         "/scanners/ferret-scan/options/max_live_bytes",
         "/scanners/gitleaks/options/max_target_megabytes",

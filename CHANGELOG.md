@@ -1173,15 +1173,15 @@
   `config`, `exclude_rule` and `severity`, trivy's `scanners` and
   `ignore_unfixed`, trivy-repo's `license_full` and `scanners`, ferret-scan's
   `max_live_bytes`, gitleaks' `max_target_megabytes`, and every scanner's
-  `offline` (npm audit offline reports no advisories). So do each scanner's own
-  config file (`config_file` of actionlint, bandit, cfn-lint, checkov,
-  ferret-scan, gitleaks, grype, syft, trivy, trivy-repo and zizmor, and trivy's
-  and trivy-repo's `secret_config_file`), trivy-repo's `module_dir`, cfn-guard's
-  `rules_paths`, actionlint's `shellcheck` and `pyflakes`, zizmor's
-  `online_audits`, the `honor_inline_ignores` of cfn-lint, gitleaks and zizmor,
-  every `tool_version`, opengrep's `version` and `sha256`, the AWS reporters'
-  destinations and credentials, and the GitLab SAST reporter's
-  `exclude_suppressed`. Left at its default, each still scans.
+  `offline` (npm audit, which keeps no advisory data, checks none offline). So
+  do each scanner's own config file (`config_file` of actionlint, bandit,
+  cfn-lint, checkov, ferret-scan, gitleaks, grype, syft, trivy, trivy-repo and
+  zizmor, and trivy's and trivy-repo's `secret_config_file`), trivy-repo's
+  `module_dir`, cfn-guard's `rules_paths`, actionlint's `shellcheck` and
+  `pyflakes`, zizmor's `online_audits`, the `honor_inline_ignores` of cfn-lint,
+  gitleaks and zizmor, every `tool_version`, opengrep's `version` and `sha256`,
+  the AWS reporters' destinations and credentials, and the GitLab SAST
+  reporter's `exclude_suppressed`. Left at its default, each still scans.
 
 - **A default scan runs six more scanners.** actionlint, cfn-lint, cfn-guard,
   gitleaks, trivy and zizmor are builtin and on by default, so a scan with an existing

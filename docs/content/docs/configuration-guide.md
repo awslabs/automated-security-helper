@@ -1050,7 +1050,7 @@ on which:
     | semgrep | `config`, `exclude_rule`, `severity` |
     | trivy | `scanners`, `ignore_unfixed` |
     | trivy-repo | `license_full`, `scanners` |
-    | every scanner | `offline`: a scanner set offline runs on cached data, and npm audit offline reports no advisories at all |
+    | every scanner | `offline`: a scanner set offline runs on cached data, and npm audit, which keeps no advisory data, checks none offline |
 
     Options that only tune output or performance, or whose default already
     reports the least they can (trivy-repo's `ignore_unfixed`, bandit's
