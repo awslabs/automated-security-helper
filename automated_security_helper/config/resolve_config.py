@@ -578,8 +578,9 @@ def resolve_config(
             limits (``config/archive_limits.py``).
         client_overrides: ``config_overrides`` came from an MCP client (a
             workspace tool's), not the operator, so a tool path they name is not
-            the operator's (``path_trust.OperatorPaths``). Implied when
-            ``client_config_policy`` is set and there are overrides.
+            the operator's (``path_trust.OperatorPaths``), and neither is a value
+            they set for an option ``utils/config_trust.set_by_operator`` guards.
+            Implied when ``client_config_policy`` is set and there are overrides.
         client_config_policy: The rules a file of the chain that an MCP client
             delivered is checked against; see ``config/client_config_policy.py``.
             None takes the trusted base's. When set, ``config_overrides`` are the
@@ -658,6 +659,7 @@ def resolve_config(
     named: List[Path] = []
     spelled: List[Path] = []
     merged: List[Any] = []
+    before_overrides: List[AshConfig] = []
     documents: Dict[Path, Any] = {}
     names: Dict[Path, Tuple[Path, ...]] = {}
     # What every file a value of the config can come from read from the
@@ -726,11 +728,25 @@ def resolve_config(
         merged=merged,
         references=references,
         fill=fill,
+        before_overrides=before_overrides,
     )
     if config is None:
         return config
     if overlay is not None:
         references.extend(overlay.environment_references)
+    # The overrides that count as the operator's choice, replayed onto the trusted
+    # base below. Under the MCP server (``client_config_policy`` set) they are the
+    # client's: the workspace tools' config_overrides, already held to the
+    # session's allowlist. An allowlist that lets a client change a field does
+    # not make the client's value the operator's, so none is replayed there.
+    operator_overrides = (
+        list(config_overrides or [])
+        if client_config_policy is None and not client_overrides
+        else []
+    )
+    # An MCP client's overrides are applied, but they are not the operator's: the
+    # tool paths and the options set_by_operator guards count only the operator's.
+    client_supplied = config_overrides if client_overrides else None
     default_document = default_config_document()
     if default_document is not None:
         references.extend(default_document.environment_references)
@@ -773,7 +789,7 @@ def resolve_config(
         root,
         merged[0] if merged else None,
         untrusted=untrusted_config,
-        overrides=[] if client_overrides else config_overrides,
+        overrides=operator_overrides,
     )
     # A file is not the operator's when the scanned repository could have written
     # it (repository_written: inside any git checkout or the scan root, under any
@@ -799,12 +815,15 @@ def resolve_config(
         # With no config file, the config is get_default_config(): ASH_CONFIG's
         # file when that variable names one, which can be untrusted too.
         in_tree = default_in_tree
+    # The files that are not the operator's, before the client's overrides are
+    # added to them below.
+    untrusted_files = list(in_tree)
     if client_overrides:
         # Named in the warnings as the source of what is confined.
         in_tree = [*in_tree, Path("config_overrides")]
     if not in_tree:
         config._environment_references = tuple(references)
-        record_provenance(config, in_tree=[])
+        _record_operator_provenance(config, client_supplied, before_overrides)
         return config
     operator = _load_operator_config(
         trusted_config_path, source_dir, permit_base, operators_files
@@ -863,25 +882,22 @@ def resolve_config(
             if operator is not None
             else get_default_config().sandbox.mode
         )
-    # The overrides that count as the operator's choice, replayed onto the trusted
-    # base below. Under the MCP server (``client_config_policy`` set) they are the
-    # client's: the workspace tools' config_overrides, already held to the
-    # session's allowlist. An allowlist that lets a client change a field does
-    # not make the client's value the operator's, so none is replayed there.
-    operator_overrides = (
-        list(config_overrides or [])
-        if client_config_policy is None and not client_overrides
-        else []
-    )
     # What scanners consult before honoring an option that names code to run
     # (utils/config_trust.py): the same trusted base, with the overrides replayed
-    # per section when a scanner asks.
-    record_provenance(
-        config,
-        in_tree=in_tree,
-        trusted=trusted.model_copy(deep=True),
-        config_overrides=operator_overrides,
-    )
+    # per section when a scanner asks. When every file of the chain is the
+    # operator's and only an MCP client's overrides are not, the operator's
+    # values are the config those files resolved to before the overrides, not
+    # the trusted base, which holds none of them without trusted_config_path.
+    if untrusted_files:
+        record_provenance(
+            config,
+            in_tree=in_tree,
+            trusted=trusted.model_copy(deep=True),
+            config_overrides=operator_overrides,
+            client_overrides=client_supplied,
+        )
+    else:
+        _record_operator_provenance(config, client_supplied, before_overrides)
     confine_to_trusted_base(
         config,
         trusted,
@@ -1188,6 +1204,30 @@ def confine_honor_ignore_files(
         "operator's choice. Using honor_ignore_files: "
         f"{str(trusted.honor_ignore_files).lower()}. {KEEP_A_SETTING} Or turn it "
         "off with --no-honor-ignore-files."
+    )
+
+
+def _record_operator_provenance(
+    config: AshConfig,
+    client_supplied: Optional[List[str]],
+    before_overrides: List[AshConfig],
+) -> None:
+    """The provenance of a config no file inside the scanned tree contributed to.
+
+    Every value is the operator's, unless an MCP client supplied overrides: then
+    the operator's values are the config as the operator's files (or the defaults)
+    resolved it before those overrides (``before_overrides``), and a value only the
+    client set is not the operator's. With no such config recorded the trusted
+    base is missing, and ``set_by_operator`` then answers False.
+    """
+    if not client_supplied:
+        record_provenance(config, in_tree=[])
+        return
+    record_provenance(
+        config,
+        in_tree=[],
+        trusted=before_overrides[0] if before_overrides else None,
+        client_overrides=client_supplied,
     )
 
 
@@ -1579,6 +1619,7 @@ def _resolve_config(
     merged: Optional[List[Any]] = None,
     references: Optional[List[Any]] = None,
     fill: Sequence[Any] = (),
+    before_overrides: Optional[List[AshConfig]] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
@@ -1587,10 +1628,11 @@ def _resolve_config(
     appends the root config file's path as it was named (passed or discovered)
     to ``named``, every file read by the path that named it
     (``ResolvedConfigDocument.named``) to ``spelled``, the merged document,
-    before any override, to ``merged``, and what the files read from the
-    environment to ``references``. ``fill`` is what the operator's copy of a
-    profile read from the environment, when the selected file is the copy a
-    client patched (``environment_record.fill_environment_references``).
+    before any override, to ``merged``, what the files read from the
+    environment to ``references``, and, when there are overrides, the config
+    they are applied to to ``before_overrides``. ``fill`` is what the operator's
+    copy of a profile read from the environment, when the selected file is the
+    copy a client patched (``environment_record.fill_environment_references``).
     ``anchor_paths`` accepts the files whose relative paths are taken from their
     own directory (``config/operator_paths.py``).
     ``refuse_env`` decides which files of the chain resolve no ``!ENV``
@@ -1607,6 +1649,11 @@ def _resolve_config(
         if overlay is None or default is None:
             return default
         return _overlaid(overlay, chain, documents, names)
+
+    def overridden(config: AshConfig) -> AshConfig:
+        if before_overrides is not None:
+            before_overrides.append(config)
+        return apply_config_overrides(config, config_overrides)
 
     # The overlay's file, once it has been merged into the selected file's
     # document; named in a validation error.
@@ -1629,7 +1676,7 @@ def _resolve_config(
             config = fallback(config)
             # Apply overrides to default config if provided
             if config_overrides:
-                return apply_config_overrides(config, config_overrides)
+                return overridden(config)
             return config
 
         # Only a source_dir the caller passed may widen where `extends` bases
@@ -1679,7 +1726,7 @@ def _resolve_config(
                 config = fallback(config)
                 # Apply overrides to default config if provided
                 if config_overrides:
-                    return apply_config_overrides(config, config_overrides)
+                    return overridden(config)
                 return config  # Return default config if no config file found
             else:
                 raise ValueError("Configuration file not found or provided")
@@ -1771,7 +1818,7 @@ def _resolve_config(
 
             # Apply config overrides if provided
             if config_overrides:
-                config = apply_config_overrides(config, config_overrides)
+                config = overridden(config)
 
             config._resolution_warnings.extend(ignored_sources)
             return config

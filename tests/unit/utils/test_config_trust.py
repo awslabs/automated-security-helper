@@ -196,13 +196,16 @@ def test_scan_root_is_the_recorded_workspace_root_else_the_source_dir(repo, tmp_
     assert scan_root(None, repo) == repo
 
 
-def _context_after_initialize(source: Path, config_path=None, overrides=None):
+def _context_after_initialize(
+    source: Path, config_path=None, overrides=None, client_overrides=False
+):
     engine = MagicMock()
     orchestrator = ASHScanOrchestrator(
         source_dir=source,
         output_dir=source / ".ash" / "ash_output",
         config_path=config_path,
         config_overrides=overrides,
+        client_overrides=client_overrides,
         no_cleanup=True,
         metadata=None,
         ash_plugin_modules=[],
@@ -244,6 +247,106 @@ def test_the_scanners_context_carries_the_overrides(repo):
         set_by_operator(context.config, "scanners.actionlint.options.pyflakes", "x")
         is False
     )
+
+
+# --------------------------------------------------------------------------- #
+# Overrides an MCP client supplied (resolve_config(client_overrides=True))
+# --------------------------------------------------------------------------- #
+
+#: An option only the operator may set: cfn-lint imports the Python rules a
+#: ``.cfnlintrc`` names.
+CFN_LINT_CONFIG = "scanners.cfn-lint.options.config_file"
+
+
+def _where(where: str, repo: Path, tmp_path: Path, monkeypatch) -> dict:
+    """resolve_config's arguments for a config in the tree, outside it, or none."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    if where == "in-tree":
+        (repo / ".ash").mkdir()
+        (repo / ".ash" / ".ash.yaml").write_text(_config_text())
+        return {"source_dir": repo}
+    if where == "operator-file":
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(_config_text())
+        return {"config_path": operator, "source_dir": repo}
+    return {"source_dir": repo}
+
+
+@pytest.mark.parametrize("where", ["in-tree", "operator-file", "no-file"])
+def test_a_client_override_is_not_the_operators(repo, tmp_path, monkeypatch, where):
+    """The MCP server passes a client's overrides with ``client_overrides=True``.
+
+    They are applied to the config, but a value only they set is the client's: the
+    same override from the operator (``--config-overrides``) is the operator's.
+    """
+    args = _where(where, repo, tmp_path, monkeypatch)
+    override = f"{CFN_LINT_CONFIG}=/x/rc"
+
+    client = resolve_config(**args, config_overrides=[override], client_overrides=True)
+    operator = resolve_config(**args, config_overrides=[override])
+
+    assert str(client.scanners.cfn_lint.options.config_file) == "/x/rc", (
+        "the client's override was not applied, so nothing below tests its provenance"
+    )
+    assert set_by_operator(client, CFN_LINT_CONFIG, "/x/rc") is False
+    assert set_by_operator(client, CFN_LINT_CONFIG, Path("/x/rc")) is False
+    assert set_by_operator(operator, CFN_LINT_CONFIG, "/x/rc") is True
+
+
+def test_a_client_override_leaves_the_operators_own_values_the_operators(
+    repo, tmp_path, monkeypatch
+):
+    """The operator's file outside the tree still vouches for what it sets."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(
+        yaml.safe_dump(
+            {
+                "project_name": "operator",
+                "scanners": {"cfn-lint": {"options": {"config_file": "/x/rc"}}},
+            }
+        )
+    )
+
+    config = resolve_config(
+        config_path=operator,
+        source_dir=repo,
+        config_overrides=[f"{KEY}=sh"],
+        client_overrides=True,
+    )
+
+    assert set_by_operator(config, CFN_LINT_CONFIG, "/x/rc") is True
+    assert set_by_operator(config, KEY, "sh") is False
+
+
+def test_a_client_override_that_changes_the_operators_value_is_not_the_operators(
+    repo, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(_config_text())
+
+    config = resolve_config(
+        config_path=operator,
+        source_dir=repo,
+        config_overrides=[f"{KEY}=client-sh"],
+        client_overrides=True,
+    )
+
+    assert config.scanners.actionlint.options.shellcheck == "client-sh"
+    assert set_by_operator(config, KEY, "client-sh") is False
+    assert set_by_operator(config, KEY, "sh") is True
+
+
+def test_the_scanners_context_carries_a_clients_overrides_as_the_clients(
+    repo, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    context = _context_after_initialize(
+        repo, overrides=[f"{CFN_LINT_CONFIG}=/x/rc"], client_overrides=True
+    )
+
+    assert set_by_operator(context.config, CFN_LINT_CONFIG, "/x/rc") is False
 
 
 # --------------------------------------------------------------------------- #

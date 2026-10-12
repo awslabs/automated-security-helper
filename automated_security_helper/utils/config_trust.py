@@ -48,6 +48,12 @@ the overrides gives the same value. Comparing resolutions, not override key name
 makes ``key+=``, the dashed scanner spelling and a whole-section override count the
 same as ``key=value``.
 
+Overrides an MCP client supplied (``resolve_config(client_overrides=True)``) are not
+the operator's, as they are not for ``config/path_trust.OperatorPaths``: they are
+left out of the replay, and a config built from no file in the tree is then
+compared with the operator's files as resolved before those overrides, so a value
+only the client set is not the operator's.
+
 Constraints and failure modes
 -----------------------------
 * Fail closed. A config with no recorded provenance (one built without
@@ -77,15 +83,24 @@ class ConfigProvenance:
 
     Attributes:
         in_tree: The config files it was built from that are inside the scanned
-            tree. Empty means the operator's: a file outside the tree, or none.
-        trusted: The config the operator's values come from when ``in_tree`` is
-            not empty: the trusted base, before the overrides below.
-        overrides: The ``--config-overrides`` given to the resolution.
+            tree. Empty, with no ``client_overrides``, means the operator's: a file
+            outside the tree, or none.
+        trusted: The config the operator's values come from when ``in_tree`` or
+            ``client_overrides`` is not empty: the trusted base, before the
+            overrides below. With only ``client_overrides``, the config as the
+            operator's files resolved it, before the client's overrides.
+        overrides: The operator's ``--config-overrides``, replayed onto
+            ``trusted``.
+        client_overrides: Overrides an MCP client supplied
+            (``resolve_config(client_overrides=True)``). They are applied to the
+            config but are not the operator's, so they are not replayed, and a
+            value only they set is not the operator's.
     """
 
     in_tree: Tuple[Path, ...] = ()
     trusted: Any = None
     overrides: Tuple[str, ...] = ()
+    client_overrides: Tuple[str, ...] = ()
     _resolved: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     def trusted_value(self, key: str) -> Any:
@@ -129,12 +144,17 @@ def record_provenance(
     in_tree: Sequence[Path],
     trusted: Any = None,
     config_overrides: Optional[Iterable[Any]] = None,
+    client_overrides: Optional[Iterable[Any]] = None,
 ) -> None:
-    """Attach a ``ConfigProvenance`` to ``config`` (an ``AshConfig``)."""
+    """Attach a ``ConfigProvenance`` to ``config`` (an ``AshConfig``).
+
+    ``config_overrides`` are the operator's; ``client_overrides`` an MCP client's.
+    """
     config._provenance = ConfigProvenance(
         in_tree=tuple(in_tree),
         trusted=trusted,
         overrides=tuple(str(o) for o in (config_overrides or [])),
+        client_overrides=tuple(str(o) for o in (client_overrides or [])),
     )
 
 
@@ -200,16 +220,17 @@ def _same_value(expected: Any, value: Any) -> bool:
 def set_by_operator(config: Any, key: str, value: Any) -> bool:
     """Whether ``value``, about to be used for dotted ``key``, is the operator's.
 
-    True when ``config`` was built from no file inside the scanned tree, or when the
-    trusted base plus ``--config-overrides`` resolves ``key`` to ``value``. False
-    otherwise, including when ``config`` carries no provenance. The value the scanner
-    will use is compared, rather than the one at ``key`` in ``config``, so a scanner
-    constructed with options of its own is judged by what it would actually run.
+    True when ``config`` was built from no file inside the scanned tree and no MCP
+    client's overrides, or when the trusted base plus the operator's
+    ``--config-overrides`` resolves ``key`` to ``value``. False otherwise, including
+    when ``config`` carries no provenance. The value the scanner will use is
+    compared, rather than the one at ``key`` in ``config``, so a scanner constructed
+    with options of its own is judged by what it would actually run.
     """
     provenance = getattr(config, "_provenance", None)
     if not isinstance(provenance, ConfigProvenance):
         return False
-    if not provenance.in_tree:
+    if not provenance.in_tree and not provenance.client_overrides:
         return True
     expected = provenance.trusted_value(key)
     if expected is _MISSING:
