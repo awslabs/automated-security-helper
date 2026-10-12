@@ -33,11 +33,13 @@ pytestmark = pytest.mark.skipif(
 GRACE_SECONDS = 0.5
 
 # argv[1]: the wrapper's path. argv[2]: "stop" for a scanner that runs until it
-# is stopped, "exit" for one that exits at once. Writes "ready <scanner pid>" once
-# the stop signals are held for the handler, "reaping" when the reap loop starts,
-# and "kill <pid>" for each signal the wrapper sends.
+# is stopped, "exit" for one that exits at once, "late" for one whose stop takes
+# longer than STOP_REAP_DEADLINE_SECONDS to end it (each signal the wrapper sends
+# waits 0.4 s first). Writes "ready <scanner pid>" once the stop signals are held
+# for the handler, "reaping" when the reap loop starts, and "kill <pid>" for each
+# signal the wrapper sends.
 DRIVER = """
-import importlib.util, os, sys
+import importlib.util, os, sys, time
 
 spec = importlib.util.spec_from_file_location("landlock_exec", sys.argv[1])
 wrapper = importlib.util.module_from_spec(spec)
@@ -47,6 +49,7 @@ send = os.kill
 # Above the kernel's largest pid (2**22), so no process has it and every kill of
 # it fails; the loop sees this descendant on every pass.
 NEVER_GONE = 2**22 + 1
+late = sys.argv[2] == "late"
 
 
 def never_gone():
@@ -59,6 +62,8 @@ def never_gone():
 def recorded(target, signum):
     if target != NEVER_GONE:
         os.write(1, b"kill %d\\n" % target)
+        if late:
+            time.sleep(0.4)
     return send(target, signum)
 
 
@@ -69,7 +74,7 @@ def restrict():
 
 wrapper._descendants = never_gone
 os.kill = recorded
-command = ["/bin/sleep", "30"] if sys.argv[2] == "stop" else ["/bin/true"]
+command = ["/bin/true"] if sys.argv[2] == "exit" else ["/bin/sleep", "30"]
 sys.exit(wrapper.run_and_reap(command, restrict))
 """
 
@@ -139,6 +144,24 @@ def test_a_wrapper_stopped_while_it_reaps_finishes_inside_the_grace():
     assert elapsed < GRACE_SECONDS, elapsed
     assert process.returncode == 0
     assert scanner not in killed, "the stop signalled the reaped scanner's pid"
+
+
+def test_a_stop_whose_deadline_passed_before_the_scanner_exited_still_reaps_once():
+    """The scanner outlived STOP_REAP_DEADLINE_SECONDS after the stop.
+
+    The deadline is already behind when the reap starts; one pass is still made,
+    so what the scanner left is killed at least once.
+    """
+    process, scanner = _driver("late")
+    try:
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=30)
+        lines = process.stdout.read().split(b"\n")
+    finally:
+        _finish(process)
+
+    assert f"kill {scanner}".encode() in lines, "the stop did not end the scanner"
+    assert b"reaping" in lines, "no reap pass after a stop that outlived its deadline"
 
 
 def test_without_a_stop_the_reap_runs_to_its_own_deadline():

@@ -957,6 +957,29 @@ class TestAggregatorOutput:
             target.name
         ], "a staging file was left behind"
 
+    def test_a_spool_file_appears_only_once_it_is_complete(self, tmp_path, monkeypatch):
+        """Written to a staging file and renamed: no reader finds a partial spool."""
+        from automated_security_helper.workspace import aggregation
+
+        plan = _plan(tmp_path, "api")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+        spool = aggregator.spool_dir / "api.run.json"
+        present_while_written = []
+        dump = json.dump
+
+        def dump_then_look(obj, handle, *args, **kwargs):
+            dump(obj, handle, *args, **kwargs)
+            handle.flush()
+            present_while_written.append(spool.exists())
+
+        monkeypatch.setattr(aggregation.json, "dump", dump_then_look)
+
+        aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert present_while_written == [False]
+        assert json.loads(spool.read_text(encoding="utf-8"))["results"]
+        assert sorted(p.name for p in aggregator.spool_dir.iterdir()) == [spool.name]
+
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""
         plan = _plan(tmp_path, "api", "web")
