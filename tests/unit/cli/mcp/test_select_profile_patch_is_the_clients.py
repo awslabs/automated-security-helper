@@ -629,6 +629,62 @@ def _operator_copy(session: str) -> Path:
     return session_sandbox(session).config_dir / "ash.yaml"
 
 
+_OFF_HOST_REPORTERS = (
+    "aws-security-hub",
+    "bedrock-summary-reporter",
+    "cloudwatch-logs",
+    "s3",
+)
+
+
+def _reporter_enabled(config: AshConfig, reporter: str) -> Any:
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_ENABLED_DEFAULTS,
+    )
+
+    section = config.get_plugin_config("reporter", reporter) or {}
+    if not isinstance(section, dict):
+        section = section.model_dump()
+    return section.get("enabled", REPORTER_ENABLED_DEFAULTS[reporter])
+
+
+@pytest.mark.parametrize("change", ["patch_ops", "override_yaml", "config_overrides"])
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+def test_a_clients_enabled_false_is_accepted_and_takes_no_effect(
+    _server, isolated_registry, executions, reporter: str, change: str
+) -> None:
+    """Whether an off-host reporter runs is the operator's in both directions. A
+    client's ``enabled: false`` asks for nothing beyond the profile, so it is not
+    refused on any route, but the scan runs the reporter as the profile has it:
+    select_profile's patch_ops and override_yaml on a single-directory scan, and
+    the workspace tools' config_overrides on a workspace scan."""
+    document = {
+        "project_name": "operator",
+        "global_settings": _policy(["/**"]),
+        "reporters": {reporter: {"enabled": True}},
+    }
+    _register(_server, document)
+    if change == "patch_ops":
+        op = {"op": "replace", "path": f"/reporters/{reporter}/enabled"}
+        _bind(SESSION, patch_ops=[{**op, "value": False}])
+        config = _scanned(_server["target"], SESSION)
+    elif change == "override_yaml":
+        restated = yaml.safe_load(yaml.safe_dump(document))
+        restated["reporters"][reporter]["enabled"] = False
+        _bind(SESSION, override_yaml=yaml.safe_dump(restated))
+        config = _scanned(_server["target"], SESSION)
+    else:
+        _bind(SESSION)
+        config = _workspace_config(
+            _server["scan_root"],
+            SESSION,
+            executions,
+            config_overrides=[f"reporters.{reporter}.enabled=false"],
+        )
+
+    assert _reporter_enabled(config, reporter) is True
+
+
 def test_a_profile_bound_without_a_patch_is_the_operators(_server) -> None:
     _register(
         _server,

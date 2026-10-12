@@ -663,14 +663,47 @@ def _bound_reporter_enabled(session_id: str, reporter: str) -> Any:
     return (section or {}).get("enabled")
 
 
+def _scanned_reporter_enabled(tmp_path: Path, session_id: str, reporter: str) -> Any:
+    """Whether ``reporter`` runs in a scan of this session: the bound copy,
+    resolved with the arguments ``mcp_tools._run_scan_async`` hands the
+    orchestrator for a bound config, as the client's against the registered
+    profile."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        resolve_session_trusted_config_path,
+    )
+    from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
+        config_base_gate,
+    )
+    from automated_security_helper.cli.mcp_tools import _session_client_rules
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    bound = resolve_session_config_path(session_id)
+    assert bound is not None
+    untrusted = client_named_config_is_untrusted(bound, session_id=session_id)
+    assert untrusted, bound
+    target = tmp_path / "target"
+    target.mkdir(exist_ok=True)
+    config = resolve_config(
+        config_path=bound,
+        source_dir=target,
+        permit_base=config_base_gate(session_id),
+        trusted_config_path=resolve_session_trusted_config_path(session_id),
+        untrusted_config=untrusted,
+        client_config_policy=_session_client_rules(session_id),
+    )
+    section = config.get_plugin_config("reporter", reporter) or {}
+    return section.get("enabled", REPORTER_ENABLED_DEFAULTS[reporter])
+
+
 @pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
 @pytest.mark.usefixtures("_own_workspace_root")
 def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
     tmp_path: Path, reporter: str
 ) -> None:
     """``enabled: false`` asks for nothing beyond the profile, so it is accepted on
-    both routes. A scan of the client's copy takes ``enabled`` from the profile
-    (test_a_clients_runtime_override_turning_one_off_is_accepted_and_ignored)."""
+    both routes, and the client's copy holds it. It takes no effect: a scan of
+    that copy runs the reporter as the profile has it."""
     document = _profile(allowed_paths=["/**"])
     document["reporters"] = {reporter: {"enabled": True}}
     _install(tmp_path, document)
@@ -685,6 +718,7 @@ def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
     for session, result in (("patch", patched), ("override", overridden)):
         assert result["success"] is True, result
         assert _bound_reporter_enabled(session, reporter) is False
+        assert _scanned_reporter_enabled(tmp_path, session, reporter) is True
 
 
 @pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
@@ -692,7 +726,8 @@ def test_a_client_may_turn_off_a_reporter_the_profile_turns_on(
 def test_a_client_may_add_a_section_that_only_turns_a_reporter_off(
     tmp_path: Path, reporter: str
 ) -> None:
-    """The profile has no section, so the change adds one holding only ``enabled``."""
+    """The profile has no section, so the change adds one holding only ``enabled``.
+    Accepted, and of no effect: a scan runs the reporter as its default has it."""
     document = _profile(allowed_paths=["/**"])
     _install(tmp_path, document)
 
@@ -704,6 +739,10 @@ def test_a_client_may_add_a_section_that_only_turns_a_reporter_off(
     for session, result in (("patch", patched), ("override", overridden)):
         assert result["success"] is True, result
         assert _bound_reporter_enabled(session, reporter) is False
+        assert (
+            _scanned_reporter_enabled(tmp_path, session, reporter)
+            is REPORTER_ENABLED_DEFAULTS[reporter]
+        )
 
 
 @pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
