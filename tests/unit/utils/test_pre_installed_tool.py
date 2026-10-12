@@ -38,6 +38,18 @@ BASH = shutil.which("bash") or "/bin/bash"
 
 
 @pytest.fixture(autouse=True)
+def _uv_is_on_path():
+    """Fail each test with one clear reason when uv is missing, rather than a dozen
+    unrelated-looking errors from inside the checks. Not a skip: a runner without
+    uv cannot run ASH, and these tests must not pass quietly there."""
+    if shutil.which("uv") is None:
+        pytest.fail(
+            "uv is not on PATH. These tests run the real uv, which ASH needs at "
+            "run time; install uv to run them."
+        )
+
+
+@pytest.fixture(autouse=True)
 def _fresh_cache():
     reset_pre_installed_tool_cache()
     yield
