@@ -1,9 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib
 import re
-from threading import Lock
-from typing import TYPE_CHECKING, Any, Callable, Dict, Annotated, List, Literal
+import sys
+from contextlib import contextmanager
+from threading import Lock, local
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Annotated,
+    Iterable,
+    Iterator,
+    List,
+    Literal,
+    Mapping,
+    Sequence,
+    Set,
+)
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from automated_security_helper.plugins.events import AshEventType
@@ -76,6 +92,17 @@ class AshPluginManager(BaseModel):
     #: differently-configured scans against it concurrently, so subscribe and
     #: notify cannot both touch the same list unsynchronised.
     _event_lock: Lock = PrivateAttr(default_factory=Lock)
+    #: Which registrations an untrusted import made, so a scan is offered only
+    #: the classes its own modules load (``plugins_loaded_by``). By plugin type
+    #: and name: the module imported for an untrusted source, and the
+    #: registration, so a later registration under the same name is not taken
+    #: for it.
+    _untrusted_registrations: dict = PrivateAttr(default_factory=dict)
+    #: Every module the operator named in this process (``trust_plugin_modules``).
+    _operator_modules: set = PrivateAttr(default_factory=set)
+    _provenance_lock: Lock = PrivateAttr(default_factory=Lock)
+    #: The module ``untrusted_import`` is importing on this thread, if any.
+    _importing: local = PrivateAttr(default_factory=local)
 
     def set_context(self, context: "PluginContext"):
         """Set the plugin context for this plugin manager.
@@ -215,7 +242,171 @@ class AshPluginManager(BaseModel):
         elif plugin_type == "reporter":
             self.plugin_library.reporters[plugin_module_name] = plug_reg
 
+        untrusted = getattr(self._importing, "module", None)
+        if untrusted is not None:
+            with self._provenance_lock:
+                self._untrusted_registrations[(plugin_type, plugin_module_name)] = (
+                    untrusted,
+                    plug_reg,
+                )
+
         ASH_LOGGER.verbose(f"Registered plugin module '{plugin_module_name}'")
+
+    @contextmanager
+    def untrusted_import(self, module_name: str) -> Iterator[None]:
+        """Attribute what this thread registers inside the block to ``module_name``.
+
+        For importing a module the operator did not name: one that a config
+        file inside the scanned tree, or a config an MCP client delivered, lists
+        in ``ash_plugin_modules``, or one an MCP client's request loads.
+        Registration lasts for the rest of the process, and the MCP server and a
+        workspace run build several scans in one process, so
+        ``plugins_loaded_by`` leaves these registrations' classes out of a scan
+        that does not itself load the module.
+
+        Per thread, because the decorators register a class on the thread that
+        runs its module's code, which is the thread importing it; a scan
+        importing on another thread at the same time is not attributed here. A
+        module already imported registers nothing again, so what an earlier
+        import of it registered keeps its earlier attribution.
+        """
+        previous = getattr(self._importing, "module", None)
+        self._importing.module = module_name
+        try:
+            yield
+        finally:
+            self._importing.module = previous
+
+    def trust_plugin_modules(self, module_names: Iterable[str]) -> None:
+        """Record ``module_names`` as modules the operator loaded.
+
+        ``--ash-plugin-modules``, ``ASH_PLUGIN_MODULES``, or the operator's
+        configuration. What their imports registered is the operator's choice
+        and stays selectable by every later scan in the process, even when an
+        untrusted import registered it first: the operator loading a module
+        first would have left it untracked, and the order two scans load a
+        module in does not decide what a later scan is offered.
+        """
+        with self._provenance_lock:
+            self._operator_modules.update(name for name in module_names if name)
+
+    def plugins_loaded_by(
+        self,
+        plugins: Mapping[str, Sequence[type]],
+        module_names: Iterable[str],
+    ) -> Dict[str, List[type]]:
+        """``plugins`` without the classes only another scan's untrusted imports brought in.
+
+        A class is left out when every registration that brings it into
+        ``plugin_modules`` was made inside ``untrusted_import`` of a module that
+        neither ``module_names`` (the modules this scan loads) nor a module the
+        operator named (``trust_plugin_modules``) is, and none of those modules
+        defines the class, is a package around its module, has it as an
+        attribute, or lists it in ``ASH_SCANNERS``, ``ASH_REPORTERS`` or
+        ``ASH_CONVERTERS``. Those last checks cover a module this scan names that
+        an untrusted import already imported along the way: importing it again
+        registers nothing. Every other class is kept, including one embedding
+        code registered through ``register_plugin_module`` itself.
+
+        The resolved list ``plugin_modules`` caches stays as it is; this filters
+        what one scan takes from it.
+
+        Args:
+            plugins: The classes ``plugin_modules`` resolved, by plugin type.
+            module_names: The plugin modules this scan loads: the operator's and
+                those its own config names.
+
+        Returns:
+            The classes to select, by plugin type, in their original order.
+        """
+        selected = {kind: list(classes) for kind, classes in plugins.items()}
+        with self._provenance_lock:
+            tracked = dict(self._untrusted_registrations)
+            names = set(module_names) | self._operator_modules
+        if not tracked:
+            return selected
+        dropped: Dict[type, Set[str]] = {}
+        for kind, classes in selected.items():
+            registry = self._registry(kind)
+            if registry is None:
+                continue
+            untracked_classes: Set[type] = set()
+            origins: Dict[type, Set[str]] = {}
+            # A copy: a registration on another thread must not resize the dict
+            # this loop walks.
+            for name, registration in dict(registry).items():
+                if not registration.enabled:
+                    continue
+                found = self._registered_classes(kind, registration, quiet=True)
+                entry = tracked.get((kind, name))
+                if entry is None or entry[1] is not registration:
+                    untracked_classes.update(found)
+                    continue
+                for cls in found:
+                    origins.setdefault(cls, set()).add(entry[0])
+            kept: List[type] = []
+            for cls in classes:
+                if (
+                    cls in untracked_classes
+                    or cls not in origins
+                    or origins[cls] & names
+                    or _named_module_provides(names, cls)
+                ):
+                    kept.append(cls)
+                else:
+                    dropped[cls] = origins[cls]
+            selected[kind] = kept
+        if dropped:
+            described = ", ".join(
+                f"{getattr(cls, '__name__', cls)!r} (imported with "
+                f"{', '.join(sorted(modules))})"
+                for cls, modules in dropped.items()
+            )
+            ASH_LOGGER.verbose(
+                f"Plugin classes {described} are not selected: this process "
+                "registered them while importing a module for another scan's "
+                "config file inside its scanned tree, a config an MCP client "
+                "delivered, or an MCP client's request, and neither this scan nor "
+                "the operator loads that module."
+            )
+        return selected
+
+    def _registry(self, plugin_type: str) -> Dict[str, AshPluginRegistration] | None:
+        return {
+            "converter": self.plugin_library.converters,
+            "scanner": self.plugin_library.scanners,
+            "reporter": self.plugin_library.reporters,
+        }.get(plugin_type)
+
+    @staticmethod
+    def _registered_classes(
+        plugin_type: str, registration: AshPluginRegistration, quiet: bool = False
+    ) -> List[type]:
+        """The ``plugin_type`` classes in the module ``registration`` names.
+
+        Every class there with that ``ash_plugin_type``, not only the registered
+        one, which is how ``plugin_modules`` has always resolved a registration.
+        """
+        try:
+            # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+            module = importlib.import_module(registration.plugin_module_path)
+        except ImportError as e:
+            if not quiet:
+                ASH_LOGGER.warning(
+                    f"Failed to import plugin module {registration.plugin_module_path}: {e}"
+                )
+            return []
+        found: List[type] = []
+        for attr_name in dir(module):
+            attr = getattr(module, attr_name)
+            if (
+                isinstance(attr, type)
+                and hasattr(attr, "ash_plugin_type")
+                and attr.ash_plugin_type == plugin_type
+                and attr not in found
+            ):
+                found.append(attr)
+        return found
 
     def filter_plugin_modules(self, items: List, callback: Callable, *args, **kwargs):
         filtered = []
@@ -240,8 +431,6 @@ class AshPluginManager(BaseModel):
         Returns:
             List of plugin class implementations (not registration objects)
         """
-        import importlib
-
         # Normalize plugin_type to a string key
         cache_key = plugin_type if isinstance(plugin_type, str) else None
         if cache_key is None:
@@ -252,84 +441,21 @@ class AshPluginManager(BaseModel):
             cached = self._resolved_plugins[cache_key]
             return self.filter_plugin_modules(cached, filter_callback, *args, **kwargs)
 
-        plugins = []
-
-        # Get all registered plugins (internal and external)
-        if plugin_type == "converter":
-            # Add registered converters
-            for name, registration in self.plugin_library.converters.items():
-                if registration.enabled:
-                    try:
-                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                        module = importlib.import_module(
-                            registration.plugin_module_path
-                        )
-                        # Find the plugin class in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if (
-                                isinstance(attr, type)
-                                and hasattr(attr, "ash_plugin_type")
-                                and attr.ash_plugin_type == "converter"
-                            ):
-                                if attr not in plugins:  # Avoid duplicates
-                                    plugins.append(attr)
-                    except ImportError as e:
-                        ASH_LOGGER.warning(
-                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                        )
-
-        elif plugin_type == "scanner":
-            # Add registered scanners
-            for name, registration in self.plugin_library.scanners.items():
-                if registration.enabled:
-                    try:
-                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                        module = importlib.import_module(
-                            registration.plugin_module_path
-                        )
-                        # Find the plugin class in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if (
-                                isinstance(attr, type)
-                                and hasattr(attr, "ash_plugin_type")
-                                and attr.ash_plugin_type == "scanner"
-                            ):
-                                if attr not in plugins:  # Avoid duplicates
-                                    plugins.append(attr)
-                    except ImportError as e:
-                        ASH_LOGGER.warning(
-                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                        )
-
-        elif plugin_type == "reporter":
-            # Add registered reporters
-            for name, registration in self.plugin_library.reporters.items():
-                if registration.enabled:
-                    try:
-                        # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                        module = importlib.import_module(
-                            registration.plugin_module_path
-                        )
-                        # Find the plugin class in the module
-                        for attr_name in dir(module):
-                            attr = getattr(module, attr_name)
-                            if (
-                                isinstance(attr, type)
-                                and hasattr(attr, "ash_plugin_type")
-                                and attr.ash_plugin_type == "reporter"
-                            ):
-                                if attr not in plugins:  # Avoid duplicates
-                                    plugins.append(attr)
-                    except ImportError as e:
-                        ASH_LOGGER.warning(
-                            f"Failed to import plugin module {registration.plugin_module_path}: {e}"
-                        )
-        else:
-            # If we get here, we don't know what to do with this plugin type
+        registry = self._registry(plugin_type)
+        if registry is None:
             ASH_LOGGER.warning(f"Unknown plugin type: {plugin_type}")
             return []
+
+        # Get all registered plugins (internal and external). The live dict, not
+        # a copy: tests/unit/workspace/test_concurrent_plugin_resolution.py pins
+        # what a registration during this loop does, and the workspace pre-warm
+        # is what keeps one from happening.
+        plugins: List[type] = []
+        for registration in registry.values():
+            if registration.enabled:
+                for attr in self._registered_classes(plugin_type, registration):
+                    if attr not in plugins:  # Avoid duplicates
+                        plugins.append(attr)
 
         # Cache the unfiltered result so repeat calls skip the import work
         if cache_key:
@@ -337,3 +463,30 @@ class AshPluginManager(BaseModel):
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)
+
+
+#: The module attributes that list a plugin package's classes.
+_PLUGIN_LISTS = ("ASH_SCANNERS", "ASH_REPORTERS", "ASH_CONVERTERS")
+
+
+def _named_module_provides(module_names: Set[str], cls: type) -> bool:
+    """Whether one of ``module_names`` defines ``cls``, or has it or lists it.
+
+    Defines it: the name is ``cls.__module__`` or a package around it. Has it: an
+    imported module of that name has it as the attribute of its name. Lists it:
+    that module's ``ASH_SCANNERS``, ``ASH_REPORTERS`` or ``ASH_CONVERTERS``
+    includes it.
+    """
+    defined_in = getattr(cls, "__module__", "") or ""
+    for name in module_names:
+        if defined_in == name or defined_in.startswith(name + "."):
+            return True
+        imported = sys.modules.get(name)
+        if imported is None:
+            continue
+        if getattr(imported, getattr(cls, "__name__", ""), None) is cls:
+            return True
+        for attribute in _PLUGIN_LISTS:
+            if any(entry is cls for entry in getattr(imported, attribute, None) or []):
+                return True
+    return False

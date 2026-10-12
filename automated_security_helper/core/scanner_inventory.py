@@ -136,6 +136,8 @@ def _loaded_scanner_classes() -> list:
     # ferret, snyk and trivy out of the answer. Loading both is safe because
     # import_module is cached and register_plugin_module skips names already
     # registered, so the result does not depend on the order either.
+    from automated_security_helper.plugins import ash_plugin_manager
+
     package_paths = _discover_external_scanner_plugin_packages()
     package_paths.extend(_VENDORED_SCANNER_PLUGIN_PACKAGES)
 
@@ -143,10 +145,21 @@ def _loaded_scanner_classes() -> list:
     # load_additional_plugin_modules logs a warning when a package fails to
     # import, which the bare `except ImportError: pass` this replaces did not: a
     # scanner missing because its package is broken now leaves a trace.
-    external = load_additional_plugin_modules(package_paths)
+    #
+    # Each inside untrusted_import: a client's request loads these packages, not
+    # the operator. Their scanners register for the rest of the process, and
+    # trivy-repo and ferret-scan are enabled by default, so without it a later
+    # scan in the server would select and run them although neither it nor the
+    # operator loads their package.
+    external: list = []
+    for package_path in package_paths:
+        with ash_plugin_manager.untrusted_import(package_path):
+            external.extend(
+                load_additional_plugin_modules([package_path]).get("scanners", [])
+            )
 
     scanner_classes: list = []
-    for cls in list(internal.get("scanners", [])) + list(external.get("scanners", [])):
+    for cls in list(internal.get("scanners", [])) + external:
         if cls not in scanner_classes:
             scanner_classes.append(cls)
 

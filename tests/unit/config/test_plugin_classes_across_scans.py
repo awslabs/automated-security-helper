@@ -120,6 +120,7 @@ def _scanner(cls: str, name: str, decorator_args: str = "") -> str:
 #   scan       a scan engine over a config resolved the way the CLI resolves it,
 #              with "cli" as --ash-plugin-modules;
 #   register   embedding code registering a class through the registry directly;
+#   list       the scanner classes the MCP list_scanners tool loads;
 #   workspace  a workspace run whose projects' scan engines are real.
 # Prints, for each step, the classes each engine selected and the warnings logged.
 _DRIVER = """
@@ -160,6 +161,14 @@ def scan(step):
     source = Path(step["source"])
     config = resolve_config(source_dir=source, **step["resolve"])
     return selected(engine(source, source.parent / "out", config, step["cli"]))
+
+
+def listed(step):
+    from automated_security_helper.core.scanner_inventory import (
+        _loaded_scanner_classes,
+    )
+
+    return {"listed": sorted(c.__name__ for c in _loaded_scanner_classes())}
 
 
 def register(step):
@@ -230,9 +239,8 @@ def workspace(step):
 results = []
 for step in steps:
     warnings.clear()
-    result = {"scan": scan, "register": register, "workspace": workspace}[
-        step["kind"]
-    ](step)
+    run = {"scan": scan, "register": register, "list": listed, "workspace": workspace}
+    result = run[step["kind"]](step)
     result["warnings"] = list(warnings)
     results.append(result)
 print(json.dumps(results))
@@ -450,6 +458,27 @@ def test_a_class_registered_directly_is_unaffected(tmp_path, site):
     assert {"EmbeddedScanner", "CarriedScanner"} <= set(first["scanners"]), first
     assert "EmbeddedScanner" in later["scanners"], later
     assert "CarriedScanner" not in later["scanners"], later
+
+
+def test_listing_the_scanners_adds_none_to_a_later_scan(tmp_path, site):
+    """The MCP list_scanners tool imports the scanner packages ASH ships.
+
+    Their scanners are enabled by default, so a scan selecting them would run
+    them. A fresh process's scan of the same tree does not, and one that names
+    the package still does.
+    """
+    plain = _tree(tmp_path, "plain")
+
+    listing, later, named = _run(
+        site, [{"kind": "list"}, _scan(plain), _scan(plain, cli=[TRIVY])]
+    )
+
+    shipped = {"TrivyRepoScanner", "FerretScanScanner"}
+    assert shipped <= set(listing["listed"]), listing
+    assert not shipped & set(later["scanners"]), later
+    assert "BanditScanner" in later["scanners"], later
+    assert "TrivyRepoScanner" in named["scanners"], named
+    assert "FerretScanScanner" not in named["scanners"], named
 
 
 def test_a_workspace_run_selects_only_what_its_projects_load(tmp_path, site):

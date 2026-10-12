@@ -487,15 +487,26 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
 
     # Every active project has the same list by now, so the first one speaks for
     # all of them; settings may add more from the CLI.
-    declared: Set[str] = set(settings.ash_plugin_modules)
-    for project in plan.active_projects:
-        declared.update(project.ash_plugin_modules)
-    modules = sorted(declared)
+    operator, modules = _workspace_plugin_modules(plan, settings)
 
     if modules:
         ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")
-        load_additional_plugin_modules(modules)
-        discover_plugins(plugin_modules=modules)
+        if operator:
+            load_additional_plugin_modules(operator)
+            discover_plugins(plugin_modules=operator)
+        # A module only the projects name is imported as an untrusted config's,
+        # like ScanExecutionEngine imports one, so that a later scan in this
+        # process that does not load it is not offered what it registered. The
+        # plan does not say which project configs are the operator's, so each
+        # project's engine records those its own config trusts
+        # (ash_plugin_manager.trust_plugin_modules) when it is built.
+        for module_name in modules:
+            if module_name in operator:
+                continue
+            with ash_plugin_manager.untrusted_import(module_name):
+                load_additional_plugin_modules([module_name])
+                discover_plugins(plugin_modules=[module_name])
+    ash_plugin_manager.trust_plugin_modules(operator)
 
     # Resolve once so the memoised list is complete and identical for every
     # project, rather than whatever the first project happened to see.
@@ -508,6 +519,45 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
         f"Workspace plugin registry pre-warmed with {resolved} scanner class(es)"
     )
     return resolved
+
+
+def _workspace_plugin_modules(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> Tuple[List[str], List[str]]:
+    """The run's ``--ash-plugin-modules``, and every module the run loads, sorted.
+
+    The second list is those and every active project's ``ash_plugin_modules``.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    operator = sorted(split_plugin_modules(settings.ash_plugin_modules))
+    declared: Set[str] = set(operator)
+    for project in plan.active_projects:
+        declared.update(project.ash_plugin_modules)
+    return operator, sorted(declared)
+
+
+def workspace_reporter_classes(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> List[type]:
+    """The reporters the workspace-level report step considers.
+
+    Every reporter class the registry resolved that this run's plugin modules
+    (``_workspace_plugin_modules``) or the operator's load. The registry is the
+    process's, so under the MCP server it also holds reporters an earlier scan's
+    untrusted config loaded; this run did not choose those
+    (``AshPluginManager.plugins_loaded_by``). Called after
+    ``prewarm_plugin_registry``, so the resolved list is the warm one.
+    """
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    _, modules = _workspace_plugin_modules(plan, settings)
+    reporters = ash_plugin_manager.plugin_modules("reporter")
+    return ash_plugin_manager.plugins_loaded_by({"reporter": reporters}, modules)[
+        "reporter"
+    ]
 
 
 def _project_output_dir(settings: ProjectScanSettings, project: ProjectPlan) -> Path:
@@ -1285,7 +1335,8 @@ def execute_workspace(
             ``ASHScanOrchestrator.create``; injected only by tests, so production
             callers never pass it.
         reporter_classes: The reporters the workspace-level report step considers.
-            Defaults to the plugin registry; injected only by tests.
+            Defaults to the registry's reporters that this run's plugin modules
+            load (:func:`workspace_reporter_classes`); injected only by tests.
 
     Returns:
         The unified results path, the process exit code, and the payload.
@@ -1332,6 +1383,8 @@ def execute_workspace(
     # Before the pool, never inside it: the registry is process-global and the
     # first project to touch it would otherwise freeze the scanner set for all.
     prewarm_plugin_registry(plan, settings)
+    if reporter_classes is None:
+        reporter_classes = workspace_reporter_classes(plan, settings)
 
     reports_requested = _REPORT_PHASE in settings.phases
     if reports_requested:

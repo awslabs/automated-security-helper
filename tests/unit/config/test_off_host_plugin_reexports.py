@@ -358,6 +358,12 @@ def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     off-host packages. The next scan, in the same process, is of a tree with no
     config, and names neither package; the one after it names the Snyk package on
     the command line.
+
+    After the tree's config loaded them, the next scan is not offered them at
+    all (``AshPluginManager.plugins_loaded_by``), as in a fresh process, so the
+    off-host check has nothing to drop or warn about. After the operator's config
+    loaded them they stay in the registry for every scan, and the off-host check
+    drops them with its warning.
     """
     source = tmp_path / "repo"
     if first == "tree":
@@ -376,8 +382,12 @@ def test_a_later_scan_in_the_same_process_selects_only_what_it_loads(
     assert not set(later["scanners"]) & set(OFF_HOST_SCANNERS), later
     assert not set(later["reporters"]) & set(OFF_HOST_REPORTERS), later
     assert "BanditScanner" in later["scanners"], later
-    [dropped] = [w for w in later["warnings"] if "not selected" in w]
-    assert SNYK in dropped and AWS in dropped, dropped
+    dropped = [w for w in later["warnings"] if "not selected" in w]
+    if first == "tree":
+        assert dropped == [], dropped
+    else:
+        [warning] = dropped
+        assert SNYK in warning and AWS in warning, warning
     assert "SnykCodeScanner" in named["scanners"], named
     assert not set(named["reporters"]) & set(OFF_HOST_REPORTERS), named
 

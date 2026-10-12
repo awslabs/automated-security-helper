@@ -59,6 +59,14 @@ packages declare no ``ASH_EVENT_HANDLERS``
 (tests/unit/config/test_off_host_plugin_modules_from_repo_config.py derives what
 they send from their reporters, handlers and scanners), so only classes are
 checked.
+
+That process-wide registry holds every other package an earlier scan's
+untrusted config loaded as well. ``plugin_modules_by_trust`` splits the modules
+a scan loads into the operator's and the rest; the engine imports the rest
+inside ``ash_plugin_manager.untrusted_import``, and
+``AshPluginManager.plugins_loaded_by`` leaves the classes those imports
+registered out of a later scan that loads neither the module nor any module the
+operator named.
 """
 
 from __future__ import annotations
@@ -256,6 +264,43 @@ def confine_plugin_modules(
         f"{source.reason}, so {imported}. Name other modules with "
         f"{source.modules_remedy}."
     )
+
+
+def plugin_modules_by_trust(
+    config: Optional["AshConfig"],
+    operator_modules: Optional[Iterable[object]],
+) -> Tuple[List[str], List[str]]:
+    """The plugin modules a scan loads: the operator's, and those only its untrusted config names.
+
+    The operator's are ``operator_modules`` (``--ash-plugin-modules`` and
+    ``ASH_PLUGIN_MODULES``) and the config's ``ash_plugin_modules`` entries that
+    its recorded trusted list names: the defaults, an operator config outside
+    the tree, and ``--config-overrides``. A config with no trusted list recorded
+    was built only from the operator's files, so all of its entries are the
+    operator's. The rest came from a config file inside the scanned tree or one
+    an MCP client delivered, and passed ``confine_plugin_modules``. A module both
+    name is the operator's.
+
+    ``ScanExecutionEngine`` imports the second list inside
+    ``ash_plugin_manager.untrusted_import``, so a later scan in the process that
+    does not load one of those modules is not offered the classes its import
+    registered (``AshPluginManager.plugins_loaded_by``).
+
+    Returns:
+        The operator's modules, then the others, each in order and without
+        repeats, with entries split on commas.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+
+    configured = split_plugin_modules(
+        getattr(config, "ash_plugin_modules", None) if config is not None else None
+    )
+    recorded = config._trusted_plugin_modules if isinstance(config, AshConfig) else None
+    trusted = set(configured if recorded is None else recorded)
+    operator = split_plugin_modules(
+        [*(operator_modules or []), *(name for name in configured if name in trusted)]
+    )
+    return operator, [name for name in configured if name not in operator]
 
 
 #: The module attributes that list a plugin package's classes.

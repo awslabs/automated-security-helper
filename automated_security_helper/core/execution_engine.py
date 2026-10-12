@@ -31,6 +31,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.plugin_module_trust import (
     drop_untrusted_off_host_plugins,
+    plugin_modules_by_trust,
 )
 from automated_security_helper.config.reporter_trust import (
     confine_declared_reporter_destinations,
@@ -185,23 +186,16 @@ class ScanExecutionEngine:
 
         load_internal_plugins()
 
-        # Combine plugin modules from config and CLI parameters
-        config_plugin_modules = (
-            getattr(self._context.config, "ash_plugin_modules", [])
-            if self._context.config
-            and hasattr(self._context.config, "ash_plugin_modules")
-            else []
+        # Combine plugin modules from config and CLI parameters, entries split on
+        # commas. The operator's (the CLI's, and the config entries its trusted
+        # list names) are imported first, and the rest -- what a config inside
+        # the scanned tree or one an MCP client delivered added -- each inside
+        # untrusted_import, so that a later scan in this process that does not
+        # load one of them is not offered the classes its import registered.
+        operator_plugin_modules, untrusted_plugin_modules = plugin_modules_by_trust(
+            self._context.config, ash_plugin_modules
         )
-
-        # CLI parameters take precedence over config
-        # evaluate ash_plugin_modules, split any entries with commas into separate items and trim surrounding whitespace
-        config_plugin_modules = [
-            subitem.strip()
-            for item in config_plugin_modules
-            if item is not None
-            for subitem in item.split(",")
-        ]
-        combined_plugin_modules = list(set(ash_plugin_modules + config_plugin_modules))
+        combined_plugin_modules = operator_plugin_modules + untrusted_plugin_modules
 
         if len(combined_plugin_modules) > 0:
             ASH_LOGGER.info(f"Loading plugin modules: {combined_plugin_modules}")
@@ -211,10 +205,15 @@ class ScanExecutionEngine:
                 load_additional_plugin_modules,
             )
 
-            load_additional_plugin_modules(combined_plugin_modules)
-
-            # Discover plugins from specified modules
-            discover_plugins(plugin_modules=combined_plugin_modules)
+            if operator_plugin_modules:
+                load_additional_plugin_modules(operator_plugin_modules)
+                # Discover plugins from specified modules
+                discover_plugins(plugin_modules=operator_plugin_modules)
+            for module_name in untrusted_plugin_modules:
+                with ash_plugin_manager.untrusted_import(module_name):
+                    load_additional_plugin_modules([module_name])
+                    discover_plugins(plugin_modules=[module_name])
+        ash_plugin_manager.trust_plugin_modules(operator_plugin_modules)
         # Config can override environment
         if self._context.config:
             if (
@@ -282,6 +281,14 @@ class ScanExecutionEngine:
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
+
+        # The registry is the process's, so it also holds what an earlier scan's
+        # untrusted config loaded, in the MCP server and across a workspace's
+        # projects. This scan takes only the classes its own modules, or the
+        # operator's, bring in; the cached list stays whole for the next scan.
+        self.plugins = ash_plugin_manager.plugins_loaded_by(
+            self.plugins, combined_plugin_modules
+        )
 
         # A class from an off-host plugin package is selected only when this
         # scan's trusted modules load it: not when only an in-tree or delivered

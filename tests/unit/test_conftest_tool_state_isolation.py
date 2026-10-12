@@ -147,6 +147,19 @@ def test_a_registration_and_handlers_a_test_made_are_rolled_back():
     } == handlers
 
 
+def test_a_module_the_operator_named_during_a_test_is_forgotten():
+    """Otherwise one test's ``--ash-plugin-modules`` would be the operator's in the next."""
+    before = set(getattr(ash_plugin_manager, "_operator_modules"))
+
+    with _ProcessWideToolState():
+        ash_plugin_manager.trust_plugin_modules(["conftest_probe_ash_plugins"])
+        assert "conftest_probe_ash_plugins" in getattr(
+            ash_plugin_manager, "_operator_modules"
+        )
+
+    assert getattr(ash_plugin_manager, "_operator_modules") == before
+
+
 def test_what_importing_a_plugin_module_registered_is_kept(tmp_path, monkeypatch):
     """The import that registered it will not run again, so dropping it loses it."""
     module_name = "ash_conftest_isolation_probe_plugin"

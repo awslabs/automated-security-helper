@@ -653,7 +653,10 @@ class _ProcessWideToolState:
       module's own memo object counts; a test that rebinds a memo to a dict of its
       own made up everything in it;
     * ``ash_plugin_manager``'s resolved-plugin memo, event handlers and plugin
-      registrations.
+      registrations, and the modules it has recorded the operator naming
+      (``trust_plugin_modules``). Which registrations an untrusted import made
+      is not rolled back: such a registration is kept or dropped by the rule
+      below, and the record is ignored once its registration is gone.
 
     A module first imported during the test has no snapshot, so what its import
     built is the baseline: an empty memo, a fresh runner from
@@ -698,6 +701,9 @@ class _ProcessWideToolState:
                 "manager": ash_plugin_manager,
                 "library": library,
                 "resolved": dict(getattr(ash_plugin_manager, "_resolved_plugins")),
+                "operator_modules": set(
+                    getattr(ash_plugin_manager, "_operator_modules")
+                ),
                 "event_handlers": (
                     library.event_handlers,
                     {
@@ -775,6 +781,7 @@ class _ProcessWideToolState:
                 "manager": ash_plugin_manager,
                 "library": library,
                 "resolved": {},
+                "operator_modules": set(),
                 "event_handlers": (library.event_handlers, {}),
                 "registries": {
                     kind: (getattr(library, kind), {}) for kind in _PLUGIN_REGISTRIES
@@ -807,6 +814,9 @@ class _ProcessWideToolState:
         resolved = getattr(ash_plugin_manager, "_resolved_plugins")
         resolved.clear()
         resolved.update(saved["resolved"])
+        operator_modules = getattr(ash_plugin_manager, "_operator_modules")
+        operator_modules.clear()
+        operator_modules.update(saved["operator_modules"])
 
         handlers_by_event, saved_handlers = saved["event_handlers"]
         library.event_handlers = handlers_by_event
