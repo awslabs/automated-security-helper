@@ -519,12 +519,15 @@ def test_cli_flags_check_passes_on_the_real_tree(gate):
 
 
 def test_every_scan_option_is_named_for_its_flag():
-    """check_cli_flags turns each option's parameter name into a flag.
+    """Each scan option's parameter name is its flag, so the two cannot drift apart.
 
-    So a parameter named unlike its flag makes the gate ask cli-reference.md for
-    a flag the CLI does not have: config_files_from_scanned_repository, whose
-    flag is --config-file-from-scanned-repository, asked for
-    --config-files-from-scanned-repository. Hidden options count too: they are
+    check_cli_flags used to turn every option's parameter name into a flag, so a
+    parameter named unlike its flag made the gate ask cli-reference.md for a flag
+    the CLI does not have: config_files_from_scanned_repository, whose flag is
+    --config-file-from-scanned-repository, asked for
+    --config-files-from-scanned-repository. It now takes an Option's own flags
+    (test_a_parameter_that_names_its_flag_gets_no_flag_from_its_name); this test
+    keeps the names honest for readers too. Hidden options count: they are
     documented in cli-reference.md like the rest.
     """
     import typer
@@ -547,6 +550,49 @@ def test_every_scan_option_is_named_for_its_flag():
         if "--" + name.replace("_", "-") not in flags:
             misnamed[name] = sorted(flags)
     assert misnamed == {}
+
+
+def test_a_parameter_that_names_its_flag_gets_no_flag_from_its_name(
+    gate, tmp_path, monkeypatch
+):
+    """typer uses an Option's own flag strings and ignores the parameter's name.
+
+    The check derived `--config-files-from-scanned-repository` from scan.py's
+    parameter of that name (since renamed), whose flag is
+    `--config-file-from-scanned-repository`, and failed on a flag that does not
+    exist. A parameter whose Option names no flag still gets one from its name.
+    """
+    source = tmp_path / "scan.py"
+    source.write_text(
+        "def scan(\n"
+        "    files_from_repo: Annotated[\n"
+        "        Optional[List[str]],\n"
+        "        typer.Option(\n"
+        '            "--file-from-repo",\n'
+        "            hidden=True,\n"
+        "        ),\n"
+        "    ] = None,\n"
+        "    plain_name: Annotated[\n"
+        "        bool,\n"
+        '        typer.Option(help="names no flag"),\n'
+        "    ] = False,\n"
+        "): ...\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "CLI_SCAN_PY", source)
+    docs = tmp_path / "cli-reference.md"
+    monkeypatch.setattr(gate, "CLI_REFERENCE_MD", docs)
+
+    docs.write_text("`--file-from-repo` and `--plain-name`\n", encoding="utf-8")
+    assert gate.check_cli_flags() == [], (
+        "a flag was derived from the name of a parameter whose Option names its own"
+    )
+
+    docs.write_text("`--file-from-repo`\n", encoding="utf-8")
+    failures = gate.check_cli_flags()
+    assert failures and all("--plain-name" in f for f in failures), (
+        f"a parameter whose Option names no flag lost its derived flag: {failures}"
+    )
 
 
 def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):

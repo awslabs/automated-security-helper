@@ -350,7 +350,15 @@ def check_cli_flags() -> list[str]:
         r"^\s+([a-z_][a-z0-9_]*):\s*Annotated\[\s*\n?\s*.*?,\s*\n?\s*typer\.Option\(",
         re.MULTILINE,
     )
+    #
+    # Only for an Option that names no flag of its own. Given flag strings, typer
+    # uses those and nothing else, and the literal scan above already has them; the
+    # parameter name then names no flag at all. Deriving one anyway reported
+    # `--config-files-from-scanned-repository`, which does not exist, for a
+    # parameter whose flag is `--config-file-from-scanned-repository`.
     for match in param_pattern.finditer(source):
+        if re.match(r"\s*[\"']", source[match.end() :]):
+            continue
         param_name = match.group(1)
         flag = "--" + param_name.replace("_", "-")
         flags_in_source.add(flag)
