@@ -218,9 +218,19 @@ def npm_scanner(test_plugin_context):
 def run_npm_scan(npm_scanner, root: Path, projects: dict):
     """Run NpmAuditScanner.scan over ``projects`` ({dir: audit stdout})."""
     npm_scanner.context.source_dir = root
+    # npm runs from a private copy of each project's manifest and lockfile (see
+    # NpmAuditScanner._package_manager_invocation), so the copy each audit ran in
+    # is mapped back to the project it was made from.
+    copied_from: dict = {}
+    real_invocation = NpmAuditScanner._package_manager_invocation
+
+    def recording_invocation(self, binary, package_dir, results_dir, yarn_major=None):
+        invocation = real_invocation(self, binary, package_dir, results_dir, yarn_major)
+        copied_from[Path(invocation.cwd)] = Path(package_dir)
+        return invocation
 
     def fake_run(command, results_dir, cwd, **kwargs):
-        return {"stdout": projects[Path(cwd)]}
+        return {"stdout": projects[copied_from[Path(cwd)]]}
 
     with (
         patch(
@@ -230,6 +240,9 @@ def run_npm_scan(npm_scanner, root: Path, projects: dict):
         patch.object(npm_scanner, "_pre_scan", return_value=True),
         patch.object(npm_scanner, "_post_scan"),
         patch.object(npm_scanner, "_run_subprocess", side_effect=fake_run),
+        patch.object(
+            NpmAuditScanner, "_package_manager_invocation", recording_invocation
+        ),
     ):
         return npm_scanner.scan(target=root, target_type="source")
 
