@@ -74,12 +74,15 @@ CONTAINER_INIT_PATH = "/usr/local/bin/ash-container-init"
 CDK_CONFIG_PATH = "/tmp/ash-config/.ash.yaml"
 
 IN_TREE_PROJECT_NAME = "in-tree-config"
+#: Ignores only the file holding the finding. With every file ignored, detect-secrets
+#: has nothing to scan and is SKIPPED, and a run whose scanners were all skipped
+#: exits 1, so the control could not show the config turning exit 2 into exit 0.
 IN_TREE_CONFIG = (
     f"project_name: {IN_TREE_PROJECT_NAME}\n"
     "fail_on_findings: false\n"
     "global_settings:\n"
     "  ignore_paths:\n"
-    '    - path: "**"\n'
+    '    - path: "deploy.pem"\n'
     '      reason: "listed in the scanned tree"\n'
 )
 
