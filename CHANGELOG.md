@@ -1887,6 +1887,26 @@
   values on to the reports and responses rendered from it. `ash merge` masks the
   merged results against every shard's secret findings before it writes them.
 
+- **Secret masking misses fixed.**
+  - A form feed, vertical tab, NEL, U+2028 or U+2029 in a snippet shifted every
+    later line number, so the secret line was written in clear while a
+    neighboring line was masked. Lines are now counted at `\n`, `\r\n` and `\r`
+    only, and a snippet holding one of the other characters, or a lone `\r`, in a
+    file with a secret finding is masked whole.
+  - A private key reported on its BEGIN line (detect-secrets) is masked through
+    its END line in every snippet.
+  - A value holding its own quote character (`'ab'cd...'`) is masked to the last
+    quote of the message, not the first.
+  - A secret finding's own snippets are masked whole, whatever line numbers the
+    tool's context carries.
+  - A raw value holding a `*` is no longer mistaken for one the scanner already
+    masked.
+  - A percent-encoded URI (`my%20app/settings.py`) matches the same file written
+    plainly.
+  - A line with an unterminated quote and many backslashes no longer stalls the
+    masking (and an MCP server with it), and a secret region ending at line
+    3,000,000 no longer allocates one entry per line.
+
 - **The findings browser masks the source lines it reads from disk.** For a
   finding with no snippet, `ash inspect findings` shows the five lines either side
   of it from the file, which were not masked: a secret on a neighboring line was
