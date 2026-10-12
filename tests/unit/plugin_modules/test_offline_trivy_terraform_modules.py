@@ -179,6 +179,68 @@ def test_offline_trivy_runs_no_misconfig_checks_when_their_list_is_unknown(
     assert "vuln" in scanners, command
 
 
+def _refusal(scanner, ctx, monkeypatch):
+    """The error ``scan`` raised, and the trivy scans it started (expected none)."""
+    from automated_security_helper.core.exceptions import ScannerError
+
+    commands: List[List[str]] = []
+
+    def record(command, *args, **kwargs):
+        commands.append([str(part) for part in command])
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", record)
+    monkeypatch.setattr(
+        type(scanner), "validate_plugin_dependencies", lambda self: True
+    )
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=ctx.source_dir, target_type="source")
+    scans = [c for c in commands if any(ctx.source_dir.as_posix() in p for p in c)]
+    return raised.value, scans
+
+
+def test_offline_misconfig_only_trivy_refuses_without_the_list(offline, context):
+    """With misconfig the only scanner and its list unknown, nothing is left to run.
+
+    Dropping misconfig would hand trivy an empty --scanners; running it would let
+    the Terraform checks download module sources. So the scan is refused.
+    """
+    offline.setattr(
+        trivy_repo_scanner,
+        "trivy_default_misconfig_scanners",
+        lambda *args, **kwargs: None,
+        raising=False,
+    )
+    scanner = TrivyRepoScanner(
+        context=context,
+        config=TrivyRepoScannerConfig(
+            options=TrivyRepoScannerConfigOptions(scanners=["misconfig"])
+        ),
+    )
+
+    error, scans = _refusal(scanner, context, offline)
+
+    assert scans == [], scans
+    assert "misconfiguration checks" in str(error)
+
+
+@pytest.mark.parametrize(
+    "variable", ["TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"]
+)
+def test_an_operator_input_that_is_not_a_file_refuses_the_scan(
+    online, context, tmp_path, variable
+):
+    """A directory where the operator named a file: trivy is not run without it."""
+    directory = tmp_path / "operator-directory"
+    directory.mkdir()
+    online.setenv(variable, str(directory))
+
+    error, scans = _refusal(_trivy(context), context, online)
+
+    assert scans == [], scans
+    assert variable in str(error) and "not a file" in str(error), error
+
+
 def test_control_online_trivy_keeps_its_terraform_checks(online, context):
     command = _scan_command(_trivy(context), context, online)
 
