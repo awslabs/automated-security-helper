@@ -140,60 +140,6 @@ def _config_env_refusal(error: Exception, operation: str) -> Dict[str, Any]:
     }
 
 
-def _delivered_config_env_error(
-    config_path: Optional[str], target: Path, session_id: Optional[str]
-) -> Optional[Exception]:
-    """The ``!ENV`` refusal a scan of ``target`` would meet, or None.
-
-    Resolves the config the scan would read (``config_path``, or the one
-    discovery selects in ``target``) with the scan's confinement, so that a
-    delivered config using ``!ENV`` is refused before the scan starts and in
-    the words the scan would use, rather than by a scan that ends with exit
-    code 3. Any other problem with the config is left to the scan, which
-    reports it as it always has. The scan still refuses on its own if the file
-    changes after this check.
-    """
-    from automated_security_helper.cli.mcp.sandbox import (
-        caller_is_remote,
-        config_base_gate,
-    )
-    from automated_security_helper.config.config_sources import (
-        default_confinement_root,
-        discover_config_source,
-        env_refused_for,
-        resolve_config_document,
-    )
-    from automated_security_helper.core.exceptions import (
-        ASHConfigEnvNotResolvedError,
-    )
-
-    permit_base = config_base_gate(session_id)
-    try:
-        if config_path is None:
-            # Under the session's gate, as the scan discovers it: a source that
-            # links outside the grant is refused before anything opens it.
-            selected = discover_config_source(target, permit=permit_base).selected
-            if selected is None:
-                return None
-            path, confine_to = selected.path, target
-        else:
-            path = Path(config_path)
-            confine_to = default_confinement_root(path, target)
-        if not path.is_file():
-            return None
-        resolve_config_document(
-            path,
-            confine_to=confine_to,
-            permit_base=permit_base,
-            refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
-        )
-    except ASHConfigEnvNotResolvedError as exc:
-        return exc
-    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
-        _logger.debug(f"Config not resolved before the scan ({exc})")
-    return None
-
-
 def _discovered_config_refusal(
     target: Path, session_id: Optional[str]
 ) -> Optional[MCPResourceError]:

@@ -756,7 +756,6 @@ def test_the_scan_pre_checks_and_validate_config_accept_a_patched_profile(
     )
     target = _server["target"]
 
-    assert mcp_tools._delivered_config_env_error(bound, target, SESSION) is None
     assert (
         mcp_tools._client_config_denial(bound, target, SESSION, "scan_directory")
         is None

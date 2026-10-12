@@ -4,15 +4,14 @@
 """The scan's pre-checks discover the config under the session's gate.
 
 Before a scan of a directory with no named config, ``scan_directory`` runs
-three checks that each discover the config the scan would read: the refusal of
-a config source outside the session's grant, the ``!ENV`` refusal and the
-client-rules denial. A discovered name can be a link to any file on the server,
-so discovery is handed the session's ``config_base_gate``, which checks every
+checks that each discover the config the scan would read, among them the
+refusal of a config source outside the session's grant and the client-rules
+denial. A discovered name can be a link to any file on the server, so
+discovery is handed the session's ``config_base_gate``, which checks every
 source by the path it resolves to before opening any
-(``config_sources.discover_config_source``). Without it the ``!ENV`` check and
-the client-rules check read the file the link reaches, even one the gate
-refuses: when they are called on their own, or when the link changes after the
-first check passed.
+(``config_sources.discover_config_source``). Without it the client-rules check
+read the file the link reaches, even one the gate refuses: when it is called on
+its own, or when the link changes after the first check passed.
 
 Each check is called here on its own, on a directory whose ``.ash.yaml`` links
 to a file outside every root the session may read config from, and the test
@@ -71,9 +70,6 @@ def resolved(monkeypatch: pytest.MonkeyPatch) -> List[Path]:
 
 
 CHECKS: Dict[str, Callable[[Path], object]] = {
-    "env-check": lambda target: mcp_tools._delivered_config_env_error(
-        None, target, SESSION
-    ),
     "client-rules-check": lambda target: mcp_tools._client_config_denial(
         None, target, SESSION, "scan_directory"
     ),
