@@ -23,7 +23,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from automated_security_helper.core.enums import SandboxMode
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -486,6 +486,33 @@ def outside_scanner_sandbox() -> Iterator[None]:
         _ACTIVE.reset(previous)
 
 
+#: Programs that spawns in an ``also_runs`` block start besides their own argv0.
+_ALSO_RUNS: contextvars.ContextVar[Tuple[str, ...]] = contextvars.ContextVar(
+    "ash_sandbox_also_runs", default=()
+)
+
+
+@contextmanager
+def also_runs(*executables: str) -> Iterator[None]:
+    """Spawns in the block also start ``executables``: grant each as argv0 is granted.
+
+    For ASH's own checks that hand a tool another program to run. The pre-installed
+    tool check runs ``uv pip install --dry-run --python <interpreter>``, and uv runs
+    that interpreter. A policy grants paths for argv0 only, so the interpreter's
+    environment was readable only while a broad directory around uv (all of
+    ~/.local, for a uv in ~/.local/bin) was mounted. Each executable named here gets
+    the grants argv0 gets, through the same breadth filter
+    (``policy._executable_prefix``): its directory and install prefix, never a home
+    or a directory directly in one. Only ASH's own code names them; nothing a
+    scanner's options say reaches this.
+    """
+    token = _ALSO_RUNS.set(_ALSO_RUNS.get() + tuple(executables))
+    try:
+        yield
+    finally:
+        _ALSO_RUNS.reset(token)
+
+
 def prepare_spawn(
     argv: Sequence[str],
     env: Optional[Mapping[str, str]],
@@ -534,6 +561,7 @@ def _plan_spawn(
         env_scanners=scope.env_scanners,
         # This thread's scanner run's own config files, and no other run's.
         tool_config_dir=active_tool_config_dir(),
+        also_runs=_ALSO_RUNS.get(),
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the

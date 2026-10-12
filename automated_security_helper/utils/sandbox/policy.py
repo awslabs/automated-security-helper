@@ -895,6 +895,7 @@ def build_scanner_policy(
     read_path_scanners: Sequence[str] = (),
     env_scanners: Sequence[str] = (),
     tool_config_dir: Optional[Path] = None,
+    also_runs: Sequence[str] = (),
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
 
@@ -912,6 +913,9 @@ def build_scanner_policy(
             run's tool (``utils/tool_config_dir``). Read-only, and in
             ``scan_data``, so a backend that limits where programs run from
             (sandbox-exec) runs none from it.
+        also_runs: Programs the spawn starts besides argv0, named by ASH's own
+            code (``scope.also_runs``). Each is granted as argv0 is, through
+            ``_executable_prefix`` and its breadth filter.
     """
     real_home = Path.home()
     read_granted = not requirements.read_paths_require_grant or scanner_name in set(
@@ -957,6 +961,7 @@ def build_scanner_policy(
         + _uv_directories()
         + _ash_paths()
         + _executable_prefix(argv0)
+        + [path for program in also_runs for path in _executable_prefix(program)]
         + [_expand(p) for p in declared_read]
         + env_named_reads
         + [_expand(p) for p in extra_read_paths]

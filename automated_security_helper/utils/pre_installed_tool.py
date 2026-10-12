@@ -34,7 +34,10 @@ How the check works
    <requirement>`` decides. uv evaluates extras, environment markers and the
    version constraint the same way the scan's ``uv tool run`` would, and with no
    cache and no network it can only answer "Would make no changes" when that
-   environment already satisfies the requirement. Nothing is installed.
+   environment already satisfies the requirement. Nothing is installed. Under
+   ``--sandbox`` the dry run is granted that interpreter's environment the way a
+   spawn's own program is (``sandbox.scope.also_runs``); uv's own directory alone
+   does not hold it.
 
 Rejected alternatives: reading ``importlib.metadata`` in the tool's interpreter
 needs marker evaluation (bandit's ``toml`` extra is ``tomli; python_version <
@@ -353,7 +356,12 @@ def _dry_run(
         command += ["--target", target]
     if no_deps:
         command.append("--no-deps")
-    result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
+    from automated_security_helper.utils.sandbox.scope import also_runs
+
+    # uv runs the interpreter to inspect it, so under --sandbox the spawn needs the
+    # interpreter's environment as well as uv's own directory.
+    with also_runs(interpreter):
+        result = _run(command + [requirement], _UV_DRY_RUN_TIMEOUT)
     if result is None:
         return "unverifiable", f"could not run uv to check {requirement!r}"
     # uv colors its output into a pipe when FORCE_COLOR or CLICOLOR_FORCE is set; the
