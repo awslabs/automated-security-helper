@@ -313,6 +313,28 @@ def load_config_file(
     (see ``read_config_document``) and one that does not validate raises
     ``ASHConfigValidationError``, both exit 3 from ``ash scan``.
     """
+    return load_config_document(
+        config_path,
+        confine_to=confine_to,
+        permit_base=permit_base,
+        log_failure=log_failure,
+        refuse_env=refuse_env,
+        anchor_relative_paths=anchor_relative_paths,
+    )[0]
+
+
+def load_config_document(
+    config_path: Path | str,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    *,
+    log_failure: bool = True,
+    refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
+) -> Tuple[AshConfig, ResolvedConfigDocument]:
+    """``load_config_file``, and the document it read, for a caller that checks
+    the chain's files too (``cli/mcp/sandbox.check_config_input``) without reading
+    them again."""
     document = read_config_document(
         config_path,
         confine_to=confine_to,
@@ -321,7 +343,7 @@ def load_config_file(
         refuse_env=refuse_env,
         anchor_relative_paths=anchor_relative_paths,
     )
-    return _validate_config_document(document, config_path)
+    return _validate_config_document(document, config_path), document
 
 
 def _apply_config_override(

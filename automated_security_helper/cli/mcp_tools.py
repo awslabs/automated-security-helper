@@ -278,15 +278,18 @@ def _client_config_denial(
     source_dir: Path,
     session_id: Optional[str],
     operation: str,
+    document: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """Refuse up front a client-delivered config the scan would refuse while resolving.
 
     The scan resolves the config in the background, so the same check runs here
     first and the client is told which field to remove at once. The chain is read
     the way the scan reads it: the named file, or the file discovered in
-    ``source_dir``. Any other chain problem is left to the scan, which reports it
-    as it always has. The scan's own check is the one that decides; this one
-    only reports early.
+    ``source_dir``. ``document`` is that chain when the caller has read it already
+    (``sandbox.ConfigInputCheck.document`` for ``config_path``), so it is not read
+    again. Any other chain problem is left to the scan, which reports it as it
+    always has. The scan's own check is the one that decides; this one only
+    reports early.
     """
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
@@ -316,21 +319,24 @@ def _client_config_denial(
         config_path, session_id=session_id
     )
     try:
-        if config_path is not None:
-            path = Path(config_path)
-            confine = default_confinement_root(path, source_dir)
-        else:
-            # Under the session's gate, as the scan discovers it.
-            selected = discover_config_source(source_dir, permit=permit_base).selected
-            if selected is None:
-                return None
-            path, confine = selected.path, source_dir
-        document = resolve_config_document(
-            path,
-            confine_to=confine,
-            permit_base=permit_base,
-            refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
-        )
+        if document is None:
+            if config_path is not None:
+                path = Path(config_path)
+                confine = default_confinement_root(path, source_dir)
+            else:
+                # Under the session's gate, as the scan discovers it.
+                selected = discover_config_source(
+                    source_dir, permit=permit_base
+                ).selected
+                if selected is None:
+                    return None
+                path, confine = selected.path, source_dir
+            document = resolve_config_document(
+                path,
+                confine_to=confine,
+                permit_base=permit_base,
+                refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
+            )
     except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
         _logger.debug(f"Config chain not read before the scan: {exc}")
         return None
@@ -491,6 +497,8 @@ async def mcp_scan_directory(
     # config extends, so a refused path is reported as refused and not as missing.
     # `is not None`: an empty path is a config input too, and is refused here
     # rather than starting a scan that fails on it.
+    # The chain the check below read, which the denial check reads from.
+    chain_document: Optional[Any] = None
     if config_path is not None:
         from automated_security_helper.cli.mcp.sandbox import check_config_input
 
@@ -548,6 +556,7 @@ async def mcp_scan_directory(
                     "Run 'ash config lint' on the file to check it",
                 ],
             )
+        chain_document = checked.document
     else:
         link_out = _discovered_config_refusal(resolved_target, session_id)
         if link_out is not None:
@@ -557,7 +566,11 @@ async def mcp_scan_directory(
             return _config_env_refusal(env_error, "scan_directory")
 
     denial = _client_config_denial(
-        config_path, resolved_target, session_id, "scan_directory"
+        config_path,
+        resolved_target,
+        session_id,
+        "scan_directory",
+        document=chain_document,
     )
     if denial is not None:
         return denial

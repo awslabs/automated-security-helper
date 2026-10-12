@@ -112,7 +112,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
@@ -944,12 +944,15 @@ class ConfigInputCheck:
 
     ``env_error`` is the ``ASHConfigEnvNotResolvedError`` for a file that may
     not use ``!ENV`` and does (``config_sources.env_refused_for``), which a
-    caller reports as ``config_env_not_resolved``.
+    caller reports as ``config_env_not_resolved``. ``document`` is the chain the
+    check read (a ``config_sources.ResolvedConfigDocument``) when it loaded, so
+    a caller that checks what its files set does not read them again.
     """
 
     refusal: Optional[MCPResourceError] = None
     load_error: Optional[MCPResourceError] = None
     env_error: Optional[Exception] = None
+    document: Optional[Any] = None
 
 
 def check_config_input(
@@ -973,7 +976,7 @@ def check_config_input(
         default_confinement_root,
         env_refused_for,
     )
-    from automated_security_helper.config.resolve_config import load_config_file
+    from automated_security_helper.config.resolve_config import load_config_document
     from automated_security_helper.core.exceptions import (
         ASHConfigEnvNotResolvedError,
         ASHConfigInputNotPermittedError,
@@ -988,7 +991,7 @@ def check_config_input(
         # Read as the scan reads it, so a file that may not use !ENV is refused
         # for that before an `extends` whose value !ENV would choose is followed:
         # the refusal must not depend on the server's environment.
-        load_config_file(
+        _config, document = load_config_document(
             path,
             confine_to=default_confinement_root(
                 path, Path(source_dir) if source_dir is not None else None
@@ -1020,7 +1023,7 @@ def check_config_input(
                 f"The configuration could not be resolved: {type(exc).__name__}: {exc}",
             )
         )
-    return ConfigInputCheck()
+    return ConfigInputCheck(document=document)
 
 
 def _config_load_error(config_path: object, reason: object) -> MCPResourceError:
