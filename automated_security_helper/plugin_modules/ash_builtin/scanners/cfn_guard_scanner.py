@@ -111,6 +111,7 @@ from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     NOT_THE_OPERATORS,
     operator_paths,
+    refusal_warning,
     scan_root,
     set_by_operator,
 )
@@ -346,8 +347,11 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         ]
         for raw, reason in refused:
             self._warn_rules_once(
-                f"Ignoring scanners.cfn-guard.options.rules_paths entry {raw!r}: "
-                f"{reason}."
+                refusal_warning(
+                    f"Ignoring scanners.cfn-guard.options.rules_paths entry {raw!r}: "
+                    f"{reason}.",
+                    reason,
+                )
             )
         root = scan_root(config, source_dir)
         real_root = Path(os.path.realpath(root))
@@ -486,9 +490,12 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         ):
             return value
         self._warn_rules_once(
-            f"Ignoring scanners.cfn-guard.options.rule_sets ({value!r}): "
-            f"{NOT_THE_OPERATORS}. cfn-guard evaluates ASH's default rule set, "
-            f"{DEFAULT_RULE_SET}."
+            refusal_warning(
+                f"Ignoring scanners.cfn-guard.options.rule_sets ({value!r}): "
+                f"{NOT_THE_OPERATORS}. cfn-guard evaluates ASH's default rule set, "
+                f"{DEFAULT_RULE_SET}.",
+                NOT_THE_OPERATORS,
+            )
         )
         return [DEFAULT_RULE_SET]
 

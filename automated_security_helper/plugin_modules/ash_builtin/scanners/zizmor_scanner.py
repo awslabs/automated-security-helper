@@ -143,9 +143,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     SarifReport,
 )
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
+    refusal_warning,
     set_by_operator,
 )
 from automated_security_helper.utils.get_scan_set import honors_ignore_files, scan_set
@@ -676,9 +678,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     "scanners.zizmor.options.online_audits is true in a config inside "
                     "a git checkout or the scanned directory, or from an MCP client, "
                     "so it is ignored: zizmor runs with --offline and without the "
-                    "GitHub token variables. Set it with --config-overrides or a "
-                    "config file outside every git checkout and the scanned "
-                    "directory.",
+                    f"GitHub token variables. {KEEP_A_SETTING}",
                     level=logging.WARNING,
                 )
             return False
@@ -712,9 +712,8 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 "scanners.zizmor.options.honor_inline_ignores is true in a config "
                 "inside a git checkout or the scanned directory, or from an MCP "
                 "client, so it is ignored: zizmor runs with --no-ignores and its "
-                "ignore comments do not apply. Set it with --config-overrides or a "
-                "config file outside every git checkout and the scanned directory, "
-                "or suppress findings with ASH suppressions.",
+                "ignore comments do not apply; suppress findings with ASH "
+                f"suppressions. {KEEP_A_SETTING}",
                 level=logging.WARNING,
             )
         return False
@@ -882,9 +881,12 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     )
                 return chosen.path.as_posix()
             self._plugin_log(
-                f"Ignoring scanners.zizmor.options.config_file ({str(configured)!r}): "
-                f"{chosen.refusal}. zizmor runs with --no-config; tune findings "
-                "with ASH suppressions.",
+                refusal_warning(
+                    "Ignoring scanners.zizmor.options.config_file "
+                    f"({str(configured)!r}): {chosen.refusal}. zizmor runs with "
+                    "--no-config; tune findings with ASH suppressions.",
+                    chosen.refusal,
+                ),
                 level=logging.WARNING,
             )
         source = Path(self._plugin_context.source_dir)

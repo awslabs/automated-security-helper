@@ -64,7 +64,10 @@ from automated_security_helper.config.operator_paths import (
 )
 from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.config.tool_config_trust import empty_tool_config
-from automated_security_helper.utils.config_trust import operator_path
+from automated_security_helper.utils.config_trust import (
+    operator_path,
+    refusal_warning,
+)
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.content_db_refresh import (
     EMPTY_TOOL_CONFIG,
@@ -593,7 +596,9 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         if refusal not in self._warned_inputs:
             self._warned_inputs.add(refusal)
             self._plugin_log(
-                f"Ignoring {key} ({str(value)!r}): {reason}. {why}",
+                refusal_warning(
+                    f"Ignoring {key} ({str(value)!r}): {reason}. {why}", reason
+                ),
                 level=logging.WARNING,
             )
         return None

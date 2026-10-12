@@ -74,6 +74,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+
 PathLike = Union[str, "os.PathLike[str]"]
 
 _MISSING = object()
@@ -249,12 +251,26 @@ def scan_root(config: Any, source_dir: PathLike) -> Path:
     return Path(getattr(config, "_scanned_root", None) or source_dir)
 
 
-#: Why ``operator_path`` refused a value the operator did not set.
+#: Why ``operator_path`` refused a value the operator did not set. A warning that
+#: gives it ends with the remedy every confinement warning ends with,
+#: ``confinement_remedy.KEEP_A_SETTING`` (``refusal_warning``).
 NOT_THE_OPERATORS = (
     "it came from a config file inside a git checkout or the scanned directory, or "
-    "from an MCP client; set it with --config-overrides or a config file outside "
-    "every git checkout and the scanned directory"
+    "from an MCP client"
 )
+
+
+def refusal_warning(message: str, refusal: Optional[str]) -> str:
+    """``message``, ending with ``KEEP_A_SETTING`` when ``refusal`` is ``NOT_THE_OPERATORS``.
+
+    Only that refusal is the operator's to undo by moving the setting. A path
+    refused for where it is (``INSIDE_THE_TREE``, ``LEADS_OUT_OF_THE_TREE``) is not,
+    and its message says what to name instead.
+    """
+    if refusal == NOT_THE_OPERATORS:
+        return f"{message} {KEEP_A_SETTING}"
+    return message
+
 
 #: Why ``operator_path`` refused a path inside the scanned tree.
 INSIDE_THE_TREE = "it is inside the scanned tree"

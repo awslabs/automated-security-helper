@@ -169,9 +169,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.utils.config_trust import (
     LEADS_OUT_OF_THE_TREE,
     operator_path,
+    refusal_warning,
     set_by_operator,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -502,8 +504,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             )
         if chosen.path is None:
             self._plugin_log(
-                f"Ignoring scanners.gitleaks.options.{option} ({str(value)!r}): "
-                f"{chosen.refusal}. Tune findings with ASH suppressions.",
+                refusal_warning(
+                    f"Ignoring scanners.gitleaks.options.{option} ({str(value)!r}): "
+                    f"{chosen.refusal}. Tune findings with ASH suppressions.",
+                    chosen.refusal,
+                ),
                 level=logging.WARNING,
             )
             return None
@@ -535,9 +540,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 "scanners.gitleaks.options.honor_inline_ignores is true in a config "
                 "inside a git checkout or the scanned directory, or from an MCP "
                 "client, so it is ignored: gitleaks runs with --ignore-gitleaks-allow "
-                "and gitleaks:allow comments do not apply. Set it with "
-                "--config-overrides or a config file outside every git checkout and "
-                "the scanned directory, or suppress findings with ASH suppressions.",
+                "and gitleaks:allow comments do not apply; suppress findings with "
+                f"ASH suppressions. {KEEP_A_SETTING}",
                 level=logging.WARNING,
             )
         return False
@@ -562,8 +566,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                 f"scanners.gitleaks.options.max_target_megabytes ({value}) is set "
                 "in a config inside a git checkout or the scanned directory, or "
                 "from an MCP client, so it is ignored and gitleaks scans files of "
-                "every size. Set it with --config-overrides or a config file "
-                "outside every git checkout and the scanned directory.",
+                f"every size. {KEEP_A_SETTING}",
                 level=logging.WARNING,
             )
         return None

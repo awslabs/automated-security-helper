@@ -185,8 +185,10 @@ from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.config_trust import (
     INSIDE_THE_TREE,
     LEADS_OUT_OF_THE_TREE,
+    NOT_THE_OPERATORS,
     leaves_the_tree_through_a_link,
     operator_path,
+    refusal_warning,
     scan_root,
     set_by_operator,
 )
@@ -602,7 +604,15 @@ class ActionlintScannerConfig(ScannerPluginConfigBase):
 
 
 class _RefusedIntegration(Exception):
-    """A shellcheck/pyflakes value the scanned tree may not choose; see the module."""
+    """A shellcheck/pyflakes value the scanned tree may not choose; see the module.
+
+    ``refusal`` is the ``config_trust`` refusal it stands for, when there is one,
+    so the warning ends with that refusal's remedy (``refusal_warning``).
+    """
+
+    def __init__(self, reason: str, refusal: Optional[str] = None) -> None:
+        super().__init__(reason)
+        self.refusal = refusal
 
 
 @ash_scanner_plugin
@@ -676,9 +686,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 if flag not in self._refused_integrations:
                     self._refused_integrations.add(flag)
                     self._plugin_log(
-                        f"Ignoring scanners.actionlint.options.{flag} "
-                        f"({str(configured).strip()!r}): {refused}. actionlint runs "
-                        f"with {flag} off.",
+                        refusal_warning(
+                            f"Ignoring scanners.actionlint.options.{flag} "
+                            f"({str(configured).strip()!r}): {refused}. actionlint "
+                            f"runs with {flag} off.",
+                            refused.refusal,
+                        ),
                         level=logging.WARNING,
                     )
         return resolved
@@ -708,10 +721,10 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             context_config, f"scanners.actionlint.options.{flag}", configured
         ):
             raise _RefusedIntegration(
-                "a config file inside a git checkout or the scanned directory may "
-                f"set only {flag!r} itself, or an empty value to keep it off; name "
-                "another program with --config-overrides or a config file outside "
-                "every git checkout and the scanned directory"
+                "a config file inside a git checkout or the scanned directory, or "
+                f"one an MCP client delivered, may set only {flag!r} itself, or an "
+                "empty value to keep it off",
+                NOT_THE_OPERATORS,
             )
         if not any(sep and sep in configured for sep in ("/", os.sep, os.altsep)):
             found = find_absolute_executable(configured)
@@ -738,7 +751,8 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             source_dir,
         )
         if chosen.path is None:
-            raise _RefusedIntegration(chosen.refusal or INSIDE_THE_TREE)
+            reason = chosen.refusal or INSIDE_THE_TREE
+            raise _RefusedIntegration(reason, reason)
         candidate = chosen.path
         # A file that is not executable counts as absent: actionlint would
         # otherwise drop the integration silently.
@@ -935,9 +949,12 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 )
             if chosen.path is None:
                 self._plugin_log(
-                    f"Ignoring scanners.actionlint.options.config_file "
-                    f"({configured!r}): {chosen.refusal}. actionlint runs with an "
-                    "empty config; tune findings with ASH suppressions.",
+                    refusal_warning(
+                        f"Ignoring scanners.actionlint.options.config_file "
+                        f"({configured!r}): {chosen.refusal}. actionlint runs with "
+                        "an empty config; tune findings with ASH suppressions.",
+                        chosen.refusal,
+                    ),
                     level=logging.WARNING,
                 )
             elif not chosen.path.is_file():

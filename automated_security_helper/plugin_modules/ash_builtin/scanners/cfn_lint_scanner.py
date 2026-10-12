@@ -129,6 +129,7 @@ from automated_security_helper.utils.cfn_template_discovery import (
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
     operator_path,
+    refusal_warning,
     set_by_operator,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -480,8 +481,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if name not in self._refused_options:
             self._refused_options.add(name)
             self._plugin_log(
-                f"Ignoring scanners.cfn-lint.options.{name} ({value!r}): "
-                f"{NOT_THE_OPERATORS}. cfn-lint uses the default, {default!r}.",
+                refusal_warning(
+                    f"Ignoring scanners.cfn-lint.options.{name} ({value!r}): "
+                    f"{NOT_THE_OPERATORS}. cfn-lint uses the default, {default!r}.",
+                    NOT_THE_OPERATORS,
+                ),
                 level=logging.WARNING,
             )
         return copy.deepcopy(default)
@@ -681,9 +685,12 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if "honor_inline_ignores" not in self._refused_options:
             self._refused_options.add("honor_inline_ignores")
             self._plugin_log(
-                "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
-                f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not apply; "
-                "suppress findings with ASH suppressions.",
+                refusal_warning(
+                    "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
+                    f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not "
+                    "apply; suppress findings with ASH suppressions.",
+                    NOT_THE_OPERATORS,
+                ),
                 level=logging.WARNING,
             )
         return False
@@ -857,9 +864,12 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # A .cfnlintrc can make cfn-lint import Python files (append_rules), so one
         # the scanned repository chose is never handed to it.
         self._plugin_log(
-            f"Ignoring scanners.cfn-lint.options.config_file ({str(configured)!r}): "
-            f"{reason}. A .cfnlintrc can load Python rules, so cfn-lint runs with "
-            "ASH's empty configuration instead.",
+            refusal_warning(
+                "Ignoring scanners.cfn-lint.options.config_file "
+                f"({str(configured)!r}): {reason}. A .cfnlintrc can load Python "
+                "rules, so cfn-lint runs with ASH's empty configuration instead.",
+                reason,
+            ),
             level=logging.WARNING,
         )
         return None

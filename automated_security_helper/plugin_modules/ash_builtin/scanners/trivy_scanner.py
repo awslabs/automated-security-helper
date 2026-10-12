@@ -167,6 +167,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.utils.config_trust import (
     NOT_THE_OPERATORS,
+    refusal_warning,
     set_by_operator,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -416,8 +417,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         if set_by_operator(config, "scanners.trivy.options.scanners", chosen):
             return
         self._plugin_log(
-            f"Ignoring scanners.trivy.options.scanners ({chosen}): {NOT_THE_OPERATORS}. "
-            f"trivy runs the default set, {default}.",
+            refusal_warning(
+                f"Ignoring scanners.trivy.options.scanners ({chosen}): "
+                f"{NOT_THE_OPERATORS}. trivy runs the default set, {default}.",
+                NOT_THE_OPERATORS,
+            ),
             level=logging.WARNING,
         )
         if self.config is not None:
