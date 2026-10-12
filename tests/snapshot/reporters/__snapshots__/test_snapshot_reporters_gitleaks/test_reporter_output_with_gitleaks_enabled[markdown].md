@@ -71,7 +71,7 @@ github-pat has detected secret for file docs/example.md.
 
 **Code Snippet**:
 ```
-REDACTED
+[masked: a secret finding reports this line]
 ```
 
 ---
@@ -88,7 +88,7 @@ slack-bot-token has detected secret for file app/settings.py.
 
 **Code Snippet**:
 ```
-REDACTED
+[masked: a secret finding reports this line]
 ```
 
 ---
@@ -105,7 +105,7 @@ github-pat has detected secret for file app/settings.py.
 
 **Code Snippet**:
 ```
-REDACTED
+[masked: a secret finding reports this line]
 ```
 
 ---
@@ -122,7 +122,7 @@ aws-access-token has detected secret for file app/settings.py.
 
 **Code Snippet**:
 ```
-REDACTED
+[masked: a secret finding reports this line]
 ```
 
 ---
@@ -139,7 +139,7 @@ github-pat has detected secret for file app/inline_allowed.py.
 
 **Code Snippet**:
 ```
-REDACTED
+[masked: a secret finding reports this line]
 ```
 
 </details>

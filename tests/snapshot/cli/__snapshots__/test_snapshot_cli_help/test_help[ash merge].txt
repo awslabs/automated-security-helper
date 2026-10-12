@@ -39,9 +39,17 @@
 │                                                                            reporters send        │
 │                                                                            findings and which    │
 │                                                                            off-host reporters    │
-│                                                                            run. It adds no       │
-│                                                                            plugin module or      │
-│                                                                            reporter the shards   │
+│                                                                            run. Its              │
+│                                                                            ash_plugin_modules    │
+│                                                                            are the plugin        │
+│                                                                            modules the merge     │
+│                                                                            loads, with any       │
+│                                                                            --config-overrides    │
+│                                                                            adds; a module only   │
+│                                                                            the shards recorded   │
+│                                                                            is not loaded. It     │
+│                                                                            adds no reporter      │
+│                                                                            section the shards    │
 │                                                                            did not record; use   │
 │                                                                            --config-overrides    │
 │                                                                            for that.             │
@@ -81,10 +89,14 @@
 │                                                                            it owned, and exit 1  │
 │                                                                            when any scanner in   │
 │                                                                            the union is ERROR or │
-│                                                                            MISSING. Without it,  │
-│                                                                            a shard whose         │
-│                                                                            scanners never ran    │
-│                                                                            contributes no        │
+│                                                                            MISSING, or when      │
+│                                                                            every one is SKIPPED, │
+│                                                                            such as when no       │
+│                                                                            selected scanner had  │
+│                                                                            a file to scan.       │
+│                                                                            Without it, a shard   │
+│                                                                            whose scanners never  │
+│                                                                            ran contributes no    │
 │                                                                            findings and the      │
 │                                                                            merged report reads   │
 │                                                                            as a complete, clean  │
@@ -95,19 +107,6 @@
 │                                                                            --no-fail-on-incompl… │
 │                                                                            to merge a partial    │
 │                                                                            union anyway.         │
-│    --config              -c                          <str>                 The operator's        │
-│                                                                            configuration file.   │
-│                                                                            Only this file can    │
-│                                                                            turn on a reporter    │
-│                                                                            that sends findings   │
-│                                                                            off the host (the AWS │
-│                                                                            reporters): the       │
-│                                                                            configuration the     │
-│                                                                            shards recorded is    │
-│                                                                            ignored for them, in  │
-│                                                                            both directions.      │
-│                                                                            Everything else comes │
-│                                                                            from the shards.      │
 │    --log-level                                       <QUIET|SIMPLE|ERROR|  Set the log level.    │
 │                                                      INFO|VERBOSE|DEBUG|T  [default: INFO]       │
 │                                                      RACE>                                       │

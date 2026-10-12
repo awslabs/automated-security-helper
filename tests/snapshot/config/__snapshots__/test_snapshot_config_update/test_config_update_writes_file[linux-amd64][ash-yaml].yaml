@@ -17,17 +17,23 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /honor_ignore_files
+      - /content_db_staleness_offline_image_default
       - /sandbox
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
+      - /scanners/detect-secrets/options/scan_settings/filters_used
+      - /scanners/detect-secrets/options/scan_settings/filters_used/**
+      - /scanners/detect-secrets/options/scan_settings/plugins_used
+      - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+      - /scanners/detect-secrets/options/baseline_file
       - /global_settings/ignore_paths
       - /global_settings/suppressions
       - /global_settings/mcp
       - /global_settings/mcp/**
       - /scanners/opengrep/options/exclude_rule
       - /scanners/semgrep/options/exclude_rule
-      - /scanners/detect-secrets/options/baseline_file
       - /scanners/bandit/options/confidence_level
       - /scanners/checkov/options/frameworks
       - /scanners/checkov/options/skip_frameworks
@@ -75,16 +81,30 @@ global_settings:
       - /reporters/s3/**
       - /reporters/bedrock-summary-reporter/**
       - /reporters/gitlab-sast/options/exclude_suppressed
+      - /scanners/detect-secrets/**
+      - /scanners/npm-audit/**
+      - /scanners/opengrep/**
+      - /scanners/semgrep/**
+      - /scanners/snyk-code/**
+      - /scanners/trivy-repo/**
+      - /converters/archive/options/max_members
+      - /converters/archive/options/max_member_bytes
+      - /converters/archive/options/max_total_bytes
+      - /converters/archive/options/max_compression_ratio
       denied_value_patterns: {}
       replace_default_denied_paths: false
 fail_on_findings: true
 fail_on_incomplete_scanners: true
+honor_ignore_files: true
 sandbox:
   mode: 'off'
   network_scanners: null
   extra_read_paths: []
+  read_path_scanners: []
+  env_scanners: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
+content_db_staleness_offline_image_default: true
 ash_plugin_modules: []
 external_reports_to_include: []
 build: null
@@ -92,7 +112,11 @@ converters:
   archive:
     name: archive
     enabled: true
-    options: {}
+    options:
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
   jupyter:
     name: jupyter
     enabled: true
@@ -100,6 +124,15 @@ converters:
       tool_version: '>=7.16.0,<8.0.0'
       install_timeout: 300
 scanners:
+  actionlint:
+    name: actionlint
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      shellcheck: null
+      pyflakes: null
   bandit:
     name: bandit
     enabled: false
@@ -126,6 +159,28 @@ scanners:
         NIST80053R5Checks: false
         PCIDSS321Checks: false
       include_compliant_checks: false
+  cfn-guard:
+    name: cfn-guard
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      rule_sets:
+      - wa-Security-Pillar
+      rules_paths: []
+  cfn-lint:
+    name: cfn-lint
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      regions: []
+      ignore_checks: []
+      include_checks: []
+      honor_inline_ignores: false
+      tool_version: '>=1.43.3,<2.0.0'
+      install_timeout: 300
   cfn-nag:
     name: cfn-nag
     enabled: true
@@ -163,6 +218,16 @@ scanners:
         filters_used: []
         results: {}
       skip_generated_lockfiles: true
+  gitleaks:
+    name: gitleaks
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      baseline_path: null
+      honor_inline_ignores: false
+      max_target_megabytes: null
   grype:
     name: grype
     enabled: true
@@ -222,6 +287,33 @@ scanners:
       additional_outputs:
       - syft-table
       offline: false
+  trivy:
+    name: trivy
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      scanners:
+      - vuln
+      license_full: false
+      ignore_unfixed: false
+      disable_telemetry: true
+      config_file: null
+      ignore_file: null
+      secret_config_file: null
+      offline: false
+  zizmor:
+    name: zizmor
+    enabled: true
+    options:
+      severity_threshold: null
+      scan_timeout: 1800
+      config_file: null
+      persona: regular
+      online_audits: false
+      honor_inline_ignores: false
+      tool_version: '>=1.29.0,<2.0.0'
+      install_timeout: 300
 reporters:
   csv:
     name: csv
@@ -323,6 +415,7 @@ reporters:
     extension: yaml
 mcp-resource-management:
   max_concurrent_scans: 3
+  max_concurrent_scans_per_session: 2
   max_concurrent_tasks: 20
   thread_pool_max_workers: 4
   scan_timeout_seconds: 1800

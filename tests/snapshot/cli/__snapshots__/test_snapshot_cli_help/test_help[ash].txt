@@ -265,14 +265,23 @@
 │                                                                            the same code as a    │
 │                                                                            clean scan, because   │
 │                                                                            no scanner produced   │
-│                                                                            any finding. SKIPPED  │
-│                                                                            scanners are ones you │
-│                                                                            did not select and    │
-│                                                                            never trip it, so     │
-│                                                                            --scanners and        │
+│                                                                            any finding. A        │
+│                                                                            SKIPPED scanner, one  │
+│                                                                            you did not select or │
+│                                                                            one with nothing of   │
+│                                                                            its kind to scan,     │
+│                                                                            does not trip it by   │
+│                                                                            itself, so --scanners │
+│                                                                            and                   │
 │                                                                            --exclude-scanners    │
 │                                                                            both narrow what is   │
-│                                                                            gated. Independent of │
+│                                                                            gated; but a run in   │
+│                                                                            which every scanner   │
+│                                                                            is SKIPPED, such as   │
+│                                                                            one where no selected │
+│                                                                            scanner had a file to │
+│                                                                            scan, exits 1.        │
+│                                                                            Independent of        │
 │                                                                            --fail-on-findings,   │
 │                                                                            and takes precedence  │
 │                                                                            over it when both     │
@@ -306,14 +315,20 @@
 │                                                                            120h after the        │
 │                                                                            database was built.   │
 │                                                                            Without it such a     │
-│                                                                            scan exits 1. With it │
-│                                                                            the scan proceeds and │
-│                                                                            the warning is        │
-│                                                                            recorded in the log   │
-│                                                                            and in the reports.   │
+│                                                                            scan exits 1, except  │
+│                                                                            for trivy's database  │
+│                                                                            in an image built     │
+│                                                                            with OFFLINE=YES,     │
+│                                                                            which warns by        │
+│                                                                            default. With it the  │
+│                                                                            scan proceeds and the │
+│                                                                            warning is recorded   │
+│                                                                            in the log and in the │
+│                                                                            reports.              │
 │                                                                            --no-allow-stale-con… │
-│                                                                            forces the default    │
-│                                                                            failure. Defaults to  │
+│                                                                            forces the failure,   │
+│                                                                            for that database     │
+│                                                                            too. Defaults to      │
 │                                                                            unset, which prefers  │
 │                                                                            the                   │
 │                                                                            `content_db_stalenes… │

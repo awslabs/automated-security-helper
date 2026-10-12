@@ -231,7 +231,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Applied modification: fail_on_findings=sometimes
+      [<LOG_TIME>] INFO     Applied a modification to fail_on_findings
       Failed to validate config after applying modifications: 1 validation error for AshConfig
       fail_on_findings
         Input should be a valid boolean, unable to interpret input [type=bool_parsing]

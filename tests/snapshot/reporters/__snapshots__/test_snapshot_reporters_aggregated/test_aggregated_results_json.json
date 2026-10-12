@@ -31,7 +31,9 @@
     "execution_discrepancy_report": {},
     "shard": null,
     "expected_scanners": [],
-    "plugin_load_errors": {}
+    "plugin_load_errors": {},
+    "ignore_file_exclusions": null,
+    "inputs_not_scanned": null
   },
   "ash_config": {
     "project_name": "snapshot-fixture",
@@ -75,17 +77,23 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/honor_ignore_files",
+            "/content_db_staleness_offline_image_default",
             "/sandbox",
             "/sandbox/**",
             "/ash_plugin_modules",
             "/ash_plugin_modules/**",
+            "/scanners/detect-secrets/options/scan_settings/filters_used",
+            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+            "/scanners/detect-secrets/options/baseline_file",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/global_settings/mcp",
             "/global_settings/mcp/**",
             "/scanners/opengrep/options/exclude_rule",
             "/scanners/semgrep/options/exclude_rule",
-            "/scanners/detect-secrets/options/baseline_file",
             "/scanners/bandit/options/confidence_level",
             "/scanners/checkov/options/frameworks",
             "/scanners/checkov/options/skip_frameworks",
@@ -132,7 +140,17 @@
             "/reporters/bedrock-summary-reporter/options/output_technical_file",
             "/reporters/s3/**",
             "/reporters/bedrock-summary-reporter/**",
-            "/reporters/gitlab-sast/options/exclude_suppressed"
+            "/reporters/gitlab-sast/options/exclude_suppressed",
+            "/scanners/detect-secrets/**",
+            "/scanners/npm-audit/**",
+            "/scanners/opengrep/**",
+            "/scanners/semgrep/**",
+            "/scanners/snyk-code/**",
+            "/scanners/trivy-repo/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio"
           ],
           "denied_value_patterns": {},
           "replace_default_denied_paths": false
@@ -141,13 +159,17 @@
     },
     "fail_on_findings": true,
     "fail_on_incomplete_scanners": true,
+    "honor_ignore_files": true,
     "sandbox": {
       "mode": "off",
       "network_scanners": null,
-      "extra_read_paths": []
+      "extra_read_paths": [],
+      "read_path_scanners": [],
+      "env_scanners": []
     },
     "content_db_staleness": "fail",
     "content_db_staleness_overrides": [],
+    "content_db_staleness_offline_image_default": true,
     "ash_plugin_modules": [],
     "external_reports_to_include": [],
     "build": null,
@@ -155,7 +177,12 @@
       "archive": {
         "name": "archive",
         "enabled": true,
-        "options": {}
+        "options": {
+          "max_members": 100000,
+          "max_member_bytes": 268435456,
+          "max_total_bytes": 1073741824,
+          "max_compression_ratio": 100
+        }
       },
       "jupyter": {
         "name": "jupyter",
@@ -167,6 +194,17 @@
       }
     },
     "scanners": {
+      "actionlint": {
+        "name": "actionlint",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "shellcheck": null,
+          "pyflakes": null
+        }
+      },
       "bandit": {
         "name": "bandit",
         "enabled": true,
@@ -196,6 +234,33 @@
             "PCIDSS321Checks": false
           },
           "include_compliant_checks": false
+        }
+      },
+      "cfn-guard": {
+        "name": "cfn-guard",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "rule_sets": [
+            "wa-Security-Pillar"
+          ],
+          "rules_paths": []
+        }
+      },
+      "cfn-lint": {
+        "name": "cfn-lint",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "regions": [],
+          "ignore_checks": [],
+          "include_checks": [],
+          "honor_inline_ignores": false,
+          "tool_version": ">=1.43.3,<2.0.0",
+          "install_timeout": 300
         }
       },
       "cfn-nag": {
@@ -242,6 +307,18 @@
             "results": {}
           },
           "skip_generated_lockfiles": true
+        }
+      },
+      "gitleaks": {
+        "name": "gitleaks",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "baseline_path": null,
+          "honor_inline_ignores": false,
+          "max_target_megabytes": null
         }
       },
       "grype": {
@@ -314,6 +391,38 @@
             "syft-table"
           ],
           "offline": false
+        }
+      },
+      "trivy": {
+        "name": "trivy",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "scanners": [
+            "vuln"
+          ],
+          "license_full": false,
+          "ignore_unfixed": false,
+          "disable_telemetry": true,
+          "config_file": null,
+          "ignore_file": null,
+          "secret_config_file": null,
+          "offline": false
+        }
+      },
+      "zizmor": {
+        "name": "zizmor",
+        "enabled": true,
+        "options": {
+          "severity_threshold": null,
+          "scan_timeout": 1800,
+          "config_file": null,
+          "persona": "regular",
+          "online_audits": false,
+          "honor_inline_ignores": false,
+          "tool_version": ">=1.29.0,<2.0.0",
+          "install_timeout": 300
         }
       }
     },
@@ -442,6 +551,7 @@
     },
     "mcp-resource-management": {
       "max_concurrent_scans": 3,
+      "max_concurrent_scans_per_session": 2,
       "max_concurrent_tasks": 20,
       "thread_pool_max_workers": 4,
       "scan_timeout_seconds": 1800,
@@ -466,7 +576,7 @@
   "scanner_results": {
     "npm-audit": {
       "status": "MISSING",
-      "dependencies_satisfied": true,
+      "dependencies_satisfied": false,
       "excluded": false,
       "severity_counts": {
         "suppressed": 0,
@@ -480,12 +590,13 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 0.0
+      "duration": 0.0,
+      "missing_reason": null
     },
     "cdk-nag": {
       "status": "SKIPPED",
       "dependencies_satisfied": true,
-      "excluded": false,
+      "excluded": true,
       "severity_counts": {
         "suppressed": 0,
         "critical": 0,
@@ -498,7 +609,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 0.0
+      "duration": 0.0,
+      "missing_reason": null
     },
     "bandit": {
       "status": "FAILED",
@@ -516,7 +628,8 @@
       "actionable_finding_count": 1,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 1.25
+      "duration": 1.25,
+      "missing_reason": null
     },
     "cfn-nag": {
       "status": "ERROR",
@@ -534,7 +647,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 0.25
+      "duration": 0.25,
+      "missing_reason": null
     },
     "checkov": {
       "status": "FAILED",
@@ -552,7 +666,8 @@
       "actionable_finding_count": 3,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 7.5
+      "duration": 7.5,
+      "missing_reason": null
     },
     "detect-secrets": {
       "status": "PASSED",
@@ -570,7 +685,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 1,
       "exit_code": 0,
-      "duration": 0.5
+      "duration": 0.5,
+      "missing_reason": null
     },
     "grype": {
       "status": "FAILED",
@@ -588,7 +704,8 @@
       "actionable_finding_count": 2,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 3.0
+      "duration": 3.0,
+      "missing_reason": null
     },
     "semgrep": {
       "status": "PASSED",
@@ -606,7 +723,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 4.0
+      "duration": 4.0,
+      "missing_reason": null
     },
     "syft": {
       "status": "PASSED",
@@ -624,7 +742,8 @@
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
       "exit_code": 0,
-      "duration": 2.0
+      "duration": 2.0,
+      "missing_reason": null
     }
   },
   "converter_results": {},
@@ -1296,7 +1415,7 @@
             "kind": "fail",
             "level": "note",
             "message": {
-              "text": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+              "text": "Possible hardcoded password: 'hu**********************t'",
               "markdown": null,
               "id": null,
               "arguments": [],
@@ -2556,6 +2675,9 @@
         },
         "severity_counts": {},
         "status": "ERROR",
+        "errors": [
+          "infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation template"
+        ],
         "targets_attempted": 1,
         "targets_failed": 1
       }
@@ -2581,5 +2703,13 @@
   "used_suppressions": [
     "app/app.py|SECRET-SECRET-KEYWORD|5|5"
   ],
-  "workspace": null
+  "workspace": null,
+  "secret_value_shapes": [
+    {
+      "prefix": "hu",
+      "suffix": "t",
+      "length": 25,
+      "spans_whitespace": false
+    }
+  ]
 }
