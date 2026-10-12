@@ -159,6 +159,9 @@ RESULTS_FILENAME = "ash_aggregated_results.json"
 #: checkpoints, which :func:`stamp_run_record` fills.
 _EMPTY_CHECKPOINTS_LINE = f"{json.dumps('validation_checkpoints')}: {json.dumps([])},\n"
 
+#: The most of a results file ``stamp_run_record`` reads at once.
+_STAMP_READ_LIMIT = 1 << 20
+
 #: A Windows drive at the start of a path, e.g. ``C:/ws/api``. Matched on the raw
 #: text rather than via ``PureWindowsPath.drive``, whose value for unusual inputs
 #: changed between 3.11 and 3.12 and this project supports 3.10 through 3.14.
@@ -939,18 +942,25 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
             open(path, "r", encoding="utf-8") as source,
             open(staging, "x", encoding="utf-8") as target,
         ):
-            for line in source:
-                if line == _EMPTY_CHECKPOINTS_LINE:
-                    target.write(
-                        f"{json.dumps('validation_checkpoints')}: "
-                        f"{json.dumps([record])},\n"
-                    )
-                    break
-                if line.startswith('"sarif": '):
+            # In pieces of at most _STAMP_READ_LIMIT, so a long header line is
+            # copied without being held whole, and a file that is not one write()
+            # wrote is given up on without reading its SARIF line whole.
+            at_line_start = True
+            while True:
+                piece = source.readline(_STAMP_READ_LIMIT)
+                if not piece:
                     return False
-                target.write(line)
-            else:
-                return False
+                if at_line_start:
+                    if piece == _EMPTY_CHECKPOINTS_LINE:
+                        target.write(
+                            f"{json.dumps('validation_checkpoints')}: "
+                            f"{json.dumps([record])},\n"
+                        )
+                        break
+                    if piece.startswith('"sarif": '):
+                        return False
+                target.write(piece)
+                at_line_start = piece.endswith("\n")
             shutil.copyfileobj(source, target)
         os.replace(staging, path)
         staging = None

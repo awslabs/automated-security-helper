@@ -1157,6 +1157,87 @@ class TestStampingARunRecord:
         before.pop("validation_checkpoints")
         assert after == before
 
+    def test_the_file_is_replaced_rather_than_rewritten_in_place(self, tmp_path):
+        """A reader that opened the file before the stamp keeps reading it whole."""
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        before = path.read_bytes()
+        inode = path.stat().st_ino
+
+        with open(path, "rb") as reader:
+            assert stamp_run_record(path, self.RECORD)
+            assert reader.read() == before
+
+        assert path.stat().st_ino != inode
+
+    def test_a_header_line_longer_than_one_read_is_copied_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """The file is read in bounded pieces; a long line is copied in several."""
+        from automated_security_helper.workspace import aggregation
+
+        path = self._written(tmp_path)
+        before = json.loads(path.read_text(encoding="utf-8"))
+        # Only just long enough for the checkpoints line, which must be read whole;
+        # the workspace and scanner_results lines take several reads.
+        monkeypatch.setattr(
+            aggregation,
+            "_STAMP_READ_LIMIT",
+            len(aggregation._EMPTY_CHECKPOINTS_LINE) + 1,
+        )
+
+        assert aggregation.stamp_run_record(path, self.RECORD)
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert after.pop("validation_checkpoints") == [self.RECORD]
+        before.pop("validation_checkpoints")
+        assert after == before
+
+    def test_a_file_without_the_checkpoints_line_is_not_read_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """Given up on at the SARIF line, after one bounded read of it."""
+        import builtins
+
+        from automated_security_helper.workspace import aggregation
+
+        path = tmp_path / "ash_aggregated_results.json"
+        sarif_line = '"sarif": {"runs": ["' + "x" * 100_000 + '"]}\n'
+        path.write_text('{\n"name": "n",\n' + sarif_line + "}\n", encoding="utf-8")
+        reads = []
+
+        class _Recording:
+            def __init__(self, handle):
+                self._handle = handle
+
+            def readline(self, size=-1):
+                line = self._handle.readline(size)
+                reads.append((size, len(line)))
+                return line
+
+            def __getattr__(self, name):
+                return getattr(self._handle, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self._handle.__exit__(*exc)
+
+        def recording_open(file, mode="r", *args, **kwargs):
+            handle = builtins.open(file, mode, *args, **kwargs)
+            return _Recording(handle) if mode == "r" else handle
+
+        monkeypatch.setattr(aggregation, "open", recording_open, raising=False)
+        monkeypatch.setattr(aggregation, "_STAMP_READ_LIMIT", 4096)
+
+        assert not aggregation.stamp_run_record(path, self.RECORD)
+
+        assert reads, "the file was not read in bounded pieces"
+        assert all(0 < size <= 4096 for size, _ in reads), reads
+        assert sum(length for _, length in reads) < 4096 + 64, reads
+
     def test_a_file_the_aggregator_did_not_write_is_left_unchanged(self, tmp_path):
         from automated_security_helper.workspace.aggregation import stamp_run_record
 
