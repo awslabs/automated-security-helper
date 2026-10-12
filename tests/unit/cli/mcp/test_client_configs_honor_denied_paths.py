@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
@@ -651,6 +652,36 @@ def test_an_upload_repeating_the_servers_reporter_settings_scans(_server) -> Non
     bedrock = config.get_plugin_config("reporter", "bedrock-summary-reporter")
     assert bedrock["options"]["include_code_snippets"] is True
     assert config.get_plugin_config("reporter", "s3")["enabled"] is True
+
+
+def test_an_upload_without_the_section_keeps_the_servers_reporter_options(
+    _server,
+) -> None:
+    """The upload replaces the server's config, so leaving the Bedrock reporter's
+    section out would drop the server's model, what it is sent and its retries."""
+    operator = _server["tmp"] / "operator" / "ash.yaml"
+    options = {
+        "model_id": "operator.model-v1:0",
+        "custom_prompt": "Operator prompt.",
+        "max_retries": 5,
+    }
+    operator.write_text(
+        yaml.safe_dump(
+            {
+                "project_name": "operator",
+                "reporters": {"bedrock-summary-reporter": {"options": options}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = _upload({"ash.yaml": "project_name: delivered\n"})
+
+    config = _scan_resolution(_server["target"], str(source / "ash.yaml"))
+
+    assert not isinstance(config, Exception), config
+    section = config.get_plugin_config("reporter", "bedrock-summary-reporter")
+    assert section is not None
+    assert section["options"] == options
 
 
 def test_a_delivered_tree_cannot_turn_on_a_reporter_the_server_turned_off(

@@ -448,17 +448,30 @@ def _confine_options(
     An option is matched under every mix of ``-`` and ``_`` in its name, since a
     config merge reads them as the same key (``config_sources._resolve_dict_key``):
     each spelling the config writes is replaced by the spellings the trusted base
-    writes, with their values. Returns the spellings the config set to a value
-    the trusted base does not give them, as dotted keys.
+    writes, with their values. A config with no section for a reporter gets one
+    holding the trusted base's values, where it sets any: a file that replaces
+    the operator's config and leaves the section out would otherwise drop them.
+    Returns the spellings the config set to a value the trusted base does not
+    give them, as dotted keys.
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
-    if not extras:
+    if extras is None:
         return ignored
     for plugin, option_names in destinations.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
         trusted_options = dict((trusted_section or {}).get("options") or {})
-        for key in _sections_of(config, plugin):
+        keys = _sections_of(config, plugin)
+        if not keys:
+            kept = {
+                spelling: trusted_options[spelling]
+                for name in option_names
+                for spelling in _spellings(trusted_options, name)
+            }
+            if kept:
+                extras[plugin] = {"options": kept}
+            continue
+        for key in keys:
             section = _as_section(extras[key])
             options = dict(section.get("options") or {})
             changed = False

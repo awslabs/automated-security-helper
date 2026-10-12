@@ -330,6 +330,36 @@ def test_a_null_section_in_the_tree_reads_as_an_empty_one(
 
 
 @pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
+def test_a_tree_config_without_the_section_keeps_the_operators_options(
+    tmp_path, ash_log, reporter
+):
+    """A tree config replaces the operator's, so leaving the section out would
+    drop every option the operator set: where findings go, what is sent, and how
+    long the reporter retries. Each listed option is set to a value no default
+    has."""
+    names = REPORTER_DESTINATION_OPTIONS[reporter]
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {reporter: {"options": {n: _REPO_VALUES[n] for n in names}}}},
+    )
+    repo = tmp_path / "workspace" / "repo"
+    project = _write(repo / ".ash" / ".ash.yaml", {"project_name": "repo"})
+
+    for config in (
+        _cli(repo, config_path=project, trusted_config_path=operator),
+        _workspace(tmp_path, project, operator),
+    ):
+        options = (config.get_plugin_config("reporter", reporter) or {}).get("options")
+        assert options == {n: _REPO_VALUES[n] for n in names}, options
+        built = _built(config, reporter, tmp_path / "context")
+        for name in names:
+            if hasattr(built.config.options, name):
+                assert getattr(built.config.options, name) == _REPO_VALUES[name], name
+    # Nothing the tree wrote was ignored.
+    assert f"reporters.{reporter}" not in _warnings(ash_log)
+
+
+@pytest.mark.parametrize("reporter", sorted(REPORTER_ENABLED_DEFAULTS))
 def test_off_by_default_neither_route_lets_the_tree_turn_one_on(
     tmp_path, ash_log, monkeypatch, reporter
 ):

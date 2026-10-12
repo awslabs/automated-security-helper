@@ -308,6 +308,28 @@ def test_a_project_config_replacing_the_operators_keeps_the_operators_value(
     assert len(_ignoring(result["warnings"], KEY)) == 1, result["warnings"]
 
 
+def test_a_project_config_without_the_section_keeps_the_operators_value(tmp_path, site):
+    """The project config replaces the operator's, so leaving the section out
+    would send to the default endpoint rather than the operator's."""
+    project = _write(
+        tmp_path / "repo" / ".ash" / ".ash.yaml", {"project_name": "scanned"}
+    )
+    operator = _write(
+        tmp_path / "operator" / "ash.yaml",
+        {"reporters": {REPORTER: {"options": {"endpoint": OPERATOR_ENDPOINT}}}},
+    )
+
+    result = _scan(
+        tmp_path,
+        site,
+        config_path=str(project),
+        trusted_config_path=str(operator),
+    )
+
+    assert result["sent"]["endpoint"] == OPERATOR_ENDPOINT, result
+    assert not _ignoring(result["warnings"], KEY), result["warnings"]
+
+
 def test_a_base_the_tree_extends_does_not_choose_it_either(tmp_path, site):
     _write(
         tmp_path / "repo" / "shared" / "base.yaml",
