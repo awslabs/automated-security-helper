@@ -293,6 +293,50 @@ class TestEveryValueIsMaskedInFindingsThatOverlapIt:
         overlapping = model.sarif.runs[0].results[1]
         assert WORD_VALUE not in overlapping.model_dump_json()
 
+    def test_a_finding_with_a_snippet_but_no_line(self):
+        """A snippet that cannot be placed may hold the line: it is masked."""
+        unplaced = self._overlapping()
+        region = unplaced["locations"][0]["physicalLocation"]["region"]
+        del region["startLine"], region["endLine"]
+        model = _results(self._secret(), unplaced)
+
+        mask_secrets_in_results(model)
+
+        assert WORD_VALUE not in model.sarif.runs[0].results[1].model_dump_json()
+
+    def test_a_secret_finding_without_a_line_covers_its_whole_file(self):
+        secret = self._secret()
+        del secret["locations"][0]["physicalLocation"]["region"]
+        elsewhere = self._overlapping(line=9)
+        elsewhere["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = (
+            "lib.py"
+        )
+        model = _results(secret, self._overlapping(line=9), elsewhere)
+
+        mask_secrets_in_results(model)
+
+        same_file, other_file = model.sarif.runs[0].results[1:]
+        assert WORD_VALUE not in same_file.model_dump_json()
+        assert WORD_VALUE in _message(other_file)
+
+    def test_another_secret_finding_on_the_line_is_masked_outside_its_message(self):
+        """Its properties are masked with the value; its message keeps its words."""
+        other = _result(
+            "SECRET-KEYWORD",
+            "app.py",
+            3,
+            "Secret of type 'Keyword' detected",
+            scanner="detect-secrets",
+        )
+        other["properties"]["matched"] = f'{NAME} = "{WORD_VALUE}"'
+        model = _results(self._secret(), other)
+
+        mask_secrets_in_results(model)
+
+        other = model.sarif.runs[0].results[1]
+        assert WORD_VALUE not in other.model_dump_json()
+        assert _message(other) == "Secret of type 'Keyword' detected"
+
     def test_a_finding_that_does_not_overlap_keeps_the_word(self):
         """Control: in another file, or on another line, the word is left alone."""
         elsewhere = self._overlapping()
