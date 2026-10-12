@@ -74,7 +74,7 @@ def world(tmp_path, monkeypatch):
     return world
 
 
-def _build(world, monkeypatch, executable, prefix, base_prefix=None):
+def _build(world, monkeypatch, executable, prefix, base_prefix=None, argv0="/bin/sh"):
     monkeypatch.setattr(sys, "executable", str(executable))
     monkeypatch.setattr(sys, "prefix", str(prefix))
     monkeypatch.setattr(sys, "exec_prefix", str(prefix))
@@ -82,7 +82,7 @@ def _build(world, monkeypatch, executable, prefix, base_prefix=None):
     return build_scanner_policy(
         "grype",
         SandboxRequirements(),
-        argv0="/bin/sh",
+        argv0=str(argv0),
         source_dir=world.source,
         output_dir=world.output,
         results_dir=world.output / "scanners" / "grype",
@@ -485,3 +485,128 @@ def test_a_sys_prefix_of_root_is_still_refused(world, monkeypatch):
         _build(world, monkeypatch, "/opt/python3", Path("/"), world.root / "usr")
 
     assert repr("/") in str(refused.value), str(refused.value)
+
+
+# A directory spelled bin, sbin or Scripts is exempt from the breadth rules only
+# when it really is one: the exemption is judged on the directory a link resolves
+# to, so ~/bin -> ~/.aws, or $WORK/bin -> . with HOME=$WORK/home, is not.
+
+
+def _covered(policy, path):
+    real = Path(os.path.realpath(path))
+    return any(real == grant or grant in real.parents for grant in _real_grants(policy))
+
+
+def _work_holding(world, which_home):
+    """A directory that holds HOME's directory, or one holding only the passwd home."""
+    if which_home == "HOME":
+        return world.home.parent
+    passwd_home = world.root / "pwork" / "pw"
+    (passwd_home / ".ssh").mkdir(parents=True)
+    world.set_passwd_home(passwd_home)
+    return passwd_home.parent
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_tool_in_a_bin_link_to_the_directory_holding_a_home_mounts_none_of_it(
+    world, monkeypatch, which_home
+):
+    """$WORK/bin -> . with the home in $WORK: the tool's bin directory is $WORK."""
+    work = _work_holding(world, which_home)
+    tool = _python(work / "tool")
+    _link(work / "bin", ".")
+    usr, system_python = _system_python(world)
+
+    policy = _build(
+        world, monkeypatch, system_python, usr, argv0=work / "bin" / tool.name
+    )
+
+    assert Path(os.path.realpath(work)) not in _real_grants(policy)
+    assert not _covered(policy, world.passwd_home / ".ssh")
+    _assert_no_home_mounted(world, policy)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_tool_in_a_bin_link_to_a_config_directory_mounts_none_of_it(
+    world, monkeypatch, which_home
+):
+    """~/bin -> ~/.aws: the tool's directory is the configuration directory."""
+    home = _in_which_home(world, which_home)
+    _python(home / ".aws" / "tool")
+    (home / ".aws" / "credentials").write_text("[default]\n")
+    _link(home / "bin", home / ".aws")
+    usr, system_python = _system_python(world)
+
+    policy = _build(world, monkeypatch, system_python, usr, argv0=home / "bin" / "tool")
+
+    assert not _covered(policy, home / ".aws" / "credentials")
+    _assert_no_home_mounted(world, policy)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_ashs_python_in_a_bin_link_to_a_config_directory_is_refused(
+    world, monkeypatch, which_home
+):
+    """~/bin -> ~/.aws, with ASH's python3 link inside it: mounting that link's
+    directory would mount ~/.aws for every scanner."""
+    home = _in_which_home(world, which_home)
+    usr, system_python = _system_python(world)
+    _link(home / ".aws" / "python3", system_python)
+    _link(home / "bin", home / ".aws")
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, home / "bin" / "python3", usr)
+
+    assert repr((home / "bin").as_posix()) in str(refused.value), str(refused.value)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_path_entry_spelled_bin_that_resolves_elsewhere_in_a_home_is_skipped(
+    world, monkeypatch, which_home
+):
+    """~/.config/tool/bin -> . on PATH names the configuration directory."""
+    home = _in_which_home(world, which_home)
+    (home / ".config" / "tool").mkdir(parents=True)
+    (home / ".config" / "tool" / "token").write_text("x")
+    _link(home / ".config" / "tool" / "bin", ".")
+    monkeypatch.setenv("PATH", str(home / ".config" / "tool" / "bin"))
+    usr, system_python = _system_python(world)
+
+    policy = _build(world, monkeypatch, system_python, usr)
+
+    assert not _covered(policy, home / ".config" / "tool" / "token")
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_an_ash_bin_path_spelled_bin_that_resolves_to_a_config_directory_is_refused(
+    world, monkeypatch, which_home
+):
+    """ASH_BIN_PATH=~/bin with ~/bin -> ~/.aws."""
+    home = _in_which_home(world, which_home)
+    (home / ".aws").mkdir()
+    _link(home / "bin", home / ".aws")
+    monkeypatch.setenv("ASH_BIN_PATH", str(home / "bin"))
+    usr, system_python = _system_python(world)
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _build(world, monkeypatch, system_python, usr)
+
+    assert "ASH_BIN_PATH" in str(refused.value), str(refused.value)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_real_bin_directory_in_a_home_is_still_mounted(
+    world, monkeypatch, which_home
+):
+    """Control: ~/bin that is a directory, with a tool in it, is mounted as before,
+    for the tool, on PATH and as ASH_BIN_PATH."""
+    home = _in_which_home(world, which_home)
+    tool = _python(home / "bin" / "tool")
+    monkeypatch.setenv("PATH", str(home / "bin"))
+    monkeypatch.setenv("ASH_BIN_PATH", str(home / "bin"))
+    usr, system_python = _system_python(world)
+
+    policy = _build(world, monkeypatch, system_python, usr, argv0=tool)
+
+    assert Path(os.path.realpath(home / "bin")) in _real_grants(policy)
+    _assert_no_home_mounted(world, policy)

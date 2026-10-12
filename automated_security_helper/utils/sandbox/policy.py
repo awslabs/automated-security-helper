@@ -399,6 +399,23 @@ def _inside(path: Path, parent: Path) -> bool:
         return False
 
 
+def _a_bin_directory(path: Path, homes: Sequence[Path]) -> bool:
+    """Whether ``path`` really is a bin, sbin or Scripts directory.
+
+    Judged on the directory it resolves to, not on its spelling: ~/bin -> ~/.aws is
+    spelled bin and is a configuration directory, and $WORK/bin -> . with
+    HOME=$WORK/home is spelled bin and holds a home. A filesystem root, a home and a
+    directory holding one are never a bin directory, whatever their name.
+    """
+    real = Path(os.path.realpath(path))
+    if real.name not in _BIN_DIR_NAMES:
+        return False
+    return not (
+        real == Path(real.anchor)
+        or any(real == home or real in home.parents for home in homes)
+    )
+
+
 def _passwd_home() -> Optional[Path]:
     """The home directory the passwd entry names, or None where there is none.
 
@@ -475,7 +492,7 @@ def _path_directories(trees: Sequence[Path] = ()) -> List[Path]:
             continue
         if _broader_than_a_tool(path, homes):
             continue
-        if path.name not in _BIN_DIR_NAMES and any(_inside(path, h) for h in homes):
+        if not _a_bin_directory(path, homes) and any(_inside(path, h) for h in homes):
             continue
         entries.append(path)
     return _existing(entries)
@@ -634,10 +651,13 @@ def _executable_prefix(argv0: str) -> List[Path]:
         }
     for candidate in candidates:
         parent = candidate.parent
-        if parent.name in _BIN_DIR_NAMES or not too_broad(parent):
-            if Path(os.path.realpath(parent)) not in homes:
-                paths.append(parent)
-        if parent.name in _BIN_DIR_NAMES and not too_broad(parent.parent):
+        # A bin directory by what it resolves to (_a_bin_directory), so a link
+        # spelled bin that names a home's directory, or one holding a home, is
+        # judged by the breadth rules like any other directory.
+        is_bin = _a_bin_directory(parent, homes)
+        if is_bin or not too_broad(parent):
+            paths.append(parent)
+        if is_bin and not too_broad(parent.parent):
             paths.append(parent.parent)
     return _existing(paths)
 
@@ -780,10 +800,12 @@ def _refuse_a_home_among(
       being a venv or conda root (~/.venv and ~/miniconda3 are one installation,
       ~/.local is not);
     - a link's directory that is "/", a home or holds one, or is inside a home
-      without being named bin, sbin or Scripts or lying inside an interpreter
+      without being a bin, sbin or Scripts directory or lying inside an interpreter
       (~/.config for ~/.config/python3);
     - an ASH_BIN_PATH that is "/", a home or holds one, or is directly in a home
-      without being named bin, sbin or Scripts (~/.local).
+      without being a bin, sbin or Scripts directory (~/.local).
+    Whether a directory is a bin directory is judged on what it resolves to
+    (_a_bin_directory), so ~/bin -> ~/.aws is not one.
     """
     roots = [Path(os.path.realpath(root)) for root in interpreter_roots]
 
@@ -812,7 +834,9 @@ def _refuse_a_home_among(
             real == root or root in real.parents for root in roots
         )
         if holds_a_home(real) or (
-            in_a_home and path.name not in _BIN_DIR_NAMES and not part_of_an_interpreter
+            in_a_home
+            and not _a_bin_directory(path, homes)
+            and not part_of_an_interpreter
         ):
             raise SandboxUnavailable(
                 f"ASH's Python {sys.executable!r} is reached through a link in "
@@ -822,7 +846,7 @@ def _refuse_a_home_among(
     if os.path.isdir(bin_path):
         real = Path(os.path.realpath(bin_path))
         if holds_a_home(real) or (
-            directly_in_a_home(real) and bin_path.name not in _BIN_DIR_NAMES
+            directly_in_a_home(real) and not _a_bin_directory(bin_path, homes)
         ):
             raise SandboxUnavailable(
                 f"ASH_BIN_PATH {bin_path.as_posix()!r} is a home directory, holds one, "
