@@ -53,7 +53,7 @@ actionlint runs `shellcheck` on `run:` scripts and `pyflakes` on `shell: python`
 
 To use them, set the option to `shellcheck` or `pyflakes`, which is looked up in the absolute directories on `PATH` and in ASH's bin directory, and handed to actionlint as an absolute path. If the configured tool cannot be found or is not executable, the scanner reports `MISSING` rather than running without it. shellcheck and pyflakes findings are LOW severity. Neither is installed in the ASH container image.
 
-Each option names the program actionlint pipes every `run:` script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program runs the repository's code. ASH's config usually comes from the repository being scanned (`.ash/.ash.yaml`), so from a config file inside the scanned tree each option accepts only its own name. Another program, or any path, is honored only from `--config-overrides` or a config file outside the scanned tree:
+Each option names the program actionlint pipes every `run:` script to, started from the root of the scanned tree. Set to a shell or an interpreter, that program would run each `run:` script instead of checking it. ASH's config usually comes from the repository being scanned (`.ash/.ash.yaml`), so from a config file inside the scanned tree each option accepts only its own name. Another program, or any path, is honored only from `--config-overrides` or a config file outside the scanned tree:
 
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
