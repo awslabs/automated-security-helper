@@ -29,6 +29,7 @@ from automated_security_helper.utils.sandbox.policy import (
     SandboxPolicy,
     SandboxUnavailable,
     _distinct_home,
+    _home_link_targets,
     _passwd_home,
 )
 
@@ -143,6 +144,35 @@ class SandboxBackend:
 def _other_home(policy: SandboxPolicy) -> Optional[Path]:
     """The passwd entry's home when it is a directory other than ``policy.home``."""
     return _distinct_home(policy.home, _passwd_home())
+
+
+def _hidden_around(root: Path, shown: Sequence[Path]) -> List[Path]:
+    """What to blacklist so that ``root`` shows only ``shown`` and the way to them.
+
+    firejail whitelists only inside the home and a few system directories, so a
+    directory a link at the top of a home names (policy._home_link_targets) is hidden
+    with --blacklist: all of it, or, where the policy grants paths inside it, every
+    entry beside the way to those paths. Links among the entries are left alone,
+    since firejail would blacklist the directory they point to.
+    """
+    inside = [p for p in shown if p == root or _is_within(p, root)]
+    if not inside:
+        return [root]
+    if root in inside:
+        return []
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return [root]
+    hidden: List[Path] = []
+    for entry in entries:
+        if entry.is_symlink():
+            continue
+        if any(p == entry or _is_within(p, entry) for p in inside):
+            hidden += _hidden_around(entry, inside)
+        else:
+            hidden.append(entry)
+    return hidden
 
 
 def _probe_process(
@@ -561,6 +591,17 @@ class FirejailBackend(SandboxBackend):
             and not _is_within(home_variable, tmp_root)
         ):
             cmd.append(f"--blacklist={home_variable.as_posix()}")
+        # A directory a link at the top of either home names (~/.local kept on
+        # another disk) is part of that home but outside it, where firejail shows
+        # everything: it is blacklisted, all but the policy's own paths inside it.
+        homes = [home] + (
+            [home_variable] if home_variable not in (home, Path("/")) else []
+        )
+        for target in _home_link_targets(homes):
+            if _is_within(target, tmp_root):
+                continue
+            for hidden in _hidden_around(target, readable + writable):
+                cmd.append(f"--blacklist={hidden.as_posix()}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
         # writable ones (the results directory, inside the read-only output and
@@ -906,6 +947,10 @@ class SandboxExecBackend(SandboxBackend):
         # The passwd entry's home too, when HOME names another directory: reading
         # starts from "/", so a home that is not denied here stays readable.
         homes = [home] + [h for h in [_other_home(policy)] if h is not None]
+        # And each directory a link at the top of a home names (~/.local kept on
+        # another disk), which is part of that home; the policy's own paths inside
+        # it are allowed again after the denies, as they are inside the homes.
+        denied = homes + _home_link_targets(homes)
         # Caches are read-only here too; see _private_caches.
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})"
@@ -946,7 +991,7 @@ class SandboxExecBackend(SandboxBackend):
             # directories, then give back the paths the policy lists. In SBPL the
             # last matching rule wins.
             '(allow file-read* (subpath "/"))',
-            *[f"(deny file-read* (subpath {_sbpl_string(h)}))" for h in homes],
+            *[f"(deny file-read* (subpath {_sbpl_string(h)}))" for h in denied],
             '(deny file-read* (subpath "/private/tmp") (subpath "/private/var/folders"))',
         ]
         if readable:

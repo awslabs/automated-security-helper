@@ -611,6 +611,15 @@ blacklists the directory `HOME` names, unless it is under `/tmp`, which is alrea
 private. A tool installed inside that directory then fails to start rather than the
 directory being shown. sandbox-exec likewise denies reading both directories.
 
+A directory that a link at the top of either home names outside the homes, such as
+`~/.local` kept on another disk, is part of that home but lies outside it, where
+both backends would otherwise show it. sandbox-exec denies reading it along with the
+homes, before the policy's own paths are allowed again, so a tool's `bin` directory
+inside it still runs while its `share` and keyrings stay unreadable. firejail
+blacklists it, or, where the policy lists paths inside it (that `bin` directory, or a
+scanned repository kept in a linked `~/code`), every entry beside the way to those
+paths. A link to a system directory, such as `~/u` linked to `/usr`, is not hidden.
+
 firejail also decides for itself whether to build a sandbox at all. When it finds no
 kernel threads among the first ten PIDs, as inside a container that has its own PID
 namespace, it concludes it is already sandboxed and runs the command with none of the

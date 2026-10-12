@@ -6,6 +6,7 @@
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -1048,6 +1049,131 @@ class TestFirejailHidesBothHomes:
         argv = self._argv(layout)
         assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
         assert "--private" in argv
+
+
+class TestTheBackendsHideADirectoryAHomeLinksTo:
+    """~/.local -> /persist/me/.local: the backends hide the target like a home.
+
+    sandbox-exec reads from "/" and takes back the homes, and firejail shows all
+    that is outside the home, so a directory a link at the top of a home names
+    stayed readable whatever the policy granted. sandbox-exec now denies reading it
+    with the homes, before the policy's allows, and firejail blacklists it, or,
+    where the policy grants a path inside it, every entry beside the way to that
+    path. A link to a system directory is not hidden.
+    """
+
+    @pytest.fixture(params=["HOME", "passwd home"])
+    def linked(self, request, layout, tmp_path, monkeypatch):
+        if request.param == "HOME":
+            home = layout.home
+            # The layout's own ~/.local makes way for the link.
+            shutil.rmtree(home / ".local")
+        else:
+            home = tmp_path / "passwd-home"
+            (home / ".ssh").mkdir(parents=True)
+            _fake_passwd_home(monkeypatch, home)
+        elsewhere = tmp_path / "persist" / "me" / ".local"
+        (elsewhere / "share" / "keyrings").mkdir(parents=True)
+        (elsewhere / "share" / "keyrings" / "login.keyring").write_text("x")
+        tool = elsewhere / "bin" / "tool"
+        tool.parent.mkdir()
+        tool.write_bytes(b"\x7fELF")
+        tool.chmod(0o755)
+        (home / ".local").symlink_to(elsewhere)
+        return SimpleNamespace(
+            home=home, elsewhere=elsewhere, tool=home / ".local/bin/tool"
+        )
+
+    @staticmethod
+    def _sbpl_after_deny(policy, tmp_path, target):
+        lines = SandboxExecBackend().profile(policy, tmp_path / "ptmp").splitlines()
+        deny = f'(deny file-read* (subpath "{_as_argv(target)}"))'
+        assert deny in lines, deny
+        at = lines.index(deny)
+        allows = [
+            line for line in lines[at + 1 :] if line.startswith("(allow file-read")
+        ]
+        return at, lines, set().union(*(_subpaths(line) for line in allows))
+
+    @staticmethod
+    def _firejail(policy, argv0="/usr/bin/true"):
+        backend = FirejailBackend()
+        backend._executable = "/fj"
+        return backend.plan([str(argv0)], {}, policy).argv
+
+    def test_sandbox_exec_denies_it_before_the_policys_allows(
+        self, layout, linked, tmp_path
+    ):
+        at, lines, allowed = self._sbpl_after_deny(
+            _policy(layout, argv0="/usr/bin/true"), tmp_path, linked.elsewhere
+        )
+        read_everywhere = lines.index('(allow file-read* (subpath "/"))')
+        assert read_everywhere < at
+        keyring = linked.elsewhere / "share" / "keyrings" / "login.keyring"
+        for kept in (linked.elsewhere, linked.elsewhere / "share", keyring):
+            real = Path(_as_argv(kept))
+            covering = [
+                p for p in allowed if Path(p) == real or Path(p) in real.parents
+            ]
+            assert not covering, (kept, covering)
+
+    def test_sandbox_exec_gives_a_tools_own_bin_back(self, layout, linked, tmp_path):
+        policy = _policy(layout, argv0=str(linked.tool))
+        _at, _lines, allowed = self._sbpl_after_deny(policy, tmp_path, linked.elsewhere)
+        assert _as_argv(linked.elsewhere / "bin") in allowed
+        assert _as_argv(linked.elsewhere / "share") not in allowed
+        assert _as_argv(linked.elsewhere) not in allowed
+
+    def test_firejail_blacklists_it(self, layout, linked):
+        argv = self._firejail(_policy(layout, argv0="/usr/bin/true"))
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" in argv
+
+    def test_firejail_hides_all_but_a_tools_own_bin(self, layout, linked):
+        policy = _policy(layout, argv0=str(linked.tool))
+        argv = self._firejail(policy, linked.tool)
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
+
+    def test_firejail_keeps_a_scanned_tree_kept_in_a_linked_directory(
+        self, layout, tmp_path
+    ):
+        """~/code -> /data/code with the scanned repository in it: the repository is
+        the policy's own path there, so only what is beside it is blacklisted."""
+        code = tmp_path / "data" / "code"
+        repo = code / "repo"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (code / "other" / "notes").mkdir(parents=True)
+        (layout.home / "code").symlink_to(code)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        argv = self._firejail(policy)
+
+        blacklisted = [a.split("=", 1)[1] for a in argv if a.startswith("--blacklist=")]
+        assert _as_argv(code / "other") in blacklisted
+        for shown in (code, repo, output):
+            assert _as_argv(shown) not in blacklisted, shown
+
+    def test_a_link_to_a_system_directory_is_not_hidden(self, layout, tmp_path):
+        (layout.home / "u").symlink_to("/usr")
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "ptmp").splitlines()
+        assert not [
+            line
+            for line in lines
+            if line.startswith("(deny file-read*") and _as_argv("/usr") in line
+        ]
+        argv = self._firejail(policy)
+        assert f"--blacklist={_as_argv('/usr')}" not in argv
 
 
 class TestHomeElsewhereThanThePasswdEntry:
