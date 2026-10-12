@@ -42,7 +42,10 @@ Two stacked Docker builds:
    `INSTALL_ASH_REVISION=LOCAL`, rather than letting the Dockerfile re-clone.
    That matters because the Dockerfile's own remote path uses
    `git clone --branch`, which cannot resolve a commit SHA — doing the fetch
-   outside is what makes SHA pinning possible.
+   outside is what makes SHA pinning possible. `ash_version` and
+   `ash_repository_clone_url` follow `--` on the git command line, so git
+   takes them as the ref and the remote URL even when one starts with `-`; such
+   a value names no ref or repository, and the build fails at the fetch.
 2. A thin wrapper (`files/wrapper.Dockerfile`) adding two scripts:
    - `ash-container-init` (the `ENTRYPOINT`) materializes the base config from
      SSM to `.ash/.ash.yaml`, resolves the MCP auth header value from Secrets

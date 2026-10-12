@@ -682,7 +682,10 @@ export class AshImageBuild extends Construct {
             // tag or a branch and refuses a commit SHA ("Remote branch <sha> not
             // found"), and a commit is the one value that pins an exact build. The
             // Terraform image pipeline fetches the same way.
-            'git init -q ash-src && git -C ash-src fetch -q --depth 1 "${ASH_REPOSITORY_URL}" "${ASH_VERSION}" && git -C ash-src checkout -q FETCH_HEAD',
+            //
+            // `--` ends git's options before the repository and the ref, so git
+            // takes an AshVersion that starts with '-' as a refspec.
+            'git init -q ash-src && git -C ash-src fetch -q --depth 1 -- "${ASH_REPOSITORY_URL}" "${ASH_VERSION}" && git -C ash-src checkout -q FETCH_HEAD',
           ],
         },
         build: {

@@ -530,6 +530,13 @@ and keeps the role only for the clone. A base config that enables a reporter whi
 calls AWS has no credentials in the gate, and that reporter fails. The role holds no
 Secrets Manager grant: the gate reads no secret.
 
+The handler refuses an event whose `sourceCommit` or `destinationCommit` is not a
+full hex object id, before it runs git or calls CodeCommit, and the invocation fails.
+CodeCommit sends 40-digit ids, so this never refuses a real event. Both ids reach git
+as arguments, and `git checkout` takes whatever follows `--` as paths, so `--` cannot
+keep a commit from being read as an option there. The clone passes `--` before the
+repository.
+
 ## Requires CLI surface from sibling changes
 
 Two things these templates invoke are being added alongside this change and are

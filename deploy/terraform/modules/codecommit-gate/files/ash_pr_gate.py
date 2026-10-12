@@ -74,6 +74,14 @@ DEFAULT_MAX_COMMENT_CHARS = 10000
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
+#: A full git object id: 40 hex digits, or 64 in a SHA-256 repository.
+#:
+#: The event's commit ids reach git as arguments, and git reads an argument that
+#: starts with "-" as an option. ``git checkout`` takes whatever follows ``--`` as
+#: paths, so ``--`` cannot carry a commit there; ``parse_event`` accepts only this
+#: shape instead.
+COMMIT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+
 #: Where the gate image recorded the uv tool directory the ASH stage installed
 #: into, so ``_scan_env`` can give uv a writable parent without reinstalling the
 #: tools. Baked by the ENV block in
@@ -525,6 +533,10 @@ def parse_event(event: dict) -> dict:
         raise ValueError(
             f"event detail is missing required fields: {', '.join(missing)}"
         )
+    for key in ("sourceCommit", "destinationCommit"):
+        value = detail[key]
+        if not (isinstance(value, str) and COMMIT_ID.fullmatch(value)):
+            raise ValueError(f"event {key} is not a full commit id: {value!r}")
 
     source_reference = detail["sourceReference"]
     branch = source_reference.removeprefix("refs/heads/")
@@ -572,6 +584,7 @@ def clone_source(
             "--single-branch",
             "--branch",
             branch,
+            "--",
             remote,
             str(source_dir),
         ]

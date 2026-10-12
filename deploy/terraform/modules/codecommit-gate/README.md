@@ -239,6 +239,14 @@ arbitrary commit SHA directly, so the pull request's source branch is cloned in
 full and the SHA is then checked out from that history. Clone time therefore
 scales with repository history, and it is the main cost driver here.
 
+**Only full commit ids are checked out.** The handler refuses an event whose
+`sourceCommit` or `destinationCommit` is not a full hex object id, before it
+runs git or calls CodeCommit, and the invocation fails. CodeCommit sends 40-digit
+ids, so this never refuses a real event. The check exists because `git checkout`
+takes whatever follows `--` as paths, so `--` cannot keep a commit argument from
+being read as an option there. The clone itself passes `--` before the
+repository.
+
 **The gate image build needs network access to a Python index**, for
 `awslambdaric` and `git-remote-codecommit`, even when `ash_offline_mode` is true.
 `ash_offline_mode` affects how ASH behaves at scan time; it does not make this

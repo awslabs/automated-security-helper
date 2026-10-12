@@ -225,6 +225,20 @@ describe.each(BUILDS.map((b) => [`${b.stack}/${b.project}`, b] as const))('%s', 
     });
   });
 
+  test('an AshVersion starting with "-" is fetched as a ref, never read as a git option', () => {
+    // As an option, --upload-pack names a program git runs to serve the fetch. The
+    // stand-in leaves a marker and then serves, so the marker is what shows git ran it.
+    const probe = fs.mkdtempSync(path.join(fixture.root, 'probe-'));
+    const marker = path.join(probe, 'upload-pack-ran');
+    const script = path.join(probe, 'upload-pack.sh');
+    fs.writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\nexec git upload-pack "$@"\n`, { mode: 0o755 });
+
+    const run = runImageBuild(spec, fixture, `--upload-pack=${script}`);
+
+    expect({ ran: fs.existsSync(marker), fetched: run.preBuildStatus === 0 }).toEqual({ ran: false, fetched: false });
+    expect(run.stderr).toContain(`--upload-pack=${script}`);
+  });
+
   test('the ASH stage is built from the fetched tree, not re-cloned by --branch inside docker', () => {
     const run = runImageBuild(spec, fixture, 'v9.9.9');
     const stageBuilds = run.dockerCalls.filter((call) => call.startsWith('docker build') && call.includes('--target'));
