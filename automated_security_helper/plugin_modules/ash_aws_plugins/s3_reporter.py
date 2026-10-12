@@ -24,6 +24,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
     check_retry_delays,
+    report_missing_setting,
     retry_with_backoff,
 )
 
@@ -194,10 +195,18 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
-        if (
-            self.config.options.aws_region is None
-            or self.config.options.bucket_name is None
-        ):
+        missing = False
+        if self.config.options.aws_region is None:
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
+            missing = True
+        if self.config.options.bucket_name is None:
+            report_missing_setting(
+                self.config.name, "bucket_name", ("ASH_S3_BUCKET_NAME",)
+            )
+            missing = True
+        if missing:
             return self.dependencies_satisfied
         try:
             session = boto3.Session(

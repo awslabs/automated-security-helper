@@ -36,6 +36,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRY_DELAY_SECONDS,
     check_retry_delays,
     get_fallback_model,
+    report_missing_setting,
     validate_bedrock_model,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
@@ -410,13 +411,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
 
-        # Check if AWS region is configured
+        # The region defaults to us-east-1, so it is unset only when a config sets
+        # it to null.
         if self.config.options.aws_region is None:
-            self._plugin_log(
-                "AWS region is not configured. Set AWS_REGION environment variable or specify in config.",
-                level=logging.WARNING,
-                target_type="source",
-                append_to_stream="stderr",
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
             )
             return self.dependencies_satisfied
 

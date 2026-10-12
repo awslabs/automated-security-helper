@@ -15,6 +15,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
     check_retry_delays,
+    report_missing_setting,
     retry_with_backoff,
 )
 
@@ -174,10 +175,18 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
-        if (
-            self.config.options.aws_region is None
-            or self.config.options.log_group_name is None
-        ):
+        missing = False
+        if self.config.options.aws_region is None:
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
+            missing = True
+        if self.config.options.log_group_name is None:
+            report_missing_setting(
+                self.config.name, "log_group_name", ("ASH_CLOUDWATCH_LOG_GROUP_NAME",)
+            )
+            missing = True
+        if missing:
             return self.dependencies_satisfied
         try:
             sts_client = boto3.client("sts", region_name=self.config.options.aws_region)

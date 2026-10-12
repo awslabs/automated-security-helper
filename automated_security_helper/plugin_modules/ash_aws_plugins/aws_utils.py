@@ -1,9 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import random
+import threading
 import time
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, TypeVar
 
 import botocore.exceptions
 
@@ -11,6 +12,53 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 # Type variable for the return type of the function
 T = TypeVar("T")
+
+#: (reporter key, option) pairs already named by :func:`report_missing_setting`
+#: in this process. A workspace builds and checks a reporter for each project,
+#: and one missing setting should produce one message.
+_MISSING_SETTINGS_NAMED: Set[Tuple[str, str]] = set()
+_MISSING_SETTINGS_LOCK = threading.Lock()
+
+
+def reset_missing_setting_notices() -> None:
+    """Forget which missing settings were already named (tests)."""
+    with _MISSING_SETTINGS_LOCK:
+        _MISSING_SETTINGS_NAMED.clear()
+
+
+def report_missing_setting(
+    reporter_key: str, option: str, environment: Sequence[str]
+) -> None:
+    """Say, once per process, that an enabled reporter lacks a setting it needs.
+
+    For an AWS reporter's ``validate_plugin_dependencies``, before it returns
+    False because ``option`` is unset. The report phase then leaves the reporter
+    out, and when no output format was requested nothing else names it, so the
+    upload the operator turned on would not happen with no word of why. The
+    message names the reporter, the option, the ``--config-overrides`` key that
+    sets it and the environment variables its default is read from.
+
+    Logged at ERROR so that it is shown under ``--quiet``, like a requested
+    format that produces nothing (``report_phase``). The exit code is not
+    changed: it stays a verdict on the scanned code. Only names are logged,
+    never a value.
+    """
+    with _MISSING_SETTINGS_LOCK:
+        if (reporter_key, option) in _MISSING_SETTINGS_NAMED:
+            return
+        _MISSING_SETTINGS_NAMED.add((reporter_key, option))
+    from_environment = ""
+    if environment:
+        from_environment = (
+            f", or set {' or '.join(environment)} in the environment, which is "
+            f"read only when no config sets {option}"
+        )
+    ASH_LOGGER.error(
+        f"Reporter '{reporter_key}' is enabled but does not run: no {option} is "
+        f"set. Set it with --config-overrides "
+        f"reporters.{reporter_key}.options.{option}=<value>{from_environment}."
+    )
+
 
 #: The most retries an AWS reporter's options allow, and the longest delay in
 #: seconds between two attempts, so no config makes a reporter keep calling an

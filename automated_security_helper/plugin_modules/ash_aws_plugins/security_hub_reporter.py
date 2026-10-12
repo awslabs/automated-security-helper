@@ -14,6 +14,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    report_missing_setting,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -110,7 +113,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
         self.dependencies_satisfied = False
 
         if not self.config.options.aws_region:
-            ASH_LOGGER.error("AWS region is required for Security Hub reporter")
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
+            )
             return self.dependencies_satisfied
 
         try:
