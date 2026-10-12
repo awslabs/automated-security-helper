@@ -4,7 +4,8 @@
 """Only the calling session's ``config/`` directory holds files set aside for it.
 
 ``select_profile`` materializes a registered profile into the session's own
-``config/`` directory as ``ash.yaml`` and ``call-profile.yaml``. A config path a
+``config/`` directory as ``ash.yaml``, and a workspace tool's ``profile`` as
+``call-profile-<digest>.yaml`` (``call_profile_filename``). A config path a
 client names to one of those files is the operator's, and for a remote caller it
 resolves ``!ENV``. Any other file in ``config/`` is the client's, because the
 server never writes one. A file in another session's ``config/`` directory is not
@@ -23,8 +24,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
-    CALL_PROFILE_FILENAME,
     DEFAULT_SESSION_ID,
+    call_profile_filename,
     clear_profile_registry,
     clear_session_state,
     session_client_rules,
@@ -202,7 +203,7 @@ def own_policy(_server: Path) -> Path:
     The call profile, because a workspace policy may not take a project config
     name such as the session's ``ash.yaml``.
     """
-    path = _server / MINE / "config" / CALL_PROFILE_FILENAME
+    path = _server / MINE / "config" / call_profile_filename("policy")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(POLICY, encoding="utf-8")
     return path

@@ -35,6 +35,7 @@ import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
     DEFAULT_SESSION_ID,
+    call_profile_filename,
     clear_profile_registry,
     clear_session_state,
 )
@@ -156,10 +157,13 @@ def _in_session(session_id: str, *parts: str) -> Path:
 
 
 def test_a_sessions_config_directory_is_set_aside(_server) -> None:
-    """The two profile files the server writes there; any other file is the
-    client's (``test_session_config_dir_is_server_only.py``)."""
+    """The profile files the server writes there, the bound profile and a
+    per-call profile; any other file is the client's
+    (``test_session_config_dir_is_server_only.py``)."""
     denied = _write(_in_session(REMOTE, "config", "ash.yaml"), DENIED)
-    reference = _write(_in_session(REMOTE, "config", "call-profile.yaml"), NO_DEFAULT)
+    reference = _write(
+        _in_session(REMOTE, "config", call_profile_filename("ci")), NO_DEFAULT
+    )
 
     assert _validate(config_path=str(denied), session_id=REMOTE)["valid"] is True
     assert _validate(config_path=str(reference), session_id=REMOTE)["valid"] is True

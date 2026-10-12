@@ -477,7 +477,9 @@ file any MCP client delivered also counts as inside the scanned tree for the pat
 and module checks below: everything under the MCP workspace root
 (`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except the profile files
 the server writes in each session's `config/` directory: `ash.yaml`, the profile
-`select_profile` binds, and `call-profile.yaml`, a workspace tool's per-call profile.
+`select_profile` binds, and a workspace tool's per-call profile, one file per profile
+named `call-profile-` followed by 16 lowercase hex digits and `.yaml` (or
+`call-profile.yaml`). Only a file directly in `config/` with one of those names counts.
 Any other file there is the client's, and neither `config/` nor `client-config/` may
 be a scan target or an output directory. A profile a client patched with
 `select_profile` is written to the session's `client-config/` directory instead, so

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -292,6 +293,13 @@ SESSION_CONFIG_FILENAME = "ash.yaml"
 #: ``call_profile_filename``'s names.
 CALL_PROFILE_FILENAME = "call-profile.yaml"
 
+_CALL_PROFILE_STEM, _CALL_PROFILE_SUFFIX = os.path.splitext(CALL_PROFILE_FILENAME)
+_CALL_PROFILE_DIGEST_LENGTH = 16
+_CALL_PROFILE_NAME = re.compile(
+    rf"{re.escape(_CALL_PROFILE_STEM)}-[0-9a-f]{{{_CALL_PROFILE_DIGEST_LENGTH}}}"
+    rf"{re.escape(_CALL_PROFILE_SUFFIX)}"
+)
+
 
 def call_profile_filename(profile_name: str) -> str:
     """The file a workspace tool's ``profile`` is materialized under, one per profile.
@@ -301,8 +309,23 @@ def call_profile_filename(profile_name: str) -> str:
     profile, so two calls in one session that name different profiles do not
     replace the file the other's plan recorded and its scan reads.
     """
-    digest = hashlib.sha256(profile_name.encode("utf-8")).hexdigest()[:16]
-    return CALL_PROFILE_FILENAME.replace(".yaml", f"-{digest}.yaml")
+    digest = hashlib.sha256(profile_name.encode("utf-8")).hexdigest()
+    return (
+        f"{_CALL_PROFILE_STEM}-{digest[:_CALL_PROFILE_DIGEST_LENGTH]}"
+        f"{_CALL_PROFILE_SUFFIX}"
+    )
+
+
+def is_call_profile_filename(name: str) -> bool:
+    """Whether ``name`` has the shape of a name ``call_profile_filename`` returns.
+
+    By shape alone: the prefix, a dash, exactly 16 lowercase hex digits and the
+    suffix, nothing before or after. Only the server writes in a session's
+    ``config/`` directory (``sandbox._server_config_dir_refusal``), so a file
+    there named so is one it wrote, and the registered profiles need not be
+    looked up to tell.
+    """
+    return _CALL_PROFILE_NAME.fullmatch(name) is not None
 
 
 def materialize_session_config(

@@ -155,7 +155,8 @@
   invalid and `run_ash_scan` does not start the scan. A config
   path a client names counts as the client's unless it is in a directory
   `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or is a profile file the server writes in
-  the session's own `config/` directory (`ash.yaml` or `call-profile.yaml`), so a
+  the session's own `config/` directory (`ash.yaml`, or a per-call profile named
+  `call-profile-` and 16 lowercase hex digits, or `call-profile.yaml`), so a
   config in another checkout the server may scan is checked the same way, and so
   is a link a client delivered, wherever it points. Neither the session's
   `config/` nor its `client-config/` directory may be a scan target or a
@@ -231,8 +232,9 @@
   value the allowlist accepted was honored as the operator's. A binding without
   a patch, or with an empty `patch_ops`, is still `config/ash.yaml` and the
   operator's, and it removes an earlier patched copy. A workspace tool's
-  per-call `profile` is written to `config/call-profile.yaml` and no longer
-  replaces the session's bound config. A `denied_value_patterns` entry does not
+  per-call `profile` is written to a file of its own per profile,
+  `config/call-profile-<digest>.yaml`, and no longer replaces the session's bound
+  config. A `denied_value_patterns` entry does not
   refuse the patched copy for a mapping key the server's config already has, so
   a patched profile that repeats the operator's keys is not refused for them; a
   key in any other delivered file is checked as before. See

@@ -314,8 +314,8 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
     Everything under the shared workspace root got there through a client: a
     delivered source tree, a zip upload and its staging. The exception is the
     profile files the server writes in each session's ``config/`` directory
-    (``_server_written_config_names``): the operator's profile that
-    ``select_profile`` materializes, and a workspace tool's per-call profile.
+    (``_is_server_written_config``): the operator's profile that
+    ``select_profile`` materializes, and a workspace tool's per-call profiles.
     Any other file there is the client's, and no scan may write there
     (``_server_config_dir_refusal``). Any session's sandbox counts, not only the
     caller's, because a sibling session's upload is no more the operator's than
@@ -350,11 +350,12 @@ def config_is_client_supplied(config_path: str | Path) -> bool:
 
 
 def _server_written_config_names() -> Tuple[str, ...]:
-    """The files the server writes in a session's ``config/`` directory.
+    """The fixed names the server writes in a session's ``config/`` directory.
 
     Read from ``profile_registry``, which writes them
-    (``materialize_session_config``): the bound profile and a workspace tool's
-    per-call profile.
+    (``materialize_session_config``): the bound profile, and the name a workspace
+    tool's per-call profile had before each profile got a file of its own. The
+    per-profile names are matched by ``profile_registry.is_call_profile_filename``.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         CALL_PROFILE_FILENAME,
@@ -365,11 +366,22 @@ def _server_written_config_names() -> Tuple[str, ...]:
 
 
 def _is_server_written_config(parts: Tuple[str, ...]) -> bool:
-    """Whether ``parts``, below a session's sandbox, name a file the server writes."""
+    """Whether ``parts``, below a session's sandbox, name a file the server writes.
+
+    Directly in ``config/``, under one of ``_server_written_config_names`` or a
+    per-profile call profile's name (``is_call_profile_filename``).
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        is_call_profile_filename,
+    )
+
     return (
         len(parts) == 2
         and parts[0] == CONFIG_DIR_NAME
-        and parts[1] in _server_written_config_names()
+        and (
+            parts[1] in _server_written_config_names()
+            or is_call_profile_filename(parts[1])
+        )
     )
 
 
