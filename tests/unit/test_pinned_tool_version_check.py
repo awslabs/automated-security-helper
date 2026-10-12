@@ -439,9 +439,16 @@ _TABLES_A_BUMP_LEAVES = {
     "_BARE_EXECUTABLE_TOOLS": "whether the release asset is the executable itself",
 }
 
-#: Dockerfile ``ARG <NAME>_VERSION`` lines that are not a pin this script reports.
-_DOCKERFILE_ARGS_THAT_ARE_NOT_PINS = {
-    "BUNDLER_VERSION": "the bundler the image installs the cfn-nag gems with",
+#: Dockerfile ``ARG <NAME>_VERSION`` lines that pin a version this script does not
+#: track, by design. Each is a version pin all the same, so the reason says how it is
+#: bumped instead.
+_UNTRACKED_DOCKERFILE_VERSION_ARGS = {
+    "BUNDLER_VERSION": (
+        "the bundler the image installs the cfn-nag gems with. Not tracked by this "
+        "checker, by design: it reads its pins from tool_downloads.py, and this "
+        "version is set only in the Dockerfile, so tracking it would need a new kind "
+        "of pin read from there. A bundler bump is a manual edit to this ARG."
+    ),
 }
 
 PINS_REL = PINS_FILE.relative_to(REPO_ROOT).as_posix()
@@ -746,7 +753,7 @@ class TestBumpStepsNameEveryValueABumpChanges:
         )
         unowned = sorted(
             {f"{a}_VERSION" for a in args if a not in stems}
-            - set(_DOCKERFILE_ARGS_THAT_ARE_NOT_PINS)
+            - set(_UNTRACKED_DOCKERFILE_VERSION_ARGS)
         )
         assert not unowned, unowned
 
