@@ -8,6 +8,7 @@ from rich.text import Text
 from rich.panel import Panel
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     get_unified_scanner_metrics,
@@ -212,9 +213,11 @@ def print_inputs_not_scanned(
     cannot say which input went unexamined. Nothing is printed when there is none.
     """
     for scanner_name, path, reason in inputs_not_scanned(asharp_model):
+        # The path is the scanned repository's: its control characters (a terminal
+        # escape sequence, a newline) are escaped before its markup is.
         console.print(
             f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
-            f"scan {escape(path)}: {escape(reason)}"
+            f"scan {escape(escape_controls(path))}: {escape(reason)}"
         )
 
 

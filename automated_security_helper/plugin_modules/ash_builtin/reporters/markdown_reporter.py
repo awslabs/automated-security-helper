@@ -12,6 +12,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.utils.display_text import markdown_code_span
 from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     inputs_not_scanned,
@@ -292,8 +293,13 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     "no finding is reported for one says nothing about it:"
                 )
                 md_parts.append("")
+                # The path is the scanned repository's: shown in a code span its own
+                # backticks cannot close, with its newlines and other control
+                # characters escaped, so it cannot start a line of its own.
                 for scanner_name, path, reason in not_scanned:
-                    md_parts.append(f"- **{scanner_name}**: `{path}`: {reason}")
+                    md_parts.append(
+                        f"- **{scanner_name}**: {markdown_code_span(path)}: {reason}"
+                    )
                 md_parts.append("")
 
             # Same placement and the same reasoning as the coverage section above: no status

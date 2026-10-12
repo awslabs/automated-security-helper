@@ -19,6 +19,7 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
     format_duration,
     inputs_not_scanned,
@@ -219,8 +220,12 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
             if not_scanned:
                 text_parts.append("INPUTS NOT SCANNED")
                 text_parts.append("------------------")
+                # The path is the scanned repository's; its control characters are
+                # escaped so it stays on its line (see utils/display_text.py).
                 for scanner_name, path, reason in not_scanned:
-                    text_parts.append(f"- {scanner_name}: {path}: {reason}")
+                    text_parts.append(
+                        f"- {scanner_name}: {escape_controls(path)}: {reason}"
+                    )
                 text_parts.append("")
 
             # See the matching section in the markdown reporter: no status value carries this.
