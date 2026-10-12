@@ -661,6 +661,29 @@ class TestOverridesApplyOverTheRecordedConfig:
 
         _assert_merged(result, harness)
 
+    def test_an_operators_sandbox_override_is_kept(self, harness):
+        """A ``sandbox`` override is the operator's grant, not a shard's.
+
+        It is applied to each shard's recorded config and replayed onto the
+        trusted base, so the sandbox step finds it in both and keeps it.
+        """
+        grant = harness.tmp_path / "operator-grant"
+        grant.mkdir()
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+
+        result = harness.merge(
+            shard_paths,
+            "--config-overrides",
+            f"sandbox.extra_read_paths={json.dumps([grant.as_posix()])}",
+        )
+
+        _assert_merged(result, harness)
+        assert not [m for m in harness.ignoring() if "sandbox." in m], harness.warnings
+        recorded = json.loads(
+            (harness.output_dir / RESULTS_FILE_NAME).read_text("utf-8")
+        )["ash_config"]
+        assert recorded["sandbox"]["extra_read_paths"] == [grant.as_posix()]
+
     def test_an_invalid_override_exits_three(self, harness):
         shard_paths = harness.write_shards({"project_name": "test-merge"})
 
