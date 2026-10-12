@@ -379,7 +379,8 @@ def resolve_offline_image_default(
     true. So a config can turn it off, never on: without the variable it is off
     whatever the config says.
     """
-    if not built_offline(os.environ if environ is None else environ):
+    # A locked copy, not the live mapping (utils/process_env.py).
+    if not built_offline(snapshot_environ() if environ is None else environ):
         return False
     return (
         getattr(config, "content_db_staleness_offline_image_default", True) is not False
