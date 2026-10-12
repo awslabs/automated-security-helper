@@ -186,6 +186,13 @@
   other tool that honors `.gitignore`, now leaves the output directory out too.
   The file does not count among the files already in the output directory that
   the scan-set warning reports.
+- **A config file does not interpolate an `ASH_` variable named for a
+  credential.** A reference to an `ASH_` name that ends in `_KEY`, `_TOKEN`,
+  `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS` or `_HEADER_VALUE`,
+  compared case-insensitively, or to `ASH_MCP_AUTH_HEADER_VALUE`, is left as
+  written, as a reference to an unlisted name is. The warning names the
+  variable, never its value. Every other `ASH_` name, and `AWS_REGION`,
+  `AWS_DEFAULT_REGION` and `AWS_PROFILE`, resolves as before.
 - **Only the operator turns trivy-repo's telemetry on.** A config file inside a git
   checkout or the scanned directory could set
   `scanners.trivy-repo.options.disable_telemetry: false`, and trivy then sent

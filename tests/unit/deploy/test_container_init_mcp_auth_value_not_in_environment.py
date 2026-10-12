@@ -18,13 +18,13 @@ named by ``ASH_MCP_AUTH_HEADER_VALUE_FD``. ``ash-mcp-serve`` reads it, closes it
 removes both variables before it execs ``ash mcp``; a value an operator sets
 directly as ``ASH_MCP_AUTH_HEADER_VALUE`` is removed the same way. Measured here:
 
-* the command the init script execs has no ``ASH_MCP_AUTH_HEADER_VALUE``, a config
-  it resolves that reads the variable gets nothing for it, and the descriptor holds
-  the value byte for byte. The references are written ``${ASH_MCP_AUTH_HEADER_VALUE:}``
-  (empty default) and ``${ASH_MCP_AUTH_HEADER_VALUE:not-set}``: those are the forms
-  ``resolve_env_references`` reads a variable for. A bare ``${NAME}`` is left as
-  written whether or not the variable is set, so it would pass here before the
-  change too and cannot tell the two apart;
+* the command the init script execs has no ``ASH_MCP_AUTH_HEADER_VALUE``, and the
+  descriptor holds the value byte for byte. A config it resolves that names the
+  variable gets nothing for it either: ``ASH_MCP_AUTH_HEADER_VALUE`` is a name a
+  config does not interpolate (``ash_config.config_env_var_is_secret_shaped``), so
+  ``${ASH_MCP_AUTH_HEADER_VALUE:}`` and ``${ASH_MCP_AUTH_HEADER_VALUE:not-set}`` stay
+  as written whether or not the variable is set. The environment check is what
+  tells the two apart;
 * ``ash mcp`` started through both scripts refuses a request without the header or
   with another value and accepts one with the right value, while its environment,
   its open descriptors and everything the scripts and the server printed are free
@@ -315,8 +315,8 @@ class TestTheExecdCommandsEnvironment:
         text = report.read_text(encoding="utf-8")
         seen = json.loads(text)
         assert "ASH_MCP_AUTH_HEADER_VALUE" not in seen["environ"]
-        assert seen["project_name"] == "not-set"
-        assert seen["raw_value"] is None
+        assert seen["project_name"] == "${ASH_MCP_AUTH_HEADER_VALUE:not-set}"
+        assert seen["raw_value"] == "${ASH_MCP_AUTH_HEADER_VALUE:}"
         assert SECRET_VALUE not in text
         assert SECRET_VALUE.encode() not in result.stdout + result.stderr
         assert seen["handed_over"] is True

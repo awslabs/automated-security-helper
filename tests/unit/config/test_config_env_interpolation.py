@@ -23,6 +23,7 @@ tests name credential-shaped *variables* -- the name, never a value -- because
 naming them is the point of the assertion.
 """
 
+import logging
 import re
 
 import pytest
@@ -228,11 +229,122 @@ class TestAshOwnConfigStaysLoadable:
         Every entry names a region or a profile -- a *where*, not a *with what*.
         A reader adding an entry has to justify it against that sentence, and a
         name ending in KEY, TOKEN, SECRET or PASSWORD cannot be.
+
+        The prefix admits every ``ASH_`` name, including ones not written yet, so
+        the same guard applies to it: whatever ``ASH_`` name ends like a
+        credential's is not interpolated, and the allowlist holds none.
         """
         for name in ASH_CONFIG_ENV_VAR_ALLOWLIST:
-            assert not re.search(r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)", name), (
-                f"{name} does not belong in the config interpolation allowlist"
-            )
+            assert not re.search(
+                r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|HEADER_VALUE)", name
+            ), f"{name} does not belong in the config interpolation allowlist"
+            assert not _secret_shaped(name), name
+        for suffix in SECRET_SUFFIXES:
+            for name in (f"ASH_ANY_FUTURE{suffix}", f"ASH_ANY_FUTURE{suffix.lower()}"):
+                assert not config_env_var_is_interpolatable(name), name
+
+
+# Every suffix of a name a config may not read, and the name listed on its own.
+SECRET_SUFFIXES = (
+    "_KEY",
+    "_TOKEN",
+    "_SECRET",
+    "_PASSWORD",
+    "_CREDENTIAL",
+    "_CREDENTIALS",
+    "_HEADER_VALUE",
+)
+CANARY = "ash-test-canary-c8e2"
+
+
+def _secret_shaped(name: str) -> bool:
+    from automated_security_helper.config import ash_config
+
+    return ash_config.config_env_var_is_secret_shaped(name)
+
+
+@pytest.fixture
+def log_records(monkeypatch):
+    """Every record any logger is asked to log, at every level."""
+    seen = []
+    monkeypatch.setattr(logging.Logger, "isEnabledFor", lambda self, level: True)
+    monkeypatch.setattr(
+        logging.Logger, "handle", lambda self, record: seen.append(record)
+    )
+    return seen
+
+
+class TestSecretShapedNamesAreNotResolved:
+    """An ``ASH_`` name that ends like a credential's is not interpolated.
+
+    The prefix admits every ``ASH_`` variable in the process, and an operator or
+    a wrapper can export a secret under one: ``ASH_MCP_AUTH_HEADER_VALUE`` is the
+    documented case, which ash-mcp-serve and ash-container-init take out of the
+    environment before ASH starts because a config could read it. A name ending
+    in ``_KEY``, ``_TOKEN``, ``_SECRET``, ``_PASSWORD``, ``_CREDENTIAL``,
+    ``_CREDENTIALS`` or ``_HEADER_VALUE``, in any case, and that name itself, is
+    left as written, as an unlisted name is, and the warning names the variable
+    and why, never its value. Every other ``ASH_`` name resolves as before.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [f"ASH_PROBE{suffix}" for suffix in SECRET_SUFFIXES]
+        + ["ASH_PROBE_api_token", "ASH_MCP_AUTH_HEADER_VALUE"],
+    )
+    @pytest.mark.parametrize(
+        "form", [REFERENCE, BARE_REFERENCE], ids=["default", "bare"]
+    )
+    def test_a_secret_shaped_name_is_left_as_written(
+        self, tmp_path, monkeypatch, log_records, name, form
+    ):
+        monkeypatch.setenv(name, CANARY)
+        reference = form.format(name=name)
+
+        config = _load(tmp_path, f"project_name: {reference}\n")
+
+        assert config.project_name == reference
+        assert CANARY not in config.model_dump_json()
+        messages = [record.getMessage() for record in log_records]
+        assert not [m for m in messages if CANARY in m], messages
+        named = [m for m in messages if name in m and "credential" in m]
+        assert named, messages
+
+    def test_an_operator_config_naming_the_auth_header_value_is_refused(
+        self, tmp_path, monkeypatch, log_records
+    ):
+        """The case the wrappers guard against, through resolution of a config
+        the operator named, the way a scan resolves it."""
+        monkeypatch.setenv("ASH_MCP_AUTH_HEADER_VALUE", CANARY)
+        config_file = tmp_path / "operator.yaml"
+        config_file.write_text(
+            "project_name: ${ASH_MCP_AUTH_HEADER_VALUE:None}\n", encoding="utf-8"
+        )
+
+        config = resolve_config(config_path=config_file, source_dir=tmp_path)
+
+        assert CANARY not in config.model_dump_json()
+        assert not [r for r in log_records if CANARY in r.getMessage()]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "ASH_PROBE_CANARY",
+            # Like a suffix, but not one: the setting ASH reads for Bedrock.
+            "ASH_BEDROCK_MAX_TOKENS",
+            "ASH_KEYS_DIR",
+            "ASH_S3_BUCKET_NAME",
+            "AWS_REGION",
+        ],
+    )
+    def test_control_other_names_still_resolve(self, tmp_path, monkeypatch, name):
+        monkeypatch.setenv(name, CANARY)
+
+        config = _load(tmp_path, f"project_name: {REFERENCE.format(name=name)}\n")
+
+        assert config.project_name == CANARY
+        assert config_env_var_is_interpolatable(name)
+        assert not _secret_shaped(name)
 
 
 class TestBareReference:

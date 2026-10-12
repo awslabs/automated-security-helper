@@ -195,7 +195,8 @@ ASH_CONFIG_MAX_FILE_BYTES = 1024 * 1024
 # ----------------
 # Every entry names *where* to send a report, never *what to authenticate with*.
 # ``tests/unit/config/test_config_env_interpolation.py`` asserts that, so an
-# entry ending in KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL fails the suite.
+# entry ending in KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or HEADER_VALUE fails
+# the suite.
 # An operator needing another name renames it with the ``ASH_`` prefix.
 #
 # A config file an MCP client delivered is outside this bound altogether: it may
@@ -208,6 +209,25 @@ ASH_CONFIG_ENV_VAR_ALLOWLIST = [
     "AWS_PROFILE",
     "AWS_REGION",
 ]
+
+# ``ASH_`` names a config file may not interpolate whatever they hold: a name
+# that ends, compared case-insensitively, in one of these suffixes, and the
+# names listed after them. The prefix admits every ``ASH_`` variable in the
+# process, including ones an operator or a wrapper exports for a credential:
+# ``ASH_MCP_AUTH_HEADER_VALUE`` is the documented one, which ash-mcp-serve and
+# ash-container-init take out of the environment before ASH starts because a
+# config could read it. A reference to one of these names is left as written,
+# as a reference to an unlisted name is.
+ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES = (
+    "_KEY",
+    "_TOKEN",
+    "_SECRET",
+    "_PASSWORD",
+    "_CREDENTIAL",
+    "_CREDENTIALS",
+    "_HEADER_VALUE",
+)
+ASH_CONFIG_ENV_VAR_SECRET_NAMES = ("ASH_MCP_AUTH_HEADER_VALUE",)
 
 # Dependency manifests, split by who writes them. The split is the whole point of
 # these two lists and must not be undone -- see the failure mode at the bottom.

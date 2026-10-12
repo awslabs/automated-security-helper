@@ -216,7 +216,11 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or `AWS_PROFILE`. A reference to
   any other name is left in the configuration exactly as written and a warning
   names it; ASH does not read the variable. The names are matched exactly, so
-  write them in upper case.
+  write them in upper case. An `ASH_` name that ends in `_KEY`, `_TOKEN`,
+  `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS` or `_HEADER_VALUE`, in
+  any case, and `ASH_MCP_AUTH_HEADER_VALUE`, is left as written the same way:
+  a configuration file does not read a variable named for a credential. The
+  warning names the variable, never its value.
 
   ASH reads the configuration file it finds in the directory it is scanning, so
   which variables that file may name is ASH's decision rather than the file's.

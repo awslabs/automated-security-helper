@@ -30,6 +30,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
+    ASH_CONFIG_ENV_VAR_SECRET_NAMES,
+    ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
@@ -140,10 +142,26 @@ def config_env_var_is_interpolatable(var_name: str) -> bool:
     names it, the docs and ASH's own config write these names in upper case, and
     ``tests/unit/config/test_config_env_interpolation.py`` pins both directions so
     that reintroducing folding is a decision rather than a drift.
+
+    A name ``config_env_var_is_secret_shaped`` matches is not admitted either;
+    that check does fold case, since it only ever excludes.
     """
+    if config_env_var_is_secret_shaped(var_name):
+        return False
     return (
         var_name.startswith(ASH_CONFIG_ENV_VAR_PREFIX)
         or var_name in ASH_CONFIG_ENV_VAR_ALLOWLIST
+    )
+
+
+def config_env_var_is_secret_shaped(var_name: str) -> bool:
+    """Whether ``var_name`` ends like a credential's name, or is one listed.
+
+    See ``ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES`` in ``core/constants.py``.
+    """
+    upper = var_name.upper()
+    return upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES or upper.endswith(
+        ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES
     )
 
 
@@ -178,6 +196,13 @@ def resolve_env_references(value: str) -> Optional[str]:
     var_name, colon, default_text = match.group(1), match.group(2), match.group(3)
     default_text = default_text or ""
     ASH_LOGGER.debug(f"Evaluating env var match: {match.group(0)}")
+    if config_env_var_is_secret_shaped(var_name):
+        ASH_LOGGER.warning(
+            f"Not reading environment variable {var_name} into the configuration: "
+            "a configuration file may not read a variable whose name is a "
+            "credential's. The reference is left as written."
+        )
+        return value.strip()
     if not config_env_var_is_interpolatable(var_name):
         # Left exactly as written rather than replaced with its default. A
         # literal that still reads as a reference is visible in the artifact
