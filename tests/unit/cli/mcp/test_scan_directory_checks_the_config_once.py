@@ -51,7 +51,13 @@ def _scan(target: Path, config: Path):
     return result, started.called
 
 
-def test_a_config_that_does_not_validate_is_refused_before_the_scan(target):
+def test_a_config_that_does_not_validate_is_refused_before_the_scan(
+    target, monkeypatch
+):
+    # A config root, so the file is the operator's. A file a client delivered or
+    # named outside the config roots that also sets a field a client may not is
+    # refused for that field first (test_denial_check_failures.py).
+    monkeypatch.setenv(ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV, str(target))
     config = target / ".ash.yaml"
     config.write_text("global_settings: 7\n", encoding="utf-8")
 

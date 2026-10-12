@@ -285,9 +285,12 @@ def _warnings_when_discovered(
     return discovery_warnings(discovery)
 
 
-def _validate_config_document(
+def validate_config_document(
     document: ResolvedConfigDocument, config_path: Path | str
 ) -> AshConfig:
+    """The config ``document`` (``read_config_document``'s) holds, validated as a
+    scan validates it; ``ASHConfigValidationError`` naming ``config_path`` if it
+    does not validate."""
     try:
         return AshConfig.model_validate(document.data, strict=True)
     except ValidationError as e:
@@ -313,28 +316,6 @@ def load_config_file(
     (see ``read_config_document``) and one that does not validate raises
     ``ASHConfigValidationError``, both exit 3 from ``ash scan``.
     """
-    return load_config_document(
-        config_path,
-        confine_to=confine_to,
-        permit_base=permit_base,
-        log_failure=log_failure,
-        refuse_env=refuse_env,
-        anchor_relative_paths=anchor_relative_paths,
-    )[0]
-
-
-def load_config_document(
-    config_path: Path | str,
-    confine_to: Optional[Path] = None,
-    permit_base: Optional[Callable[[Path], bool]] = None,
-    *,
-    log_failure: bool = True,
-    refuse_env: Optional[RefuseEnv] = None,
-    anchor_relative_paths: Optional[AnchorPaths] = None,
-) -> Tuple[AshConfig, ResolvedConfigDocument]:
-    """``load_config_file``, and the document it read, for a caller that checks
-    the chain's files too (``cli/mcp/sandbox.check_config_input``) without reading
-    them again."""
     document = read_config_document(
         config_path,
         confine_to=confine_to,
@@ -343,7 +324,7 @@ def load_config_document(
         refuse_env=refuse_env,
         anchor_relative_paths=anchor_relative_paths,
     )
-    return _validate_config_document(document, config_path), document
+    return validate_config_document(document, config_path)
 
 
 def _apply_config_override(
@@ -1279,7 +1260,7 @@ def _load_operator_config(
         anchor_relative_paths=anchor_paths,
     )
     return OperatorConfig(
-        config=_validate_config_document(document, path),
+        config=validate_config_document(document, path),
         chain=list(document.chain),
         named=list(document.named),
         names=dict(document.names),

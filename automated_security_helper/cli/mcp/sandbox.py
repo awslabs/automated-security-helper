@@ -969,14 +969,18 @@ def check_config_input(
     ``source_dir`` would use. A base outside the grant is a ``refusal``; a file or
     chain that does not load, or does not validate, is a ``load_error``. Each
     check used to parse the file on its own, on the event loop every session
-    shares.
+    shares. The chain read is kept as ``document`` when it was read, whether or
+    not it validated, so the denied-fields check can run on it first.
     """
 
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         env_refused_for,
     )
-    from automated_security_helper.config.resolve_config import load_config_document
+    from automated_security_helper.config.resolve_config import (
+        read_config_document,
+        validate_config_document,
+    )
     from automated_security_helper.core.exceptions import (
         ASHConfigEnvNotResolvedError,
         ASHConfigInputNotPermittedError,
@@ -987,11 +991,12 @@ def check_config_input(
     if refusal is not None:
         return ConfigInputCheck(refusal=refusal)
     path = Path(config_path)
+    document = None
     try:
         # Read as the scan reads it, so a file that may not use !ENV is refused
         # for that before an `extends` whose value !ENV would choose is followed:
         # the refusal must not depend on the server's environment.
-        _config, document = load_config_document(
+        document = read_config_document(
             path,
             confine_to=default_confinement_root(
                 path, Path(source_dir) if source_dir is not None else None
@@ -999,6 +1004,7 @@ def check_config_input(
             permit_base=config_base_gate(session_id),
             refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
         )
+        validate_config_document(document, path)
     except ASHConfigInputNotPermittedError as exc:
         return ConfigInputCheck(refusal=config_chain_refusal(config_path, exc))
     except ASHConfigEnvNotResolvedError as exc:
@@ -1007,7 +1013,9 @@ def check_config_input(
         # file that does not load.
         return ConfigInputCheck(env_error=exc)
     except ASHConfigValidationError as exc:
-        return ConfigInputCheck(load_error=_config_load_error(config_path, exc))
+        return ConfigInputCheck(
+            load_error=_config_load_error(config_path, exc), document=document
+        )
     except BaseException as exc:
         # As resolve_config refuses it: pydantic-core reports a Rust panic as
         # pyo3's PanicException, a BaseException, which would otherwise reach
@@ -1021,7 +1029,8 @@ def check_config_input(
             load_error=_config_load_error(
                 config_path,
                 f"The configuration could not be resolved: {type(exc).__name__}: {exc}",
-            )
+            ),
+            document=document,
         )
     return ConfigInputCheck(document=document)
 

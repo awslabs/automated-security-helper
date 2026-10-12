@@ -544,10 +544,26 @@ async def mcp_scan_directory(
         # exit code 3; the same read found it.
         if checked.env_error is not None:
             return _config_env_refusal(checked.env_error, "scan_directory")
+        chain_document = checked.document
         # Refused here rather than by the scan: a file that does not load, or
         # does not validate, would otherwise start a scan that fails on its
-        # first read of the config.
+        # first read of the config. A file a client delivered that also sets a
+        # field it may not is refused for that first, as the scan would refuse it
+        # while resolving: the denial names what to remove. A check that cannot
+        # finish on a file that does not validate leaves the load error to report.
         if checked.load_error:
+            if chain_document is not None:
+                denial = _client_config_denial(
+                    config_path,
+                    resolved_target,
+                    session_id,
+                    "scan_directory",
+                    document=chain_document,
+                )
+                if denial is not None and denial.get("error_type") == (
+                    CONFIG_FIELD_DENIED
+                ):
+                    return denial
             return create_error_response(
                 error=checked.load_error,
                 operation="scan_directory",
@@ -556,7 +572,6 @@ async def mcp_scan_directory(
                     "Run 'ash config lint' on the file to check it",
                 ],
             )
-        chain_document = checked.document
     else:
         link_out = _discovered_config_refusal(resolved_target, session_id)
         if link_out is not None:
