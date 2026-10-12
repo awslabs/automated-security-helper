@@ -33,11 +33,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.link_exclusions import (
-    ignoring_patterns,
-    walked_files,
+from automated_security_helper.utils.link_exclusions import walked_files
+from automated_security_helper.utils.sarif_utils import (
+    attach_scanner_details,
+    ignore_paths_for_locations,
 )
-from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.scanned_tree import (
     REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
@@ -274,20 +274,55 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _refuse_output_dir_inside(self, target: Path) -> None:
+        """Refuse a target that holds ASH's own output directory.
+
+        snyk would upload it with the rest: an earlier run's reports and logs,
+        which can quote code from ignored paths, and the converted files. snyk
+        honors a ``.gitignore``, and ASH writes one there, but that is read from
+        snyk's sources and not measured, so it is not relied on: ASH's output is
+        never in what snyk is given. With the default output directory,
+        ``.ash/ash_output``, that refuses the source target; the converted target,
+        the work directory below the output directory, is not affected.
+
+        Raises:
+            ScannerError: Naming the output directory and the remedy.
+        """
+        inside = self._output_dir_inside(Path(target))
+        if inside is None:
+            return
+        raise ScannerError(
+            f"Not running snyk code test on {Path(target).as_posix()}: ASH's output "
+            f"directory '{escape_controls(inside.as_posix())}' is inside it, and "
+            "snyk has no option that leaves out a path, so it would upload ASH's own "
+            "output: an earlier run's reports and logs, and the converted files. "
+            "Pass --output-dir with a directory outside the scanned tree to run "
+            "snyk-code on it (snyk code test was not started)."
+        )
+
     def _refuse_ignored_files(self, target: Path, ignore_paths: Any) -> None:
         """Refuse a target holding a file the global ignore paths ignore.
 
         ``snyk code test`` uploads the files it reads to Snyk and has no option
         that leaves out a path, so an ignored file would leave the host. The other
         scanners are told to leave such a file out, or ASH drops its findings; for
-        an upload that is not enough. The files are the ones snyk would list
-        (``walked_files``), matched as ASH matches ignore paths: by their path below
-        the source directory, which for the converted target is their path in the
-        work directory when that is inside the source directory, as their findings'
-        locations are matched. The ignore paths are the operator's: the default
-        config sets none, and the scanner-level default exclusions
-        (``KNOWN_IGNORE_PATHS``) are not ignore paths. snyk-code has no exclusion
-        option of its own to check as well; a test fails if it gains one.
+        an upload that is not enough. The files are every file snyk is given
+        (``walked_files``, which walks as the tools do): the source directory for
+        the source target, and the work directory, wherever it is, for the
+        converted one. Each is matched exactly as ASH matches the location snyk
+        reports for a finding in it, its path below the directory snyk tests
+        (``sarif_utils.ignore_paths_for_locations``, the findings step's own
+        matching). So a converted file is matched by its path below the work
+        directory, not the source directory: a file whose findings ASH would drop
+        is refused, and a file whose findings ASH keeps is not. The converters do
+        not convert an ignored notebook or archive in the first place, and a
+        converted file's name is flattened, so an exact source path such as
+        ``vendor/nb.ipynb`` is kept from snyk by that skip, not by this match.
+
+        The ignore paths are the operator's: the default config sets none, and
+        the scanner-level default exclusions (``KNOWN_IGNORE_PATHS``) are not
+        ignore paths. snyk-code has no exclusion option of its own to check as
+        well; a test fails if it gains one.
 
         Raises:
             ScannerError: Naming the first ignored file and the pattern that
@@ -296,13 +331,20 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         """
         if not ignore_paths:
             return
+        if self.context is None:
+            # Never the case for a scan the executor runs; refused rather than
+            # run unchecked.
+            raise ScannerError(
+                "Not running snyk code test: there is no scan context to match "
+                "global_settings.ignore_paths against (snyk code test was not started)."
+            )
         files, _ = walked_files(target)
         root = Path(target)
-        by_path = {str(root / relative): relative for relative in files}
-        ignored = ignoring_patterns(by_path, self.context.source_dir, ignore_paths)
-        if not ignored:
+        found = ignore_paths_for_locations(files, self.context, ignore_paths)
+        if not found:
             return
-        # walked_files sorts, and ignoring_patterns keeps that order.
+        # walked_files sorts, and ignore_paths_for_locations keeps that order.
+        ignored = {relative: matched.path for relative, matched in found.items()}
         first_path, first_pattern = next(iter(ignored.items()))
         patterns = list(dict.fromkeys(ignored.values()))
         shown = ", ".join(repr(pattern) for pattern in patterns[:3])
@@ -313,7 +355,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             f"Not running snyk code test on {root.as_posix()}: {count} "
             f"{'file' if count == 1 else 'files'} there "
             f"{'is' if count == 1 else 'are'} in global_settings.ignore_paths "
-            f"({shown}), the first '{escape_controls(by_path[first_path])}', "
+            f"({shown}), the first '{escape_controls(first_path)}', "
             f"which {first_pattern!r} matches. snyk has no option that leaves out a "
             f"path, so it would upload {'it' if count == 1 else 'them'}. To scan the "
             "rest, narrow ignore_paths, or leave snyk-code out with "
@@ -428,6 +470,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 raise ScannerError(self._exclusion_refusal(excluding, Path(target)))
 
         try:
+            self._refuse_output_dir_inside(target)
             self._refuse_links_leaving(target)
             # Passed by keyword, as the executor passes it to every scanner.
             self._refuse_ignored_files(target, kwargs.get("global_ignore_paths"))

@@ -1,26 +1,28 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""An ignored file never reaches the snyk program, on either target type.
+"""An ignored file, or ASH's own output, never reaches the snyk program.
 
 ``snyk code test`` uploads the files it reads, and has no option that leaves out a
-path, so snyk-code refuses a target holding a file the operator's
+path. So snyk-code refuses a target holding a file the operator's
 ``global_settings.ignore_paths`` match: the row is ERROR, the message names the first
-such file and the pattern that matched it, and snyk is not started.
+such file and the pattern that matched it, and snyk is not started. The files are
+every file snyk is given: the source directory for the source target, and the work
+directory, wherever it is, for the converted one. Each is matched as ASH's findings
+step matches the location snyk reports in it, its path below the directory snyk
+tests, by the one function both call; so a file is refused exactly when ASH would
+drop its finding.
+
+ASH's own output directory is never in what snyk is given either: a source target
+that holds it is refused, whatever .gitignore it has, since snyk honoring one is read
+from its sources and not measured.
 
 These tests run the scanner through the executor with a stand-in ``snyk`` first on
 PATH. The stand-in records its arguments and the text of every file below the
 directory it is given, which is what the real program would read and upload. A canary
-file sits
-under the ignored path. When the target is refused, the stand-in never runs and the
-canary is in nothing it recorded. The control, where no ignore path matches, shows
-the stand-in does receive the canary, so its absence in the refused case means
-something.
-
-ASH's own output directory is the other thing snyk must not be given: by default it
-is inside the tree, and holds an earlier run's reports. The ``.gitignore`` ASH writes
-there before any scanner starts keeps it from snyk, which honors one (read from
-snyk's sources, not measured; the stand-in models the one rule ASH writes).
+sits in the file that must not be sent. When the target is refused, the stand-in never
+runs and the canary is in nothing it recorded. The controls show the stand-in does
+receive the canary when nothing refuses it, so its absence means something.
 
 snyk-code has no exclusion option of its own, so the operator's ignore paths are the
 only rule the refusal checks; the last test fails if the scanner gains one.
@@ -43,7 +45,6 @@ from automated_security_helper.config.client_scanner_exclusions import (
 )
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -54,14 +55,16 @@ from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner
     SnykCodeScannerConfig,
     SnykCodeScannerConfigOptions,
 )
+from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
+from automated_security_helper.utils.output_dir_links import ignore_output_dir_in_git
+from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 
 CANARY = "snyk-canary-4b1f0e9d7c"
 
 #: The stand-in snyk. It reads every file below the directory it is given, as the
-#: real program reads what it uploads, and writes its arguments and each file's
-#: path and text to ``received.json`` in the record directory. It models snyk's
-#: .gitignore handling for the one rule ASH writes: a directory whose .gitignore
-#: holds ``*`` is not read, and is listed under ``pruned``.
+#: real program reads what it uploads, honoring no ignore file, and writes its
+#: arguments and each file's path and text to ``received.json`` in the record
+#: directory.
 _STAND_IN = """#!{python} -I
 import json, os, sys
 
@@ -69,28 +72,24 @@ args = sys.argv[1:]
 output = next(a for a in args if a.startswith("--sarif-file-output="))
 target = args[args.index(output) - 1]
 files = {{}}
-pruned = []
-for directory, subdirectories, names in os.walk(target):
-    if ".gitignore" in names:
-        ignore = os.path.join(directory, ".gitignore")
-        with open(ignore, encoding="utf-8", errors="replace") as handle:
-            if any(line.strip() == "*" for line in handle):
-                pruned.append(os.path.relpath(directory, target))
-                subdirectories[:] = []
-                continue
+for directory, _subdirectories, names in os.walk(target):
     for name in names:
         path = os.path.join(directory, name)
         with open(path, encoding="utf-8", errors="replace") as handle:
             files[os.path.relpath(path, target)] = handle.read()
 os.makedirs({record!r}, exist_ok=True)
 with open(os.path.join({record!r}, "received.json"), "w", encoding="utf-8") as handle:
-    json.dump({{"argv": args, "files": files, "pruned": pruned}}, handle)
+    json.dump({{"argv": args, "files": files}}, handle)
 sarif = {{"version": "2.1.0", "runs": [
     {{"tool": {{"driver": {{"name": "SnykCode", "rules": []}}}}, "results": []}}
 ]}}
 with open(output.split("=", 1)[1], "w", encoding="utf-8") as handle:
     json.dump(sarif, handle)
 """
+
+#: An archive member below a vendored directory, as the archive converter names it
+#: in the work directory.
+VENDORED_MEMBER = "archive/src__bundle__zip/vendor/m.js"
 
 
 @pytest.fixture
@@ -109,9 +108,13 @@ def record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return record
 
 
-def _context(tmp_path: Path, ignore_paths: List[str]) -> PluginContext:
+def _context(
+    tmp_path: Path, ignore_paths: List[str], output_inside: bool = False
+) -> PluginContext:
+    """A source tree with a canary under thirdparty/, and an output directory
+    outside it unless ``output_inside``, with the work directory below that."""
     source = tmp_path / "src"
-    output = source / ".ash" / "ash_output"
+    output = source / ".ash" / "ash_output" if output_inside else tmp_path / "out"
     config = get_default_config()
     config.global_settings.ignore_paths = [
         IgnorePathWithReason(path=path, reason="vendored") for path in ignore_paths
@@ -130,6 +133,16 @@ def _context(tmp_path: Path, ignore_paths: List[str]) -> PluginContext:
         f"const canary = '{CANARY}';\n", encoding="utf-8"
     )
     return context
+
+
+def _converted(context: PluginContext) -> Path:
+    """The work directory with an ordinary member and the vendored one (the canary)."""
+    work = Path(context.work_dir)
+    member = work / VENDORED_MEMBER
+    member.parent.mkdir(parents=True)
+    (member.parent.parent / "ok.js").write_text("const ok = 1;\n", encoding="utf-8")
+    member.write_text(f"const canary = '{CANARY}';\n", encoding="utf-8")
+    return work
 
 
 def _run(context: PluginContext, target: Path, target_type: str):
@@ -169,140 +182,183 @@ def _canary_in(received: Optional[Dict[str, Any]]) -> List[str]:
     )
 
 
-def test_a_refused_source_target_never_starts_snyk(tmp_path, record):
-    context = _context(tmp_path, ["thirdparty/**"])
-
-    container = _run(context, Path(context.source_dir), "source")
-
-    received = _received(record)
-    assert _canary_in(received) == []
-    assert received is None, "the stand-in snyk ran"
-    assert container.status == ScannerStatus.ERROR
-    errors = _errors(container)
-    assert "the first 'thirdparty/lib.js', which 'thirdparty/**' matches" in errors
-    assert "2 files there are in global_settings.ignore_paths" in errors
-    assert "--exclude-scanners snyk-code" in errors
-    assert "snyk code test was not started" in errors
-    assert CANARY not in errors
-
-
-def test_without_an_ignored_file_snyk_runs_and_receives_every_file(tmp_path, record):
-    """The control: the stand-in reads the canary when nothing ignores it."""
-    context = _context(tmp_path, ["docs/**"])
-
-    container = _run(context, Path(context.source_dir), "source")
-
-    assert container.status != ScannerStatus.ERROR, _errors(container)
-    received = _received(record)
-    assert received is not None, "the stand-in snyk did not run"
-    assert received["argv"][:2] == ["code", "test"]
-    assert Path(context.source_dir).as_posix() in received["argv"]
-    assert _canary_in(received) == ["thirdparty/zz-canary.js"]
-
-
-def test_a_refused_converted_target_never_starts_snyk(tmp_path, record):
-    """A converted file is matched by its path below the source directory."""
-    context = _context(tmp_path, ["**/generated/**"])
-    work = Path(context.work_dir)
-    (work / "archive" / "bundle" / "generated").mkdir(parents=True)
-    (work / "archive" / "bundle" / "app.py").write_text("a = 1\n", encoding="utf-8")
-    (work / "archive" / "bundle" / "generated" / "client.py").write_text(
-        f"canary = '{CANARY}'\n", encoding="utf-8"
+def _findings_step_drops(context: PluginContext, uri: str) -> bool:
+    """Whether ASH's findings step drops a snyk finding reported at ``uri``."""
+    sarif = SarifReport(
+        runs=[
+            Run(
+                tool={"driver": {"name": "SnykCode"}},
+                results=[
+                    {
+                        "ruleId": "probe",
+                        "message": {"text": "probe"},
+                        "locations": [
+                            {"physicalLocation": {"artifactLocation": {"uri": uri}}}
+                        ],
+                    }
+                ],
+            )
+        ]
     )
-
-    container = _run(context, work, "converted")
-
-    received = _received(record)
-    assert _canary_in(received) == []
-    assert received is None, "the stand-in snyk ran"
-    assert container.status == ScannerStatus.ERROR
-    errors = _errors(container)
-    assert (
-        "the first 'archive/bundle/generated/client.py', which '**/generated/**' "
-        "matches" in errors
-    ), errors
-    assert "1 file there is in global_settings.ignore_paths" in errors
-    assert "so it would upload it." in errors
+    kept = apply_suppressions_to_sarif(sarif, context).runs[0].results or []
+    return not kept
 
 
-def test_a_converted_target_with_no_ignored_file_runs(tmp_path, record):
-    context = _context(tmp_path, ["**/generated/**"])
-    work = Path(context.work_dir)
-    (work / "archive" / "bundle").mkdir(parents=True)
-    (work / "archive" / "bundle" / "app.py").write_text("a = 1\n", encoding="utf-8")
+class TestTheSourceTarget:
+    def test_a_source_target_holding_an_ignored_file_never_starts_snyk(
+        self, tmp_path, record
+    ):
+        context = _context(tmp_path, ["thirdparty/**"])
 
-    container = _run(context, work, "converted")
+        container = _run(context, Path(context.source_dir), "source")
 
-    assert container.status != ScannerStatus.ERROR, _errors(container)
-    received = _received(record)
-    assert received is not None, "the stand-in snyk did not run"
-    assert sorted(received["files"]) == ["archive/bundle/app.py"]
+        received = _received(record)
+        assert _canary_in(received) == []
+        assert received is None, "the stand-in snyk ran"
+        assert container.status == ScannerStatus.ERROR
+        errors = _errors(container)
+        assert "the first 'thirdparty/lib.js', which 'thirdparty/**' matches" in errors
+        assert "2 files there are in global_settings.ignore_paths" in errors
+        assert "--exclude-scanners snyk-code" in errors
+        assert "snyk code test was not started" in errors
+        assert CANARY not in errors
+
+    def test_without_an_ignored_file_snyk_runs_and_receives_every_file(
+        self, tmp_path, record
+    ):
+        """The control: the stand-in reads the canary when nothing ignores it."""
+        context = _context(tmp_path, ["docs/**"])
+
+        container = _run(context, Path(context.source_dir), "source")
+
+        assert container.status != ScannerStatus.ERROR, _errors(container)
+        received = _received(record)
+        assert received is not None, "the stand-in snyk did not run"
+        assert received["argv"][:2] == ["code", "test"]
+        assert Path(context.source_dir).as_posix() in received["argv"]
+        assert _canary_in(received) == ["thirdparty/zz-canary.js"]
+
+    @pytest.mark.parametrize("gitignored", [True, False])
+    def test_a_source_target_holding_the_output_dir_is_refused(
+        self, tmp_path, record, gitignored
+    ):
+        """Whatever .gitignore the output directory has: that snyk honors one is
+        read, not measured, so it is not relied on."""
+        context = _context(tmp_path, [], output_inside=True)
+        output = Path(context.output_dir)
+        (output / "reports").mkdir(parents=True)
+        (output / "reports" / "ash.html").write_text(
+            f"<p>{CANARY}</p>\n", encoding="utf-8"
+        )
+        if gitignored:
+            assert ignore_output_dir_in_git(context.source_dir, output) is True
+
+        container = _run(context, Path(context.source_dir), "source")
+
+        assert _received(record) is None, "the stand-in snyk ran"
+        assert container.status == ScannerStatus.ERROR
+        errors = _errors(container)
+        assert "ASH's output directory '.ash/ash_output' is inside it" in errors
+        assert "--output-dir" in errors
+        assert "snyk code test was not started" in errors
+
+    def test_the_first_path_is_shown_with_its_controls_escaped(self, tmp_path, record):
+        context = _context(tmp_path, ["thirdparty/**"])
+        name = "a\nb\x1b[31m.js"
+        (Path(context.source_dir) / "thirdparty" / name).write_text(
+            "const e = 5;\n", encoding="utf-8"
+        )
+
+        container = _run(context, Path(context.source_dir), "source")
+
+        errors = _errors(container)
+        assert "the first 'thirdparty/a\\nb\\x1b[31m.js'" in errors, errors
+        assert name not in errors
+        assert _received(record) is None, "the stand-in snyk ran"
 
 
-def test_the_first_path_is_shown_with_its_controls_escaped(tmp_path, record):
-    context = _context(tmp_path, ["thirdparty/**"])
-    name = "a\nb\x1b[31m.js"
-    (Path(context.source_dir) / "thirdparty" / name).write_text(
-        "const e = 5;\n", encoding="utf-8"
+class TestTheConvertedTarget:
+    def test_an_ignored_member_of_a_work_dir_outside_the_source_is_refused(
+        self, tmp_path, record
+    ):
+        """The output directory outside the source, and a converted member under
+        ``**/vendor/**``: ASH drops its finding, so snyk must not be given it."""
+        context = _context(tmp_path, ["**/vendor/**"])
+        work = _converted(context)
+
+        container = _run(context, work, "converted")
+
+        received = _received(record)
+        assert _canary_in(received) == []
+        assert received is None, "the stand-in snyk ran"
+        assert container.status == ScannerStatus.ERROR
+        errors = _errors(container)
+        assert f"the first '{VENDORED_MEMBER}', which '**/vendor/**' matches" in errors
+        assert "1 file there is in global_settings.ignore_paths" in errors
+        assert "so it would upload it." in errors
+
+    def test_a_work_dir_with_nothing_ignored_runs(self, tmp_path, record):
+        """The control: the stand-in receives the member when nothing ignores it."""
+        context = _context(tmp_path, ["docs/**"])
+        work = _converted(context)
+
+        container = _run(context, work, "converted")
+
+        assert container.status != ScannerStatus.ERROR, _errors(container)
+        assert _canary_in(_received(record)) == [VENDORED_MEMBER]
+
+    @pytest.mark.parametrize(
+        "pattern, output_inside, dropped",
+        [
+            ("**/vendor/**", False, True),
+            ("**/vendor/**", True, True),
+            ("archive/src__bundle__zip/**", False, True),
+            ("**/ash_output/converted/archive/**", True, False),
+            (".ash/ash_output/converted/**", True, False),
+            ("vendor/**", False, False),
+        ],
     )
+    def test_refused_exactly_when_the_findings_step_drops_the_finding(
+        self, tmp_path, record, pattern, output_inside, dropped
+    ):
+        """Both directions: a converted file whose finding ASH would drop is refused,
+        and one whose finding ASH would keep is given to snyk, wherever the work
+        directory is. snyk reports each location below the directory it tests, so
+        the findings step matches a converted file by its path below the work
+        directory, not the source directory."""
+        context = _context(tmp_path, [pattern], output_inside=output_inside)
+        work = _converted(context)
+        drops = _findings_step_drops(context, VENDORED_MEMBER)
+        assert drops is dropped
 
-    container = _run(context, Path(context.source_dir), "source")
+        container = _run(context, work, "converted")
 
-    errors = _errors(container)
-    assert "the first 'thirdparty/a\\nb\\x1b[31m.js'" in errors, errors
-    assert name not in errors
-    assert _received(record) is None, "the stand-in snyk ran"
-
-
-REPORT_CANARY = "snyk-report-canary-91d2c4"
+        refused = container.status == ScannerStatus.ERROR
+        assert refused is drops, _errors(container)
+        assert (_received(record) is None) is drops
 
 
-def _earlier_report(context: PluginContext) -> None:
-    """What an earlier run left in the output directory: a report."""
-    reports = Path(context.output_dir) / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    (reports / "ash.html").write_text(f"<p>{REPORT_CANARY}</p>\n", encoding="utf-8")
-
-
-def test_a_later_run_sends_snyk_nothing_from_an_output_dir_in_the_tree(
-    tmp_path, record
+def test_an_exact_source_path_is_kept_from_snyk_by_the_converter_skip(
+    test_plugin_context,
 ):
-    """The output directory's .gitignore, written before any scanner starts, keeps
-    an earlier run's reports from snyk, as far as the stand-in models snyk's
-    .gitignore handling."""
-    context = _context(tmp_path, [])
-    _earlier_report(context)
-    ASHScanOrchestrator(
-        source_dir=Path(context.source_dir),
-        output_dir=Path(context.output_dir),
-        config_path=None,
-        config_overrides=None,
-        no_cleanup=False,
-        metadata=None,
-        ash_plugin_modules=[],
-    ).ensure_directories()
+    """A converted file's name is flattened, so an ignore path naming the source
+    archive exactly matches nothing in the work directory; the archive converter
+    does not extract the archive in the first place."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        ArchiveConverter,
+        ArchiveConverterConfig,
+    )
 
-    container = _run(context, Path(context.source_dir), "source")
+    test_plugin_context.config.global_settings.ignore_paths = [
+        IgnorePathWithReason(path="vendor/a.zip", reason="third-party code")
+    ]
+    converter = ArchiveConverter(
+        context=test_plugin_context, config=ArchiveConverterConfig()
+    )
+    source = Path(test_plugin_context.source_dir)
 
-    assert container.status != ScannerStatus.ERROR, _errors(container)
-    received = _received(record)
-    assert received is not None, "the stand-in snyk did not run"
-    assert received["pruned"] == [".ash/ash_output"]
-    assert [name for name in received["files"] if name.startswith(".ash/")] == []
-    assert REPORT_CANARY not in json.dumps(received)
-
-
-def test_without_the_gitignore_snyk_reads_the_output_dir(tmp_path, record):
-    """The control: the stand-in reads ASH's output when nothing ignores it."""
-    context = _context(tmp_path, [])
-    _earlier_report(context)
-
-    _run(context, Path(context.source_dir), "source")
-
-    received = _received(record)
-    assert received is not None, "the stand-in snyk did not run"
-    assert received["pruned"] == []
-    assert REPORT_CANARY in received["files"][".ash/ash_output/reports/ash.html"]
+    assert converter._skipped(str(source / "vendor" / "a.zip")) is True
+    assert converter._skipped(str(source / "vendor" / "b.zip")) is False
 
 
 def test_snyk_code_has_no_exclusion_option_the_refusal_does_not_check():

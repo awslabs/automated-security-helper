@@ -109,12 +109,18 @@ scanners:
 
 ### Run Snyk Code Scan
 
+snyk-code does not scan a source directory that holds ASH's output directory (see
+[ASH's output directory](#performance-considerations)), so these commands write ASH's
+output outside the scanned tree with `--output-dir`. With the default
+`.ash/ash_output`, snyk-code reports `ERROR` for the source and names the output
+directory.
+
 ```bash
 # Scan current directory
-uv run ash --scanners snyk-code
+uv run ash --scanners snyk-code --output-dir ../ash_output
 
 # Scan specific directory
-uv run ash --scanners snyk-code /path/to/project
+uv run ash --scanners snyk-code --output-dir /path/to/ash_output /path/to/project
 ```
 
 ### Run Snyk Code Scan without an ASH configuration file
@@ -124,10 +130,10 @@ command to enable the plugin
 
 ```bash
 # Scan current directory only with snyk-code
-uv run ash --scanners snyk-code --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ash --scanners snyk-code --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 
 # SCan current directory with all available scanners (including snyk-code)
-uv run ash  --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ash --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 
 ```
 
@@ -211,14 +217,14 @@ scanners:
 
 ```bash
 # Use Snyk Code alongside other ASH scanners
-uv run ash --scanners snyk-code,bandit,semgrep
+uv run ash --scanners snyk-code,bandit,semgrep --output-dir ../ash_output
 ```
 
 ### CI/CD Integration
 
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners snyk-code --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+uv run ash --mode container --scanners snyk-code --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ## Output Integration
@@ -238,8 +244,8 @@ Snyk Code results are integrated into ASH's unified reporting system:
 - **Rate Limits**: Snyk may apply rate limits based on your subscription tier
 - **Offline Mode**: Snyk Code needs Snyk's service, so offline it does not run and is reported MISSING (see [Offline Mode](#offline-mode))
 - **Links leaving the tree**: `snyk code test` uploads the files it reads and has no option that leaves out one path, so ASH does not run it on a directory holding a link, to a file or to a directory, whose target is outside that directory. snyk-code is then `ERROR`, and the error names the link. Remove the link, or exclude snyk-code for that scan.
-- **ASH's output directory**: by default it is inside the scanned tree (`.ash/ash_output`) and holds an earlier run's reports, which `snyk code test` would upload. Before snyk-code starts, ASH writes a `.gitignore` holding `*` there, which snyk honors (read from snyk's sources, not measured). A `.gitignore` already there is left as it is, so make sure it ignores the reports, or write ASH's output outside the tree with `--output-dir`.
-- **Ignored paths**: for the same reason, snyk-code refuses a directory holding a file that `global_settings.ignore_paths` matches, since the file would be uploaded. That applies to the source directory and to ASH's directory of converted files alike, where a converted file is matched by its path below the source directory. `snyk code test` is then not started, snyk-code is `ERROR`, and the error names the first such file and the pattern that matched it, and gives the number of files and the patterns. Narrow `ignore_paths`, or exclude snyk-code with `--exclude-scanners snyk-code`. ASH's own default exclusions, such as `node_modules/`, are not ignore paths and do not stop it, and snyk-code has no exclusion option of its own. This applies to the operator's ignore paths: the ignore paths in a config an MCP client delivered drop their findings but do not stop the upload, so a client that does not want its files sent leaves snyk-code out with the `excluded_scanners` argument of `run_ash_workspace_scan`. `run_ash_scan` has no argument that selects scanners, so a client using it does not deliver the files it does not want sent.
+- **ASH's output directory**: by default it is inside the scanned tree (`.ash/ash_output`), and it holds an earlier run's reports and logs and the converted files, which `snyk code test` would upload with the source. So snyk-code refuses a source directory that holds ASH's output directory: it is `ERROR`, `snyk code test` is not started, and the error names the output directory. To run snyk-code on the source, pass `--output-dir` with a directory outside the scanned tree. The `.gitignore` ASH writes in an output directory inside the tree is not relied on for this, since that snyk honors it is read from snyk's sources, not measured. The converted files are still scanned, as their own target.
+- **Ignored paths**: for the same reason, snyk-code refuses a directory holding a file that `global_settings.ignore_paths` matches, since the file would be uploaded. The files are every file snyk would be given: the source directory for the source, and ASH's directory of converted files, wherever it is, for the converted files. Each is matched as ASH matches the location snyk reports for a finding in it, its path below the directory snyk tests, so snyk-code refuses a file exactly when ASH would drop its findings. A converted file is matched by its path below the directory of converted files, such as `archive/src__bundle__zip/vendor/m.js`; an ignore path naming a source archive or notebook exactly keeps it from being converted at all. `snyk code test` is then not started, snyk-code is `ERROR`, and the error names the first such file and the pattern that matched it, and gives the number of files and the patterns. Narrow `ignore_paths`, or exclude snyk-code with `--exclude-scanners snyk-code`. ASH's own default exclusions, such as `node_modules/`, are not ignore paths and do not stop it, and snyk-code has no exclusion option of its own. This applies to the operator's ignore paths: the ignore paths in a config an MCP client delivered drop their findings but do not stop the upload, so a client that does not want its files sent leaves snyk-code out with the `excluded_scanners` argument of `run_ash_workspace_scan`. `run_ash_scan` has no argument that selects scanners, so a client using it does not deliver the files it does not want sent.
 
 ## Troubleshooting
 
@@ -283,7 +289,7 @@ failure and is reported ERROR.
 Enable verbose logging to troubleshoot issues:
 
 ```bash
-uv run ash --scanners snyk-code --log-level DEBUG
+uv run ash --scanners snyk-code --output-dir ../ash_output --log-level DEBUG
 ```
 
 ### Offline Mode
@@ -313,7 +319,7 @@ repos:
     hooks:
       - id: ash-snyk-code
         name: ASH Snyk Code Security Scan
-        entry: uv run ash --scanners snyk-code --mode precommit --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+        entry: uv run ash --scanners snyk-code --mode precommit --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         language: system
         pass_filenames: false
 ```
@@ -336,15 +342,16 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
           ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
+        # ASH's output outside the checkout, so snyk-code scans the source.
         run: |
-          uv run ash --scanners snyk-code --output-format sarif
+          uv run ash --scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output"
       - name: Upload SARIF results
         # Also when ASH exits non-zero on findings: without a status function
         # GitHub skips this step after any failed step.
         if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: .ash/ash_output/reports/ash.sarif
+          sarif_file: ${{ runner.temp }}/ash_output/reports/ash.sarif
 ```
 
 ### GitLab CI
@@ -357,13 +364,18 @@ snyk-security-scan:
   before_script:
     - npm install -g snyk
   script:
-    - uv run ash --scanners snyk-code
+    # ASH's output outside the checkout, so snyk-code scans the source; the
+    # report is copied back in afterwards, since artifacts come from the checkout.
+    - uv run ash --scanners snyk-code --output-dir /tmp/ash_output
+  after_script:
+    - cp /tmp/ash_output/reports/ash.sarif ash.sarif
   variables:
     SNYK_TOKEN: $SNYK_TOKEN
     ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
   artifacts:
-    reports:
-      sast: .ash/ash_output/reports/ash.sarif
+    when: always
+    paths:
+      - ash.sarif
 ```
 
 ## Supported Languages

@@ -4,7 +4,7 @@ import math
 import os
 import random
 from contextlib import suppress
-from typing import Any, Callable, List
+from typing import Any, Callable, Dict, Iterable, List
 import uuid
 from pathlib import Path, PurePosixPath
 from automated_security_helper.base.plugin_context import PluginContext
@@ -875,6 +875,17 @@ class _OutputDirExclusion:
             self.source_dir_basename,
         )
 
+    def ignore_path_for(
+        self, raw_uri: str, ignore_paths: List[IgnorePathWithReason]
+    ) -> IgnorePathWithReason | None:
+        """The first of ``ignore_paths`` that a result located at ``raw_uri`` is under.
+
+        ``raw_uri`` as the scanner reported it, read as ``normalize`` reads it. The
+        one match the findings step and snyk-code's refusal both make
+        (``ignore_paths_for_locations``), so the two cannot disagree.
+        """
+        return _matching_ignore_path(self.normalize(raw_uri), ignore_paths)
+
     def holds(self, uri: str) -> bool:
         """Whether the normalized ``uri`` is ASH's output, outside the work directory."""
         if self.output_dir_contains_source:
@@ -942,6 +953,34 @@ class _OutputDirExclusion:
                 f"its work directory. These are reports ASH wrote, not findings about "
                 f"the scanned tree. Run with --verbose to see each one."
             )
+
+
+def ignore_paths_for_locations(
+    raw_uris: Iterable[str],
+    plugin_context: PluginContext,
+    ignore_paths: List[IgnorePathWithReason],
+) -> Dict[str, IgnorePathWithReason]:
+    """``{raw_uri: ignore path}`` for each result location an ignore path matches.
+
+    Matched as ``apply_suppressions_to_sarif`` matches a result's location to drop
+    it, by the same call, ``_OutputDirExclusion.ignore_path_for``: the URI as the
+    scanner reported it, normalized to the source directory where it is inside it,
+    then ``_matching_ignore_path``. For a scanner that has to decide before it runs
+    which files it may be given, such as snyk-code, whose tool uploads them: a
+    file is then refused exactly when ASH would drop the finding the tool reports
+    at it, and a file whose findings ASH keeps is not refused. Locations in ASH's
+    own output directory are not answered here; apply_suppressions_to_sarif drops
+    those for every result whatever the ignore paths say.
+    """
+    if not ignore_paths:
+        return {}
+    exclusion = _OutputDirExclusion(plugin_context)
+    found: Dict[str, IgnorePathWithReason] = {}
+    for raw_uri in raw_uris:
+        matched = exclusion.ignore_path_for(raw_uri, ignore_paths)
+        if matched is not None:
+            found[raw_uri] = matched
+    return found
 
 
 def apply_suppressions_to_sarif(
@@ -1034,7 +1073,9 @@ def apply_suppressions_to_sarif(
                         output_exclusion.record(uri)
                         is_in_ignorable_path = True
                         continue
-                    matched_ignore = _matching_ignore_path(uri, ignore_paths)
+                    matched_ignore = output_exclusion.ignore_path_for(
+                        raw_uri, ignore_paths
+                    )
                     if matched_ignore is not None:
                         ASH_LOGGER.verbose(
                             f"Ignoring finding on rule '{escape_markup(result.ruleId)}' "

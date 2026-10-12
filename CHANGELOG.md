@@ -179,13 +179,21 @@
   none). ASH now writes `<output_dir>/.gitignore` holding `*` when the output
   directory is inside the source directory, before any scanner starts: from the
   CLI in every run mode (in container mode, on the host), and from the
-  orchestrator for MCP and API scans. snyk honors it, as read from snyk's sources,
-  not measured. An existing `.gitignore` there is never overwritten, nothing is
-  written for an output directory outside the tree, and a link at that name is
-  refused, never followed, and stops the scan with exit code 3. git, and any
-  other tool that honors `.gitignore`, now leaves the output directory out too.
-  The file does not count among the files already in the output directory that
-  the scan-set warning reports.
+  orchestrator for MCP and API scans. An existing `.gitignore` there is never
+  overwritten, nothing is written for an output directory outside the tree, and a
+  link at that name is refused, never followed, and stops the scan with exit code
+  3. git, and any other tool that honors `.gitignore`, now leaves the output
+  directory out too. The file does not count among the files already in the
+  output directory that the scan-set warning reports. snyk-code does not rely on
+  it (see the next entry).
+- **snyk-code does not scan a source directory that holds ASH's output
+  directory.** With the default `.ash/ash_output`, snyk-code is now `ERROR` for the
+  source, `snyk code test` is not started, and the error names the output
+  directory. snyk would upload ASH's own output with the source, and that it
+  honors the output directory's `.gitignore` is read from snyk's sources, not
+  measured. Pass `--output-dir` with a directory outside the scanned tree to run
+  snyk-code on the source; the converted files are still scanned as their own
+  target. The examples on the Snyk plugin page now pass one.
 - **A config file does not interpolate an `ASH_` variable named for a
   credential.** A reference to an `ASH_` name that ends in `_KEY`, `_TOKEN`,
   `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS` or `_HEADER_VALUE`,
@@ -2581,10 +2589,14 @@
   read. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
   `ERROR`. snyk-code, which has no such option and uploads what it reads, refuses
   a directory holding an ignored file, the source directory and ASH's directory of
-  converted files alike: `snyk code test` is not started, snyk-code is `ERROR`,
-  and the error names the first such file and the pattern that matched it, with
-  the number of files, the patterns, and the remedy (narrow `ignore_paths`, or
-  `--exclude-scanners snyk-code`). This applies to the operator's ignore paths:
+  converted files alike, wherever that is: `snyk code test` is not started,
+  snyk-code is `ERROR`, and the error names the first such file and the pattern
+  that matched it, with the number of files, the patterns, and the remedy (narrow
+  `ignore_paths`, or `--exclude-scanners snyk-code`). Each file is matched by the
+  same function that decides whether ASH drops a finding at the location snyk
+  reports for it, its path below the directory snyk tests, so a converted file is
+  refused exactly when ASH would drop its findings, by its path below the
+  directory of converted files. This applies to the operator's ignore paths:
   those in a config an MCP client delivered drop their findings but do not stop
   the upload, and a client that does not want its files sent leaves snyk-code out
   with the `excluded_scanners` argument of `run_ash_workspace_scan`.

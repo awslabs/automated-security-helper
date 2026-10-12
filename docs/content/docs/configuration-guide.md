@@ -466,11 +466,13 @@ there, write ASH's output outside the scanned tree with `--output-dir`.
 When the output directory is inside the source directory, ASH also writes a
 `.gitignore` there holding `*` before any scanner starts, unless something is
 already at that name. A tool that reads the tree itself and honors `.gitignore`
-files then leaves ASH's output out too. snyk-code relies on it, since
-`snyk code test` uploads what it reads; that snyk honors the file is read from its
-sources, not measured. An existing `.gitignore` there is left as it is, nothing is
-written for an output directory outside the tree, and a link at that name stops the
-scan with exit code 3, as one at `ash.log` does.
+files then leaves ASH's output out too, and so does git. An existing `.gitignore`
+there is left as it is, nothing is written for an output directory outside the tree,
+and a link at that name stops the scan with exit code 3, as one at `ash.log` does.
+snyk-code does not rely on the file: `snyk code test` uploads what it reads, and that
+it honors a `.gitignore` is read from snyk's sources, not measured, so snyk-code
+refuses a source directory that holds ASH's output directory. Pass `--output-dir`
+with a directory outside the scanned tree to run snyk-code on the source.
 
 `ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
 example `Ignore files: the scanned repository's .gitignore and .ignore files
@@ -537,8 +539,13 @@ A path a tool's option cannot carry (one with a comma for bandit and trivy, or a
 name that is not unique for semgrep and opengrep) is still read by that tool, and
 ASH drops what it finds there. snyk-code has no option that leaves out a path and
 uploads the files it reads, so it refuses a directory holding a file an ignore path
-matches, whether the source directory or ASH's directory of converted files (a
-converted file is matched by its path below the source directory). It is `ERROR`,
+matches, whether the source directory or ASH's directory of converted files,
+wherever that is. Each file is matched as ASH matches the location snyk reports for
+a finding in it, its path below the directory snyk tests, so a file is refused
+exactly when ASH would drop its findings: a converted file by its path below the
+directory of converted files, such as `archive/src__bundle__zip/vendor/m.js`. An
+ignore path naming a source archive or notebook exactly keeps it from being
+converted at all. It is `ERROR`,
 `snyk code test` is not started, and the error names the first such file and the
 pattern that matched it, gives the number of files and the patterns, and suggests
 narrowing `ignore_paths` or `--exclude-scanners snyk-code`. On Windows the other
