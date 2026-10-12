@@ -716,15 +716,61 @@ def _bind_listen_socket(host: str):
     return listen_socket
 
 
+def _log_where_the_server_listens(config, listen_socket) -> None:
+    """Log uvicorn's "Uvicorn running on" line for a socket ASH bound itself.
+
+    uvicorn logs that line from ``Server.startup`` only for a socket it binds.
+    Measured on uvicorn 0.54.0: given ``sockets``, it logs nothing, on the
+    assumption that ``Config.bind_socket`` already did. A caller that starts
+    ``ash mcp`` on ``--port 0`` learns its port from this line, so it is logged
+    here instead, on uvicorn's logger and in its format, colored message
+    included: the address part bold, as uvicorn's own ``style`` writes it. The
+    host is the one uvicorn was given, as in uvicorn's line, and the port is the
+    one the socket is bound to.
+
+    The line is written out here rather than by calling uvicorn's private
+    ``Server._log_started_message``, which a release inside the supported
+    ``uvicorn>=0.54.0,<1`` range could rename or change. A unit test checks that
+    the two log the same record.
+    """
+    import logging
+
+    host = "0.0.0.0" if config.host is None else config.host
+    address = "%s://[%s]:%d" if ":" in host else "%s://%s:%d"
+    logging.getLogger("uvicorn.error").info(
+        f"Uvicorn running on {address} (Press CTRL+C to quit)",
+        "https" if config.ssl else "http",
+        host,
+        listen_socket.getsockname()[1],
+        extra={
+            "color_message": (
+                f"Uvicorn running on \033[1m{address}\033[0m (Press CTRL+C to quit)"
+            )
+        },
+    )
+
+
 def _run_uvicorn(
     app, host: str, port: int, log_level: AshLogLevel, listen_socket=None
 ) -> None:
     """Run an ASGI app via uvicorn, blocking until shutdown.
 
     ``listen_socket`` is an already bound socket to serve on instead of binding
-    ``host`` and ``port`` (see :func:`_bind_listen_socket`).
+    ``host`` and ``port`` (see :func:`_bind_listen_socket`). Once the server
+    listens on it, the line that names its address is logged as uvicorn logs it
+    for a socket of its own (see :func:`_log_where_the_server_listens`).
     """
+    import socket
+
     import uvicorn
+
+    class _Server(uvicorn.Server):
+        async def startup(self, sockets: Optional[List[socket.socket]] = None) -> None:
+            # uvicorn exits from startup when the app's startup fails, so the
+            # line is logged only for a server that started and listens.
+            await super().startup(sockets=sockets)
+            if sockets:
+                _log_where_the_server_listens(self.config, sockets[0])
 
     config = uvicorn.Config(
         app=app,
@@ -733,7 +779,7 @@ def _run_uvicorn(
         log_level=_ash_log_level_to_uvicorn(log_level),
         access_log=False,
     )
-    server = uvicorn.Server(config)
+    server = _Server(config)
     server.run(sockets=None if listen_socket is None else [listen_socket])
 
 
