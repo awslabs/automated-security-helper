@@ -72,6 +72,6 @@
 # name: test_powershell_wrapper_without_a_runner
   dict({
     'exit_code': 1,
-    'first_error_line': 'Invoke-ASH: Unable to resolve an OCI_RUNNER -- exiting',
+    'first_error_line': 'Exception: ERROR: Unable to resolve an OCI_RUNNER -- exiting',
   })
 # ---

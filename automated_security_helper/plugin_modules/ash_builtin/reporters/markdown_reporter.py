@@ -12,9 +12,17 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
-from automated_security_helper.core.unified_metrics import coverage_shortfalls
+from automated_security_helper.utils.display_text import markdown_code_span
+from automated_security_helper.core.unified_metrics import (
+    coverage_shortfalls,
+    inputs_not_scanned,
+)
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
+)
+from automated_security_helper.utils.converter_refusals import (
+    converter_refusals,
+    markdown_summary_lines,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -119,6 +127,12 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             md_parts.append(f"- **Project**: {metadata['project']}")
             md_parts.append(f"- **Scan executed**: {metadata['scan_time']}")
             md_parts.append(f"- **ASH version**: {metadata['tool_version']}")
+            # See the text reporter: the scan set depends on the ignore files.
+            ignore_file_exclusions = model.metadata.ignore_file_exclusions
+            if ignore_file_exclusions is not None:
+                md_parts.append(
+                    f"- **Ignore files**: {ignore_file_exclusions.summary_text()}"
+                )
             md_parts.append("")
 
         # Add summary section if enabled
@@ -268,6 +282,26 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     )
                 md_parts.append("")
 
+            # Same placement and reasoning: a SKIPPED or PASSED row cannot say which input
+            # went unexamined (npm-audit's lockfiles offline, for one).
+            not_scanned = inputs_not_scanned(model)
+            if not_scanned:
+                md_parts.append("### Inputs not scanned")
+                md_parts.append("")
+                md_parts.append(
+                    "These scanners found these inputs and did not scan them. That "
+                    "no finding is reported for one says nothing about it:"
+                )
+                md_parts.append("")
+                # The path is the scanned repository's: shown in a code span its own
+                # backticks cannot close, with its newlines and other control
+                # characters escaped, so it cannot start a line of its own.
+                for scanner_name, path, reason in not_scanned:
+                    md_parts.append(
+                        f"- **{scanner_name}**: {markdown_code_span(path)}: {reason}"
+                    )
+                md_parts.append("")
+
             # Same placement and the same reasoning as the coverage section above: no status
             # value carries "the database this scanner matched against was out of date", the
             # summary is what gets pasted into a pull request, and compact mode must not hide
@@ -288,6 +322,24 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                         f"- **{record.name}** ({record.scanner}, {verdict}): "
                         f"{record.message()}"
                     )
+                md_parts.append("")
+
+            # Same placement and reasoning again: a converter input that was not read
+            # never reaches a scanner, so no scanner row can say it went unscanned.
+            # An archive refused for an extraction limit is marked, because it is
+            # what failed the completeness gate; the rest are reported only.
+            refusals = converter_refusals(model)
+            if refusals:
+                md_parts.append("### Converter inputs not scanned")
+                md_parts.append("")
+                md_parts.append(
+                    "These inputs were not read by their converter, so their contents "
+                    "were not scanned:"
+                )
+                md_parts.append("")
+                # Each in a code span: a name such as @someone or a URL would
+                # otherwise become a mention or a link where the summary is posted.
+                md_parts.extend(markdown_summary_lines(refusals))
                 md_parts.append("")
 
             # Add top hotspots (files with most findings)

@@ -10,9 +10,13 @@ A finding is a single security issue detected by a scanner. Each finding has a r
 
 A scanner is a plugin that analyzes source code, configuration files, or container images for a specific class of vulnerabilities. Each scanner wraps an external tool (like Bandit, Checkov, or Grype), invokes it against the target, and translates its output into SARIF findings. ASH ships with built-in scanners and supports community-contributed ones.
 
+ASH runs a scanner's tool from outside the directory it is scanning. A copy inside it, such as one in the project's `.venv/bin` or `node_modules/.bin` that `uv run ash` or `npm run` put first on `PATH`, is skipped; with no other copy the scanner is MISSING, and its `missing_reason` names the in-tree path. `--allow-in-tree-tools` or `ASH_ALLOW_IN_TREE_TOOLS=1` allows in-tree tools for one run, the scanner sandbox's own programs included. A configuration file cannot turn this on, and `ash mcp` never does. See [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
+
 ## Converter
 
 A converter transforms input files into a format that scanners can process. For example, a converter might extract files from a ZIP archive, convert Jupyter notebooks to Python scripts, or render Helm charts into Kubernetes manifests. Converters run before scanners in the pipeline.
+
+The Jupyter converter runs nbconvert outside the scanned tree on a copy named `notebook.ipynb`, so a notebook whose name contains glob or format characters, such as `[x].ipynb`, converts, and the result is named after the original. A file a converter could not convert, such as a notebook nbconvert failed on or a `.zip`, `.tar` or `.gz` file that is not an archive Python can read, is recorded in `converter_results.<name>.failed_inputs` and makes the scan incomplete, which exits 1 by default as a scanner that did not run does. `ash merge` combines every shard's failed inputs, and workspace mode reports them per project. A `.gz` that is one compressed file rather than a tarball, such as `data.json.gz`, is decompressed and scanned, and is a failed input only when it cannot be decompressed. See [Inputs a converter could not convert](plugins/builtin/converters.md#inputs-a-converter-could-not-convert).
 
 ## Reporter
 
@@ -42,6 +46,18 @@ ASH supports three execution modes:
 - **Local** — runs scanners directly on the host using UV-managed tool installations
 - **Container** — runs inside a Docker container with all tools pre-installed
 - **Pre-commit** — runs as a Git pre-commit hook, scanning only staged files
+
+## Output directory
+
+A scan writes to an output directory: `.ash/ash_output` in the directory ASH runs from unless `--output-dir` names another, which is inside the scanned directory when you scan the one you are in. Before a scan ASH clears `analysis`, `reports`, `scanners` and `converted` there, then writes its logs, results and reports, and a sandboxed scan mounts the directory. So ASH refuses, whatever the sandbox mode and before writing anything, an output directory when any of these is a symlink or a directory junction:
+
+- the output directory itself;
+- a directory inside the scanned tree on the way to it, however either path is spelled (an in-tree output directory whose real path is outside the tree is refused too);
+- `analysis`, `reports`, `scanners` or `converted` under it;
+- a file ASH writes there by a fixed name: `ash.log`, `ash.log.jsonl`, `ash_aggregated_results.json`, `ash-ignore-report.txt`, `ash-scan-set-files-list.txt`;
+- in workspace mode, `projects/`, each `projects/<key>` and `.workspace-spool`.
+
+The error names the link; pass `--output-dir` with a directory that is not a link. This applies to local, container, nix, workspace and MCP scans, and `ash report` and `ash merge` refuse a linked output or `reports` directory the same way. A link above an output directory outside the scanned tree, such as `/tmp` on macOS, is your own spelling and is accepted. See [Troubleshooting](troubleshooting.md#the-scan-stops-because-something-in-the-output-directory-is-a-symlink).
 
 ## SARIF
 

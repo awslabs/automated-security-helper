@@ -37,7 +37,7 @@ import subprocess  # nosec B404 - this script drives `ash scan`
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
 SNAPSHOT_REPO = REPO / "tests" / "test_data" / "snapshot_fixture" / "repo"
@@ -86,7 +86,12 @@ def build_fixture(root: Path) -> Path:
 
 
 def run_scan(
-    ash: List[str], source: Path, output: Path, mode: str, offline: bool
+    ash: List[str],
+    source: Path,
+    output: Path,
+    mode: str,
+    offline: bool,
+    config: Optional[Path] = None,
 ) -> int:
     command = [
         *ash,
@@ -104,6 +109,8 @@ def run_scan(
     ]
     if offline:
         command.append("--offline")
+    if config is not None:
+        command += ["--config", str(config)]
     print(f"$ {' '.join(command)}", flush=True)
     log = output.with_suffix(".log")
     with open(log, "w", encoding="utf-8") as handle:
@@ -217,6 +224,19 @@ def main() -> int:
         default=os.environ.get("ASH_SANDBOX_PARITY_REQUIRE", ""),
         help="comma-separated scanners that must have run (not MISSING) unsandboxed",
     )
+    parser.add_argument(
+        "--require-offline",
+        default="",
+        help="comma-separated scanners that must also have run (not MISSING) "
+        "unsandboxed in the offline pair, for a scanner whose offline run is the "
+        "case under test",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="an ASH config file for every scan, to enable plugin scanners",
+    )
     parser.add_argument("--min-findings", type=int, default=10)
     parser.add_argument(
         "--ash", default=None, help="ash command, default: this interpreter's"
@@ -232,8 +252,8 @@ def main() -> int:
     for label, offline in pairs:
         off = work / f"out-{label}-off"
         boxed = work / f"out-{label}-{args.sandbox}"
-        run_scan(ash, source, off, "off", offline)
-        run_scan(ash, source, boxed, args.sandbox, offline)
+        run_scan(ash, source, off, "off", offline, args.config)
+        run_scan(ash, source, boxed, args.sandbox, offline, args.config)
         pair_rows, pair_problems = compare(label, off, boxed)
         rows += pair_rows
         problems += pair_problems
@@ -260,12 +280,17 @@ def main() -> int:
                 f"[{label}] only {total} findings unsandboxed (need {args.min_findings}): "
                 "the fixture is not exercising the scanners"
             )
-        # Checked on the online pair when there is one: offline, semgrep and opengrep
-        # need a seeded rule cache and npm-audit is skipped by design, so a scanner
-        # can legitimately be MISSING in both offline runs. Parity still holds there.
+        # --require is checked on the online pair when there is one: offline, semgrep
+        # and opengrep need a seeded rule cache and npm-audit is skipped by design, so
+        # a scanner can legitimately be MISSING in both offline runs. Parity still
+        # holds there. --require-offline names the scanners whose offline run is
+        # itself under test, and whose cache the job seeds first.
+        required_here = args.require
         if args.online and label == "offline":
-            continue
-        for required in filter(None, (s.strip() for s in args.require.split(","))):
+            required_here = args.require_offline
+        elif label == "offline":
+            required_here = f"{args.require},{args.require_offline}"
+        for required in filter(None, (s.strip() for s in required_here.split(","))):
             if statuses.get(required) in (None, "MISSING", "ERROR", "SKIPPED"):
                 problems.append(
                     f"[{label}] required scanner {required} did not run unsandboxed "

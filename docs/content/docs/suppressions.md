@@ -170,15 +170,49 @@ method of `Deployer`, or at module level, is still reported.
 
 Symbol suppressions parse source files with
 [tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
-extra:
+extra. When the extra is missing, the scan warning and `ash config lint` print a
+command that installs the extra's packages, read from the metadata of the ASH you
+run, so it fits that ASH whatever its version or source. It runs the `uv` that ASH
+depends on through the Python interpreter that runs ASH, and installs into that
+interpreter's environment, so it reaches a virtualenv, a `uv tool install` or
+`pipx install` environment and a checkout's `uv sync` environment alike. The hint
+prints the interpreter's full path where this shows `<python>`:
 
 ```bash
-pip install "automated-security-helper[symbols]"
-# or
-uv tool install "automated-security-helper[symbols]"
+<python> -m uv pip install --python <python> 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
 ```
 
-The ASH container image includes it. Without it, an entry that sets `symbol`
+A plain `pip install` of those packages does not do the same: environments made by
+uv have no pip, so `pip` runs whichever pip comes next on `PATH`, usually another
+Python's.
+
+You can also reinstall ASH with `[symbols]` added to the source you installed it
+from. For uvx that is the only way that lasts: uvx rebuilds its cached environment
+from its own arguments, so an extra installed into it is dropped.
+
+The `symbols` extra is available from the next release, the first after v3.7.1.
+v3.7.1 and earlier define only `cdk`, and asking one of them for `[symbols]`
+installs it without the extra, with only a warning. Until that release, install
+from the `main` branch:
+
+```bash
+# ASH installed with uv tool install
+uv tool install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+# ASH installed with pipx install
+pipx install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+# the uvx alias from the installation guide
+alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main' ash"
+```
+
+`main` moves, so these commands also replace the ASH you run with the newest code.
+To stay on one version, or to use a checkout, put that source after the first `@`
+instead (`automated-security-helper[symbols] @ git+...@<commit from main>`, or
+`@ file:///path/to/checkout`).
+Keep the `@` and the source. ASH is not published on PyPI, and the PyPI project
+with ASH's name is unrelated and has no `symbols` extra, so asking for the extra by
+the bare name installs that project instead.
+
+The ASH container image includes the extra. Without it, an entry that sets `symbol`
 matches nothing: the findings it names stay visible, the scan logs a warning
 naming the missing extra, the entry shows up in the unused-suppressions report,
 and `ash config lint` warns about it.

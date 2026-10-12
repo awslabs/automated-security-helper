@@ -90,7 +90,7 @@
             <p><strong>ASH version:</strong> <ASH_VERSION></p>
         </div>
 
-        <div class="section" id="workspace-projects"><h2>Projects</h2><p>Each project is scanned independently and judged against its own threshold, so a workspace fails when any project does.</p><table><thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Actionable</th><th>Threshold</th><th>Result</th></tr></thead><tbody><tr class="failed"><td>snapshot-api (api)</td><td>COMPLETED</td><td>1</td><td>1</td><td>MEDIUM</td><td>FAILED</td></tr><tr class="failed"><td>snapshot-web (web)</td><td>COMPLETED</td><td>2</td><td>1</td><td>HIGH</td><td>FAILED</td></tr></tbody></table></div>
+        <div class="section" id="workspace-projects"><h2>Projects</h2><p>Each project is scanned independently and judged against its own threshold, so a workspace fails when any project does.</p><table><thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Actionable</th><th>Threshold</th><th>Result</th></tr></thead><tbody><tr class="failed"><td>snapshot-api (api)</td><td>COMPLETED</td><td>1</td><td>1</td><td>MEDIUM</td><td>FAILED (incomplete)</td></tr><tr class="failed"><td>snapshot-web (web)</td><td>COMPLETED</td><td>2</td><td>1</td><td>HIGH</td><td>FAILED</td></tr></tbody></table></div>
 
         <h2>Scanner Results</h2>
         <div class="help-text">
@@ -154,7 +154,7 @@
                 <td><1ms</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
-                <td>MEDIUM (global)</td>
+                <td>MEDIUM (unavailable)</td>
             </tr>
 
             <tr>
@@ -168,7 +168,7 @@
                 <td><1ms</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
-                <td>MEDIUM (global)</td>
+                <td>MEDIUM (unavailable)</td>
             </tr>
 
             <tr>
@@ -182,7 +182,7 @@
                 <td><1ms</td>
                 <td class="status-passed">0</td>
                 <td class="status-missing">MISSING</td>
-                <td>MEDIUM (global)</td>
+                <td>MEDIUM (unavailable)</td>
             </tr>
 
             <tr>
@@ -196,7 +196,7 @@
                 <td><1ms</td>
                 <td class="status-failed">1</td>
                 <td class="status-failed">FAILED</td>
-                <td>MEDIUM (global)</td>
+                <td>MEDIUM (unavailable)</td>
             </tr>
             </table>
 
@@ -299,6 +299,14 @@
 
             <div class="metadata-item">
                 <strong>plugin_load_errors:</strong> {}
+            </div>
+
+            <div class="metadata-item">
+                <strong>ignore_file_exclusions:</strong> None
+            </div>
+
+            <div class="metadata-item">
+                <strong>inputs_not_scanned:</strong> None
             </div>
             </div>
     </div>

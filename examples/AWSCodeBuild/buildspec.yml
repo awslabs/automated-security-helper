@@ -19,7 +19,8 @@ phases:
       - pip install git+${ASH_REPO_CLONE_URL}@${ASH_REPO_BRANCH}
   build:
     commands:
-      - ash --mode container --no-progress
+      # CodeBuild runs as root, which builds the ci stage (the image that runs as root).
+      - ash --mode container --build-target ci --no-progress
 
   post_build:
     commands:

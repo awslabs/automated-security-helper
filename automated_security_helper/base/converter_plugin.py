@@ -19,11 +19,16 @@ from automated_security_helper.base.plugin_config import (
     config_validated_by_declared_model,
 )
 from automated_security_helper.core.exceptions import ScannerError
-from automated_security_helper.models.asharp_model import RefusedInputInfo
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.models.asharp_model import (
+    FailedInputInfo,
+    RefusedInputInfo,
+)
+from automated_security_helper.utils.converter_refusals import inert_text
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
+    relative_display,
 )
 
 
@@ -47,6 +52,9 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     # into the converter's results row, which is what keeps a refused input visible in
     # the scan result rather than only in the log.
     refused_inputs: List[RefusedInputInfo] = Field(default_factory=list)
+    # Inputs convert() set out to convert and could not. Copied into the row the same
+    # way; the completeness gate counts them as lost coverage.
+    failed_inputs: List[FailedInputInfo] = Field(default_factory=list)
 
     @field_validator("config", mode="wrap")
     @classmethod
@@ -115,7 +123,11 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         return open_in_scanned_tree(path, self.context.source_dir)
 
     def record_refused_input(
-        self, refusal: TreeInputRefused, member: str | None = None
+        self,
+        refusal: TreeInputRefused,
+        member: str | None = None,
+        limit: str | None = None,
+        unlisted_members: int | None = None,
     ) -> None:
         """Warn once about a refused input and keep it for the results row.
 
@@ -123,19 +135,63 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             refusal: What :meth:`open_source_file` raised, or an equivalent built for
                 an archive member.
             member: The archive member's name, when the refusal is of a member.
+            limit: The name of the extraction-limit option the input exceeded, when
+                that is why it was refused. Such a refusal leaves the scan
+                incomplete; see ``RefusedInputInfo.limit``.
+            unlisted_members: The record stands for this many more members of the
+                archive, refused for the same reason and not listed one by one.
         """
-        if member is None:
+        # The names come from the scanned tree, so they are logged as data, with
+        # control characters escaped (utils/converter_refusals.inert_text).
+        path = inert_text(refusal.path)
+        reason = inert_text(refusal.reason)
+        if unlisted_members is not None:
             ASH_LOGGER.warning(
-                f"Skipped converter input '{refusal.path}': {refusal.reason}"
+                f"Skipped {unlisted_members} more members of archive "
+                f"'{path}', not listed one by one: {reason}",
+                extra=NO_MARKUP,
+            )
+        elif member is None:
+            ASH_LOGGER.warning(
+                f"Skipped converter input '{path}': {reason}",
+                extra=NO_MARKUP,
             )
         else:
             ASH_LOGGER.warning(
-                f"Skipped member '{member}' of archive '{refusal.path}': "
-                f"{refusal.reason}"
+                f"Skipped member '{inert_text(member)}' of archive '{path}': {reason}",
+                extra=NO_MARKUP,
             )
         self.refused_inputs.append(
-            RefusedInputInfo(path=refusal.path, member=member, reason=refusal.reason)
+            RefusedInputInfo(
+                path=refusal.path,
+                member=member,
+                reason=refusal.reason,
+                limit=limit,
+                unlisted_members=unlisted_members,
+            )
         )
+
+    def record_failed_input(self, path: Path | str, reason: str) -> None:
+        """Log an input that could not be converted and keep it for the results row.
+
+        Args:
+            path: The input, as the scan set gave it.
+            reason: Why conversion failed, without the input's content.
+        """
+        # Recording a failure must not itself fail: with no context, the path as
+        # given is the best name there is.
+        display = (
+            relative_display(path, self.context.source_dir)
+            if self.context is not None
+            else Path(path).as_posix()
+        )
+        # The path comes from the scanned tree: logged as data, control characters
+        # escaped, as record_refused_input does.
+        ASH_LOGGER.error(
+            f"Could not convert '{inert_text(display)}': {inert_text(reason)}",
+            extra=NO_MARKUP,
+        )
+        self.failed_inputs.append(FailedInputInfo(path=display, reason=reason))
 
     def candidate_input_count(self) -> int | None:
         """How many files this converter WOULD convert, or None if it cannot say.

@@ -649,10 +649,14 @@ runs:
         python3 "${{ github.action_path }}/count_scanner_errors.py" \
           .ash/ash_output/ash_aggregated_results.json
 
-    # PowerShell scan
+    # PowerShell scan. `pwsh -File {0}`, not `pwsh`: the built-in shell runs the
+    # script as `pwsh -command ". '<script>'"`, which reports every non-zero exit as
+    # 1, so a refusal's 3 would arrive as 1. The custom shell also drops the
+    # `$ErrorActionPreference = 'stop'` the built-in one puts first and the
+    # `exit $LASTEXITCODE` it puts last, so the script sets both itself.
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'
-      shell: pwsh
+      shell: pwsh -File {0}
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
@@ -664,15 +668,28 @@ runs:
         ASH_TEST_PLATFORM: ${{ steps.platform.outputs.platform }}
         ASH_TEST_CONFIG_FILE: ${{ inputs.config-file }}
       run: |
+        $ErrorActionPreference = 'Stop'
         Write-Host "Testing ASH using PowerShell on $env:ASH_TEST_OS ($env:ASH_TEST_PLATFORM) with config: $env:ASH_TEST_CONFIG_FILE"
         . ./utils/ash_helpers.ps1
         Get-Help Invoke-ASH -Full
         $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }
-        if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_community_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
-        } else {
-          Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
-        }
+        # -Config, the name Invoke-ASH declares. -ConfigFile is not one of its
+        # parameters, so PowerShell passed it and the path through $AshArgs and the
+        # scan ran without the community config this leg is named for.
+        # A refusal throws with $LASTEXITCODE set (3, or 1 without a runner), and so
+        # does any other error Invoke-ASH raises, with a code that is not 0. Uncaught,
+        # the step would end with exit 1 whatever the code; the catch writes the error
+        # record and exits with the code. The `else { 1 }` covers an error raised
+        # before Invoke-ASH sets one, such as a parameter it cannot bind.
+        try {
+          if ("$env:ASH_TEST_CONFIG_FILE" -eq "community") {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner -Config ".ash/.ash_community_plugins.yaml" --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml --config-overrides scanners.ferret-scan.options.use_default_config=false
+          } else {
+            Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner --config-overrides scanners.bandit.options.config_file=.ash/bandit.yaml --config-overrides scanners.grype.options.config_file=.ash/.grype.yaml
+          }
+        } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
+        # The scan's own exit code, as the built-in shell's appended line passed it on.
+        if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }
 
     # This step used to read `$Results.scanners.<name>.result`. Neither the key nor
     # the field exists: AshAggregatedResults declares `scanner_results`, keyed by
@@ -746,12 +763,17 @@ runs:
         cache-hit: ${{ steps.tool-cache.outputs.cache-hit }}
 
     # Common post-scan validation
+    #
+    # reports/ and the aggregated results only: scanners/ and converted/ hold each
+    # tool's raw output, not masked, and the steps below read nothing else either.
     - name: Collect ASH output artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: success() || failure()
       with:
         name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}${{ inputs.oci-runner && format('-{0}', inputs.oci-runner) || '' }}${{ inputs.offline == 'true' && '-offline' || '' }}
-        path: .ash/ash_output
+        path: |
+          .ash/ash_output/reports
+          .ash/ash_output/ash_aggregated_results.json
         retention-days: 7
         if-no-files-found: warn
 
@@ -854,7 +876,8 @@ runs:
 
     # Snapshots of what ASH prints when a real runtime runs its image: `ash --version` and
     # `ash build-image --help` inside it, `ash --mode container` and both wrappers scanning
-    # the snapshot fixture, and the exit status each one ends with. The unit-test legs have
+    # the snapshot fixture, and the exit status each one ends with; and, read from inside
+    # the same image, who owns and can write its directories. The unit-test legs have
     # no runtime, so tests/conftest.py deselects these there; the image the scan above just
     # built is what makes them runnable here, which is why this is a step and not a job.
     #
@@ -875,4 +898,5 @@ runs:
         uv run --extra cdk pytest \
           tests/snapshot/container/runtime/test_snapshot_container_runtime.py \
           tests/snapshot/container/runtime/test_snapshot_container_bash_wrapper.py \
+          tests/snapshot/container/runtime/test_container_image_permissions.py \
           --run-container-snapshots --no-cov -n 0

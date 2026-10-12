@@ -660,6 +660,46 @@ class TestNixModeStaleResults:
         assert exit_info.value.code != 0
         assert not stale.exists()
 
+    @pytest.mark.parametrize(
+        ("code", "meaning"),
+        [(3, "invalid config"), (4, "workspace definition or policy error")],
+    )
+    def test_an_inner_refusal_without_results_keeps_its_exit_code(
+        self, tmp_path, caplog, code, meaning
+    ):
+        """3 and 4 say nothing was scanned and why; exit 1 would lose which."""
+        opts = _opts(tmp_path)
+        logger = logging.getLogger("test_nix_refusal_code")
+
+        with (
+            caplog.at_level(logging.ERROR, logger="test_nix_refusal_code"),
+            patch(
+                "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
+                return_value=create_completed_process(args=[], returncode=code),
+            ),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            _run_nix_mode(opts, logger)
+
+        assert exit_info.value.code == code
+        assert any(meaning in record.message for record in caplog.records), [
+            r.message for r in caplog.records
+        ]
+
+    def test_control_another_failure_without_results_exits_1(self, tmp_path):
+        opts = _opts(tmp_path)
+
+        with (
+            patch(
+                "automated_security_helper.interactions.run_ash_scan.run_ash_nix",
+                return_value=create_completed_process(args=[], returncode=42),
+            ),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            _run_nix_mode(opts, MagicMock())
+
+        assert exit_info.value.code == 1
+
     def test_the_non_zero_shell_status_is_reported_above_debug(self, tmp_path, caplog):
         """The console handler and both file handlers sit at INFO, so a debug-level
         report of "the shell exited non-zero" is emitted nowhere -- not to the terminal

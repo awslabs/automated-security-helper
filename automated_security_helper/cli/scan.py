@@ -31,6 +31,7 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_scan import (
+    resolve_workspace_execution_config,
     run_ash_scan,
 )
 from automated_security_helper.core.enums import ExportFormat
@@ -41,6 +42,10 @@ from automated_security_helper.utils.content_databases import (
     go_duration,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.get_scan_set import (
+    InvalidBaseRefError,
+    validate_base_ref,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
 from automated_security_helper.workspace.workspace_file import (
@@ -191,11 +196,22 @@ def _handle_workspace_mode(
             # reflects an override. The ceiling applies to that, and --dry-run
             # prints the value the scan will actually enforce.
             config_overrides=config_overrides,
-            # The same reason, for the operator's config file.
+            # The same reason, for the operator's config file. Resolved here as
+            # the scan resolves it, so a missing or broken file is refused at
+            # planning, --dry-run included, and the plan's thresholds are the
+            # ones the scan applies.
             default_config=Path(config) if config else None,
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
+    except ASHConfigValidationError as exc:
+        _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
+
+    # The workspace root's own config sets how the run executes (parallelism,
+    # timeouts), and the run refuses one that cannot be loaded with exit 3. Read
+    # here too, so --dry-run does not report a plan the run would refuse.
+    try:
+        resolve_workspace_execution_config(Path(plan.workspace_root), config)
     except ASHConfigValidationError as exc:
         _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
 
@@ -438,6 +454,23 @@ def run_ash_scan_cli_command(
             help="Ignore all suppression rules and report all findings regardless of suppression status."
         ),
     ] = False,
+    honor_ignore_files: Annotated[
+        bool | None,
+        typer.Option(
+            help=(
+                "Whether the .gitignore and .ignore files in the scanned tree decide "
+                "which files are left out of ASH's scan set (the files "
+                "detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters "
+                "read). --no-honor-ignore-files scans the files they match too; "
+                "ASH's own exclusions such as .git still apply. Defaults to unset, "
+                "which prefers the operator's `honor_ignore_files` config value and "
+                "then honoring them. Either form takes precedence over the config. "
+                "A config file inside the scanned tree cannot set it. The results "
+                "and summaries record whether the ignore files were honored and how "
+                "many files they excluded."
+            )
+        ),
+    ] = None,
     min_severity: Annotated[
         str,
         typer.Option(
@@ -467,6 +500,13 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    allow_in_tree_tools: Annotated[
+        bool,
+        typer.Option(
+            "--allow-in-tree-tools",
+            help="Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does.",
+        ),
+    ] = False,
     shard_index: Annotated[
         Optional[int],
         typer.Option(
@@ -483,6 +523,14 @@ def run_ash_scan_cli_command(
             envvar="ASH_SHARD_COUNT",
         ),
     ] = None,
+    config_from_scanned_repository: Annotated[
+        bool,
+        typer.Option(
+            "--config-from-scanned-repository",
+            hidden=True,
+            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it.",
+        ),
+    ] = False,
     ### WORKSPACE-RELATED OPTIONS
     workspace: Annotated[
         str | None,
@@ -553,7 +601,7 @@ def run_ash_scan_cli_command(
         BuildTarget | None,
         typer.Option(
             "--build-target",
-            help="Specify the target stage of the ASH image to build",
+            help="The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it; --custom-containerfile builds on 'ci'.",
             case_sensitive=False,
         ),
     ] = None,
@@ -618,6 +666,28 @@ def run_ash_scan_cli_command(
 
     _validate_shard_options(shard_index, shard_count, workspace)
 
+    # Through the environment rather than a parameter, so that every lookup in this
+    # process and in the processes it starts (the cdk-nag worker, a container, a
+    # nix shell) sees the same answer; see utils/subprocess_utils.in_tree_tools_allowed.
+    if allow_in_tree_tools:
+        from automated_security_helper.utils.process_env import (
+            apply_environ_overrides,
+        )
+        from automated_security_helper.utils.subprocess_utils import (
+            ALLOW_IN_TREE_TOOLS_ENV,
+        )
+
+        apply_environ_overrides({ALLOW_IN_TREE_TOOLS_ENV: "1"})
+
+    # With --changed-files-only the base ref goes to `git diff`, so it is refused
+    # here, before any git process starts, when git could read it as anything but
+    # a revision. Without the flag no diff runs and the value is not used.
+    if changed_files_only:
+        try:
+            validate_base_ref(base_ref)
+        except InvalidBaseRefError as exc:
+            _fail_usage(f"{exc} The value comes from --base-ref or ASH_BASE_REF.")
+
     # Workspace mode is handled before any cwd-based default is applied, because
     # --workspace and --source-dir are mutually exclusive and defaulting
     # source_dir first would make every invocation look like it had both.
@@ -670,6 +740,14 @@ def run_ash_scan_cli_command(
     # and workspace runs unchanged and wins over the config file's sandbox.mode.
     if sandbox is not None:
         config_overrides.append(f"sandbox.mode={SandboxMode(sandbox).value}")
+
+    # The same route again. As an override it is operator input, which a config
+    # file inside the scanned tree cannot outvote (resolve_config's
+    # confine_honor_ignore_files), and the container runs it unchanged.
+    if honor_ignore_files is not None:
+        config_overrides.append(
+            f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
+        )
 
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
@@ -784,6 +862,22 @@ def run_ash_scan_cli_command(
                         f"'{fmt}' is not a valid format. Valid formats are: {', '.join(valid_formats)}"
                     )
 
+    # The hidden flag is how container mode tells the scan inside the container that its
+    # config was written by the repository being scanned. That scan is a
+    # single-directory local scan; any other scan cannot apply the mark, so it is a
+    # usage error with exit 3 rather than run_ash_scan's ValueError.
+    if config_from_scanned_repository and (
+        (mode or RunMode.local) != RunMode.local or workspace_plan is not None
+    ):
+        typer.secho(
+            "--config-from-scanned-repository is passed by container mode to the scan "
+            "inside the container and applies only to a single-directory scan in "
+            "local mode. Leave it out: container mode decides it on the host.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(3)
+
     # Call run_ash_scan with all parameters
     run_ash_scan(
         source_dir=source_dir,
@@ -836,4 +930,6 @@ def run_ash_scan_cli_command(
         custom_build_arg=custom_build_arg,
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
+        untrusted_config=config_from_scanned_repository,
+        workspace_config_as_named=workspace_config,
     )

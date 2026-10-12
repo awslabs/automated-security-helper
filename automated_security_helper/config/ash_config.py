@@ -21,6 +21,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+    EXTRACTION_LIMIT_OPTIONS,
     ArchiveConverterConfig,
 )
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
@@ -206,6 +207,52 @@ def resolve_env_references(value: str) -> Optional[str]:
     return value
 
 
+class _NoAliasSafeLoader(yaml.SafeLoader):
+    """``yaml.SafeLoader`` that refuses YAML aliases; see ``load_config_yaml``."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.events.AliasEvent):
+            event = self.peek_event()
+            raise yaml.composer.ComposerError(
+                None,
+                None,
+                f"found the alias *{event.anchor}; ASH configuration does not "
+                "accept YAML aliases, so write the value out where it is used",
+                event.start_mark,
+            )
+        return super().compose_node(parent, index)
+
+
+def _load_single_document(loader_class: type, stream: Any) -> Any:
+    # What yaml.load does, with the loader class given: one document, then the
+    # loader's resources released.
+    loader = loader_class(stream)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
+def load_config_yaml(stream: Any) -> Any:
+    """Parse YAML that configures ASH: safe tags only, and no aliases.
+
+    Every reader of an ASH config file, workspace policy, MCP profile or
+    client-supplied config fragment parses with this, or with
+    ``load_yaml_config``, which adds ``!ENV`` on top of it.
+
+    Why no aliases: an alias is a reference to an anchored node, and a few
+    hundred bytes of nested aliases stand for gigabytes once the parsed config
+    is walked or serialized. A scan writes its config into its results, and MCP
+    ``get_config`` returns it, so such a file exhausted memory in the process
+    reading it; an MCP server resolves a client's config in the process every
+    session shares. Parsing does not expand aliases, so a read-size bound cannot
+    stop this. None of the YAML files in ASH's repository uses an alias, and a
+    config that repeats a value can write it out where it is used. Anchors with
+    no alias referring to them are harmless and still parse.
+    """
+    return _load_single_document(_NoAliasSafeLoader, stream)
+
+
 class EnvReferenceNotResolved(Exception):
     """``load_yaml_config(..., env="refuse")`` met an ``!ENV`` value.
 
@@ -227,10 +274,12 @@ def load_yaml_config(
     implicit resolver, raises ``EnvReferenceNotResolved`` before anything is read
     from the environment. With ``env="keep"``, each one is the reference as
     written, which is what a raw view of the file shows.
+
+    Aliases are refused, as in ``load_config_yaml``.
     """
 
     # Use a local subclass to avoid mutating the global SafeLoader
-    class _AshConfigLoader(yaml.SafeLoader):
+    class _AshConfigLoader(_NoAliasSafeLoader):
         pass
 
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
@@ -243,7 +292,9 @@ def load_yaml_config(
         return resolve_env_references(loader.construct_scalar(node))
 
     _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
-    return yaml.load(stream, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by resolve_env_references above
+    # !ENV is bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by
+    # resolve_env_references above.
+    return _load_single_document(_AshConfigLoader, stream)
 
 
 class _ConfigDumper(yaml.SafeDumper):
@@ -559,6 +610,21 @@ class MCPResourceManagementConfig(BaseModel):
         ),
     ] = 3
 
+    max_concurrent_scans_per_session: Annotated[
+        int,
+        Field(
+            description=(
+                "Maximum number of scans one session of a network transport "
+                "(streamable-http, sse) may run at once; 0 for no per-session "
+                "limit. A run_ash_workspace_scan counts once. Read from the "
+                "operator's config (ASH_CONFIG) only, never from a scanned or "
+                "delivered one. stdio's single session is not limited."
+            ),
+            ge=0,
+            le=100,
+        ),
+    ] = 2
+
     max_concurrent_tasks: Annotated[
         int,
         Field(
@@ -697,6 +763,56 @@ class MCPResourceManagementConfig(BaseModel):
     ] = False
 
 
+#: The archive converter's extraction limits as runtime-override pointers. They bound
+#: what extracting an archive in the scanned tree may write, so no client may raise
+#: them; they are part of ALWAYS_DENIED_PATHS. A write at an ancestor
+#: (``/converters/archive``, ``/converters``) is refused too, as for any denied_paths
+#: entry.
+ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
+    f"/converters/archive/options/{name}" for name in EXTRACTION_LIMIT_OPTIONS
+)
+
+#: Runtime-override denials no profile can remove: RuntimeOverridesConfig adds any of
+#: them its denied_paths leaves out. A client override that gets past the gate is
+#: replayed as the operator's own setting (resolve_config, the session's profile), so
+#: these are the settings that trust depends on. The scanner sandbox. Plugin modules,
+#: imported into ASH's own process. The detect-secrets settings that turn on secret
+#: verification (each candidate secret is sent to its issuer) or import a plugin or
+#: filter from a file, and the baseline that can carry both. The archive extraction
+#: limits. And every plugin that sends data off the host, each a whole section, so a
+#: client can neither turn one on or off nor change what it sends or where (``**``
+#: also matches the section itself): the reporters that send the results, and the
+#: scanners that send the source (snyk-code), dependency lists (npm-audit,
+#: trivy-repo), candidate secrets (detect-secrets) or usage metrics (semgrep,
+#: opengrep). tests/unit/config/test_off_host_plugins_are_operator_only.py lists what
+#: each one sends and classifies every plugin.
+#:
+#: A floor rather than the default alone: denied_paths was replaced whole by a
+#: profile's own list, so adding one entry dropped every shipped one.
+ALWAYS_DENIED_PATHS = (
+    "/sandbox",
+    "/sandbox/**",
+    "/ash_plugin_modules",
+    "/ash_plugin_modules/**",
+    "/scanners/detect-secrets/options/scan_settings/filters_used",
+    "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+    "/scanners/detect-secrets/options/scan_settings/plugins_used",
+    "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+    "/scanners/detect-secrets/options/baseline_file",
+    *ARCHIVE_LIMIT_RUNTIME_PATHS,
+    "/reporters/s3/**",
+    "/reporters/aws-security-hub/**",
+    "/reporters/cloudwatch-logs/**",
+    "/reporters/bedrock-summary-reporter/**",
+    "/scanners/detect-secrets/**",
+    "/scanners/npm-audit/**",
+    "/scanners/opengrep/**",
+    "/scanners/semgrep/**",
+    "/scanners/snyk-code/**",
+    "/scanners/trivy-repo/**",
+)
+
+
 class RuntimeOverridesConfig(BaseModel):
     """Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
 
@@ -737,7 +853,14 @@ class RuntimeOverridesConfig(BaseModel):
                 "is added to the current defaults, unless replace_default_denied_paths "
                 "is true. When it is added, a list that holds some default entries and "
                 "leaves others out still gets them, and a warning names the ones it "
-                "leaves out."
+                "leaves out. Whatever the list, and with replace_default_denied_paths "
+                "too, the entries ASH always denies (the scanner sandbox, "
+                "ash_plugin_modules, the detect-secrets verification, plugin and "
+                "baseline settings, the archive converter's extraction limits, and the "
+                "sections of the plugins that send data off the host: the s3, "
+                "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
+                "reporters and the detect-secrets, npm-audit, opengrep, semgrep, "
+                "snyk-code and trivy-repo scanners) are added to it."
             )
         ),
     ] = [
@@ -750,6 +873,9 @@ class RuntimeOverridesConfig(BaseModel):
         # out-of-date vulnerability database pass.
         "/content_db_staleness",
         "/content_db_staleness_overrides",
+        # Turning the scanned repository's ignore files off or on changes which
+        # files are scanned; it is the operator's choice.
+        "/honor_ignore_files",
         # The scanner sandbox: a client must not be able to switch it off, hand a
         # scanner a network, or widen what it can read.
         "/sandbox",
@@ -757,6 +883,15 @@ class RuntimeOverridesConfig(BaseModel):
         # Plugin modules are imported into ASH's own process, unsandboxed.
         "/ash_plugin_modules",
         "/ash_plugin_modules/**",
+        # detect-secrets settings the trust checks count as the operator's: the
+        # verification filter sends each candidate secret to the service that issued
+        # it, plugins and filters named by file are imported, and a baseline file can
+        # carry both.
+        "/scanners/detect-secrets/options/scan_settings/filters_used",
+        "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+        "/scanners/detect-secrets/options/scan_settings/plugins_used",
+        "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+        "/scanners/detect-secrets/options/baseline_file",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -837,6 +972,9 @@ class RuntimeOverridesConfig(BaseModel):
         # operator's enabled applies (config/reporter_trust.py). A local
         # reporter's enabled is not denied.
         "/reporters/bedrock-summary-reporter/options/aws_*",
+        # The reporters that send results off the host, whole: turning one on or
+        # choosing its destination is the operator's call (also in
+        # ALWAYS_DENIED_PATHS).
         "/reporters/cloudwatch-logs/**",
         "/reporters/aws-security-hub/**",
         "/reporters/bedrock-summary-reporter/options/model_id",
@@ -849,6 +987,22 @@ class RuntimeOverridesConfig(BaseModel):
         # the findings a client's own suppressions are marked on would be gone
         # from it (off by default; GHAS's is on by default and off reports more).
         "/reporters/gitlab-sast/options/exclude_suppressed",
+        # The scanners that send data off the host, whole, for the same reason: the
+        # source (snyk-code), dependency lists (npm-audit, trivy-repo), candidate
+        # secrets (detect-secrets) or usage metrics (semgrep, opengrep). Also in
+        # ALWAYS_DENIED_PATHS.
+        "/scanners/detect-secrets/**",
+        "/scanners/npm-audit/**",
+        "/scanners/opengrep/**",
+        "/scanners/semgrep/**",
+        "/scanners/snyk-code/**",
+        "/scanners/trivy-repo/**",
+        # The archive converter's extraction limits bound what extracting an
+        # archive in the scanned tree may write, so a client may not raise them.
+        # A write at an ancestor (/converters/archive, /converters) is refused too.
+        # Listed for the operator reading the default; a profile's own list keeps
+        # them too (ALWAYS_DENIED_PATHS).
+        *ARCHIVE_LIMIT_RUNTIME_PATHS,
     ]
 
     denied_value_patterns: Annotated[
@@ -906,6 +1060,20 @@ class RuntimeOverridesConfig(BaseModel):
             )
         return value
 
+    @model_validator(mode="after")
+    def _keep_the_always_denied_paths(self) -> "RuntimeOverridesConfig":
+        """Add each ALWAYS_DENIED_PATHS entry the list leaves out, at its end.
+
+        Assigned only when one is missing, so a default policy (which holds them all)
+        is the shipped list unchanged and keeps its serialized shape.
+        """
+        missing = [
+            entry for entry in ALWAYS_DENIED_PATHS if entry not in self.denied_paths
+        ]
+        if missing:
+            self.denied_paths = [*self.denied_paths, *missing]
+        return self
+
 
 class SandboxConfig(BaseModel):
     """OS-level sandboxing of scanner subprocesses. Off by default.
@@ -924,6 +1092,9 @@ class SandboxConfig(BaseModel):
                 "then firejail, then landlock; macOS: sandbox-exec). Any other value "
                 "requires that backend. A scanner that cannot be sandboxed as requested "
                 "is recorded MISSING with the reason; it is never run unsandboxed. "
+                "A mode that --sandbox, ASH_CONFIG or the operator's config file sets "
+                "is a floor: a config file inside a git checkout or the scanned "
+                "directory cannot turn it off or switch backends. "
                 "Ignored in container mode, where the container is the boundary."
             )
         ),
@@ -937,8 +1108,9 @@ class SandboxConfig(BaseModel):
                 "uses each scanner's declared need: semgrep, opengrep, grype, trivy, "
                 "npm-audit and snyk-code fetch rules, databases or audit data. A list "
                 "replaces those defaults. Under --offline no scanner gets a network. "
-                "Honored only from --config-overrides or a config file outside the "
-                "scanned tree; set inside the tree, a list can only remove network."
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory; set by any other config file, "
+                "a list can only remove network."
             )
         ),
     ] = None
@@ -949,13 +1121,44 @@ class SandboxConfig(BaseModel):
             description=(
                 "Additional host paths every sandboxed scanner may read, for example a "
                 "corporate CA bundle or a shared rule directory. '~' and $VARS expand. "
-                "Ignored when set by a config file inside the scanned tree."
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory."
+            )
+        ),
+    ] = []
+
+    read_path_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanners allowed the extra host paths their own options ask for "
+                "(a rules file or baseline outside the source tree, for example). "
+                "Under a sandbox, without this, a scanner whose read paths come from "
+                "its options gets only the default policy, and ASH does not read a "
+                "detect-secrets baseline_file outside the source tree. With it, a "
+                "granted path, that baseline included, is used only when it resolves "
+                "inside the source tree or an extra_read_paths entry. "
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory."
+            )
+        ),
+    ] = []
+
+    env_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanners allowed the environment variables their own options ask "
+                "for (a token for an online check, for example). Without this, such "
+                "variables are not passed. Honored only from --config-overrides or a "
+                "config file outside every git checkout and the scanned directory."
             )
         ),
     ] = []
 
     # Set by config/sandbox_grants.py from a network_scanners list that a config
-    # file inside the scanned tree wrote. Private, so no config file can set it.
+    # file the scanned repository could have written. Private, so no config file
+    # can set it.
     _network_limit: Optional[List[str]] = PrivateAttr(default=None)
 
     @property
@@ -1273,6 +1476,18 @@ class AshConfig(BaseModel):
     # refuses tool config files inside it. None means the source directory's tree.
     _scanned_root: Optional[Path] = PrivateAttr(default=None)
 
+    # Which tool paths in this config the operator named
+    # (config/path_trust.OperatorPaths), recorded by resolve_config. None means
+    # no option value counts as the operator's.
+    _operator_paths: Optional[Any] = PrivateAttr(default=None)
+
+    # What the detect-secrets settings of this config may turn on, when a file the
+    # scanned repository or an MCP client wrote built it (an
+    # UntrustedDetectSecretsSettings from config/secret_verification_trust.py), or
+    # None when the operator's own sources built it. Private, so no config file can
+    # set or clear it.
+    _untrusted_detect_secrets_settings: Optional[Any] = PrivateAttr(default=None)
+
     # Scanner exclusions a config an MCP client delivered supplied, moved out of the
     # scanners' options and applied to their results as marked suppressions
     # instead (config/client_scanner_exclusions.py). Set by resolve_config.
@@ -1332,11 +1547,33 @@ class AshConfig(BaseModel):
                 "asked for actually run'. Selects on the scanner's status, so it "
                 "covers only a failure that reached that status. Defaults to True, "
                 "so a scanner recorded ERROR or MISSING does not report the exit "
-                "code of a clean scan. Set it to False, or pass "
+                "code of a clean scan. Converters count too: one that crashed, one "
+                "that could not convert some of its inputs, and one whose tool is "
+                "missing while it had inputs make the scan exit non-zero the same "
+                "way. Set it to False, or pass "
                 "--no-fail-on-incomplete-scanners, to accept a partial scan's exit "
                 "code; excluding the scanner whose tool is unavailable is usually "
                 "better, because an excluded scanner is recorded SKIPPED and the "
                 "report then says what was not measured."
+            )
+        ),
+    ] = True
+
+    honor_ignore_files: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether the .gitignore and .ignore files in the scanned tree decide "
+                "which files are left out of ASH's scan set, the file list "
+                "detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters "
+                "read. True (the default) leaves out every file they match. False "
+                "scans those files too; ASH's own exclusions (.git, CDK assets, "
+                "its own output directory) still apply. An operator setting: a config file inside the scanned "
+                "tree, or one an MCP client supplied, cannot change it, and its "
+                "value there is ignored with a warning. Set it in a config file "
+                "outside the tree, with --config-overrides, or with "
+                "--no-honor-ignore-files / --honor-ignore-files. Every scan records "
+                "the outcome in metadata.ignore_file_exclusions."
             )
         ),
     ] = True
@@ -1697,7 +1934,7 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         return
 
     text = config_path.read_text(encoding="utf-8")
-    data = yaml.safe_load(text) or {}
+    data = load_config_yaml(text) or {}
 
     # A file that extends a base and has no suppressions list of its own gets
     # its suppressions from the base. Writing a list here would replace that

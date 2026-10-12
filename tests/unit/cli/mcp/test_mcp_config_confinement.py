@@ -323,6 +323,43 @@ class TestRunAshScanConfinesTheChain:
         assert result["error_type"] == _CONFIG_REFUSED
         started.assert_not_called()
 
+    def test_an_unparseable_config_outside_the_grant_is_refused_unread(self, layout):
+        """Confinement is checked before the file is parsed, so a file outside the
+        grant is refused as outside it, and nothing about its contents -- not even
+        that it does not parse -- reaches the client."""
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        layout.far.write_text(f"project_name: [{_OUTSIDE_MARKER}\n", encoding="utf-8")
+        with patch(
+            "automated_security_helper.cli.mcp_tools._run_scan_async"
+        ) as started:
+            result = _run(
+                mcp_scan_directory(
+                    directory_path=str(layout.scan),
+                    config_path=str(layout.far),
+                    session_id=_SESSION,
+                )
+            )
+
+        assert result["success"] is False
+        assert result["error_type"] == _CONFIG_REFUSED
+        # The path holds the test's name, so look for the parser's own words.
+        assert "could not parse" not in json.dumps(result)
+        assert "while parsing" not in json.dumps(result)
+        _assert_carries_nothing_from(result)
+        started.assert_not_called()
+
+    def test_the_load_check_does_not_read_a_file_outside_the_grant(self, layout):
+        """config_load_error leaves a refused file to validate_config_chain, unread."""
+        layout.far.write_text(f"project_name: [{_OUTSIDE_MARKER}\n", encoding="utf-8")
+
+        assert (
+            sandbox.config_load_error(
+                layout.far, session_id=_SESSION, source_dir=layout.scan
+            )
+            is None
+        )
+
     def test_the_scan_itself_receives_the_sessions_gate(self, layout):
         """The preflight is not the only check: the scan resolves under the grant too."""
         from automated_security_helper.cli import mcp_tools
@@ -712,9 +749,7 @@ class TestEveryPathParameterIsAudited:
 
         call = _AUDITED[key]
         with (
-            patch(
-                "automated_security_helper.cli.mcp.source_delivery.subprocess.run"
-            ) as git,
+            patch("automated_security_helper.cli.mcp.source_delivery._run_git") as git,
             patch("automated_security_helper.cli.mcp_tools._run_scan_async") as scan,
         ):
             result = call(mcp_server, layout)
@@ -780,8 +815,11 @@ class TestInsideTheRootsStillWorks:
         )
         assert result["success"] is True, result
 
-    def test_set_source_git_with_a_remote_url_reaches_git(self, layout):
+    def test_set_source_git_with_a_remote_url_reaches_git(self, layout, monkeypatch):
         from automated_security_helper.cli import mcp_server
+
+        # The tool clones only from hosts the operator lists.
+        monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
 
         def fake_run(cmd, **kw):
             res = MagicMock()
@@ -790,7 +828,7 @@ class TestInsideTheRootsStillWorks:
             return res
 
         with patch(
-            "automated_security_helper.cli.mcp.source_delivery.subprocess.run",
+            "automated_security_helper.cli.mcp.source_delivery._run_git",
             side_effect=fake_run,
         ) as git:
             result = _run(
@@ -803,9 +841,7 @@ class TestInsideTheRootsStillWorks:
     def test_set_source_git_reports_url_rules_before_confinement(self, layout, url):
         from automated_security_helper.cli import mcp_server
 
-        with patch(
-            "automated_security_helper.cli.mcp.source_delivery.subprocess.run"
-        ) as git:
+        with patch("automated_security_helper.cli.mcp.source_delivery._run_git") as git:
             result = _run(mcp_server.set_source_git(_ctx(), url=url))
 
         assert result["success"] is False

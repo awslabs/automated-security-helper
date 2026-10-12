@@ -117,15 +117,20 @@ The following ferret-scan CLI options are **NOT supported** in the ASH plugin an
 | `pre_commit_mode` | ASH manages output formatting and exit codes centrally; use ASH's own pre-commit hook. |
 | `list_profiles` | Only prints available profiles and exits — produces no scan results. |
 
-### Security Warning: show_match Option
+### show_match
 
-⚠️ **Data Exfiltration Risk**: The `show_match` option causes ferret-scan to include the actual matched sensitive data (credit card numbers, SSNs, API keys, etc.) in the scan output. This creates significant security risks:
+With `show_match` on, ferret-scan writes each matched value (card numbers, national
+IDs, keys) into its own output: the result message (`Matched text: '...'`) and the
+SARIF snippets. ASH masks those values before it writes `ash_aggregated_results.json`
+or any report, so they do not reach ASH's reports, the Bedrock summary or MCP
+responses (see "Secret values in reports" in the output formats page). They do stay
+in ferret-scan's own results file under `scanners/ferret-scan/`, and in its log
+output.
 
-- **Log file exposure**: Matched sensitive data will appear in SARIF reports, CI/CD logs, and ASH output files
-- **Accidental data leakage**: Reports shared with team members or uploaded to security dashboards may contain real sensitive data
-- **Compliance violations**: Logging actual PII/PCI data may violate data protection regulations (GDPR, PCI-DSS, HIPAA)
-
-**Recommendation**: Keep `show_match: false` (the default) in production environments. Only enable it temporarily for debugging in isolated, secure environments where log files are properly protected and purged.
+`show_match` is off by default, and every profile in the bundled
+`ferret-config.yaml` sets it to `false`, including `debug`, `comprehensive`,
+`json-api`, `person-name`, `enhanced-metadata` and `social-media`, which turned it
+on before. Turn it on only where the scanner's own output directory is protected.
 
 ### Note: `API_KEY_OR_SECRET` false positives (SECRETS check)
 
@@ -207,7 +212,7 @@ scanners:
 | `use_default_config` | bool | `true` | Use the default config bundled with this plugin. Set by the operator only (see above) |
 | `profile` | string | `null` | Profile name from config file. Set by the operator only (see above) |
 | `exclude_patterns` | list | `[]` | Patterns to exclude from scanning (directory names or file patterns, e.g., `.venv`, `*.log`) |
-| `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning above) |
+| `show_match` | bool | `false` | Display matched text in ferret-scan's own output (see [show_match](#show_match) above) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
 | `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned (findings may be missing). ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |

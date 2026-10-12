@@ -158,6 +158,20 @@ def joined_inside(parent: Path, component: str, what: str = "session_id") -> Pat
     return joined
 
 
+#: File ASH writes into every session workspace it creates. The TTL sweep removes
+#: only directories that carry it, so anything else under the workspace root is
+#: never touched.
+SESSION_MARKER = ".ash-mcp-session"
+
+
+def mark_session_workspace(directory: Path) -> Path:
+    """Create ``directory`` as a session workspace, with its marker, and return it."""
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / SESSION_MARKER).touch(exist_ok=True)
+    return directory
+
+
 def session_directory(parent: Path, session_id: str, what: str = "session_id") -> Path:
     """Return ``parent``'s subdirectory for ``session_id``, both layers applied.
 
@@ -171,6 +185,8 @@ def session_directory(parent: Path, session_id: str, what: str = "session_id") -
 
 __all__ = [
     "MAX_COMPONENT_LEN",
+    "SESSION_MARKER",
+    "mark_session_workspace",
     "joined_inside",
     "session_directory",
     "validated_path_component",

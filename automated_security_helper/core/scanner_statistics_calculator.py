@@ -29,7 +29,6 @@ Example usage:
 
 from typing import Dict, Any, Optional, Tuple
 
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
@@ -503,16 +502,23 @@ class ScannerStatisticsCalculator:
         Returns:
             Tuple of (threshold, threshold_source), where threshold is one of
             "ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL" and threshold_source is
-            one of "global", "config"
+            one of "global", "config", or "unavailable" when the results record
+            no configuration (the threshold is then ASH_DEFAULT_SEVERITY_LEVEL)
         """
         # Get global severity threshold from config
         global_threshold = ASH_DEFAULT_SEVERITY_LEVEL
 
+        # The configuration the results record. When there is none, or it cannot
+        # be read, the threshold source says so; the configuration of the process
+        # reading the results (ASH's defaults, or the file ASH_CONFIG names) is not
+        # the one the scan ran with and is never consulted.
         try:
             ash_conf = asharp_model.ash_config
         except Exception as e:
-            ASH_LOGGER.error(f"Error loading config, using default: {e}")
-            ash_conf = get_default_config()
+            ASH_LOGGER.error(f"The recorded configuration could not be read: {e}")
+            ash_conf = None
+        if ash_conf is None:
+            return global_threshold, "unavailable"
 
         # Check for global_settings.severity_threshold
         if (

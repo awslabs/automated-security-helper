@@ -556,6 +556,42 @@ def test_git_repository_root_returns_none_when_git_cannot_run(tmp_path, exc):
         assert git_repository_root(tmp_path) is None
 
 
+def test_git_is_resolved_to_an_absolute_path_on_path(tmp_path, monkeypatch):
+    from automated_security_helper.utils import subprocess_utils
+
+    bin_dir = tmp_path / "usr" / "bin"
+    bin_dir.mkdir(parents=True)
+    git = bin_dir / ("git.exe" if sys.platform == "win32" else "git")
+    git.write_text("#!/bin/sh\nexit 0\n")
+    git.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(
+        subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+    )
+    subprocess_utils.clear_find_executable_cache()
+    try:
+        assert gss._git_executable() == str(git)
+    finally:
+        subprocess_utils.clear_find_executable_cache()
+
+
+def test_git_repository_root_runs_git_by_its_resolved_path(tmp_path, monkeypatch):
+    """Not by name: on Windows a name is looked for in the working directory first."""
+    monkeypatch.setattr(gss, "_git_executable", lambda: "/opt/git/bin/git")
+    with patch.object(
+        gss.subprocess, "run", return_value=_completed(0, f"{tmp_path}\n")
+    ) as run:
+        git_repository_root(tmp_path)
+    assert run.call_args.args[0][0] == "/opt/git/bin/git"
+
+
+def test_git_repository_root_runs_nothing_when_git_is_not_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(gss, "_git_executable", lambda: None)
+    with patch.object(gss.subprocess, "run") as run:
+        assert git_repository_root(tmp_path) is None
+    run.assert_not_called()
+
+
 def test_git_repository_root_returns_none_on_a_nonzero_exit(tmp_path):
     with patch.object(gss.subprocess, "run", return_value=_completed(128, "")):
         assert git_repository_root(tmp_path) is None
@@ -577,16 +613,17 @@ def test_git_repository_root_returns_none_on_empty_output(tmp_path):
     ["origin/main; rm -rf x", "$(whoami)", "ref with spaces", "back`tick`", ""],
 )
 def test_get_changed_files_rejects_a_ref_that_fails_the_allowlist(bad_ref):
-    """An unsafe ref falls back to a full scan rather than reaching subprocess."""
+    """An unsafe ref is refused with an error and never reaches subprocess."""
     with patch.object(gss.subprocess, "run") as run:
-        assert get_changed_files(base_ref=bad_ref) is None
+        with pytest.raises(gss.InvalidBaseRefError):
+            get_changed_files(base_ref=bad_ref)
 
     run.assert_not_called()
 
 
 def test_get_changed_files_accepts_a_conventional_ref_and_parses_the_diff(tmp_path):
     with patch.object(
-        gss.subprocess, "run", return_value=_completed(0, "a/b.py\n\nc.py\n")
+        gss.subprocess, "run", return_value=_completed(0, "a/b.py\0c.py\0")
     ):
         changed = get_changed_files(base_ref="origin/main", cwd=tmp_path)
 

@@ -149,23 +149,23 @@ class TestResolveConfig:
         assert config.project_name == "from-file"
         assert isinstance(config, AshConfig)
 
-    def test_config_path_not_found_with_fallback(self, tmp_path):
-        config = resolve_config(
-            config_path=tmp_path / "nonexistent.yaml", fallback_to_default=True
-        )
-        assert config is not None
+    def test_config_path_not_found_is_refused_with_fallback(self, tmp_path):
+        """fallback_to_default covers "no config file", not "the named file is gone".
 
-    def test_config_path_not_found_without_fallback(self, tmp_path):
-        # When fallback_to_default=False but config_path doesn't exist,
-        # it should raise or return None depending on implementation
-        try:
-            result = resolve_config(
+        The defaults in its place would have none of the named file's suppressions
+        and settings.
+        """
+        with pytest.raises(ASHConfigValidationError, match="nonexistent.yaml"):
+            resolve_config(
+                config_path=tmp_path / "nonexistent.yaml", fallback_to_default=True
+            )
+
+    def test_config_path_not_found_is_refused_without_fallback(self, tmp_path):
+        """Without a fallback it raises too, rather than returning None."""
+        with pytest.raises(ASHConfigValidationError, match="nonexistent.yaml"):
+            resolve_config(
                 config_path=tmp_path / "nonexistent.yaml", fallback_to_default=False
             )
-            # If it doesn't raise, verify it handled the situation
-            assert result is None or isinstance(result, AshConfig)
-        except (ValueError, Exception):
-            pass  # Expected behavior
 
     def test_source_dir_with_config_file(self, tmp_path):
         ash_dir = tmp_path / ".ash"
@@ -197,12 +197,13 @@ class TestResolveConfig:
         )
         assert config.project_name == "overridden"
 
-    def test_invalid_yaml_with_fallback(self, tmp_path):
+    def test_invalid_yaml_is_refused_with_fallback(self, tmp_path):
+        """A file that does not parse is refused, as a schema error already is."""
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text(": invalid yaml {{")
 
-        config = resolve_config(config_path=config_path, fallback_to_default=True)
-        assert config is not None
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml"):
+            resolve_config(config_path=config_path, fallback_to_default=True)
 
     def test_source_dir_string(self, tmp_path):
         ash_dir = tmp_path / ".ash"

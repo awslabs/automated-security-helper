@@ -19,7 +19,13 @@ The fix has two halves and needs both:
 * Every runtime mutation goes through this module, under ``ENVIRON_LOCK``, so a
   snapshot is never taken halfway through someone else's change. Copying
   ``os.environ`` reads the key list and then each value, so a concurrent ``pop``
-  between the two raises ``KeyError`` in the copying thread.
+  between the two raises ``KeyError`` in the copying thread, and a copy taken
+  during a multi-variable override gets some of its values and not others.
+  So every copy goes through ``snapshot_environ()`` too, not only a spawn's:
+  ``tests/unit/utils/test_environ_mutations_are_locked.py`` refuses a write
+  outside this module and ``test_environ_copies_are_locked.py`` any read of the
+  whole mapping (a copy, ``**`` or ``|``, iteration, ``env=os.environ``, an
+  alias, or the mapping handed to a function).
 
 The lock is held only while variables are written or copied, never across the
 work done with them. ``cdk_nag_wrapper`` keeps its own lock to serialize whole
@@ -95,6 +101,58 @@ def environ_overrides(
         yield
     finally:
         restore_environ(previous)
+
+
+#: Variables held by hold_environ: key -> [value, holders, value before the first hold].
+_HELD: Dict[str, list] = {}
+
+
+def hold_environ(key: str, value: str) -> None:
+    """Set ``key`` to ``value`` for as long as at least one caller holds it.
+
+    For a change that several overlapping callers each need, such as
+    ``ASH_OFFLINE=YES`` for two offline scans in one process. Snapshot and restore
+    (:func:`apply_environ_overrides`) breaks there: the first caller to finish
+    restores the value it saw while the other is still running, and the last one
+    restores the first one's change. Here the first holder records the original
+    value and sets the variable, and the last :func:`release_environ` puts the
+    original back.
+
+    Raises ValueError if the variable is already held at a different value, since
+    two holders cannot both have their way.
+    """
+    with ENVIRON_LOCK:
+        held = _HELD.get(key)
+        if held is None:
+            _HELD[key] = [value, 1, os.environ.get(key)]
+        elif held[0] != value:
+            raise ValueError(
+                f"{key} is held at {held[0]!r}; it cannot also be held at {value!r}"
+            )
+        else:
+            held[1] += 1
+        os.environ[key] = value
+
+
+def release_environ(key: str) -> None:
+    """Release one :func:`hold_environ` of ``key``; the last restores its original.
+
+    Raises RuntimeError if nobody holds it, which is a hold and release that do not
+    pair up.
+    """
+    with ENVIRON_LOCK:
+        held = _HELD.get(key)
+        if held is None:
+            raise RuntimeError(f"{key} is released but not held")
+        held[1] -= 1
+        if held[1]:
+            return
+        del _HELD[key]
+        original = held[2]
+        if original is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = original
 
 
 def setdefault_environ(key: str, value: str) -> str:

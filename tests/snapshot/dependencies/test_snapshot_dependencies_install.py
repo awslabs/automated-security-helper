@@ -23,14 +23,20 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 from rich.console import Console
 
 from automated_security_helper.utils import uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
-from tests.snapshot.support.cli import ALL_HOSTS, run_cli, simulated_host
+from tests.snapshot.support.cli import (
+    ALL_HOSTS,
+    DISPLAYED_CWD,
+    displayed_cwd,
+    run_cli,
+    simulated_host,
+)
 
 PINNED_PYTHON = "python3"
 REAL_PYTHON = sys.executable
@@ -68,10 +74,17 @@ SCENARIOS = {
 
 
 @pytest.fixture
-def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def project_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, snapshot_normalizer
+) -> Path:
     project = tmp_path / "demo-project"
     project.mkdir()
     monkeypatch.chdir(project)
+    # The bin path is printed absolute, in the panel and in every install command
+    # that names it; displayed_cwd keeps its length, and so the wrapping, the same
+    # on every machine.
+    for spelling in (PurePosixPath(DISPLAYED_CWD), PureWindowsPath(DISPLAYED_CWD)):
+        snapshot_normalizer.add_root(spelling, "WORKSPACE")
     # install_dependencies writes os.environ["ASH_BIN_PATH"] itself; setting it here
     # first means monkeypatch restores the real value afterwards.
     monkeypatch.setenv("ASH_BIN_PATH", "bin")
@@ -159,7 +172,7 @@ def test_dependencies_install(
     )
     _fake_machine(monkeypatch, scenario)
 
-    with simulated_host(monkeypatch, host):
+    with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):
         run = run_cli(["dependencies", "install", "--bin-path", "bin"])
 
     assert run.exit_code == exit_code, run.output
@@ -176,7 +189,7 @@ def test_dependencies_install_bad_selection(
     scenario = Scenario()
     _fake_machine(monkeypatch, scenario)
 
-    with simulated_host(monkeypatch, host):
+    with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):
         run = run_cli(
             [
                 "dependencies",
@@ -202,7 +215,7 @@ def test_dependencies_install_selected_tool(
     scenario = Scenario()
     _fake_machine(monkeypatch, scenario)
 
-    with simulated_host(monkeypatch, host):
+    with simulated_host(monkeypatch, host), displayed_cwd(monkeypatch):
         run = run_cli(
             [
                 "dependencies",

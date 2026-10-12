@@ -184,6 +184,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
         # runs opengrep.bin from there.
         unpack_dir_env="XDG_CACHE_HOME",
+        # The offline rule cache ASH checked before the scan and passes as --config.
+        read_path_env=("OPENGREP_RULES_CACHE_DIR",),
     )
 
     def model_post_init(self, context):

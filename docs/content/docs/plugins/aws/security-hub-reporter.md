@@ -15,6 +15,8 @@ The Security Hub Reporter integrates ASH scan results with AWS Security Hub by:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml

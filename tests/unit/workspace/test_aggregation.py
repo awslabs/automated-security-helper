@@ -16,6 +16,7 @@ The three properties these tests exist to hold:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ from automated_security_helper.workspace.aggregation import (
     rebase_run_for_project,
     to_workspace_uri,
 )
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
 
@@ -868,6 +870,92 @@ class TestAggregatorOutput:
             output_path=f"projects/{key}",
             **kwargs,
         )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_the_unified_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        victim = tmp_path / "victim.json"
+        (output / "ash_aggregated_results.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        spool = tmp_path / "out" / ".workspace-spool"
+        spool.mkdir(parents=True)
+        victim = tmp_path / "victim.json"
+        (spool / "api.run.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_directory_that_is_a_link_is_not_written_through(self, tmp_path):
+        """No PluginContext registered the workspace output; the spool is guarded."""
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (output / ".workspace-spool").symlink_to(elsewhere, target_is_directory=True)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert list(elsewhere.iterdir()) == []
+
+    def test_a_reader_sees_the_previous_unified_file_while_it_is_written(
+        self, tmp_path, monkeypatch
+    ):
+        """The MCP progress reader parses the file while a workspace scan rewrites it."""
+        import shutil
+
+        from automated_security_helper.workspace import aggregation
+
+        plan = _plan(tmp_path, "api", "web")
+        output = tmp_path / "out"
+        output.mkdir()
+        target = output / "ash_aggregated_results.json"
+        previous = '{"previous": "complete"}\n'
+        target.write_text(previous, encoding="utf-8")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        for index, key in enumerate(("api", "web")):
+            aggregator.add(self._outcome(key), _run(_result()), plan.projects[index])
+        seen = []
+        copy = shutil.copyfileobj
+
+        def read_then_copy(source, destination, *args, **kwargs):
+            destination.flush()
+            seen.append(target.read_text(encoding="utf-8"))
+            return copy(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(aggregation.shutil, "copyfileobj", read_then_copy)
+
+        path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert seen == [previous, previous]
+        assert len(json.loads(path.read_text(encoding="utf-8"))["sarif"]["runs"]) == 2
+        assert sorted(p.name for p in output.iterdir() if p.is_file()) == [
+            target.name
+        ], "a staging file was left behind"
 
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""

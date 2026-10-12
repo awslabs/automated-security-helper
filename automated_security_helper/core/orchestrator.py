@@ -10,7 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from automated_security_helper.base.plugin_context import PluginContext
 
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import (
+    LoggedResolutionWarning,
+    resolve_config,
+)
 from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.core.progress import (
     ExecutionPhaseType,
@@ -28,10 +31,17 @@ from automated_security_helper.config.client_config_policy import ClientConfigRu
 from automated_security_helper.core.exceptions import (
     ASHValidationError,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    InputNotScanned,
+)
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
 from automated_security_helper.utils.inner_run_outcome import (
     INNER_RUN_OUTCOME_FILE,
     ExistingResultsRefused,
@@ -39,10 +49,50 @@ from automated_security_helper.utils.inner_run_outcome import (
     without_run_records,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_RESULT_FILES,
+    OUTPUT_WORKING_DIRS,
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
     refuse_a_linked_reports_dir,
 )
+from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+
+def resolve_scan_config(
+    *,
+    config_path: Optional[str | Path],
+    source_dir: str | Path,
+    config_overrides: Optional[List[str]] = None,
+    config_base_gate: Optional[Callable[[Path], bool]] = None,
+    trusted_config_path: Optional[str | Path] = None,
+    untrusted_config: bool = False,
+    client_overrides: bool = False,
+    client_config_policy: Optional[ClientConfigRules] = None,
+    remote_client: bool = False,
+) -> AshConfig:
+    """The config a single-directory scan of ``source_dir`` runs with.
+
+    The orchestrator resolves through here. ``trusted_config_path`` and
+    ``untrusted_config`` decide whose sandbox settings stand, and with them
+    ``resolve_config`` keeps the operator's sandbox mode as a floor. A resolution
+    without them reads ``sandbox.mode`` from a file the scanned repository or an
+    MCP client wrote, which the scan itself does not honor.
+    """
+    return resolve_config(
+        config_path=config_path,
+        source_dir=source_dir,
+        config_overrides=list(config_overrides or []),
+        permit_base=config_base_gate,
+        trusted_config_path=trusted_config_path,
+        untrusted_config=untrusted_config,
+        client_overrides=client_overrides,
+        client_config_policy=client_config_policy,
+        remote_client=remote_client,
+    )
 
 
 class ASHScanOrchestrator(BaseModel):
@@ -109,6 +159,16 @@ class ASHScanOrchestrator(BaseModel):
                 "The config at config_path was written by the caller, not the "
                 "operator, so its sandbox settings are restrict-only. Passed to "
                 "resolve_config; see its docstring."
+            ),
+        ),
+    ] = False
+    client_overrides: Annotated[
+        bool,
+        Field(
+            description=(
+                "config_overrides came from an MCP client, not the operator, so a "
+                "tool config path they name is not the operator's. Passed to "
+                "resolve_config."
             ),
         ),
     ] = False
@@ -280,6 +340,7 @@ class ASHScanOrchestrator(BaseModel):
                 ("config_path", self.config_path),
                 ("config_overrides", self.config_overrides),
                 ("untrusted_config", self.untrusted_config),
+                ("client_overrides", self.client_overrides),
                 ("remote_client", self.remote_client),
                 ("trusted_config_path", self.trusted_config_path),
                 ("client_config_policy", self.client_config_policy),
@@ -319,7 +380,14 @@ class ASHScanOrchestrator(BaseModel):
         """
         if self._initialized:
             return
+        # Building the plugins already looks tools up, so source_dir is the scanned
+        # tree for this as well as for execute_scan; see
+        # utils/subprocess_utils.scanning_tree. Scoped to the call, so nothing is
+        # left registered if it raises.
+        with scanning_tree(self.source_dir):
+            self._initialize()
 
+    def _initialize(self) -> None:
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
         if self.resolved_config is not None:
@@ -328,23 +396,24 @@ class ASHScanOrchestrator(BaseModel):
             )
             self.config = self.resolved_config
         else:
-            self.config = resolve_config(
+            self.config = resolve_scan_config(
                 config_path=self.config_path,
                 source_dir=self.source_dir,
-                config_overrides=self.config_overrides or [],
-                permit_base=self.config_base_gate,
+                config_overrides=self.config_overrides,
+                config_base_gate=self.config_base_gate,
                 trusted_config_path=self.trusted_config_path,
                 untrusted_config=self.untrusted_config,
+                client_overrides=self.client_overrides,
                 client_config_policy=self.client_config_policy,
                 remote_client=self.remote_client,
             )
 
-        # Surface config resolution warnings prominently
+        # Surface config resolution warnings prominently, once: resolution has
+        # already logged some of them (LoggedResolutionWarning).
         if self.config._resolution_warnings:
             for warning in self.config._resolution_warnings:
-                ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
-
-        self._refuse_symlinked_output_dir()
+                if not isinstance(warning, LoggedResolutionWarning):
+                    ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
         ASH_LOGGER.verbose("Setting up working directories")
 
@@ -355,18 +424,9 @@ class ASHScanOrchestrator(BaseModel):
             for old_file in [
                 file
                 for file in self.output_dir.glob("*.*")
-                if file.name
-                in [
-                    "ash_aggregated_results.json",
-                    "ash-ignore-report.txt",
-                    "ash-scan-set-files-list.txt",
-                    # An earlier inner run's refusal (utils/inner_run_outcome.py).
-                    INNER_RUN_OUTCOME_FILE,
-                    # Don't delete log files here - they're managed by the logger
-                    # which truncates them on initialization
-                    # "ash.log",
-                    # "ash.log.jsonl",
-                ]
+                # Not the logs: the logger truncates them when it opens them. An
+                # earlier inner run's refusal too (utils/inner_run_outcome.py).
+                if file.name in (*OUTPUT_RESULT_FILES, INNER_RUN_OUTCOME_FILE)
             ]:
                 ASH_LOGGER.debug(f"Removing old file: {old_file}")
                 try:
@@ -476,44 +536,47 @@ class ASHScanOrchestrator(BaseModel):
         instance.initialize()
         return instance
 
-    def _refuse_symlinked_output_dir(self) -> None:
-        """Stop a sandboxed scan whose output directory runs through a symlink.
+    def _refuse_linked_output_dir(self) -> None:
+        """Refuse an output directory that ASH would write or clear through a link.
 
-        Before ensure_directories, which clears subdirectories of the output
-        directory, and before anything else ASH writes there unsandboxed. See
-        utils/sandbox/policy.py:refuse_symlinked_output_dir for what is refused.
-        With the sandbox off, where the output goes is the operator's choice.
+        Called first by ensure_directories, whatever the sandbox mode:
+        ensure_directories clears the working directories under the output
+        directory, initialize then removes files at its top level, and a sandbox
+        mounts it. Refused, with the link in the message and --output-dir as the
+        remedy: a component below the source directory on the way to it (the
+        repository's own, as the default ``.ash/ash_output`` is), the output
+        directory itself or a real path that differs from its spelling, each of
+        ``analysis``, ``reports``, ``scanners`` and ``converted``, and each file ASH
+        writes there by a fixed name. See utils/output_dir_links.py. Components above an
+        output directory outside the tree are the operator's spelling (``/tmp`` on
+        macOS is one) and are not examined.
+
+        Raises:
+            ASHValidationError: one of those is a symlink or a junction.
         """
-        from automated_security_helper.core.enums import SandboxMode
-        from automated_security_helper.utils.sandbox.policy import (
-            SandboxUnavailable,
-            refuse_symlinked_output_dir,
-        )
-
-        settings = getattr(self.config, "sandbox", None)
-        mode = getattr(settings, "mode", SandboxMode.off)
-        if SandboxMode(mode) == SandboxMode.off:
-            return
         try:
-            refuse_symlinked_output_dir(Path(self.source_dir), Path(self.output_dir))
-        except SandboxUnavailable as refusal:
-            raise ASHValidationError(
-                f"The scanner sandbox is on, and {refusal}. Choose an output "
-                "directory that is not reached through a symlink."
-            ) from refusal
+            refuse_linked_output_dir(self.source_dir, self.output_dir)
+        except OutputDirLinkRefused as refusal:
+            raise ASHValidationError(str(refusal)) from refusal
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
 
         Creates work_dir if it doesn't exist or if no_cleanup
-        is True, and output_dir if it doesn't exist.
+        is True, and output_dir if it doesn't exist. A working directory left by a
+        previous run is removed first. An output directory or working directory
+        that is a link is refused before anything here runs, so the clean-up cannot
+        delete inside wherever it points.
 
         Raises:
+            ASHValidationError: the output directory, or a working directory or
+                result file under it, is reached through a link.
             ReportPathLinkRefused: ``reports/`` is a symlink or a directory
                 junction, dangling or not. Refused before anything here clears or
                 creates it: rmtree fails on a link to a directory, and mkdir on a
                 dangling one.
         """
+        self._refuse_linked_output_dir()
         refuse_a_linked_reports_dir(self.output_dir.joinpath("reports"))
         try:
             # Create output directory if it doesn't exist
@@ -529,14 +592,19 @@ class ASHScanOrchestrator(BaseModel):
                 self.output_dir.joinpath("reports").mkdir(parents=True, exist_ok=True)
             else:
                 # Otherwise, set up all working directories
-                for working_dir in ["analysis", "reports", "scanners", "converted"]:
+                for working_dir in OUTPUT_WORKING_DIRS:
                     path_working_dir = self.output_dir.joinpath(working_dir)
                     if path_working_dir.exists() and self.existing_results_path is None:
                         ASH_LOGGER.verbose(
                             f"Cleaning up working directory from previous run: {path_working_dir.as_posix()}"
                         )
                         shutil.rmtree(path_working_dir)
-                    path_working_dir.mkdir(parents=True, exist_ok=True)
+                        # Without exist_ok, so anything at the name after the
+                        # removal makes this fail rather than be taken for the
+                        # directory.
+                        path_working_dir.mkdir()
+                    else:
+                        path_working_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
@@ -553,6 +621,12 @@ class ASHScanOrchestrator(BaseModel):
         Returns:
             AshAggregatedResults: The results of the scan.
         """
+        with scanning_tree(self.source_dir):
+            return self._execute_scan(phases)
+
+    def _execute_scan(
+        self, phases: List[ExecutionPhaseType] | None = None
+    ) -> AshAggregatedResults:
         if phases is None:
             phases = ["convert", "scan", "report"]
         ASH_LOGGER.verbose(f"Source directory: {self.source_dir}")
@@ -627,11 +701,34 @@ class ASHScanOrchestrator(BaseModel):
             # Only identify files to scan if we're not using existing results
             elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
+                exclusions: Dict[str, Any] = {}
+                links_not_scanned: List[Dict[str, str]] = []
                 self.source_scan_set = scan_set(
                     source=str(self.source_dir),
                     output=str(self.output_dir),
                     debug=self.debug,
+                    honor_ignore_files=honors_ignore_files(self.config),
+                    exclusions=exclusions,
+                    links_not_scanned=links_not_scanned,
                 )
+                # Recorded on the results the phases build on, so the aggregated
+                # JSON and every summary say whether the repository's ignore files
+                # were honored and how many files they removed. Empty only for a
+                # scan set reused from the output directory, which initialize()
+                # removes before every scan.
+                if exclusions and self.execution_engine is not None:
+                    self.execution_engine._asharp_model.metadata.ignore_file_exclusions = IgnoreFileExclusions.model_validate(
+                        exclusions
+                    )
+                # The links the scan set left out, which no reader of it scanned:
+                # listed as ASH's inputs not scanned in the results, the summaries
+                # and the console (unified_metrics.inputs_not_scanned). Set only when
+                # there are some, so other results keep their exact shape.
+                if links_not_scanned and self.execution_engine is not None:
+                    self.execution_engine._asharp_model.metadata.inputs_not_scanned = [
+                        InputNotScanned.model_validate(entry)
+                        for entry in links_not_scanned
+                    ]
                 ASH_LOGGER.info(
                     f"Found {len(self.source_scan_set)} files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified."
                 )

@@ -23,6 +23,16 @@ class ASHConfigSourceError(ASHConfigValidationError):
     """
 
 
+class ASHConfigFileNotFoundError(ASHConfigSourceError):
+    """A config file that was named or discovered does not exist.
+
+    Raised for a missing path, a symbolic link to nothing, and an ``ASH_CONFIG``
+    naming a missing file. A subclass of ``ASHConfigSourceError`` so it refuses
+    the same way; distinct so that a caller reporting it (the MCP tools) can say
+    "not found" rather than "cannot be parsed".
+    """
+
+
 class ASHConfigInputNotPermittedError(ASHConfigSourceError):
     """A file in an ``extends`` chain is outside what the caller may read.
 

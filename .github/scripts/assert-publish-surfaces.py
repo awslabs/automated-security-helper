@@ -700,10 +700,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        publishes=(
+            "cache-local-path=${{ runner.temp }}/setup-uv-cache "
+            "enable-cache=${{ env.RESTORE_CACHES }} "
+            "save-cache=${{ github.event_name == 'push' }}"
+        ),
         reason=_UV_CACHE_REASON
-        + " Saved from a push only, which narrows who writes the entry: a pull"
-        " request restores its base branch's copy and no longer saves its own.",
+        + " Saved from a push only, which narrows who writes the entry. Not"
+        " restored either on pull_request or merge_group (RESTORE_CACHES), where"
+        " the run's own cache scope can hold entries written by other jobs that"
+        " run the pull request's code. cache-local-path is setup-uv's own default"
+        " on a hosted runner, named so that the checkout's cache-dir is not read.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",

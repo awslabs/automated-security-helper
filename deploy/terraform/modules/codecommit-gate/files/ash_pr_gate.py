@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -73,6 +74,14 @@ DEFAULT_MAX_COMMENT_CHARS = 10000
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
+#: A full git object id: 40 hex digits, or 64 in a SHA-256 repository.
+#:
+#: The event's commit ids reach git as arguments, and git reads an argument that
+#: starts with "-" as an option. ``git checkout`` takes whatever follows ``--`` as
+#: paths, so ``--`` cannot carry a commit there; ``parse_event`` accepts only this
+#: shape instead.
+COMMIT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+
 #: Where the gate image recorded the uv tool directory the ASH stage installed
 #: into, so ``_scan_env`` can give uv a writable parent without reinstalling the
 #: tools. Baked by the ENV block in
@@ -103,6 +112,40 @@ BAKED_SCANNER_DATA = (
 #: scanners consult, so this handler and the scan it launches cannot disagree
 #: about whether the run has network access.
 OFFLINE_VALUES = {"YES", "TRUE", "1"}
+
+#: Variables ``_scan_env`` removes, so the scan runs without the function role.
+#:
+#: On Lambda the execution role's credentials are in the function's environment,
+#: and this role can comment on and approve pull requests. The scanners run over
+#: code the pull request controls and make no AWS call of their own, so they get
+#: none of it: every variable an SDK or CLI reads credentials or a profile from.
+#: The clone keeps the role, because git-remote-codecommit signs with it; see
+#: ``clone_source``, which runs git with the handler's own environment.
+#:
+#: The cost: a base config that enables a reporter which calls AWS (S3, Security
+#: Hub, CloudWatch Logs, Bedrock) has no credentials in this gate, and that
+#: reporter fails. The limit: the variables leave the child's environment, not
+#: the sandbox, so a scanner running as the same user could still read this
+#: process's environment through /proc.
+SCAN_ENV_DROPPED_VARIABLES = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_SECURITY_TOKEN",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_ROLE_ARN",
+        "AWS_ROLE_SESSION_NAME",
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_CONFIG_FILE",
+    }
+)
 
 #: Scan options an operator may not set through ASH_SCAN_EXTRA_ARGS. Each one can
 #: change this gate's verdict, so the gate decides them and the environment does not.
@@ -339,8 +382,16 @@ def _scan_env() -> dict[str, str]:
     PATH is restored from ASH_IMAGE_PATH when the image recorded one, and left
     alone when it did not, so running this handler outside the image behaves
     normally.
+
+    The function role's credentials are not passed on; see
+    SCAN_ENV_DROPPED_VARIABLES. IMDS is switched off so no SDK waits on it.
     """
-    env = dict(os.environ)
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in SCAN_ENV_DROPPED_VARIABLES
+    }
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
     home = WORK_ROOT / "home"
     cache = home / "cache"
     tool_dir = home / "uv-tools"
@@ -455,8 +506,8 @@ def _reject_gate_owned_options(tokens: list[str]) -> None:
         f"ASH_SCAN_EXTRA_ARGS sets options this gate reserves: {' '.join(offending)}. "
         "Refusing to scan rather than letting the environment decide this gate's "
         "verdict: these either repeat an option the gate passes -- which resolves to "
-        "its last occurrence -- or narrow what gets scanned, which switches off the "
-        "completeness check without switching off the gate's report of a pass. "
+        "its last occurrence -- or narrow what gets scanned or what counts, so the "
+        "gate would report a pass about less than the whole tree. "
         f"Reserved: {' '.join(reserved)}."
     )
     LOGGER.error(message)
@@ -482,6 +533,10 @@ def parse_event(event: dict) -> dict:
         raise ValueError(
             f"event detail is missing required fields: {', '.join(missing)}"
         )
+    for key in ("sourceCommit", "destinationCommit"):
+        value = detail[key]
+        if not (isinstance(value, str) and COMMIT_ID.fullmatch(value)):
+            raise ValueError(f"event {key} is not a full commit id: {value!r}")
 
     source_reference = detail["sourceReference"]
     branch = source_reference.removeprefix("refs/heads/")
@@ -529,6 +584,7 @@ def clone_source(
             "--single-branch",
             "--branch",
             branch,
+            "--",
             remote,
             str(source_dir),
         ]
@@ -545,6 +601,115 @@ def clone_source(
     return source_dir
 
 
+#: The option that makes a scan whose selected scanners did not all run exit 1.
+COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
+
+#: Whether this image's ``ash scan`` offers COMPLETENESS_FLAG, once known. Asked once
+#: per execution environment, because the image cannot change under a warm one.
+_completeness_flag_found: bool | None = None
+
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def check_completeness_flag(env: dict[str, str]) -> None:
+    """Refuse to scan with an ASH whose ``ash scan`` cannot fail an incomplete scan.
+
+    ``run_scan`` passes COMPLETENESS_FLAG, and the gate's fail-closed property rests
+    on it: without it a run where no scanner completed exits 0, which is outcome
+    "pass", which APPROVEs. ASH releases up to v3.7.1 have no such option, and their
+    ``ash scan`` collects unknown options rather than refusing them, so the flag has
+    no effect there. Measured on v3.7.0: bandit and grype both MISSING, the flag
+    passed, exit 0.
+
+    So ``ash scan --help`` is asked once whether the option exists. The probe runs
+    with colour off and a wide terminal, and ANSI codes are stripped before the
+    match, because rich styles each dash of an option name apart when colour is
+    forced and the plain name would then not appear. A probe that fails refuses too
+    and is asked again next time, rather than being read as either answer.
+    """
+    global _completeness_flag_found
+    if _completeness_flag_found is None:
+        probe_env = dict(env, COLUMNS="200", NO_COLOR="1")
+        probe_env.pop("FORCE_COLOR", None)
+        probe = _run(["ash", "scan", "--help"], env=probe_env)
+        if probe.returncode != 0:
+            raise RuntimeError(
+                f"'ash scan --help' exited {probe.returncode}, so this image's ASH could "
+                f"not be checked for {COMPLETENESS_FLAG}. Refusing to scan."
+            )
+        help_text = _ANSI_ESCAPE.sub("", probe.stdout or "")
+        _completeness_flag_found = COMPLETENESS_FLAG in help_text
+    if not _completeness_flag_found:
+        raise RuntimeError(
+            f"The ASH in this image has no {COMPLETENESS_FLAG} option, so a scan whose "
+            "scanners never ran would be reported as a pass. Refusing to scan. Build "
+            f"the gate's base image from an ash_version whose `ash scan` accepts "
+            f"{COMPLETENESS_FLAG}."
+        )
+
+
+def scan_config(source_dir: pathlib.Path) -> pathlib.Path:
+    """The config file the scan is given: the operator's, never the pull request's.
+
+    Without ``--config`` or ``ASH_CONFIG``, ASH looks for a config INSIDE the scanned
+    tree, so the pull request under judgment would choose the ASH config it is judged
+    by: a pull request adding ``global_settings.ignore_paths`` turned a failing scan
+    into exit 0, "pass" and an APPROVE. ash-container-init exports ``ASH_CONFIG``
+    only after writing a base config, so a gate deployed without one had nothing to
+    say.
+
+    So the scan always gets ``--config``:
+
+    *   With ``ASH_BASE_CONFIG_SSM_PARAMETER`` set, the parameter is read again for
+        every scan and written beside the clone. The copy ash-container-init wrote
+        is not used: it is written once per execution environment, to a path the
+        scan's own user can write, so its content after the first scan is whatever
+        that scan left there. Reading per scan also means an edit to the parameter
+        reaches the next pull request without a cold start.
+    *   Otherwise a path in ``ASH_CONFIG`` the operator set is used as is.
+    *   Otherwise ``{}`` is written beside the clone, which is ASH's defaults; ``{}``
+        and not an empty file, which ASH refuses as a config.
+
+    A parameter that cannot be read, an ``ASH_CONFIG`` that names no file, or a path
+    that resolves inside the clone refuses the scan.
+    """
+    parameter = os.environ.get("ASH_BASE_CONFIG_SSM_PARAMETER", "").strip()
+    base = os.environ.get("ASH_CONFIG", "").strip()
+    if parameter:
+        try:
+            # WithDecryption covers SecureString parameters, as ash-container-init does.
+            response = boto3.client("ssm").get_parameter(
+                Name=parameter, WithDecryption=True
+            )
+            document = response["Parameter"]["Value"]
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not read the base config parameter {parameter}, so this scan is "
+                "refused rather than run with a configuration the operator did not "
+                f"choose: {exc}"
+            ) from exc
+        path = WORK_ROOT / "ash-config.yaml"
+        path.write_text(document, encoding="utf-8")
+    elif base:
+        path = pathlib.Path(base)
+        if not path.is_file():
+            raise RuntimeError(
+                f"ASH_CONFIG names {base}, which is not a file, so the base config "
+                "this gate was deployed with cannot be read. Refusing to scan rather "
+                "than run with a configuration the operator did not choose."
+            )
+    else:
+        path = WORK_ROOT / "ash-config.yaml"
+        path.write_text("{}\n", encoding="utf-8")
+    if path.resolve().is_relative_to(source_dir.resolve()):
+        raise RuntimeError(
+            f"The scan config {path} is inside the cloned pull request, which would "
+            "let the pull request choose the ASH config it is judged by. Refusing to "
+            "scan."
+        )
+    return path
+
+
 def run_scan(
     source_dir: pathlib.Path, min_severity: str, fail_on_findings: bool
 ) -> tuple[int, pathlib.Path, str]:
@@ -555,6 +720,7 @@ def run_scan(
     """
     output_dir = WORK_ROOT / "out"
     output_dir.mkdir(parents=True, exist_ok=True)
+    config_path = scan_config(source_dir)
 
     # Held apart from the operator's extra args below and emitted after them, so that
     # last-occurrence-wins resolution lands on the gate's value.
@@ -568,6 +734,9 @@ def run_scan(
         str(source_dir),
         "--output-dir",
         str(output_dir),
+        # Always, so ASH never discovers a config inside the clone; see scan_config.
+        "--config",
+        str(config_path),
         "--min-severity",
         min_severity,
         # Passed explicitly rather than left to ASH's default, which falls back to
@@ -598,7 +767,7 @@ def run_scan(
         # _reject_gate_owned_options and the ordering below are for. This flag was
         # hardcoded and still negatable, because ASH_SCAN_EXTRA_ARGS was appended
         # after it and the CLI resolves a repeated option to its last occurrence.
-        "--fail-on-incomplete-scanners",
+        COMPLETENESS_FLAG,
     ]
 
     extra = os.environ.get("ASH_SCAN_EXTRA_ARGS", "").strip()
@@ -614,7 +783,11 @@ def run_scan(
     # PATH merged with the image's ENVs, which point every scanner's cache at the
     # read-only root filesystem. See _scan_env. It raises when an offline scan's
     # caches are unreachable, which handler reads as outcome "error".
-    result = _run(argv, env=_scan_env())
+    env = _scan_env()
+    env["ASH_CONFIG"] = str(config_path)
+    # After the refusals above, so a deployment they refuse never starts ASH at all.
+    check_completeness_flag(env)
+    result = _run(argv, env=env)
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
     LOGGER.info("ash scan exited %d", result.returncode)
     return result.returncode, output_dir, log_tail

@@ -19,9 +19,17 @@ from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
-from automated_security_helper.core.unified_metrics import format_duration
+from automated_security_helper.utils.display_text import escape_controls
+from automated_security_helper.core.unified_metrics import (
+    format_duration,
+    inputs_not_scanned,
+)
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
+)
+from automated_security_helper.utils.converter_refusals import (
+    converter_refusals,
+    summary_lines,
 )
 
 
@@ -101,6 +109,11 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
         text_parts.append(f"Project: {metadata['project']}")
         text_parts.append(f"Scan executed: {metadata['scan_time']}")
         text_parts.append(f"ASH version: {metadata['tool_version']}")
+        # Which files the scanners read depends on the repository's ignore files, and
+        # no scanner's own result can say that some were left out.
+        ignore_file_exclusions = model.metadata.ignore_file_exclusions
+        if ignore_file_exclusions is not None:
+            text_parts.append(f"Ignore files: {ignore_file_exclusions.summary_text()}")
         text_parts.append("")
 
         # The per-project table, ahead of the summary because in a workspace the
@@ -201,6 +214,20 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
 
             text_parts.append("")
 
+            # See the matching section in the markdown reporter: no status value says
+            # which input went unexamined.
+            not_scanned = inputs_not_scanned(model)
+            if not_scanned:
+                text_parts.append("INPUTS NOT SCANNED")
+                text_parts.append("------------------")
+                # The path is the scanned repository's; its control characters are
+                # escaped so it stays on its line (see utils/display_text.py).
+                for scanner_name, path, reason in not_scanned:
+                    text_parts.append(
+                        f"- {scanner_name}: {escape_controls(path)}: {reason}"
+                    )
+                text_parts.append("")
+
             # See the matching section in the markdown reporter: no status value carries this.
             stale_dbs = stale_content_databases(model)
             if stale_dbs:
@@ -209,6 +236,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 for record in stale_dbs:
                     verdict = "FAILED THE SCAN" if record.enforced else "WARNING"
                     text_parts.append(f"- [{verdict}] {record.message()}")
+                text_parts.append("")
+
+            # See the matching section in the markdown reporter.
+            refusals = converter_refusals(model)
+            if refusals:
+                text_parts.append("CONVERTER INPUTS NOT SCANNED")
+                text_parts.append("----------------------------")
+                for line in summary_lines(refusals):
+                    text_parts.append(f"- {line}")
                 text_parts.append("")
 
             # Add top hotspots (files with most findings)

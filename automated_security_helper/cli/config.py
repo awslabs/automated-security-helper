@@ -25,13 +25,18 @@ from automated_security_helper.config.ash_config import (
     ConverterConfigSegment,
     ReporterConfigSegment,
     ScannerConfigSegment,
+    load_config_yaml,
 )
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
     describe_config_path,
+    is_regular_file,
+    read_config_bytes,
+    read_config_file,
 )
 from automated_security_helper.config.resolve_config import (
+    check_config_path,
     find_config_file,
     resolve_config,
 )
@@ -54,6 +59,31 @@ def _config_path_or_discovered(config: str | None) -> Path:
     if config:
         return Path(config)
     return find_config_file(Path.cwd()) or Path(".ash/.ash.yaml")
+
+
+def _refuse_unloadable(config_path: Path) -> None:
+    """Exit 3 when `config_path` cannot be loaded at all, as a scan refuses it.
+
+    Missing, not a regular file (a directory, a FIFO), unreadable, not UTF-8,
+    not valid YAML, JSON or TOML, or using a YAML alias. Read with the scan's
+    reader, so a FIFO is refused rather than waited on. Its ``extends`` chain is
+    not followed here: the commands report a chain that does not resolve
+    themselves, as a problem in a file that loads.
+    """
+    try:
+        check_config_path(config_path)
+        read_config_file(config_path)
+    except ASHConfigValidationError as e:
+        typer.secho(f"❌ Invalid configuration: {e}", fg=typer.colors.RED)
+        raise typer.Exit(3)
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as e:
+        # json.JSONDecodeError is a ValueError.
+        typer.secho(
+            f"❌ Invalid configuration: could not load "
+            f"{describe_config_path(config_path)}: {e}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
 
 
 def _print_source_chain(config_path: Path) -> None:
@@ -86,9 +116,10 @@ def _rewrite_refusal(config_path: Path) -> str | None:
     if config_path.name.endswith(".toml"):
         return "it is a TOML file, and this command writes YAML; edit it by hand"
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-    except (OSError, yaml.YAMLError):
+        # As a scan reads it, so a FIFO at the name is refused, not waited on. A
+        # file that does not load is refused when the command loads it.
+        raw = load_config_yaml(read_config_bytes(config_path).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ASHConfigValidationError):
         return None
     if isinstance(raw, dict) and (EXTENDS_KEY in raw or PATCH_KEY in raw):
         return (
@@ -192,10 +223,20 @@ def init(
 
 @config_app.command()
 def get(
+    ctx: typer.Context,
     config_path: Annotated[
         str,
         typer.Argument(
             help=f"The name of the config file to get. By default, ASH looks for the following config file names in the source directory of a scan: {ASH_CONFIG_SOURCES_DESCRIPTION}. If  a different filename is specified, it must be provided when running ASH via the `--config` option or by setting the `ASH_CONFIG` environment variable.",
+        ),
+    ] = None,
+    config: Annotated[
+        str | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="The path to the configuration file to get, as for `ash scan --config`. The same as the positional path; when both name a file on the command line they must name the same one. The positional path wins over ASH_CONFIG.",
+            envvar="ASH_CONFIG",
         ),
     ] = None,
     config_overrides: Annotated[
@@ -214,19 +255,29 @@ def get(
         show_progress=False,
         use_color=color,
     )
-    if config_path is not None and not Path(config_path).exists():
-        typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+    # The positional path, else --config / ASH_CONFIG, as `ash scan --config`
+    # takes it. Two different files named on one command line are refused rather
+    # than one of them silently ignored; ASH_CONFIG yields to the argument, as it
+    # yields to --config in `ash scan`.
+    if config_path is not None and config is not None and config_path != config:
+        if getattr(ctx.get_parameter_source("config"), "name", None) == "COMMANDLINE":
+            typer.secho(
+                f"Name one configuration file: the argument {config_path} and "
+                f"--config {config} differ.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+    named = config_path if config_path is not None else config
     # The file this command is about: the one named, or the one resolve_config
-    # would discover. When there is one, it is loaded with fallback_to_default
-    # off. resolve_config's default is to log a file it cannot parse and return
-    # the default configuration -- right for a scan, which records the warning
-    # and carries on, and wrong here: `ash config get` on a file with a YAML
-    # syntax error exited 0 and printed the defaults as though they were that
-    # file's contents.
-    config_file = Path(config_path) if config_path is not None else find_config_file()
+    # would discover. resolve_config refuses either when it cannot be loaded --
+    # missing, empty, unreadable or unparseable -- and so does discovery for a
+    # source it cannot read; each exits 3 below, as `ash scan` does. The named
+    # path is passed as given, so an empty one is reported as empty rather than
+    # as the working directory.
+    config_file = None
     try:
-        config = resolve_config(
+        config_file = named if named is not None else find_config_file()
+        resolved = resolve_config(
             config_file,
             config_overrides=config_overrides,
             fallback_to_default=config_file is None,
@@ -247,7 +298,7 @@ def get(
     print(
         Syntax(
             code=yaml.dump(
-                config.model_dump(
+                resolved.model_dump(
                     by_alias=True,
                     exclude_defaults=False,
                     exclude_none=False,
@@ -372,10 +423,15 @@ def update(
     config_strings = []
 
     # Preserve the schema reference if it exists in the original file
-    with open(config_path, "r") as f:
-        first_line = f.readline().strip()
-        if first_line.startswith("#") and "schema" in first_line.lower():
-            config_strings.append(first_line)
+    # Read as a scan reads it, so a FIFO swapped in at the name is refused rather
+    # than waited on; the file loaded above, so a failure here only drops the line.
+    try:
+        lines = read_config_bytes(config_path).decode("utf-8").splitlines()
+    except (OSError, UnicodeDecodeError, ASHConfigValidationError):
+        lines = []
+    first_line = lines[0].strip() if lines else ""
+    if first_line.startswith("#") and "schema" in first_line.lower():
+        config_strings.append(first_line)
 
     # If no schema reference was found, add the default one
     if not config_strings:
@@ -594,12 +650,10 @@ def lint(
         config_path = _config_path_or_discovered(config)
     except ASHConfigValidationError as e:
         typer.secho(f"❌ {e}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+        raise typer.Exit(3)
     output_dir_path = Path(output_dir) if output_dir else None
 
-    if not config_path.exists():
-        typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
-        raise typer.Exit(1)
+    _refuse_unloadable(config_path)
 
     if (fix or fix_unused) and config_path.name.endswith(".toml"):
         typer.secho(
@@ -896,6 +950,15 @@ def wizard(
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
+    if os.path.lexists(config_path) and not is_regular_file(config_path):
+        # A link to nothing, a directory: not "no config yet", and writing the
+        # answers would go through the link to wherever it points.
+        typer.secho(
+            f"Invalid configuration: {config_path} exists but is not a regular "
+            "file, so the wizard will not write it.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
     if config_path.exists():
         console.print(
             Panel(
@@ -906,11 +969,15 @@ def wizard(
         try:
             ash_config = AshConfig.from_file(config_path=config_path)
         except Exception as exc:
+            # Refused, not replaced by the defaults: the wizard writes its result
+            # back over this file, which would drop every setting it does not ask
+            # about.
             typer.secho(
-                f"Failed to load existing config: {exc}. Starting from defaults.",
-                fg=typer.colors.YELLOW,
+                f"Invalid configuration: {config_path} could not be loaded ({exc}). "
+                "Fix the file, or move it aside to start from the defaults.",
+                fg=typer.colors.RED,
             )
-            ash_config = AshConfig()
+            raise typer.Exit(3)
     else:
         console.print(
             Panel(
@@ -1121,11 +1188,13 @@ def validate(
     try:
         from automated_security_helper.config.config_validator import ConfigValidator
 
-        config_path = _config_path_or_discovered(config)
+        try:
+            config_path = _config_path_or_discovered(config)
+        except ASHConfigValidationError as e:
+            typer.secho(f"❌ {e}", fg=typer.colors.RED)
+            raise typer.Exit(3)
 
-        if not config_path.exists():
-            typer.secho(f"❌ Config file not found: {config_path}", fg=typer.colors.RED)
-            raise typer.Exit(1)
+        _refuse_unloadable(config_path)
 
         typer.secho(
             f"Validating configuration file: {describe_config_path(config_path)}",

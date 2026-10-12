@@ -21,7 +21,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from automated_security_helper.config.config_sources import read_config_file
+from automated_security_helper.config.ash_config import load_config_yaml
+from automated_security_helper.config.config_sources import (
+    named_text_stream,
+    read_config_bytes,
+    read_config_file,
+)
 from automated_security_helper.config.config_validator import ConfigValidator
 
 logger = logging.getLogger(__name__)
@@ -188,7 +193,7 @@ class ConfigLinter:
         """
         cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
-        raw_content = config_path.read_text(encoding="utf-8")
+        raw_content = read_config_bytes(config_path).decode("utf-8")
 
         if issues is None:
             lint_result = cls.lint(config_path)
@@ -269,7 +274,7 @@ class ConfigLinter:
         """
         cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
-        raw_content = config_path.read_text(encoding="utf-8")
+        raw_content = read_config_bytes(config_path).decode("utf-8")
 
         # Find the unused suppressions report
         report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
@@ -459,15 +464,18 @@ class ConfigLinter:
 
         A TOML file goes through the config loader's reader, so a
         pyproject.toml yields its [tool.ash] table. Its own ``extends`` is not
-        followed: lint reports on the file it would fix.
+        followed: lint reports on the file it would fix. Every file is read as a
+        scan reads it (``read_config_bytes``): without blocking on a FIFO, only a
+        regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES``.
         """
         if str(config_path).endswith(".toml"):
             return read_config_file(config_path) or {}
-        with open(config_path, "r", encoding="utf-8") as f:
-            if str(config_path).endswith(".json"):
-                return json.load(f)
-            else:
-                return yaml.safe_load(f) or {}
+        data = read_config_bytes(config_path)
+        if str(config_path).endswith(".json"):
+            return json.loads(data.decode("utf-8-sig"))
+        return (
+            load_config_yaml(named_text_stream(data.decode("utf-8"), config_path)) or {}
+        )
 
     @classmethod
     def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:
@@ -967,6 +975,7 @@ class ConfigLinter:
             SYMBOLS_EXTRA,
             is_valid_symbol,
             symbols_extra_available,
+            symbols_extra_install_hint,
         )
 
         symbol = suppression.get("symbol")
@@ -1009,6 +1018,7 @@ class ConfigLinter:
                     )
 
         if not reported_missing_extra and not symbols_extra_available():
+            hint = symbols_extra_install_hint()
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
@@ -1017,8 +1027,7 @@ class ConfigLinter:
                         f"Suppressions that set 'symbol' need the optional "
                         f"'{SYMBOLS_EXTRA}' extra, which is not installed here. "
                         f"Until it is, they match nothing and the findings they "
-                        f"name stay visible. Install "
-                        f"automated-security-helper[{SYMBOLS_EXTRA}]"
+                        f"name stay visible. {hint[:1].upper()}{hint[1:]}"
                     ),
                     path=path_prefix,
                 )

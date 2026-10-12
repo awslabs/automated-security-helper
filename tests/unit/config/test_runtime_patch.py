@@ -362,9 +362,11 @@ class TestDefaults:
         fictional schema paths). For glob-bearing entries we resolve the prefix
         up to (but not including) the first wildcard segment.
 
-        Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`)
-        are NOT present on a default `AshConfig`; we materialize them here via
-        model_validate so the schema check covers extras that real plugins add.
+        Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
+        `aws-security-hub`, `s3`) and scanners (`snyk-code`, `trivy-repo`) are NOT
+        present on a default `AshConfig`; we materialize them here via
+        model_validate so the schema check covers extras that real plugins add,
+        from their own models.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             FerretScannerConfig,
@@ -630,10 +632,17 @@ class TestRootPointerRefused:
             )
         assert "root pointer" in excinfo.value.rule
 
-    def test_root_replace_allowed_when_allowlist_names_root_explicitly(self) -> None:
-        """The refusal is an escape-hatch, not a wall: an operator who writes
-        the root pointer into `allowed_paths` has asked for a whole-config
-        swap, and with an empty denylist there is nothing left to constrain.
+    def test_root_replace_refused_even_with_an_empty_denylist(self) -> None:
+        """Naming the root in `allowed_paths` clears the structural refusal, but an
+        empty `denied_paths` no longer leaves nothing to constrain: the entries ASH
+        always denies (ALWAYS_DENIED_PATHS: the sandbox, ash_plugin_modules, the
+        detect-secrets verification settings, the archive extraction limits) are
+        added to any list, and a root write carries every one of them. So a
+        whole-config swap is refused. A field below the root (`/project_name`) is
+        still allowed.
+
+        This test used to assert the swap succeeded with `denied_paths=[]`, which
+        was the case the always-denied entries exist to close.
         """
         base = _base_config()
         allowlist = RuntimeOverridesConfig(
@@ -643,10 +652,20 @@ class TestRootPointerRefused:
         )
         swapped = base.model_dump(mode="json", by_alias=False)
         swapped["project_name"] = "swapped"
-        result = apply_runtime_patch(
-            base, [{"op": "replace", "path": "", "value": swapped}], allowlist=allowlist
+        with pytest.raises(RuntimePatchDeniedError, match="/sandbox"):
+            apply_runtime_patch(
+                base,
+                [{"op": "replace", "path": "", "value": swapped}],
+                allowlist=allowlist,
+            )
+        renamed = apply_runtime_patch(
+            base,
+            [{"op": "replace", "path": "/project_name", "value": "swapped"}],
+            allowlist=RuntimeOverridesConfig(
+                enabled=True, allowed_paths=["/project_name"], denied_paths=[]
+            ),
         )
-        assert result.project_name == "swapped"
+        assert renamed.project_name == "swapped"
 
     def test_root_replace_still_denied_by_denylist_when_root_is_allowed(self) -> None:
         """Naming the root in `allowed_paths` clears the structural refusal but
@@ -1096,19 +1115,19 @@ class TestDenialsMatchEitherSeparator:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_either_spelling(self) -> None:
+        # ferret-scan, a plugin that sends nothing off the host: those that do are
+        # always denied whole, so a value pattern under one is never reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={
-                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
-            },
+            denied_value_patterns={"/scanners/ferret-scan/options/config_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/reporters/bedrock_summary_reporter/options/aws_region",
-                "value": "us-east-1",
+                "path": "/scanners/ferret_scan/options/config_file",
+                "value": "x",
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
@@ -1194,19 +1213,20 @@ class TestDenialsMatchEveryPluginSpelling:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_every_spelling(self) -> None:
+        # ferret-scan, a plugin that sends nothing off the host: a section of one
+        # that does is always denied whole, so a value pattern under it is never
+        # reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={
-                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
-            },
+            denied_value_patterns={"/scanners/ferret-scan/options/config_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/reporters/BedrockSummary",
-                "value": {"options": {"aws_region": "us-east-1"}},
+                "path": "/scanners/FerretScan",
+                "value": {"options": {"config_file": "x"}},
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:

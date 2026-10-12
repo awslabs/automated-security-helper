@@ -10,13 +10,18 @@ is needed to show what the converters and ``scan_set`` write.
 
 One process boundary is replaced: ``jupyter nbconvert``. Whether nbconvert is installed
 differs between machines, so the child stands in for it with a function that does what
-nbconvert does for ``--to script`` -- read the notebook named on its command line and
-write its code cells -- and nothing else. Everything ASH does around it is real.
+nbconvert does -- expand the notebook argument with ``glob.glob``, read the notebook,
+and write its code cells to ``<--output-dir>/<--output>.py`` -- and nothing else.
+Everything ASH does around it is real.
 
 The tree holds, beside a "host" directory with a marker string in every file:
 
-- ``a.zip``, ``b.tar``, ``nb.ipynb``: symlinks to host files;
-- ``sub/.gitignore``: a symlink to a host file;
+- ``a.zip``, ``b.tar``, ``nb.ipynb``: symlinks to host files, which the scan set
+  leaves out because their targets leave the tree, so no converter sees them;
+- ``sub/.gitignore``: a symlink to a host file, left out of the scan set the same
+  way, and whose rules are not applied;
+- ``c.zip``, ``d.tar``, ``nb2.ipynb``: symlinks to the regular files below, which the
+  scan set keeps and each converter refuses;
 - ``ok.zip``, ``ok.tar``, ``ok.ipynb``: regular files, the positive control, two of
   them carrying members that are links or whose names leave the destination.
 """
@@ -40,6 +45,17 @@ from tests.utils.helpers import importing_this_checkout
 
 MARKER = "HOST-ONLY-CONTENT-e8a7"
 
+LINK_WITH_A_BACKTICK = "tick`name.py"
+
+#: The tree's links whose targets are outside it, as paths below the tree.
+LINKS_LEAVING_THE_TREE = (
+    "a.zip",
+    "b.tar",
+    "nb.ipynb",
+    "sub/.gitignore",
+    LINK_WITH_A_BACKTICK,
+)
+
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
 )
@@ -50,37 +66,75 @@ pytestmark = pytest.mark.skipif(
 DRIVER = importing_this_checkout(
     textwrap.dedent(
         """
+    import glob
     import json
+    import os
     import subprocess
     import sys
     from pathlib import Path
 
+    # The ASH the parent test imported, ahead of whatever the interpreter has
+    # installed, so the child runs the code under test.
+    sys.path.insert(0, os.environ["ASH_TEST_CODE_ROOT"])
+
+    import automated_security_helper
     from automated_security_helper.plugin_modules.ash_builtin.converters import (
         jupyter_converter,
     )
+    from automated_security_helper.utils import uv_tool_runner
 
-    real_run = subprocess.run
+    real_get_runner = uv_tool_runner.get_uv_tool_runner
+    calls_log = Path(os.environ["ASH_TEST_NBCONVERT_CALLS"])
+    Path(os.environ["ASH_TEST_IMPORTED_FROM"]).write_text(
+        automated_security_helper.__file__
+    )
 
-    def nbconvert_to_script(cmd, *args, **kwargs):
-        if list(cmd[:2]) != ["jupyter", "nbconvert"]:
-            return real_run(cmd, *args, **kwargs)
-        notebook = json.loads(Path(cmd[6]).read_text(encoding="utf-8"))
-        code = "".join(
-            "".join(cell.get("source", []))
-            for cell in notebook.get("cells", [])
-            if cell.get("cell_type") == "code"
-        )
-        output = Path(cmd[cmd.index("--output") + 1] + ".py")
-        output.write_text(code, encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+    class Runner:
+        # The real runner for everything except running nbconvert, which is done
+        # here the way `nbconvert --to script` does it, and recorded.
+        def __init__(self, real):
+            self._real = real
 
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def is_uv_available(self):
+            return True
+
+        def run_tool(self, **kwargs):
+            if kwargs.get("tool_name") != "jupyter-nbconvert":
+                return self._real.run_tool(**kwargs)
+            args = list(kwargs["args"])
+            (pattern,) = [a for a in args if a.endswith(".ipynb")]
+            (notebook_path,) = glob.glob(pattern)
+            notebook = json.loads(Path(notebook_path).read_text(encoding="utf-8"))
+            code = "".join(
+                "".join(cell.get("source", []))
+                for cell in notebook.get("cells", [])
+                if cell.get("cell_type") == "code"
+            )
+            with calls_log.open("a", encoding="utf-8") as log:
+                cwd = kwargs.get("cwd")
+                record = {
+                    "args": args,
+                    # None stays null: str(None) is "None", a relative path that is
+                    # never inside the tree, so the check below could not fail.
+                    "cwd": None if cwd is None else str(cwd),
+                    "notebook": notebook_path,
+                    "code": code,
+                }
+                log.write(json.dumps(record) + "\\n")
+            output = Path(
+                args[args.index("--output-dir") + 1],
+                args[args.index("--output") + 1] + ".py",
+            )
+            output.write_text(code, encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+    uv_tool_runner.get_uv_tool_runner = lambda: Runner(real_get_runner())
     jupyter_converter.JupyterConverter.validate_plugin_dependencies = (
         lambda self: True
     )
-    jupyter_converter.JupyterConverter._execute_nbconvert_via_uv = (
-        lambda self, cmd, timeout=60, cwd=None: False
-    )
-    subprocess.run = nbconvert_to_script
 
     from automated_security_helper.cli.main import app
 
@@ -134,6 +188,8 @@ def build(base: Path) -> tuple[Path, Path]:
         (tree / name).symlink_to(host / name)
     (tree / "sub").mkdir()
     (tree / "sub" / ".gitignore").symlink_to(host / "rules")
+    # A name with a backtick, which the markdown summary has to fence around.
+    (tree / LINK_WITH_A_BACKTICK).symlink_to(host / "secret.py")
 
     (tree / "ok.ipynb").write_text(notebook("print('in-tree notebook')\n"))
     with zipfile.ZipFile(tree / "ok.zip", "w") as archive:
@@ -149,6 +205,9 @@ def build(base: Path) -> tuple[Path, Path]:
         symlink.linkname = str(host / "secret.py")
         archive.addfile(symlink)
         tar_member(archive, "../escape_tar.py", f"E = '{MARKER}'\n".encode())
+    for link, target in (("c.zip", "ok.zip"), ("d.tar", "ok.tar")):
+        (tree / link).symlink_to(target)
+    (tree / "nb2.ipynb").symlink_to("ok.ipynb")
     (tree / ".gitignore").write_text("*.log\n")
     (tree / "app.py").write_text("print('hello')\n")
     return tree, host
@@ -167,6 +226,13 @@ def scan(tmp_path_factory):
     env = dict(os.environ)
     # Keep the child off the network and away from the caller's terminal settings.
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
+    # Where the child records each nbconvert call: outside the output directory, so
+    # the output sweeps below see only what ASH wrote.
+    env["ASH_TEST_NBCONVERT_CALLS"] = str(base / "nbconvert-calls.jsonl")
+    import automated_security_helper
+
+    env["ASH_TEST_CODE_ROOT"] = str(Path(automated_security_helper.__file__).parents[1])
+    env["ASH_TEST_IMPORTED_FROM"] = str(base / "imported-from.txt")
     # `-I` keeps the caller's PYTHONPATH and working directory out of the child;
     # DRIVER puts this checkout first on its path.
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
@@ -201,7 +267,34 @@ def scan(tmp_path_factory):
     )
     assert (output / "ash.log").is_file()
     assert (output / "ash_aggregated_results.json").is_file()
+    # Kept beside the output directory, so the output sweeps below see only ASH's.
+    (base / "console.txt").write_text(completed.stdout, encoding="utf-8")
     return tree, host, output
+
+
+def test_the_child_ran_the_code_under_test(scan):
+    import automated_security_helper
+
+    _, _, output = scan
+    imported = Path((output.parent / "imported-from.txt").read_text())
+    assert imported == Path(automated_security_helper.__file__)
+
+
+def test_nbconvert_ran_outside_the_tree_on_a_copy(scan):
+    """The default route (uv tool run) was taken, in a directory outside the tree."""
+    tree, _, output = scan
+    calls = [
+        json.loads(line)
+        for line in (output.parent / "nbconvert-calls.jsonl").read_text().splitlines()
+    ]
+    assert len(calls) == 1, calls  # ok.ipynb; nb.ipynb was refused
+    (call,) = calls
+    # A copy of ok.ipynb, under the fixed name nbconvert is given.
+    assert Path(call["notebook"]).name == "notebook.ipynb"
+    assert call["code"] == "print('in-tree notebook')\n"
+    assert call["cwd"] is not None, "nbconvert inherited ASH's working directory"
+    for path in (call["cwd"], call["notebook"]):
+        assert not Path(path).resolve().is_relative_to(tree.resolve()), path
 
 
 def test_no_host_content_reaches_the_output_directory(scan):
@@ -234,9 +327,9 @@ def test_each_refused_input_is_named_in_one_warning(scan):
     member = "Skipped member '{}' of archive '{}': {}"
     assert sorted(warnings) == sorted(
         [
-            "Skipped converter input 'a.zip': it is a symbolic link",
-            "Skipped converter input 'b.tar': it is a symbolic link",
-            "Skipped converter input 'nb.ipynb': it is a symbolic link",
+            "Skipped converter input 'c.zip': it is a symbolic link",
+            "Skipped converter input 'd.tar': it is a symbolic link",
+            "Skipped converter input 'nb2.ipynb': it is a symbolic link",
             (
                 "Skipped ignore file 'sub/.gitignore': it is a symbolic link, so its "
                 "rules were not applied"
@@ -253,6 +346,48 @@ def test_each_refused_input_is_named_in_one_warning(scan):
     )
 
 
+def test_each_link_leaving_the_tree_is_named_in_one_warning(scan):
+    """The scan set leaves them out, so no converter or scanner is given them."""
+    _, _, output = scan
+    warnings = [
+        line.split("\t", 3)[-1].strip()
+        for line in (output / "ash.log").read_text().splitlines()
+        if "\tWARNING\t" in line and "Not scanning" in line
+    ]
+    assert sorted(warnings) == sorted(
+        f"Not scanning {name!r}: link leaves the scanned tree"
+        for name in LINKS_LEAVING_THE_TREE
+    )
+
+
+def test_links_leaving_the_tree_are_listed_as_inputs_not_scanned(scan):
+    """In the results, both summaries and the console, escaped as the others are."""
+    from automated_security_helper.utils.display_text import (
+        escape_controls,
+        markdown_code_span,
+    )
+
+    _, _, output = scan
+    results = json.loads((output / "ash_aggregated_results.json").read_text())
+    assert results["metadata"]["inputs_not_scanned"] == [
+        {"path": name, "reason": "link leaves the scanned tree"}
+        for name in sorted(LINKS_LEAVING_THE_TREE)
+    ]
+
+    markdown = (output / "reports" / "ash.summary.md").read_text()
+    text = (output / "reports" / "ash.summary.txt").read_text()
+    console = (output.parent / "console.txt").read_text()
+    assert "### Inputs not scanned" in markdown
+    assert "INPUTS NOT SCANNED" in text
+    for name in LINKS_LEAVING_THE_TREE:
+        reason = "link leaves the scanned tree"
+        assert f"- **ASH**: {markdown_code_span(name)}: {reason}" in markdown
+        assert f"- ASH: {escape_controls(name)}: {reason}" in text
+        assert f"Not scanned: ASH did not scan {escape_controls(name)}: {reason}" in (
+            " ".join(console.split())
+        )
+
+
 def test_refused_inputs_are_recorded_in_the_results(scan):
     _, _, output = scan
     results = json.loads((output / "ash_aggregated_results.json").read_text())
@@ -265,15 +400,15 @@ def test_refused_inputs_are_recorded_in_the_results(scan):
 
     assert refused("archive") == sorted(
         [
-            ("a.zip", None, "it is a symbolic link"),
-            ("b.tar", None, "it is a symbolic link"),
+            ("c.zip", None, "it is a symbolic link"),
+            ("d.tar", None, "it is a symbolic link"),
             ("ok.zip", "link.py", "it is a symbolic or hard link"),
             ("ok.zip", "../escape.py", "its path contains a '..' component"),
             ("ok.tar", "link_tar.py", "it is a symbolic or hard link"),
             ("ok.tar", "../escape_tar.py", "its path contains a '..' component"),
         ]
     )
-    assert refused("jupyter") == [("nb.ipynb", None, "it is a symbolic link")]
+    assert refused("jupyter") == [("nb2.ipynb", None, "it is a symbolic link")]
     # A refusal is not a converter failure: the gate for incomplete conversion is
     # about converters that did not run.
     assert rows["archive"]["failure"] is None

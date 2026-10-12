@@ -3,10 +3,12 @@
 
 import json
 import os
+import re
 import shlex
 import logging
+import threading
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Set
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
 from pydantic import Field, PrivateAttr, model_validator
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -39,16 +41,77 @@ from automated_security_helper.utils.download_utils import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.path_trust import honored_path
 from automated_security_helper.config.tool_config_trust import empty_tool_config
+from automated_security_helper.utils.link_exclusions import trivy_skip_files
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.content_db_refresh import (
+    EMPTY_TOOL_CONFIG,
     default_cache_dir,
     prepare_content_db,
     sandboxed_online,
     scan_id_for,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+
+
+#: The trivy misconfiguration scanner that downloads the module sources a .tf file
+#: names. See TrivyRepoScanner._offline_misconfig_args.
+_TERRAFORM_MISCONFIG_SCANNER = "terraform"
+
+_DEFAULT_MISCONFIG_SCANNERS: Dict[Tuple[str, ...], Optional[List[str]]] = {}
+_DEFAULT_MISCONFIG_SCANNERS_LOCK = threading.Lock()
+
+
+def reset_trivy_default_misconfig_scanners() -> None:
+    """Forget the lists trivy_default_misconfig_scanners read (tests)."""
+    with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
+        _DEFAULT_MISCONFIG_SCANNERS.clear()
+
+
+def trivy_default_misconfig_scanners(
+    binary: str, subcommands: List[str]
+) -> Optional[List[str]]:
+    """trivy's default ``--misconfig-scanners`` list, as the installed trivy prints it.
+
+    Read from ``<binary> <subcommands> --help`` (the "(default [...])" of that flag)
+    rather than written down here, because the list differs between trivy releases
+    and trivy given a value it does not know runs every misconfiguration scanner
+    instead (measured with trivy 0.74.0). None when the list cannot be read. A list
+    that was read is kept per binary and subcommand; a failed read is not, so the next
+    scan tries again rather than every later scan in the process (a long-running MCP
+    server, a workspace's projects) leaving out every misconfiguration check.
+    """
+    key = (binary, *subcommands)
+    with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
+        if key in _DEFAULT_MISCONFIG_SCANNERS:
+            return _DEFAULT_MISCONFIG_SCANNERS[key]
+    try:
+        result = subprocess_utils.run_command(
+            [binary, *subcommands, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            log_level=logging.DEBUG,
+        )
+        text = f"{result.stdout or ''}\n{result.stderr or ''}"
+    except Exception as error:  # the list is unknown; the caller fails closed
+        ASH_LOGGER.debug(
+            f"Could not run {binary} {' '.join(subcommands)} --help: {error}"
+        )
+        text = ""
+    match = re.search(r"--misconfig-scanners\b[^\n]*?\(default \[([^\]]*)\]\)", text)
+    listed = (
+        [name.strip() for name in match.group(1).split(",") if name.strip()]
+        if match
+        else None
+    )
+    listed = listed or None
+    if listed is not None:
+        with _DEFAULT_MISCONFIG_SCANNERS_LOCK:
+            _DEFAULT_MISCONFIG_SCANNERS[key] = listed
+    return listed
 
 
 class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
@@ -136,15 +199,32 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
-        cache_paths=("~/.cache/trivy", "$TRIVY_CACHE_DIR"),
-        # trivy's default cache on macOS (os.UserCacheDir), read-only like the
-        # cache above: the database is updated there outside the sandbox before an
-        # online scan (utils/content_db_refresh.py), and trivy only reads it.
-        read_paths=("~/Library/Caches/trivy",),
+        # Every place content_db_refresh.default_cache_dir can put trivy's cache:
+        # ~/.cache or XDG_CACHE_HOME on Linux, ~/Library/Caches on macOS, and
+        # TRIVY_CACHE_DIR. Caches rather than read paths: a cache is read-only on
+        # every backend but bwrap, whose overlay throws writes away, and
+        # sandbox-exec runs no program from one, where it runs programs from read
+        # paths. The database is updated outside the sandbox before an online scan
+        # (utils/content_db_refresh.py), and trivy only reads it.
+        cache_paths=(
+            "~/.cache/trivy",
+            "~/Library/Caches/trivy",
+            "$XDG_CACHE_HOME/trivy",
+            "$TRIVY_CACHE_DIR",
+        ),
         env_prefixes=("TRIVY_",),
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    # trivy exits 0 for a completed run, findings or not, unless --exit-code names
+    # another code for findings (default 0, pkg/flag/report_flags.go), and 1 from
+    # log.Fatal on any error (cmd/trivy/main.go). ASH passes no --exit-code, so 1 is
+    # an error. An exit-code set in the TRIVY_CONFIG file or in TRIVY_EXIT_CODE
+    # makes a run with findings exit with that code, and it is then recorded as a
+    # failed run: 1 is indistinguishable from trivy's own error exit. A trivy.yaml in
+    # the scanned directory is not read (_config_file).
+    success_exit_codes: ClassVar[Set[int]] = {0}
 
     # Env vars layered onto the subprocess. Populated by _process_config_options
     # when offline mode is active. Kept on the instance so concurrent scanners
@@ -240,6 +320,13 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
         if self._scanner_offline():
+            # --skip-check-update only skips the checks bundle. trivy's version
+            # check and its telemetry both contact check.trivy.dev (measured with
+            # trivy 0.75.0); offline both are turned off by TRIVY_SKIP_VERSION_CHECK
+            # and TRIVY_DISABLE_TELEMETRY (utils/offline_tool_env.py), whatever
+            # disable_telemetry says. Variables rather than flags: a trivy too old to
+            # know them ignores a variable, but refuses the whole command over an
+            # unknown flag.
             for flag in (
                 "--skip-db-update",
                 "--skip-java-db-update",
@@ -262,6 +349,94 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
 
         return super()._process_config_options()
+
+    def _offline_misconfig_args(self, final_args: List[str]) -> List[str]:
+        """``final_args`` without trivy's Terraform checks, for an offline scan.
+
+        trivy's Terraform scanner fetches the source of every ``module`` block it
+        evaluates, with every offline flag ASH passes and with
+        ``--tf-exclude-downloaded-modules`` (measured with trivy 0.75.0): a registry
+        source contacted registry.terraform.io, a ``git::`` source ran the host's
+        git, with the operator's git configuration and credentials, against the URL
+        the repository chose, and an ``https://`` archive was downloaded. trivy has
+        no setting that stops it. So offline, trivy gets ``--misconfig-scanners``
+        naming its own default list without ``terraform``. When that list cannot be
+        read from trivy, the misconfiguration scanner is not run offline at all,
+        rather than guessed at. checkov still checks Terraform.
+        """
+        if "misconfig" not in (self.config.options.scanners or []):
+            return final_args
+        binary = find_executable(self.command) or self.command
+        defaults = trivy_default_misconfig_scanners(binary, list(self.subcommands))
+        kept = [name for name in defaults or [] if name != _TERRAFORM_MISCONFIG_SCANNER]
+        args = list(final_args)
+        if kept:
+            message = (
+                "trivy's Terraform checks are skipped offline: trivy downloads the "
+                "module sources a .tf file names, and has no setting that stops it. "
+                "checkov still checks Terraform."
+            )
+            head = [self.command, *self.subcommands]
+            insert_at = len(head) if args[: len(head)] == head else len(args)
+            args[insert_at:insert_at] = [f"--misconfig-scanners={','.join(kept)}"]
+        else:
+            message = (
+                "trivy's misconfiguration checks are skipped offline: ASH could not "
+                f"read trivy's list of them from `{binary} "
+                f"{' '.join(self.subcommands)} --help`, so it cannot leave out the "
+                "Terraform checks, which download module sources."
+            )
+            index = args.index("--scanners") if "--scanners" in args else -1
+            if index >= 0 and index + 1 < len(args):
+                remaining = [
+                    name for name in args[index + 1].split(",") if name != "misconfig"
+                ]
+                if not remaining:
+                    raise ScannerError(message)
+                args[index + 1] = ",".join(remaining)
+        if message not in self._warned_inputs:
+            self._warned_inputs.add(message)
+            self._plugin_log(message, level=logging.WARNING)
+        return args
+
+    def _config_file(self) -> str:
+        """The trivy config file (``--config``), online and offline.
+
+        Without the flag trivy reads ``trivy.yaml`` from its working directory, the
+        source directory. A trivy.yaml in the scanned repository could turn on a VEX
+        repository download or client/server mode, and both reach the network
+        whatever offline flags ASH passes (measured with trivy 0.75.0), or change
+        what is reported. So trivy always gets ``TRIVY_CONFIG`` when that names a
+        file outside the scanned tree (config/path_trust.py), and otherwise ASH's
+        empty config (``EMPTY_TOOL_CONFIG``, readable under every sandbox backend).
+        """
+        source_dir = Path(self.context.source_dir)
+        configured = os.environ.get("TRIVY_CONFIG")
+        if configured:
+            path = honored_path(
+                configured,
+                source_dir=source_dir,
+                key="TRIVY_CONFIG",
+                config=getattr(self.context, "config", None),
+            )
+            if path is not None:
+                if not path.is_file():
+                    raise ScannerError(
+                        f"TRIVY_CONFIG is {configured!r}, which is not a file "
+                        f"(resolved to {path.as_posix()}). Fix the path or unset it; "
+                        "trivy is not run without it."
+                    )
+                return path.as_posix()
+        in_tree = source_dir / "trivy.yaml"
+        if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
+            self._warned_inputs.add(in_tree.as_posix())
+            self._plugin_log(
+                f"Ignoring {in_tree.as_posix()}: it is inside the scanned tree, and "
+                "its settings can reach the network or change what is reported. Set "
+                "TRIVY_CONFIG to a file outside the tree to use one.",
+                level=logging.WARNING,
+            )
+        return EMPTY_TOOL_CONFIG.as_posix()
 
     def _ignore_file(self) -> str:
         """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
@@ -427,6 +602,19 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             for key, value in identity.items():
                 setattr(result.properties, key, value)
 
+    def content_databases_in_use(self) -> list:
+        """trivy-db, unless the scan's ``--scanners`` leave out ``vuln``.
+
+        The secret, misconfiguration and license scanners never open it. An empty
+        ``scanners`` list passes no ``--scanners``, so trivy runs its own default
+        (``vuln,secret``, pkg/flag/scan_flags.go) or what a trivy.yaml says, and the
+        database is held to its bounds then too.
+        """
+        scanners = self.config.options.scanners or []
+        if scanners and "vuln" not in scanners:
+            return []
+        return super().content_databases_in_use()
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — TrivyRepoScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -454,6 +642,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         Returns:
             dict: Scan results
         """
+        # Per target; see ScannerPluginBase.scan().
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -505,36 +695,64 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             insert_at = (
                 len(head) if final_args[: len(head)] == head else len(final_args)
             )
-            final_args[insert_at:insert_at] = [
-                f"--ignorefile={self._ignore_file()}",
-                f"--secret-config={self._secret_config_file()}",
-            ]
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
+            # The database's directory, resolved once as trivy resolves it on this
+            # host and named to the scan, the refresh and the staleness check alike:
+            # the sandbox drops XDG_CACHE_HOME, and the flag beats a cache.dir in a
+            # trivy.yaml, the scanned repository's included. See "Which cache" in
+            # utils/content_db_refresh.py.
+            cache = default_cache_dir("trivy", subprocess_env or snapshot_environ())
+            self._content_db_cache_dir = cache
+            final_args[insert_at:insert_at] = [
+                f"--ignorefile={self._ignore_file()}",
+                f"--secret-config={self._secret_config_file()}",
+                f"--cache-dir={cache.as_posix()}",
+                f"--config={self._config_file()}",
+                # Each link leaving the target; trivy follows no link. In the
+                # joined form, since a path can start with "-". See
+                # utils/link_exclusions.py.
+                *(f"--skip-files={path}" for path in trivy_skip_files(target)),
+            ]
+            if self._scanner_offline():
+                final_args = self._offline_misconfig_args(final_args)
+            cache_flags: List[str] = []
             if sandboxed_online(self._scanner_offline()):
                 # The sandbox mounts trivy's cache read-only, so its database (and
                 # the checks bundle, for misconfiguration scans) is updated first,
                 # outside the sandbox, and trivy only reads it: no update of its
-                # own, and its scan cache in memory rather than in that cache. See
-                # utils/content_db_refresh.py. Not the Java database: `trivy
-                # repository` does not analyze JAR, WAR or EAR files and never reads
-                # it (measured with trivy 0.75), so its update is skipped rather
-                # than downloading about 935 MiB the scan would not use.
+                # own. See utils/content_db_refresh.py. Not the Java database:
+                # `trivy repository` does not analyze JAR, WAR or EAR files and never
+                # reads it (measured with trivy 0.75), so its update is skipped
+                # rather than downloading about 935 MiB the scan would not use.
                 checks = "misconfig" in (self.config.options.scanners or [])
                 prepare_content_db(
                     "trivy",
-                    default_cache_dir("trivy", subprocess_env or snapshot_environ()),
+                    cache,
                     offline=False,
+                    source_dir=self.context.source_dir,
+                    results_dir=self.results_dir or target_results_dir,
+                    config=getattr(self.context, "config", None),
                     checks=checks,
                     scan_id=scan_id_for(self.context),
                 )
-                final_args[insert_at:insert_at] = [
+                cache_flags += [
                     "--skip-db-update",
                     "--skip-java-db-update",
                     *(["--skip-check-update"] if checks else []),
-                    "--cache-backend=memory",
                 ]
+            # Every run, sandboxed or not, online or offline: trivy keeps its scan
+            # cache (fanal/fanal.db) in the cache directory, which every sandbox
+            # backend but bwrap mounts read-only, and which can be read-only with
+            # no sandbox at all (a shared or image-baked cache). Measured with trivy
+            # 0.75.0 against a read-only cache, offline, sandboxed and not: "unable
+            # to initialize fs cache: failed to create cache dir ... permission
+            # denied", exit 1, and with --cache-backend=memory the same scan's
+            # findings. The scan cache only saves re-analysing an unchanged target,
+            # so the results are the same either way.
+            cache_flags.append("--cache-backend=memory")
+            final_args[insert_at:insert_at] = cache_flags
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",
@@ -542,12 +760,14 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 level=logging.VERBOSE,
             )
 
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 env=subprocess_env,
                 timeout=self._effective_scan_timeout(),
             )
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             # SARIF mode - parse SARIF results
             if Path(results_file).exists():
@@ -585,9 +805,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,
-                                executionSuccessful=(
-                                    self.exit_code == 0 or self.exit_code == 1
-                                ),
+                                executionSuccessful=self._exit_code_accepted(),
                                 exitCode=self.exit_code,
                                 exitCodeDescription="\n".join(self.errors),
                                 workingDirectory=ArtifactLocation(

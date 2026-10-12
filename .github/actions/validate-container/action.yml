@@ -172,7 +172,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-podman.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-podman.outputs.base-image-override }}
-      run: ash build-image --oci-runner podman --force --no-run
+      run: ash build-image --oci-runner podman --build-target ci --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -204,7 +204,7 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-finch.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-finch.outputs.base-image-override }}
-      run: ash build-image --oci-runner finch --force --no-run
+      run: ash build-image --oci-runner finch --build-target ci --force --no-run
 
     # === nerdctl ===
     #
@@ -362,8 +362,10 @@ runs:
       env:
         ASH_BASE_OCI_LAYOUT: ${{ steps.prepull-nerdctl.outputs.oci-layout }}
         ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull-nerdctl.outputs.base-image-override }}
-        # The tag ash build-image applies: build_target is forced to "ci" whenever
-        # CI is set, so this is the image the load above would have created.
+        # The tag ash build-image applies for --build-target ci, which every build
+        # and scan in this action passes, so this is the image the load above would
+        # have created. CI variables do not choose the stage, so it is named
+        # explicitly rather than left to the default (non-root).
         IMAGE: automated-security-helper:ci
         ATTEMPTS: "3"
       run: |
@@ -383,8 +385,9 @@ runs:
           # the retry loop would re-run a scan whose exit 2 on findings is not the
           # race being matched below -- it would fail the first `grep` and abort,
           # reporting a build break that never happened. Flag order matches those
-          # two legs on attempt 1: --oci-runner nerdctl --force --no-run.
-          ash build-image --oci-runner nerdctl "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          # two legs on attempt 1: --oci-runner nerdctl --build-target ci --force
+          # --no-run.
+          ash build-image --oci-runner nerdctl --build-target ci "${force_args[@]}" --no-run 2>&1 | tee "${log}"
           rc="${PIPESTATUS[0]}"
           set -e
 
@@ -490,6 +493,7 @@ runs:
         ash scan \
           --mode container \
           --oci-runner "${RUNTIME}" \
+          --build-target ci \
           --source-dir /tmp/ash-selftest \
           --output-dir /tmp/ash-selftest/output \
           --simple \

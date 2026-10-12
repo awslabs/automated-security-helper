@@ -10,8 +10,8 @@ discovery, Dockerfile location, command assembly, process streaming -- and the
 existing suite covers the paths a healthy local checkout takes. What was
 untested is everything the helpers do when the environment is *not* a full clone:
 a pip-installed package resolving its own git revision, a Dockerfile that has to
-be found by walking upward, a build that fails, a child process that is
-interrupted.
+come from the ASH tree while the working directory holds another one, a build
+that fails, a child process that is interrupted.
 
 None of these start a container. ``_build_image`` and ``_build_custom_image``
 are exercised with ``run_cmd_direct`` replaced by a recorder, so the assertion is
@@ -49,6 +49,7 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_REPO_LATEST_REVISION
 from automated_security_helper.core.enums import (
+    AshLogLevel,
     ExecutionPhase,
     ExecutionStrategy,
     ExportFormat,
@@ -457,11 +458,36 @@ class TestFindRunner:
 # ---------------------------------------------------------------------------
 
 
+#: The source tree this suite imports ASH from. A LOCAL revision builds the
+#: Dockerfile at its root, wherever ``ash`` is started from.
+_ASH_SOURCE_ROOT = Path(rac.__file__).resolve().parents[2]
+_ASH_SOURCE_DOCKERFILE = _ASH_SOURCE_ROOT / "Dockerfile"
+
+
+def _lookup(revision: str) -> Any:
+    """The Dockerfile ``_find_dockerfile`` picks (resolved), or the refusal it raises.
+
+    Returning the refusal rather than letting it propagate keeps the comparison in
+    the test's own assertion, so a run that refuses where a path was required fails
+    on that assertion and shows what it got.
+    """
+    try:
+        return Path(_find_dockerfile(revision)).resolve()
+    except FileNotFoundError as error:
+        return error
+
+
 class TestFindDockerfileLocal:
-    def test_the_dockerfile_is_found_by_walking_up_to_the_repo_root(
+    """A LOCAL revision builds the Dockerfile of the ASH tree it was installed from.
+
+    The scanned project, or any directory above the working directory, may hold a
+    Dockerfile and a pyproject.toml of its own. Neither is ever built.
+    """
+
+    def test_a_project_root_above_the_cwd_does_not_supply_the_dockerfile(
         self, monkeypatch, tmp_path
     ):
-        """Running `ash` from a subdirectory of a clone still finds the Dockerfile."""
+        """Running `ash` from a subdirectory of another project builds ASH's Dockerfile."""
         repo = tmp_path / "repo"
         nested = repo / "packages" / "inner"
         nested.mkdir(parents=True)
@@ -469,39 +495,139 @@ class TestFindDockerfileLocal:
         (repo / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
         monkeypatch.chdir(nested)
 
-        assert _find_dockerfile("LOCAL") == repo.resolve() / "Dockerfile"
+        assert _lookup("LOCAL") == _ASH_SOURCE_DOCKERFILE
 
-    def test_a_dockerfile_without_a_pyproject_is_not_treated_as_the_repo_root(
+    def test_a_stray_dockerfile_above_the_cwd_does_not_supply_the_dockerfile(
         self, monkeypatch, tmp_path
     ):
-        """Both markers are required; a stray Dockerfile is not an ASH checkout."""
+        """A Dockerfile above the working directory is neither built nor a reason to refuse."""
         outer = tmp_path / "outer"
         nested = outer / "inner"
         nested.mkdir(parents=True)
         (outer / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         monkeypatch.chdir(nested)
 
-        with pytest.raises(FileNotFoundError):
-            _find_dockerfile("LOCAL")
+        assert _lookup("LOCAL") == _ASH_SOURCE_DOCKERFILE
 
-    def test_a_dockerfile_in_the_cwd_is_used_directly(self, monkeypatch, tmp_path):
+    def test_a_dockerfile_in_the_cwd_does_not_supply_the_dockerfile(
+        self, monkeypatch, tmp_path
+    ):
         (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
-        assert _find_dockerfile("LOCAL") == tmp_path / "Dockerfile"
+        assert _lookup("LOCAL") == _ASH_SOURCE_DOCKERFILE
+
+    def test_the_ash_checkout_root_supplies_its_own_dockerfile(self, monkeypatch):
+        """The developer flow: an editable install run from the root of its checkout."""
+        assert _ASH_SOURCE_DOCKERFILE.is_file()
+        monkeypatch.chdir(_ASH_SOURCE_ROOT)
+
+        assert _lookup("LOCAL") == _ASH_SOURCE_DOCKERFILE
+
+    def test_a_subdirectory_of_the_ash_checkout_supplies_its_dockerfile(
+        self, monkeypatch
+    ):
+        """The developer flow from below the checkout root still builds the checkout."""
+        assert _ASH_SOURCE_DOCKERFILE.is_file()
+        monkeypatch.chdir(_ASH_SOURCE_ROOT / "automated_security_helper")
+
+        assert _lookup("LOCAL") == _ASH_SOURCE_DOCKERFILE
+
+
+class TestFindDockerfileLocalFromTheInstallRecord:
+    """A LOCAL revision for a package that does not run from a clone.
+
+    ``pip install <dir>`` and ``uvx --from <dir>`` leave no clone beside the
+    package; the installer records the directory in ``direct_url.json`` instead.
+    That directory is the one ASH source tree there is to build. Anything else --
+    an install from a wheel file, a recorded directory with no Dockerfile, no
+    record at all -- is refused rather than resolved from the working directory.
+    """
+
+    def test_a_recorded_source_directory_supplies_the_dockerfile(
+        self, pip_installed_ash, monkeypatch, tmp_path
+    ):
+        tree = tmp_path / "ash-source"
+        tree.mkdir()
+        (tree / "Dockerfile").write_text("FROM scratch AS non-root\n", encoding="utf-8")
+        pip_installed_ash.write_text(
+            json.dumps({"url": tree.as_uri(), "dir_info": {}}), encoding="utf-8"
+        )
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+        monkeypatch.chdir(project)
+
+        assert _lookup("LOCAL") == (tree / "Dockerfile").resolve()
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            pytest.param(
+                lambda tmp: {
+                    "url": (tmp / "ash-3.7.1-py3-none-any.whl").as_uri(),
+                    "archive_info": {},
+                },
+                id="installed-from-a-wheel-file",
+            ),
+            pytest.param(
+                lambda tmp: {"url": (tmp / "emptied").as_uri(), "dir_info": {}},
+                id="recorded-directory-without-a-dockerfile",
+            ),
+            pytest.param(None, id="no-install-record"),
+        ],
+    )
+    def test_no_recorded_source_tree_is_refused_with_what_to_do(
+        self, record, pip_installed_ash, monkeypatch, tmp_path
+    ):
+        (tmp_path / "emptied").mkdir()
+        if record is not None:
+            pip_installed_ash.write_text(json.dumps(record(tmp_path)), encoding="utf-8")
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        monkeypatch.chdir(project)
+
+        with pytest.raises(FileNotFoundError) as refused:
+            _find_dockerfile("LOCAL")
+
+        message = str(refused.value)
+        assert "--ash-revision-to-install" in message
+        assert "--no-build" in message
+        assert project.as_posix() not in message
 
 
 class TestFindDockerfileNonLocal:
-    def test_a_clone_in_the_cwd_wins_over_the_packaged_asset(
+    def test_a_project_dockerfile_in_the_cwd_does_not_replace_the_packaged_one(
         self, monkeypatch, tmp_path
     ):
-        """A revision was requested, but a local clone builds what the user has."""
+        """A pinned revision builds the packaged Dockerfile, not the scanned project's."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+        assets = tmp_path / "assets"
+        assets.mkdir()
+        (assets / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(rac, "ASH_ASSETS_DIR", assets)
+
+        assert _lookup("v1.2.3") == (assets / "Dockerfile").resolve()
+
+    def test_a_missing_packaged_dockerfile_is_refused_with_one_in_the_cwd(
+        self, monkeypatch, tmp_path
+    ):
+        """No packaged Dockerfile means no build, not a build of the working directory's."""
         (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         (tmp_path / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+        empty_assets = tmp_path / "assets"
+        empty_assets.mkdir()
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(rac, "ASH_ASSETS_DIR", tmp_path / "unused-assets")
+        monkeypatch.setattr(rac, "ASH_ASSETS_DIR", empty_assets)
 
-        assert _find_dockerfile("v1.2.3") == tmp_path / "Dockerfile"
+        with pytest.raises(FileNotFoundError, match="Dockerfile not found"):
+            _find_dockerfile("v1.2.3")
 
     def test_the_packaged_asset_is_used_when_the_cwd_is_not_a_clone(
         self, monkeypatch, tmp_path
@@ -596,9 +722,9 @@ class TestBuildImage:
         monkeypatch.setattr(rac.platform, "machine", lambda: "x86_64")
 
         # build_target is "ci" rather than this module's "non-root" default because
-        # that is the only value reachable here: run_ash_container forces "ci"
-        # whenever CI is set, and the cache requires ACTIONS_RUNTIME_TOKEN, which
-        # only exists inside Actions.
+        # it is the stage this repository's Actions legs ask for with
+        # --build-target ci, and the cache requires ACTIONS_RUNTIME_TOKEN, which only
+        # exists inside Actions.
         _build_image(**_build_image_kwargs(dockerfile, build_target="ci", debug=True))
 
         cmd = recorded_commands[0]
@@ -986,9 +1112,25 @@ class TestAssembleRunCommandFlagPassthrough:
         assert "checkov" in cmd
         assert "my_plugin" in cmd
 
-    def test_config_is_forwarded(self, tmp_path):
-        cmd = _run_command(tmp_path, tmp_path / "out", config="ash.yaml")
-        assert cmd[cmd.index("--config") + 1] == "ash.yaml"
+    def test_config_is_forwarded(self, tmp_path, monkeypatch):
+        """The file is mounted read-only and the inner scan is given its path there.
+
+        See test_container_config_reaches_the_scan.py.
+        """
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        (operator / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+        monkeypatch.chdir(operator)
+        source = tmp_path / "src"
+        source.mkdir()
+
+        cmd = _run_command(source, tmp_path / "out", config="ash.yaml")
+
+        assert cmd[cmd.index("--config") + 1] == "/ash-config/ash.yaml"
+        assert (
+            f"type=bind,source={(operator / 'ash.yaml').resolve()},"
+            "destination=/ash-config/ash.yaml,readonly"
+        ) in cmd
 
     def test_existing_results_becomes_the_declared_flag(self, tmp_path):
         """Inverted assertion.
@@ -1127,6 +1269,8 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
             strategy=ExecutionStrategy.PARALLEL,
             shard_index=0,
             shard_count=2,
+            ignore_suppressions=True,
+            log_level=AshLogLevel.ERROR,
         )
 
         with self._parse(argv) as ctx:
@@ -1135,6 +1279,8 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
             assert ctx.params["use_existing"] is True
             assert ctx.params["fail_on_findings"] is False
             assert ctx.params["fail_on_incomplete_scanners"] is True
+            assert ctx.params["ignore_suppressions"] is True
+            assert ctx.params["log_level"] == AshLogLevel.ERROR
 
     def test_the_undeclared_flag_this_replaced_is_still_rejected(self):
         """Guards the premise, and records why the rejection was invisible.

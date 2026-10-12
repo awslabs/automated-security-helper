@@ -236,6 +236,8 @@ Snyk Code results are integrated into ASH's unified reporting system:
 - **Network Dependency**: Requires internet connection for cloud-based analysis
 - **Large Codebases**: Scanning time scales with codebase size
 - **Rate Limits**: Snyk may apply rate limits based on your subscription tier
+- **Offline Mode**: Snyk Code needs Snyk's service, so offline it does not run and is reported MISSING (see [Offline Mode](#offline-mode))
+- **Links leaving the tree**: `snyk code test` uploads the files it reads and has no option that leaves out one path, so ASH does not run it on a directory holding a link to a file whose target is outside that directory. snyk-code is then `ERROR`, and the error names the link. Remove the link, or exclude snyk-code for that scan.
 
 ## Troubleshooting
 
@@ -268,6 +270,12 @@ snyk test --dry-run
 **Empty directory warnings**:
 The plugin will skip scanning if the target directory is empty or doesn't exist, logging an appropriate warning message.
 
+**No supported files (exit code 3)**:
+`snyk code test` exits 3 when the target holds no file Snyk Code supports, for example
+a tree of only Terraform or YAML. snyk-code then evaluated nothing and is reported
+SKIPPED, not ERROR, so it does not fail the completeness gate. Exit code 2 is a Snyk
+failure and is reported ERROR.
+
 ### Debug Mode
 
 Enable verbose logging to troubleshoot issues:
@@ -278,11 +286,18 @@ uv run ash --scanners snyk-code --log-level DEBUG
 
 ### Offline Mode
 
-**Note**: Snyk Code requires internet connectivity and will be automatically disabled in offline mode:
+Snyk Code analyzes code on Snyk's service, so it cannot run offline. In offline mode
+snyk-code does not run and is reported MISSING, which fails the scan under the default
+completeness gate (`fail_on_incomplete_scanners`, exit code 1). To scan offline
+without it, leave it out. Both commands assume the plugin is enabled in your
+configuration, as shown above:
 
 ```bash
-# Snyk Code will be skipped in offline mode
+# snyk-code is MISSING here, and the scan exits 1
 uv run ash --offline --scanners snyk-code
+
+# An offline scan that does not ask for snyk-code
+uv run ash --offline --exclude-scanners snyk-code
 ```
 
 ## Integration Examples
@@ -322,6 +337,9 @@ jobs:
         run: |
           uv run ash --scanners snyk-code --output-format sarif
       - name: Upload SARIF results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: .ash/ash_output/reports/ash.sarif

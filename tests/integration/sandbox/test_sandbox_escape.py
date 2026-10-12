@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A malicious scanner tries to escape; every attempt fails under each sandbox.
+"""A fixture scanner tries to act outside its sandbox; every attempt fails under each sandbox.
 
 The scanner is ``tests/test_data/sandbox_escape``: a third-party-style plugin whose tool
 (escape_probe.py) tries to read a planted ~/.ssh key and a file outside the source
@@ -233,16 +233,22 @@ def _scan(
     outside = home / "outside"
     outside.mkdir()
     (outside / "secret.txt").write_text(CANARY)
-    for victim in ("victim-results.txt", "victim-log.txt"):
-        (outside / victim).write_text("original\n")
+    for link_target in ("outside-results.txt", "outside-log.txt"):
+        (outside / link_target).write_text("original\n")
+    # Outside $HOME and outside every read list.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "secret.txt").write_text(CANARY)
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("print('hello')\n")
+    # Committed in the tree, as a repository can: each names a file the sandbox
+    # does not grant, one inside $HOME and one outside it.
+    (source / "link_to_home").symlink_to(outside / "secret.txt")
+    (source / "link_elsewhere").symlink_to(elsewhere / "secret.txt")
     shutil.copy(FIXTURE / "escape_probe.py", source / "escape_probe.py")
     (source / ".ash").mkdir()
-    (source / ".ash" / ".ash.yaml").write_text(
-        "project_name: sandbox-escape\nash_plugin_modules:\n  - escape_plugins\n"
-    )
+    (source / ".ash" / ".ash.yaml").write_text("project_name: sandbox-escape\n")
     output = source / output_in_source if output_in_source else tmp_path / "out"
     if plant is not None:
         plant(source)
@@ -260,6 +266,8 @@ def _scan(
         "home": str(home),
         "secret": CANARY,
         "outside_file": str(outside / "secret.txt"),
+        "link_to_home": str(source / "link_to_home"),
+        "link_elsewhere": str(source / "link_elsewhere"),
         "outside_dir": str(outside),
         "output_dir": str(output),
         "source_dir": str(source),
@@ -271,9 +279,9 @@ def _scan(
         "unix_datagram_socket": str(listeners.datagram_path or ""),
         "ipc_env": _ipc_environment(listeners),
         "host_cache": str(host_cache),
-        "victims": {
-            "ASH.ScanResults.json": str(outside / "victim-results.txt"),
-            "SandboxEscapeScanner.stdout.log": str(outside / "victim-log.txt"),
+        "link_targets": {
+            "ASH.ScanResults.json": str(outside / "outside-results.txt"),
+            "SandboxEscapeScanner.stdout.log": str(outside / "outside-log.txt"),
         },
         "shm_file": (
             f"/dev/shm/ash-sandbox-probe-{os.getpid()}-{mode}"  # nosec B108 - the probe's target; asserted never to appear
@@ -314,6 +322,10 @@ def _scan(
         # The listeners' directory is visible in every sandbox; see _Listeners.
         "--config-overrides",
         f"sandbox.extra_read_paths=[{listeners.directory}]",
+        # The fixture plugin, as an operator installs one. Its module sits in this
+        # git checkout, which an in-tree config may not import from.
+        "--config-overrides",
+        "ash_plugin_modules=[escape_ash_plugins]",
     ]
     if online:
         # The fixture scanner declares no network need, so it is granted one the
@@ -340,18 +352,18 @@ def _scan(
     outcomes["_source_untouched"] = (
         "succeeded"
         if (source / "app.py").read_text() != "print('hello')\n"
-        or (source / "pwned.txt").exists()
+        or (source / "written.txt").exists()
         else "blocked: source tree unchanged"
     )
     # Planting the links is allowed (it is the scanner's own directory); what must
     # not happen is ASH writing through them afterwards.
     outcomes.pop("plant_symlinks", None)
-    victims_intact = all(
-        Path(v).read_text() == "original\n" for v in spec["victims"].values()
+    link_targets_intact = all(
+        Path(v).read_text() == "original\n" for v in spec["link_targets"].values()
     )
     outcomes["_parent_writes_contained"] = (
         "blocked: ASH did not write through the planted links"
-        if victims_intact
+        if link_targets_intact
         else "succeeded"
     )
     if spec["shm_file"]:
@@ -370,12 +382,12 @@ def _scan(
         "succeeded"
         if seed.read_text() != "original\n"
         or seed.stat().st_mtime_ns != seed_mtime
-        or (host_cache / "pwned.txt").exists()
+        or (host_cache / "written.txt").exists()
         else "blocked: host cache unchanged"
     )
     outcomes["_outside_untouched"] = (
         "succeeded"
-        if (outside / "pwned.txt").exists() or (output / "pwned.txt").exists()
+        if (outside / "written.txt").exists() or (output / "written.txt").exists()
         else "blocked: nothing written outside the results directory"
     )
     return outcomes, works, result
@@ -390,6 +402,11 @@ def test_every_attempt_succeeds_without_a_sandbox(tmp_path, listeners):
         if v != "succeeded" and k not in CONTROL_EXEMPT
     }
     assert not failed, f"attempts that should have succeeded unsandboxed: {failed}"
+    exempt_escaped = {k: outcomes[k] for k in CONTROL_EXEMPT if k in outcomes}
+    assert all(v.startswith(BLOCKED_BY) for v in exempt_escaped.values()), (
+        f"attempts ASH blocks even unsandboxed got through: {exempt_escaped}"
+    )
+    assert set(exempt_escaped) == set(CONTROL_EXEMPT), "an exempt attempt was not made"
     assert listeners.reached() == listeners.kinds
     assert works == EXPECTED_WORKS
 
@@ -414,10 +431,13 @@ BLOCKED_BY = (
 )
 
 
-#: Attempts the negative control is not expected to make succeed, and why. Empty:
-#: unsandboxed, ASH's writes behave exactly as open() and follow a planted link,
-#: which is what makes _parent_writes_contained a real control.
-CONTROL_EXEMPT: dict = {}
+#: Attempts the negative control is not expected to make succeed, and why. Each is
+#: asserted blocked in the control too, so an entry that starts succeeding fails.
+CONTROL_EXEMPT: dict = {
+    "_parent_writes_contained": "ASH's own writes refuse a symlink below the output "
+    "directory with or without a sandbox (fs_guard.open_for_write), so the links "
+    "the probe plants are not written through unsandboxed either",
+}
 
 #: Attempts a backend is documented not to block (docs/content/docs/scanner-sandbox.md).
 #: Listed here rather than skipped, so each one is asserted to be exactly the known
@@ -427,6 +447,18 @@ KNOWN_GAPS = {
         "_shm_untouched": "Landlock cannot make /dev/shm private, and multiprocessing "
         "needs it for semaphores",
     },
+}
+
+#: Attempts whose outcome under a backend depends on where the test's temporary
+#: directory is, so they are not scored there. firejail shows everything outside
+#: $HOME and /tmp, and sandbox-exec reads everywhere except $HOME and the shared
+#: temporary directories (scanner-sandbox.md), so a link to a file outside $HOME is
+#: hidden or not depending on whether the temporary directory is /tmp. Both limits
+#: are pinned in the docs by test_sandbox_docs_state_the_link_target_limits; bwrap
+#: and Landlock hide that file wherever it is, and are scored.
+NOT_SCORED = {
+    "firejail": {"read_link_elsewhere"},
+    "sandbox-exec": {"read_link_elsewhere"},
 }
 
 #: What has to keep working inside every sandbox. uv writes its cache on every run,
@@ -466,6 +498,8 @@ def _control(tmp_path_factory, listeners: _Listeners, *, online: bool) -> set:
 
 
 def _assert_blocked(backend: str, outcomes: Dict[str, str]) -> None:
+    for name in NOT_SCORED.get(backend, set()):
+        outcomes.pop(name, None)
     gaps = KNOWN_GAPS.get(backend, {})
     for name in gaps:
         if name in outcomes:
@@ -564,18 +598,25 @@ def test_an_output_directory_reached_through_a_link_in_the_tree_is_refused(
     assert outcomes is None, (
         f"the scanner ran with a linked output directory: {outcomes}"
     )
-    assert result.returncode == 1, output[-4000:]
+    # 3: an output directory refused for a link, the same code on every path.
+    assert result.returncode == 3, output[-4000:]
     assert "is a symlink" in output, output[-4000:]
     assert _snapshot(target) == before, "the scan wrote into the linked directory"
     assert not listeners.received
 
 
-def test_with_the_sandbox_off_a_linked_output_directory_is_still_used(
+def test_with_the_sandbox_off_a_linked_output_directory_in_the_tree_is_refused_too(
     tmp_path, listeners
 ):
-    """Only a sandboxed scan is refused; unsandboxed, the operator chose the path."""
+    """With the sandbox off too: ASH clears subdirectories of the output directory.
+
+    The operator chose ``build/ash``; where ``build`` points is the tree's. See
+    core/orchestrator.py, _refuse_linked_output_dir.
+    """
     target = tmp_path / "host-dir"
     target.mkdir()
+    (target / "keep.txt").write_text("original\n")
+    before = _snapshot(target)
     outcomes, _, result = _scan(
         tmp_path,
         listeners,
@@ -585,8 +626,10 @@ def test_with_the_sandbox_off_a_linked_output_directory_is_still_used(
             target, target_is_directory=True
         ),
     )
-    assert outcomes is not None, (result.stdout + result.stderr)[-4000:]
-    assert (target / "ash" / "ash_aggregated_results.json").is_file()
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 3, output[-4000:]
+    assert "is a symlink" in output, output[-4000:]
+    assert _snapshot(target) == before, "the scan changed the link's target"
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

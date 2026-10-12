@@ -6,7 +6,7 @@ import shlex
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal, Set
 
 import yaml
 from pydantic import Field
@@ -29,9 +29,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.scanned_tree import (
+    REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
     open_in_scanned_tree,
     relative_display,
@@ -116,6 +118,10 @@ def _excludes(path: Path, root: Path) -> bool:
     )
 
 
+#: ``snyk code test`` exits 3 when the target holds no file it supports.
+_NO_SUPPORTED_FILES_EXIT_CODE = 3
+
+
 class SnykCodeScannerConfigOptions(ScannerOptionsBase):
     honor_tree_exclusions: Annotated[
         bool,
@@ -157,6 +163,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    # src/cli/exit-codes.ts: 0 no issues, 1 issues found, 2 an error, 3 no supported
+    # project detected.
+    success_exit_codes: ClassVar[Set[int]] = {0, 1}
 
     def model_post_init(self, context):
         if self.config is None:
@@ -261,6 +271,29 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _refuse_links_leaving(self, target: Path) -> None:
+        """Refuse a target holding a link to a file whose target leaves it.
+
+        ``snyk code test`` uploads the files it reads to Snyk, has no option that
+        leaves out one path (``--exclude`` is for open-source projects, and takes
+        names, not paths), and how it treats links has not been measured. So a link
+        the repository committed could send a file from outside the scanned tree,
+        such as a credentials file, off the host. The links come from
+        ``file_links_leaving_tree``, which does not enter links to directories and
+        does not read ignore files.
+
+        Raises:
+            ScannerError: Naming the first such link. snyk is then not run on
+                ``target``.
+        """
+        links = file_links_leaving_tree(target)
+        if links:
+            raise ScannerError(
+                f"Not running snyk code test on {Path(target).as_posix()}: "
+                f"{links[0]!r}: {REASON_LINK_LEAVES_TREE}, and snyk has no option "
+                "that leaves out one path, so it might upload the file it points at."
+            )
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — SnykCodeScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -288,6 +321,14 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         Returns:
             dict: Scan results
         """
+        # No claim until this target's run makes one (exit 3 below), so the count
+        # from an earlier target is never read as this one's. The exit code too:
+        # _run_subprocess keeps the worst code of every run of this instance, and the
+        # executor runs one instance over the source tree and then the converted one,
+        # so after a source that exited 3 the converted target read 3 whatever its
+        # own run returned, and was graded SKIPPED with its findings unread.
+        self.targets_attempted = None
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -330,6 +371,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 raise ScannerError(self._exclusion_refusal(excluding, Path(target)))
 
         try:
+            self._refuse_links_leaving(target)
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
@@ -345,15 +387,33 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
 
             # No environment modifications are currently needed for Snyk Code.
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 timeout=self._effective_scan_timeout(),
             )
 
-            # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not
-            # executed successfully.
-            if self.exit_code != 0:
+            # snyk exits 1 when it found issues, which is a completed scan, 2 when it
+            # failed, and 3 when it found no supported project; see success_exit_codes.
+            self._record_target_exit_code(response)
+            # Exit 3 is snyk's "no supported projects detected": the target holds no
+            # file Snyk Code reads, so it evaluated nothing. SKIPPED, by the
+            # maintainer's ruling, rather than the ERROR every other code outside
+            # success_exit_codes gets: a Terraform-only tree is not a failed scan.
+            # targets_attempted = 0 is what the executor grades SKIPPED. Exit 2 is
+            # still a failure.
+            if self.exit_code == _NO_SUPPORTED_FILES_EXIT_CODE:
+                self._plugin_log(
+                    f"Snyk Code found no supported files in {target}; nothing was "
+                    "evaluated (snyk exit code 3).",
+                    target_type=target_type,
+                    level=logging.INFO,
+                )
+                self.targets_attempted = 0
+                self._post_scan(target=target, target_type=target_type)
+                return True
+
+            if not self._exit_code_accepted():
                 raise ScannerError(
                     f"Snyk scan failed with exit code {self.exit_code}: {self.errors}"
                 )
@@ -447,15 +507,3 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             "it reading them. Remove them, or accept them with --config-overrides "
             "scanners.snyk-code.options.honor_tree_exclusions=true."
         )
-
-    def _post_scan(self, target, target_type):
-        # Snyk returns 1 on a successful scan when actionable items are detected
-        if self.exit_code == 1:
-            self._plugin_log(
-                "Snyk scan completed with actionable items detected (1).",
-                target_type=target_type,
-                level=logging.INFO,
-            )
-            self.exit_code = 0  # Reset exit code to 0 for successful scan
-
-        return super()._post_scan(target, target_type)

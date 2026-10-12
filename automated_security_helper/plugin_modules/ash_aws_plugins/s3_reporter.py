@@ -99,8 +99,11 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
 class S3ReporterConfig(ReporterPluginConfigBase):
     name: Literal["s3"] = "s3"
     extension: str = "s3.json"
-    enabled: bool = True
-    options: S3ReporterConfigOptions = S3ReporterConfigOptions()
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
+    enabled: bool = False
+    # A factory, so the environment defaults are read when the config is built.
+    options: S3ReporterConfigOptions = Field(default_factory=S3ReporterConfigOptions)
 
 
 @ash_reporter_plugin
@@ -157,6 +160,8 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
     destination_options = (
         "aws_region",
         "aws_profile",

@@ -25,6 +25,20 @@ from automated_security_helper.utils.uv_tool_runner import (
 
 
 @pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    These tests replace the process boundary and pass it programs that are not
+    installed. On Windows ASH refuses such a name before spawning it
+    (subprocess_utils._refuse_unresolved_on_windows); these tests are about what
+    happens after the spawn, so that decision is set aside here.
+    """
+    from automated_security_helper.utils import subprocess_utils as _subprocess_utils
+
+    monkeypatch.setattr(_subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_module_caches():
     """Clear the module-level memo caches around every test in this file.
 
@@ -85,6 +99,53 @@ class TestIsUvAvailable:
             runner.is_uv_available()
             runner.is_uv_available()
             assert mock_run.call_count == 1
+
+    def test_a_sandbox_refusal_is_not_remembered(self, runner):
+        """A check refused by a probe's sandbox scope says nothing about uv itself.
+
+        The runner is shared by the whole process, so caching that answer made uv
+        read as missing for every later spawn, sandboxed or not.
+        """
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.is_uv_available() is False
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert runner.is_uv_available() is True
+
+    def test_a_sandbox_refusal_is_named_as_the_reason(self, runner):
+        """Not "UV is not available": uv may be installed; the sandbox refused it."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.is_uv_available() is False
+            reason = runner.unavailable_reason()
+
+        assert "scanner sandbox refused to run uv" in reason
+        assert "no bwrap here" in reason
+        assert "UV is not available" not in reason
+
+    def test_an_absent_uv_is_named_as_before(self, runner):
+        """Control, and a later check clears an earlier refusal's reason."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        with sandbox_scope(RefusingScope("jupyter", "no bwrap here")):  # type: ignore[arg-type]
+            runner.is_uv_available()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1)
+            assert runner.is_uv_available() is False
+
+        assert runner.unavailable_reason() == "UV is not available"
 
 
 class TestListAvailableTools:
@@ -181,6 +242,20 @@ class TestGetToolVersion:
         runner._uv_available_cache = True
         with patch("subprocess.run", side_effect=RuntimeError("boom")):
             assert runner.get_tool_version("bandit") is None
+
+    def test_a_sandbox_refusal_is_not_remembered(self, runner):
+        """A probe its sandbox scope refused did not run, so it measured nothing."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+
+        runner._uv_available_cache = True
+        with sandbox_scope(RefusingScope("bandit", "no bwrap here")):  # type: ignore[arg-type]
+            assert runner.get_tool_version("bandit") is None
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.8\n")
+            assert runner.get_tool_version("bandit") == "bandit 1.7.8"
 
 
 class TestInstallToolWithVersion:

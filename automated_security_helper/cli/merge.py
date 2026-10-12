@@ -193,8 +193,14 @@ from pydantic import ValidationError
 # module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
 # reasons about this exact import form.
 from rich import print  # noqa: A004
+from rich.markup import escape
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.base.reporter_plugin import (
+    off_host_reporter_refused,
+    warn_off_host_section_without_enabled,
+)
 
 # Imported at module scope, and not lazily inside the functions that need it,
 # because importing this module is what calls AshAggregatedResults.model_rebuild().
@@ -237,13 +243,29 @@ from automated_security_helper.core.sharding import (
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
-from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ConverterStatusInfo,
+    FailedInputInfo,
+    InputNotScanned,
+    RefusedInputInfo,
+)
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.plugins.loader import (
+    PluginModuleError,
+    load_plugins,
+    refuse_plugin_modules_outside_namespace,
+)
 from automated_security_helper.utils.atomic_write import write_text_atomically
-from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
 from automated_security_helper.utils.inner_run_outcome import without_run_records
+from automated_security_helper.utils.log import ASH_LOGGER, escape_markup, get_logger
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 from automated_security_helper.utils.report_path_links import ReportPathRefused
+from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -895,6 +917,33 @@ def _merge_timing(
         base.metadata.summary_stats.duration = max(durations)
 
 
+def _refuse_shards_without_a_config(
+    loaded: Sequence[Tuple[Path, AshAggregatedResults]],
+) -> None:
+    """Refuse a shard whose results record no scan configuration.
+
+    The merged verdict, the aggregated suppression pass and the report settings
+    are read from the configuration the shards scanned under. A shard with none
+    is not merged under ASH's defaults in its place.
+
+    Raises:
+        ShardCoverageError: Naming each shard that records no configuration.
+    """
+    missing = [
+        Path(path).as_posix()
+        for path, results in loaded
+        if not isinstance(results.ash_config, AshConfig)
+    ]
+    if missing:
+        raise ShardCoverageError(
+            f'Shard results record no scan configuration ("ash_config" is null): '
+            f"{', '.join(missing)}. The merged verdict, suppressions and report "
+            "settings come from the configuration the shards scanned under, so a "
+            "shard without one cannot be merged. Merge the results files the "
+            "shards wrote, unedited."
+        )
+
+
 def merge_shard_results(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     require_scanner_completion: bool = False,
@@ -906,10 +955,11 @@ def merge_shard_results(
 
     Does not mutate its inputs; the base is a deep copy of the lowest-indexed
     shard. That shard supplies the report's identity -- name, description,
-    ``ash_config``, ``converter_results`` -- because those are properties of the
-    scan rather than of the shard, and taking them from the *lowest index* rather
-    than from the first ``--results`` argument makes the merged report
-    independent of the order the operator listed the shards in.
+    ``ash_config`` -- because those are properties of the scan rather than of the
+    shard, and taking them from the *lowest index* rather than from the first
+    ``--results`` argument makes the merged report independent of the order the
+    operator listed the shards in. ``converter_results`` rows are combined across
+    shards instead; see :func:`_merge_converter_rows`.
 
     Args:
         loaded: (path, results) pairs, in any order.
@@ -925,6 +975,7 @@ def merge_shard_results(
         ShardCoverageError: If the shards do not reconstruct exactly one whole
             scan.
     """
+    _refuse_shards_without_a_config(loaded)
     shards = _collect_assignments(loaded)
     verify_shard_coverage([assignment for _, _, assignment in shards])
 
@@ -951,17 +1002,31 @@ def merge_shard_results(
             merged.sarif.merge_sarif_report(shard.sarif)
             _merge_tool_extensions(merged, shard)
 
+        # Every shard read the same config, so each recorded the same config
+        # warnings; those are kept once. Other checkpoints are per shard.
         merged.validation_checkpoints.extend(
-            without_run_records(shard.validation_checkpoints)
+            checkpoint
+            for checkpoint in without_run_records(shard.validation_checkpoints)
+            if not (
+                checkpoint.get("type") == "config_warning"
+                and checkpoint in merged.validation_checkpoints
+            )
         )
         merged.used_suppressions.update(shard.used_suppressions)
 
         for name, converter_result in shard.converter_results.items():
             # Converters are not sharded: every shard converts the whole tree, so
-            # the entries agree and the first one is as good as any. setdefault
-            # rather than assignment keeps the lowest-indexed shard's copy, which
-            # is what makes the result order-independent.
-            merged.converter_results.setdefault(name, converter_result)
+            # the rows normally agree. They are still each shard's own record, and
+            # one shard's runner can fail where another's succeeded -- nbconvert
+            # timing out, a tool missing -- so the rows are combined rather than
+            # the lowest-indexed one kept. Shards are visited in index order, so
+            # the result does not depend on the order they were passed in.
+            base = merged.converter_results.get(name)
+            merged.converter_results[name] = (
+                converter_result.model_copy(deep=True)
+                if base is None
+                else _merge_converter_rows(base, converter_result)
+            )
 
         for name, report in shard.additional_reports.items():
             merged.additional_reports.setdefault(name, report)
@@ -972,14 +1037,152 @@ def merge_shard_results(
             merged.cyclonedx = shard.cyclonedx
 
     _adopt_owning_shard_results(merged, shards, owner_by_scanner)
+    _merge_scan_set_records(merged, shards)
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
+
+    # Each shard was masked against its own secret findings only, and shards split
+    # by scanner, so a secret one shard's scanner reports can sit in another
+    # shard's snippets. The merged set is masked against all of them before
+    # anything is written; see utils/secret_masking.py. By location from the
+    # findings themselves; by value from the shapes every shard recorded, since
+    # no shard holds the values any more once it has masked them.
+    mask_secrets_in_results(
+        merged,
+        shapes=[shape for _, shard, _ in shards for shape in shard.secret_value_shapes],
+    )
 
     # Recomputes summary_stats and per-scanner counts from the merged SARIF, the
     # same call the execution engine makes before the report phase. Without it
     # every count would still be the base shard's, so a merged report would show
     # the union's findings under one shard's totals.
     return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
+def _merge_scan_set_records(
+    merged: AshAggregatedResults,
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Set the merged scan-set records in ``metadata`` from every shard's.
+
+    Each shard builds ASH's scan set itself and records what it left out:
+    ``inputs_not_scanned`` (the links leaving the scanned tree) and
+    ``ignore_file_exclusions``. Shards normally agree, since they scan one tree, but
+    one that ran on a different checkout or with ``--no-honor-ignore-files`` does
+    not, and its scan-set readers did not scan what it left out. So the merged
+    report records what any shard left out, in shard order:
+
+    * ``inputs_not_scanned``: every shard's rows, each (path, reason) once, first
+      record kept; None when no shard recorded one.
+    * ``ignore_file_exclusions``: ``honored`` only when every shard honored the
+      ignore files (as a workspace's merged record says); for each ignore file the
+      most any shard says it removed; ``excluded_file_count`` the sum of those, or
+      the largest shard count when that is more (a shard that did not honor the
+      ignore files can count files the caller's ignore files removed without
+      naming them); ``output_dir_file_count`` the largest. None when no shard
+      recorded one.
+
+    Shards are visited in index order, so the result does not depend on the order
+    they were passed in. No shard is modified.
+    """
+    rows: Dict[Tuple[str, str], InputNotScanned] = {}
+    for _, shard, _ in shards:
+        for row in shard.metadata.inputs_not_scanned or []:
+            rows.setdefault((row.path, row.reason), row)
+    merged.metadata.inputs_not_scanned = (
+        [row.model_copy() for row in rows.values()] if rows else None
+    )
+
+    records = [
+        shard.metadata.ignore_file_exclusions
+        for _, shard, _ in shards
+        if shard.metadata.ignore_file_exclusions is not None
+    ]
+    if not records:
+        merged.metadata.ignore_file_exclusions = None
+        return
+    by_ignore_file: Dict[str, int] = {}
+    for record in records:
+        for path, count in record.by_ignore_file.items():
+            by_ignore_file[path] = max(by_ignore_file.get(path, 0), count)
+    merged.metadata.ignore_file_exclusions = IgnoreFileExclusions(
+        honored=all(record.honored for record in records),
+        excluded_file_count=max(
+            sum(by_ignore_file.values()),
+            max(record.excluded_file_count for record in records),
+        ),
+        by_ignore_file=by_ignore_file,
+        output_dir_file_count=max(record.output_dir_file_count for record in records),
+    )
+
+
+def _merge_converter_rows(
+    base: ConverterStatusInfo, other: ConverterStatusInfo
+) -> ConverterStatusInfo:
+    """One converter's row for the union of two shards' rows.
+
+    Combined so that the completeness gate (``run_ash_scan.incomplete_converters``)
+    sees in the union whatever it would have seen in either shard:
+
+    * ``failure``: every distinct one, in shard order.
+    * ``failed_inputs`` and ``refused_inputs``: every shard's, listed once per path
+      (and per archive member for a refusal), first record kept.
+    * ``dependencies_satisfied``: False if it was False in either shard, with the
+      candidate count of the shards where it was. Only a count of 0 exempts an
+      unavailable converter, so 0 is kept only when every such shard reported 0,
+      and a missing count stays missing.
+    * ``excluded``: True only if both shards excluded it; a shard that ran it is
+      not overridden by one that did not.
+    * ``converted_paths``: the union, in order.
+
+    A field neither row set is left unset, so a simple dump of two agreeing rows is
+    the base row's dump. Neither input is modified.
+    """
+    update: Dict[str, Any] = {}
+    fields_set = base.model_fields_set | other.model_fields_set
+
+    failures = list(dict.fromkeys(f for f in (base.failure, other.failure) if f))
+    if failures:
+        update["failure"] = "; ".join(failures)
+
+    if not (base.dependencies_satisfied and other.dependencies_satisfied):
+        update["dependencies_satisfied"] = False
+        counts = [
+            row.candidate_inputs
+            for row in (base, other)
+            if not row.dependencies_satisfied
+        ]
+        if any(count is None for count in counts):
+            update["candidate_inputs"] = None
+        else:
+            update["candidate_inputs"] = max(c for c in counts if c is not None)
+    elif "candidate_inputs" in fields_set:
+        update["candidate_inputs"] = base.candidate_inputs
+
+    if "excluded" in fields_set:
+        update["excluded"] = base.excluded and other.excluded
+
+    failed: Dict[str, FailedInputInfo] = {}
+    for record in [*base.failed_inputs, *other.failed_inputs]:
+        failed.setdefault(record.path, record)
+    if failed:
+        update["failed_inputs"] = [r.model_copy() for r in failed.values()]
+
+    refused: Dict[Tuple[str, Optional[str]], RefusedInputInfo] = {}
+    for refusal in [*base.refused_inputs, *other.refused_inputs]:
+        refused.setdefault((refusal.path, refusal.member), refusal)
+    if refused:
+        update["refused_inputs"] = [r.model_copy() for r in refused.values()]
+
+    if "converted_paths" in fields_set:
+        update["converted_paths"] = list(
+            dict.fromkeys([*base.converted_paths, *other.converted_paths])
+        )
+
+    merged = base.model_copy(deep=True)
+    for key, value in update.items():
+        setattr(merged, key, value)
+    return merged
 
 
 def _has_sbom_components(cyclonedx: Any) -> bool:
@@ -1782,7 +1985,31 @@ def merge_command(
         print(f"[red]Refusing to merge: {exc}[/red]")
         raise typer.Exit(1)
 
+    # Before anything is written, and before the output directory is created. The
+    # shards' config names the plugin modules the reports are rendered with, and a
+    # module outside the plugin namespace is refused here as the scan itself
+    # refuses it, without importing anything.
+    try:
+        refuse_plugin_modules_outside_namespace(
+            split_plugin_modules(
+                getattr(merged.ash_config, "ash_plugin_modules", None) or []
+            )
+        )
+    except PluginModuleError as exc:
+        # Escaped: the message quotes the configured name, which may hold markup
+        # characters.
+        print(f"[red]Invalid configuration: {escape(str(exc))}[/red]")
+        raise typer.Exit(3)
+
     output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
+    # The merged results and reports are written into the output directory, so a
+    # link there or at reports/ is refused as a scan refuses it.
+    try:
+        refuse_linked_output_dir(Path.cwd(), output_dir_path)
+    except OutputDirLinkRefused as refusal:
+        print(f"[red]{escape_markup(str(refusal))}[/red]")
+        # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
+        raise typer.Exit(3)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # The scan's own configuration, carried through the shard results, rather
@@ -1799,8 +2026,14 @@ def merge_command(
         ignore_suppressions=ignore_suppressions,
     )
 
+    # Also before anything is written: a module the shards' config names that
+    # does not import refuses the merge with exit 3, as it refuses a scan.
     ash_plugin_manager.set_context(plugin_context)
-    load_plugins(plugin_context=plugin_context)
+    try:
+        load_plugins(plugin_context=plugin_context)
+    except PluginModuleError as exc:
+        print(f"[red]Invalid configuration: {escape(str(exc))}[/red]")
+        raise typer.Exit(3)
     reporter_plugins = ash_plugin_manager.plugin_modules(plugin_type="reporter")
     # The plugin modules are loaded, so the destination options each reporter
     # declares are known. Before the merged results are written, so they record
@@ -1823,11 +2056,36 @@ def merge_command(
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
 
+    # The plugins were loaded above, before anything was written.
+    # A reporter that sends findings off the host runs only when the operator's
+    # own --config enables it. The configuration the shards carried came from
+    # whatever config each shard's scan read, a file in the scanned repository
+    # included, and the reporter would send the merged findings with this host's
+    # credentials; so that configuration decides nothing for it, in either
+    # direction.
+    operator_config = resolve_config(config_path=config) if config else None
+    local_reporters, off_host_reporters, notices = select_merge_reporters(
+        reporter_plugins,
+        shard_config=merged.ash_config,
+        operator_config=operator_config,
+    )
+    for notice in notices:
+        logger.warning(notice)
+    # The off-host reporters run only when no format is requested (below), so
+    # only then is an operator section that sets options but no enabled named.
+    if not parsed_formats:
+        for reporter_class in reporter_plugins:
+            if reporter_class in off_host_reporters:
+                continue
+            warn_off_host_section_without_enabled(
+                reporter_class, _section(operator_config, reporter_class)
+            )
+
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
     # output turned off rather than None.
     report_phase = ReportPhase(
-        plugins=reporter_plugins,
+        plugins=local_reporters,
         plugin_context=plugin_context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,
@@ -1839,6 +2097,28 @@ def merge_command(
             aggregated_results=merged,
             python_based_plugins_only=False,
         )
+        # The off-host reporters run with the operator's configuration, so their
+        # destinations are the operator's too. No --output-formats value names one,
+        # so, as in a scan, they run only when no format is requested.
+        if off_host_reporters and not parsed_formats:
+            off_host_context = PluginContext(
+                source_dir=Path.cwd(),
+                output_dir=output_dir_path,
+                work_dir=output_dir_path.joinpath("work"),
+                config=operator_config,
+                ignore_suppressions=ignore_suppressions,
+            )
+            merged = ReportPhase(
+                plugins=off_host_reporters,
+                plugin_context=off_host_context,
+                progress_display=LiveProgressDisplay(show_progress=False),
+                asharp_model=merged,
+            ).execute(
+                report_dir=output_dir_path.joinpath("reports"),
+                cli_output_formats=None,
+                aggregated_results=merged,
+                python_based_plugins_only=False,
+            )
     except ReportPathRefused as exc:
         # Refused before any reporter wrote: a link at the reports directory or at
         # a report file, or a report file name outside it. Printed like the other
@@ -1856,6 +2136,63 @@ def merge_command(
     _print_merge_summary(merged, merged_file, exit_code)
     if exit_code != 0:
         raise typer.Exit(exit_code)
+
+
+def _section(config: Optional[AshConfig], reporter_class: type) -> Optional[Any]:
+    if config is None:
+        return None
+    try:
+        return config.get_plugin_config(
+            plugin_type="reporter", plugin_name=plugin_config_key(reporter_class)
+        )
+    except Exception:  # noqa: BLE001 -- an unknown reporter has no section
+        return None
+
+
+def select_merge_reporters(
+    reporter_classes: Sequence[type],
+    shard_config: Optional[AshConfig],
+    operator_config: Optional[AshConfig],
+) -> Tuple[List[type], List[type], List[str]]:
+    """Split ``ash merge``'s reporters into local and off-host ones, and say what was ignored.
+
+    A reporter that sends findings off the host runs only when the operator's own
+    ``--config`` sets ``enabled: true`` in its section (``off_host_reporter_refused``).
+    The configuration the shards recorded is ignored for it, in both directions:
+    a shard's ``enabled: true`` does not run it and a shard's ``enabled: false``
+    does not stop it. Where the shards' value disagrees with the operator's
+    decision, a notice says it was ignored. Every recorded configuration carries
+    every reporter's ``enabled``, its default included, so a value that agrees
+    cannot be told from a default and is not reported.
+
+    Returns the local reporters, the off-host reporters that run, and the notices.
+    """
+    local: List[type] = []
+    off_host: List[type] = []
+    notices: List[str] = []
+    for reporter_class in reporter_classes:
+        if getattr(reporter_class, "sends_off_host", False) is not True:
+            local.append(reporter_class)
+            continue
+        name = plugin_config_key(reporter_class)
+        refused = off_host_reporter_refused(
+            reporter_class, _section(operator_config, reporter_class)
+        )
+        shard_section = _section(shard_config, reporter_class)
+        shard_enabled = (
+            shard_section.get("enabled") if isinstance(shard_section, dict) else None
+        )
+        if isinstance(shard_enabled, bool) and shard_enabled is refused:
+            notices.append(
+                f"Ignoring 'enabled: {str(shard_enabled).lower()}' for reporter "
+                f"'{name}' in the configuration the shards recorded: it sends "
+                "findings off the host, so only the operator's --config decides "
+                f"whether it runs. It {'does not run' if refused else 'runs'}."
+            )
+        if refused:
+            continue
+        off_host.append(reporter_class)
+    return local, off_host, notices
 
 
 def _relocate_colliding_output_dir(output_dir: Path) -> Path:
@@ -2024,9 +2361,13 @@ def _print_merge_summary(
         # was empty enough to be refused outright. Naming the scanners matters
         # more here than in a single scan: the operator has n CI jobs and no other
         # way to tell which one to look at.
+        from rich.markup import escape as escape_markup
+
         from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_converters,
             incomplete_scanners,
         )
+        from automated_security_helper.utils.converter_refusals import inert_text
 
         incomplete = incomplete_scanners(merged)
         if incomplete:
@@ -2042,3 +2383,19 @@ def _print_merge_summary(
             )
             for name, status in incomplete:
                 print(f"  [red]{name}: {status}[/red]")
+        # _merged_exit_code counts these too, so the summary names them: a
+        # merge that fails for an archive over a limit or one that could not be
+        # read otherwise prints only the counts. Their reasons hold file names
+        # from the scanned tree, so they are printed as inert text.
+        converters = incomplete_converters(merged)
+        if converters:
+            print(
+                f"[bold red]ERROR (1) Exiting because conversion in the merged scan "
+                f"was incomplete: {len(converters)} converter(s) did not process "
+                f"the files they were given[/bold red]"
+            )
+            for name, reason in converters:
+                print(
+                    f"  [red]{escape_markup(inert_text(name))}: "
+                    f"{escape_markup(inert_text(reason))}[/red]"
+                )

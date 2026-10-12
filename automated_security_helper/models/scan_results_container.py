@@ -9,7 +9,15 @@ from typing import Annotated, Any, Dict, Literal, List, Optional
 from pydantic import BaseModel, Field
 
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.models.asharp_model import ScannerSeverityCount
+
+# InputNotScanned is defined beside ReportMetadata, which records the scan-level ones;
+# imported here, where each scanner's own are recorded, under the name it always had.
+from automated_security_helper.models.asharp_model import (
+    InputNotScanned,
+    ScannerSeverityCount,
+)
+
+__all__ = ["InputNotScanned", "ScanResultsContainer"]
 
 
 class ScanResultsContainer(BaseModel):
@@ -90,6 +98,13 @@ class ScanResultsContainer(BaseModel):
     targets_attempted: int | None = None
     targets_failed: int = 0
 
+    # Inputs the scanner found and did not scan, each with the reason: npm-audit's
+    # lockfiles in offline mode, which it cannot audit without the registry's advisory
+    # service. Rendered beside the summary table and markdown summary
+    # (unified_metrics.inputs_not_scanned), because no status value says which input
+    # went unexamined. Empty for a scanner that scanned everything it found.
+    inputs_not_scanned: List[InputNotScanned] = Field(default_factory=list)
+
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the container.
 
@@ -104,9 +119,14 @@ class ScanResultsContainer(BaseModel):
 
         Args:
             error: Error message to add
+
+        Assigned rather than appended: appending to the default list does not mark
+        ``errors`` as set, so ``model_dump(exclude_unset=True)`` (ScanResultProcessor)
+        would leave the reason out of ``additional_reports`` and
+        ``ASH.ScanResults.json``.
         """
         if error not in self.errors:
-            self.errors.append(error)
+            self.errors = [*self.errors, error]
 
     def record_target_attempt(self, count: int = 1) -> None:
         """Record that the scanner is about to process ``count`` more targets.

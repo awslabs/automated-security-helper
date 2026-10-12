@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
@@ -49,7 +50,7 @@ class SandboxRequirements:
         cache_env: Variables that move a tool's writable cache (``npm_config_cache``).
             Where ``cache_paths`` are read-only, each variable named here points at
             a private, empty directory for the spawn, so a tool that has to write
-            its cache still can. A cache that is only read, such as a vulnerability
+            its cache still can. A cache that is only read, such as a scanner's
             database prepared before the scan, is not listed.
         env_prefixes: Environment variable name prefixes passed through in addition to
             the baseline allowlist (``GRYPE_``, ``SEMGREP_``, ...). Credential-shaped
@@ -83,6 +84,31 @@ class SandboxRequirements:
             executable for it alone and removed afterwards, so nothing it unpacks
             reaches another run. Other backends give the tool a private home
             directory and do not restrict exec, and leave the variable alone.
+        read_paths_require_grant: ``read_paths`` and ``cache_paths`` follow the
+            scanner's options, which the scanned repository can write (a rules
+            file or baseline path, for example). ``read_paths`` are mounted only
+            when ``sandbox.read_path_scanners`` names the scanner, and then only
+            inside the source tree or an ``extra_read_paths`` entry;
+            ``cache_paths`` are never mounted.
+        env_requires_grant: ``env_prefixes`` and ``env_names`` follow the
+            scanner's options (a token for an online check, for example). They are
+            passed only when ``sandbox.env_scanners`` names the scanner.
+        read_path_env: Variables in ASH's own environment that name a directory
+            the tool reads, mounted read-only and, under sandbox-exec, not
+            executable: semgrep's offline rule cache,
+            ``SEMGREP_RULES_CACHE_DIR``. Read from ASH's process environment when
+            the policy is built, never from the scanner's options, which the
+            scanned repository can write, so no grant is needed. An unset or empty
+            variable, a relative path, anything but a directory, and a directory
+            as broad as a filesystem root, ``$HOME`` or a directory holding
+            ``$HOME`` grant nothing. A directory directly under ``$HOME`` (``~/rules``)
+            is mounted as named: the operator chose it.
+        staged_input_only: The tool is handed a staged copy of its input outside the
+            scanned tree, and reads nothing else of the scan: nbconvert converts one
+            notebook ASH copied to a private directory. The source and output
+            directories are left out of its read paths and named in the policy's
+            ``unread``, so it reads its scan target, its working directory and its
+            tools, and writes its results directory.
     """
 
     network: bool = False
@@ -95,6 +121,10 @@ class SandboxRequirements:
     system_trust_roots: bool = False
     sandbox_exec_env: Tuple[Tuple[str, str], ...] = ()
     unpack_dir_env: Optional[str] = None
+    read_paths_require_grant: bool = False
+    env_requires_grant: bool = False
+    read_path_env: Tuple[str, ...] = ()
+    staged_input_only: bool = False
 
 
 #: The baseline environment allowlist. Exact names, then prefixes. Anything else in
@@ -197,10 +227,11 @@ class SandboxPolicy:
     scan's own data, so the system and tool paths. Programs run from there, and from
     the spawn's private uv cache, which the backend adds because ``uv tool run``
     keeps the environments of tools it was not asked to install there. ``scan_data`` is the scan's data
-    (the source tree, the output directory, the scan target, the working directory
-    and the directory of config files ASH wrote for the tool), which stays
-    non-executable even where a tool path contains it, so a repository checked out
-    under ``/opt`` cannot have its own binaries run.
+    (the source tree, the output directory, the scan target, the working
+    directory, the directories ``read_path_env`` names, and the directory of config
+    files ASH wrote for the tool), which stays non-executable even where a tool path
+    contains it, so a repository checked out under ``/opt`` cannot have its own
+    binaries run.
     """
 
     scanner_name: str
@@ -225,6 +256,15 @@ class SandboxPolicy:
     #: it looks for an installed tool. The file, not the directory: writing the
     #: lock changes nothing a later run reads.
     uv_tool_locks: Tuple[Path, ...] = ()
+    #: Directories the tool may not read even where a path the policy shows holds
+    #: them: the source and output directories of a tool given a staged copy
+    #: (``SandboxRequirements.staged_input_only``). bwrap mounts an empty directory
+    #: over each that a wider mount would show, and sandbox-exec denies reading
+    #: them after the reads it allows; both give back what the policy lists inside
+    #: them. Landlock only grants, and firejail shows everything outside ``$HOME``
+    #: and ``/tmp``, so under those a tree inside a directory they show stays
+    #: readable.
+    unread: Tuple[Path, ...] = ()
 
     @property
     def results_dir(self) -> Path:
@@ -384,6 +424,44 @@ def _path_directories(home: Path) -> List[Path]:
     return _existing(entries)
 
 
+def _contained_option_paths(
+    spelled: Sequence[str], roots: Sequence[Path]
+) -> Tuple[str, ...]:
+    """The paths a scanner's options name that may be mounted, as resolved paths.
+
+    Options are repository-writable, so a path they name is mounted only when it
+    resolves inside one of ``roots`` (the source tree and the operator's
+    ``extra_read_paths``) and is a regular file or directory, never a socket or
+    device. The resolved path is what goes into the policy, so a link swapped after
+    this check is not followed later.
+    """
+    real_roots = [Path(os.path.realpath(root)) for root in roots]
+    kept: List[str] = []
+    for value in spelled:
+        path = _expand(value)
+        if path is None:
+            continue
+        real = Path(os.path.realpath(path))
+        try:
+            mode = os.stat(real).st_mode
+        except OSError:
+            continue
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            continue
+        if _inside_any(real, real_roots):
+            kept.append(str(real))
+    return tuple(kept)
+
+
+def _inside_any(real: PurePath, roots: Sequence[PurePath]) -> bool:
+    """Whether ``real`` is one of ``roots`` or below one, by path comparison alone.
+
+    Both sides are already resolved. Pure-path comparison follows the platform's
+    rules: on Windows, case-insensitive, and never equal across drives.
+    """
+    return any(real == root or root in real.parents for root in roots)
+
+
 def _broader_than_a_tool(path: Path) -> bool:
     """Whether mounting ``path`` would expose more than one tool installation.
 
@@ -396,6 +474,44 @@ def _broader_than_a_tool(path: Path) -> bool:
     return (
         real == Path("/") or real == home or real in home.parents or real.parent == home
     )
+
+
+def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
+    """The directories ``names`` name in ASH's own environment, as read grants.
+
+    See ``SandboxRequirements.read_path_env``. A value that would expose far more
+    than one directory -- a filesystem root, ``$HOME``, or a directory holding
+    ``$HOME`` -- is refused with a warning, so the tool then finds nothing there and
+    says so, rather than reading the whole home directory.
+    """
+    real_home = Path(os.path.realpath(Path.home()))
+    granted: List[Path] = []
+    for name in names:
+        value = os.environ.get(name, "")
+        if not value or not os.path.isabs(value):
+            continue
+        if not os.path.isdir(value):
+            # A rules directory, not a file, and not a path that does not exist.
+            if os.path.lexists(value):
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.warning(
+                    f"${name}={value} is not mounted in the scanner sandbox: it is "
+                    "not a directory."
+                )
+            continue
+        real = Path(os.path.realpath(value))
+        if real == Path(real.anchor) or real == real_home or real in real_home.parents:
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                f"${name}={value} is not mounted in the scanner sandbox: it would "
+                "expose far more than one directory. Point it at the directory "
+                "itself."
+            )
+            continue
+        granted.append(Path(value))
+    return granted
 
 
 def _symlink_hops(path: Path) -> List[Path]:
@@ -418,7 +534,7 @@ def _symlink_hops(path: Path) -> List[Path]:
 
 
 def _lookup(name: str) -> Optional[str]:
-    """``find_executable``: never from the working directory."""
+    """``find_executable``: never from the working directory or the scanned tree."""
     from automated_security_helper.utils.subprocess_utils import find_executable
 
     return find_executable(name)
@@ -594,48 +710,20 @@ def refuse_symlinked_output_dir(source_dir: Path, output_dir: Path) -> None:
     would let the repository pick a host directory for the sandbox to show and
     for ASH to write.
 
-    Refused, with the path in the message: any component from below the source
-    directory down to the output directory that is a symlink; the output
-    directory itself if it is one, wherever it is; and an output directory inside
-    the source tree whose real path is not the source directory's real path plus
-    the rest of its spelling (a ``..`` after a symlink resolves elsewhere than it
-    reads). Components at and above the source directory are the operator's own
-    spelling (a home directory that links elsewhere, macOS's ``/var``) and are not
-    examined, so an ordinary output directory outside the tree is unaffected.
+    The same check every scan makes before it starts, whatever the sandbox mode
+    (utils/output_dir_links.py), made again here for each scanner's policy so a
+    link that appeared since is not mounted. Links at or above the source
+    directory are the operator's own spelling and are not examined.
     """
-    source = Path(os.path.abspath(source_dir))
-    spelled = Path(output_dir).absolute()
+    from automated_security_helper.utils.output_dir_links import (
+        linked_output_component,
+    )
 
-    def refuse_link(path: Path) -> None:
-        if path.is_symlink():
-            raise SandboxUnavailable(
-                f"the output directory path {path.as_posix()} is a symlink, so "
-                "mounting the output directory would expose wherever it points"
-            )
-
-    # Walked as spelled, `..` included, so a link that a later `..` would step
-    # back out of is still seen.
-    current = Path(spelled.anchor)
-    for part in spelled.parts[1:]:
-        if part == "..":
-            current = current.parent
-            continue
-        if part in ("", "."):
-            continue
-        current = current / part
-        if source in current.parents:
-            refuse_link(current)
-    refuse_link(current)
-    lexical = Path(os.path.abspath(spelled))
-    if source in lexical.parents:
-        expected = Path(os.path.realpath(source)) / lexical.relative_to(source)
-        actual = Path(os.path.realpath(lexical))
-        if actual != expected:
-            raise SandboxUnavailable(
-                f"the output directory {lexical.as_posix()} resolves to "
-                f"{actual.as_posix()}, not where its path inside the source "
-                "directory reads, so mounting it would expose another directory"
-            )
+    found = linked_output_component(source_dir, output_dir)
+    if found is not None:
+        raise SandboxUnavailable(
+            f"{found}, so mounting the output directory would expose wherever it points"
+        )
 
 
 def build_scanner_policy(
@@ -652,6 +740,8 @@ def build_scanner_policy(
     network_scanners: Optional[Sequence[str]],
     extra_read_paths: Sequence[str] = (),
     network_limit: Optional[Sequence[str]] = None,
+    read_path_scanners: Sequence[str] = (),
+    env_scanners: Sequence[str] = (),
     tool_config_dir: Optional[Path] = None,
 ) -> SandboxPolicy:
     """The policy one scanner gets for one spawn.
@@ -662,12 +752,36 @@ def build_scanner_policy(
         network_limit: When not None, a scanner not named here gets no network
             whatever the rest says. Set from a config file in the scanned tree,
             which may take network away but not grant it.
+        read_path_scanners: Scanners whose ``read_paths_require_grant`` paths
+            are granted.
+        env_scanners: Scanners whose ``env_requires_grant`` variables are
+            granted.
         tool_config_dir: The directory of config files ASH wrote for this scanner
             run's tool (``utils/tool_config_dir``). Read-only, and in
             ``scan_data``, so a backend that limits where programs run from
             (sandbox-exec) runs none from it.
     """
     real_home = Path.home()
+    read_granted = not requirements.read_paths_require_grant or scanner_name in set(
+        read_path_scanners
+    )
+    env_granted = not requirements.env_requires_grant or scanner_name in set(
+        env_scanners
+    )
+    declared_read = requirements.read_paths if read_granted else ()
+    declared_cache = requirements.cache_paths if read_granted else ()
+    if requirements.read_paths_require_grant:
+        # Paths taken from options the repository can write. Even when granted,
+        # only what the trusted policy already reaches: the source tree and the
+        # operator's extra_read_paths. Never a writable cache.
+        declared_read = _contained_option_paths(
+            declared_read,
+            [source_dir]
+            + [p for p in (_expand(e) for e in extra_read_paths) if p is not None],
+        )
+        declared_cache = ()
+    declared_prefixes = requirements.env_prefixes if env_granted else ()
+    declared_names = requirements.env_names if env_granted else ()
     if network_scanners is None:
         network = requirements.network and not requirements.network_requires_grant
     else:
@@ -677,20 +791,27 @@ def build_scanner_policy(
     if offline:
         network = False
 
+    # Data the tool reads, like the scan's own: readable, never executable.
+    env_named_reads = _env_named_read_paths(requirements.read_path_env)
+    # A tool given a staged copy reads that copy (the scan target), not the scan's
+    # tree or its output.
+    unread = (
+        _existing([source_dir, output_dir]) if requirements.staged_input_only else []
+    )
+    scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     read_only = _existing(
         [Path(p) for p in SYSTEM_READ_PATHS]
         + _path_directories(real_home)
         + _uv_directories()
         + _ash_paths()
         + _executable_prefix(argv0)
-        + [_expand(p) for p in requirements.read_paths]
+        + [_expand(p) for p in declared_read]
+        + env_named_reads
         + [_expand(p) for p in extra_read_paths]
-        + [source_dir, output_dir, scan_target, _readable_cwd(cwd), tool_config_dir]
+        + [*scan_tree, scan_target, _readable_cwd(cwd), tool_config_dir]
     )
 
-    cache = _existing(
-        [uv_cache_directory()] + [_expand(p) for p in requirements.cache_paths]
-    )
+    cache = _existing([uv_cache_directory()] + [_expand(p) for p in declared_cache])
 
     refuse_symlinked_output_dir(source_dir, output_dir)
     _refuse_symlinked_results_dir(output_dir, results_dir)
@@ -710,7 +831,22 @@ def build_scanner_policy(
     read_only = [p for p in read_only if not _inside_writable(p)]
     cache = [p for p in cache if not _inside_writable(p)]
 
-    scan_data = _existing([source_dir, output_dir, scan_target, cwd, tool_config_dir])
+    # The working directory the same way the read list takes it: a filesystem root
+    # (checkov and ferret-scan run from one so that they read no config file from
+    # the scanned tree) is not the scan's data.
+    # The offline rule cache too: data the tool reads, which sandbox-exec then
+    # denies exec in even where an executable root (/opt, /usr/local) contains it.
+    # And the directory of config files ASH wrote for this run's tool.
+    scan_data = _existing(
+        [
+            source_dir,
+            output_dir,
+            scan_target,
+            _readable_cwd(cwd),
+            *env_named_reads,
+            tool_config_dir,
+        ]
+    )
     not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
@@ -731,8 +867,8 @@ def build_scanner_policy(
         network=network,
         home=real_home,
         cwd=cwd.absolute() if cwd else None,
-        env_prefixes=tuple(requirements.env_prefixes),
-        env_names=tuple(requirements.env_names),
+        env_prefixes=tuple(declared_prefixes),
+        env_names=tuple(declared_names),
         extra_env=extra_env,
         cache_env=cache_env,
         executable=tuple(executable),
@@ -741,4 +877,5 @@ def build_scanner_policy(
         sandbox_exec_env=dict(requirements.sandbox_exec_env),
         unpack_dir_env=requirements.unpack_dir_env,
         uv_tool_locks=tuple(_uv_tool_locks()),
+        unread=tuple(unread),
     )

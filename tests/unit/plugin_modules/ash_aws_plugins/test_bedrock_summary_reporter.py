@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the BedrockSummaryReporter class."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,7 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_re
     BedrockSummaryReporterConfigOptions,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 
 AshConfig.model_rebuild()
 BedrockSummaryReporterConfig.model_rebuild()
@@ -109,7 +111,15 @@ def reporter(mock_context):
 
 @pytest.fixture
 def sample_sarif_model():
-    """Build an AshAggregatedResults with realistic SARIF findings."""
+    """Build an AshAggregatedResults with findings shaped as the engine shapes them.
+
+    Two bandit findings and one detect-secrets finding, each scanner's report
+    passed through ``attach_scanner_details`` and merged the way
+    ``ScanResultProcessor`` does it. The secret finding is the result
+    ``DetectSecretsScanner`` writes, tags included; no scanner sets a
+    ``scanner_type`` property, so none is set here.
+    """
+    from automated_security_helper.core.enums import ScannerToolType
     from automated_security_helper.models.asharp_model import AshAggregatedResults
     from automated_security_helper.schemas.sarif_schema_model import (
         SarifReport,
@@ -124,11 +134,13 @@ def sample_sarif_model():
         Region,
         ReportingDescriptorReference,
         PropertyBag,
+        ArtifactContent,
     )
+    from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
     AshAggregatedResults.model_rebuild()
 
-    findings = [
+    bandit_findings = [
         Result(
             ruleId="B101",
             rule=ReportingDescriptorReference(id="B101"),
@@ -142,7 +154,6 @@ def sample_sarif_model():
                     )
                 )
             ],
-            properties=PropertyBag(scanner_type="SAST"),
         ),
         Result(
             ruleId="B108",
@@ -157,38 +168,63 @@ def sample_sarif_model():
                     )
                 )
             ],
-            properties=PropertyBag(scanner_type="SAST"),
         ),
+    ]
+    detect_secrets_findings = [
         Result(
-            ruleId="SECRET001",
-            rule=ReportingDescriptorReference(id="SECRET001"),
+            ruleId="SECRET-AWS-ACCESS-KEY",
+            properties=PropertyBag(
+                tags=[
+                    "detect-secrets",
+                    "secret",
+                    "security",
+                    "tool_name::detect-secrets",
+                    f"tool_type::{ScannerToolType.SECRETS}",
+                ],
+            ),
             level="error",
-            message=Message(text="Possible AWS access key"),
+            message=Message(
+                text="Secret of type 'AWS Access Key' detected in file "
+                "'config/.env' at line 3"
+            ),
             locations=[
                 Location(
+                    id=1,
                     physicalLocation=PhysicalLocation(
                         artifactLocation=ArtifactLocation(uri="config/.env"),
-                        region=Region(startLine=3, endLine=3),
-                    )
+                        region=Region(
+                            startLine=3,
+                            endLine=3,
+                            snippet=ArtifactContent(
+                                text="Secret of type AWS Access Key detected"
+                            ),
+                        ),
+                    ),
                 )
             ],
-            properties=PropertyBag(scanner_type="SECRET"),
         ),
     ]
 
-    run = Run(
-        tool=Tool(
-            driver=ToolComponent(
-                name="ASH",
-                version="1.0.0",
-            )
-        ),
-        results=findings,
-    )
-
     model = AshAggregatedResults()
-    model.sarif = SarifReport(version="2.1.0", runs=[run])
-    model.scanner_results = {"bandit": MagicMock(), "gitleaks": MagicMock()}
+    for scanner_name, version, results in (
+        ("bandit", "1.9.4", bandit_findings),
+        ("detect-secrets", "1.5.0", detect_secrets_findings),
+    ):
+        report = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name=scanner_name)),
+                    results=results,
+                )
+            ],
+        )
+        model.sarif.merge_sarif_report(
+            attach_scanner_details(
+                report, scanner_name=scanner_name, scanner_version=version
+            )
+        )
+    model.scanner_results = {"bandit": MagicMock(), "detect-secrets": MagicMock()}
     return model
 
 
@@ -842,6 +878,44 @@ class TestReport:
         assert main_report.exists()
         content = main_report.read_text()
         assert len(content) > 0
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    @patch("boto3.client")
+    @patch("boto3.Session")
+    def test_report_is_not_written_through_a_link_at_its_name(
+        self,
+        mock_session_cls,
+        mock_boto3_client,
+        mock_context,
+        sample_sarif_model,
+        bedrock_client_ok,
+        bedrock_runtime_ok,
+        temp_output_dir,
+        tmp_path,
+    ):
+        """``ash report`` writes into an existing reports/, so the name may be a link."""
+        session = MagicMock()
+        session.client.side_effect = lambda svc, **kw: {
+            "bedrock": bedrock_client_ok,
+            "bedrock-runtime": bedrock_runtime_ok,
+        }.get(svc, MagicMock())
+        mock_session_cls.return_value = session
+        mock_boto3_client.return_value = bedrock_client_ok
+        reports_dir = Path(temp_output_dir) / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        victim = tmp_path / "victim.md"
+        (reports_dir / "ash.bedrock.summary.md").symlink_to(victim)
+
+        reporter = BedrockSummaryReporter(context=mock_context)
+        reporter.config.options.output_markdown = True
+        try:
+            reporter.report(sample_sarif_model)
+        except OutputDirLinkRefused:
+            pass
+
+        assert not victim.exists(), "the summary was written through the link"
 
     @patch("boto3.client")
     @patch("boto3.Session")

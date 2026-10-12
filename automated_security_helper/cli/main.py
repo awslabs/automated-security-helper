@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from pathlib import Path
+
 import typer
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.dependencies import dependencies_app
@@ -90,7 +92,22 @@ def _mcp_wrapper(
     auth_header_value: str = typer.Option(
         None,
         "--auth-header-value",
-        help="Expected value of --auth-header-name.",
+        help="Expected value of --auth-header-name. Visible to other local users "
+        "on the command line; prefer --auth-header-value-file or "
+        "--auth-header-value-fd.",
+    ),
+    auth_header_value_file: Path = typer.Option(
+        None,
+        "--auth-header-value-file",
+        help="Read the expected value of --auth-header-name from this file, once at "
+        "startup: a regular file, not a symlink, readable by its owner only. One "
+        "trailing newline is dropped.",
+    ),
+    auth_header_value_fd: int = typer.Option(
+        None,
+        "--auth-header-value-fd",
+        help="Read the expected value of --auth-header-name from this inherited "
+        "file descriptor (3 or above), once at startup, then close it.",
     ),
     stateless_http: bool = typer.Option(
         False,
@@ -101,13 +118,38 @@ def _mcp_wrapper(
         "that inject their own Mcp-Session-Id. Only valid with "
         "--transport streamable-http.",
     ),
+    trust_upstream_session_id: bool = typer.Option(
+        False,
+        "--trust-upstream-session-id",
+        help="Stateless streamable-HTTP only. Declare that a platform in front of "
+        "ASH issues and authenticates the Mcp-Session-Id header, so it can name "
+        "the caller's session. Without it a stateless server identifies no "
+        "session, and tools that need one (source delivery, profiles, the scan "
+        "registry) refuse.",
+    ),
     allowed_host: list[str] | None = typer.Option(
         None,
         "--allowed-host",
         help="Host header value to accept, repeatable. Keeps DNS-rebinding "
         "protection enabled while allowing a known proxy or load balancer "
-        "hostname. Without this, protection is enabled only when --host is "
-        "loopback, matching the MCP SDK's own default.",
+        "hostname. Required with a non-loopback --host unless "
+        "--trust-upstream-host-check is given.",
+    ),
+    session_workspace_ttl: int | None = typer.Option(
+        None,
+        "--session-workspace-ttl",
+        help="HTTP transports only. Seconds a session workspace (delivered source, "
+        "uploads, bound profile) may go unused before it is removed. Covers "
+        "sessions whose end the server cannot see, such as every stateless one. "
+        "Default: 86400 (24 hours).",
+    ),
+    trust_upstream_host_check: bool = typer.Option(
+        False,
+        "--trust-upstream-host-check",
+        help="HTTP transports only. Declare that a proxy or platform in front of "
+        "ASH checks the Host and Origin headers, so ASH serves any. Without it, a "
+        "non-loopback --host needs --allowed-host or the server refuses to start. "
+        "Cannot be combined with --allowed-host.",
     ),
     profile: list[str] | None = typer.Option(
         None,
@@ -136,8 +178,13 @@ def _mcp_wrapper(
         mount_path=mount_path,
         auth_header_name=auth_header_name,
         auth_header_value=auth_header_value,
+        auth_header_value_file=auth_header_value_file,
+        auth_header_value_fd=auth_header_value_fd,
         stateless_http=stateless_http,
+        trust_upstream_session_id=trust_upstream_session_id,
         allowed_host=allowed_host,
+        trust_upstream_host_check=trust_upstream_host_check,
+        session_workspace_ttl=session_workspace_ttl,
         profile=profile,
     )
 
@@ -214,9 +261,20 @@ def get_genai_guide(
             typer.echo(github_url, err=True)
             raise typer.Exit(1)
 
-    # Write to output file
+    # Write to output file, as a new file renamed over the destination: a symlink
+    # there is refused rather than written through (fs_guard).
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        replace_without_following,
+    )
+
     output_file = Path(output_path)
-    output_file.write_text(guide_content)
+    try:
+        replace_without_following(output_file, guide_content)
+    except OutputDirLinkRefused as refused:
+        # The family's base, a symlink or a file another name refers to alike.
+        typer.echo(f"Error: {refused}", err=True)
+        raise typer.Exit(1)
 
     typer.echo(f"✓ GenAI Integration Guide saved to: {output_file.absolute()}")
     if source:

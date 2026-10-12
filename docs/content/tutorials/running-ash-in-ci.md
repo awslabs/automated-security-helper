@@ -6,13 +6,28 @@ This guide explains how to integrate ASH v3 into various CI/CD platforms.
 
 ASH supports running in CI environments as an executable container (e.g., via `docker run`) as well as via Container Job mechanisms, depending on CI platform support.
 
+### What to keep as a build artifact
+
+The examples on this page keep `reports/` and `ash_aggregated_results.json` from the output directory, not the whole directory. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files. Those are not masked, so a secret a scanner found is in them in full, and anyone who can download the build's artifacts could read it. A workspace scan (`--workspace`) writes the same layout once per project under `projects/<key>/`; keep `projects/*/reports` and `projects/*/ash_aggregated_results.json` as well, and leave each project's `scanners/` and `converted/` out.
+
 ### Building ASH Container Images for CI Usage
 
-Building ASH images for use in CI platforms requires targeting the `ci` stage of the `Dockerfile`:
+`ash --mode container` and `ash build-image` build the `non-root` stage of the
+`Dockerfile` unless you pass `--build-target ci`. Running inside a CI job does not change
+that: `CI`, `IsCI`, `ISCI` and `CODEBUILD_BUILD_ID` play no part in choosing the stage.
+
+Pass `--build-target ci`, whose image runs as root, when the CI job itself runs as root,
+as AWS CodeBuild and container-based GitLab and Jenkins jobs do. The `non-root` stage
+creates its user with the UID of the account running ASH, and ASH refuses to build it as
+UID 0. Use it as well when the platform starts containers with UIDs you cannot set, so
+the non-root user could not write the mounted output directory. Otherwise keep the
+default: on GitHub-hosted runners, for example, the job runs as an unprivileged user and
+`non-root` works.
 
 ```bash
 # Via ash CLI
 ash build-image --build-target ci
+ash --mode container --build-target ci
 
 # Via docker or other OCI CLI
 docker build --tag automated-security-helper:ci --target ci .
@@ -95,10 +110,15 @@ jobs:
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Using Container Mode
@@ -124,10 +144,15 @@ jobs:
       - name: Run ASH scan
         run: ash --mode container
       - name: Upload scan results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### GitHub Advanced Security (Code Scanning)
@@ -294,12 +319,19 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ash-merged-results
-          path: .ash/merged
+          path: |
+            .ash/merged/reports
+            .ash/merged/ash_aggregated_results.json
 ```
 
 Leaving `merge-multiple` off the download step is deliberate: each artifact then extracts into its own directory under `shards/`, which is what the loop iterates over. With `merge-multiple: true` all four shards would extract into the same directory and overwrite each other's `ash_aggregated_results.json`.
 
 The shard upload step has no `if: always()`, so a shard whose scan crashed uploads nothing, its job goes red, and the collect job is skipped rather than merging three shards out of four.
+
+
+### Using ASH's reusable workflow
+
+ASH scans its own repository with `.github/workflows/run-ash-security-scan.yml`, and you can call the same workflow from yours. Its `config-ref` and `config-ref-missing` inputs, which read the scan's config from a pull request's base commit, its read-only scan job and its separate `Report ASH results` job are in ASH releases after v3.7.1. v3.7.0, the release this page documents, does not have them yet, so this section describes them once the documented release does.
 
 ## GitLab CI
 
@@ -313,7 +345,8 @@ ash-scan:
     - ash --mode local
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Using Container Mode
@@ -328,10 +361,12 @@ ash-scan-container:
   script:
     - apk add --no-cache python3 py3-pip git
     - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-    - ash --mode container
+    # The job runs as root, so build the image stage that runs as root
+    - ash --mode container --build-target ci
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Gitlab Security Dashboard
@@ -355,7 +390,8 @@ ash-scan:
     - ash --mode local --no-fail-on-findings
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Distributed Scanning (Execute and Collect)
@@ -405,7 +441,8 @@ ash-merge:
   artifacts:
     when: always
     paths:
-      - .ash/merged
+      - .ash/merged/reports
+      - .ash/merged/ash_aggregated_results.json
 ```
 
 `needs` pointing at a `parallel` job depends on all of its instances, not one, so `ash-merge` starts only after all four shards have succeeded.
@@ -432,7 +469,8 @@ phases:
 
 artifacts:
   files:
-    - .ash/ash_output/**/*
+    - .ash/ash_output/reports/**/*
+    - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Using Container Mode
@@ -454,11 +492,13 @@ phases:
 
   build:
     commands:
-      - ash --mode container
+      # CodeBuild runs the build as root, so build the image stage that runs as root
+      - ash --mode container --build-target ci
 
 artifacts:
   files:
-    - .ash/ash_output/**/*
+    - .ash/ash_output/reports/**/*
+    - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Distributed Scanning (Execute and Collect)
@@ -545,7 +585,8 @@ phases:
 
 artifacts:
   files:
-    - .ash/merged/**/*
+    - .ash/merged/reports/**/*
+    - .ash/merged/ash_aggregated_results.json
 ```
 
 `CODEBUILD_RESOLVED_SOURCE_VERSION` is the commit, and every task in the batch resolves it to the same value — that is what lets the merge task find the shards without being told where they are. It is not unique per batch, though. Re-running the batch on the same commit overwrites each shard's object in place, and `ash merge` verifies coverage rather than freshness, so a shard that fails on the re-run can leave the previous run's object in place for the merge to read. If you re-run batches, add a per-run value to the prefix from an environment variable override supplied when the batch is started.
@@ -612,7 +653,7 @@ pipeline {
     }
     post {
         always {
-            archiveArtifacts artifacts: '.ash/ash_output/**/*', allowEmptyArchive: true
+            archiveArtifacts artifacts: '.ash/ash_output/reports/**/*, .ash/ash_output/ash_aggregated_results.json', allowEmptyArchive: true
         }
     }
 }
@@ -637,13 +678,14 @@ pipeline {
         }
         stage('Run ASH Scan') {
             steps {
-                sh 'ash --mode container'
+                // The docker agent runs as root, so build the image stage that runs as root
+                sh 'ash --mode container --build-target ci'
             }
         }
     }
     post {
         always {
-            archiveArtifacts artifacts: '.ash/ash_output/**/*', allowEmptyArchive: true
+            archiveArtifacts artifacts: '.ash/ash_output/reports/**/*, .ash/ash_output/ash_aggregated_results.json', allowEmptyArchive: true
         }
     }
 }
@@ -724,7 +766,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: '.ash/merged/**/*', allowEmptyArchive: true
+                    archiveArtifacts artifacts: '.ash/merged/reports/**/*, .ash/merged/ash_aggregated_results.json', allowEmptyArchive: true
                 }
             }
         }
@@ -757,8 +799,11 @@ jobs:
           name: Run ASH scan
           command: ash --mode local
       - store_artifacts:
-          path: .ash/ash_output
-          destination: ash-results
+          path: .ash/ash_output/reports
+          destination: ash-results/reports
+      - store_artifacts:
+          path: .ash/ash_output/ash_aggregated_results.json
+          destination: ash-results/ash_aggregated_results.json
 
 workflows:
   version: 2
@@ -784,8 +829,11 @@ jobs:
           name: Run ASH scan
           command: ash --mode container
       - store_artifacts:
-          path: .ash/ash_output
-          destination: ash-results
+          path: .ash/ash_output/reports
+          destination: ash-results/reports
+      - store_artifacts:
+          path: .ash/ash_output/ash_aggregated_results.json
+          destination: ash-results/ash_aggregated_results.json
 
 workflows:
   version: 2
@@ -847,8 +895,11 @@ jobs:
             done
             ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
       - store_artifacts:
-          path: .ash/merged
-          destination: ash-merged-results
+          path: .ash/merged/reports
+          destination: ash-merged-results/reports
+      - store_artifacts:
+          path: .ash/merged/ash_aggregated_results.json
+          destination: ash-merged-results/ash_aggregated_results.json
 
 workflows:
   version: 2

@@ -13,9 +13,9 @@ output "shard_count" {
   value       = var.shard_count
 }
 
-output "shard_project_name" {
-  description = "CodeBuild project that runs each shard. One project serves all shard actions; the index arrives as a per-action environment variable."
-  value       = aws_codebuild_project.shard.name
+output "shard_project_names" {
+  description = "CodeBuild projects that run the shards, indexed by shard. One project and one role per shard, so a shard can write only its own results."
+  value       = aws_codebuild_project.shard[*].name
 }
 
 output "merge_project_name" {
@@ -63,9 +63,9 @@ output "pipeline_role_arn" {
   value       = aws_iam_role.pipeline.arn
 }
 
-output "shard_role_arn" {
-  description = "ARN of the role shard builds run as."
-  value       = aws_iam_role.shard.arn
+output "shard_role_arns" {
+  description = "ARNs of the roles the shard builds run as, indexed by shard."
+  value       = aws_iam_role.shard[*].arn
 }
 
 output "merge_role_arn" {

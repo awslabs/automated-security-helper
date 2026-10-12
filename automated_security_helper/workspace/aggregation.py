@@ -130,6 +130,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.models.workspace import (
+    ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
 )
@@ -592,6 +593,30 @@ def incomplete_scanners_for_project(results: Any) -> List[str]:
     return [name for name, _status in incomplete_scanners(results)]
 
 
+def incomplete_converters_for_project(results: Any) -> Dict[str, str]:
+    """Converter name to reason, for each converter of this project that lost coverage.
+
+    The converter question ``_compute_exit_code`` asks beside the scanner ones: a
+    converter that crashed, one that could not convert some of its inputs, or one
+    whose tool was absent with something to convert. Delegates to
+    ``run_ash_scan.incomplete_converters`` for the reason its scanner siblings
+    delegate -- one decision, one place -- and is imported inside the function
+    for the same import-cycle reason.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+
+    Returns:
+        ``{name: reason}`` in the order the rows were recorded; empty when every
+        converter ran cleanly or was excluded, and for ``None``.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        incomplete_converters,
+    )
+
+    return dict(incomplete_converters(results))
+
+
 def no_scanner_ran_for_project(results: Any) -> bool:
     """Whether this project recorded scanners and none of them reached a verdict.
 
@@ -644,6 +669,45 @@ def no_scanner_ran_for_project(results: Any) -> bool:
     return no_scanner_ran(scanner_statuses(results), expected)
 
 
+def inputs_not_scanned_for_project(
+    results: Any, relative_path: str
+) -> List[ProjectInputNotScanned]:
+    """This project's inputs that a scanner found and did not scan, workspace-relative.
+
+    Read through ``unified_metrics.inputs_not_scanned``, the reader the
+    single-directory summaries use, so the two modes list the same entries. A path
+    the scanner recorded relative to the project gets the project's
+    ``relative_path`` in front; one it could only record as absolute is kept as it
+    is.
+
+    The reader is imported inside the function for the reason its siblings above
+    give.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+        relative_path: The project's workspace-relative path.
+
+    Returns:
+        The entries, in the reader's order.
+    """
+    from automated_security_helper.core.unified_metrics import inputs_not_scanned
+
+    if results is None:
+        return []
+    entries = []
+    for scanner, path, reason in inputs_not_scanned(results):
+        recorded = PurePosixPath(path)
+        shown = (
+            path
+            if recorded.is_absolute()
+            else (PurePosixPath(relative_path) / recorded).as_posix()
+        )
+        entries.append(
+            ProjectInputNotScanned(scanner=scanner, path=shown, reason=reason)
+        )
+    return entries
+
+
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
     """Whichever scanner status is worse news, for the workspace-level rollup."""
     if left is None:
@@ -654,6 +718,43 @@ def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
         if candidate in (left, right):
             return candidate
     return left
+
+
+def workspace_ignore_file_exclusions(
+    outcomes: Iterable[WorkspaceProjectResult],
+) -> Optional[Dict[str, Any]]:
+    """The merged results' ``metadata.ignore_file_exclusions``, from every project's.
+
+    The workspace summaries render this record like a single scan's, so the line
+    they print is the workspace total. Each ignore file is keyed by its path
+    relative to the workspace root (the project's ``relative_path`` joined to the
+    project-relative key), so two projects' root ``.gitignore`` files stay apart.
+    ``honored`` is True only when every project that built a scan set honored its
+    ignore files; the switch is the operator's, so the projects agree unless their
+    configs were resolved from different operator sources. None when no project
+    built a scan set.
+    """
+    recorded = [
+        outcome for outcome in outcomes if outcome.ignore_file_exclusions is not None
+    ]
+    if not recorded:
+        return None
+    by_ignore_file: Dict[str, int] = {}
+    for outcome in recorded:
+        prefix = PurePosixPath(outcome.relative_path)
+        for path, count in outcome.ignore_file_exclusions.by_ignore_file.items():
+            key = path if str(prefix) == "." else (prefix / path).as_posix()
+            by_ignore_file[key] = by_ignore_file.get(key, 0) + count
+    return {
+        "honored": all(outcome.ignore_file_exclusions.honored for outcome in recorded),
+        "excluded_file_count": sum(
+            outcome.ignore_file_exclusions.excluded_file_count for outcome in recorded
+        ),
+        "by_ignore_file": by_ignore_file,
+        "output_dir_file_count": sum(
+            outcome.ignore_file_exclusions.output_dir_file_count for outcome in recorded
+        ),
+    }
 
 
 class WorkspaceAggregator:
@@ -755,7 +856,15 @@ class WorkspaceAggregator:
         # The project key is a path-derived value with separators already
         # replaced by dashes, so it is safe as a filename by construction.
         spool_path = self.spool_dir / f"{outcome.project}.run.json"
-        with open(spool_path, "w", encoding="utf-8") as handle:
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            open_for_atomic_write,
+        )
+
+        # Guarded below the workspace output directory whether or not a
+        # PluginContext registered it: a link at the spool or at the file name is
+        # refused rather than written through. Renamed into place, so write()
+        # never copies a spool file that is still being written.
+        with open_for_atomic_write(spool_path, root=self.output_dir) as handle:
             json.dump(rebased, handle)
         self._spooled[outcome.project] = spool_path
 
@@ -850,6 +959,7 @@ class WorkspaceAggregator:
         max_parallel_projects: Optional[int] = None,
         project_timeout: Optional[float] = None,
         project_name: Optional[str] = None,
+        secret_value_shapes: Optional[Sequence[Any]] = None,
     ) -> Path:
         """Stream the unified results file and return its path.
 
@@ -857,6 +967,10 @@ class WorkspaceAggregator:
         one project's SARIF is in memory at a time. Two tests read the result back
         -- one as JSON, one as ``AshAggregatedResults`` -- because hand-assembled
         JSON is exactly the kind of thing that is subtly wrong.
+
+        ``secret_value_shapes`` are the shapes of the values every project's
+        secret findings exposed (``AshAggregatedResults.secret_value_shapes``),
+        written only when there are any, as the model writes them.
         """
         payload = self.results_payload(
             exit_code,
@@ -871,6 +985,20 @@ class WorkspaceAggregator:
             if outcome.project in self._spooled
         ]
 
+        metadata: Dict[str, Any] = {
+            "report_id": f"ASH-WORKSPACE-{Path(self.plan.workspace_file).stem}",
+            "project_name": project_name
+            or Path(self.plan.workspace_root).name
+            or "ash-workspace",
+            "tool_version": get_ash_version(),
+            "description": (
+                "Automated Security Helper workspace-mode aggregated report"
+            ),
+        }
+        ignore_file_exclusions = workspace_ignore_file_exclusions(payload.projects)
+        if ignore_file_exclusions is not None:
+            metadata["ignore_file_exclusions"] = ignore_file_exclusions
+
         header: Dict[str, Any] = {
             "name": f"ASH Workspace Scan: {project_name or Path(self.plan.workspace_root).name}",
             "description": (
@@ -878,28 +1006,37 @@ class WorkspaceAggregator:
                 "SARIF run per project; see the 'workspace' block for "
                 "attribution and per-project verdicts."
             ),
-            "metadata": {
-                "report_id": f"ASH-WORKSPACE-{Path(self.plan.workspace_file).stem}",
-                "project_name": project_name
-                or Path(self.plan.workspace_root).name
-                or "ash-workspace",
-                "tool_version": get_ash_version(),
-                "description": (
-                    "Automated Security Helper workspace-mode aggregated report"
-                ),
-            },
+            "metadata": metadata,
             "workspace": payload.model_dump(mode="json"),
             "scanner_results": self._scanner_results_payload(),
+            # Empty on purpose. Converter rows are per project -- their paths are
+            # relative to that project's tree and two projects run converters of
+            # the same name -- so one top-level map keyed by converter cannot hold
+            # them. Each project's converter verdict is in its entry under
+            # "workspace": incomplete_converters, and scan_incomplete when the gate
+            # is on.
             "converter_results": {},
             "additional_reports": {},
             "validation_checkpoints": [],
             "used_suppressions": [],
         }
+        if secret_value_shapes:
+            header["secret_value_shapes"] = [
+                shape.model_dump(mode="json") if hasattr(shape, "model_dump") else shape
+                for shape in secret_value_shapes
+            ]
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         target = self.output_dir / RESULTS_FILENAME
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            open_for_atomic_write,
+        )
+
         try:
-            with open(target, "w", encoding="utf-8") as handle:
+            # Streamed into a staging file renamed over the target at the end: the
+            # MCP progress reader parses this file while the scan runs, and sees the
+            # previous complete file until the new one is.
+            with open_for_atomic_write(target, root=self.output_dir) as handle:
                 handle.write("{\n")
                 handle.writelines(
                     f"{json.dumps(key)}: {json.dumps(value)},\n"

@@ -30,7 +30,9 @@ node {
     """
   )
 
+  // reports/ and the aggregated results only. scanners/ and converted/ hold each
+  // tool's raw output, which is not masked.
   archiveArtifacts(
-    artifacts: "${ASH_OUTPUT_PATH}/**"
+    artifacts: "${ASH_OUTPUT_PATH}/reports/**, ${ASH_OUTPUT_PATH}/ash_aggregated_results.json"
   )
 }

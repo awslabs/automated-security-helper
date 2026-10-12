@@ -27,6 +27,8 @@ Nix mode supplies every scanner from a pinned flake, so nothing else needs insta
 
 ## Installation Options
 
+ASH is not published on PyPI under the name `automated-security-helper`, which belongs to an unrelated project there; install ASH from git, as the commands below do.
+
 ### Standard Installation
 
 #### 1. Using `uvx` (Recommended)
@@ -83,6 +85,11 @@ pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERS
 # Use as normal
 ash --help
 ```
+
+Install into an environment outside the repository you scan. A virtual environment
+inside it, such as the project's own `.venv`, is part of the scanned directory, so the
+scanners installed there are not run and are reported MISSING; see
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
 
 #### 4. Clone the Repository
 

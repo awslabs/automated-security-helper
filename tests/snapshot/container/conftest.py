@@ -46,7 +46,7 @@ FIXTURE_REPO = REPO_ROOT / "tests" / "test_data" / "snapshot_fixture" / "repo"
 
 #: What the fake runner reports as its path. A fixed string, so the "Resolved
 #: OCI_RUNNER to:" line is the same on every machine.
-FAKE_DOCKER = "/usr/bin/docker"
+FAKE_DOCKER = "/nonexistent/ash-test/docker"
 
 
 @pytest.fixture
@@ -57,17 +57,21 @@ def in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def local_checkout(in_tmp: Path) -> None:
-    """Make the working directory look like an ASH checkout to build from.
+def project_build_files_in_cwd(in_tmp: Path) -> None:
+    """Make the working directory a project with a Dockerfile and pyproject.toml of its own.
 
-    Container mode resolves its Dockerfile before it decides whether to build: for
-    a LOCAL revision, the nearest directory holding both a Dockerfile and a
-    pyproject.toml, starting at the working directory. These two empty files are
-    what it finds, so the build context it prints is <TMP> and nothing depends on
-    where the suite was started.
+    That is the usual shape of a Python project that ships a container image, and
+    it is what ``ash`` is most often started in. Container mode builds ASH's own
+    Dockerfile regardless: this suite imports ASH from a checkout, so the revision
+    is LOCAL and a build command printed here names that checkout (``<REPO>``) as
+    both the Dockerfile's directory and the build context, never ``<TMP>``.
     """
-    (in_tmp / "Dockerfile").write_text("", encoding="utf-8")
-    (in_tmp / "pyproject.toml").write_text("", encoding="utf-8")
+    (in_tmp / "Dockerfile").write_text(
+        "FROM scratch AS non-root\nFROM scratch AS ci\n", encoding="utf-8"
+    )
+    (in_tmp / "pyproject.toml").write_text(
+        "[project]\nname = 'scanned'\n", encoding="utf-8"
+    )
 
 
 @pytest.fixture

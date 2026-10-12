@@ -386,6 +386,8 @@ def test_get_config_shows_the_bound_profile_as_the_base_for_an_upload(
         "mode": "firejail",
         "network_scanners": ["grype"],
         "extra_read_paths": ["/opt/ca"],
+        "read_path_scanners": [],
+        "env_scanners": [],
     }
     assert shown == _resolved_by_scan(_server["target"], uploaded).sandbox.model_dump()
 
@@ -400,6 +402,8 @@ def test_get_config_still_shows_the_operator_profiles_grants(_server) -> None:
         "mode": "firejail",
         "network_scanners": ["grype"],
         "extra_read_paths": ["/opt/ca"],
+        "read_path_scanners": [],
+        "env_scanners": [],
     }
     assert shown == _resolved_by_scan(_server["target"], bound).sandbox.model_dump()
 
@@ -418,4 +422,27 @@ def test_get_config_discovering_an_uploaded_config_does_not_show_its_grants(
         "mode": "firejail",
         "network_scanners": ["grype"],
         "extra_read_paths": ["/opt/ca"],
+        "read_path_scanners": [],
+        "env_scanners": [],
     }
+
+
+@pytest.mark.parametrize("client", [False, True])
+def test_the_orchestrator_passes_on_whose_overrides_they_are(
+    tmp_path: Path, client: bool
+) -> None:
+    # A tool path an MCP client's overrides name is not the operator's
+    # (config/path_trust.py); the single-directory scan path carries the flag to
+    # resolve_config as the workspace path does.
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    override = "scanners.checkov.options.config_file=/ops/checkov.yaml"
+    orchestrator = ASHScanOrchestrator(
+        source_dir=tmp_path,
+        output_dir=tmp_path / "out",
+        config_overrides=[override],
+        client_overrides=client,
+    )
+    orchestrator.initialize()
+    recorded = orchestrator.config._operator_paths.overrides
+    assert (recorded == []) is client

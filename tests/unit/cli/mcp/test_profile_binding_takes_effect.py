@@ -282,10 +282,14 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
             """Windows-flavoured, and tolerates the filesystem calls made on it.
 
             Subclassing keeps the flavour across ``/`` joins, which is what makes
-            the ``config/`` and ``ash.yaml`` segments Windows-shaped too.
+            the ``config/`` and ``ash.yaml`` segments Windows-shaped too. The
+            calls are the directory creation and the session-workspace marker.
             """
 
             def mkdir(self, *args, **kwargs):
+                return None
+
+            def touch(self, *args, **kwargs):
                 return None
 
             def unlink(self, *args, **kwargs):

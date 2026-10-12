@@ -224,7 +224,15 @@ ASH Converters
 │ archive │ True    │ ArchiveConverter │ automated_security_helper.… │ {                           │
 │         │         │                  │                             │   "name": "archive",        │
 │         │         │                  │                             │   "enabled": true,          │
-│         │         │                  │                             │   "options": {}             │
+│         │         │                  │                             │   "options": {              │
+│         │         │                  │                             │     "max_members": 100000,  │
+│         │         │                  │                             │     "max_member_bytes":     │
+│         │         │                  │                             │ 268435456,                  │
+│         │         │                  │                             │     "max_total_bytes":      │
+│         │         │                  │                             │ 1073741824,                 │
+│         │         │                  │                             │     "max_compression_ratio… │
+│         │         │                  │                             │ 100                         │
+│         │         │                  │                             │   }                         │
 │         │         │                  │                             │ }                           │
 ├─────────┼─────────┼──────────────────┼─────────────────────────────┼─────────────────────────────┤
 │ jupyter │ True    │ JupyterConverter │ automated_security_helper.… │ {                           │

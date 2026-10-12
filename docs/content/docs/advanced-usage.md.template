@@ -17,6 +17,37 @@ ash --mode local
 - Fastest execution but limited scanner coverage
 - Ideal for quick checks during development
 
+### Tools inside the scanned directory
+
+ASH does not start a scanner or any other tool that it finds inside the directory it
+is scanning. `uv run ash scan .` puts the repository's `.venv/bin` first on `PATH`,
+and `npm run` does the same with `node_modules/.bin`, so under either a scanner
+installed in the project, such as a `bandit` or `semgrep` dependency, is part of the
+repository being scanned. ASH skips it and uses the next copy on `PATH`, or the one
+`uv tool` installs. If there is none, the scanner is reported as MISSING, with the
+in-tree path in its `missing_reason`, in the log, and in the message the incomplete
+scan exits with.
+
+ASH also never finds a tool through the working directory: not through an empty, `.`
+or relative `PATH` entry, and on Windows not through the working directory that
+`CreateProcess` and `shutil.which` search first. Tools on ordinary absolute `PATH`
+entries are found, including Homebrew, nix profiles, uv and pipx shims,
+asdf and mise shims, conda, Program Files, scoop and Chocolatey. Programs ASH and its
+scanners start are given a `PATH` without the scanned directory's entries, unless you
+allow in-tree tools.
+
+To run tools from inside the scanned directory, pass `--allow-in-tree-tools` (or set
+`"allow_in_tree_tools": true` in a `--cli-json-input` document), or set
+`ASH_ALLOW_IN_TREE_TOOLS` to `1`, `true`, `yes` or `on`. ASH then uses them and logs a
+warning naming each one.
+This also covers the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`
+and `true`). A
+repository's configuration file cannot turn this on, and `ash mcp` ignores both: an
+MCP client's scans never run a tool from inside a scanned or delivered directory, so
+for MCP use, install scanners outside the repository. See
+[Troubleshooting](troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree)
+for the message and the fixes.
+
 ### Container Mode
 
 ```bash
@@ -135,6 +166,60 @@ not put a scanner back online during an `--offline` scan; `ash config init` writ
 `offline: false` for every scanner that has the option, so a generated config would
 otherwise undo the flag.
 
+#### What offline mode turns off
+
+Online and offline, trivy-repo and syft read no config file from the scanned tree,
+because a `trivy.yaml` there can turn on a VEX repository download or client/server
+mode and a `.syft.yaml` remote license and package lookups. trivy always gets
+`--config`, naming `TRIVY_CONFIG` when that is a file outside the scanned tree and an
+empty config ASH ships otherwise; syft runs from outside the tree and is given only a
+`config_file` outside it.
+
+Besides the database and rule downloads, offline mode turns off what the scanners do
+over the network on their own:
+
+- Every scanner tool process ASH starts, the version probes of its dependency check
+  included, gets environment variables that turn off each tool's update, version and
+  telemetry checks: semgrep's version check and metrics
+  (`SEMGREP_ENABLE_VERSION_CHECK=0`, `SEMGREP_SEND_METRICS=off`), checkov's PyPI update
+  check (`CKV_SKIP_PACKAGE_UPDATE_CHECK=true`), npm's update notifier
+  (`npm_config_update_notifier=false`), trivy's version check and telemetry
+  (`TRIVY_SKIP_VERSION_CHECK`, `TRIVY_DISABLE_TELEMETRY`), and the update checks of
+  syft and grype. They also turn off the lookups a tool's own config file can enable:
+  syft's remote license searches, maven lookups and vcpkg git clones, and grype's
+  external sources. On a Go module syft does not run the Go toolchain
+  (`SYFT_GOLANG_USE_PACKAGES_LIB=false`), and the toolchain grype runs gets
+  `GOPROXY=off` and `GOTOOLCHAIN=local`, so it downloads no module and no toolchain.
+  The full list is in `automated_security_helper/utils/offline_tool_env.py`. A scanner
+  set offline by its own `options.offline: true` while ASH runs online gets them too,
+  on its scan and on the version probes of its dependency check.
+- trivy's version check and telemetry are off whatever `disable_telemetry` says, through
+  `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY` rather than flags, which a
+  trivy too old to know them would refuse.
+- trivy-repo does not run trivy's Terraform checks offline. trivy downloads the source
+  of every `module` block a `.tf` file names (from the Terraform registry, with the
+  host's `git`, or over HTTPS), and has no setting that stops it, so ASH passes
+  `--misconfig-scanners` with trivy's own default list minus `terraform`. If that list
+  cannot be read from `trivy repository --help`, trivy's misconfiguration checks are
+  skipped offline. checkov still checks Terraform. Any `git` a tool runs offline gets
+  `GIT_ALLOW_PROTOCOL=file`, so it reaches no remote.
+- npm-audit runs no audit, because npm, pnpm and yarn audit only against the package
+  registry's advisory service: offline `npm audit --offline` reported no advisories for
+  a lockfile with known ones, `pnpm audit --offline` sent the dependency list to the
+  registry anyway, and `yarn npm audit` has no offline mode. Every lockfile it would
+  have audited is listed as not scanned, with the reason, in
+  `ash_aggregated_results.json` (the scanner's `inputs_not_scanned`), the console
+  summary, and the "Inputs not scanned" section of `ash.summary.md` and
+  `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
+  paths, in each project's `inputs_not_scanned` entry in the workspace results, the
+  merged summaries and the workspace console summary. When there is a lockfile, npm-audit is MISSING, as snyk-code is,
+  so the scan fails under the default completeness gate (exit code 1). To scan a
+  Node.js project offline without it, pass `--exclude-scanners npm-audit`. A project
+  with no lockfile has nothing to audit, and npm-audit is SKIPPED.
+- detect-secrets does not verify candidate secrets with their issuers, whatever the
+  scanned repository's `.secrets.baseline` or any config says. See
+  [Secret verification](configuration-guide.md#secret-verification).
+
 #### Seeding the semgrep and opengrep rule cache
 
 Offline, semgrep and opengrep read their rules only from a local cache: the directory
@@ -172,6 +257,15 @@ ash --mode local --offline
 
 Copy the cache directories to the air-gapped host and export the same two variables
 there. Repeat the download at least every 30 days, or the scan fails as stale.
+
+Under `--sandbox`, the sandbox mounts the directory each variable names read-only for
+its scanner, wherever it is, including under `$HOME`, which the sandbox otherwise
+hides. Only the variable in ASH's own environment grants it: a rules path in a
+scanner's options, which the scanned repository can set, is not mounted, and an
+empty or relative value grants nothing. A variable naming a file, `/`, `$HOME` or a
+directory that holds `$HOME` is not mounted either, with a warning; point it at the
+rules directory itself. If semgrep or opengrep still cannot read its rules, it exits 7 and is recorded
+`ERROR`, and the scan exits 1.
 
 ## Customizing Scan Phases
 
@@ -364,10 +458,15 @@ jobs:
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### GitLab CI
@@ -380,8 +479,11 @@ ash-scan:
     - ash --mode local
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
+
+Both examples keep `scanners/` and `converted/` out of the artifact: those hold each tool's raw output, which is not masked.
 
 ## Performance Optimization
 

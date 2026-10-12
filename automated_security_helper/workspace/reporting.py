@@ -72,10 +72,16 @@ Failure modes and known limitations
   and ``execute_workspace``'s exit code is a verdict about code under scan.
 * An ``UNSUPPORTED`` reporter *does* fail the run, at
   ``WorkspaceExitCode.INTERNAL_ERROR``, and only when the run would otherwise
-  have succeeded. It does not override exit 2 or 3, for the reason recorded in
-  ``models.workspace``: a finding is a certainty and must not be suppressed by
-  anything weaker. No reporter shipped here declares ``UNSUPPORTED``; the path is
+  have succeeded. It does not override exit 2 or 3: those are verdicts about the
+  code under scan, and a reporter that cannot render them is not one. No
+  reporter shipped here declares ``UNSUPPORTED``; the path is
   built and tested so the enum member is a mechanism rather than a comment.
+* A per-project reporter that ASH's default config leaves off (the AWS reporters)
+  is listed with the per-project artefacts that exist on disk, because the
+  projects' own configs decided whether it ran. Only the projects that wrote one
+  are listed, and none is reported missing: the step cannot tell a project whose
+  config left the reporter off from one whose report phase failed. With no
+  artefact on disk it is recorded as ``skipped: disabled``.
 * A symlink or directory junction at ``reports/``, at a file a workspace-level
   reporter writes there, or at the manifest refuses the run with
   ``ReportPathLinkRefused`` (exit 1), before any project is scanned
@@ -110,6 +116,7 @@ from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    off_host_reporter_refused,
     reporter_companion_file_names,
     reporter_file_name,
     reporter_file_names,
@@ -290,6 +297,14 @@ def _per_project_artifacts(
     return entries, missing
 
 
+def _present_per_project_artifacts(
+    plan: WorkspacePlan, output_dir: Path, filename: str
+) -> List[Dict[str, str]]:
+    """The per-project artefacts of ``filename`` that exist on disk, in plan order."""
+    entries, missing = _per_project_artifacts(plan, output_dir, filename)
+    return [entry for entry in entries if entry["project"] not in missing]
+
+
 def _default_reporter_classes() -> List[type]:
     """Every reporter class the plugin registry resolved.
 
@@ -366,16 +381,29 @@ def _selected_reporters(
         # because they route the operator to different knobs: disabled means edit
         # the config, not-requested means widen --output-format, and unavailable
         # means the reporter's own dependencies are unsatisfied.
+        #
+        # The dependency check is last, and only for a reporter that produces an
+        # artefact at workspace level: it can contact a remote service (the AWS
+        # reporters call STS or DescribeHub), and a reporter this step does not
+        # run -- not requested, or per-project, whose check its own project's
+        # scan made -- is not checked here.
         skipped: Optional[str] = None
-        if _disabled_by_config(instance):
+        if _disabled_by_config(instance) or off_host_reporter_refused(
+            reporter_class, config_lookup(plugin_config_key(reporter_class))
+        ):
             skipped = SKIP_DISABLED
-        elif check_dependencies and _dependencies_unsatisfied(instance):
-            skipped = SKIP_UNSATISFIED_DEPENDENCIES
         if skipped is None and python_based_plugins_only:
             if not instance.is_python_only():
                 skipped = SKIP_NOT_PYTHON_ONLY
         if skipped is None and not _matches_requested_formats(instance, output_formats):
             skipped = SKIP_NOT_REQUESTED
+        if (
+            skipped is None
+            and check_dependencies
+            and behaviour in _EMITTING_BEHAVIOURS
+            and _dependencies_unsatisfied(instance)
+        ):
+            skipped = SKIP_UNSATISFIED_DEPENDENCIES
 
         if skipped is not None:
             ASH_LOGGER.debug(
@@ -550,18 +578,15 @@ def unsupported_reporter_names(
     Answered from declarations and config alone -- no model, no results file, no
     scan, and deliberately no dependency validation.
 
-    That last exclusion is not an optimisation. ``SecurityHubReporter`` and
-    ``BedrockSummaryReporter`` call AWS inside
-    ``validate_plugin_dependencies``, so validating here would put live API calls
-    on the path *before every workspace scan* -- latency and log noise on a run
-    they cannot affect, since a reporter whose dependencies are unsatisfied is
-    already skipped by :func:`emit_workspace_reports`. It also means the two
-    answers differ in one narrow case, on purpose: a reporter that is enabled,
-    declares ``UNSUPPORTED``, and has unsatisfied dependencies refuses the run
-    here rather than being quietly skipped later. That is the right direction --
-    the operator's configuration asks for something the format cannot do, and
-    telling them so does not depend on whether an unrelated credential happens to
-    be present.
+    That last exclusion is not an optimisation. The AWS reporters call AWS inside
+    ``validate_plugin_dependencies`` (Security Hub ``DescribeHub``, the others
+    STS), so validating here would put live API calls on the path *before every
+    workspace scan* -- latency and log noise on a run they cannot affect.
+    :func:`emit_workspace_reports` checks dependencies only for a reporter that
+    emits a workspace-level artefact, so an enabled ``UNSUPPORTED`` reporter is
+    refused here and recorded as unsupported there, whether or not its
+    dependencies are satisfied: whether the format can express a workspace does
+    not depend on a credential being present.
 
     Why a pre-flight at all:
 
@@ -639,6 +664,9 @@ def emit_workspace_reports(
         ReportPathLinkRefused: ``reports/``, a file a reporter here would write or
             the manifest is a link. Nothing is written.
     """
+    # The reports and the manifest are written as ASH's other output: never through
+    # a link below the output directory (write_report_file replaces each file
+    # through fs_guard's atomic write).
     output_dir = Path(output_dir)
     reports_dir = ensure_reports_dir(output_dir / REPORTS_DIR_NAME)
 
@@ -689,11 +717,31 @@ def emit_workspace_reports(
         }
         manifest_reporters[name] = entry
 
+        if (
+            skipped == SKIP_DISABLED
+            and behaviour is ReporterWorkspaceBehaviour.PER_PROJECT
+        ):
+            # Disabled by ASH's default config, which is what this step reads, but
+            # each project's scan read its own config. A per-project reporter the
+            # default leaves off -- the AWS reporters -- may have run in the
+            # projects whose config enabled it, so list what they wrote rather
+            # than call it disabled. A project with no artefact is not missing
+            # one: its config may simply leave the reporter off.
+            present = _present_per_project_artifacts(plan, output_dir, filename)
+            if present:
+                per_project.append(name)
+                entry["considered"] = True
+                entry["per_project_artifacts"] = present
+                ASH_LOGGER.verbose(
+                    f"Reporter {name} is off in the default config but per-project; "
+                    f"{len(present)} project(s) wrote its artefact."
+                )
+                continue
+
         if skipped is not None:
             # Recorded rather than omitted. Six of the nineteen shipped reporters
-            # land here on a default run -- yaml and spdx ship disabled, and the
-            # four AWS ones report unsatisfied dependencies without credentials --
-            # and an operator asking where their yaml report went deserves an
+            # land here on a default run -- yaml, spdx and the four AWS ones ship
+            # disabled -- and an operator asking where their yaml report went deserves an
             # answer rather than silence. Silence is the defect this manifest
             # exists to prevent; only the reason differs from a withheld artefact.
             entry["skipped"] = skipped

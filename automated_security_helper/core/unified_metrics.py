@@ -45,6 +45,7 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -182,6 +183,41 @@ def target_counts(
     return attempted, failed
 
 
+def target_exit_code(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> int | None:
+    """The exit code for the scanner's consolidated row, from its per-target reports.
+
+    The row stands for every target, so it takes the code that explains it: the largest
+    code among targets whose status is ERROR, else the largest code of any target. An
+    ERROR target's code comes first because the largest code overall can be an accepted
+    one (grype's 2 for a match at ``--fail-on``) that would hide another target's error
+    exit (grype's 1).
+
+    Returns None when no target report carries an integer code; ``bool`` is rejected for
+    the reason ``target_counts`` gives.
+    """
+    reports = asharp_model.additional_reports.get(scanner_name)
+    if not isinstance(reports, dict):
+        return None
+
+    codes: list[int] = []
+    error_codes: list[int] = []
+    for target_report in reports.values():
+        if not isinstance(target_report, dict):
+            continue
+        code = target_report.get("exit_code")
+        if not isinstance(code, int) or isinstance(code, bool):
+            continue
+        codes.append(code)
+        # Equal for the enum and for the plain string a report read back from JSON has.
+        if target_report.get("status") == ScannerStatus.ERROR:
+            error_codes.append(code)
+    if error_codes:
+        return max(error_codes)
+    return max(codes) if codes else None
+
+
 def coverage_shortfalls(
     asharp_model: AshAggregatedResults,
 ) -> list[tuple[str, int, int]]:
@@ -206,6 +242,53 @@ def coverage_shortfalls(
             continue
         shortfalls.append((scanner_name, attempted, failed))
     return shortfalls
+
+
+#: The name :func:`inputs_not_scanned` gives the inputs ASH itself left out of its scan
+#: set, in place of a scanner's: every scanner that reads the scan set did not scan
+#: them.
+SCAN_SET_OWNER = "ASH"
+
+
+def inputs_not_scanned(
+    asharp_model: AshAggregatedResults,
+) -> list[tuple[str, str, str]]:
+    """``(scanner, path, reason)`` for every input a scanner found and did not scan.
+
+    Read off the serialized per-target reports (``ScanResultsContainer.
+    inputs_not_scanned``), in scanner order. A scanner that did not scan an input says
+    nothing about it in its findings, and its status cannot say which input it was, so
+    the summaries list them beside the table, as they do coverage shortfalls.
+
+    The files ASH left out of its scan set come first, under :data:`SCAN_SET_OWNER`
+    (``ReportMetadata.inputs_not_scanned``): no reader of the scan set scanned them.
+
+    For a workspace scan, whose unified results carry no per-target reports, they are
+    read off each project's entry (``WorkspaceProjectResult.inputs_not_scanned``,
+    workspace-relative paths), in workspace order, after any per-target ones.
+    """
+    entries = []
+    metadata = getattr(asharp_model, "metadata", None)
+    for item in getattr(metadata, "inputs_not_scanned", None) or []:
+        entries.append((SCAN_SET_OWNER, item.path, item.reason))
+    for scanner_name in sorted(asharp_model.additional_reports or {}):
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            continue
+        for target_report in reports.values():
+            if not isinstance(target_report, dict):
+                continue
+            for item in target_report.get("inputs_not_scanned") or []:
+                if not isinstance(item, dict):
+                    continue
+                path, reason = item.get("path"), item.get("reason")
+                if isinstance(path, str) and isinstance(reason, str):
+                    entries.append((scanner_name, path, reason))
+    if is_workspace_scan(asharp_model):
+        for project in asharp_model.workspace.projects:
+            for item in project.inputs_not_scanned:
+                entries.append((item.scanner, item.path, item.reason))
+    return entries
 
 
 def format_duration(duration_seconds: Optional[float]) -> str:
@@ -480,6 +563,35 @@ def _populate_summary_stats_from_unified_metrics(
     return aggregated_results
 
 
+#: Fields of the legacy two-target row (ScannerStatusInfo) that consolidation replaces
+#: rather than carries: the per-target children are what the metrics combine.
+_PER_TARGET_ROW_FIELDS = frozenset({"source", "converted"})
+
+
+def _row_fields(row: object) -> dict:
+    """The fields a scanner_results row was given, extras included.
+
+    Only the fields that were set, so a field the row never had keeps its default and
+    stays out of dumps that exclude unset fields. A dict arrives from JSON, a legacy
+    ScannerStatusInfo from a writer that assigned the old shape; both are read the
+    same way, without their per-target children.
+    """
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        fields = dict(row)
+    else:
+        names = set(getattr(row, "model_fields_set", ())) | set(
+            getattr(row, "model_extra", None) or {}
+        )
+        fields = {name: getattr(row, name) for name in names}
+    return {
+        name: value
+        for name, value in fields.items()
+        if name not in _PER_TARGET_ROW_FIELDS
+    }
+
+
 def _populate_scanner_results_from_unified_metrics(
     aggregated_results: AshAggregatedResults, unified_metrics: List[ScannerMetrics]
 ) -> AshAggregatedResults:
@@ -521,8 +633,13 @@ def _populate_scanner_results_from_unified_metrics(
         else:
             status = ScannerStatus.PASSED  # Default fallback
 
-        # Create consolidated target status info (combines source + converted)
-        consolidated_target_info = ScannerTargetStatusInfo(
+        # Built from the scanner's existing row, with only the fields the metrics
+        # compute replaced. Building it from the metrics alone dropped everything
+        # else: an excluded scanner's ``excluded: true`` came back false, the same as
+        # a scanner that ran and had nothing to scan, and exit_code and any extra
+        # field were lost too.
+        fields = _row_fields(aggregated_results.scanner_results.get(scanner_name))
+        fields.update(
             severity_counts=consolidated_severity_counts,
             finding_count=metrics.total,
             actionable_finding_count=metrics.actionable,
@@ -530,6 +647,33 @@ def _populate_scanner_results_from_unified_metrics(
             duration=total_duration,
             status=status,
         )
+        # The scan phase's reason for a MISSING row comes with the row's other fields:
+        # the metrics know the status, not why. It stays only while the row is MISSING.
+        if status != ScannerStatus.MISSING or not isinstance(
+            fields.get("missing_reason"), str
+        ):
+            fields.pop("missing_reason", None)
+        # The two flags say why the status is what it is, so they follow the
+        # metrics when the metrics found the scanner missing or excluded. Every
+        # later reader of this scanner -- the report phase, and the exit-code gate
+        # through get_unified_scanner_metrics -- reads this row before the
+        # per-target reports, and a scanner recorded MISSING during its scan
+        # (scan() returned False) has no earlier row to carry the flag: left at its
+        # default of True it read as having its dependencies, and one target that
+        # evaluated nothing then graded it SKIPPED, which the completeness gate lets
+        # through. Set only in those cases, so a row that had no flag keeps its
+        # serialized shape (dumps that exclude unset fields, such as the S3 and
+        # CloudWatch payloads, leave the defaults out).
+        if metrics.dependencies_missing:
+            fields["dependencies_satisfied"] = False
+        if metrics.excluded:
+            fields["excluded"] = True
+        # Only when a target report says what its tool exited with; otherwise the
+        # field keeps its default and stays unset.
+        exit_code = target_exit_code(aggregated_results, scanner_name)
+        if exit_code is not None:
+            fields["exit_code"] = exit_code
+        consolidated_target_info = ScannerTargetStatusInfo(**fields)
 
         # Update scanner_results with consolidated information.
         #

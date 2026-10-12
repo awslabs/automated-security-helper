@@ -858,6 +858,51 @@ jobs:
 
           bash "$SCRIPT"
 
+      # The modules' terraform tests (`<module>/tests/*.tftest.hcl`) assert what the
+      # input-validation step above cannot reach: the IAM statements and container
+      # environment a plan would configure -- that the gate's image build pushes only
+      # to its own repository, that no executor shard can write another shard's
+      # results, and which MCP trust settings the agentcore and fargate modules pass.
+      # Every provider is a mock_provider with override_during = plan, so nothing is
+      # planned against, or sent to, an AWS account, and no credentials are needed;
+      # they are cleared anyway for the reason given on the step above. Those mocks
+      # need Terraform >= 1.11, which the 1.14.4 pin above satisfies.
+      #
+      # Runs after the init loop, which wrote each module's .terraform/. A module is
+      # found by its test files rather than listed, so a new module's tests run
+      # without editing this step; finding none fails the step, because this tree has
+      # them and a step that tested nothing would otherwise pass.
+      - name: Run the modules' terraform tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export AWS_EC2_METADATA_DISABLED=true
+          unset AWS_PROFILE AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN || true
+
+          mapfile -t dirs < <(find deploy/terraform -type f -name '*.tftest.hcl' -not -path '*/.terraform/*' -printf '%h\n' | sed 's#/tests$##' | sort -u)
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "::error::Found no *.tftest.hcl under deploy/terraform, so no terraform test ran."
+            exit 1
+          fi
+
+          # Every module is attempted even after one fails, as in the validate loop.
+          failed=0
+          for dir in "${dirs[@]}"; do
+            echo "::group::$dir"
+            if ! terraform -chdir="$dir" test -no-color; then
+              echo "::error file=$dir::terraform test failed in $dir"
+              failed=$((failed + 1))
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "$failed of ${#dirs[@]} module(s) failed terraform test."
+            exit 1
+          fi
+          echo "terraform test passed in all ${#dirs[@]} module(s)."
+
   # ---------------------------------------------------------------------------
   # cdk-nag, failing on any unsuppressed finding.
   #

@@ -206,10 +206,10 @@ scanners:
 | `use_default_config` | bool | `true` | Use the default config bundled with this plugin. Set by the operator only; see [Using profiles](#using-profiles) |
 | `profile` | string | `null` | Profile name from config file. Set by the operator only; see [Using profiles](#using-profiles) |
 | `exclude_patterns` | list | `[]` | Glob patterns to exclude |
-| `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning below) |
+| `show_match` | bool | `false` | Display matched text in ferret-scan's own output (see [show_match](#show_match) below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
-| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
+| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still reports the partial findings, counts the target as failed, and records the scanner `ERROR`, so the completeness gate fails the scan. |
 | `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
 | `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
 | `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
@@ -237,15 +237,20 @@ The following options are **not supported** because they conflict with ASH conve
 | `pre_commit_mode` | "ASH manages output formatting and exit codes; use ASH's own pre-commit hook" |
 | `list_profiles` | "Only prints available profiles and exits — produces no scan results" |
 
-### Security Warning: show_match Option
+### show_match
 
-⚠️ **Data Exfiltration Risk**: The `show_match` option causes ferret-scan to include the actual matched sensitive data (credit card numbers, SSNs, API keys, etc.) in the scan output. This creates significant security risks:
+With `show_match` on, ferret-scan writes each matched value (card numbers, national
+IDs, keys) into its own output: the result message (`Matched text: '...'`) and the
+SARIF snippets. ASH masks those values before it writes `ash_aggregated_results.json`
+or any report, so they do not reach ASH's reports, the Bedrock summary or MCP
+responses (see "Secret values in reports" in the output formats page). They do stay
+in ferret-scan's own results file under `scanners/ferret-scan/`, and in its log
+output.
 
-- **Log file exposure**: Matched sensitive data will appear in SARIF reports, CI/CD logs, and ASH output files
-- **Accidental data leakage**: Reports shared with team members or uploaded to security dashboards may contain real sensitive data
-- **Compliance violations**: Logging actual PII/PCI data may violate data protection regulations (GDPR, PCI-DSS, HIPAA)
-
-**Recommendation**: Keep `show_match: false` (the default) in production environments. Only enable it temporarily for debugging in isolated, secure environments where log files are properly protected and purged.
+`show_match` is off by default, and every profile in the bundled
+`ferret-config.yaml` sets it to `false`, including `debug`, `comprehensive`,
+`json-api`, `person-name`, `enhanced-metadata` and `social-media`, which turned it
+on before. Turn it on only where the scanner's own output directory is protected.
 
 ### Available Checks
 
@@ -630,6 +635,9 @@ jobs:
           uv run ash --scanners ferret-scan --output-format sarif \
             --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
       - name: Upload SARIF results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: .ash/ash_output/reports/ash.sarif

@@ -46,13 +46,31 @@ def _is_top_level_package(name: str) -> bool:
 
 
 def discover_plugins(plugin_modules: List[str] | None = None):
-    """Discover plugins in the given namespace"""
+    """Import the top-level plugin packages *plugin_modules* names.
+
+    A name outside the plugin namespace that ``load_additional_plugin_modules``
+    enforces is skipped with the same warning, before it is looked up, so it is
+    never imported. A scan refuses such a name before calling this
+    (``refuse_plugin_modules_outside_namespace``); the check here keeps every other
+    caller to the same rule.
+    """
+    from automated_security_helper.plugins.loader import (
+        _is_allowed_module_path,
+        _namespace_rule,
+    )
+
     if plugin_modules is None:
         plugin_modules = ["ash_plugins"]
     discovered = {"converters": [], "scanners": [], "reporters": []}
 
     # Look for top-level packages named by plugin_modules
     for name in dict.fromkeys(plugin_modules):
+        if not _is_allowed_module_path(name):
+            ASH_LOGGER.warning(
+                f"Skipping module with unexpected namespace: {name}. "
+                f"{_namespace_rule()}"
+            )
+            continue
         if not _is_top_level_package(name):
             continue
         try:

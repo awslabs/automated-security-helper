@@ -95,7 +95,7 @@ def test_an_uploaded_config_cannot_add_an_uninstalled_module(workspace):
     upload.parent.mkdir()
     upload.write_text(
         "project_name: uploaded\nash_plugin_modules:\n"
-        "  - no_such_module_anywhere\n"
+        "  - no_such_ash_plugins\n"
         "  - automated_security_helper.plugin_modules.ash_trivy_plugins\n"
     )
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
