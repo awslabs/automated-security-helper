@@ -426,7 +426,12 @@ def _confine(
 ) -> None:
     """Set each reporter's ``destinations`` options, and the ``enabled`` of each
     reporter of ``enabled_defaults``, to the trusted base's, with one warning."""
-    ignored = _confine_options(config, trusted_config, destinations)
+    ignored = _confine_options(
+        config,
+        trusted_config,
+        destinations,
+        fill_missing=source.fills_missing_sections,
+    )
     ignored.extend(_confine_enabled(config, trusted_config, enabled_defaults))
     if not ignored:
         return
@@ -454,17 +459,19 @@ def _confine_options(
     config: "AshConfig",
     trusted_config: "AshConfig",
     destinations: Mapping[str, Sequence[str]],
+    fill_missing: bool = True,
 ) -> List[str]:
     """Set each reporter's ``destinations`` options to the trusted base's.
 
     An option is matched under every mix of ``-`` and ``_`` in its name, since a
     config merge reads them as the same key (``config_sources._resolve_dict_key``):
     each spelling the config writes is replaced by the spellings the trusted base
-    writes, with their values. A config with no section for a reporter gets one
-    holding the trusted base's values, where it sets any: a file that replaces
-    the operator's config and leaves the section out would otherwise drop them.
-    Returns the spellings the config set to a value the trusted base does not
-    give them, as dotted keys.
+    writes, with their values. With ``fill_missing``
+    (``UntrustedSource.fills_missing_sections``), a config with no section for a
+    reporter gets one holding the trusted base's values, where it sets any: a
+    file that replaces the operator's config and leaves the section out would
+    otherwise drop them. Returns the spellings the config set to a value the
+    trusted base does not give them, as dotted keys.
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
@@ -475,6 +482,8 @@ def _confine_options(
         trusted_options = dict((trusted_section or {}).get("options") or {})
         keys = _sections_of(config, plugin)
         if not keys:
+            if not fill_missing:
+                continue
             kept = {
                 spelling: trusted_options[spelling]
                 for name in option_names

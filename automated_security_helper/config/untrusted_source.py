@@ -39,6 +39,12 @@ class UntrustedSource:
         scanner_steps_note: What the sandbox and scanner-config steps' warnings
             say in place of their remedy, where no scanner runs. None gives the
             remedy.
+        fills_missing_sections: Give a reporter section the config leaves out the
+            trusted base's destination options. A file inside the tree, or one an
+            MCP client delivered, replaces the operator's config, so leaving a
+            section out would drop the operator's values. ``ash merge``'s
+            ``--config`` supplies values for what a shard recorded without adding
+            to it (``cli/merge.py``), so the merge does not fill sections.
     """
 
     reason: str
@@ -46,6 +52,7 @@ class UntrustedSource:
     modules_remedy: str
     named_modules_only: bool = False
     scanner_steps_note: Optional[str] = None
+    fills_missing_sections: bool = True
 
 
 #: A config file inside the scanned tree, or one an MCP client delivered.
@@ -70,4 +77,5 @@ SHARD_RECORDED = UntrustedSource(
         "No scanner runs during a merge, so this changes only the merged results, "
         "which record the operator's value"
     ),
+    fills_missing_sections=False,
 )
