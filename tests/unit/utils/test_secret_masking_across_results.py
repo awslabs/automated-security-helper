@@ -521,6 +521,7 @@ class TestMergedShards:
         import json as _json
 
         from automated_security_helper.cli.merge import stamp_shard_assignment
+        from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.core.enums import ScannerStatus
         from automated_security_helper.core.sharding import ShardAssignment
         from automated_security_helper.models.asharp_model import (
@@ -549,6 +550,9 @@ class TestMergedShards:
             ((["detect-secrets"], detect_secrets), (["bandit"], bandit))
         ):
             model = _results(result)
+            # Every shard records the config it scanned under; ash merge refuses a
+            # shard that records none.
+            model.ash_config = AshConfig()
             for name in scanners:
                 model.scanner_results[name] = ScannerTargetStatusInfo(
                     status=ScannerStatus.FAILED,
