@@ -567,9 +567,11 @@ def resolve_config(
             key it removes is left to the selected config, and an ``add`` at
             ``/global_settings/suppressions/-`` adds to its own list, which then
             replaces the selected config's. ``config_overrides`` apply after it.
-            Where the default config would be used instead of a selected file
-            (none was found, or it could not be loaded), this file is used
-            alone. Workspace mode passes the operator's ``--config`` here for a
+            When no config file was found, this file is used alone. A selected
+            file that is missing or cannot be loaded is refused, as it is
+            without an overlay, rather than replaced by this file: the
+            project's own settings would be lost. Workspace mode passes the
+            operator's ``--config`` here for a
             project that has a config of its own (``workspace/resolver.py``), and
             the same file as ``trusted_config_path``, so a field the operator set
             is its trusted value. Every file it is built from must be the

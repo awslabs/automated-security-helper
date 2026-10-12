@@ -122,9 +122,9 @@ passes one (``check_discovered_source``). The directory searched is one the
 caller may read, but a file found there may be a symlink to a file elsewhere,
 and reading that file would let the caller choose a file on the host. The
 MCP server's ``get_config`` already checks a file it finds this way. The refusal
-names the file as found, not the file it resolves to. Discovery itself still
-checks whether each candidate exists, and reads a ``pyproject.toml`` to see
-whether it has a ``[tool.ash]`` table, before the check.
+names the file as found, not the file it resolves to. Discovery looks only at
+whether each candidate exists before the predicate is applied to it; a
+``pyproject.toml`` is read for its ``[tool.ash]`` table only after it passed.
 
 Bounds
 ------

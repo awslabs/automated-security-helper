@@ -171,15 +171,31 @@ def test_a_config_under_the_mcp_root_setting_a_denied_field_is_refused(
 def test_positive_control_an_operator_ash_config_is_not_checked(
     tmp_path: Path, mcp_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With nothing the client named read, the operator's own file is the config."""
+    """With no client file named, the operator's own ASH_CONFIG is the config."""
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(yaml.safe_dump({"fail_on_findings": False}), "utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+
+    config = resolve_config(source_dir=_repo(tmp_path))
+
+    assert config.fail_on_findings is False
+
+
+def test_a_missing_file_a_client_named_is_refused_not_replaced(
+    tmp_path: Path, mcp_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not answered with the operator's ASH_CONFIG: a named config that is
+    missing refuses resolution, as on the CLI."""
+    from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
+
     operator = tmp_path / "operator" / "ash.yaml"
     operator.parent.mkdir()
     operator.write_text(yaml.safe_dump({"fail_on_findings": False}), "utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     missing = mcp_root / "session-1" / "source" / "missing.yaml"
 
-    config = resolve_config(
-        config_path=missing, source_dir=_repo(tmp_path), untrusted_config=True
-    )
-
-    assert config.fail_on_findings is False
+    with pytest.raises(ASHConfigFileNotFoundError, match="missing.yaml"):
+        resolve_config(
+            config_path=missing, source_dir=_repo(tmp_path), untrusted_config=True
+        )

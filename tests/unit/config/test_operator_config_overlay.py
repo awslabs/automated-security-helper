@@ -179,7 +179,7 @@ def test_the_operators_patch_applies_to_its_own_file_before_the_layering(tmp_pat
 
 
 def test_the_operators_patch_applies_to_its_own_file_when_used_alone(tmp_path):
-    missing = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    """With no project config found, the overlay is the config, its patch applied."""
     (tmp_path / "repo").mkdir()
     operator = _operator(
         tmp_path,
@@ -189,9 +189,25 @@ def test_the_operators_patch_applies_to_its_own_file_when_used_alone(tmp_path):
         },
     )
 
-    config = _resolve(tmp_path, missing, operator)
+    config = resolve_config(
+        source_dir=tmp_path / "repo",
+        trusted_config_path=operator,
+        overlay_config_path=operator,
+    )
 
     assert config.project_name == "after"
+
+
+def test_a_named_project_config_that_is_missing_is_refused(tmp_path):
+    """Not answered with the overlay alone: the project's own settings would be lost."""
+    from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
+
+    missing = tmp_path / "repo" / ".ash" / ".ash.yaml"
+    (tmp_path / "repo").mkdir()
+    operator = _operator(tmp_path, {"project_name": "operator"})
+
+    with pytest.raises(ASHConfigFileNotFoundError, match=".ash.yaml"):
+        _resolve(tmp_path, missing, operator)
 
 
 def test_config_overrides_still_win_over_the_operators_file(tmp_path):
@@ -314,26 +330,21 @@ def test_the_overlays_extends_chain_counts_as_set(tmp_path):
     assert config.project_name == "x"
 
 
-def test_a_project_config_that_cannot_be_read_falls_back_to_the_overlay(tmp_path):
-    """Not to the built-in defaults, which would drop the operator's settings."""
+def test_a_project_config_that_cannot_be_read_is_refused(tmp_path):
+    """Not replaced by the overlay alone, nor by the built-in defaults: either
+    would scan with the project's own settings dropped."""
     project = tmp_path / "repo" / ".ash" / ".ash.yaml"
     project.parent.mkdir(parents=True)
     project.write_text("fail_on_findings: [unclosed\n", encoding="utf-8")
-    # Not the default, so falling back to the defaults would fail this.
     operator = _operator(tmp_path, {"fail_on_incomplete_scanners": False})
 
-    config = _resolve(tmp_path, project, operator)
+    with pytest.raises(ASHConfigSourceError, match="could not parse") as raised:
+        _resolve(tmp_path, project, operator)
 
-    assert config.fail_on_incomplete_scanners is False
-    assert any(
-        "Failed to load configuration file" in warning and "alone" in warning
-        for warning in config._resolution_warnings
-    )
+    assert ".ash.yaml" in str(raised.value)
 
 
-def test_an_unexpected_error_in_the_project_config_falls_back_to_the_overlay(
-    tmp_path, monkeypatch
-):
+def test_an_unexpected_error_in_the_project_config_is_refused(tmp_path, monkeypatch):
     from automated_security_helper.config import resolve_config as module
 
     project = _project(tmp_path, {"project_name": "p"})
@@ -347,9 +358,8 @@ def test_an_unexpected_error_in_the_project_config_falls_back_to_the_overlay(
 
     monkeypatch.setattr(module, "resolve_config_document", failing)
 
-    config = _resolve(tmp_path, project, operator)
-
-    assert config.fail_on_incomplete_scanners is False
+    with pytest.raises(ASHConfigValidationError, match="could not be resolved"):
+        _resolve(tmp_path, project, operator)
 
 
 def test_with_no_project_config_found_the_overlay_is_used_alone(tmp_path):
