@@ -40,8 +40,9 @@ from automated_security_helper.utils.sandbox.policy import (
 def _home_is_the_passwd_home(monkeypatch):
     """HOME is the passwd entry's home here, as on most hosts.
 
-    Every test sets HOME to a directory of its own; the case where the two differ
-    is TestFirejailHidesBothHomes, which overrides this.
+    Every test sets HOME to a directory of its own; the cases where the two differ
+    are TestFirejailHidesBothHomes and TestHomeElsewhereThanThePasswdEntry, which
+    override this.
     """
     monkeypatch.setattr(backends_module, "_passwd_home", Path.home, raising=False)
 
@@ -977,6 +978,86 @@ class TestFirejailHidesBothHomes:
         argv = self._argv(layout)
         assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
         assert "--private" in argv
+
+
+class TestHomeElsewhereThanThePasswdEntry:
+    """HOME and the passwd entry's home can be two directories; deny reading both.
+
+    The policy's home is Path.home(), which reads HOME. sandbox-exec allows reading
+    everything and then denied that one home, so with HOME set elsewhere the passwd
+    entry's home (the real ~/.ssh, ~/.aws, ~/Library/Keychains) stayed readable.
+    The policy's own paths under it are allowed again after the denies.
+    """
+
+    @pytest.fixture
+    def passwd_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "passwd-home"
+        (home / "Library" / "Keychains").mkdir(parents=True)
+        monkeypatch.setattr(
+            backends_module, "_passwd_home", lambda: home, raising=False
+        )
+        return home
+
+    def test_sandbox_exec_denies_reading_both_homes(
+        self, layout, passwd_home, tmp_path
+    ):
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        for home in (layout.home, passwd_home):
+            assert f'(deny file-read* (subpath "{_as_argv(home)}"))' in profile, home
+            assert _as_argv(home / "Library" / "Keychains") in profile, home
+
+    def test_a_policy_path_under_the_passwd_home_is_readable_again(
+        self, layout, passwd_home, monkeypatch, tmp_path
+    ):
+        """ASH's own venv can live in the passwd home; its allow comes after the deny."""
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        monkeypatch.setenv("PATH", str(venv_bin))
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        lines = profile.splitlines()
+        deny = lines.index(f'(deny file-read* (subpath "{_as_argv(passwd_home)}"))')
+        allow = next(
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("(allow file-read*") and _as_argv(venv_bin) in line
+        )
+        assert allow > deny
+
+    def test_one_home_changes_nothing(self, layout, monkeypatch, tmp_path):
+        """Positive control: HOME is the passwd home, as on most hosts."""
+        monkeypatch.setattr(
+            backends_module, "_passwd_home", lambda: layout.home, raising=False
+        )
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        home_denials = [
+            line
+            for line in profile.splitlines()
+            if line.startswith("(deny file-read* (subpath")
+            and '"/private/tmp"' not in line
+        ]
+        assert home_denials == [
+            f'(deny file-read* (subpath "{_as_argv(layout.home)}"))'
+        ], home_denials
+
+
+class TestSandboxExecLeavesTheRealCacheUnwritten:
+    """filter_env drops XDG_CACHE_HOME, so tools fall back to $HOME/.cache.
+
+    Under sandbox-exec HOME is the real path. The profile denies by default and
+    allows writing only the results directory, the private TMPDIR, an unpack
+    directory and uv's lock files, so a write to the real $HOME/.cache is refused
+    rather than landing there.
+    """
+
+    def test_no_write_rule_reaches_home(self, layout, tmp_path):
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        writes = [line for line in profile.splitlines() if "file-write*" in line]
+        assert writes
+        home = _as_argv(layout.home)
+        for line in writes:
+            if line.startswith("(deny"):
+                continue
+            assert f'"{home}"' not in line and f'"{home}/' not in line, line
 
 
 class TestWritableWinsOverReadOnly:

@@ -559,7 +559,7 @@ from `HOME`. When `HOME` names another directory, ASH decides the whitelists ins
 the home against the passwd entry's home, as firejail applies them, and also
 blacklists the directory `HOME` names, unless it is under `/tmp`, which is already
 private. A tool installed inside that directory then fails to start rather than the
-directory being shown.
+directory being shown. sandbox-exec likewise denies reading both directories.
 
 firejail also decides for itself whether to build a sandbox at all. When it finds no
 kernel threads among the first ten PIDs, as inside a container that has its own PID
@@ -633,6 +633,13 @@ directory and a private `TMPDIR`. With no network, no socket of any kind is allo
 With a network, IP sockets are allowed and Unix sockets are not, except the
 resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH agent
 stay out of reach. The scanner starts in a new session, with no controlling terminal.
+
+The home directory is the one `HOME` names. When that is not the home your account's
+passwd entry names, as in a CI job or `HOME=/tmp/x ash scan`, the profile denies
+reading both, and the keychain rule covers `Library/Keychains` under both. The paths
+the policy lists are allowed again after those denies, wherever they are, so a tool
+path inside either home stays readable. With `HOME` set to the passwd entry's home,
+the profile is the same as before.
 
 Programs run only from the system and tool paths the policy makes readable, and from
 two directories made for the spawn alone: its private uv cache, where `uv tool run`

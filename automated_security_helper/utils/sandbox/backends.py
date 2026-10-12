@@ -152,6 +152,17 @@ def _passwd_home() -> Optional[Path]:
         return None
 
 
+def _other_home(policy: SandboxPolicy) -> Optional[Path]:
+    """The passwd entry's home when it is a directory other than ``policy.home``."""
+    other = _passwd_home()
+    if other is None or not other.is_absolute():
+        return None
+    real = _real(other)
+    if real == _real(policy.home) or real == Path("/"):
+        return None
+    return real
+
+
 def _probe_process(
     argv: Sequence[str], env: Optional[Mapping[str, str]] = None
 ) -> "subprocess.CompletedProcess[str]":
@@ -910,6 +921,9 @@ class SandboxExecBackend(SandboxBackend):
         private_uv_cache: Optional[Path] = None,
     ) -> str:
         home = _real(policy.home)
+        # The passwd entry's home too, when HOME names another directory: reading
+        # starts from "/", so a home that is not denied here stays readable.
+        homes = [home] + [h for h in [_other_home(policy)] if h is not None]
         # Caches are read-only here too; see _private_caches.
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})"
@@ -950,7 +964,7 @@ class SandboxExecBackend(SandboxBackend):
             # directories, then give back the paths the policy lists. In SBPL the
             # last matching rule wins.
             '(allow file-read* (subpath "/"))',
-            f"(deny file-read* (subpath {_sbpl_string(home)}))",
+            *[f"(deny file-read* (subpath {_sbpl_string(h)}))" for h in homes],
             '(deny file-read* (subpath "/private/tmp") (subpath "/private/var/folders"))',
         ]
         if readable:
@@ -982,9 +996,11 @@ class SandboxExecBackend(SandboxBackend):
             )
         # Last of the file rules, so no path the policy grants can reopen them: the
         # system and login keychains, whatever the keychain daemon would allow.
+        keychains = " ".join(
+            f"(subpath {_sbpl_string(h / 'Library' / 'Keychains')})" for h in homes
+        )
         lines.append(
-            '(deny file-read* file-write* (subpath "/Library/Keychains")'
-            f" (subpath {_sbpl_string(home / 'Library' / 'Keychains')}))"
+            f'(deny file-read* file-write* (subpath "/Library/Keychains") {keychains})'
         )
         if policy.network:
             # IP only. Unix-domain sockets stay denied (Docker Desktop's socket, the
