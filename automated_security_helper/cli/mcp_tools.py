@@ -241,7 +241,7 @@ def _discovered_config_refusal(
 
 
 def _discovered_config_path(
-    target: Path, *, permit: Callable[[Path], None]
+    target: Path, *, permit: Callable[[Path], bool]
 ) -> Tuple[Optional[Path], Optional[MCPResourceError]]:
     """The config file a scan of ``target`` would discover, under ``permit``.
 
