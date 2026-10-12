@@ -33,6 +33,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
 from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScanner,
 )
+from automated_security_helper.utils.sandbox import backends as backends_module
+from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
@@ -224,6 +226,30 @@ def test_a_variable_naming_a_root_or_the_home_directory_grants_nothing(
         "home": home,
         "holding-home": home.parent,
     }[value]
+    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
+
+    policy = _policy(layout, backend, "semgrep")
+
+    assert _real(named) not in _readable(policy)
+
+
+@pytest.mark.parametrize("value", ["passwd-home", "holding-passwd-home"])
+def test_a_variable_naming_the_passwd_home_grants_nothing(
+    layout, backend, monkeypatch, value
+):
+    """With HOME elsewhere, the passwd entry's home is a home too.
+
+    sandbox-exec denies reading it and then allows the policy's read paths again,
+    so a grant of it, or of a directory holding it, would re-open it, ~/.ssh
+    included. The check measured only against HOME.
+    """
+    tmp, _home, _source, _output = layout
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    passwd_home = tmp / "elsewhere" / "passwd-home"
+    (passwd_home / ".ssh").mkdir(parents=True)
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", lambda: passwd_home, raising=False)
+    named = passwd_home if value == "passwd-home" else passwd_home.parent
     monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(named))
 
     policy = _policy(layout, backend, "semgrep")

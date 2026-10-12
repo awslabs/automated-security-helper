@@ -111,11 +111,14 @@ it needs.
   are mounted, and a tool's install prefix only when it is deeper than a directory
   directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). When `HOME`
   names a directory other than your account's passwd entry's home, both directories
-  are screened this way. ASH's own Python is mounted where it is installed. If its
-  prefix is a home directory, or it is reached through a link kept directly in one
-  (a virtual environment made with `~/python3 -m venv`), the scanner is refused
-  rather than given the home; create the environment from the interpreter's real
-  path instead.
+  are screened this way. ASH's own Python is mounted where it is installed, and
+  `ASH_BIN_PATH` with it. The scanner is refused rather than given the home when
+  the Python's prefix is a home directory or a directory directly in one that is
+  not a virtual environment or conda installation (`~/.local`), when the Python is
+  reached through a link kept directly in a home (a virtual environment made with
+  `~/python3 -m venv`), or when `ASH_BIN_PATH` names a home or a directory directly
+  in one not named `bin`. Use an interpreter or virtual environment outside the
+  home directory, or one created from the interpreter's real path.
 - The offline rule cache of semgrep and opengrep, the directory
   `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
   for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
@@ -123,7 +126,8 @@ it needs.
   firejail and Landlock restrict writes and reads, not exec, there. Only the
   variable in ASH's own environment grants it, never a path in the scanner's options;
   an empty or relative value grants nothing, and one naming a file, `/`, `$HOME` or a
-  directory above `$HOME` is not mounted, with a warning. A directory directly under
+  directory above `$HOME` (or the passwd entry's home, or a directory above it, when
+  `HOME` names another directory) is not mounted, with a warning. A directory directly under
   `$HOME`, such as `~/rules`, is mounted as named, so point the variable at the rules
   directory itself.
 - The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,

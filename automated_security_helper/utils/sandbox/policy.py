@@ -435,11 +435,14 @@ def _homes() -> List[Path]:
 
     HOME's, and the passwd entry's when that is another directory. sandbox-exec
     denies reading both and then allows the policy's paths again, and firejail hides
-    the passwd one, so a path under either must be screened the same way.
+    the passwd one, so a path under either must be screened the same way. "/" is
+    left out of both: a HOME of "/", as in some containers, names no home, and as
+    one it would make every top-level directory "directly under a home".
     """
     home = Path(os.path.realpath(Path.home()))
+    homes = [] if home == Path("/") else [home]
     other = _distinct_home(home, _passwd_home())
-    return [home] if other is None else [home, other]
+    return homes if other is None else [*homes, other]
 
 
 def _path_directories() -> List[Path]:
@@ -529,11 +532,12 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
     """The directories ``names`` name in ASH's own environment, as read grants.
 
     See ``SandboxRequirements.read_path_env``. A value that would expose far more
-    than one directory -- a filesystem root, ``$HOME``, or a directory holding
-    ``$HOME`` -- is refused with a warning, so the tool then finds nothing there and
-    says so, rather than reading the whole home directory.
+    than one directory -- a filesystem root, a home directory, or a directory
+    holding one -- is refused with a warning, so the tool then finds nothing there
+    and says so, rather than reading the whole home directory. The home directories
+    are $HOME's and, when HOME names another directory, the passwd entry's.
     """
-    real_home = Path(os.path.realpath(Path.home()))
+    homes = _homes()
     granted: List[Path] = []
     for name in names:
         value = os.environ.get(name, "")
@@ -550,7 +554,9 @@ def _env_named_read_paths(names: Sequence[str]) -> List[Path]:
                 )
             continue
         real = Path(os.path.realpath(value))
-        if real == Path(real.anchor) or real == real_home or real in real_home.parents:
+        if real == Path(real.anchor) or any(
+            real == home or real in home.parents for home in homes
+        ):
             from automated_security_helper.utils.log import ASH_LOGGER
 
             ASH_LOGGER.warning(
@@ -696,7 +702,10 @@ def _ash_paths() -> List[Path]:
         Path(os.path.realpath(sys.executable)).parent.parent,
     ]
     link_dirs = [hop.parent for hop in _symlink_hops(Path(sys.executable))]
-    _refuse_a_home_among(interpreter_dirs, link_dirs, homes, interpreter_roots)
+    bin_path = _bin_path()
+    _refuse_a_home_among(
+        interpreter_dirs, link_dirs, bin_path, homes, interpreter_roots
+    )
     return _existing(
         [
             package_dir,
@@ -704,33 +713,51 @@ def _ash_paths() -> List[Path]:
             *import_path,
             *interpreter_dirs,
             *link_dirs,
-            _bin_path(),
+            bin_path,
         ]
     )
+
+
+def _is_an_installation_root(path: Path) -> bool:
+    """Whether ``path`` is a venv's root (pyvenv.cfg) or a conda installation's."""
+    return (path / "pyvenv.cfg").is_file() or (path / "conda-meta").is_dir()
+
+
+#: What to do instead, in every refusal of ASH's own paths.
+_USE_ANOTHER_PYTHON = (
+    "Use an interpreter or virtual environment outside the home directory, or a "
+    "virtual environment created from the interpreter's real path."
+)
 
 
 def _refuse_a_home_among(
     interpreter_dirs: Sequence[Path],
     link_dirs: Sequence[Path],
+    bin_path: Path,
     homes: Sequence[Path],
     interpreter_roots: Iterable[Path],
 ) -> None:
-    """Refuse the spawn when mounting ASH's interpreter would mount a home directory.
+    """Refuse the spawn when mounting ASH's own paths would mount a home's contents.
 
-    These paths are mounted as they are, with no breadth filter, so that the
-    interpreter can be started inside the sandbox by the path it was started with.
-    Refused: a prefix that is "/", a home directory or a directory holding one (a
-    Python built with --prefix=$HOME), and the directory of a link sys.executable
-    passes through when that directory is one of those, or is a directory inside a
-    home that is neither named bin, sbin or Scripts nor part of an interpreter. A
-    venv made by ``~/python3 -m venv ~/env`` links env/bin/python3 to ~/python3,
-    which mounted the whole home, ~/.ssh included. Mounting less instead would leave
-    that link dangling in the sandbox, and the interpreter would not start.
+    ASH's interpreter is mounted by its prefixes and by the directory of every link
+    sys.executable passes through, so that it starts inside the sandbox by the path
+    it was started with, and ASH_BIN_PATH is mounted for the tools in it. None of
+    them went through a breadth filter. A venv made by ``~/python3 -m venv ~/env``
+    links env/bin/python3 to ~/python3, which mounted the whole home, ~/.ssh
+    included; a Python whose prefix is ~/.local mounted ~/.local/share and its
+    keyrings. Mounting less instead would leave a link dangling, or the interpreter
+    without its library, and it would not start, so the spawn is refused.
 
-    A HOME of "/", as in some containers, is not counted as a home here: every path
-    is inside it.
+    Measured against ``homes`` (_homes(): HOME's and the passwd entry's):
+    - a prefix that is "/", a home or holds one, or is directly in a home without
+      being a venv or conda root (~/.venv and ~/miniconda3 are one installation,
+      ~/.local is not);
+    - a link's directory that is "/", a home or holds one, or is inside a home
+      without being named bin, sbin or Scripts or lying inside an interpreter
+      (~/.config for ~/.config/python3);
+    - an ASH_BIN_PATH that is "/", a home or holds one, or is directly in a home
+      without being named bin, sbin or Scripts (~/.local).
     """
-    homes = [home for home in homes if home != Path("/")]
     roots = [Path(os.path.realpath(root)) for root in interpreter_roots]
 
     def holds_a_home(real: Path) -> bool:
@@ -738,13 +765,18 @@ def _refuse_a_home_among(
             real == home or real in home.parents for home in homes
         )
 
+    def directly_in_a_home(real: Path) -> bool:
+        return real.parent in homes
+
     for path in interpreter_dirs:
-        if holds_a_home(Path(os.path.realpath(path))):
+        real = Path(os.path.realpath(path))
+        if holds_a_home(real) or (
+            directly_in_a_home(real) and not _is_an_installation_root(real)
+        ):
             raise SandboxUnavailable(
-                f"ASH's Python prefix {path.as_posix()} is a home directory or holds "
-                "one, so the sandbox would mount that home for every scanner. Run "
-                "ASH from a Python installed, or a virtual environment created, "
-                "outside it."
+                f"ASH's Python prefix {path.as_posix()!r} is a home directory, holds "
+                "one, or holds more of one than a single Python installation, so the "
+                f"sandbox would mount it for every scanner. {_USE_ANOTHER_PYTHON}"
             )
     for path in link_dirs:
         real = Path(os.path.realpath(path))
@@ -756,11 +788,21 @@ def _refuse_a_home_among(
             in_a_home and path.name not in _BIN_DIR_NAMES and not part_of_an_interpreter
         ):
             raise SandboxUnavailable(
-                f"ASH's Python ({sys.executable}) is reached through a link in "
-                f"{path.as_posix()}, a home directory or a directory in one, so the "
-                "sandbox would mount it for every scanner. Create the virtual "
-                "environment from the interpreter's real path "
-                f"({os.path.realpath(sys.executable)})."
+                f"ASH's Python {sys.executable!r} is reached through a link in "
+                f"{path.as_posix()!r}, a home directory or a directory in one, so the "
+                f"sandbox would mount it for every scanner. {_USE_ANOTHER_PYTHON}"
+            )
+    if os.path.isdir(bin_path):
+        real = Path(os.path.realpath(bin_path))
+        if holds_a_home(real) or (
+            directly_in_a_home(real) and bin_path.name not in _BIN_DIR_NAMES
+        ):
+            raise SandboxUnavailable(
+                f"ASH_BIN_PATH {bin_path.as_posix()!r} is a home directory, holds one, "
+                "or is a directory directly in one not named bin, so the sandbox "
+                "would mount it for every scanner. Point ASH_BIN_PATH at a "
+                "directory that holds only tools, outside the home directory or in "
+                "one of its bin directories."
             )
 
 

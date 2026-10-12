@@ -1101,7 +1101,14 @@ class TestPolicyPathsUnderThePasswdHome:
     @pytest.fixture
     def pw(self, tmp_path, monkeypatch):
         home = tmp_path / "passwd-home"
-        for name in (".ssh", ".config/t", ".local/bin", ".local/share", ".cargo/bin"):
+        for name in (
+            ".ssh",
+            ".config/t",
+            ".local/bin",
+            ".local/share",
+            ".cargo/bin",
+            "bin",
+        ):
             (home / name).mkdir(parents=True)
         _fake_passwd_home(monkeypatch, home)
         return home
@@ -1131,7 +1138,7 @@ class TestPolicyPathsUnderThePasswdHome:
         children = [pw, pw / ".config" / "t", *pw.iterdir()]
         assert _reopened_after_deny(profile, pw, children) == []
 
-    @pytest.mark.parametrize("bin_dir", [".local/bin", ".cargo/bin"])
+    @pytest.mark.parametrize("bin_dir", [".local/bin", ".cargo/bin", "bin"])
     def test_a_tools_prefix_directly_under_the_passwd_home(
         self, layout, pw, monkeypatch, bin_dir
     ):
@@ -1234,10 +1241,144 @@ class TestAshsInterpreterThroughAHome:
         """Positive control: sys.prefix ~/env is one installation, mounted as is."""
         venv = layout.home / "env"
         venv.mkdir()
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
         monkeypatch.setattr(sys, "prefix", str(venv))
         exposed = _resolved(_policy(layout).read_only)
         assert Path(os.path.realpath(venv)) in exposed
         assert Path(os.path.realpath(layout.home)) not in exposed
+
+    @pytest.mark.parametrize("in_home", ["HOME", "passwd home"])
+    def test_a_real_python_in_dot_local_bin(
+        self, layout, tmp_path, monkeypatch, in_home
+    ):
+        """Its prefix is ~/.local, which holds ~/.local/share and its keyrings."""
+        home = layout.home
+        if in_home == "passwd home":
+            home = tmp_path / "passwd-home"
+            _fake_passwd_home(monkeypatch, home)
+        python = home / ".local" / "bin" / "python3.12"
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_bytes(b"\x7fELF")
+        (home / ".local" / "lib" / "python3.12").mkdir(parents=True)
+        monkeypatch.setattr(sys, "executable", str(python))
+        for name in ("prefix", "exec_prefix", "base_prefix"):
+            monkeypatch.setattr(sys, name, str(home / ".local"))
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    def test_the_refusal_names_the_path_escaped_and_the_way_out(
+        self, layout, tmp_path, monkeypatch
+    ):
+        odd = layout.home / "odd\n::error::name"
+        self._interpreter_through(odd / "python3", tmp_path, monkeypatch)
+        with pytest.raises(SandboxUnavailable) as refused:
+            _policy(layout)
+        message = str(refused.value)
+        assert repr(odd.as_posix()) in message
+        assert "\n" not in message
+        assert "outside the home directory" in message
+
+
+class TestAshBinPathUnderAHome:
+    """ASH_BIN_PATH is mounted for every scanner, so it gets the same breadth rule."""
+
+    @pytest.mark.parametrize("value", ["home", "holding-home", ".local"])
+    def test_a_broad_bin_path_is_refused(self, layout, monkeypatch, value):
+        named = {
+            "home": layout.home,
+            "holding-home": layout.home.parent,
+            ".local": layout.home / ".local",
+        }[value]
+        monkeypatch.setenv("ASH_BIN_PATH", str(named))
+        with pytest.raises(SandboxUnavailable, match="ASH_BIN_PATH"):
+            _policy(layout)
+
+    @pytest.mark.parametrize("where", ["bin", ".ash/bin"])
+    def test_a_bin_directory_in_the_home_is_mounted(self, layout, monkeypatch, where):
+        named = layout.home / where
+        named.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("ASH_BIN_PATH", str(named))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(named)) in exposed
+        assert Path(os.path.realpath(layout.home)) not in exposed
+
+
+class TestCommonInterpreterLayoutsStayAllowed:
+    """The refusal above does not refuse the usual places a Python lives in a home.
+
+    Each layout is built in HOME, and again in the passwd home with HOME elsewhere,
+    and is mounted without the home itself.
+    """
+
+    @staticmethod
+    def _binary(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x7fELF")
+        return path
+
+    @classmethod
+    def _pyenv(cls, home):
+        prefix = home / ".pyenv" / "versions" / "3.12.1"
+        cls._binary(prefix / "bin" / "python3.12")
+        (prefix / "bin" / "python3").symlink_to("python3.12")
+        (prefix / "lib" / "python3.12").mkdir(parents=True)
+        return prefix / "bin" / "python3", prefix, prefix
+
+    @classmethod
+    def _uv(cls, home):
+        prefix = home / ".local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu"
+        cls._binary(prefix / "bin" / "python3.14")
+        (prefix / "bin" / "python3").symlink_to("python3.14")
+        (prefix / "lib" / "python3.14").mkdir(parents=True)
+        return prefix / "bin" / "python3", prefix, prefix
+
+    @classmethod
+    def _venv_at(cls, home, venv):
+        _executable, base, _ = cls._uv(home)
+        (venv / "bin").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text(f"home = {base / 'bin'}\n")
+        (venv / "bin" / "python").symlink_to(base / "bin" / "python3.14")
+        (venv / "bin" / "python3").symlink_to("python")
+        return venv / "bin" / "python3", venv, base
+
+    @classmethod
+    def _venv(cls, home):
+        """An in-tree .venv, as uv sync makes it."""
+        return cls._venv_at(home, home / "work" / "project" / ".venv")
+
+    @classmethod
+    def _dot_venv(cls, home):
+        """A venv directly under the home."""
+        return cls._venv_at(home, home / ".venv")
+
+    @classmethod
+    def _conda(cls, home):
+        prefix = home / "miniconda3"
+        cls._binary(prefix / "bin" / "python3.12")
+        (prefix / "bin" / "python3").symlink_to("python3.12")
+        (prefix / "lib" / "python3.12").mkdir(parents=True)
+        (prefix / "conda-meta").mkdir()
+        return prefix / "bin" / "python3", prefix, prefix
+
+    @pytest.mark.parametrize("which", ["pyenv", "uv", "venv", "dot_venv", "conda"])
+    @pytest.mark.parametrize("in_home", ["HOME", "passwd home"])
+    def test_it_is_mounted_and_the_home_is_not(
+        self, layout, tmp_path, monkeypatch, which, in_home
+    ):
+        home = layout.home
+        if in_home == "passwd home":
+            home = tmp_path / "passwd-home"
+            home.mkdir()
+            _fake_passwd_home(monkeypatch, home)
+        executable, prefix, base_prefix = getattr(self, f"_{which}")(home)
+        monkeypatch.setattr(sys, "executable", str(executable))
+        monkeypatch.setattr(sys, "prefix", str(prefix))
+        monkeypatch.setattr(sys, "exec_prefix", str(prefix))
+        monkeypatch.setattr(sys, "base_prefix", str(base_prefix))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(prefix)) in exposed
+        assert Path(os.path.realpath(base_prefix)) in exposed
+        assert Path(os.path.realpath(home)) not in exposed
 
 
 @pytest.mark.parametrize(
@@ -1252,6 +1393,16 @@ def test_no_second_home(tmp_path, pw_dir):
     special = {"HOME": home, "link to HOME": link}
     value = special.get(pw_dir) or (None if pw_dir is None else Path(pw_dir))
     assert policy_module._distinct_home(home, value) is None
+
+
+def test_a_home_of_root_is_not_a_home(tmp_path, monkeypatch):
+    """A HOME of "/", as in some containers, names no home: every path is inside it."""
+    monkeypatch.setenv("HOME", "/")
+    monkeypatch.setenv("USERPROFILE", "/")
+    other = tmp_path / "passwd-home"
+    other.mkdir()
+    _fake_passwd_home(monkeypatch, other)
+    assert policy_module._homes() == [Path(os.path.realpath(other))]
 
 
 def test_a_second_home(tmp_path):
