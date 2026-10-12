@@ -22,7 +22,8 @@ the tool runs and gone afterwards, that a link at the old path is not written
 through, and what a sandboxed scanner may do with the directory.
 
 cfn-guard is handed a copy of each of the operator's rules files ASH read, and
-the same directory holds those copies (the tests at the end of this module).
+gitleaks' re-scan a copy of each file the tree's ``.gitleaksignore`` names. The
+same directory holds those copies (the tests at the end of this module).
 """
 
 from __future__ import annotations
@@ -632,6 +633,54 @@ def _cfn_guard_respond(argv: List[str]) -> str:
     return _EMPTY_SARIF
 
 
+#: The file the scanned tree's .gitleaksignore names, and what it holds.
+_NAMED_FILE = "app/named.py"
+_NAMED_TEXT = "value = 'a line the re-scan reads'\n"
+
+
+def _gitleaks(
+    tmp_path: Path, context: PluginContext, monkeypatch: pytest.MonkeyPatch
+) -> Any:
+    """gitleaks over a tree whose .gitleaksignore names one file."""
+    source = Path(context.source_dir)
+    (source / _NAMED_FILE).parent.mkdir(parents=True)
+    (source / _NAMED_FILE).write_text(_NAMED_TEXT, encoding="utf-8")
+    (source / ".gitleaksignore").write_text(
+        f"{_NAMED_FILE}:generic-api-key:1\n", encoding="utf-8"
+    )
+    cls, config = _scanner_class("gitleaks")
+    monkeypatch.setattr(cls, "validate_plugin_dependencies", lambda self: True)
+    return cls(context=context, config=config())
+
+
+def _gitleaks_copy(
+    argv: List[str], cwd: Optional[Path], source: Path
+) -> Optional[Path]:
+    """The re-scan's copy of the named file: the run from another directory."""
+    if cwd is None or _real(cwd) == _real(source):
+        return None
+    return cwd / _NAMED_FILE
+
+
+def _gitleaks_respond(argv: List[str]) -> str:
+    """gitleaks writes its report where ``--report-path`` says; it found nothing.
+
+    The report has a run, so the first run's is followed by the re-scan.
+    """
+    report = _config_arg(argv, "--report-path")
+    assert report is not None, argv
+    report.write_text(
+        json.dumps(
+            {
+                "version": "2.1.0",
+                "runs": [{"tool": {"driver": {"name": "gitleaks"}}, "results": []}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return ""
+
+
 COPY_CASES = [
     CopyCase(
         "cfn-guard",
@@ -640,6 +689,14 @@ COPY_CASES = [
         _cfn_guard_copy,
         _cfn_guard_respond,
         _OPERATOR_RULES,
+    ),
+    CopyCase(
+        "gitleaks",
+        "source/gitleaksignore-rescan/tree",
+        _gitleaks,
+        _gitleaks_copy,
+        _gitleaks_respond,
+        _NAMED_TEXT,
     ),
 ]
 

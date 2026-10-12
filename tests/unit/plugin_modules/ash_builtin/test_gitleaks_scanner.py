@@ -888,10 +888,19 @@ def test_findings_the_trees_gitleaksignore_drops_are_added_back(tmp_path, monkey
     assert [a for a in call["argv"] if not a.startswith("--report-path=")][:-1] == [
         a for a in main_args if not a.startswith("--report-path=")
     ][:-1]
-    rescan_dir = results_file.parent / "gitleaksignore-rescan"
-    assert call["cwd"] == rescan_dir / "tree"
+    # The copies are outside the scanned tree, in the run's own directory; the
+    # report stays beside the first run's.
+    assert call["cwd"].name == "tree"
+    assert call["cwd"].parent.name == "gitleaksignore-rescan"
+    assert _ashs_own(call["cwd"], source), call["cwd"]
+    rescan_reports = results_file.parent / "gitleaksignore-rescan"
+    assert any(
+        a == f"--report-path={(rescan_reports / 'tree.sarif').as_posix()}"
+        for a in call["argv"]
+    )
     # The copies hold the tree's secrets: none is left behind.
     assert not call["cwd"].exists()
+    assert not call["cwd"].parent.exists()
 
 
 def test_without_a_gitleaksignore_nothing_is_re_scanned(tmp_path, monkeypatch):
@@ -1539,6 +1548,32 @@ def test_a_copy_the_re_scan_cannot_write_fails_the_scan(tmp_path, monkeypatch):
     source = Path(scanner.context.source_dir)
     _write(source, "app/x.py")
     (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\nmissing.py:r:1\n")
+    with pytest.raises(ScannerError, match="No space left on device"):
+        _add_back(scanner, source, _report(), tmp_path)
+    assert calls == []
+
+
+def test_a_copies_directory_that_cannot_be_made_fails_the_scan(tmp_path, monkeypatch):
+    """The re-scan's directory outside the tree is ASH's to make; without it the
+    files the ignore file hides would not be re-scanned."""
+    import errno
+
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+
+    real = module.empty_tool_directory
+
+    def no_room_for_copies(name, **kwargs):
+        if name == "gitleaksignore-rescan":
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real(name, **kwargs)
+
+    monkeypatch.setattr(module, "empty_tool_directory", no_room_for_copies)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:1\n")
     with pytest.raises(ScannerError, match="No space left on device"):
         _add_back(scanner, source, _report(), tmp_path)
     assert calls == []

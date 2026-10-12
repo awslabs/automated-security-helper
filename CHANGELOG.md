@@ -1245,7 +1245,8 @@
     names nothing;
   - gitleaks runs with its default rules, not `.gitleaks.toml` or
     `.ash/.gitleaks.toml`, and ASH re-scans each file a root `.gitleaksignore`
-    names (gitleaks always reads that file) and reports what it dropped;
+    names (gitleaks always reads that file), from copies it makes outside the
+    scanned tree and removes when the run ends, and reports what it dropped;
     `GITLEAKS_CONFIG` and `GITLEAKS_CONFIG_TOML` from the environment still apply
     outside `--sandbox`;
   - zizmor runs with `--no-config`, not `zizmor.yml` or `.github/zizmor.yml`;

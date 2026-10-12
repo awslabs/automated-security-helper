@@ -109,8 +109,9 @@ it needs.
   syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name
   none, gitleaks' default-rules config, trivy's and trivy-repo's empty ignore file
   and secret config, the empty directories ASH passes trivy-repo as its modules
-  directory and gitleaks as its ignore path, and the copies of your `rules_paths`
-  files ASH gives cfn-guard) are in a directory of that scanner run's own, outside the
+  directory and gitleaks as its ignore path, the copies of your `rules_paths`
+  files ASH gives cfn-guard, and the copies of the files a `.gitleaksignore` names
+  that gitleaks re-scans) are in a directory of that scanner run's own, outside the
   scanned tree (normally in the system temporary directory, never under one another
   account can change), made with mode 0700 and removed when the run ends. The
   scanner can read it and cannot write to it. Under sandbox-exec, the one backend

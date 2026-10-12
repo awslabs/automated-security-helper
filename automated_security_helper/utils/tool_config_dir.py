@@ -11,8 +11,9 @@ operator's, or a file ASH writes that sets nothing
 (``config/tool_config_trust.empty_tool_config``). A tool that loads what a
 directory holds (trivy-repo's modules directory) gets an empty one the same way
 (``empty_tool_directory``, :func:`make_tool_config_directory`). cfn-guard is
-handed copies of the operator's rules files ASH read, which are written here
-too. Those used to be written in
+handed copies of the operator's rules files ASH read, and gitleaks' re-scan
+copies of the files a ``.gitleaksignore`` names, which are written here too.
+Those used to be written in
 the scanner's results directory. That is under the output directory, which
 defaults to ``<source>/.ash/ash_output``, so the file sat inside the tree being
 scanned, at a path the scanned repository could already occupy with a committed

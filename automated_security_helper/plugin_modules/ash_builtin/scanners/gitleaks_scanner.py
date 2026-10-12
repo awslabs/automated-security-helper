@@ -58,7 +58,9 @@ which are both, so the scanned tree does not configure gitleaks:
 * ``.gitleaksignore``: gitleaks reads ``<scan path>/.gitleaksignore`` whatever
   ``--gitleaks-ignore-path`` says, and has no flag to turn that off (measured on
   8.30.1). When the scan root has one, ASH copies the files it names into a
-  directory of its own, at their paths relative to the root, runs gitleaks once
+  directory of its own outside the scanned tree, in the scanner run's own
+  directory (``config/tool_config_trust.empty_tool_directory``), at their paths
+  relative to the root, runs gitleaks once
   more over that directory (no ``.gitleaksignore`` is there), and adds back every
   finding the first run dropped. gitleaks walks the copies under the same
   relative paths, so the directories its allowlists skip (``.git``, by default)
@@ -203,7 +205,12 @@ CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
 #: The ignore file gitleaks always reads at the root of its scan path.
 IGNORE_FILE_NAME = ".gitleaksignore"
 
-#: Under the re-scan directory: the copies of the files ``.gitleaksignore``
+#: The directory the re-scan's copies are made in, in the scanner run's own
+#: directory outside the scanned tree. Its re-scan reports and logs are written
+#: under the results directory, in a directory of the same name.
+RESCAN_DIR_NAME = "gitleaksignore-rescan"
+
+#: Under the copies directory: the copies of the files ``.gitleaksignore``
 #: names, at their tree paths, and the copy of ``.gitleaksignore`` itself when it
 #: names itself. See ``GitleaksScanner._copy_for_rescan``.
 RESCAN_TREE_DIR = "tree"
@@ -252,9 +259,9 @@ DEFAULT_RULES_CONFIG = (
 def _write_private_copy(source: BinaryIO, destination: Path) -> None:
     """Copy ``source`` to a new file at ``destination``, readable by its owner only.
 
-    ``O_EXCL`` and ``O_NOFOLLOW``: the file must not exist, so nothing left in the
-    re-scan directory can redirect the write. The copy holds the tree's secrets
-    until the re-scan removes it.
+    ``O_EXCL`` and ``O_NOFOLLOW``: the file must not exist, so nothing at its name
+    in the copies directory can redirect the write. The copy holds the tree's
+    secrets until the re-scan removes it.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(
@@ -851,9 +858,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
         gitleaks reads ``<scan path>/.gitleaksignore`` whatever ASH passes, so the
         run whose report is ``raw`` may have dropped findings by fingerprint. ASH
-        copies each named file into a directory of its own, at the same path
-        relative to the root, and runs gitleaks once over that directory with the
-        first run's flags. No ``.gitleaksignore`` is at its root, and gitleaks
+        copies each named file into a directory of its own outside the scanned
+        tree (``_rescan_copies_dir``), at the same path relative to the root, and
+        runs gitleaks once over that directory with the first run's flags. Its
+        reports and logs go to the results directory, the one place a sandboxed
+        gitleaks may write. No ``.gitleaksignore`` is at its root, and gitleaks
         walks the copies under the same relative paths, so the directories and
         paths its allowlists skip (``.git``, by default) are skipped as they were
         in the tree, under whichever config the first run used. Results the first
@@ -891,19 +900,20 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
         seen = {key(result) for result in results}
         scan_path = self._scan_path(target)
-        rescan_dir = results_file.parent / "gitleaksignore-rescan"
+        rescan_dir = results_file.parent / RESCAN_DIR_NAME
         if rescan_dir.is_symlink() or rescan_dir.is_file():
             rescan_dir.unlink()
         elif rescan_dir.is_dir():
             shutil.rmtree(rescan_dir)
         rescan_dir.mkdir(parents=True)
+        copies_dir = self._rescan_copies_dir()
         added = 0
         # One deadline for every re-scan run, scan_timeout long.
         timeout = self._effective_scan_timeout()
         deadline = None if timeout is None else _monotonic() + timeout
         try:
             batches, copied, skipped = self._copy_for_rescan(
-                target, relatives, rescan_dir, final_args
+                target, relatives, copies_dir, rescan_dir, final_args
             )
             self._rescan_skipped = skipped
             if skipped:
@@ -934,8 +944,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                             results.append(result)
                             added += 1
         finally:
-            for copies in (RESCAN_TREE_DIR, RESCAN_SELF_DIR):
-                shutil.rmtree(rescan_dir / copies, ignore_errors=True)
+            # Now, not only when the run's directory goes: they hold the tree's
+            # secrets.
+            shutil.rmtree(copies_dir, ignore_errors=True)
         self._plugin_log(
             f"The scanned tree's {IGNORE_FILE_NAME} names {len(relatives)} file(s), "
             f"{copied} of them read by the directory scan. gitleaks applies it at "
@@ -949,7 +960,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         self,
         target: Path,
         relatives: List[str],
-        rescan_dir: Path,
+        copies_dir: Path,
+        reports_dir: Path,
         final_args: List[str],
     ) -> Tuple[List[Tuple[Path, str, Path]], int, int]:
         """Copy the named files the directory scan reads; return the runs to make.
@@ -958,10 +970,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         not checked because ``MAX_RESCAN_FILES`` files were copied first.
 
         Each run is ``(working directory, scan path, report path)``. The files go
-        under ``RESCAN_TREE_DIR`` at their tree paths, scanned as ``.``. The root
-        ``.gitleaksignore``, when it names itself, goes alone under
-        ``RESCAN_SELF_DIR`` and is scanned as a file, which reads no ignore file:
-        at the copy tree's root it would be read as one.
+        under ``copies_dir / RESCAN_TREE_DIR`` at their tree paths, scanned as
+        ``.``. The root ``.gitleaksignore``, when it names itself, goes alone under
+        ``copies_dir / RESCAN_SELF_DIR`` and is scanned as a file, which reads no
+        ignore file: at the copy tree's root it would be read as one. Each run's
+        report is in ``reports_dir``.
 
         Not copied, because the directory scan does not read them or ASH drops
         what it finds there:
@@ -990,8 +1003,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             if arg.startswith("--max-target-megabytes="):
                 size_limit = int(arg.split("=", 1)[1]) * 1_000_000
 
-        tree_dir = rescan_dir / RESCAN_TREE_DIR
-        self_dir = rescan_dir / RESCAN_SELF_DIR
+        tree_dir = copies_dir / RESCAN_TREE_DIR
+        self_dir = copies_dir / RESCAN_SELF_DIR
         in_tree = 0
         itself = False
         not_checked = 0
@@ -1040,10 +1053,34 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
 
         batches = []
         if in_tree:
-            batches.append((tree_dir, ".", rescan_dir / "tree.sarif"))
+            batches.append((tree_dir, ".", reports_dir / "tree.sarif"))
         if itself:
-            batches.append((self_dir, IGNORE_FILE_NAME, rescan_dir / "self.sarif"))
+            batches.append((self_dir, IGNORE_FILE_NAME, reports_dir / "self.sarif"))
         return batches, in_tree + int(itself), not_checked
+
+    def _rescan_copies_dir(self) -> Path:
+        """A new, empty directory for the re-scan's copies, outside the scanned tree.
+
+        Made with mode 0700 in the scanner run's own directory
+        (``empty_tool_directory``), so it is removed with the run even when the
+        re-scan never gets to remove it, and a sandboxed gitleaks may read it and
+        not write it. It used to be under the results directory, which is inside
+        the scanned tree with the default output directory, so the copies of the
+        tree's files sat in the tree being scanned.
+
+        Raises:
+            ScannerError: it could not be made. Without the re-scan the findings
+                the ignore file hides would go unreported.
+        """
+        try:
+            return empty_tool_directory(RESCAN_DIR_NAME, context=self.context)
+        except OSError as exc:
+            raise ScannerError(
+                "ASH could not make the directory for the re-scan of the files the "
+                f"scanned tree's {IGNORE_FILE_NAME} names "
+                f"({exc.strerror or type(exc).__name__}); without the re-scan the "
+                "findings those files hide would go unreported"
+            ) from None
 
     def _run_rescan(
         self,
