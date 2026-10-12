@@ -378,11 +378,20 @@ def find_absolute_executable(name: str) -> Optional[str]:
 def config_ignore_patterns(config_path: Path) -> List[str]:
     """The ``paths.<glob>.ignore`` patterns in an actionlint config, sorted.
 
-    Never raises: actionlint owns the verdict on its own config, and reports a
+    Read with ``load_config_yaml``, which refuses YAML aliases as every YAML
+    config ASH reads does. actionlint reads aliases, so a config that uses one
+    can still ignore findings ASH cannot list: that raises
+    ``yaml.composer.ComposerError``, for the caller to say so. Nothing else
+    raises: actionlint owns the verdict on its own config, and reports a
     malformed one itself with exit 3.
     """
+    # Imported here: config/ash_config.py imports this module.
+    from automated_security_helper.config.ash_config import load_config_yaml
+
     try:
-        document = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        document = load_config_yaml(config_path.read_text(encoding="utf-8"))
+    except yaml.composer.ComposerError:
+        raise
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return []
     paths = document.get("paths") if isinstance(document, dict) else None
@@ -1019,7 +1028,19 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
 
         try:
             config_file = self._resolve_config_file(target)
-            ignore_patterns = config_ignore_patterns(config_file)
+            try:
+                ignore_patterns = config_ignore_patterns(config_file)
+            except yaml.composer.ComposerError as exc:
+                ignore_patterns = []
+                self._plugin_log(
+                    "ASH could not list the findings the actionlint config at "
+                    f"{config_file.as_posix()} ignores: {exc.problem} (line "
+                    f"{exc.problem_mark.line + 1 if exc.problem_mark else '?'}). "
+                    "actionlint still reads it, and drops the findings its "
+                    "paths.<glob>.ignore patterns match before ASH sees them.",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                )
             if ignore_patterns:
                 self._plugin_log(
                     f"The actionlint config at {config_file.as_posix()} ignores "

@@ -696,9 +696,26 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         and its ``configure_rules`` passed on the command line. A file that cannot
         be parsed is reported with a warning; every check then runs and its
         configure_rules do not apply.
+
+        It is read with ``load_config_yaml``, which refuses YAML aliases as every
+        YAML config ASH reads does. cfn-lint reads aliases, so a file that uses
+        one would still apply in full, ``merge_configs`` included, with ASH unable
+        to check what it sets: such a file stops the scan instead.
         """
+        # Imported here: config/ash_config.py imports this module.
+        from automated_security_helper.config.ash_config import load_config_yaml
+
         try:
-            parsed = yaml.safe_load(Path(config_file).read_text(encoding="utf-8"))
+            parsed = load_config_yaml(Path(config_file).read_text(encoding="utf-8"))
+        except yaml.composer.ComposerError as exc:
+            line = exc.problem_mark.line + 1 if exc.problem_mark else "?"
+            raise ScannerError(
+                f"ASH could not read {Path(config_file).as_posix()}: {exc.problem} "
+                f"(line {line}). ASH checks that file for merge_configs and passes "
+                "its ignore_checks and configure_rules itself, and cfn-lint would "
+                "read the rest of it, so cfn-lint is not run with a file ASH could "
+                "not check."
+            ) from exc
         except (OSError, yaml.YAMLError) as exc:
             self._plugin_log(
                 f"Could not read {Path(config_file).as_posix()} ({exc}); every "

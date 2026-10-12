@@ -36,6 +36,7 @@ from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
     SEVERITY_BY_RULE_LETTER,
     CfnLintScanner,
@@ -1102,6 +1103,25 @@ class TestTemplateRuleConfigurationIsOffByDefault:
         with pytest.raises(Exception, match="merge_configs"):
             self._args(scanner, repo)
         # With template configuration honored, the file is used as written.
+        honored = _scanner(
+            repo, operator=True, config_file=str(rc), honor_inline_ignores=True
+        )
+        assert _configured(self._args(honored, repo)) == []
+
+    def test_an_operators_file_that_uses_an_alias_is_refused(self, repo, tmp_path):
+        """ASH reads the operator's file with YAML aliases refused, as it reads
+        every YAML config. cfn-lint reads aliases, so a file ASH could not read
+        could still set merge_configs or ignore_checks ASH never saw; the scan
+        stops instead of running cfn-lint with it."""
+        rc = self._rc(
+            tmp_path,
+            "x-strict: &strict\n  strict: false\nconfigure_rules:\n  E3012: *strict\n",
+        )
+        scanner = _scanner(repo, operator=True, config_file=str(rc))
+        with pytest.raises(ScannerError, match="alias") as raised:
+            self._args(scanner, repo)
+        assert rc.as_posix() in str(raised.value)
+        # With template configuration honored, ASH does not read the file.
         honored = _scanner(
             repo, operator=True, config_file=str(rc), honor_inline_ignores=True
         )

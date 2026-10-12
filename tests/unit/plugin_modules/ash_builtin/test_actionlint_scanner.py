@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -762,6 +763,42 @@ def test_an_operator_config_that_ignores_findings_is_warned_about(
         scanner.scan(target=repo, target_type="source")
 
     assert any("'potentially untrusted'" in r.getMessage() for r in caplog.records)
+
+
+ALIASED_IGNORES = (
+    "paths:\n  .github/workflows/a.yml:\n    ignore: &ignored\n"
+    "      - 'potentially untrusted'\n"
+    "  .github/workflows/b.yml:\n    ignore: *ignored\n"
+)
+
+
+def test_an_operator_config_whose_ignores_cannot_be_listed_is_warned_about(
+    repo, monkeypatch, on_path, caplog
+):
+    """ASH reads the config with YAML aliases refused, and actionlint reads them.
+
+    So ASH cannot list what an aliased config ignores, while actionlint still
+    drops those findings; the warning says so instead of staying silent.
+    """
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text(ALIASED_IGNORES)
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any(
+        "could not list" in message and "alias" in message for message in warnings
+    ), warnings
+
+
+def test_an_aliased_config_is_not_read_for_its_ignore_patterns(tmp_path):
+    config = tmp_path / "actionlint.yaml"
+    config.write_text(ALIASED_IGNORES)
+    with pytest.raises(yaml.composer.ComposerError, match="alias"):
+        config_ignore_patterns(config)
 
 
 @pytest.mark.parametrize(
