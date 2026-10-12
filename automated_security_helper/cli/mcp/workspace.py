@@ -1324,10 +1324,14 @@ async def _execute(
         if claim is not None and not claim.worker_starts():
             raise RuntimeError("the workspace scan was cancelled before it started")
         try:
-            with ScanPresence(
-                session_id if claim is not None and claim.claimed else None
-            ):
-                return _under_session_lock(session_id, plan, settings)
+            claimed = claim is not None and bool(claim.claimed)
+            with ScanPresence(session_id if claimed else None):
+                # A session that delivered nothing has no tree of its own for the
+                # scan to hold, so the scan takes neither its claim nor its lock,
+                # and the session may deliver one meanwhile.
+                if claimed:
+                    return _under_session_lock(session_id, plan, settings)
+                return _offline_aware(plan, settings)
         finally:
             if claim is not None:
                 claim.worker_returns()
