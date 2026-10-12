@@ -37,6 +37,7 @@ import importlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -77,7 +78,97 @@ def record_execution_start(*args, **kwargs):
     return True
 
 
+def _event_recorder(event):
+    # Appends "<scan index> <event>" for each notification it receives; the probe
+    # program sets the index before each scan.
+    def record(*args, **kwargs):
+        with open(os.environ["PLUGIN_SELECTION_EVENTS"], "a", encoding="utf-8") as log:
+            log.write(os.environ.get("PLUGIN_SELECTION_SCAN", "?") + " " + event.name + "\\n")
+        return True
+
+    record.__name__ = "record_" + event.name.lower()
+    return record
+
+
 ASH_EVENT_HANDLERS = {AshEventType.EXECUTION_START: [record_execution_start]}
+for _event in RECORDED_EVENTS:
+    ASH_EVENT_HANDLERS.setdefault(_event, []).append(_event_recorder(_event))
+"""
+
+#: The events ``HANDLER_PACKAGE`` records: the scan's start and end, the start of
+#: each default phase, and ERROR. The INSPECT phase is not a default phase, so its
+#: events are not recorded here.
+_RECORDED_EVENT_NAMES = (
+    "EXECUTION_START",
+    "CONVERT_PHASE_START",
+    "SCAN_PHASE_START",
+    "REPORT_PHASE_START",
+    "EXECUTION_COMPLETE",
+    "ERROR",
+)
+
+_HANDLER_INIT = _HANDLER_INIT.replace(
+    "\nASH_EVENT_HANDLERS = {",
+    "\nRECORDED_EVENTS = ["
+    + ", ".join(f"AshEventType.{name}" for name in _RECORDED_EVENT_NAMES)
+    + "]\n\nASH_EVENT_HANDLERS = {",
+    1,
+)
+
+#: A plugin package outside the scanned trees with one converter, enabled by
+#: default, whose convert() writes ``converted-<tree name>`` to the markers.
+CONVERTER_PACKAGE = "zzconvert_ash_plugins"
+
+_CONVERTER_INIT = """
+import os
+from pathlib import Path
+from typing import Literal
+
+from automated_security_helper.base.converter_plugin import (
+    ConverterPluginBase,
+    ConverterPluginConfigBase,
+)
+from automated_security_helper.base.options import ConverterOptionsBase
+from automated_security_helper.plugins.decorators import ash_converter_plugin
+
+
+class ZzMarkConverterConfig(ConverterPluginConfigBase):
+    name: Literal["zz-mark-converter"] = "zz-mark-converter"
+    enabled: bool = True
+    options: ConverterOptionsBase = ConverterOptionsBase()
+
+
+@ash_converter_plugin
+class ZzMarkConverter(ConverterPluginBase[ZzMarkConverterConfig]):
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = ZzMarkConverterConfig()
+        return super().model_post_init(context)
+
+    def convert(self, target=None):
+        name = "converted-" + Path(str(self.context.source_dir)).name
+        Path(os.environ["PLUGIN_SELECTION_MARKERS"], name).write_text(
+            "converted", encoding="utf-8"
+        )
+        return []
+
+
+ASH_CONVERTERS = [ZzMarkConverter]
+"""
+
+#: A plugin package whose CONVERT_PHASE_START handler raises, so a scan naming it
+#: fails inside the phases and the engine notifies ERROR.
+RAISING_PACKAGE = "zzraise_ash_plugins"
+
+_RAISING_INIT = """
+from automated_security_helper.plugins.events import AshEventType
+
+
+def stop_the_convert_phase(*args, **kwargs):
+    raise RuntimeError("zzraise_ash_plugins stops the convert phase")
+
+
+ASH_EVENT_HANDLERS = {AshEventType.CONVERT_PHASE_START: [stop_the_convert_phase]}
 """
 
 _REPORTER_INIT = """
@@ -217,6 +308,7 @@ for step in json.loads(sys.argv[1]):
     else:
         target = {"source_dir": step["source_dir"]}
     LEFT_OUT.clear()
+    os.environ["PLUGIN_SELECTION_SCAN"] = str(len(scans))
     try:
         run_ash_scan(
             **target,
@@ -232,6 +324,8 @@ for step in json.loads(sys.argv[1]):
         code = 0
     except SystemExit as exc:
         code = exc.code
+    except Exception as exc:
+        code = "raised " + type(exc).__name__
     results = Path(step["output_dir"]) / "ash_aggregated_results.json"
     rows = None
     if results.is_file():
@@ -261,8 +355,17 @@ class _Process:
         (self.site / REPORTER_PACKAGE / "__init__.py").write_text(
             _REPORTER_INIT, encoding="utf-8"
         )
+        (self.site / RAISING_PACKAGE).mkdir()
+        (self.site / RAISING_PACKAGE / "__init__.py").write_text(
+            _RAISING_INIT, encoding="utf-8"
+        )
+        (self.site / CONVERTER_PACKAGE).mkdir()
+        (self.site / CONVERTER_PACKAGE / "__init__.py").write_text(
+            _CONVERTER_INIT, encoding="utf-8"
+        )
         self.markers = tmp_path / "markers"
         self.markers.mkdir()
+        self.events_log = tmp_path / "events.log"
         self.home = tmp_path / "home"
         self.home.mkdir()
         self.stubs = tmp_path / "stubs"
@@ -300,6 +403,7 @@ class _Process:
                 "USERPROFILE": str(self.home),
                 "PLUGIN_SELECTION_MARKERS": str(self.markers),
                 "PLUGIN_SELECTION_PREIMPORT": json.dumps(self.preimport),
+                "PLUGIN_SELECTION_EVENTS": str(self.events_log),
                 "PYTHONIOENCODING": "utf-8",
                 # No usable cloud credentials and a refusing endpoint, whatever
                 # the host has: an in-process scan builds ASH's reporters.
@@ -337,6 +441,17 @@ class _Process:
     def started(self) -> List[str]:
         return sorted(p.name for p in self.markers.iterdir())
 
+    def events(self, scan_index: int) -> List[str]:
+        """The events ``HANDLER_PACKAGE`` recorded during the scan at *scan_index*."""
+        if not self.events_log.is_file():
+            return []
+        lines = self.events_log.read_text(encoding="utf-8").splitlines()
+        return sorted(
+            event
+            for index, event in (line.split(" ", 1) for line in lines)
+            if index == str(scan_index)
+        )
+
 
 def _rows(scan: dict) -> Dict[str, str]:
     assert scan["rows"] is not None, f"the scan wrote no results: {scan}"
@@ -345,10 +460,19 @@ def _rows(scan: dict) -> Dict[str, str]:
     }
 
 
+def _assert_no_snyk_on_the_scans_path(proc: _Process) -> None:
+    """The MISSING snyk-code row below depends on snyk being absent from that PATH."""
+    assert shutil.which("snyk", path=proc._env()["PATH"]) is None, (
+        "precondition: these tests need no snyk on the PATH the scans get, so that "
+        "a scan naming the snyk plugin gets a MISSING snyk-code row; this host has one"
+    )
+
+
 class TestALaterScansModulesTakePart:
     def test_a_module_only_the_second_scan_names_gets_a_missing_row(self, tmp_path):
         """The first scan resolves the registry; the second names snyk, absent here."""
         proc = _Process(tmp_path)
+        _assert_no_snyk_on_the_scans_path(proc)
         first, second = proc.tree("first"), proc.tree("second")
         unnamed, named = proc.run(
             [
@@ -370,6 +494,7 @@ class TestALaterScansModulesTakePart:
     def test_each_scan_gets_rows_for_its_own_modules_only(self, tmp_path):
         """Two scans naming two different modules: each sees its own scanner only."""
         proc = _Process(tmp_path)
+        _assert_no_snyk_on_the_scans_path(proc)
         first, second = proc.tree("first"), proc.tree("second")
         ferret_scan, snyk_scan = proc.run(
             [
@@ -564,6 +689,65 @@ class TestEventHandlersFollowTheScansModules:
             "second scan"
         )
 
+    def test_each_phase_event_reaches_only_the_scan_that_named_the_module(
+        self, tmp_path
+    ):
+        """The engine's own events and each default phase's start event.
+
+        Not covered here: INSPECT, which is not a default phase, and the per-plugin
+        events such as SCAN_START, which the phases send through the same filter.
+        """
+        proc = _Process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [HANDLER_PACKAGE],
+                },
+                {"source_dir": str(second), "output_dir": str(tmp_path / "out2")},
+            ]
+        )
+
+        expected = sorted(name for name in _RECORDED_EVENT_NAMES if name != "ERROR")
+        assert proc.events(0) == expected, (
+            "control: the scan that named the module did not get each event once",
+            proc.output[-3000:],
+        )
+        assert proc.events(1) == [], (
+            "events reached a handler from a module only the earlier scan named"
+        )
+
+    def test_error_reaches_only_the_scan_that_named_the_module(self, tmp_path):
+        """A handler in RAISING_PACKAGE stops the convert phase, so ERROR is notified."""
+        proc = _Process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        scan1, scan2 = proc.run(
+            [
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [HANDLER_PACKAGE, RAISING_PACKAGE],
+                },
+                {
+                    "source_dir": str(second),
+                    "output_dir": str(tmp_path / "out2"),
+                    "modules": [RAISING_PACKAGE],
+                },
+            ]
+        )
+
+        assert scan1["exit"] != 0 and scan2["exit"] != 0, (scan1, scan2)
+        assert "ERROR" in proc.events(0), (
+            "control: the failing scan that named the module notified no ERROR to it",
+            proc.events(0),
+            proc.output[-3000:],
+        )
+        assert "ERROR" not in proc.events(1), (
+            "ERROR reached a handler from a module only the earlier scan named"
+        )
+
     def test_a_handler_the_calling_program_subscribes_fires_in_every_scan(
         self, tmp_path
     ):
@@ -593,6 +777,35 @@ class TestEventHandlersFollowTheScansModules:
         assert "first" in started and "second" not in started, (
             "control: the plugin module's handler still follows the scan's modules: "
             f"{started}"
+        )
+
+
+class TestConvertersFollowTheScansModules:
+    def test_a_converter_an_earlier_scan_named_does_not_run_in_a_later_scan(
+        self, tmp_path
+    ):
+        proc = _Process(tmp_path)
+        first, second = proc.tree("first"), proc.tree("second")
+        proc.run(
+            [
+                {
+                    "source_dir": str(first),
+                    "output_dir": str(tmp_path / "out1"),
+                    "modules": [CONVERTER_PACKAGE],
+                },
+                {"source_dir": str(second), "output_dir": str(tmp_path / "out2")},
+            ]
+        )
+
+        assert "converted-first" in proc.started(), (
+            (
+                "control: the converter of the module the first scan named did not "
+                "run for that scan"
+            ),
+            proc.output[-3000:],
+        )
+        assert "converted-second" not in proc.started(), (
+            "a converter from a module only the first scan named ran in the second"
         )
 
 
@@ -643,6 +856,44 @@ class TestReportersFollowTheScansModules:
             "a reporter from a module only the first scan named ran in the "
             f"workspace scan: {unexpected}"
         )
+
+    def test_a_reporter_the_workspace_scan_names_itself_writes_every_report(
+        self, tmp_path
+    ):
+        """Named by the scan's own argument, not by a project config.
+
+        The projects' reports and the workspace-level report, which comes from the
+        workspace's own reporter list rather than any project's engine.
+        """
+        proc = _Process(tmp_path)
+        workspace = tmp_path / "ws"
+        for key in ("api", "web"):
+            project = workspace / key
+            (project / ".ash").mkdir(parents=True)
+            (project / "app.py").write_text("x = 1\n", encoding="utf-8")
+            (project / ".ash" / ".ash.yaml").write_text(
+                f"project_name: {key}\n", encoding="utf-8"
+            )
+        workspace_file = workspace / "dev.code-workspace"
+        workspace_file.write_text(
+            json.dumps({"folders": [{"path": "api"}, {"path": "web"}]}),
+            encoding="utf-8",
+        )
+        proc.run(
+            [
+                {
+                    "workspace_file": str(workspace_file),
+                    "output_dir": str(tmp_path / "out"),
+                    "modules": [REPORTER_PACKAGE],
+                }
+            ]
+        )
+
+        assert _reports(tmp_path / "out", "zzmark") == [
+            "projects/api/reports/ash.zzmark",
+            "projects/web/reports/ash.zzmark",
+            "reports/ash.zzmark",
+        ], proc.output[-3000:]
 
 
 #: A regular package whose ``__init__`` imports nothing, and a subpackage of it

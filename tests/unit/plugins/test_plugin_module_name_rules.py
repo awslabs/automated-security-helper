@@ -34,6 +34,7 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins.loader import (
     PluginModuleNamespaceError,
     refuse_plugin_modules_outside_namespace,
+    scan_handler_filter,
     scan_plugin_filter,
 )
 
@@ -161,6 +162,20 @@ class TestBuiltInPlugins:
         )
 
         assert scan_plugin_filter([])(builtin)
+
+    def test_the_built_in_event_handlers_are_notified_without_being_named(self):
+        """Functions, not classes: the built-in rule covers handlers as well."""
+        from automated_security_helper.plugin_modules.ash_builtin.event_handlers import (
+            handle_scan_completion_logging,
+            handle_suppression_expiration_check,
+        )
+
+        for handler in (
+            handle_scan_completion_logging,
+            handle_suppression_expiration_check,
+        ):
+            assert scan_plugin_filter([])(handler), handler
+            assert scan_handler_filter([])(handler), handler
 
     @pytest.mark.parametrize(
         "module",

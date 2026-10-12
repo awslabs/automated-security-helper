@@ -513,3 +513,9 @@ class TestSelectionFollowsTheScansOwnModules:
         snyk_calls = [c for c in seq.started_against(tree) if c["tool"] == "snyk"]
         assert snyk_calls, f"snyk was never started on the tree: {seq.calls()}"
         assert snyk_calls[0]["argv"][:2] == ["code", "test"]
+        # ASH's built-in SCAN_COMPLETE handler is the only code that logs this
+        # line, so it shows the built-in handlers still reach a filtered scan.
+        log = (tmp_path / "out" / "ash.log").read_text(encoding="utf-8")
+        assert log.count("All scanners completed!") == 1, (
+            "the built-in scan-completion handler did not run once for the scan"
+        )
