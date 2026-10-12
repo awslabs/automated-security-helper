@@ -1978,6 +1978,33 @@ class TestSandboxExecProfile:
             assert _as_argv(directory) not in allowed, directory
             assert _as_argv(directory) not in document["read_only"], directory
 
+    def test_a_path_entry_in_an_output_directory_outside_the_source_is_no_exec_grant(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """--output-dir outside the scanned tree: a PATH entry in it is still the
+        scan's data, not a tool directory, though the source does not hold it."""
+        output = tmp_path / "elsewhere" / "ash_output"
+        in_output = output / "bin"
+        in_output.mkdir(parents=True)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(in_output), "/usr/bin"]))
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+        )
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+
+        assert Path(os.path.realpath(in_output)) not in _resolved(policy.executable)
+        assert _as_argv(in_output) not in allowed
+
     def test_a_path_entry_outside_the_scanned_tree_is_still_a_tool_directory(
         self, layout, monkeypatch, tmp_path
     ):
