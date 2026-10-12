@@ -280,6 +280,29 @@ def test_a_discovered_link_to_nothing(stage, mode):
     _assert_refused_on_the_host(stage, before, result.exit_code, result.output)
 
 
+BAD_OVERRIDES = [
+    pytest.param("fail_on_findings=maybe", id="wrong-type"),
+    pytest.param("global_settings=7", id="not-a-section"),
+    pytest.param("no-equals-sign", id="unparsable"),
+]
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("override", BAD_OVERRIDES)
+@pytest.mark.parametrize("with_config", [False, True], ids=["defaults", "config"])
+def test_an_override_a_local_scan_refuses(stage, mode, override, with_config):
+    """--config-overrides are applied on the host as a local scan applies them."""
+    extra = ["--config-overrides", override]
+    if with_config:
+        stage.named.write_text("project_name: fine\n", encoding="utf-8")
+        extra += ["--config", str(stage.named)]
+    before = stage.output_snapshot()
+
+    result = _cli(stage, mode, *extra)
+
+    _assert_refused_on_the_host(stage, before, result.exit_code, result.output)
+
+
 def _assert_started(stage: Stage, mode: str, output: str) -> None:
     calls = stage.runner_calls()
     if mode == "container":
@@ -311,6 +334,20 @@ def test_control_a_valid_discovered_config_starts(stage, mode):
 def test_control_no_config_file_starts(stage, mode):
     """No --config, no ASH_CONFIG and nothing at a discovered name: the defaults."""
     result = _cli(stage, mode)
+
+    _assert_started(stage, mode, result.output)
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param("fail_on_findings=false", id="core-field"),
+        pytest.param("scanners.image-only-scanner.options.depth=3", id="plugin-option"),
+    ],
+)
+def test_control_an_override_a_local_scan_accepts_starts(stage, mode, override):
+    result = _cli(stage, mode, "--config-overrides", override)
 
     _assert_started(stage, mode, result.output)
 

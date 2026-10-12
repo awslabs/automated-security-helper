@@ -1683,22 +1683,35 @@ def _outer_mode_config_refusal(
     confinement root resolution would use, so a file that is missing, not a
     regular file, unreadable, not UTF-8, not valid YAML, JSON or TOML (YAML
     aliases included), or not a valid config is refused with the error a local
-    scan reports. Options of a plugin are not judged here: they are validated
-    against the plugin, which may be installed only in the image.
+    scan reports. ``--config-overrides`` are then applied as resolution applies
+    them (``resolve_config.apply_config_overrides``), so one that does not parse,
+    or leaves a value the config model refuses, is refused too. Options of a
+    plugin are not judged here: they are validated against the plugin, which may
+    be installed only in the image.
     """
+    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.default_config import _ash_config_file
-    from automated_security_helper.config.resolve_config import load_config_file
+    from automated_security_helper.config.resolve_config import (
+        apply_config_overrides,
+        load_config_file,
+    )
 
     try:
         config_path = _scan_config_path(opts)
         if config_path is not None:
-            _load_with_confinement(config_path, opts.source_dir, log_failure=False)
+            config = _load_with_confinement(
+                config_path, opts.source_dir, log_failure=False
+            )
         else:
             # A local scan with no config file reads ASH_CONFIG's file, as
             # get_default_config does, or uses the defaults.
             env_config = _ash_config_file()
-            if env_config is not None:
+            config = (
                 load_config_file(env_config, log_failure=False)
+                if env_config is not None
+                else AshConfig()
+            )
+        apply_config_overrides(config, list(opts.config_overrides or []))
     except ASHConfigValidationError as exc:
         return exc
     return None

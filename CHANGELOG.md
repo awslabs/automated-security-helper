@@ -179,7 +179,9 @@
   not a valid config, or a discovered name that is a link to nothing) now refuses the run
   with exit 3 and the local scan's `Invalid configuration: ...` message, before any image
   is built or run, any mount, and any clearing of the previous run's output. The scan
-  inside used to refuse it only after all of those. A missing `--config` in container
+  inside used to refuse it only after all of those. `--config-overrides` are applied on
+  the host as well, so an override that does not parse or sets a value the config does
+  not accept is refused the same way. A missing `--config` in container
   mode now reports `Invalid configuration: Configuration file not found: <path>`, where
   it said `Config file not found: <path>`. Plugin options are still checked by the scan
   inside, which loads the plugin. The `Invalid configuration` message no longer drops

@@ -232,7 +232,9 @@ local scan would refuse refuses the run with exit 3 and the same message
 (`Invalid configuration: ...`): a file that is missing or empty, a directory or another
 file that is not a regular file, unreadable, not UTF-8, not valid YAML, JSON or TOML
 (YAML aliases included), or not a valid config, and a name in `--source-dir` that is a
-link to nothing. Options of a scanner or reporter plugin are left to the scan inside,
+link to nothing. `--config-overrides` are applied to it the same way, so one that does
+not parse, or sets a value the config does not accept, refuses the run too. Options of
+a scanner or reporter plugin are left to the scan inside,
 which loads the plugin from the image. `--mode nix` reads the file the same way before
 it enters its shell. `--no-run` builds an image and scans nothing, so its config is not
 read. An `extends` entry anywhere in the chain that names its base by absolute path
