@@ -235,6 +235,57 @@ def test_the_other_confinement_warnings(where, setting, settings, tmp_path, warn
         assert path.name in message, message
 
 
+@pytest.mark.parametrize("where", ["the-workspace", "its-checkout"])
+def test_a_refused_workspace_operator_config_of_the_repository_says_how(
+    where, tmp_path
+):
+    """A workspace's operator config may not be one of the workspace's files
+    (resolve_config.check_operator_config). Where the cause is the repository's
+    tier, the refusal ends with the same remedy as the confinement warnings."""
+    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+    from automated_security_helper.config.resolve_config import check_operator_config
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    workspace = repo / "ws"
+    workspace.mkdir()
+    place = workspace if where == "the-workspace" else repo / "ops"
+    place.mkdir(exist_ok=True)
+    config = place / "ash.yaml"
+    config.write_text("project_name: p\n", encoding="utf-8")
+
+    with pytest.raises(ASHConfigValidationError) as raised:
+        check_operator_config(config, workspace)
+
+    message = " ".join(str(raised.value).split())
+    assert "Move the config, and every base it extends, outside" in message, message
+    assert message.endswith(KEEP_A_SETTING), message
+
+
+def test_a_refused_workspace_operator_config_an_mcp_client_delivered_does_not(
+    tmp_path, monkeypatch
+):
+    """Control: an MCP client's file is refused for its tier, not the repository's,
+    so the refusal names only the place to move it out of."""
+    from automated_security_helper.config.resolve_config import check_operator_config
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    delivered = tmp_path / "mcp-workspaces" / "sess" / "upload" / "ash.yaml"
+    delivered.parent.mkdir(parents=True)
+    delivered.write_text("project_name: p\n", encoding="utf-8")
+
+    with pytest.raises(ASHConfigValidationError) as raised:
+        check_operator_config(delivered, workspace)
+
+    message = str(raised.value)
+    assert "delivered by an MCP client" in message, message
+    assert "To keep a setting" not in message, message
+
+
 def test_a_merged_shards_config_says_how_to_keep_a_setting_there():
     """``ash merge``'s own source: the same form, with the merge's options."""
     from automated_security_helper.config.untrusted_source import SHARD_RECORDED

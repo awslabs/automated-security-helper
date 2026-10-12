@@ -296,42 +296,70 @@ def test_a_one_directory_scan_still_marks_it(checkout, commands, tmp_path):
     assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG in _run_command(commands)
 
 
+def _assemble_workspace_run(checkout: Path, config: Path, tmp_path: Path) -> None:
+    (tmp_path / "out").mkdir(exist_ok=True)
+    rac._assemble_run_command(
+        oci_command_prefix=[],
+        resolved_oci_runner="docker",
+        image_name="ash:test",
+        source_dir=(checkout / "ws").resolve(),
+        output_dir=(tmp_path / "out").resolve(),
+        offline=False,
+        debug=False,
+        color=False,
+        quiet=True,
+        progress=False,
+        verbose=False,
+        simple=True,
+        python_based_plugins_only=False,
+        cleanup=False,
+        inspect=False,
+        fail_on_findings=None,
+        phases=[],
+        scanners=[],
+        exclude_scanners=[],
+        output_formats=[],
+        config=str(config),
+        config_overrides=[],
+        existing_results=None,
+        ash_plugin_modules=[],
+        strategy=None,
+        ctx=None,
+        workspace_relative_file="ash.code-workspace",
+    )
+
+
 def test_the_assembled_command_refuses_it_on_its_own(checkout, tmp_path):
     """The check holds wherever it is called from: command assembly applies it
     too, whatever order a caller's checks run in."""
     config = _config(checkout / "other" / "ash-config.yaml")
-    (tmp_path / "out").mkdir()
 
     with pytest.raises(rac.ContainerInputError, match=FIX):
-        rac._assemble_run_command(
-            oci_command_prefix=[],
-            resolved_oci_runner="docker",
-            image_name="ash:test",
-            source_dir=(checkout / "ws").resolve(),
-            output_dir=(tmp_path / "out").resolve(),
-            offline=False,
-            debug=False,
-            color=False,
-            quiet=True,
-            progress=False,
-            verbose=False,
-            simple=True,
-            python_based_plugins_only=False,
-            cleanup=False,
-            inspect=False,
-            fail_on_findings=None,
-            phases=[],
-            scanners=[],
-            exclude_scanners=[],
-            output_formats=[],
-            config=str(config),
-            config_overrides=[],
-            existing_results=None,
-            ash_plugin_modules=[],
-            strategy=None,
-            ctx=None,
-            workspace_relative_file="ash.code-workspace",
-        )
+        _assemble_workspace_run(checkout, config, tmp_path)
+
+
+def test_the_refusal_names_each_file_once_and_says_how_to_keep_a_setting(
+    checkout, tmp_path
+):
+    """The files of the chain in the workspace's checkout, the --config itself
+    among them, each named once, in chain order, and the remedy every
+    confinement message ends with: the cause is the repository's tier."""
+    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+
+    base = _config(checkout / "other" / "base.yaml")
+    config = _config(
+        checkout / "other" / "ash-config.yaml", "project_name: t\nextends: base.yaml\n"
+    )
+
+    with pytest.raises(rac.ContainerInputError) as raised:
+        _assemble_workspace_run(checkout, config, tmp_path)
+
+    message = str(raised.value)
+    named = message.split("is the scanned repository's: ", 1)[1].split(
+        " is in the git checkout", 1
+    )[0]
+    assert named.split(", ") == [config.as_posix(), base.as_posix()], message
+    assert message.endswith(f"{FIX}. {KEEP_A_SETTING}"), message
 
 
 def test_the_scan_cli_refuses_it_before_clearing_the_output(
@@ -368,3 +396,11 @@ def test_the_scan_cli_refuses_it_before_clearing_the_output(
     message = " ".join(result.output.split())
     assert "ash-config.yaml" in message, message
     assert "is inside the checkout" in message, message
+    # The cause is the repository's tier: the remedy every confinement message ends
+    # with follows the place to move the config out of.
+    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+
+    assert "Move the config, and every base it extends, outside the checkout" in (
+        message
+    ), message
+    assert KEEP_A_SETTING in message, message

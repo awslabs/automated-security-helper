@@ -1334,11 +1334,17 @@ def _refuse_unless_the_operators(
         reasons.append(f"'{describe_config_path(path)}' {reason}")
         if place not in places:
             places.append(place)
+    # A file of the scanned tree is refused for the repository's tier, which the
+    # confinement remedy speaks to; one an MCP client delivered is not.
+    of_the_repository = any(
+        tree_holding(path, trees, overlay.names) is not None for path in others
+    )
     raise ASHConfigValidationError(
         f"The operator config '{describe_config_path(root)}' is layered over each "
         "project's own config, so every file it is built from must be the "
         f"operator's, and {'; '.join(reasons)}. Move the config, and every base "
         f"it extends, outside {' and outside '.join(places)}."
+        + (f" {KEEP_A_SETTING}" if of_the_repository else "")
     )
 
 

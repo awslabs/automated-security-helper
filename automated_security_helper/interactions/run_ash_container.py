@@ -1516,23 +1516,27 @@ def _refuse_repository_config_in_a_workspace(
     the operator's config may not be one of the workspace's files. One outside
     every checkout is the operator's.
     """
+    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
     from automated_security_helper.config.sandbox_grants import in_tree_reason
 
-    inside = [
-        path
-        for path in [*config_files, Path(config)]
-        if in_tree_reason(path, Path(source_dir)) is not None
-    ]
+    # Each file once, in chain order: config_files holds the --config itself,
+    # resolved, and the name it was given is judged too, for a link.
+    inside = list(
+        dict.fromkeys(
+            path.as_posix()
+            for path in [*config_files, Path(config)]
+            if in_tree_reason(path, Path(source_dir)) is not None
+        )
+    )
     if not config_files or not inside:
         return
     raise ContainerInputError(
         f"The config file {config!r} is the scanned repository's: "
-        f"{', '.join(path.as_posix() for path in inside)} is in the git checkout "
-        "around the workspace root "
+        f"{', '.join(inside)} is in the git checkout around the workspace root "
         f"{Path(source_dir).as_posix()}, or reached through a link there, and "
         "outside the workspace root, where the workspace scan inside the container "
         "cannot see it. Container mode refuses it in workspace mode. Keep --config, "
-        "and every file it extends, outside every git checkout."
+        f"and every file it extends, outside every git checkout. {KEEP_A_SETTING}"
     )
 
 
