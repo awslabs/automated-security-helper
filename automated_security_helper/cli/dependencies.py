@@ -470,6 +470,9 @@ def install_dependencies(
                     if tool_resolution[typed] in names:
                         elsewhere.setdefault(typed, []).append(kind)
         if elsewhere:
+            # Every name the request got wrong, not only those of another type, so one
+            # run shows all of them.
+            nowhere = sorted(t for t in unknown if t not in elsewhere)
             console.print(
                 Panel(
                     "[bold red]Not of the selected plugin type "
@@ -478,7 +481,13 @@ def install_dependencies(
                         f"{escape(typed)} is a {escape(' and '.join(kinds))} plugin"
                         for typed, kinds in sorted(elsewhere.items())
                     )
-                    + "\nAdd its --plugin-type, or leave --plugin-type out.",
+                    + "\nAdd its --plugin-type, or leave --plugin-type out."
+                    + (
+                        "\n[bold red]Unknown tool(s):[/bold red] "
+                        + escape(", ".join(nowhere))
+                        if nowhere
+                        else ""
+                    ),
                     title="Nothing installed",
                     expand=False,
                 )

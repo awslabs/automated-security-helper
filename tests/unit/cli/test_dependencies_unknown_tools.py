@@ -127,6 +127,39 @@ class TestWithTheRealRegistry:
         assert "bandit is a scanner plugin" in output, output
         assert "--plugin-type" in output, output
 
+    UNKNOWN_PAIR = ("not-a-real-tool", "also-not-a-tool")
+
+    def _names_every_unknown(self, output: str) -> None:
+        for name in self.UNKNOWN_PAIR:
+            assert name in output, (name, output)
+
+    @pytest.mark.parametrize("skip", [False, True], ids=["refused", "skipped"])
+    def test_a_mixed_request_names_every_unknown_tool(self, monkeypatch, skip):
+        if skip:
+            monkeypatch.setenv(SETTING, "skip")
+        args = ["--tool", "archive"]
+        for name in self.UNKNOWN_PAIR:
+            args += ["--tool", name]
+        result = self._invoke(*args)
+        output = self._output(result)
+        assert result.exit_code == (EXIT_OK if skip else EXIT_BAD_SELECTION), output
+        self._names_every_unknown(output)
+
+    @pytest.mark.parametrize("skip", [False, True], ids=["without skip", "with skip"])
+    def test_a_refusal_for_an_unselected_type_also_names_every_unknown_tool(
+        self, monkeypatch, skip
+    ):
+        if skip:
+            monkeypatch.setenv(SETTING, "skip")
+        args = ["--plugin-type", "converter", "--tool", "bandit"]
+        for name in self.UNKNOWN_PAIR:
+            args += ["--tool", name]
+        result = self._invoke(*args)
+        output = self._output(result)
+        assert result.exit_code == EXIT_BAD_SELECTION, output
+        assert "bandit is a scanner plugin" in output, output
+        self._names_every_unknown(output)
+
     def test_under_plugin_type_the_skip_names_only_tools_no_plugin_has(
         self, monkeypatch
     ):
