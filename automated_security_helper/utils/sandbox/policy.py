@@ -399,14 +399,59 @@ def _inside(path: Path, parent: Path) -> bool:
         return False
 
 
-def _path_directories(home: Path) -> List[Path]:
+def _passwd_home() -> Optional[Path]:
+    """The home directory the passwd entry names, or None where there is none.
+
+    Not always the policy's home: that is Path.home(), which reads HOME, and an
+    operator or a CI job can set HOME elsewhere. backends imports this name, so a
+    test that fakes the passwd home patches it in both modules.
+    """
+    try:
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, AttributeError, OSError):
+        return None
+
+
+def _distinct_home(home: Path, passwd_home: Optional[Path]) -> Optional[Path]:
+    """``passwd_home``, resolved, when it is a second home directory beside ``home``.
+
+    None when there is no entry, when pw_dir is relative or empty (it names no
+    directory), when it is "/" (a service account's: as a home it would make every
+    top-level directory "directly under a home", and sandbox-exec would deny
+    reading everything the policy does not list), and when it resolves to ``home``.
+    """
+    if passwd_home is None or not passwd_home.is_absolute():
+        return None
+    real = Path(os.path.realpath(passwd_home))
+    if real == Path(os.path.realpath(home)) or real == Path("/"):
+        return None
+    return real
+
+
+def _homes() -> List[Path]:
+    """The home directories, resolved, that a path's breadth is measured against.
+
+    HOME's, and the passwd entry's when that is another directory. sandbox-exec
+    denies reading both and then allows the policy's paths again, and firejail hides
+    the passwd one, so a path under either must be screened the same way.
+    """
+    home = Path(os.path.realpath(Path.home()))
+    other = _distinct_home(home, _passwd_home())
+    return [home] if other is None else [home, other]
+
+
+def _path_directories() -> List[Path]:
     """Directories on PATH, minus ones that would expose far more than programs.
 
-    Skipped: a relative entry (``.``), ``/``, ``$HOME`` itself, and any entry inside
-    ``$HOME`` not named ``bin``, ``sbin`` or ``Scripts``. A PATH entry such as
-    ``~/.config/tool`` would otherwise mount a configuration directory, and those
-    hold tokens.
+    Skipped: a relative entry (``.``), ``/``, a home directory itself, and any entry
+    inside a home directory not named ``bin``, ``sbin`` or ``Scripts``. A PATH entry
+    such as ``~/.config/tool`` would otherwise mount a configuration directory, and
+    those hold tokens. The home directories are $HOME's and, when HOME names another
+    directory, the passwd entry's.
     """
+    homes = _homes()
     entries = []
     for raw in os.environ.get("PATH", "").split(os.pathsep):
         if not raw or not os.path.isabs(raw):
@@ -416,9 +461,11 @@ def _path_directories(home: Path) -> List[Path]:
             resolved = path.resolve()
         except OSError:
             continue
-        if resolved in (Path("/"), home.resolve()) or _broader_than_a_tool(path):
+        if resolved == Path("/") or resolved in homes:
             continue
-        if _inside(path, home) and path.name not in _BIN_DIR_NAMES:
+        if _broader_than_a_tool(path, homes):
+            continue
+        if path.name not in _BIN_DIR_NAMES and any(_inside(path, h) for h in homes):
             continue
         entries.append(path)
     return _existing(entries)
@@ -462,17 +509,19 @@ def _inside_any(real: PurePath, roots: Sequence[PurePath]) -> bool:
     return any(real == root or root in real.parents for root in roots)
 
 
-def _broader_than_a_tool(path: Path) -> bool:
+def _broader_than_a_tool(path: Path, homes: Optional[List[Path]] = None) -> bool:
     """Whether mounting ``path`` would expose more than one tool installation.
 
-    True for /, for $HOME, for any directory that contains $HOME, and for any
-    directory directly under $HOME (~/.local, ~/.cargo): each of those holds
-    other files of the user's.
+    True for /, for a home directory, for any directory that contains one, and for
+    any directory directly under one (~/.local, ~/.cargo): each of those holds other
+    files of the user's. ``homes`` defaults to _homes().
     """
     real = Path(os.path.realpath(path))
-    home = Path(os.path.realpath(Path.home()))
-    return (
-        real == Path("/") or real == home or real in home.parents or real.parent == home
+    if real == Path("/"):
+        return True
+    return any(
+        real == home or real in home.parents or real.parent == home
+        for home in (_homes() if homes is None else homes)
     )
 
 
@@ -550,16 +599,15 @@ def _executable_prefix(argv0: str) -> List[Path]:
     found = argv0 if os.path.isabs(argv0) else _lookup(argv0)
     if not found:
         return []
-    home = Path.home()
-    real_home = Path(os.path.realpath(home))
+    homes = _homes()
 
     def too_broad(prefix: Path) -> bool:
-        # A prefix of /, of $HOME, or directly under $HOME (~/.local, ~/.cargo,
-        # ~/.toolbox) holds far more than the tool: ~/.local/share carries keyrings
-        # and ~/.cargo carries credentials.toml. Deeper prefixes, such as
+        # A prefix of /, of a home directory, or directly under one (~/.local,
+        # ~/.cargo, ~/.toolbox) holds far more than the tool: ~/.local/share carries
+        # keyrings and ~/.cargo carries credentials.toml. Deeper prefixes, such as
         # ~/.nvm/versions/node/v22, are a single installation.
         real = Path(os.path.realpath(prefix))
-        return real in (Path("/"), real_home) or real.parent == real_home
+        return real == Path("/") or real in homes or real.parent in homes
 
     paths: List[Path] = []
     candidates = set(_symlink_hops(Path(found))) | {Path(os.path.realpath(found))}
@@ -574,7 +622,7 @@ def _executable_prefix(argv0: str) -> List[Path]:
     for candidate in candidates:
         parent = candidate.parent
         if parent.name in _BIN_DIR_NAMES or not too_broad(parent):
-            if Path(os.path.realpath(parent)) != real_home:
+            if Path(os.path.realpath(parent)) not in homes:
                 paths.append(parent)
         if parent.name in _BIN_DIR_NAMES and not too_broad(parent.parent):
             paths.append(parent.parent)
@@ -611,18 +659,20 @@ def _ash_paths() -> List[Path]:
     # Landlock refuses that listing unless the entry itself is readable. That is
     # site-packages for an installed ASH, or the checkout for an editable one.
     import_root = package_dir.parent
-    if Path(os.path.realpath(import_root)) == Path(os.path.realpath(Path.home())):
+    homes = _homes()
+    if Path(os.path.realpath(import_root)) in homes:
         import_root = package_dir
     # And every directory on sys.path. A worker started with this interpreter
     # (detect-secrets, cdk-nag) imports from the same entries, and an editable
     # install's .pth file adds entries outside site-packages. Landlock denies an
     # entry it was not given, so the import fails with ModuleNotFoundError.
     #
-    # Inside $HOME only entries that belong to the interpreter (under sys.prefix or
+    # Inside a home directory ($HOME's, or the passwd entry's when HOME names
+    # another) only entries that belong to the interpreter (under sys.prefix or
     # sys.base_prefix, which is where uv keeps managed Pythons and venvs) or that
-    # hold the ASH package are added: a PYTHONPATH pointing at ~/anything would
-    # otherwise mount that directory for every scanner.
-    real_home = Path(os.path.realpath(Path.home()))
+    # hold the ASH package are added: a PYTHONPATH pointing at ~/anything, or
+    # ``python -m`` run from the home directory, would otherwise mount that
+    # directory for every scanner.
     interpreter_roots = {
         Path(os.path.realpath(p))
         for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)
@@ -632,9 +682,9 @@ def _ash_paths() -> List[Path]:
         if not entry or not os.path.isabs(entry) or not os.path.isdir(entry):
             return False
         real = Path(os.path.realpath(entry))
-        if _broader_than_a_tool(real):
+        if _broader_than_a_tool(real, homes):
             return False
-        if real_home not in real.parents:
+        if not any(home in real.parents for home in homes):
             return True
         return any(real == root or root in real.parents for root in interpreter_roots)
 
@@ -801,7 +851,7 @@ def build_scanner_policy(
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
     read_only = _existing(
         [Path(p) for p in SYSTEM_READ_PATHS]
-        + _path_directories(real_home)
+        + _path_directories()
         + _uv_directories()
         + _ash_paths()
         + _executable_prefix(argv0)

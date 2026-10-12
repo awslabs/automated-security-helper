@@ -28,6 +28,8 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.policy import (
     SandboxPolicy,
     SandboxUnavailable,
+    _distinct_home,
+    _passwd_home,
 )
 
 PROBE_TIMEOUT_SECONDS = 20
@@ -138,29 +140,9 @@ class SandboxBackend:
         raise NotImplementedError
 
 
-def _passwd_home() -> Optional[Path]:
-    """The home directory the passwd entry names, or None where there is none.
-
-    Not always the policy's home: that is Path.home(), which reads HOME, and an
-    operator or a CI job can set HOME elsewhere.
-    """
-    try:
-        import pwd
-
-        return Path(pwd.getpwuid(os.getuid()).pw_dir)
-    except (ImportError, KeyError, AttributeError, OSError):
-        return None
-
-
 def _other_home(policy: SandboxPolicy) -> Optional[Path]:
     """The passwd entry's home when it is a directory other than ``policy.home``."""
-    other = _passwd_home()
-    if other is None or not other.is_absolute():
-        return None
-    real = _real(other)
-    if real == _real(policy.home) or real == Path("/"):
-        return None
-    return real
+    return _distinct_home(policy.home, _passwd_home())
 
 
 def _probe_process(

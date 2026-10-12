@@ -21,6 +21,7 @@ from automated_security_helper.utils.sandbox import (
     scanner_sandbox_scope,
 )
 from automated_security_helper.utils.sandbox import backends as backends_module
+from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import (
     BACKENDS,
@@ -36,15 +37,26 @@ from automated_security_helper.utils.sandbox.policy import (
 )
 
 
+def _fake_passwd_home(monkeypatch, home):
+    """Make ``home`` the passwd entry's home everywhere it is read.
+
+    backends imports policy's _passwd_home by name, so each module has its own
+    binding, and a test that fakes only one sees two different passwd homes.
+    """
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", lambda: home, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _home_is_the_passwd_home(monkeypatch):
     """HOME is the passwd entry's home here, as on most hosts.
 
     Every test sets HOME to a directory of its own; the cases where the two differ
-    are TestFirejailHidesBothHomes and TestHomeElsewhereThanThePasswdEntry, which
-    override this.
+    are TestFirejailHidesBothHomes, TestHomeElsewhereThanThePasswdEntry and the
+    tests after it, which override this.
     """
-    monkeypatch.setattr(backends_module, "_passwd_home", Path.home, raising=False)
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", Path.home, raising=False)
 
 
 @pytest.fixture
@@ -993,9 +1005,7 @@ class TestHomeElsewhereThanThePasswdEntry:
     def passwd_home(self, tmp_path, monkeypatch):
         home = tmp_path / "passwd-home"
         (home / "Library" / "Keychains").mkdir(parents=True)
-        monkeypatch.setattr(
-            backends_module, "_passwd_home", lambda: home, raising=False
-        )
+        _fake_passwd_home(monkeypatch, home)
         return home
 
     def test_sandbox_exec_denies_reading_both_homes(
@@ -1025,9 +1035,7 @@ class TestHomeElsewhereThanThePasswdEntry:
 
     def test_one_home_changes_nothing(self, layout, monkeypatch, tmp_path):
         """Positive control: HOME is the passwd home, as on most hosts."""
-        monkeypatch.setattr(
-            backends_module, "_passwd_home", lambda: layout.home, raising=False
-        )
+        _fake_passwd_home(monkeypatch, layout.home)
         profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
         home_denials = [
             line
@@ -1038,6 +1046,152 @@ class TestHomeElsewhereThanThePasswdEntry:
         assert home_denials == [
             f'(deny file-read* (subpath "{_as_argv(layout.home)}"))'
         ], home_denials
+
+    @pytest.mark.parametrize(
+        "pw_dir", ["/", "", "relative/home", "link-to-home"], ids=repr
+    )
+    def test_an_unusable_passwd_home_adds_no_deny(
+        self, layout, monkeypatch, tmp_path, pw_dir
+    ):
+        """No entry to deny: "/" would take back every read the policy does not
+        re-grant, a relative or empty pw_dir names no directory, and a link to
+        HOME is the home already denied."""
+        if pw_dir == "link-to-home":
+            value = tmp_path / "home-link"
+            value.symlink_to(layout.home, target_is_directory=True)
+        else:
+            value = Path(pw_dir)
+        _fake_passwd_home(monkeypatch, value)
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        home_denials = [
+            line
+            for line in profile.splitlines()
+            if line.startswith("(deny file-read* (subpath")
+            and '"/private/tmp"' not in line
+        ]
+        assert home_denials == [
+            f'(deny file-read* (subpath "{_as_argv(layout.home)}"))'
+        ], home_denials
+
+
+def _reopened_after_deny(profile, home, paths):
+    """The rules after ``home``'s deny that allow reading one of ``paths`` again."""
+    lines = profile.splitlines()
+    deny = lines.index(f'(deny file-read* (subpath "{_as_argv(home)}"))')
+    return [
+        line
+        for line in lines[deny + 1 :]
+        if line.startswith("(allow")
+        and any(f'(subpath "{_as_argv(p)}")' in line for p in paths)
+    ]
+
+
+class TestPolicyPathsUnderThePasswdHome:
+    """The breadth filters measure a path against both homes, not only HOME's.
+
+    sandbox-exec denies reading the passwd entry's home and then allows the policy's
+    read-only paths again, and bwrap, firejail and landlock mount the same set. With
+    HOME elsewhere the filters screened only paths under HOME, so a PATH entry naming
+    the passwd home or a configuration directory in it, a tool's prefix directly
+    under it (~/.local for ~/.local/bin/uv, ~/.cargo for ~/.cargo/bin/x), a sys.path
+    entry of the passwd home (``python -m`` run from it) and an import root equal to
+    it each re-opened that home, or part of it.
+    """
+
+    @pytest.fixture
+    def pw(self, tmp_path, monkeypatch):
+        home = tmp_path / "passwd-home"
+        for name in (".ssh", ".config/t", ".local/bin", ".local/share", ".cargo/bin"):
+            (home / name).mkdir(parents=True)
+        _fake_passwd_home(monkeypatch, home)
+        return home
+
+    @staticmethod
+    def _tool(directory):
+        """An executable that is not a script, so no interpreter is added."""
+        program = directory / "tool"
+        program.write_bytes(b"\x7fELF")
+        program.chmod(0o755)
+        return program
+
+    def test_path_entries_and_a_tool_in_dot_local_bin(
+        self, layout, pw, monkeypatch, tmp_path
+    ):
+        argv0 = self._tool(pw / ".local" / "bin")
+        monkeypatch.setenv(
+            "PATH",
+            os.pathsep.join([str(pw), str(pw / ".config" / "t"), str(argv0.parent)]),
+        )
+        policy = _policy(layout, argv0=str(argv0))
+        exposed = _resolved(policy.read_only)
+        assert _resolved([pw / ".local" / "bin"]) <= exposed
+        for hidden in (pw, pw / ".config" / "t", pw / ".local"):
+            assert Path(os.path.realpath(hidden)) not in exposed, hidden
+        profile = SandboxExecBackend().profile(policy, tmp_path / "ptmp")
+        children = [pw, pw / ".config" / "t", *pw.iterdir()]
+        assert _reopened_after_deny(profile, pw, children) == []
+
+    @pytest.mark.parametrize("bin_dir", [".local/bin", ".cargo/bin"])
+    def test_a_tools_prefix_directly_under_the_passwd_home(
+        self, layout, pw, monkeypatch, bin_dir
+    ):
+        argv0 = self._tool(pw / bin_dir)
+        monkeypatch.setenv("PATH", str(argv0.parent))
+        exposed = _resolved(_policy(layout, argv0=str(argv0)).read_only)
+        assert Path(os.path.realpath(argv0.parent)) in exposed
+        assert Path(os.path.realpath(argv0.parent.parent)) not in exposed
+
+    def test_a_deeper_prefix_under_the_passwd_home_stays_readable(
+        self, layout, pw, monkeypatch
+    ):
+        """Positive control: one installation, such as ~/.nvm/versions/node/v22."""
+        prefix = pw / ".nvm" / "versions" / "node" / "v22"
+        (prefix / "bin").mkdir(parents=True)
+        argv0 = self._tool(prefix / "bin")
+        monkeypatch.setenv("PATH", str(argv0.parent))
+        exposed = _resolved(_policy(layout, argv0=str(argv0)).read_only)
+        assert Path(os.path.realpath(prefix)) in exposed
+
+    @pytest.mark.parametrize("entry", ["", ".config/t"], ids=["home", "config-dir"])
+    def test_a_sys_path_entry_under_the_passwd_home(
+        self, layout, pw, monkeypatch, entry
+    ):
+        """``python -m ...`` run from the passwd home puts it first on sys.path."""
+        path = pw / entry if entry else pw
+        monkeypatch.setattr(sys, "path", [str(path), *sys.path])
+        assert Path(os.path.realpath(path)) not in _resolved(_policy(layout).read_only)
+
+    def test_an_import_root_that_is_the_passwd_home(self, layout, pw, monkeypatch):
+        """ASH checked out directly in the passwd home: mount the package, not it."""
+        module = pw / "automated_security_helper" / "utils" / "sandbox" / "policy.py"
+        module.parent.mkdir(parents=True)
+        module.touch()
+        monkeypatch.setattr(policy_module, "__file__", str(module))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(pw)) not in exposed
+        assert Path(os.path.realpath(pw / "automated_security_helper")) in exposed
+
+
+@pytest.mark.parametrize(
+    "pw_dir", [None, "/", "", "relative/home", "HOME", "link to HOME"], ids=repr
+)
+def test_no_second_home(tmp_path, pw_dir):
+    """A passwd home that is not a second directory to measure against or deny."""
+    home = tmp_path / "home"
+    home.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(home, target_is_directory=True)
+    special = {"HOME": home, "link to HOME": link}
+    value = special.get(pw_dir) or (None if pw_dir is None else Path(pw_dir))
+    assert policy_module._distinct_home(home, value) is None
+
+
+def test_a_second_home(tmp_path):
+    home = tmp_path / "home"
+    other = tmp_path / "other"
+    home.mkdir()
+    other.mkdir()
+    assert policy_module._distinct_home(home, other) == Path(os.path.realpath(other))
 
 
 class TestSandboxExecLeavesTheRealCacheUnwritten:

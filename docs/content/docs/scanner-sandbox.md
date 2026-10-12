@@ -109,7 +109,9 @@ it needs.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
   are mounted, and a tool's install prefix only when it is deeper than a directory
-  directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no).
+  directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). When `HOME`
+  names a directory other than your account's passwd entry's home, both directories
+  are screened this way.
 - The offline rule cache of semgrep and opengrep, the directory
   `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
   for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
