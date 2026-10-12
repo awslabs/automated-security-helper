@@ -251,8 +251,18 @@ def main(argv: List[str]) -> int:
         return 2
     # Exclusively: the parent made this directory fresh for the run and wrote the
     # request into it with fs_guard, so anything already at the name, a link
-    # included, is refused rather than opened.
-    with open(response_path, "x", encoding="utf-8") as out:
+    # included, is refused rather than opened. Reported as the protocol mismatch
+    # is, an error exit with a line on stderr, which the parent quotes as the
+    # reason the child gave no answer.
+    try:
+        out = open(response_path, "x", encoding="utf-8")
+    except FileExistsError:
+        sys.stderr.write(
+            f"cdk-nag worker: the response file {response_path} already exists, and "
+            "the worker writes only a file it creates\n"
+        )
+        return 2
+    with out:
         _evaluate(request, out)
     return 0
 
@@ -425,7 +435,11 @@ def _run_child(
     )
 
     work_dir = work_root.joinpath(_WORK_DIR_NAME, uuid.uuid4().hex)
-    work_dir.mkdir(parents=True, exist_ok=True)
+    # A directory of this child's own, every time, retries included: one already
+    # at the name is not reused, so no request or response file is ever left
+    # from an earlier child.
+    work_dir.parent.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir()
     request_path = work_dir.joinpath("request.json")
     response_path = work_dir.joinpath("response.jsonl")
     try:

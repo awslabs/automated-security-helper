@@ -595,3 +595,51 @@ def test_the_worker_refuses_a_request_from_another_protocol(tmp_path, capsys):
     assert cdk_nag_worker.main([str(request), str(tmp_path / "response.jsonl")]) == 2
     assert not (tmp_path / "response.jsonl").exists()
     assert "protocol" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stale", ["file", "link"])
+def test_a_response_already_there_is_an_error_result_not_a_traceback(
+    tmp_path, capsys, stale
+):
+    """The child creates its response file; anything at the name is refused."""
+    request = tmp_path / "request.json"
+    request.write_text(
+        json.dumps(
+            {
+                "protocol": cdk_nag_worker.PROTOCOL_VERSION,
+                "cwd": tmp_path.as_posix(),
+                "log_level": logging.WARNING,
+                "options": {},
+                "templates": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = tmp_path / "response.jsonl"
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_text("kept\n")
+    if stale == "file":
+        response.write_text("stale\n")
+    else:
+        response.symlink_to(elsewhere)
+
+    assert cdk_nag_worker.main([str(request), str(response)]) == 2
+
+    err = capsys.readouterr().err
+    assert "already exists" in err and "Traceback" not in err, err
+    assert elsewhere.read_text() == "kept\n"
+    if stale == "file":
+        assert response.read_text() == "stale\n"
+
+
+def test_each_child_gets_a_directory_of_its_own(tmp_path, monkeypatch):
+    """A retry's directory is new: one already at its name is not reused."""
+    import uuid
+
+    outdir = tmp_path / "out"
+    taken = uuid.UUID(int=1)
+    (outdir / ".cdk-nag-worker" / taken.hex).mkdir(parents=True)
+    monkeypatch.setattr(cdk_nag_worker.uuid, "uuid4", lambda: taken)
+
+    with pytest.raises(FileExistsError):
+        cdk_nag_worker._run_child(["t.yaml"], {}, outdir, tmp_path, None)
