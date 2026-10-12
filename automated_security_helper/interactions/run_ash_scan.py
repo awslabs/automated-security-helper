@@ -1703,6 +1703,10 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
 # ASH_EXIT_CODES -- see the guard in _run_container_mode for which two are excluded and why.
 _CONTAINER_VERDICT_EXIT_CODES = frozenset({0, 1, 2})
 
+# The inner ASH's refusals, which it returns before writing a results file: an invalid
+# config (3) and a workspace definition or policy error (4). Nix mode passes them through.
+_NIX_REFUSAL_EXIT_CODES = frozenset({3, 4})
+
 
 def _run_container_mode(
     opts: ScanOptions,
@@ -2057,6 +2061,16 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         # No results file means the inner scan never got far enough to write one, so the
         # shell's own exit code is the only diagnostic available. Reporting it here is the
         # difference between an actionable error and a bare "file not found".
+        if nix_result.returncode in _NIX_REFUSAL_EXIT_CODES:
+            # The inner ASH refused before scanning: 3 for a config that does not load,
+            # 4 for a workspace definition or policy error. Kept, as container mode keeps
+            # them, so the caller can still tell which; exit 1 would say a scan failed.
+            logger.error(
+                f"The Nix shell exited with {nix_result.returncode} "
+                f"({ASH_EXIT_CODES[nix_result.returncode]}), which means nothing was "
+                f"scanned, so there is no results file at {output_file}."
+            )
+            sys.exit(nix_result.returncode)
         logger.error(
             f"Results file not found at {output_file}. The Nix shell exited with "
             f"code {nix_result.returncode}."
