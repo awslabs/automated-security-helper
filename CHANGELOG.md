@@ -1261,7 +1261,8 @@
     outside `--sandbox`;
   - zizmor runs with `--no-config`, not `zizmor.yml` or `.github/zizmor.yml`;
   - trivy runs with empty config, ignore and secret-config files, not
-    `trivy.yaml`, `.trivyignore` or `trivy-secret.yaml`.
+    `trivy.yaml`, `.trivyignore` or `trivy-secret.yaml`, and with an empty
+    `--module-dir`, so it loads no WASM module from `~/.trivy/modules`.
 
   Each of those scanners' `config_file` options and gitleaks' `baseline_path`, set
   by a repository-written ASH config, are ignored with a warning (a config an MCP

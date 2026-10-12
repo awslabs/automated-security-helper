@@ -116,10 +116,12 @@ findings. Unset or refused, each falls back to the operator's environment for a 
 outside the tree: ``TRIVY_CONFIG`` (``TrivyScannerBase._trivy_config_file``),
 ``TRIVY_IGNOREFILE`` and ``TRIVY_SECRET_CONFIG``
 (``TrivyScannerBase._trivy_input_file``). ``trivy-repo`` passes the same three, and
-its own ``--module-dir`` under the same rule. The database update runs from outside
-the tree with an explicit ``--config``
-(``TrivyScannerBase._shared_update_flags``). trivy 0.75.0 reads nothing else from a
-default location: ``--ignore-policy`` (a Rego file) has none, and an ignore policy
+its own ``--module-dir`` under the same rule. This scanner has no ``module_dir``
+option, so trivy gets ``--module-dir`` naming an empty directory ASH makes outside
+the tree for the run, and loads no WASM module from ``~/.trivy/modules`` or a
+config's ``module.dir``. The database update runs from outside the tree with an
+explicit ``--config`` (``TrivyScannerBase._shared_update_flags``). With those, trivy
+0.75.0 reads nothing else from a default location: ``--ignore-policy`` (a Rego file) has none, and an ignore policy
 named by the tree's ``trivy.yaml`` does not apply because that file is not read
 (``tests/integration/scanners/test_trivy_real_binary.py``).
 
@@ -158,6 +160,7 @@ from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERA
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
+from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     TrivyScannerBase,
 )
@@ -512,6 +515,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # report saying so, so ASH passes its own unless the operator chose one
         # (TrivyScannerBase._trivy_config_file, as trivy-repo does).
         extra.append(f"--config={self._trivy_config_file()}")
+        # trivy loads the WASM modules in --module-dir (default ~/.trivy/modules,
+        # or a trivy.yaml's module.dir). This scanner has no module_dir option, so
+        # it always gets an empty directory, as trivy-repo does when its option is
+        # unset.
+        modules = empty_tool_directory("trivy-modules", context=self.context)
+        extra.append(f"--module-dir={modules.as_posix()}")
         # .trivyignore and trivy-secret.yaml as trivy-repo passes them
         # (TrivyScannerBase._trivy_input_file).
         extra.append(f"--ignorefile={self._ignore_file()}")

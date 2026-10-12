@@ -518,3 +518,24 @@ def test_trivy_repo_is_handed_the_modules_directory_that_was_checked(
     else:
         assert passed == _real(chosen)
     assert _real(planted) not in " ".join(argv)
+
+
+def test_builtin_trivy_is_handed_an_empty_modules_directory(tmp_path, monkeypatch):
+    """trivy loads the WASM modules in ``--module-dir``, by default
+    ``~/.trivy/modules``, so builtin trivy, which has no ``module_dir`` option, is
+    handed an empty directory outside the scanned tree, as trivy-repo is when its
+    option is unset."""
+    source = _source(tmp_path)
+    home = tmp_path / "home"
+    (home / ".trivy" / "modules").mkdir(parents=True)
+    (home / ".trivy" / "modules" / "planted.wasm").write_bytes(b"\0asm")
+    _set_home(monkeypatch, home)
+    config = resolve_config(source_dir=source)
+
+    argv = _argv(tmp_path, source, config, "trivy", "config_file", None)
+
+    passed = Path(_passed(argv, "--module-dir"))
+    assert passed.is_dir(), argv
+    assert list(passed.iterdir()) == []
+    assert not _inside(passed, source)
+    assert not _inside(passed, home)

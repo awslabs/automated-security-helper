@@ -257,8 +257,9 @@ def test_default_argv(tmp_path):
     results = scanner.results_dir / "source" / "results_sarif.sarif"
     written = {
         flag: next(a for a in argv if a.startswith(f"{flag}="))[len(flag) + 1 :]
-        for flag in ("--ignorefile", "--secret-config")
+        for flag in ("--module-dir", "--ignorefile", "--secret-config")
     }
+    assert Path(written["--module-dir"]).name == "trivy-modules"
     assert Path(written["--ignorefile"]).name == "trivyignore-empty"
     assert Path(written["--secret-config"]).name == "trivy-secret-empty.yaml"
     assert all(_ashs_own(scanner, value) for value in written.values())
@@ -275,6 +276,7 @@ def test_default_argv(tmp_path):
         "--timeout=1800s",
         "--skip-dirs=.ash/ash_output",
         f"--config={EMPTY_TOOL_CONFIG.as_posix()}",
+        f"--module-dir={written['--module-dir']}",
         f"--ignorefile={written['--ignorefile']}",
         f"--secret-config={written['--secret-config']}",
         source.as_posix(),
