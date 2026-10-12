@@ -26,6 +26,7 @@ is resolved.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -419,6 +420,23 @@ def test_a_linked_file_that_does_not_parse_is_not_quoted(_server) -> None:
 
 
 @pytest.mark.usefixtures("host_set_aside")
+def test_the_log_line_for_it_does_not_quote_it_either(_server, caplog) -> None:
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    source = _linked_tree(_server, NOT_YAML)
+
+    with caplog.at_level(logging.ERROR, logger=ASH_LOGGER.name):
+        resolve_config(source_dir=source)
+
+    (line,) = [
+        r.getMessage() for r in caplog.records if "Failed to load" in r.getMessage()
+    ]
+    assert "could not be parsed" in line, line
+    assert YAML_CANARY not in line
+
+
+@pytest.mark.usefixtures("host_set_aside")
 def test_the_scan_tool_does_not_quote_it_either(_server) -> None:
     source = _linked_tree(_server, NOT_A_CONFIG)
 
@@ -588,6 +606,70 @@ def test_the_scan_itself_refuses_it_without_reading_it(_server) -> None:
     assert entry.error_message == "ASH exited with code 3", entry.to_dict()
     assert (_server["host"] / "ash.yaml").resolve() not in read
     assert CANARY not in repr(entry.to_dict())
+
+
+def _remote_options(source: Path, output: Path) -> Any:
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_client_rules,
+    )
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.interactions.run_ash_scan import ScanOptions
+
+    return ScanOptions(
+        source_dir=source,
+        output_dir=output,
+        remote_client=True,
+        client_config_policy=session_client_rules(SESSION),
+        config_base_gate=config_base_gate(SESSION),
+    )
+
+
+def test_the_output_dir_check_does_not_read_it(_server) -> None:
+    """The host file turns the sandbox off; read, it would let the linked output through."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        _refuse_symlinked_output_dir,
+    )
+
+    source = _linked_tree(_server, f"# {CANARY}\nsandbox:\n  mode: 'off'\n")
+    real_output = _server["tmp"] / "real-output"
+    real_output.mkdir()
+    output = source / "out"
+    _symlink(output, real_output)
+    exited: List[Any] = []
+
+    def run() -> None:
+        try:
+            _refuse_symlinked_output_dir(_remote_options(source, output))
+        except SystemExit as exc:
+            exited.append(exc.code)
+
+    read = _reads(run)
+
+    assert exited == [1]
+    assert (_server["host"] / "ash.yaml").resolve() not in read
+
+
+def test_the_workspace_knobs_reader_does_not_read_it(_server) -> None:
+    from automated_security_helper.interactions.run_ash_scan import (
+        _resolve_workspace_execution_config,
+    )
+
+    source = _linked_tree(
+        _server, f"# {CANARY}\nworkspace:\n  max_parallel_projects: 9\n"
+    )
+    out: List[Any] = []
+
+    read = _reads(
+        lambda: out.append(
+            _resolve_workspace_execution_config(
+                _remote_options(source, _server["tmp"] / "out")
+            )
+        )
+    )
+
+    (knobs,) = out
+    assert knobs.max_parallel_projects != 9
+    assert (_server["host"] / "ash.yaml").resolve() not in read
 
 
 def test_get_config_refuses_the_same_layout_as_before(_server) -> None:

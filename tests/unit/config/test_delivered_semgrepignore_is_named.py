@@ -110,6 +110,29 @@ def test_a_link_to_a_delivered_semgrepignore_is_the_clients(
     assert CLIENT_WORDING in note
 
 
+def test_a_delivered_link_to_a_semgrepignore_elsewhere_is_the_clients(
+    mcp_root: Path, tmp_path: Path
+) -> None:
+    """Judged by where the link sits, and named by it, not by the file it reaches."""
+    host_file = tmp_path / "host" / ".semgrepignore"
+    host_file.parent.mkdir()
+    host_file.write_text("hidden/\n", encoding="utf-8")
+    source = mcp_root / "session-1" / "source"
+    source.mkdir(parents=True)
+    try:
+        os.symlink(host_file, source / ".semgrepignore")
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
+        pytest.skip(f"cannot create a symlink here: {exc}")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    (note,) = _scanner_warnings("semgrep", source, out)
+
+    assert CLIENT_WORDING in note
+    assert (source / ".semgrepignore").as_posix() in note
+    assert host_file.parent.as_posix() not in note
+
+
 def test_the_checkpoint_in_the_results_carries_the_wording(
     mcp_root: Path, tmp_path: Path
 ) -> None:
@@ -153,6 +176,62 @@ def test_the_checkpoint_in_the_results_carries_the_wording(
         ),
     ):
         orchestrator.initialize()
+    with patch("automated_security_helper.core.orchestrator.scan_set", return_value=[]):
+        results = orchestrator.execute_scan(phases=["scan"])
+
+    (checkpoint,) = [
+        c
+        for c in results.validation_checkpoints
+        if c.get("type") == "config_warning" and ".semgrepignore" in c["message"]
+    ]
+    assert CLIENT_WORDING in checkpoint["message"]
+
+
+def test_a_note_the_scanner_adds_while_scanning_reaches_the_results(
+    mcp_root: Path, tmp_path: Path
+) -> None:
+    """The scanner adds its note while the phases run; the checkpoints are taken after."""
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+        SemgrepScanner,
+        SemgrepScannerConfig,
+    )
+
+    source = _tree(mcp_root / "session-1")
+    out = tmp_path / "out"
+    out.mkdir()
+    config = AshConfig(project_name="test")
+
+    class _Engine:
+        def execute_phases(self, phases=None):
+            context = PluginContext(source_dir=source, output_dir=out, config=config)
+            SemgrepScanner(
+                context=context, config=SemgrepScannerConfig()
+            )._resolve_arguments(target=source, results_file=out / "r.sarif")
+            return AshAggregatedResults()
+
+    orchestrator = ASHScanOrchestrator(
+        source_dir=source,
+        output_dir=out,
+        config_path=None,
+        config_overrides=None,
+        no_cleanup=False,
+        metadata=None,
+        ash_plugin_modules=[],
+    )
+    with (
+        patch(
+            "automated_security_helper.core.orchestrator.resolve_config",
+            return_value=config,
+        ),
+        patch(
+            "automated_security_helper.core.orchestrator.ScanExecutionEngine",
+            return_value=_Engine(),
+        ),
+    ):
+        orchestrator.initialize()
+    assert not [w for w in config._resolution_warnings if ".semgrepignore" in w]
     with patch("automated_security_helper.core.orchestrator.scan_set", return_value=[]):
         results = orchestrator.execute_scan(phases=["scan"])
 

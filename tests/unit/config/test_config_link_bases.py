@@ -161,3 +161,31 @@ def test_a_base_records_its_own_spelling_first(_server) -> None:
     names = document.names[_base(_server)]
     assert names[0] == (_server["host"] / "conf" / "base.yaml").resolve()
     assert link in names
+
+
+# ---------------------------------------------------------------------------
+# A base is judged by the path its extends entry spells
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("spelled", ["through a delivered link", "directly"])
+def test_a_base_spelled_through_a_delivered_link_is_the_clients(
+    _server, spelled: str
+) -> None:
+    """An operator's file that names its base through a client's link gets the client's file."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    base = write(_server["host"] / "conf" / "shared.yaml", SUPPRESSIONS)
+    if spelled == "directly":
+        entry = base
+    else:
+        entry = _server["workspace"] / SESSION / "source" / "shared.yaml"
+        symlink(entry, base)
+    root = write(
+        _server["host"] / "conf" / "ash.yaml", f"project_name: op\nextends: {entry}\n"
+    )
+
+    config = resolve_config(config_path=root, source_dir=_server["tmp"])
+
+    marks = [s.client_supplied for s in config.global_settings.suppressions]
+    assert marks == [spelled != "directly"]
