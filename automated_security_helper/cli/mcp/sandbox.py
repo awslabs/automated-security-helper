@@ -978,9 +978,13 @@ def check_config_input(
         env_refused_for,
     )
     from automated_security_helper.config.resolve_config import (
+        CLIENT_FILE,
+        REPOSITORY_FILE,
+        _has_a_client_file,
         read_config_document,
         validate_config_document,
     )
+    from automated_security_helper.config.sandbox_grants import repository_written
     from automated_security_helper.core.exceptions import (
         ASHConfigEnvNotResolvedError,
         ASHConfigInputNotPermittedError,
@@ -991,6 +995,12 @@ def check_config_input(
     if refusal is not None:
         return ConfigInputCheck(refusal=refusal)
     path = Path(config_path)
+    # Its values go back to the client, so only an operator's file has them
+    # repeated: not a file the client named outside the config roots or
+    # delivered, nor one in a checkout or the scanned directory (by path, before
+    # the read; by the whole chain, before the validation).
+    scan_root = Path(source_dir) if source_dir is not None else path.parent
+    named_by_client = client_named_config_is_untrusted(path, session_id=session_id)
     document = None
     try:
         # Read as the scan reads it, so a file that may not use !ENV is refused
@@ -1003,8 +1013,16 @@ def check_config_input(
             ),
             permit_base=config_base_gate(session_id),
             refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
+            unquoted=named_by_client
+            or bool(repository_written([path], scan_root, [path])),
         )
-        validate_config_document(document, path)
+        if named_by_client or _has_a_client_file(document):
+            unquoted: Optional[str] = CLIENT_FILE
+        elif repository_written(document.chain, scan_root, document.named):
+            unquoted = REPOSITORY_FILE
+        else:
+            unquoted = None
+        validate_config_document(document, path, unquoted=unquoted)
     except ASHConfigInputNotPermittedError as exc:
         return ConfigInputCheck(refusal=config_chain_refusal(config_path, exc))
     except ASHConfigEnvNotResolvedError as exc:

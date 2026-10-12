@@ -549,8 +549,9 @@ async def mcp_scan_directory(
         # does not validate, would otherwise start a scan that fails on its
         # first read of the config. A file a client delivered that also sets a
         # field it may not is refused for that first, as the scan would refuse it
-        # while resolving: the denial names what to remove. A check that cannot
-        # finish on a file that does not validate leaves the load error to report.
+        # while resolving: the denial names what to remove. So is one this
+        # session's policy cannot be read for. A check that cannot finish on a
+        # file that does not validate leaves the load error to report.
         if checked.load_error:
             if chain_document is not None:
                 denial = _client_config_denial(
@@ -560,8 +561,9 @@ async def mcp_scan_directory(
                     "scan_directory",
                     document=chain_document,
                 )
-                if denial is not None and denial.get("error_type") == (
-                    CONFIG_FIELD_DENIED
+                if denial is not None and denial.get("error_type") in (
+                    CONFIG_FIELD_DENIED,
+                    CONFIG_POLICY_UNREADABLE,
                 ):
                     return denial
             return create_error_response(

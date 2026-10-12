@@ -231,6 +231,7 @@ def read_config_document(
     ``resolve_config_document``.
     """
     path = check_config_path(config_path)
+    problem: Optional[str] = None
     try:
         return resolve_config_document(
             path,
@@ -242,17 +243,19 @@ def read_config_document(
     except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as e:
         # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
         # ValueError is not caught: pydantic's ValidationError is one too.
-        if not isinstance(e, OSError) and (unquoted or _is_a_client_file(path)):
-            problem = _unquoted_load_error(path, e)
+        if isinstance(e, OSError) or not (unquoted or _is_a_client_file(path)):
             if log_failure:
-                ASH_LOGGER.error(f"Failed to load configuration file: {problem}")
-            raise ASHConfigSourceError(problem) from None
+                ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
+            verb = "read" if isinstance(e, OSError) else "parse"
+            raise ASHConfigSourceError(
+                f"could not {verb} {describe_config_path(path)}: {e}"
+            ) from e
+        problem = _unquoted_load_error(path, e)
         if log_failure:
-            ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-        verb = "read" if isinstance(e, OSError) else "parse"
-        raise ASHConfigSourceError(
-            f"could not {verb} {describe_config_path(path)}: {e}"
-        ) from e
+            ASH_LOGGER.error(f"Failed to load configuration file: {problem}")
+    # Raised outside the handler, so the parser's error, which can quote the line
+    # it stopped at, is neither the cause nor the context of this one.
+    raise ASHConfigSourceError(problem)
 
 
 def _warnings_when_discovered(
@@ -286,19 +289,31 @@ def _warnings_when_discovered(
 
 
 def validate_config_document(
-    document: ResolvedConfigDocument, config_path: Path | str
+    document: ResolvedConfigDocument,
+    config_path: Path | str,
+    *,
+    unquoted: Optional[str] = None,
 ) -> AshConfig:
     """The config ``document`` (``read_config_document``'s) holds, validated as a
     scan validates it; ``ASHConfigValidationError`` naming ``config_path`` if it
-    does not validate."""
+    does not validate.
+
+    ``unquoted`` is why the file's values may not be repeated (``CLIENT_FILE``,
+    ``REPOSITORY_FILE``): the error then gives each problem's location and kind
+    only (``_client_validation_error``), and is raised with no cause or context
+    that holds pydantic's text.
+    """
     try:
         return AshConfig.model_validate(document.data, strict=True)
     except ValidationError as e:
-        raise ASHConfigValidationError(
-            f"Configuration validation failed for "
-            f"'{describe_config_path(Path(config_path))}': {str(e)}. "
-            "Run 'ash config lint' to identify and fix issues."
-        ) from e
+        if unquoted is None:
+            raise ASHConfigValidationError(
+                f"Configuration validation failed for "
+                f"'{describe_config_path(Path(config_path))}': {str(e)}. "
+                "Run 'ash config lint' to identify and fix issues."
+            ) from e
+        refused = _client_validation_error(config_path, e, why=unquoted)
+    raise refused
 
 
 def load_config_file(
@@ -1002,10 +1017,16 @@ def unquoted_validation_problems(
     return problems
 
 
+#: Why a file's values are not repeated in an error about it.
+CLIENT_FILE = "an MCP client supplied the file"
+REPOSITORY_FILE = "the file is in a git checkout or the scanned directory"
+
+
 def _client_validation_error(
     config_path: Path | str,
     error: ValidationError,
     layered_over: Optional[Path] = None,
+    why: str = CLIENT_FILE,
 ) -> ASHConfigValidationError:
     """The validation error for a client's file: where each problem is, and what kind.
 
@@ -1024,8 +1045,7 @@ def _client_validation_error(
     return ASHConfigValidationError(
         f"Configuration validation failed for '{describe_config_path(Path(config_path))}'"
         f"{layered}: {len(problems)} problem(s): {'; '.join(problems)}. The values are not "
-        "shown because an MCP client supplied the file. Run 'ash config lint' to "
-        "identify and fix issues."
+        f"shown because {why}. Run 'ash config lint' to identify and fix issues."
     )
 
 
@@ -1587,14 +1607,18 @@ def _resolve_config(
                 data = deep_merge(data, overlay.data, AshConfig)
                 layered_over = overlay.chain[-1]
             client_chain = untrusted_config or _has_a_client_file(document)
+            refused: Optional[ASHConfigValidationError] = None
             try:
                 config = AshConfig.model_validate(data, strict=True)
             except ValidationError as e:
                 if not client_chain:
                     raise
-                raise _client_validation_error(
+                refused = _client_validation_error(
                     config_path, e, layered_over=layered_over
-                ) from None
+                )
+            if refused is not None:
+                # Outside the handler, so pydantic's text is not its context.
+                raise refused
             chain.extend(document.chain)
             documents.update(document.documents)
             if names is not None:
