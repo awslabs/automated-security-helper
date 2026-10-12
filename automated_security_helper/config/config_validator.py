@@ -9,6 +9,7 @@ from typing import Callable, List, Optional, Tuple
 
 import yaml
 
+from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
@@ -130,7 +131,7 @@ class ConfigValidator:
                     if str(config_path).endswith(".json"):
                         config_data = json.load(f)
                     else:
-                        config_data = yaml.safe_load(f)
+                        config_data = load_config_yaml(f)
 
             if not isinstance(config_data, dict):
                 errors.append(

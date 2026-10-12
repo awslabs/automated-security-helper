@@ -131,6 +131,26 @@ class TestSpecialFilesAreNotRead:
         with pytest.raises(ASHConfigSourceError, match="larger than 64 bytes"):
             resolve_config(source_dir=tmp_path)
 
+    def test_the_bound_is_1_mib(self, tmp_path):
+        """Six times ASH's own config; parsing a file that size stays cheap."""
+        from automated_security_helper.core.constants import ASH_CONFIG_MAX_FILE_BYTES
+
+        assert ASH_CONFIG_MAX_FILE_BYTES == 1024 * 1024
+        big = tmp_path / ".ash.yaml"
+        big.write_text(
+            "project_name: x\n" + "#" * ASH_CONFIG_MAX_FILE_BYTES, encoding="utf-8"
+        )
+
+        with pytest.raises(ASHConfigSourceError, match="larger than 1048576 bytes"):
+            resolve_config(source_dir=tmp_path)
+
+    def test_control_ashs_own_config_is_within_the_bound(self):
+        from automated_security_helper.core.constants import ASH_CONFIG_MAX_FILE_BYTES
+
+        own = Path(__file__).resolve().parents[3] / ".ash" / ".ash.yaml"
+
+        assert own.stat().st_size < ASH_CONFIG_MAX_FILE_BYTES / 4
+
     def test_control_a_file_at_the_bound_is_read(self, tmp_path, monkeypatch):
         content = "project_name: x\n"
         monkeypatch.setattr(

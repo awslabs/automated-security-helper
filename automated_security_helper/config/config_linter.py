@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.config_sources import read_config_file
 from automated_security_helper.config.config_validator import ConfigValidator
 
@@ -467,7 +468,7 @@ class ConfigLinter:
             if str(config_path).endswith(".json"):
                 return json.load(f)
             else:
-                return yaml.safe_load(f) or {}
+                return load_config_yaml(f) or {}
 
     @classmethod
     def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:

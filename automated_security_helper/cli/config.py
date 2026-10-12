@@ -25,6 +25,7 @@ from automated_security_helper.config.ash_config import (
     ConverterConfigSegment,
     ReporterConfigSegment,
     ScannerConfigSegment,
+    load_config_yaml,
 )
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
@@ -87,7 +88,7 @@ def _rewrite_refusal(config_path: Path) -> str | None:
         return "it is a TOML file, and this command writes YAML; edit it by hand"
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
+            raw = load_config_yaml(f)
     except (OSError, yaml.YAMLError):
         return None
     if isinstance(raw, dict) and (EXTENDS_KEY in raw or PATCH_KEY in raw):

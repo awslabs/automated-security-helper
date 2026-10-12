@@ -1118,9 +1118,15 @@
   read is refused when it would be the source used. The defaults apply only when
   there is no config file at all; an empty `ASH_CONFIG` counts as unset. A config
   file is now opened without blocking and read only when it is a regular file, up
-  to 16 MiB, so a FIFO or a device at a config name is refused at once instead of
+  to 1 MiB, so a FIFO or a device at a config name is refused at once instead of
   stalling the scan or exhausting memory, and a JSON config with a UTF-8 byte order
-  mark is read as YAML and TOML already were. Discovery tells a `pyproject.toml`
+  mark is read as YAML and TOML already were. **YAML aliases (`*name`) are refused
+  in every YAML ASH reads as configuration** (config files, `extends` bases,
+  workspace policy files, MCP `--profile` files and `select_profile`'s
+  `override_yaml`): a few hundred bytes of nested aliases expanded to gigabytes when
+  the config was written into the results or returned by MCP `get_config`. The
+  refusal names the alias and its line; an anchor nothing refers to still parses.
+  Discovery tells a `pyproject.toml`
   that is not a regular file by its type and does not open it, and no config file
   is opened in a way that could make a tty the controlling terminal. Under the MCP
   server, a config source found in the scanned directory that is a symbolic link

@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import yaml
 
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.ash_config import AshConfig, load_config_yaml
 
 
 class ProfileRegistryError(ValueError):
@@ -136,7 +136,7 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
 
                     raw = _json.load(f)
                 else:
-                    raw = yaml.safe_load(f)
+                    raw = load_config_yaml(f)
             allowed = set(AshConfig.model_fields.keys())
             for finfo in AshConfig.model_fields.values():
                 if finfo.alias:

@@ -110,6 +110,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.ash_workspace_config import (
     AshWorkspaceConfig,
     WorkspacePolicyConfig,
@@ -281,9 +282,10 @@ def normalise_scanner_name(name: str) -> str:
 def _read_policy_document(path: Path) -> object:
     """Parse the policy file, refusing anything unreadable.
 
-    Uses ``yaml.safe_load`` rather than ``AshConfig``'s ``!ENV``-aware loader.
+    Uses ``load_config_yaml`` rather than ``AshConfig``'s ``!ENV``-aware loader.
     See "No ``!ENV`` substitution" in ``config/ash_workspace_config.py``: a
-    ceiling an environment variable can loosen is not a ceiling.
+    ceiling an environment variable can loosen is not a ceiling. YAML aliases are
+    refused, as in every ASH config file.
     """
     try:
         raw = path.read_text(encoding="utf-8")
@@ -299,7 +301,7 @@ def _read_policy_document(path: Path) -> object:
     try:
         if path.suffix.lower() == ".json":
             return json.loads(raw)
-        return yaml.safe_load(raw)
+        return load_config_yaml(raw)
     except (yaml.YAMLError, json.JSONDecodeError) as exc:
         raise _refuse(
             f"workspace policy file '{path.as_posix()}' could not be parsed: {exc}"

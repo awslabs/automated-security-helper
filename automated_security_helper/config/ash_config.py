@@ -207,11 +207,60 @@ def resolve_env_references(value: str) -> Optional[str]:
     return value
 
 
+class _NoAliasSafeLoader(yaml.SafeLoader):
+    """``yaml.SafeLoader`` that refuses YAML aliases; see ``load_config_yaml``."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.events.AliasEvent):
+            event = self.peek_event()
+            raise yaml.composer.ComposerError(
+                None,
+                None,
+                f"found the alias *{event.anchor}; ASH configuration does not "
+                "accept YAML aliases, so write the value out where it is used",
+                event.start_mark,
+            )
+        return super().compose_node(parent, index)
+
+
+def _load_single_document(loader_class: type, stream: Any) -> Any:
+    # What yaml.load does, with the loader class given: one document, then the
+    # loader's resources released.
+    loader = loader_class(stream)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
+def load_config_yaml(stream: Any) -> Any:
+    """Parse YAML that configures ASH: safe tags only, and no aliases.
+
+    Every reader of an ASH config file, workspace policy, MCP profile or
+    client-supplied config fragment parses with this, or with
+    ``load_yaml_config``, which adds ``!ENV`` on top of it.
+
+    Why no aliases: an alias is a reference to an anchored node, and a few
+    hundred bytes of nested aliases stand for gigabytes once the parsed config
+    is walked or serialized. A scan writes its config into its results, and MCP
+    ``get_config`` returns it, so such a file exhausted memory in the process
+    reading it; an MCP server resolves a client's config in the process every
+    session shares. Parsing does not expand aliases, so a read-size bound cannot
+    stop this. None of the YAML files in ASH's repository uses an alias, and a
+    config that repeats a value can write it out where it is used. Anchors with
+    no alias referring to them are harmless and still parse.
+    """
+    return _load_single_document(_NoAliasSafeLoader, stream)
+
+
 def load_yaml_config(stream: Any) -> Any:
-    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes."""
+    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes.
+
+    Aliases are refused, as in ``load_config_yaml``.
+    """
 
     # Use a local subclass to avoid mutating the global SafeLoader
-    class _AshConfigLoader(yaml.SafeLoader):
+    class _AshConfigLoader(_NoAliasSafeLoader):
         pass
 
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
@@ -220,7 +269,9 @@ def load_yaml_config(stream: Any) -> Any:
         return resolve_env_references(loader.construct_scalar(node))
 
     _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
-    return yaml.load(stream, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by resolve_env_references above
+    # !ENV is bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by
+    # resolve_env_references above.
+    return _load_single_document(_AshConfigLoader, stream)
 
 
 # Define BuildConfig class
@@ -1583,7 +1634,7 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         return
 
     text = config_path.read_text(encoding="utf-8")
-    data = yaml.safe_load(text) or {}
+    data = load_config_yaml(text) or {}
 
     # A file that extends a base and has no suppressions list of its own gets
     # its suppressions from the base. Writing a list here would replace that

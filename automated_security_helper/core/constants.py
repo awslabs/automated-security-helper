@@ -135,10 +135,14 @@ ASH_CONFIG_SOURCES_DESCRIPTION = (
 ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
 ASH_CONFIG_EXTENDS_MAX_FILES = 50
 
-# The most ASH reads from one config file. A config is text a person edits; ASH's
-# own .ash/.ash.yaml is about 160 KiB. The bound stops a file, or a device at a
-# config name, from being read into memory without limit.
-ASH_CONFIG_MAX_FILE_BYTES = 16 * 1024 * 1024
+# The most ASH reads from one config file: 1 MiB. A config is text a person edits;
+# ASH's own .ash/.ash.yaml is about 160 KiB, so this is six times that. The bound
+# stops a file, or a device at a config name, from being read into memory without
+# limit, and it bounds what parsing one costs: a flat 15 MiB YAML list took about
+# 230 s and 4.3 GiB to resolve, where 1 MiB takes a fraction of that. It does not
+# bound YAML aliases, which expand after parsing; the config loaders refuse those
+# (see load_config_yaml in config/ash_config.py).
+ASH_CONFIG_MAX_FILE_BYTES = 1024 * 1024
 
 # The environment variable names an ASH config file may interpolate.
 #

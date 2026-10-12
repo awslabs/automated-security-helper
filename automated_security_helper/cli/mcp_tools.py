@@ -1409,6 +1409,7 @@ def mcp_get_config(
         resolve_config,
         find_config_file,
     )
+    from automated_security_helper.config.ash_config import load_config_yaml
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         read_config_bytes,
@@ -1479,7 +1480,7 @@ def mcp_get_config(
             if path.name.endswith(".toml"):
                 # pyproject.toml yields its [tool.ash] table, as when it is loaded.
                 return read_config_file(path) or {}
-            return _yaml.safe_load(read_config_bytes(path).decode("utf-8")) or {}
+            return load_config_yaml(read_config_bytes(path).decode("utf-8")) or {}
         except (
             ASHConfigValidationError,
             OSError,
@@ -1815,6 +1816,7 @@ def mcp_select_profile(
         AshConfig,
         AshMcpConfig,
         RuntimeOverridesConfig,
+        load_config_yaml,
     )
     import yaml as _yaml
     from pydantic import ValidationError as _ValidationError
@@ -1856,7 +1858,7 @@ def mcp_select_profile(
 
     if override_yaml is not None:
         try:
-            raw = _yaml.safe_load(override_yaml)
+            raw = load_config_yaml(override_yaml)
         except _yaml.YAMLError as exc:
             return {"success": False, "error": f"override_yaml parse error: {exc}"}
         # Strict-extra gate: AshConfig.model_config has extra='ignore' for

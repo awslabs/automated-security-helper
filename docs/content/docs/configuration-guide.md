@@ -69,11 +69,16 @@ scanner runs, and the message names the file. That covers:
   `run_ash_scan()` or an MCP tool's `config_path` that does not exist, and an
   empty `--config ""`. An empty `ASH_CONFIG` counts as unset;
 - a named or discovered file that is not valid YAML, JSON or TOML, is not UTF-8,
-  cannot be read, is larger than 16 MiB, or is a directory, FIFO, device or other
-  non-regular file. A syntax error names its line. A file that is not a regular
-  file is refused without being read, so a FIFO or `/dev/zero` at a config name
-  does not stall the scan. A leading UTF-8 byte order mark is accepted in YAML,
-  JSON and TOML alike;
+  cannot be read, is larger than 1 MiB, uses a YAML alias (`*name`), or is a
+  directory, FIFO, device or other non-regular file. A syntax error, and an
+  alias, names its line. A file that is not a regular file is refused without
+  being read, so a FIFO or `/dev/zero` at a config name does not stall the scan.
+  A leading UTF-8 byte order mark is accepted in YAML, JSON and TOML alike.
+  Aliases are refused in every YAML ASH reads as configuration (config files,
+  `extends` bases, workspace policy files, MCP profiles and a client's
+  `override_yaml`), because a few hundred bytes of nested aliases expand to
+  gigabytes when the config is written into the results; an anchor (`&name`)
+  that nothing refers to is accepted;
 - a dangling symbolic link at one of the names above, for example
   `.ash/.ash.yaml` linked to a shared file that is not checked out. It is not
   treated as "no config";
