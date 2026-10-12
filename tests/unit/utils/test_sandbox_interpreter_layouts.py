@@ -553,6 +553,31 @@ def test_a_tool_directly_in_a_directory_holding_a_home_mounts_none_of_it(
 
 
 @pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
+def test_a_tool_in_a_bin_directory_holding_a_home_mounts_none_of_it(
+    world, monkeypatch, which_home
+):
+    """HOME=/x/bin/home with the tool at /x/bin/tool: a directory named bin that
+    holds a home is no bin directory, so neither it nor /x is mounted."""
+    bin_dir = world.root / "x" / "bin"
+    home = bin_dir / ("home" if which_home == "HOME" else "pw")
+    (home / ".ssh").mkdir(parents=True)
+    if which_home == "HOME":
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        world.home = home
+    world.set_passwd_home(home)
+    tool = _python(bin_dir / "tool")
+    usr, system_python = _system_python(world)
+
+    policy = _build(world, monkeypatch, system_python, usr, argv0=tool)
+
+    granted = _real_grants(policy)
+    assert Path(os.path.realpath(bin_dir)) not in granted
+    assert Path(os.path.realpath(bin_dir.parent)) not in granted
+    _assert_no_home_mounted(world, policy)
+
+
+@pytest.mark.parametrize("which_home", ["HOME", "passwd home"])
 def test_a_tool_in_a_bin_link_to_a_config_directory_mounts_none_of_it(
     world, monkeypatch, which_home
 ):
