@@ -103,6 +103,32 @@ def test_the_host_directory_is_inserted_as_written():
     )
 
 
+@pytest.mark.parametrize(
+    "longer", ["/out-dir/x", "/out.bak/x", "/out:/y", "/out_old", "/out~"]
+)
+def test_a_longer_name_that_starts_with_the_inner_directory_is_left_alone(longer):
+    message = f"not a file in {longer}"
+
+    assert as_seen_from_the_host(message, "/out", "/host/out") == message
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("in /out", "in /host/out"),
+        ("in /out/reports", "in /host/out/reports"),
+        ("in '/out'", "in '/host/out'"),
+        ('in "/out"', 'in "/host/out"'),
+        ("in (/out)", "in (/host/out)"),
+        ("in /out, then", "in /host/out, then"),
+        ("in /out; then", "in /host/out; then"),
+        ("in /out\nthen", "in /host/out\nthen"),
+    ],
+)
+def test_the_inner_directory_is_mapped_where_it_ends_a_path(message, expected):
+    assert as_seen_from_the_host(message, "/out", "/host/out") == expected
+
+
 def test_the_same_directory_leaves_the_message_unchanged():
     assert as_seen_from_the_host("in /x/reports", "/x", "/x") == "in /x/reports"
 

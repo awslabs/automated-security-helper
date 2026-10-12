@@ -455,7 +455,9 @@ def as_seen_from_the_host(message: str, inner_dir: Optional[str], host_dir: str)
     if not inner_dir or inner_dir == host_dir:
         return message
     # Only where the inner directory starts a path: not inside another one, such as
-    # /src/out for an inner /out, and not as the start of a longer name. The host
-    # directory is inserted as written, not read as a replacement template.
-    pattern = r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=/|\b|$)"
+    # /src/out for an inner /out, and not as the start of a longer name such as
+    # /out-dir, /out.bak or /out:/y, so only a separator, whitespace, a quote or
+    # closing punctuation may follow it. The host directory is inserted as written,
+    # not read as a replacement template.
+    pattern = r"(?<![^\s'\"(])" + re.escape(inner_dir) + r"(?=[/\s'\"),;]|$)"
     return re.sub(pattern, lambda _match: host_dir, message)
