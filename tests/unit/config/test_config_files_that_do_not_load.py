@@ -200,6 +200,46 @@ class TestAConfigFileThatCannotBeRead:
         assert mcp_workspace._exit_code_for(excinfo.value) == 3
 
 
+class TestARustPanicWhileResolvingIsRefused:
+    """pydantic-core reports a Rust panic as pyo3's PanicException, a BaseException.
+
+    resolve_config's catch-all is ``except Exception``, so a panic while a config
+    validated went past it, and past MCP get_config's handler, into whatever
+    called; in an MCP server that is the process every session shares. It is
+    refused as a config that could not be resolved. KeyboardInterrupt and
+    SystemExit still pass through.
+    """
+
+    @staticmethod
+    def _raise(error: BaseException):
+        def raiser(*args, **kwargs):
+            raise error
+
+        return raiser
+
+    def test_a_panic_while_validating_is_a_config_error(self, tmp_path, monkeypatch):
+        from automated_security_helper.config.ash_config import AshConfig
+
+        panic = type("PanicException", (BaseException,), {"__module__": "pyo3_runtime"})
+        (tmp_path / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
+        monkeypatch.setattr(
+            AshConfig, "model_validate", self._raise(panic("PyObject pointer is null"))
+        )
+
+        with pytest.raises(ASHConfigValidationError, match="PanicException"):
+            resolve_config(source_dir=tmp_path)
+
+    @pytest.mark.parametrize("error", [KeyboardInterrupt, SystemExit])
+    def test_control_an_interrupt_still_propagates(self, tmp_path, monkeypatch, error):
+        from automated_security_helper.config.ash_config import AshConfig
+
+        (tmp_path / ".ash.yaml").write_text("project_name: x\n", encoding="utf-8")
+        monkeypatch.setattr(AshConfig, "model_validate", self._raise(error()))
+
+        with pytest.raises(error):
+            resolve_config(source_dir=tmp_path)
+
+
 #: Every name discovery looks for, where it looks: each dedicated name at the root
 #: and in .ash/, each ashrc name at the root, and pyproject.toml.
 EVERY_DISCOVERY_LOCATION = [

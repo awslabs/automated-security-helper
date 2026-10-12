@@ -870,3 +870,12 @@ def _resolve_config(
         raise ASHConfigValidationError(
             f"The configuration could not be resolved: {type(e).__name__}: {e}"
         ) from e
+    except BaseException as e:
+        # pydantic-core reports a Rust panic as pyo3's PanicException, which is
+        # a BaseException and so passes `except Exception`. Refused the same way;
+        # anything else (KeyboardInterrupt, SystemExit) propagates.
+        if type(e).__name__ != "PanicException" or type(e).__module__ != "pyo3_runtime":
+            raise
+        raise ASHConfigValidationError(
+            f"The configuration could not be resolved: {type(e).__name__}: {e}"
+        ) from e
