@@ -1084,7 +1084,9 @@
   - A project that spells a key another way (`cdk-nag` beside `cdk_nag`,
     `global-settings`, `ash-plugin-modules`) no longer keeps the operator's value
     from applying; see the `extends` fix under Fixes.
-  - In container mode, the operator's config and the bases it extends are mounted
+  - In container mode, the operator config refusals above are made on the host
+    before a container starts, also for a plan handed to `run_ash_scan` directly.
+    The operator's config and the bases it extends are then mounted
     read-only at `/ash-operator-config` and the scan inside the container is
     given that path; before, it was given the host path, which it could not read,
     and exited 3. Only the `--fail-on-findings` and

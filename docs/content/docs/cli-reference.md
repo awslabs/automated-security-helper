@@ -221,7 +221,7 @@ The scan runs the plan `--dry-run` reports. The plan records a digest of the ope
 
 The settings a repository's config cannot choose ([Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)) are still limited for a project's own file. A value the operator's file sets is the operator's and is kept; a value only the project's file sets is limited as before.
 
-In container mode (`--mode container`), each file the operator's config is built from is mounted read-only at `/ash-operator-config` in the container, and the scan inside the container is given that path. Only those files are mounted, not the directory they are in. The `--fail-on-findings` and `--fail-on-incomplete-scanners` values given on the command line are forwarded into the container; the values in the operator's file reach it through the mounted file, so they stay layered as above.
+In container mode (`--mode container`), the refusals above are made on the host, before any container starts, because inside the container the operator's file is no longer where it was on the host. Each file the operator's config is built from is then mounted read-only at `/ash-operator-config` in the container, and the scan inside the container is given that path. Only those files are mounted, not the directory they are in. The `--fail-on-findings` and `--fail-on-incomplete-scanners` values given on the command line are forwarded into the container; the values in the operator's file reach it through the mounted file, so they stay layered as above.
 
 In a single-directory scan, `--config` replaces discovery instead: the repository's own config is not read at all.
 

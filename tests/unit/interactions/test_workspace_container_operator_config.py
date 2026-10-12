@@ -187,3 +187,91 @@ def test_a_single_directory_scan_still_forwards_what_the_host_read(tmp_path):
 
     assert forwarded["fail_on_findings"] is False
     assert forwarded["fail_on_incomplete_scanners"] is False
+
+
+def _checkout_workspace(tmp_path: Path) -> Path:
+    """A workspace inside a git checkout, with an operator config beside it."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    root = checkout / "work"
+    (root / "api").mkdir(parents=True)
+    (root / "dev.code-workspace").write_text('{"folders": [{"path": "api"}]}')
+    _write(checkout / "ops" / "ash.yaml", {"fail_on_findings": False})
+    return checkout
+
+
+def test_the_cli_refuses_an_in_checkout_config_before_container_mode(
+    tmp_path, monkeypatch
+):
+    from typer.testing import CliRunner
+
+    from automated_security_helper.cli.main import app
+
+    for name in ("ASH_CONFIG", "ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_WORKSPACE"):
+        monkeypatch.delenv(name, raising=False)
+    calls: List[Dict[str, Any]] = []
+    monkeypatch.setattr(
+        "automated_security_helper.cli.scan.run_ash_scan",
+        lambda **kwargs: calls.append(kwargs),
+        raising=True,
+    )
+    checkout = _checkout_workspace(tmp_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--workspace",
+            str(checkout / "work" / "dev.code-workspace"),
+            "--mode",
+            "container",
+            "--config",
+            str(checkout / "ops" / "ash.yaml"),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    assert result.exit_code == 3, result.output
+    assert calls == []
+
+
+def test_container_mode_refuses_an_in_checkout_config_a_plan_was_built_with(
+    tmp_path,
+):
+    """A plan handed to run_ash_scan without workspace resolution: the
+    in-container run sees the file only at /ash-operator-config, outside /src,
+    so the host makes the check before any container is started."""
+    checkout = _checkout_workspace(tmp_path)
+    options = ScanOptions(
+        source_dir=checkout / "work",
+        output_dir=tmp_path / "out",
+        config=str(checkout / "ops" / "ash.yaml"),
+        workspace_plan=_plan(checkout / "work"),
+    )
+    with (
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.run_ash_container"
+        ) as run,
+        pytest.raises(SystemExit) as exited,
+    ):
+        _run_container_mode(options, MagicMock())
+
+    assert exited.value.code == 3
+    run.assert_not_called()
+
+
+def test_container_mode_starts_with_an_operator_config_outside_the_checkout(
+    tmp_path,
+):
+    """Control for the refusal above."""
+    checkout = _checkout_workspace(tmp_path)
+    operator = _write(tmp_path / "ops" / "ash.yaml", {"fail_on_findings": False})
+
+    forwarded = _forwarded(
+        tmp_path,
+        config=str(operator),
+        workspace_plan=_plan(checkout / "work"),
+    )
+
+    assert forwarded["config"] == str(operator)

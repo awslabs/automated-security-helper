@@ -1884,6 +1884,21 @@ def _run_container_mode(
     # wrote) would reach it as a command-line flag and beat every project's own value.
     # Only what the operator gave on the command line is forwarded there.
     in_workspace = opts.workspace_plan is not None
+    if opts.workspace_plan is not None and opts.config:
+        # The in-container run is given the operator's file at
+        # /ash-operator-config, outside /src, so it cannot tell where the file
+        # sat on the host. Judged here, against the workspace root on the host,
+        # as workspace resolution judged it (resolve_workspace), so a plan built
+        # without that check is refused the same way before a container starts.
+        from automated_security_helper.config.resolve_config import (
+            check_operator_config,
+        )
+
+        try:
+            check_operator_config(opts.config, opts.workspace_plan.workspace_root)
+        except ASHConfigValidationError as exc:
+            print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+            sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
     effective_fail_on_findings = (
         opts.fail_on_findings
         if opts.fail_on_findings is not None or in_workspace
