@@ -75,7 +75,15 @@ stays inside the root is fine. One that leaves it is refused, and so is a
 symlink inside the root whose target is outside. The root is the scan's source
 directory when the root config is inside it, otherwise the root config's own
 directory (the parent of ``.ash/`` for a file in ``.ash/``); see
-``default_confinement_root``.
+``default_confinement_root``. A root config reached through a link an MCP
+client delivered is placed where that link sits for this, not where it leads,
+so a named link in a delivered tree cannot extend a file beside its target.
+
+A file is judged by every path it was reached by
+(``ResolvedConfigDocument.names``), and a base also by the paths of the files
+above it, since the file that names a base chose it: a base of a file a client
+delivered, or of a file a client's link reaches, is the client's wherever it
+is.
 
 A caller can narrow that further with ``permit_base``, a predicate every base
 must also pass after its symlinks are resolved. The MCP server passes one built
@@ -187,6 +195,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
 )
+from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
 # tomllib is stdlib only from Python 3.11; requires-python starts at 3.10, so
@@ -610,8 +619,14 @@ def default_confinement_root(
     config may extend a file anywhere in the repository being scanned.
     Otherwise -- no source directory, or a config kept outside it -- the root
     config's own directory, or the parent of ``.ash/`` for a file in ``.ash/``.
+
+    A root config reached through a link an MCP client delivered is placed
+    where that link sits, not where it leads (``_client_link``): the client
+    chose the file by placing the link, so its bases stay in the tree the client
+    delivered, as the bases of a file written there do.
     """
-    config_real = Path(config_path).resolve()
+    placed = _client_link(Path(config_path))
+    config_real = placed if placed is not None else Path(config_path).resolve()
     if source_dir is not None:
         source_real = Path(source_dir).resolve()
         if config_real.is_relative_to(source_real):
@@ -620,6 +635,21 @@ def default_confinement_root(
     if parent.name == ".ash":
         parent = parent.parent
     return parent
+
+
+def _client_link(path: Path) -> Optional[Path]:
+    """Where the first link on the way to ``path`` that sits in a client's tree is, or None.
+
+    A link sits in a client's tree when the directory holding it is one an MCP
+    client delivered (``config_is_client_delivered``); a link elsewhere that
+    leads into such a tree was not placed by the client. Each location is under
+    its parent with that parent's links resolved (``link_locations``), so it
+    compares with resolved paths.
+    """
+    for location in link_locations(path):
+        if config_is_client_delivered(location.parent):
+            return location
+    return None
 
 
 @dataclass
@@ -637,7 +667,9 @@ class ResolvedConfigDocument:
     gives, for each of them, the paths it was reached by before any symlink was
     followed: the root config as it was passed or discovered, and a base as its
     ``extends`` entry spells it, relative to the resolved directory of the file
-    that names it. A check of who wrote a file judges it by each of these and by
+    that names it. After those, a base's names include the resolved path and the
+    names of every file above it in the chain, since the file that names a base
+    chose it. A check of who wrote a file judges it by each of these and by
     every symlink on the way (``by_every_name``), since a link's location says who
     chose the file it reaches.
     """
@@ -681,11 +713,36 @@ class _ChainState:
     order: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
     names: Dict[Path, List[Path]] = field(default_factory=dict)
+    #: For each base, the paths of the files above it in the chain.
+    above: Dict[Path, List[Path]] = field(default_factory=dict)
 
     def reached(self, real: Path, named: Path) -> None:
         spellings = self.names.setdefault(real, [])
         if named != real and named not in spellings:
             spellings.append(named)
+
+    def chosen_by(self, real: Path, paths: Sequence[Path]) -> None:
+        recorded = self.above.setdefault(real, [])
+        for path in paths:
+            if path != real and path not in recorded:
+                recorded.append(path)
+
+    def all_names(self) -> Dict[Path, Tuple[Path, ...]]:
+        """``ResolvedConfigDocument.names``: own spellings first, then the files above.
+
+        A file with no spelling of its own but files above it is listed under
+        its own path first, so a message that names a file by the first of
+        these (``client_config_policy._as_reached``) names the file itself.
+        """
+        result: Dict[Path, Tuple[Path, ...]] = {}
+        for real in dict.fromkeys([*self.names, *self.above]):
+            own = list(self.names.get(real, ()))
+            inherited = [p for p in self.above.get(real, ()) if p not in own]
+            if inherited:
+                own = (own or [real]) + inherited
+            if own:
+                result[real] = tuple(own)
+        return result
 
 
 def _format_chain(paths: Tuple[Path, ...]) -> str:
@@ -864,6 +921,7 @@ def _resolve(
     ref: Optional[str] = None,
     env_refused_above: bool = False,
     named: Optional[Path] = None,
+    above: Tuple[Path, ...] = (),
 ) -> Any:
     real = path.resolve()
     named = path if named is None else named
@@ -921,6 +979,9 @@ def _resolve(
 
     state.documents.setdefault(real, copy.deepcopy(data))
     state.reached(real, named)
+    # The file that names a base chose it, so a base is judged by the paths of
+    # the files above it too, as env_refused_above carries a refusal down.
+    state.chosen_by(real, above)
     anchor = state.anchor_relative_paths is not None and (
         state.anchor_relative_paths(real) and state.anchor_relative_paths(named)
     )
@@ -965,6 +1026,7 @@ def _resolve(
                     base_ref,
                     env_refused,
                     base_named,
+                    (real, named, *above),
                 ),
             )
         merged = deep_merge(merged, own)
@@ -1023,7 +1085,7 @@ def resolve_config_document(
         chain=state.order,
         root=root,
         documents=state.documents,
-        names={real: tuple(named) for real, named in state.names.items() if named},
+        names=state.all_names(),
     )
 
 

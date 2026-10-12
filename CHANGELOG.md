@@ -173,7 +173,10 @@
   suppressions and ignore paths are marked `client_supplied`, its scanner
   exclusions are reported rather than applied, and it resolves no `!ENV`, as a
   file written in the tree would be. The same holds for a link anywhere on the
-  way to a config file, such as a linked `.ash` directory. On the CLI, a
+  way to a config file, such as a linked `.ash` directory, and for every base
+  such a file extends, since the file that names a base chose it. A config that
+  `--config` or `ASH_CONFIG` names through a link in a delivered tree may extend
+  only files in that tree, not files beside the link's target. On the CLI, a
   repository config that links to a file outside the scanned tree is held to the
   limits of a config inside the tree. Workspace mode does the same when it plans
   and when it scans each project, and a project's `config_source` in the plan is
