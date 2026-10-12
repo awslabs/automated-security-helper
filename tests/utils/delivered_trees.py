@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Helpers for tests that deliver a tree to the MCP server and follow its links.
 
-A tree is delivered through the real ``set_source_git``, cloning a local
-repository, because a git clone keeps symlinks (a zip upload refuses them).
-``reads`` records every config file resolution reads, resolved, so a test can
-show a file was never opened.
+A tree is delivered by cloning a local repository into the session, because a
+git clone keeps symlinks (a zip upload refuses them). ``set_source_git`` itself
+refuses a local clone source and lets git use only https and ssh, so
+``deliver_local_repository`` runs the clone step that follows those checks
+(``_clone_into_session``), with git's file protocol allowed for that clone
+only. ``reads`` records every config file resolution reads, resolved, so a test
+can show a file was never opened.
 """
 
 from __future__ import annotations
@@ -55,12 +58,26 @@ def _git(cwd: Path, *args: str) -> None:
     )
 
 
+def deliver_local_repository(origin: Path, session_id: str) -> Path:
+    """Clone the repository at ``origin`` into ``session_id``'s workspace.
+
+    The step ``set_source_git`` runs once the url is checked: the session's
+    source is replaced and the clone runs with the session's git environment.
+    """
+    from automated_security_helper.cli.mcp import source_delivery as sd
+
+    with patch.object(
+        sd, "_GIT_ARGV", (*sd._GIT_ARGV, "-c", "protocol.file.allow=always")
+    ):
+        return sd._clone_into_session(
+            origin.as_uri(), None, depth=1, workspace_root=None, session_id=session_id
+        )
+
+
 def clone(
     tmp: Path, files: Dict[str, str], links: Dict[str, Path], session_id: str
 ) -> Path:
-    """Deliver a tree holding ``files`` and ``links`` through the real git clone."""
-    from automated_security_helper.cli.mcp.source_delivery import set_source_git
-
+    """Deliver a tree holding ``files`` and ``links`` through a real git clone."""
     origin = tmp / "origin"
     origin.mkdir()
     for name, text in files.items():
@@ -70,7 +87,7 @@ def clone(
     _git(origin, "init", "-q")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "-m", "tree")
-    source = set_source_git(url=origin.as_uri(), session_id=session_id)
+    source = deliver_local_repository(origin, session_id)
     for name in links:
         assert (source / name).is_symlink(), f"the clone dropped the link {name}"
     return source

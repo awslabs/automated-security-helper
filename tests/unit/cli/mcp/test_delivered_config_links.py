@@ -17,8 +17,10 @@ reached only when the operator set its directory aside
 (``ASH_MCP_ALLOWED_CONFIG_ROOTS``); the tests of the checks above set it aside
 (``host_set_aside``), and the last section covers the refusal.
 
-The trees here are delivered through the real ``set_source_git``, cloning a
-local repository that holds the link. The scans go through the real
+The trees here are delivered by a real git clone of a local repository that
+holds the link, through the clone step ``set_source_git`` runs after its url
+checks (``tests/utils/delivered_trees.deliver_local_repository``; the tool
+itself takes only a remote url). The scans go through the real
 ``_run_scan_async``, ``run_ash_scan`` and orchestrator, stopped after the config
 is resolved.
 """
@@ -147,8 +149,8 @@ def _git(cwd: Path, *args: str) -> None:
 
 
 def _clone(tmp: Path, files: Dict[str, str], links: Dict[str, Path]) -> Path:
-    """Deliver a tree holding ``files`` and ``links`` through the real git clone."""
-    from automated_security_helper.cli.mcp.source_delivery import set_source_git
+    """Deliver a tree holding ``files`` and ``links`` through a real git clone."""
+    from tests.utils.delivered_trees import deliver_local_repository
 
     origin = tmp / "origin"
     origin.mkdir()
@@ -159,7 +161,7 @@ def _clone(tmp: Path, files: Dict[str, str], links: Dict[str, Path]) -> Path:
     _git(origin, "init", "-q")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "-m", "tree")
-    source = set_source_git(url=origin.as_uri(), session_id=SESSION)
+    source = deliver_local_repository(origin, SESSION)
     for name in links:
         assert (source / name).is_symlink(), f"the clone dropped the link {name}"
     return source
