@@ -41,12 +41,17 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
-from automated_security_helper.cli.merge import RESULTS_FILE_NAME
+from automated_security_helper.cli.merge import (
+    RESULTS_FILE_NAME,
+    load_shard_results,
+    verify_verdict_settings_agree,
+)
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import (
     apply_config_overrides,
     resolve_config,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from tests.unit.cli.test_merge import (
     _make_shard_contribute_nothing,
     build_shards,
@@ -1053,6 +1058,21 @@ class TestShardOrder:
             in_order.output,
             reordered.output,
         )
+
+    def test_the_refusal_labels_each_results_file_with_its_own_shard(self, harness):
+        """Given in reverse, each file is still named with the shard it recorded."""
+        paths = _write_each(
+            harness,
+            build_shards(3),
+            [{"fail_on_findings": False}] + [{"fail_on_findings": True}] * 2,
+        )
+        loaded = load_shard_results([str(path) for path in reversed(paths)])
+
+        with pytest.raises(ASHConfigValidationError) as raised:
+            verify_verdict_settings_agree(loaded)
+
+        for index, path in enumerate(paths):
+            assert f"shard {index} ({path.as_posix()})" in str(raised.value)
 
 
 def _suggested_override(message: str) -> str:
