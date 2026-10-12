@@ -549,7 +549,16 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "it points at."
             )
         root = Path(target).as_posix()
-        return [f"^{re.escape(f'{root}/{relative}')}$" for relative in links]
+        # Every dot as "[.]", not "\.": checkov's secrets runner, with
+        # --enable-secret-scan-all-files (or CKV_SECRETS_SCAN_ENABLE_ALL), compiles
+        # each value after replacing ".terraform" with "\.terraform"
+        # (checkov/secrets/utils.py filter_excluded_paths), which would turn an
+        # escaped "\.terraform" into "\\.terraform", and that matches no path.
+        escaped_dot = "\\."
+        return [
+            "^" + re.escape(f"{root}/{relative}").replace(escaped_dot, "[.]") + "$"
+            for relative in links
+        ]
 
     def _subprocess_cwd(self, results_dir: Path) -> Path | None:
         """Run checkov from the filesystem root, outside the scanned tree.

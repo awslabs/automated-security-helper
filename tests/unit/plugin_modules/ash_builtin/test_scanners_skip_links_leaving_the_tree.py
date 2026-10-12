@@ -249,6 +249,20 @@ def _checkov_skips(path: str, values: list[str]) -> bool:
     return False
 
 
+def _checkov_secrets_all_files_skips(path: str, values: list[str]) -> bool:
+    """checkov 3.3.26's ``filter_excluded_paths``, the secrets runner's test with
+    --enable-secret-scan-all-files: each value is compiled after ".terraform" is
+    replaced with "\\.terraform"."""
+    for value in values:
+        try:
+            pattern = re.compile(value.replace(".terraform", r"\.terraform"))
+        except re.error:
+            continue
+        if pattern.search(path) or value in path:
+            return True
+    return False
+
+
 posix_only = pytest.mark.skipif(os.sep != "/", reason="checkov skip paths are POSIX")
 
 
@@ -288,6 +302,31 @@ class TestCheckov:
             "we(ird) [name].tf",
         ):
             assert not _checkov_skips(os.path.join(root, rel), values), rel
+
+    @posix_only
+    def test_the_secrets_runner_skips_them_in_scan_all_files_mode_too(self, tmp_path):
+        source = _tree(
+            tmp_path,
+            files={"real.terraform.yml": "", "main.tf": ""},
+            links={
+                "infra/x.terraform.yml": "outside/main.tf",
+                "config.yml": "outside/main.tf",
+            },
+        )
+        scanner = _checkov(source, tmp_path)
+
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+        values = _skip_values(argv)
+        root = Path(os.path.abspath(source)).as_posix()
+        for rel in ("infra/x.terraform.yml", "config.yml"):
+            path = os.path.join(root, rel)
+            assert _checkov_skips(path, values), rel
+            assert _checkov_secrets_all_files_skips(path, values), rel
+        for rel in ("real.terraform.yml", "main.tf"):
+            path = os.path.join(root, rel)
+            assert not _checkov_skips(path, values), rel
+            assert not _checkov_secrets_all_files_skips(path, values), rel
 
     @posix_only
     def test_the_skip_paths_are_for_this_resolution_only(self, tmp_path):
