@@ -114,15 +114,23 @@ def _existing_file(key: str, value: Any, path: Path) -> str:
 class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
     """Shared trivy behaviour. Not registered: only its subclasses are scanners."""
 
-    # Both subclasses run the same binary against the same vulnerability database:
-    # online it downloads the DB into its cache, and it reads TRIVY_* settings.
+    # Both subclasses run the same binary against the same vulnerability database,
+    # and read TRIVY_* settings.
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
-        cache_paths=("~/.cache/trivy", "$TRIVY_CACHE_DIR"),
-        # trivy's default cache on macOS (os.UserCacheDir), read-only like the
-        # cache above: the database is updated there outside the sandbox before an
-        # online scan (utils/content_db_refresh.py), and trivy only reads it.
-        read_paths=("~/Library/Caches/trivy",),
+        # Every place content_db_refresh.default_cache_dir can put trivy's cache:
+        # ~/.cache or XDG_CACHE_HOME on Linux, ~/Library/Caches on macOS, and
+        # TRIVY_CACHE_DIR. Caches rather than read paths: a cache is read-only on
+        # every backend but bwrap, whose overlay throws writes away, and
+        # sandbox-exec runs no program from one, where it runs programs from read
+        # paths. The database is updated outside the sandbox before an online scan
+        # (utils/content_db_refresh.py), and trivy only reads it.
+        cache_paths=(
+            "~/.cache/trivy",
+            "~/Library/Caches/trivy",
+            "$XDG_CACHE_HOME/trivy",
+            "$TRIVY_CACHE_DIR",
+        ),
         env_prefixes=("TRIVY_",),
     )
 

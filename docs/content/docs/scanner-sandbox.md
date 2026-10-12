@@ -763,8 +763,8 @@ allows:
 
 - grype's database at `~/Library/Caches/grype`, its default location on macOS, is
   a read-only cache, from which nothing may run. Before an online scan ASH updates it
-  there, outside the sandbox, as it does `~/.cache/grype` on Linux. trivy-repo's
-  database at `~/Library/Caches/trivy` is handled the same way.
+  there, outside the sandbox, as it does `~/.cache/grype` on Linux. The database
+  trivy and trivy-repo share at `~/Library/Caches/trivy` is handled the same way.
 - cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
   temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
   whose JavaScript every CDK process on the machine runs.
