@@ -32,11 +32,13 @@ from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
-from automated_security_helper.utils.sandbox.policy import (
-    SandboxRequirements,
-    build_scanner_policy,
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.scope import (
+    SandboxScope,
+    SandboxUnavailable,
+    prepare_spawn,
+    sandbox_scope,
 )
-from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 from automated_security_helper.utils.tool_config_dir import tool_config_scope
 
 PluginContext.model_rebuild()
@@ -87,22 +89,21 @@ def test_the_directory_is_readable_and_not_writable(tmp_path: Path, name: str) -
     context = _context(tmp_path, AshConfig())
     results = Path(context.output_dir) / "scanners" / "probe"
     results.mkdir(parents=True)
-    with tool_config_scope(context):
+    # The spawn goes through prepare_spawn, as a scanner's does, so the grant
+    # it tests is the one the active run's scope hands the policy.
+    scope = SandboxScope(
+        backend=backend,
+        scanner_name="probe",
+        requirements=SandboxRequirements(),
+        source_dir=Path(context.source_dir),
+        output_dir=Path(context.output_dir),
+        results_dir=results,
+        scan_target=Path(context.source_dir),
+        offline=True,
+    )
+    with sandbox_scope(scope), tool_config_scope(context):
         config = empty_tool_config("probe-empty.yaml", "{}\n", context=context)
-        policy = build_scanner_policy(
-            "probe",
-            SandboxRequirements(),
-            argv0="/bin/sh",
-            source_dir=Path(context.source_dir),
-            output_dir=Path(context.output_dir),
-            results_dir=results,
-            scan_target=Path(context.source_dir),
-            cwd=results,
-            offline=True,
-            network_scanners=None,
-            tool_config_dir=config.parent,
-        )
-        plan = backend.plan(
+        plan = prepare_spawn(
             [
                 "/bin/sh",
                 "-c",
@@ -112,8 +113,9 @@ def test_the_directory_is_readable_and_not_writable(tmp_path: Path, name: str) -
                 (config.parent / "added.yaml").as_posix(),
             ],
             {"PATH": "/usr/bin:/bin"},
-            policy,
+            results,
         )
+        assert plan is not None
         result = subprocess.run(  # nosec B603 - argv built by the backend under test
             plan.argv,
             env=plan.env,

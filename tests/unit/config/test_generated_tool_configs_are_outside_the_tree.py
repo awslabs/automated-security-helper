@@ -340,7 +340,11 @@ def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
     runs = [spawn for spawn in backend.spawns if spawn.path is not None]
     assert len(runs) == 1, [spawn.argv for spawn in backend.spawns]
     (run,) = runs
-    directory = run.path.parent
+    # The run's directory, which a repeated file name puts the file one level
+    # below.
+    directory = next(
+        p for p in run.path.parents if p.name.startswith("ash-tool-config-")
+    )
     policy = run.policy
     assert _real(directory) in {_real(p) for p in policy.read_only}
     assert not _inside(directory, policy.writable)
@@ -359,9 +363,25 @@ def test_a_sandboxed_scanner_may_read_the_directory_and_not_write_it(
 def test_constructing_ferret_scan_writes_no_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The empty config is written when a scan resolves its arguments, not before."""
+    """The empty config is written when a scan resolves its arguments, not before.
+
+    Looked for where ASH writes it now, a new ash-tool-config-* directory in the
+    temporary directory, which construction outside any run would leave there
+    until the process exits.
+    """
+    import tempfile
+
+    from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
+
     (case,) = [c for c in CASES if c.scanner == "ferret-scan"]
+    temp = tmp_path / "temp"
+    temp.mkdir(mode=0o700)
+    os.chmod(temp, 0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
     context = _context(tmp_path)
     scanner = _scanner(case, context, monkeypatch)
     assert all(arg.key != "--config" for arg in scanner.args.extra_args)
+    assert [
+        p for p in temp.iterdir() if p.name.startswith(TOOL_CONFIG_DIR_PREFIX)
+    ] == []
     assert not (Path(scanner.results_dir) / case.old_name).exists()

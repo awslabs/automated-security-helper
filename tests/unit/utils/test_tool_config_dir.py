@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
+import subprocess  # nosec B404 - runs this module's own code in a child
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,6 +79,11 @@ def test_files_of_one_run_share_its_directory(tree) -> None:
         second = write_tool_config("b.ini", "[bandit]\n")
         assert first.parent == second.parent == active_tool_config_dir()
         assert not in_scanned_tree(first, tree.source)
+        if os.name != "nt":
+            assert [stat.S_IMODE(p.stat().st_mode) for p in (first, second)] == [
+                0o600,
+                0o600,
+            ]
     assert not first.parent.exists()
 
 
@@ -127,6 +135,78 @@ def test_outside_a_scope_each_file_gets_its_own_directory(tree) -> None:
     second = write_tool_config("x.yaml", "{}\n", context=context)
     assert first.parent != second.parent
     assert not in_scanned_tree(first, tree.source)
+
+
+def test_outside_a_scope_the_directory_is_removed_when_the_process_exits(
+    tmp_path: Path,
+) -> None:
+    """A child process writes one with no scope, exits, and leaves nothing behind."""
+    import automated_security_helper
+
+    temp = tmp_path / "temp"
+    temp.mkdir(mode=0o700)
+    source = tmp_path / "repo"
+    source.mkdir()
+    output = tmp_path / "out"
+    output.mkdir()
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from types import SimpleNamespace\n"
+        "from automated_security_helper.utils.tool_config_dir import write_tool_config\n"
+        "context = SimpleNamespace(\n"
+        "    source_dir=Path(sys.argv[1]), output_dir=Path(sys.argv[2]), config=None\n"
+        ")\n"
+        "path = write_tool_config('x.yaml', '{}\\n', context=context)\n"
+        "assert path.is_file(), path\n"
+        "print(path)\n"
+    )
+    # The child imports this checkout, whatever the interpreter has installed.
+    checkout = Path(automated_security_helper.__file__).resolve().parents[1]
+    env = {
+        **os.environ,
+        "TMPDIR": temp.as_posix(),
+        "PYTHONPATH": os.pathsep.join(
+            [checkout.as_posix(), *filter(None, [os.environ.get("PYTHONPATH")])]
+        ),
+    }
+    done = subprocess.run(  # nosec B603 - this interpreter, a fixed script
+        [sys.executable, "-c", script, source.as_posix(), output.as_posix()],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    written = Path(done.stdout.strip().splitlines()[-1])
+    assert written.parent.parent == temp
+    assert not written.parent.exists()
+    assert list(temp.iterdir()) == []
+
+
+def test_a_wider_scanned_root_keeps_the_directory_out_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In workspace mode the scanned tree is the workspace, not the project in it."""
+    workspace = tmp_path / "workspace"
+    source = workspace / "project"
+    (source / ".git").mkdir(parents=True)
+    temp = workspace / "tmp"
+    temp.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp))
+    output = tmp_path / "out"
+    output.mkdir()
+    context = SimpleNamespace(
+        source_dir=source,
+        output_dir=output,
+        config=SimpleNamespace(_scanned_root=workspace),
+    )
+    with tool_config_scope(context):
+        written = write_tool_config("x.yaml", "{}\n")
+        assert written.parent.parent == output
+    assert list(temp.iterdir()) == []
 
 
 def test_without_a_usable_temporary_directory_the_output_directory_is_used(

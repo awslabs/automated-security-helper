@@ -56,14 +56,16 @@ def _after(argv: List[str], flag: str) -> List[str]:
     return [argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == flag]
 
 
-def _is_the_empty_ini(value: str, results_dir: Path) -> bool:
+def _is_the_empty_ini(value: str, results_dir: Path, source_dir: Path) -> bool:
     """ASH's empty config: in its private directory, outside the results and the tree."""
+    from automated_security_helper.config.path_trust import in_scanned_tree
     from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
     path = Path(value)
     return (
         path.parent.name.startswith(TOOL_CONFIG_DIR_PREFIX)
         and results_dir not in path.parents
+        and not in_scanned_tree(path, source_dir)
         and path.read_text(encoding="utf-8") == "[bandit]\n"
     )
 
@@ -91,7 +93,7 @@ def test_another_file_is_a_configfile_beside_the_empty_ini(
 
     assert _after(argv, "--configfile") == [config_file.as_posix()]
     (ini,) = _after(argv, "--ini")
-    assert _is_the_empty_ini(ini, results_dir), ini
+    assert _is_the_empty_ini(ini, results_dir, plugin_context.source_dir), ini
 
 
 @pytest.mark.parametrize("named", [False, True], ids=["unset", "missing"])
@@ -104,7 +106,7 @@ def test_without_a_usable_file_only_the_empty_ini_is_passed(
 
     assert _after(argv, "--configfile") == []
     (ini,) = _after(argv, "--ini")
-    assert _is_the_empty_ini(ini, results_dir), ini
+    assert _is_the_empty_ini(ini, results_dir, plugin_context.source_dir), ini
     if named:
         (warning,) = [
             r.getMessage() for r in caplog.records if str(missing) in r.getMessage()
