@@ -695,7 +695,11 @@ def started_from_working_directory(
     if os.path.dirname(name):
         return None
     windows = platform.system().lower() == "windows"
-    path_value = (env if env is not None else os.environ).get("PATH", os.defpath)
+    path_value = (
+        env.get("PATH", os.defpath)
+        if env is not None
+        else os.environ.get("PATH", os.defpath)
+    )
     directories = [
         entry for entry in path_value.split(os.pathsep) if not _is_anchored(entry)
     ]
