@@ -6,8 +6,10 @@
 Some scanner options name a file the scanner's tool reads as its own configuration,
 or a file it loads as a plugin. A path that resolves inside the scanned tree names
 a file the repository being scanned wrote, so it is not passed to the tool, whether
-an option set it or ASH found it by name in the source directory. A path outside
-the tree is passed as before. "The scanned tree" is
+an option set it or ASH found it by name in the source directory. So is a path that
+reaches a file outside the tree through a symbolic link inside it: the repository
+chose that file by placing the link. A path outside the tree is passed as before,
+through a link outside the tree too. "The scanned tree" is
 any tree ``config.sandbox_grants.scanned_trees`` returns for the scan root: the
 outermost checkout above the source directory, under each name it has.
 Containment uses ``sandbox_grants.is_within``, so symlinks and ``..`` are resolved
@@ -24,6 +26,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple, Union
 
+from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
 _WARNED: Set[Tuple[str, str]] = set()
@@ -169,6 +172,14 @@ def resolved_path(value: Union[str, Path], source_dir: Union[str, Path]) -> Path
     return Path(os.path.realpath(path))
 
 
+def _first_warning(key: str, path: Path) -> bool:
+    """Whether the refusal of ``path`` for ``key`` is not yet logged; records it."""
+    with _WARNED_LOCK:
+        first = (key, path.as_posix()) not in _WARNED
+        _WARNED.add((key, path.as_posix()))
+    return first
+
+
 def honored_path(
     value: Union[str, Path, None],
     *,
@@ -176,9 +187,12 @@ def honored_path(
     key: str,
     config: Any = None,
 ) -> Optional[Path]:
-    """The resolved path to hand the tool, or None when it is inside the scanned tree.
+    """The resolved path to hand the tool, or None when the scanned tree chose it.
 
-    Callers pass the tool this return value and nothing rebuilt from ``value``.
+    None when the path resolves inside the scanned tree, or reaches a file
+    outside it through a symbolic link inside it
+    (``leaves_the_tree_through_a_link``). Callers pass the tool this return
+    value and nothing rebuilt from ``value``.
 
     Args:
         value: The configured or discovered path. None or blank returns None.
@@ -193,11 +207,20 @@ def honored_path(
     path = resolved_path(value, source_dir)
     root = getattr(config, "_scanned_root", None) or source_dir
     if not in_scanned_tree(path, root):
-        return path
-    with _WARNED_LOCK:
-        first = (key, path.as_posix()) not in _WARNED
-        _WARNED.add((key, path.as_posix()))
-    if first:
+        if not leaves_the_tree_through_a_link(value, source_dir, root):
+            return path
+        named = Path(os.path.expanduser(str(value)))
+        if not named.is_absolute():
+            named = Path(os.path.abspath(source_dir)) / named
+        if _first_warning(key, named):
+            ASH_LOGGER.warning(
+                f"Ignoring {key} ({named.as_posix()}): it reaches a file outside "
+                "the scanned tree through a symbolic link inside it, so the "
+                "repository being scanned chose that file. Such a file is not "
+                "passed to the tool; name the file itself."
+            )
+        return None
+    if _first_warning(key, path):
         ASH_LOGGER.warning(
             f"Ignoring {key} ({path.as_posix()}): it is inside the scanned tree "
             "(the outermost git checkout around the source directory, or the source "
@@ -206,3 +229,28 @@ def honored_path(
             "outside them."
         )
     return None
+
+
+def leaves_the_tree_through_a_link(
+    value: Union[str, Path], source_dir: Union[str, Path], root: Union[str, Path]
+) -> bool:
+    """Whether ``value`` reaches a file outside the scanned tree through a link inside it.
+
+    ``value`` as written (``~`` expanded, a relative path taken from
+    ``source_dir``) is looked up as the kernel does, one component at a time, and
+    every symbolic link that lookup follows is found where it sits
+    (``utils/link_locations``): a link at any depth, a directory link, each link
+    of a chain, and a link reached through a link outside the tree. True when one
+    of them sits in the scanned tree (``in_scanned_tree`` of the directory
+    holding it, from ``root``) and the path ends outside the tree: the
+    repository chose that file by placing the link. A path that leaves by ``..``
+    with no link in the tree is the path as written.
+    """
+    path = Path(os.path.expanduser(str(value)))
+    if not path.is_absolute():
+        path = Path(os.path.abspath(source_dir)) / path
+    if in_scanned_tree(Path(os.path.realpath(path)), root):
+        return False
+    return any(
+        in_scanned_tree(location.parent, root) for location in link_locations(path)
+    )
