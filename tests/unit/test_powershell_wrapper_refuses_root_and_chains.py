@@ -251,6 +251,29 @@ def test_another_error_leaves_the_code_non_zero(pwsh, src, tmp_path):
     assert result.stdout.split() == ["code", "1"], result.stdout + result.stderr
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runner is a POSIX shell script"
+)
+def test_another_error_in_the_run_leaves_the_code_non_zero(pwsh, src, tmp_path):
+    """The same once the run has started: the runner probe leaves $LASTEXITCODE at 0,
+    then a malformed ASH_BASE_OCI_LAYOUT stops the build before it runs."""
+    runner = tmp_path / "bin" / "docker"
+    runner.parent.mkdir()
+    runner.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    runner.chmod(0o755)
+    result = _pwsh_script(
+        pwsh,
+        tmp_path,
+        "$ErrorActionPreference = 'Stop'\n"
+        "$env:ASH_BASE_OCI_LAYOUT = 'not-a-layout'\n"
+        f"try {{ Invoke-ASH -OCIRunner '{runner.as_posix()}' -BuildTarget ci "
+        '-SourceDir src -OutputDir out } catch { "code $LASTEXITCODE" }',
+    )
+
+    # The build announces itself first.
+    assert result.stdout.splitlines()[-1:] == ["code 1"], result.stdout + result.stderr
+
+
 def test_a_refusal_is_printed_once(pwsh, src, tmp_path):
     """Uncaught, PowerShell prints the error; Invoke-ASH does not print it as well."""
     result = _pwsh_script(
