@@ -153,16 +153,17 @@ def test_operator_override_naming_an_outside_baseline_verifies(
     )
 
 
-def test_operator_override_naming_a_baseline_relative_to_the_source_verifies(
+def test_operator_override_naming_a_baseline_relative_to_the_working_directory_verifies(
     recorder, repo, tmp_path, monkeypatch
 ):
-    """``baseline_file`` relative to the source directory, as the scanner reads it.
+    """A relative ``baseline_file`` in ``--config-overrides`` names a file from the working directory.
 
-    The operator's record of the baseline it named is compared with the one the
-    scanner uses, and a relative value has to be joined to the source directory
-    on both sides. Run from a working directory at another depth than the source,
-    so a comparison that joined it to the working directory instead names a
-    different file and refuses the operator's own baseline.
+    An override is taken from the working directory ASH runs in
+    (``config/operator_paths.py``, ``anchor_override_paths``), the way a shell
+    reads a relative path the operator typed. The working directory is at
+    another depth than the source directory, so the value names the operator's
+    baseline only from the working directory: joined to the source directory it
+    names a file that is not there, and the baseline would not verify.
     """
     _baseline(
         tmp_path / "shared" / "verifying.baseline",
@@ -172,18 +173,46 @@ def test_operator_override_naming_a_baseline_relative_to_the_source_verifies(
     deeper = tmp_path / "a" / "b"
     deeper.mkdir(parents=True)
     monkeypatch.chdir(deeper)
+    relative = "../../shared/verifying.baseline"
 
     _scan(
         repo,
         tmp_path / "out",
-        config_overrides=[
-            "scanners.detect-secrets.options.baseline_file=../shared/verifying.baseline"
-        ],
+        config_overrides=[f"scanners.detect-secrets.options.baseline_file={relative}"],
     )
 
     assert _issuer_requests(recorder), (
-        "the relative baseline the operator named did not verify; "
-        f"the recorder saw {recorder.requests}"
+        "the baseline the operator named relative to the working directory did not "
+        f"verify; the recorder saw {recorder.requests}"
+    )
+
+
+def test_operator_config_naming_a_baseline_relative_to_its_own_directory_verifies(
+    recorder, repo, tmp_path, monkeypatch
+):
+    """A relative ``baseline_file`` in the operator's config file names a file from that file's directory.
+
+    The config file, the working directory and the source directory are each at
+    a different depth, so the value names the operator's baseline only from the
+    config file's directory, as ``config/operator_paths.py`` takes it.
+    """
+    _baseline(
+        tmp_path / "shared" / "verifying.baseline",
+        [{"path": VERIFICATION_FILTER, "min_level": 2}],
+    )
+    operator = _config(
+        tmp_path / "operator" / "conf" / "ash.yaml",
+        {"baseline_file": "../../shared/verifying.baseline"},
+    )
+    shallow = tmp_path / "cwd"
+    shallow.mkdir()
+    monkeypatch.chdir(shallow)
+
+    _scan(repo, tmp_path / "out", config=operator)
+
+    assert _issuer_requests(recorder), (
+        "the baseline the operator's config named relative to its own directory did "
+        f"not verify; the recorder saw {recorder.requests}"
     )
 
 
