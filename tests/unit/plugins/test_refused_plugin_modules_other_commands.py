@@ -192,6 +192,28 @@ class TestCommandsExitThreeForANameThatDoesNotImport:
 
         assert result.exit_code == EXIT_INVALID_CONFIG, result.output
 
+    def test_merge_refuses_before_writing(self, packages, tmp_path, monkeypatch):
+        reporters = MagicMock()
+        reporters.plugin_modules.return_value = []
+        monkeypatch.setattr(
+            "automated_security_helper.cli.merge.ash_plugin_manager", reporters
+        )
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config.ash_plugin_modules = [NOT_INSTALLED]
+        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        for path in write_shards(tmp_path / "artifacts", shards):
+            args += ["--results", path]
+
+        result = _invoke(args)
+
+        assert result.exit_code == EXIT_INVALID_CONFIG, (
+            result.output,
+            result.exception,
+        )
+        assert NOT_INSTALLED in result.output
+        assert not (tmp_path / "merged" / "ash_aggregated_results.json").exists()
+
 
 class TestCommandsExitThree:
     def test_plugin_list(self, packages):

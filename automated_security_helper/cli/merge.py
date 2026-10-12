@@ -1382,10 +1382,10 @@ def merge_command(
         print(f"[red]Refusing to merge: {exc}[/red]")
         raise typer.Exit(1)
 
-    # Before anything is written. The shards' config names the plugin modules the
-    # reports are rendered with, and a module outside the plugin namespace is
-    # refused here as the scan itself refuses it (load_plugins below would too,
-    # but only after the merged results file exists).
+    # Before anything is written, and before the output directory is created. The
+    # shards' config names the plugin modules the reports are rendered with, and a
+    # module outside the plugin namespace is refused here as the scan itself
+    # refuses it, without importing anything.
     try:
         refuse_plugin_modules_outside_namespace(
             split_plugin_modules(
@@ -1421,6 +1421,15 @@ def merge_command(
         ignore_suppressions=ignore_suppressions,
     )
 
+    # Also before anything is written: a module the shards' config names that
+    # does not import refuses the merge with exit 3, as it refuses a scan.
+    ash_plugin_manager.set_context(plugin_context)
+    try:
+        load_plugins(plugin_context=plugin_context)
+    except PluginModuleError as exc:
+        print(f"[red]Invalid configuration: {escape(str(exc))}[/red]")
+        raise typer.Exit(3)
+
     merged = apply_aggregated_suppressions(merged, plugin_context)
 
     # Written after the suppression pass, not before. Writing first was the
@@ -1431,9 +1440,6 @@ def merge_command(
     merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
-
-    ash_plugin_manager.set_context(plugin_context)
-    load_plugins(plugin_context=plugin_context)
 
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
