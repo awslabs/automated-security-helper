@@ -971,8 +971,12 @@ def test_ash_configs_own_mode_off_does_not_lift_the_operator_files_floor(
         _project_config_with_policy,
     )
 
+    ops = tmp_path / "ops"
+    (ops / ".git").mkdir(parents=True)
+    operator = ops / "operator.yaml"
+    operator.write_text(TRUSTED_BWRAP)
     workspace = tmp_path / "workspace"
-    project = _workspace_project(workspace, REPO_OFF)
+    project = _workspace_project(workspace, REPO_OFF, operator)
     (workspace / ".git").mkdir()
     (workspace / "shared.yaml").write_text("project_name: shared\n")
     ash_config = tmp_path / "ashcfg.yaml"
@@ -980,10 +984,6 @@ def test_ash_configs_own_mode_off_does_not_lift_the_operator_files_floor(
         "project_name: a\nextends: workspace/shared.yaml\nsandbox:\n  mode: 'off'\n"
     )
     monkeypatch.setenv("ASH_CONFIG", str(ash_config))
-    ops = tmp_path / "ops"
-    (ops / ".git").mkdir(parents=True)
-    operator = ops / "operator.yaml"
-    operator.write_text(TRUSTED_BWRAP)
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(operator)
     )
@@ -1605,7 +1605,9 @@ def test_an_operator_config_named_inside_a_checkout_is_not_the_trusted_base(
     real = tmp_path / "elsewhere.yaml"
     real.write_text(TRUSTED_BWRAP)
     _symlink(ops / "operator.yaml", real)
-    project = _workspace_project(tmp_path / "workspace", "project_name: api\n")
+    project = _workspace_project(
+        tmp_path / "workspace", "project_name: api\n", ops / "operator.yaml"
+    )
     settings = ProjectScanSettings(
         output_dir=tmp_path / "out", default_config_path=str(ops / "operator.yaml")
     )
@@ -1878,13 +1880,16 @@ def test_a_baseline_an_mcp_client_delivered_is_not_read(
 def test_a_plugin_renamed_through_its_config_dict_is_not_sandboxed(
     tmp_path, monkeypatch
 ):
-    # Built the way scan_phase builds a plugin: from the raw config dict. A name the
-    # plugin's own config class rejects falls back to the generic config class.
+    # Built the way scan_phase builds a plugin: from the raw config dict. The
+    # plugin's own config model validates it, so a name that model rejects is
+    # refused when the scanner is built, and no scanner runs under the name of
+    # one that has a network grant. scan_phase records that scanner as failed.
+    from pydantic import ValidationError
+
     from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
         SnykCodeScanner,
     )
     from automated_security_helper.utils.sandbox import scope as scope_module
-    from automated_security_helper.utils.sandbox.backends import SandboxUnavailable
 
     monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: None)
     config = resolve_config(
@@ -1899,12 +1904,8 @@ def test_a_plugin_renamed_through_its_config_dict_is_not_sandboxed(
         work_dir=tmp_path / "out" / "work",
         config=config,
     )
-    renamed = SnykCodeScanner(
-        context=context, config={"name": "grype", "enabled": True}
-    )
-    assert renamed.config.name == "grype"
-    with pytest.raises(SandboxUnavailable):
-        scope_module.scanner_sandbox_scope(renamed, context, tmp_path)
+    with pytest.raises(ValidationError, match="snyk-code"):
+        SnykCodeScanner(context=context, config={"name": "grype", "enabled": True})
     honest = SnykCodeScanner(
         context=context, config={"name": "snyk-code", "enabled": True}
     )
