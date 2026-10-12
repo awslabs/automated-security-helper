@@ -11,6 +11,12 @@ because it could not find the lock file in the working directory.
 The fix passes ``cwd=lock_file.parent`` to ``_run_subprocess`` for every
 package manager invocation so the audit command runs from the correct
 directory.
+
+npm and pnpm now run from a private copy of that directory's manifest and
+lockfile instead, so they read no settings file the repository wrote (see
+test_npm_audit_project_rc_ignored.py). What #99 needs is the lockfile in the
+tool's working directory, so for them that is what is checked: the working
+directory, read when the tool is started, holds that lockfile's contents.
 """
 
 from pathlib import Path
@@ -46,21 +52,28 @@ def npm_scanner(test_plugin_context):
     return scanner
 
 
+def _cwd_contents(cwd) -> dict:
+    """The files in ``cwd`` and their text, read while the tool would run."""
+    if cwd is None:
+        return {}
+    return {p.name: p.read_text() for p in Path(cwd).iterdir() if p.is_file()}
+
+
 def test_pnpm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
-    """When a nested pnpm-lock.yaml is found, _run_subprocess must be
-    called with cwd set to the lock file's parent directory."""
+    """When a nested pnpm-lock.yaml is found, pnpm must run in a directory
+    holding that lockfile (a private copy of the lockfile's directory)."""
     root = tmp_path / "repo"
     nested = root / "packages" / "sub"
     nested.mkdir(parents=True)
     (nested / "package.json").write_text('{"name":"sub"}')
-    (nested / "pnpm-lock.yaml").write_text("")
+    (nested / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n# packages/sub\n")
 
     npm_scanner.context.source_dir = root
 
-    captured_kwargs = []
+    seen = []
 
     def fake_run(command, **kwargs):
-        captured_kwargs.append(kwargs)
+        seen.append(_cwd_contents(kwargs.get("cwd")))
         return {"stdout": '{"vulnerabilities":{}}', "returncode": 0}
 
     with (
@@ -78,27 +91,27 @@ def test_pnpm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
     ):
         npm_scanner.scan(target=root, target_type="source")
 
-    # At least one call must have cwd pointing at the nested dir
-    cwds = [kw.get("cwd") for kw in captured_kwargs]
-    assert any(cwd is not None and Path(cwd) == nested for cwd in cwds), (
-        f"Expected cwd={nested}, got cwds={cwds}"
-    )
+    expected = {
+        "package.json": (nested / "package.json").read_text(),
+        "pnpm-lock.yaml": (nested / "pnpm-lock.yaml").read_text(),
+    }
+    assert expected in seen, f"no pnpm run had {nested}'s lockfile: {seen}"
 
 
 def test_npm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
-    """npm (package-lock.json) should also run from the lock file directory."""
+    """npm (package-lock.json) should also run with the lock file's directory."""
     root = tmp_path / "repo"
     nested = root / "apps" / "web"
     nested.mkdir(parents=True)
     (nested / "package.json").write_text('{"name":"web"}')
-    (nested / "package-lock.json").write_text("{}")
+    (nested / "package-lock.json").write_text('{"name": "web", "lockfileVersion": 3}')
 
     npm_scanner.context.source_dir = root
 
-    captured_kwargs = []
+    seen = []
 
     def fake_run(command, **kwargs):
-        captured_kwargs.append(kwargs)
+        seen.append(_cwd_contents(kwargs.get("cwd")))
         return {"stdout": '{"vulnerabilities":{}}', "returncode": 0}
 
     with (
@@ -116,10 +129,11 @@ def test_npm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
     ):
         npm_scanner.scan(target=root, target_type="source")
 
-    cwds = [kw.get("cwd") for kw in captured_kwargs]
-    assert any(cwd is not None and Path(cwd) == nested for cwd in cwds), (
-        f"Expected cwd={nested}, got cwds={cwds}"
-    )
+    expected = {
+        "package.json": (nested / "package.json").read_text(),
+        "package-lock.json": (nested / "package-lock.json").read_text(),
+    }
+    assert expected in seen, f"no npm run had {nested}'s lockfile: {seen}"
 
 
 def test_yarn_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):

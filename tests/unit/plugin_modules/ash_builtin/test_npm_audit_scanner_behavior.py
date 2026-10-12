@@ -385,19 +385,51 @@ def test_lock_file_selects_the_matching_package_manager(
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     command = audit_calls(subprocess_double)[-1].kwargs["command"]
-    assert command == [expected_binary, "audit", "--json"]
+    # yarn 1 reads no settings file of the repository's (--no-default-rc); see
+    # test_npm_audit_project_rc_ignored.py.
+    leading = ["--no-default-rc"] if expected_binary == "yarn" else []
+    assert command == [expected_binary, *leading, "audit", "--json"]
 
 
+@pytest.mark.parametrize(
+    "lock_name", ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
+)
 def test_audit_runs_in_the_lock_files_own_directory(
-    scanner, npm_on_path, node_project, subprocess_double
+    scanner, npm_on_path, node_project, subprocess_double, lock_name
 ):
-    """pnpm and yarn only find their lock file when cwd is its parent."""
-    nested = node_project(directory=scanner.context.work_dir / "packages" / "api")
-    subprocess_double.side_effect = emits(audit_json())
+    """pnpm and yarn only find their lock file in their working directory.
+
+    yarn runs in the lock file's own directory. npm and pnpm run in a private copy
+    of it (manifest and lockfile only, so they read no settings file of the
+    repository's), read here when the tool is started, since it is removed after.
+    """
+    nested = node_project(
+        directory=scanner.context.work_dir / "packages" / "api", lock_name=lock_name
+    )
+    inner = emits(YARN_CLEAN_AUDIT if lock_name == "yarn.lock" else audit_json())
+    started = []
+
+    def recording(self, command, **kwargs):
+        if "audit" in command:
+            cwd = Path(kwargs["cwd"])
+            started.append(
+                (cwd, {p.name: p.read_text() for p in cwd.iterdir() if p.is_file()})
+            )
+        return inner(self, command, **kwargs)
+
+    subprocess_double.side_effect = recording
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    assert audit_calls(subprocess_double)[-1].kwargs["cwd"] == nested
+    ((cwd, files),) = started
+    if lock_name == "yarn.lock":
+        assert cwd == nested
+    else:
+        assert cwd != nested
+        assert files == {
+            "package.json": (nested / "package.json").read_text(),
+            lock_name: (nested / lock_name).read_text(),
+        }
 
 
 @pytest.mark.parametrize(
@@ -505,7 +537,14 @@ def test_offline_mode_set_after_config_built_still_skips_the_audit(
 def test_online_mode_passes_no_env_override(
     scanner, npm_on_path, node_project, subprocess_double, monkeypatch
 ):
-    """Control for the offline test: online runs inherit the parent env."""
+    """Control for the offline test: online runs inherit the parent env.
+
+    Inherit it unchanged except for the variables that keep the package manager
+    from reading the repository's settings files (test_npm_audit_project_rc_ignored.py):
+    nothing offline, and nothing else of the caller's replaced.
+    """
+    from automated_security_helper.utils.process_env import snapshot_environ
+
     # ASH's offline mode outranks the option, so this control needs ASH online.
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     node_project()
@@ -515,7 +554,18 @@ def test_online_mode_passes_no_env_override(
 
     kwargs = audit_calls(subprocess_double)[-1].kwargs
     assert "--offline" not in kwargs["command"]
-    assert kwargs["env"] is None
+    isolation = {
+        "npm_config_userconfig",
+        "npm_config_globalconfig",
+        "pnpm_config_userconfig",
+        "pnpm_config_globalconfig",
+        "YARN_IGNORE_PATH",
+        "YARN_RC_FILENAME",
+    }
+    inherited = {k: v for k, v in snapshot_environ().items() if k not in isolation}
+    passed = {k: v for k, v in kwargs["env"].items() if k not in isolation}
+    assert passed == inherited
+    assert isolation <= set(kwargs["env"])
 
 
 def test_offline_mode_warns_which_lockfile_was_not_audited(

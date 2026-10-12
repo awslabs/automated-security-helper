@@ -294,6 +294,22 @@
   bidirectional-formatting characters escaped in the text summary, on the console
   and in the log.
 
+- **npm-audit's package managers read none of the scanned repository's settings
+  files, and run no file it names.** npm, pnpm and yarn ran in the package's
+  directory, so the repository's `.npmrc` (and, for pnpm, `pnpm-workspace.yaml`),
+  `.yarnrc` and `.yarnrc.yml` chose the registry the dependency list was sent to, the
+  proxy, TLS settings and cache; and yarn ran the JavaScript file a `yarn-path` or
+  `yarnPath` names in place of itself, ASH's own `yarn --version` included (measured
+  with npm 10.9.4, pnpm 12.6.0 and yarn 1.22.22). npm and pnpm now run from a private
+  copy of the package's `package.json` and lockfile, whose audit requests were
+  identical to the in-tree ones, workspaces included; yarn runs with
+  `YARN_IGNORE_PATH=1`, `YARN_RC_FILENAME` naming no file and, for yarn 1,
+  `--no-default-rc`. The user and global npmrc are replaced by an empty file too, so
+  a registry mirror or proxy set in `~/.npmrc` no longer applies to npm-audit: set
+  `npm_config_registry` (pnpm: `pnpm_config_registry`) or `HTTPS_PROXY` in the
+  environment instead, which is passed through. Offline npm-audit still runs no
+  package manager.
+
 - **A workspace with an incomplete project exits 1, even when another project has
   findings.** A project that failed, or whose scanners did not all complete
   (`scan_incomplete`), now ranks above actionable findings, as in a

@@ -229,6 +229,17 @@ under the default completeness gate. `--exclude-scanners npm-audit` leaves it ou
 offline scan. See
 [What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
 
+npm-audit runs npm, pnpm and yarn without the scanned repository's settings files:
+its `.npmrc`, the settings in `pnpm-workspace.yaml`, `.yarnrc` and `.yarnrc.yml`
+(including a `yarn-path` or `yarnPath`, which would run a file from the repository),
+and without your own `~/.npmrc` and global npmrc, which ASH replaces with an empty
+file. npm and pnpm run from a private copy of each package's `package.json` and
+lockfile; yarn runs in the package directory with `YARN_IGNORE_PATH=1`,
+`YARN_RC_FILENAME` naming no file and, for yarn 1, `--no-default-rc`. To point the
+audit at a mirror or through a proxy, set the environment variables the package
+manager reads (`npm_config_registry`, `pnpm_config_registry`, `HTTPS_PROXY`), which
+are passed through.
+
 **Dependencies**: Node.js, npm
 
 ---

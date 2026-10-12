@@ -137,16 +137,31 @@ def test_online_mode_passes_no_environment_override(
 ):
     """Online scans must not inherit the offline override.
 
-    Asserting None rather than "no COREPACK_ENABLE_NETWORK key" on purpose: the
-    scanner's contract is that it does not touch the environment unless offline,
-    and passing a full copy of os.environ online would silently change what the
-    child inherits if the caller ever set that variable themselves.
+    The environment passed is the caller's own, unchanged but for the variables
+    that keep the package manager from reading the repository's settings files
+    (test_npm_audit_project_rc_ignored.py). Asserted as equality with the caller's
+    environment on every other key, rather than "no COREPACK_ENABLE_NETWORK key",
+    so that a variable the caller set themselves is seen to reach the child as
+    they set it, and nothing offline is added.
     """
+    from automated_security_helper.utils.process_env import snapshot_environ
+
     scanner = _scanner(test_plugin_context, offline=offline)
 
     captured = _run_scan(scanner, tmp_path)
 
     assert captured, "scan() never reached _run_subprocess"
-    assert all(kw.get("env") is None for kw in captured), (
-        f"online scan passed an env override: {[kw.get('env') for kw in captured]}"
-    )
+    isolation = {
+        "npm_config_userconfig",
+        "npm_config_globalconfig",
+        "pnpm_config_userconfig",
+        "pnpm_config_globalconfig",
+        "YARN_IGNORE_PATH",
+        "YARN_RC_FILENAME",
+    }
+    inherited = {k: v for k, v in snapshot_environ().items() if k not in isolation}
+    for kw in captured:
+        env = kw.get("env") or {}
+        assert {k: v for k, v in env.items() if k not in isolation} == inherited, (
+            "online scan changed the inherited environment"
+        )
