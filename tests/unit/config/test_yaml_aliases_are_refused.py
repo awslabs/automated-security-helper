@@ -211,6 +211,77 @@ class TestEveryReaderRefusesAnAlias:
         with pytest.raises(Exception, match="alias"):
             load_workspace_policy(path)
 
+    @pytest.mark.parametrize(
+        ("content", "reaches_the_check"),
+        [
+            pytest.param(_chain(4), False, id="aliased"),
+            pytest.param("project_name: plain\n", True, id="control-no-alias"),
+        ],
+    )
+    def test_mcp_validate_config_content_from_a_remote_client(
+        self, monkeypatch, content, reaches_the_check
+    ):
+        """The session-policy check parses the content as the validator does.
+
+        The validator refuses the alias; the policy check that follows it walks the
+        document it parsed, so it must not parse the same text with aliases
+        accepted.
+        """
+        from automated_security_helper.cli.mcp.profile_registry import (
+            clear_profile_registry,
+            clear_session_state,
+        )
+        from automated_security_helper.cli.mcp_tools import mcp_validate_config
+        from automated_security_helper.config import client_config_policy
+
+        checked = []
+        real = client_config_policy.client_file_denials
+
+        def _record(documents, *args, **kwargs):
+            checked.append(dict(documents))
+            return real(documents, *args, **kwargs)
+
+        monkeypatch.setattr(client_config_policy, "client_file_denials", _record)
+        clear_profile_registry()
+        clear_session_state()
+        try:
+            # A real session id is a remote client's, whose content is checked.
+            result = mcp_validate_config(config_content=content, session_id="client-1")
+        finally:
+            clear_profile_registry()
+            clear_session_state()
+
+        if reaches_the_check:
+            assert len(checked) == 1, result
+        else:
+            assert result["valid"] is False, result
+            assert "alias" in json.dumps(result)
+            assert checked == []
+
+    def test_a_trivy_ignore_file_a_client_config_names(self):
+        """ASH applies its entries itself, so it is parsed as ASH configuration is."""
+        from automated_security_helper.config.client_scanner_exclusions import (
+            parse_trivy_ignore_file,
+        )
+
+        text = (
+            "misconfigurations:\n"
+            "  - &entry {id: DS002, paths: [&paths [a.py, b.py]]}\n"
+            "  - *entry\n"
+        )
+
+        with pytest.raises(ValueError, match="alias"):
+            parse_trivy_ignore_file(text, yaml_format=True)
+
+    def test_control_a_trivy_ignore_file_with_no_alias_still_parses(self):
+        from automated_security_helper.config.client_scanner_exclusions import (
+            parse_trivy_ignore_file,
+        )
+
+        text = "misconfigurations:\n  - {id: DS002, paths: [a.py]}\n"
+
+        assert parse_trivy_ignore_file(text, yaml_format=True) == [("DS002", ("a.py",))]
+
 
 # ---------------------------------------------------------------------------
 # Every YAML load in the package goes through the shared loaders
@@ -233,6 +304,11 @@ NOT_ASH_CONFIGURATION = {
     # Grype's own config file, in Grype's format, read for two keys. It is not
     # ASH configuration, and Grype's format allows anchors and aliases.
     "plugin_modules/ash_builtin/scanners/grype_scanner.py",
+    # A .snyk policy file in the scanned tree, in Snyk's format, which allows
+    # aliases. snyk-code reads it only to see whether its exclude sections list
+    # anything (_excludes), which follows no alias; refusing one would count a
+    # valid policy as unreadable.
+    "plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
 }
 
 

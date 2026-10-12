@@ -2058,13 +2058,12 @@ def _validated_document_denials(
     is checked only for a remote caller: on stdio the caller launched this
     server, and the same text as a local file is not a client's.
     """
-    import yaml as _yaml
-
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
         client_named_config_is_untrusted,
         config_base_gate,
     )
+    from automated_security_helper.config.ash_config import load_config_yaml
     from automated_security_helper.config.client_config_policy import (
         client_file_denials,
     )
@@ -2093,8 +2092,10 @@ def _validated_document_denials(
     # would report a client's config as one the policy accepts.
     try:
         if config_content is not None:
+            # Parsed as the validator parsed it: no aliases, which the policy
+            # check below would otherwise walk.
             documents: Dict[Path, Any] = {
-                Path("config_content"): _yaml.safe_load(config_content)
+                Path("config_content"): load_config_yaml(config_content)
             }
             names = None
         elif config_path is not None:

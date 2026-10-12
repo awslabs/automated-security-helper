@@ -550,8 +550,14 @@ def parse_trivy_ignore_file(
     if yaml_format:
         import yaml
 
+        from automated_security_helper.config.ash_config import load_config_yaml
+
+        # ASH applies these entries itself, so the file is parsed as ASH parses
+        # its own configuration: no aliases. An entry list of aliases to one
+        # entry whose paths are aliases to one list is read as every entry
+        # times every path.
         try:
-            document = yaml.safe_load(text) or {}
+            document = load_config_yaml(text) or {}
         except yaml.YAMLError as exc:
             raise ValueError(str(exc)) from exc
         if not isinstance(document, dict):
