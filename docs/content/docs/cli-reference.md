@@ -253,6 +253,12 @@ mounted at, which follows the `extends` entry as written and can hold such a cha
 through the name of a link the entry goes through. The run is refused with exit 3 before
 anything is built.
 
+The image should be built from the same ASH as the one on the host. With `--no-build`,
+or an `ASH_IMAGE_NAME` image built from an older ASH, the scan inside can reject an
+option this ASH passes it, such as `--config-from-scanned-repository` for a config
+elsewhere in the scanned checkout. It then exits 2 without writing a results file, and
+the host refuses with exit 3 and asks for the image to be rebuilt from this ASH.
+
 `Invoke-ASH` exits with these codes also under `$ErrorActionPreference = 'Stop'` (the
 default of a `pwsh` step on GitHub Actions), writing the reason to stderr; no
 PowerShell error record is raised. Run from a session you type into, rather than from

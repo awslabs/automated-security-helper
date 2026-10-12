@@ -62,6 +62,7 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import (
+    CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
     container_build_refusal,
     container_input_refusal,
     container_was_started,
@@ -1955,6 +1956,25 @@ def _run_container_mode(
         sys.exit(container_returncode)
 
     output_file = opts.output_dir / "ash_aggregated_results.json"
+    if container_returncode == 2 and not output_file.exists():
+        # The scan inside exits 2 for findings only after writing the results file,
+        # and for a usage error without one: an image built from an older ASH
+        # rejects an option this ASH passes it, such as the repository mark.
+        passed = [str(arg) for arg in (getattr(container_result, "args", None) or [])]
+        cause = (
+            f"the image was built from an older ASH that does not accept "
+            f"{CONFIG_FROM_SCANNED_REPOSITORY_FLAG}, which this ASH passes it"
+            if CONFIG_FROM_SCANNED_REPOSITORY_FLAG in passed
+            else "the image may be from an older ASH that does not accept an option "
+            "this ASH passes it"
+        )
+        logger.error(
+            "The scan inside the container exited 2 without writing a results file, "
+            f"which is how the ASH command line rejects its arguments: {cause}. "
+            "Rebuild the image from this ASH (run without --no-build, or rebuild the "
+            "image ASH_IMAGE_NAME names)."
+        )
+        sys.exit(3)
     if output_file.exists():
         with open(output_file, mode="r", encoding="utf-8") as f:
             content = f.read()
