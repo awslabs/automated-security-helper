@@ -937,10 +937,14 @@
   the file is loaded, so reports do not repeat it; `ash merge` drops each shard's
   records the same way. The inner run takes the ID out
   of its environment when it starts, and the scanner sandbox drops it, so the
-  processes the inner run starts do not see it; a value that is not such an ID is
-  reported and not used. The marker says whether the file is a complete account of
-  that run; it does not protect the file from code running as the inner run's
-  user.
+  processes the inner run starts do not inherit it; a value that is not such an ID
+  is reported and not used. Container mode passes it as `-e ASH_OUTER_RUN_ID` with
+  the value in the runner's environment, so it is not on the host's command lines
+  (with `OCI_RUNNER_WRAPPER` set, the value is on the command line, since a wrapper
+  such as `sudo` need not pass the environment on). The ID is not a secret: code
+  running as the inner run's user can read it. The marker says whether the file is
+  a complete account of that run; it does not protect the file from code running
+  as the inner run's user.
 
 ### Breaking changes
 

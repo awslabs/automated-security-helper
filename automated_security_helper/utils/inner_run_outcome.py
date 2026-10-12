@@ -46,11 +46,15 @@ It tells the outer process whether the file it reads back is a complete account
 of the run it started: not a file an earlier run left, not one a run that stopped
 part way wrote, and not one from an ASH that does not record completion. It is not
 an authentication mechanism. Code running as the inner run's user can write any
-file the inner run can, the marker included. So the ID is kept from the processes
-the inner run starts only so that a scanner cannot copy it into a results file by
+file the inner run can, the marker included. So the processes the inner run starts
+do not inherit the ID only so that a scanner cannot copy it into a results file by
 accident: the inner run takes it out of its environment when it starts
 (``take_outer_run_id``), and the scanner sandbox drops it from a scanner's
-environment (utils/sandbox/policy.py).
+environment (utils/sandbox/policy.py). It is not hidden from them: a process
+running as the same user can read the inner run's starting environment (from
+``/proc`` on Linux). Container mode names it with ``-e`` and no value, so it is
+not on a command line other processes on the host can list, except through an
+``OCI_RUNNER_WRAPPER``, which need not pass the environment on.
 """
 
 from __future__ import annotations

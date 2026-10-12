@@ -59,7 +59,7 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
     def fake_build(**_kwargs):
         seen["build"] += 1
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["executed"] += 1
         return create_completed_process(args=list(cmd), returncode=0)
 

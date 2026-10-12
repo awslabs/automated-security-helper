@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 import typer
 import threading
 import io
@@ -219,7 +219,7 @@ def validate_path(path: str | Path) -> Path:
     return abs_path
 
 
-def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
+def run_cmd_direct(cmd_list, check=True, debug=False, shell=False, env=None):
     """
     Run a command and stream output directly to console without Rich panels.
 
@@ -227,6 +227,7 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
         cmd_list: List of command arguments
         check: Whether to check the return code
         debug: Whether to print debug information
+        env: The command's environment, or None for this process's
 
     Returns:
         subprocess.CompletedProcess: The result of the command
@@ -241,6 +242,7 @@ def run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
     # Create process using subprocess_utils
     process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
         args=cmd_list,
+        env=env,
         text=True,
         shell=shell,
     )
@@ -866,7 +868,14 @@ def _assemble_run_command(
         ]
     )
     if outer_run_id is not None:
-        cmd.extend(["-e", f"{OUTER_RUN_ID_ENV}={outer_run_id}"])
+        # By name: the runner reads the value from its own environment
+        # (_run_environment), so it is not on a command line other processes on
+        # the host can read. A wrapper such as sudo need not pass that environment
+        # on, so through one the value goes on the command line.
+        if oci_command_prefix:
+            cmd.extend(["-e", f"{OUTER_RUN_ID_ENV}={outer_run_id}"])
+        else:
+            cmd.extend(["-e", OUTER_RUN_ID_ENV])
 
     # Source dir mount
     mount_source = f"type=bind,source={source_dir},destination=/src"
@@ -1034,7 +1043,20 @@ def _assemble_run_command(
     return cmd
 
 
-def _execute_container(cmd: List[str], debug: bool):
+def _run_environment(outer_run_id: str | None) -> Dict[str, str] | None:
+    """The container runner's environment: this process's, with the outer run's ID.
+
+    ``_assemble_run_command`` names the ID with ``-e`` and no value, and the runner
+    reads it from here. None, meaning this process's own environment, without one.
+    """
+    if outer_run_id is None:
+        return None
+    from automated_security_helper.utils.process_env import snapshot_environ
+
+    return {**snapshot_environ(), OUTER_RUN_ID_ENV: outer_run_id}
+
+
+def _execute_container(cmd: List[str], debug: bool, env: Dict[str, str] | None = None):
     """Run the assembled container command and return the result.
 
     Returns:
@@ -1044,7 +1066,7 @@ def _execute_container(cmd: List[str], debug: bool):
     if debug:
         print(f"Running container command: {' '.join(str(a) for a in cmd)}")
     try:
-        result = run_cmd_direct(cmd, debug=debug)
+        result = run_cmd_direct(cmd, debug=debug, env=env)
         if debug:
             print(
                 f"Container execution completed with return code: {result.returncode}"
@@ -1397,7 +1419,9 @@ def run_ash_container(
             ignore_suppressions=ignore_suppressions,
         )
 
-        return _execute_container(run_cmd, debug=debug)
+        return _execute_container(
+            run_cmd, debug=debug, env=_run_environment(outer_run_id)
+        )
 
     # Built but not run
     return create_completed_process(args=[], returncode=0, stdout="", stderr="")

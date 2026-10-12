@@ -78,8 +78,9 @@ def container_stubs(monkeypatch, tmp_path):
         recorded["run_command"].append(kwargs)
         return ["docker", "run", "--rm", kwargs["image_name"]]
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         recorded["executed"].append(list(cmd))
+        recorded.setdefault("environments", []).append(env)
         return create_completed_process(args=list(cmd), returncode=0)
 
     monkeypatch.setattr(rac, "_build_image", fake_build_image)
@@ -128,6 +129,19 @@ class TestCwdDefaults:
         assert kwargs["source_dir"] == Path.cwd()
         assert kwargs["output_dir"] == workdir / "ash_output"
         assert (workdir / "ash_output").is_dir()
+
+    def test_the_container_runner_is_started_with_the_outer_run_id(
+        self, container_stubs, tmp_path
+    ):
+        """The command names it with ``-e``; the runner's environment holds it."""
+        run_id = "0123456789abcdef0123456789abcdef"
+
+        run_ash_container(
+            source_dir=tmp_path, build=False, run=True, outer_run_id=run_id
+        )
+
+        assert container_stubs["run_command"][0]["outer_run_id"] == run_id
+        assert container_stubs["environments"][0]["ASH_OUTER_RUN_ID"] == run_id
 
     def test_building_without_running_returns_success_without_a_run_command(
         self, container_stubs, tmp_path

@@ -144,11 +144,18 @@ def completed_by(results_json: str, run_id: str | None) -> str:
     return json.dumps(document)
 
 
-def _outer_run_id(args: list[str]) -> str | None:
-    """The run ID the host passed with ``-e ASH_OUTER_RUN_ID=...``."""
+def _outer_run_id(args: list[str], env: dict | None) -> str | None:
+    """The run ID the host passed, as the runner would read it.
+
+    ``-e ASH_OUTER_RUN_ID`` takes the value from the runner's environment, and
+    ``-e ASH_OUTER_RUN_ID=<id>`` gives it on the command line.
+    """
     for index, arg in enumerate(args[:-1]):
-        if arg == "-e" and args[index + 1].startswith("ASH_OUTER_RUN_ID="):
-            return args[index + 1].split("=", 1)[1]
+        if arg != "-e":
+            continue
+        name, _, value = args[index + 1].partition("=")
+        if name == "ASH_OUTER_RUN_ID":
+            return value or (env or {}).get(name)
     return None
 
 
@@ -168,13 +175,13 @@ class FakeOciRunner:
     run: FakeStep = field(default_factory=FakeStep)
     calls: list[str] = field(default_factory=list)
 
-    def popen(self, args: list[str], **_kwargs: Any) -> subprocess.Popen:
+    def popen(self, args: list[str], **kwargs: Any) -> subprocess.Popen:
         subcommand = next(a for a in args[1:] if not a.startswith("-"))
         self.calls.append(subcommand)
         step = {"build": self.build, "run": self.run}[subcommand]
         if subcommand == "run" and step.results_json is not None:
             results_json = (
-                completed_by(step.results_json, _outer_run_id(args))
+                completed_by(step.results_json, _outer_run_id(args, kwargs.get("env")))
                 if step.marks_completion
                 else step.results_json
             )

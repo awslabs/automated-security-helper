@@ -37,6 +37,7 @@ the assertion would then be about the patch rather than about the command.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -376,6 +377,18 @@ class TestRunCmdDirectAgainstARealChild:
             [sys.executable, "-c", "import sys; sys.exit(7)"], check=False
         )
         assert result.returncode == 7
+
+    def test_the_child_is_started_with_the_environment_given(self):
+        """How the container run's ID reaches the runner without its command line."""
+        result = run_cmd_direct(
+            [
+                sys.executable,
+                "-c",
+                "import os; print(os.environ.get('ASH_TEST_RUN_ENV', 'absent'))",
+            ],
+            env={**os.environ, "ASH_TEST_RUN_ENV": "given"},
+        )
+        assert result.stdout.strip() == "given"
 
 
 class TestRunCmdDirectInterruption:
@@ -1148,7 +1161,9 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
 class TestExecuteContainer:
     def test_a_successful_run_returns_the_completed_process(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)
-        monkeypatch.setattr(rac, "run_cmd_direct", lambda cmd, debug=False: expected)
+        monkeypatch.setattr(
+            rac, "run_cmd_direct", lambda cmd, debug=False, env=None: expected
+        )
 
         result = _execute_container(["docker", "run"], debug=True)
 
@@ -1165,7 +1180,7 @@ class TestExecuteContainer:
             2, ["docker", "run"], output="out", stderr="scan failed"
         )
 
-        def explode(cmd, debug=False):
+        def explode(cmd, debug=False, env=None):
             raise failure
 
         monkeypatch.setattr(rac, "run_cmd_direct", explode)
@@ -1177,7 +1192,9 @@ class TestExecuteContainer:
 
     def test_without_debug_nothing_extra_is_printed(self, monkeypatch, capfd):
         expected = create_completed_process(args=["docker"], returncode=0)
-        monkeypatch.setattr(rac, "run_cmd_direct", lambda cmd, debug=False: expected)
+        monkeypatch.setattr(
+            rac, "run_cmd_direct", lambda cmd, debug=False, env=None: expected
+        )
 
         _execute_container(["docker", "run"], debug=False)
 
