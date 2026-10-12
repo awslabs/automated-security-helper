@@ -4,12 +4,13 @@
 """Only the calling session's ``config/`` directory holds files set aside for it.
 
 ``select_profile`` materializes a registered profile into the session's own
-``config/`` directory, which only the server writes. A config path a client names
-there is the operator's, and for a remote caller it resolves ``!ENV``. A file in
-another session's ``config/`` directory is not set aside for this caller: the MCP
-tools refuse such a path up front (``validate_config_input``), and
-``client_named_config_is_untrusted`` and the ``!ENV`` rule count it as the
-client's as well.
+``config/`` directory as ``ash.yaml`` and ``call-profile.yaml``. A config path a
+client names to one of those files is the operator's, and for a remote caller it
+resolves ``!ENV``. Any other file in ``config/`` is the client's, because the
+server never writes one. A file in another session's ``config/`` directory is not
+set aside for this caller: the MCP tools refuse such a path up front
+(``validate_config_input``), and ``client_named_config_is_untrusted`` and the
+``!ENV`` rule count it as the client's as well.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
+    CALL_PROFILE_FILENAME,
     DEFAULT_SESSION_ID,
     clear_profile_registry,
     clear_session_state,
@@ -127,8 +129,8 @@ def test_a_remote_scan_resolves_env_only_in_its_own_config_dir(
 # ---------------------------------------------------------------------------
 # Each MCP route judges the file for the calling session
 # ---------------------------------------------------------------------------
-# A file in the caller's own config/ directory uses ``${VAR}`` and sets a field
-# the default policy denies a client. Both are the operator's there, so every
+# The profile file in the caller's own config/ directory uses ``${VAR}`` and sets
+# a field the default policy denies a client. Both are the operator's there, so every
 # route accepts it; a route that judged it for another session (or for none)
 # would refuse it as the client's.
 
@@ -190,33 +192,44 @@ def _workspace(_server: Path, target: Path) -> Path:
     return path
 
 
+POLICY = "workspace:\n  max_severity_threshold: HIGH\n"
+
+
 @pytest.fixture
 def own_policy(_server: Path) -> Path:
-    path = _server / MINE / "config" / "ash-workspace.yaml"
+    """A policy in the call profile the server writes for the caller.
+
+    The call profile, because a workspace policy may not take a project config
+    name such as the session's ``ash.yaml``.
+    """
+    path = _server / MINE / "config" / CALL_PROFILE_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("workspace:\n  max_severity_threshold: HIGH\n", encoding="utf-8")
+    path.write_text(POLICY, encoding="utf-8")
     return path
 
 
-def test_resolve_workspace_takes_a_policy_from_the_callers_config_dir(
-    _server: Path, target: Path, own_policy: Path
-) -> None:
+@pytest.fixture
+def placed_policy(_server: Path) -> Path:
+    """A policy in a file of the caller's ``config/`` the server did not write."""
+    path = _server / MINE / "config" / "ash-workspace.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(POLICY, encoding="utf-8")
+    return path
+
+
+def _resolve_workspace(_server: Path, target: Path, policy: Path) -> dict:
     from automated_security_helper.cli.mcp import workspace as ws
 
-    result = asyncio.run(
+    return asyncio.run(
         ws.mcp_resolve_workspace(
             str(_workspace(_server, target)),
-            workspace_config=str(own_policy),
+            workspace_config=str(policy),
             session_id=MINE,
         )
     )
 
-    assert result.get("success") is True, result
 
-
-def test_scan_workspace_takes_a_policy_from_the_callers_config_dir(
-    _server: Path, target: Path, own_policy: Path
-) -> None:
+def _scan_workspace(_server: Path, target: Path, policy: Path) -> dict:
     """Stopped where the settings are built, which is after the policy check."""
     from automated_security_helper.cli.mcp import workspace as ws
 
@@ -224,15 +237,47 @@ def test_scan_workspace_takes_a_policy_from_the_callers_config_dir(
         raise _Stop
 
     with patch.object(ws, "build_project_scan_settings", stop):
-        result = asyncio.run(
+        return asyncio.run(
             ws.mcp_scan_workspace(
                 str(_workspace(_server, target)),
-                workspace_config=str(own_policy),
+                workspace_config=str(policy),
                 session_id=MINE,
             )
         )
 
+
+def _assert_policy_refused(result: dict) -> None:
+    assert result.get("success") is False, result
+    assert result.get("exit_code") == 4, result
+    assert "the workspace policy file" in result.get("error", ""), result
+
+
+def test_resolve_workspace_takes_a_policy_from_the_callers_call_profile(
+    _server: Path, target: Path, own_policy: Path
+) -> None:
+    result = _resolve_workspace(_server, target, own_policy)
+
+    assert result.get("success") is True, result
+
+
+def test_scan_workspace_takes_a_policy_from_the_callers_call_profile(
+    _server: Path, target: Path, own_policy: Path
+) -> None:
+    result = _scan_workspace(_server, target, own_policy)
+
     assert result.get("error_type") == "_Stop", result
+
+
+def test_resolve_workspace_refuses_another_file_in_the_callers_config_dir(
+    _server: Path, target: Path, placed_policy: Path
+) -> None:
+    _assert_policy_refused(_resolve_workspace(_server, target, placed_policy))
+
+
+def test_scan_workspace_refuses_another_file_in_the_callers_config_dir(
+    _server: Path, target: Path, placed_policy: Path
+) -> None:
+    _assert_policy_refused(_scan_workspace(_server, target, placed_policy))
 
 
 def test_the_exit_code_reader_judges_the_config_for_the_caller(own, target) -> None:
