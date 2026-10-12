@@ -1108,6 +1108,20 @@ class TestVerdictSettings:
         assert "shard 0" in console and "shard 1" in console, console
         assert not (harness.output_dir / RESULTS_FILE_NAME).exists()
 
+    def test_a_disagreement_in_the_last_of_three_shards_is_refused(self, harness):
+        """Every shard is compared, not only the first two."""
+        paths = _write_each(
+            harness,
+            build_shards(3),
+            [{"fail_on_findings": True}] * 2 + [{"fail_on_findings": False}],
+        )
+
+        result = harness.merge(paths)
+
+        assert result.exit_code == 3, (result.output, result.exception)
+        console = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "fail_on_findings" in console and "shard 2" in console, console
+
     def test_an_override_settles_a_disagreement(self, harness):
         paths = _write_each(
             harness,
