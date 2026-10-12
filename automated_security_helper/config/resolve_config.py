@@ -465,7 +465,12 @@ def resolve_config(
         list(config_overrides or []) if client_config_policy is None else []
     )
     confine_to_trusted_base(
-        config, trusted, operator_overrides, Path(scanned_root), in_tree
+        config,
+        trusted,
+        operator_overrides,
+        Path(scanned_root),
+        in_tree,
+        in_tree_documents=[documents[path] for path in in_tree if path in documents],
     )
     # Not one of confine_to_trusted_base's steps: ash merge takes the verdict
     # settings, these among them, from the shards (cli/merge.py).
@@ -480,6 +485,7 @@ def confine_to_trusted_base(
     scanned_root: Path,
     in_tree: Sequence[Path],
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
+    in_tree_documents: Sequence[Any] = (),
 ) -> None:
     """Replace what a config that is not the operator's may not choose, in place.
 
@@ -504,6 +510,9 @@ def confine_to_trusted_base(
             named in the warnings.
         source: Why those files are not the operator's, and the fix, for the
             warnings.
+        in_tree_documents: Those files' documents as they were parsed, so the
+            reporter step's warning quotes a section as they spelled it where the
+            merge kept another spelling (the operator's, in workspace mode).
     """
     # Only an override under `sandbox` can change the sandbox section, and replaying
     # the rest onto the defaults could fail where the config file supplied the
@@ -521,7 +530,12 @@ def confine_to_trusted_base(
         config, trusted, operator_overrides, Path(scanned_root), files, source=source
     )
     confine_reporter_destinations(
-        config, trusted, operator_overrides, files, source=source
+        config,
+        trusted,
+        operator_overrides,
+        files,
+        source=source,
+        in_tree_documents=in_tree_documents,
     )
     confine_scanner_config_files(
         config, trusted, operator_overrides, files, source=source

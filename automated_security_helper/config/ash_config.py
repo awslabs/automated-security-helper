@@ -1284,9 +1284,12 @@ class AshConfig(BaseModel):
     # overrides replayed. A reporter a plugin module adds is only known once the
     # scan imports the module, and its declared destination options are taken from
     # the same base then (config/reporter_trust.py). Empty, and None, when there
-    # is no such file.
+    # is no such file. Also the reporter section keys those files wrote, so a
+    # warning quotes a section as they spelled it where the merge kept another
+    # spelling of it.
     _in_tree_config_files: Tuple[Path, ...] = PrivateAttr(default=())
     _trusted_reporter_base: Optional["AshConfig"] = PrivateAttr(default=None)
+    _in_tree_reporter_keys: Tuple[str, ...] = PrivateAttr(default=())
 
     # Set by resolve_config in the same case: the ash_plugin_modules entries of the
     # trusted base, with the overrides replayed. A plugin class defined in an

@@ -233,11 +233,12 @@ def confine_reporter_destinations(
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
+    in_tree_documents: Iterable[Any] = (),
 ) -> None:
     """Replace the destination options an in-tree file set with the trusted base's.
 
-    Records the files and the trusted base on ``config`` for
-    ``confine_declared_reporter_destinations``.
+    Records the files, the reporter section keys they wrote and the trusted base
+    on ``config`` for ``confine_declared_reporter_destinations``.
 
     Args:
         config: The resolved AshConfig, changed in place.
@@ -249,6 +250,8 @@ def confine_reporter_destinations(
         in_tree: The config files inside the tree, named in the warning.
         source: Why those files are not the operator's, and the fix, for the
             warning.
+        in_tree_documents: Those files' documents as they were parsed. The
+            warning quotes a section as they spelled it (``written_reporter_keys``).
     """
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
@@ -264,6 +267,7 @@ def confine_reporter_destinations(
         trusted_config = apply_config_overrides(trusted_config, reporter_overrides)
     config._in_tree_config_files = tuple(in_tree)
     config._trusted_reporter_base = trusted_config
+    config._in_tree_reporter_keys = written_reporter_keys(in_tree_documents)
     _confine(
         config,
         trusted_config,
@@ -271,6 +275,47 @@ def confine_reporter_destinations(
         REPORTER_ENABLED_DEFAULTS,
         in_tree,
         source,
+    )
+
+
+def written_reporter_keys(documents: Iterable[Any]) -> Tuple[str, ...]:
+    """The keys of the ``reporters`` sections ``documents`` write, in order, once each.
+
+    A workspace project's config has the operator's config merged over it, final
+    per field, and a section both write is kept under the operator's spelling
+    (``config_sources.deep_merge``). A warning names the project's file, so it
+    quotes the section under the spelling that file wrote (``_quoted``).
+    """
+    keys: List[str] = []
+    for document in documents:
+        reporters = document.get("reporters") if isinstance(document, dict) else None
+        if not isinstance(reporters, dict):
+            continue
+        for key in reporters:
+            if isinstance(key, str) and key not in keys:
+                keys.append(key)
+    return tuple(keys)
+
+
+def _quoted(key: str, plugin: str, written: Sequence[str]) -> str:
+    """``key``, the confined config's section for ``plugin``, as a file not the
+    operator's wrote it: ``key`` itself when such a file wrote it or none wrote a
+    section the lookup reads for ``plugin``, else the first such spelling."""
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+
+    if key in written:
+        return key
+    reduced = reduced_plugin_name(plugin)
+    return next(
+        (
+            spelling
+            for spelling in written
+            if reduced in plugin_key_lookup_names(spelling)
+        ),
+        key,
     )
 
 
@@ -471,12 +516,14 @@ def _confine_options(
     reporter gets one holding the trusted base's values, where it sets any: a
     file that replaces the operator's config and leaves the section out would
     otherwise drop them. Returns the spellings the config set to a value the
-    trusted base does not give them, as dotted keys.
+    trusted base does not give them, as dotted keys, each under the section
+    spelling the files not the operator's wrote (``_quoted``).
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
     if extras is None:
         return ignored
+    tree_keys = config._in_tree_reporter_keys
     for plugin, option_names in destinations.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
         trusted_options = dict((trusted_section or {}).get("options") or {})
@@ -505,7 +552,8 @@ def _confine_options(
                     continue
                 for spelling in written:
                     if options[spelling] != wanted.get(spelling, _MISSING):
-                        ignored.append(f"reporters.{key}.options.{spelling}")
+                        section_key = _quoted(key, plugin, tree_keys)
+                        ignored.append(f"reporters.{section_key}.options.{spelling}")
                     options.pop(spelling)
                 options.update(wanted)
                 changed = True
@@ -540,11 +588,14 @@ def _confine_enabled(
     differently, or would refuse, is returned. A section that writes no
     ``enabled`` is set only where the reporter's default differs from the wanted
     value, and a config with no section for the reporter gets one in that case.
+    A key is returned under the section spelling the files not the operator's
+    wrote (``_quoted``).
     """
     extras = config.reporters.__pydantic_extra__
     ignored: List[str] = []
     if extras is None:
         return ignored
+    tree_keys = config._in_tree_reporter_keys
     for plugin, default in enabled_defaults.items():
         trusted_section = _as_dict(trusted_config.get_plugin_config("reporter", plugin))
         wanted = not _reads_as_off((trusted_section or {}).get("enabled", default))
@@ -560,7 +611,7 @@ def _confine_enabled(
             elif current is wanted:
                 continue
             elif _reads_as(current) != wanted:
-                ignored.append(f"reporters.{key}.enabled")
+                ignored.append(f"reporters.{_quoted(key, plugin, tree_keys)}.enabled")
             section["enabled"] = wanted
             extras[key] = section
     return ignored

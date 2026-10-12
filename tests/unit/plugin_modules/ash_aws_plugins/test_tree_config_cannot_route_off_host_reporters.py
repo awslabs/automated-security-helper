@@ -294,6 +294,26 @@ def test_the_workspace_route_keeps_the_trees_destinations_and_off_switch(
     assert f"reporters.{section}.enabled" in _warnings(ash_log)
 
 
+@pytest.mark.parametrize("reporter,section,hyphenated", _CASES, ids=_IDS)
+def test_the_workspace_routes_warning_quotes_the_trees_section_spelling(
+    tmp_path, ash_log, reporter, section, hyphenated
+):
+    """The operator's config is merged over the project's, final per field, and a
+    section both write is kept under the operator's spelling. The warning names the
+    project's file, so it quotes the section as that file spelled it."""
+    project = _write(
+        tmp_path / "workspace" / "api" / ".ash" / ".ash.yaml",
+        {"reporters": {section: _tree_section(reporter, hyphenated)}},
+    )
+
+    _workspace(tmp_path, project, _operator_off(tmp_path, reporter))
+
+    warnings = _warnings(ash_log)
+    for name in REPORTER_DESTINATION_OPTIONS[reporter]:
+        written = name.replace("_", "-") if hyphenated else name
+        assert f"reporters.{section}.options.{written}" in warnings, (name, warnings)
+
+
 #: A destination the operator's config sets for each reporter, so the test can
 #: tell it from the reporter's default.
 _OPERATOR_DESTINATIONS: Dict[str, Tuple[str, Any]] = {
