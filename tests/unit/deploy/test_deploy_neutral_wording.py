@@ -56,8 +56,11 @@ _ADVERSARIAL_WORDS = re.compile(
 
 
 def _shipped_lines() -> Iterator[Tuple[str, int, str]]:
+    from tests.utils.helpers import iter_repo_files
+
     for root in ROOTS:
-        for path in sorted(root.rglob("*")):
+        # Pruned as it walks: deploy/cdk/node_modules is installed per run.
+        for path in sorted(iter_repo_files(root, skip_dirs=frozenset(_SKIPPED_PARTS))):
             if (
                 not path.is_file()
                 or _SKIPPED_PARTS & set(path.parts)

@@ -55,9 +55,16 @@ _MENTIONS_OFFLINE = re.compile(r"AshOfflineMode|ash_offline_mode", re.IGNORECASE
 
 def _readme_passages() -> Iterator[Tuple[str, str]]:
     """Paragraphs and table rows of every deploy README that mention offline mode."""
-    for path in sorted(DEPLOY.rglob("*.md")):
-        if "node_modules" in path.parts or ".terraform" in path.parts:
-            continue
+    from tests.utils.helpers import iter_repo_files
+
+    # Pruned as it walks: deploy/cdk/node_modules is installed per run.
+    for path in sorted(
+        p
+        for p in iter_repo_files(
+            DEPLOY, skip_dirs=frozenset({"node_modules", ".terraform"})
+        )
+        if p.suffix == ".md"
+    ):
         text = path.read_text(encoding="utf-8")
         passages: List[str] = []
         current: List[str] = []

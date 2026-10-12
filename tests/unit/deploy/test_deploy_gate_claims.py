@@ -50,11 +50,15 @@ _COMMENT_LEADERS = {"*", "#", "#:", "//"}
 
 def _texts() -> Iterator[Tuple[str, str]]:
     """Every deploy README and variable file, plus the two gate scripts."""
+    from tests.utils.helpers import iter_repo_files
+
+    # Pruned as it walks: deploy/cdk/node_modules is installed per run.
     paths = sorted(
         p
-        for pattern in ("*.md", "variables.tf")
-        for p in DEPLOY.rglob(pattern)
-        if "node_modules" not in p.parts and ".terraform" not in p.parts
+        for p in iter_repo_files(
+            DEPLOY, skip_dirs=frozenset({"node_modules", ".terraform"})
+        )
+        if p.suffix == ".md" or p.name == "variables.tf"
     )
     paths += [GATE_HANDLER, CDK_SCRIPTS]
     for path in paths:

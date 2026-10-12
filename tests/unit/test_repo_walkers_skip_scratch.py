@@ -147,6 +147,116 @@ _EXEMPT = {
         "What the converter extracted, under the work directory of "
         "test_plugin_context, which is inside this test's ash_temp_path."
     ),
+    (".github/scripts/assert-publish-surfaces.py", "scan_tree", "github_dir"): (
+        "The checkout's .github, which test_publish_surfaces_match_the_workflows "
+        "passes as GITHUB_DIR. It holds workflows and scripts; no test or scan "
+        "writes a per-run directory there."
+    ),
+    **{
+        (path, function, "sandbox"): (
+            "A session directory the test made with mark_session_workspace under "
+            "its own tmp_path workspace root, holding only what the test wrote."
+        )
+        for path, function in (
+            (
+                "tests/unit/cli/mcp/test_session_workspace_is_removed_when_the_session_ends.py",
+                "_sandbox_with_age",
+            ),
+            ("tests/unit/cli/mcp/test_session_workspace_lifecycle.py", "_sandbox"),
+            (
+                "tests/unit/cli/mcp/test_the_sweep_never_removes_a_running_scans_tree.py",
+                "_age",
+            ),
+        )
+    },
+    **dict.fromkeys(
+        (
+            (
+                "tests/unit/converters/test_archive_converter_limits.py",
+                "files_written",
+                "root",
+            ),
+            (
+                "tests/unit/converters/test_archive_converter_limits.py",
+                "assert_extracted",
+                "extracted",
+            ),
+            (
+                "tests/unit/converters/test_archive_plain_gzip_and_lfs_pointers.py",
+                "written",
+                "root",
+            ),
+            (
+                "tests/unit/converters/test_archive_target_directories.py",
+                "written",
+                "root",
+            ),
+            (
+                "tests/unit/converters/test_archive_target_directories.py",
+                "test_a_failing_archive_leaves_nothing_where_another_was_extracted",
+                "Path(converter.results_dir)",
+            ),
+            ("tests/unit/converters/test_archive_unreadable.py", "files_under", "root"),
+        ),
+        "The archive converter's results directory, or a directory it "
+        "extracted into, under the output directory of the test's own "
+        "plugin context in tmp_path.",
+    ),
+    (
+        "tests/unit/interactions/test_scan_ignore_file_switch.py",
+        "test_the_scan_set_is_every_file_but_ash_own_exclusions",
+        "run.tree",
+    ): "The tree the module's scans fixture built under tmp_path_factory.",
+    (
+        "tests/unit/interactions/test_container_config_tier_parity.py",
+        "_scan_inside",
+        "source",
+    ): (
+        "A mount source of a container command the test assembled: its own "
+        "tmp_path tree, output directory and config files."
+    ),
+    (
+        "tests/unit/interactions/test_outer_modes_refuse_an_unusable_config_on_the_host.py",
+        "output_snapshot",
+        "self.output",
+    ): "The output directory of the scan the test set up under its tmp_path.",
+    **dict.fromkeys(
+        (
+            (
+                "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
+                "fake_run",
+                "cwd",
+            ),
+            (
+                "tests/unit/plugin_modules/ash_builtin/test_npm_audit_links_leaving_the_tree.py",
+                "test_the_child_copies_no_file_that_leaves_the_tree",
+                "child.cwd",
+            ),
+            (
+                "tests/unit/plugin_modules/ash_builtin/test_npm_audit_project_rc_ignored.py",
+                "fake_run",
+                "cwd",
+            ),
+        ),
+        "The directory npm-audit hands its package manager: a project the test "
+        "wrote under tmp_path, or the private copy package_manager_child makes "
+        "of it.",
+    ),
+    **dict.fromkeys(
+        (
+            (
+                "tests/unit/reporters/test_secret_masking_across_reports.py",
+                "_written_outside_tool_output",
+                "output_dir",
+            ),
+            (
+                "tests/unit/reporters/test_secret_masking_across_reports.py",
+                "test_the_projects_report_what_this_relies_on",
+                "two_project_output / 'projects' / 'web'",
+            ),
+        ),
+        "The output directory of a workspace scan the test ran under tmp_path.",
+    ),
     (
         "tests/unit/test_agent_plugin_ash_version.py",
         "test_every_version_files_path_exists",

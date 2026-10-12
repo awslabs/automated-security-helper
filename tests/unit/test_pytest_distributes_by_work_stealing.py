@@ -52,9 +52,15 @@ def test_addopts_steal_work_and_leave_the_worker_count_to_the_host():
 def test_nothing_asks_for_grouping_that_worksteal_ignores():
     # The grouping modes and the mark; plain `--dist load` groups nothing.
     grouping = re.compile(r"xdist_group|\bload(scope|file|group)\b")
+    from tests.utils.helpers import iter_repo_files
+
+    # iter_repo_files, not rglob: tests/ holds the per-run scratch tree, which
+    # other workers create and remove while this walks.
     sources = [
-        *sorted((REPO_ROOT / "tests").rglob("*.py")),
-        *sorted((REPO_ROOT / ".github").rglob("*.yml")),
+        *sorted(p for p in iter_repo_files(REPO_ROOT / "tests") if p.suffix == ".py"),
+        *sorted(
+            p for p in iter_repo_files(REPO_ROOT / ".github") if p.suffix == ".yml"
+        ),
         REPO_ROOT / "pytest.ini",
         REPO_ROOT / "pyproject.toml",
     ]
