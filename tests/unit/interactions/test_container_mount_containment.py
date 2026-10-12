@@ -730,6 +730,61 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
         assert "link" in result.output
         assert [cmd for cmd in commands if cmd[1] == "run"] == []
 
+    @pytest.mark.parametrize("how", ["discovered", "named", "named-at-another-path"])
+    def test_a_policy_linked_out_of_the_workspace_is_refused(
+        self, how, workspace, commands
+    ):
+        root = workspace["root"]
+        if how == "named-at-another-path":
+            (root / "policies").mkdir()
+            link = root / "policies" / "shared.yaml"
+        else:
+            link = root / "ash-workspace.yaml"
+        link.symlink_to(workspace["outside"])
+        extra = [] if how == "discovered" else ["--workspace-config", str(link)]
+
+        result = _scan(
+            "--mode",
+            "container",
+            "--workspace",
+            str(root / "dev.code-workspace"),
+            "--output-dir",
+            str(workspace["out"]),
+            *extra,
+        )
+
+        runs = [cmd for cmd in commands if cmd[1] == "run"]
+        mounted = [
+            str(options["source"]) for run in runs for options in _mount_list(run)
+        ]
+        assert str(workspace["outside"].resolve()) not in mounted
+        assert result.exit_code == 3, result.output
+        assert runs == []
+
+    def test_a_library_caller_with_a_discovered_link_is_refused(
+        self, workspace, commands
+    ):
+        """No --workspace-config: the discovered file is checked by its own name."""
+        from automated_security_helper.core.enums import RunMode
+        from automated_security_helper.interactions import run_ash_scan as ras
+        from automated_security_helper.workspace.resolver import resolve_workspace
+
+        root = workspace["root"]
+        (root / "ash-workspace.yaml").symlink_to(workspace["outside"])
+        plan = resolve_workspace(root / "dev.code-workspace")
+
+        with pytest.raises(SystemExit) as stopped:
+            ras.run_ash_scan(
+                source_dir=plan.workspace_root,
+                output_dir=str(workspace["out"]),
+                mode=RunMode.container,
+                build=False,
+                workspace_plan=plan,
+            )
+
+        assert stopped.value.code == 3
+        assert [cmd for cmd in commands if cmd[1] == "run"] == []
+
     def test_a_policy_link_inside_the_workspace_is_read_through_src(
         self, workspace, commands
     ):

@@ -144,6 +144,9 @@ class ScanOptions(BaseModel):
     # config_overrides came from an MCP client (a workspace tool's), so a tool
     # config path they name is not the operator's (config/path_trust.py).
     client_overrides: bool = False
+    # --workspace-config as given, before links are followed; the plan holds the
+    # resolved path. Container mode checks the policy by this name.
+    workspace_config_as_named: Optional[str] = None
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -1746,12 +1749,23 @@ def _run_container_mode(
 
     # The policy the host resolved for the plan. The container resolves the workspace
     # again, and on its own it would find only a policy inside the root, so one named
-    # with --workspace-config elsewhere would not apply.
-    workspace_config = (
-        opts.workspace_plan.workspace_config_source
-        if opts.workspace_plan is not None
-        else None
-    )
+    # with --workspace-config elsewhere would not apply. It is handed over by the
+    # name it was given or found under, not the resolved path the plan holds, so a
+    # policy named inside the workspace's tree that links out of it is refused as an
+    # in-tree --config that links out is; the mount itself is of the real file.
+    workspace_config = None
+    plan = opts.workspace_plan
+    if plan is not None and plan.workspace_config_source is not None:
+        from automated_security_helper.workspace.policy import (
+            named_workspace_policy_path,
+        )
+
+        named = named_workspace_policy_path(
+            plan.workspace_root, opts.workspace_config_as_named
+        )
+        workspace_config = (
+            named.as_posix() if named is not None else plan.workspace_config_source
+        )
 
     if opts.run:
         # The inputs before the previous run's output: a scan refused for its config
@@ -3172,6 +3186,7 @@ def run_ash_scan(
     config_base_gate: Optional[Callable[[Path], bool]] = None,
     untrusted_config: bool = False,
     trusted_config_path: Optional[str] = None,
+    workspace_config_as_named: Optional[str] = None,
     *args,
     **kwargs,
 ):
@@ -3243,6 +3258,7 @@ def run_ash_scan(
         config_base_gate=config_base_gate,
         untrusted_config=untrusted_config,
         trusted_config_path=trusted_config_path,
+        workspace_config_as_named=workspace_config_as_named,
     )
 
     # Only the local orchestrator resolves with these. Container and nix mode run

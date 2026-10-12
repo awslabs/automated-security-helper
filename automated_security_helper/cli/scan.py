@@ -904,4 +904,5 @@ def run_ash_scan_cli_command(
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
         untrusted_config=config_from_scanned_repository,
+        workspace_config_as_named=workspace_config,
     )

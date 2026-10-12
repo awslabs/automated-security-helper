@@ -101,6 +101,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -382,6 +383,30 @@ def discover_workspace_policy_file(root: PathLike) -> Path | None:
         )
 
     return candidates[0].resolve()
+
+
+def named_workspace_policy_path(
+    root: PathLike, explicit: PathLike | None = None
+) -> Path | None:
+    """The policy file's path as it was named, made absolute, with no link followed.
+
+    ``--workspace-config`` as given, or else the one candidate discovery finds in
+    *root* or ``root/.ash``. :func:`discover_workspace_policy_file` and
+    :func:`resolve_workspace_policy` return the resolved path, which is the file
+    read; container mode needs the name too, to refuse a policy named inside the
+    workspace's tree that is a link to a file outside it. Call it after
+    :func:`resolve_workspace_policy` has accepted the policy: with several
+    candidates this returns the first, and that call has already refused them.
+    """
+    if explicit is not None:
+        return Path(os.path.abspath(explicit))
+    directory = Path(root)
+    for parent in (directory, directory / _POLICY_SUBDIR):
+        for name in WORKSPACE_POLICY_FILE_NAMES:
+            candidate = parent / name
+            if candidate.is_file():
+                return Path(os.path.abspath(candidate))
+    return None
 
 
 def _refuse_project_config_as_policy(
