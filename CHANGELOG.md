@@ -1020,8 +1020,10 @@
   zero-byte report when it cannot load its database. That file was read and graded,
   so both were `PASSED` with no findings and the scan exited 0, even with
   `--fail-on-findings` and the completeness gate on. The results file of such a run
-  is no longer read; the row is `ERROR`, keeps the exit code, and its error names the
-  code, the accepted set and the tool's stderr. Each target is judged by its own
+  is no longer graded; the row is `ERROR`, keeps the exit code, and its error names the
+  code, the accepted set and the tool's stderr, and quotes the error-level
+  notifications the results file holds (semgrep reports an unreadable rule file only
+  there) or names the files the tool wrote. Each target is judged by its own
   run's exit code, and its row reports that code: a target the scanner returns from
   before its tool runs (an empty converted tree, missing dependencies, or a target
   the sandbox refused) reports 0, where it had reported the previous target's code,

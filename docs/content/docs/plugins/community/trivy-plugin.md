@@ -194,7 +194,7 @@ The Trivy plugin integrates with ASH's unified reporting system, producing resul
 
 trivy-repo accepts only exit code 0 as a completed run. trivy exits 0 whether or not
 it found anything and 1 on an error, so a run that exits 1 is recorded `ERROR` and its
-results file is not read. An `exit-code` setting in the config file `TRIVY_CONFIG`
+results file is not graded. An `exit-code` setting in the config file `TRIVY_CONFIG`
 names, or in `TRIVY_EXIT_CODE`, makes a run with findings exit with that code; the
 scanner is then `ERROR` instead of reporting them. ASH decides the scan's exit code
 from the findings, so leave `exit-code` unset. A `trivy.yaml` in the scanned

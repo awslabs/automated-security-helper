@@ -49,6 +49,62 @@ from pathlib import Path
 # in the stderr log file, whose path the message names, so this bounds the
 # exception without losing anything.
 _STDERR_EXCERPT_LIMIT = 2000
+#: The largest results file a rejected run's notifications are read from.
+_NOTIFICATIONS_READ_LIMIT = 5 * 1024 * 1024
+
+
+def _error_notifications(results_file: Path) -> str:
+    """The text of the error-level toolExecutionNotifications in a SARIF file.
+
+    For a rejected run, to say why it failed; nothing read here is graded. Best
+    effort: a file that is missing, not a regular file, larger than
+    _NOTIFICATIONS_READ_LIMIT or not SARIF gives "". Opened without following a
+    link at its name. Truncated to _STDERR_EXCERPT_LIMIT, as stderr is.
+    """
+    import os
+    import stat
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(results_file, flags)
+    except OSError:
+        return ""
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            status = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or status.st_size > _NOTIFICATIONS_READ_LIMIT
+            ):
+                return ""
+            data = json.loads(handle.read().decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return ""
+
+    def items(value):
+        return value if isinstance(value, list) else []
+
+    texts = []
+    runs = data.get("runs") if isinstance(data, dict) else None
+    for run in items(runs):
+        invocations = run.get("invocations") if isinstance(run, dict) else None
+        for invocation in items(invocations):
+            notes = (
+                invocation.get("toolExecutionNotifications")
+                if isinstance(invocation, dict)
+                else None
+            )
+            for note in items(notes):
+                if not isinstance(note, dict) or note.get("level") != "error":
+                    continue
+                message = note.get("message")
+                text = message.get("text") if isinstance(message, dict) else None
+                if isinstance(text, str) and text.strip():
+                    texts.append(text.strip())
+    joined = " | ".join(texts)
+    if len(joined) > _STDERR_EXCERPT_LIMIT:
+        joined = joined[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+    return joined
 
 
 class ScannerPluginConfigBase(PluginConfigBase):
@@ -523,7 +579,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return
         rejected = ScannerError(
             f"its tool exited with code {self.exit_code}, which this scanner "
-            "does not accept as a completed run, so its results file is not read"
+            "does not accept as a completed run, so its results file is not graded"
         )
         if results_file is None:
             raise rejected
@@ -969,8 +1025,28 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             detail += f". Stderr: {stderr_text}"
         elif log_path is not None:
             detail += f". No stderr captured; checked {log_path.as_posix()}"
+            if not log_path.exists():
+                detail += ", which the tool did not write"
         else:
             detail += ". No stderr captured."
+
+        # A rejected run's results file is not graded, but a tool can say there
+        # why it failed: semgrep reports a rule file it cannot read as an
+        # error-level SARIF notification and writes nothing on stderr.
+        if not accepted and results_file is not None:
+            results_path = Path(results_file)
+            reported = _error_notifications(results_path)
+            if reported:
+                detail += f". {results_path.as_posix()} reports: {reported}"
+            elif not stderr_text:
+                stdout_log = (
+                    results_path.parent / f"{self.__class__.__name__}.stdout.log"
+                )
+                outputs = [
+                    p.as_posix() for p in (results_path, stdout_log) if p.exists()
+                ]
+                if outputs:
+                    detail += f". The tool's output is in {' and '.join(outputs)}"
 
         return detail
 

@@ -351,6 +351,52 @@ def test_sarif_with_no_run_is_an_error_row(plugin_context, monkeypatch, name, co
     assert any("no SARIF run" in str(error) for error in row.errors), row.errors
 
 
+def _sarif_with_notifications(*notifications) -> str:
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "tool", "rules": []}},
+                    "invocations": [
+                        {
+                            "executionSuccessful": False,
+                            "toolExecutionNotifications": [
+                                {"level": level, "message": {"text": text}}
+                                for level, text in notifications
+                            ],
+                        }
+                    ],
+                    "results": [],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "name, exit_code", [("semgrep", 7), ("opengrep", 7), ("ferret-scan", 1)]
+)
+def test_a_rejected_run_quotes_the_errors_its_results_file_reports(
+    plugin_context, monkeypatch, name, exit_code
+):
+    """semgrep reports a rule file it cannot read in its SARIF, not on stderr."""
+    content = _sarif_with_notifications(
+        ("error", "Invalid YAML file rules/example.yml: mapping values not allowed"),
+        ("warning", "a warning that is not the cause"),
+    )
+
+    row = _row_with(plugin_context, monkeypatch, name, exit_code, content)
+
+    assert row.status == ScannerStatus.ERROR
+    text = " ".join(str(error) for error in row.errors)
+    assert "Invalid YAML file rules/example.yml" in text, row.errors
+    assert "a warning that is not the cause" not in text
+    assert "results_sarif.sarif" in text or "ferret-scan.sarif" in text, (
+        "the error names the results file the notifications came from"
+    )
+
+
 def _row_with(plugin_context, monkeypatch, name: str, exit_code: int, content: str):
     return _rows(plugin_context, monkeypatch, name, [(exit_code, content)])["source"]
 

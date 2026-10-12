@@ -132,7 +132,7 @@ says, and its error says how to create the database.
 A scanner's row is `ERROR`, and its error names the tool's exit code:
 
 ```
-Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not read (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). Stderr: ...
+Failed to execute semgrep scanner on source: SemgrepScanner scan failed: its tool exited with code 7, which this scanner does not accept as a completed run, so its results file is not graded (exit code 7: not an accepted exit code; success_exit_codes=[0, 1]). No stderr captured; checked .ash/ash_output/scanners/semgrep/source/SemgrepScanner.stderr.log, which the tool did not write. .ash/ash_output/scanners/semgrep/source/results_sarif.sarif reports: Invalid YAML file ...
 ```
 
 **Cause**
@@ -175,8 +175,12 @@ detect-secrets and cdk-nag run in ASH's own worker processes.
 
 **Fix**
 
-Read the stderr in the message, or the `<Scanner>.stderr.log` it names under
-`scanners/<name>/<target>/` in the output directory, and fix what the tool reported.
+Read what the message quotes, and fix what the tool reported: its stderr, or, when
+it wrote none (semgrep and opengrep report a rule file they cannot read only in
+their SARIF), the error-level notifications from its results file, which the
+message names. The full text is in the `<Scanner>.stderr.log`, the
+`<Scanner>.stdout.log` and the results file under `scanners/<name>/<target>/` in the
+output directory; the message names the ones the tool wrote.
 For semgrep and opengrep under `--offline`, see
 [Seeding the semgrep and opengrep rule cache](advanced-usage.md#seeding-the-semgrep-and-opengrep-rule-cache).
 For grype, see [Grype Cannot Fetch Vulnerability Database](#grype-cannot-fetch-vulnerability-database).
