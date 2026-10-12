@@ -20,6 +20,9 @@ with the tool replaced by a recorder that reads the file it was handed. They che
 where the file is and what it holds, that the directory holding it is private while
 the tool runs and gone afterwards, that a link at the old path is not written
 through, and what a sandboxed scanner may do with the directory.
+
+cfn-guard is handed a copy of each of the operator's rules files ASH read, and
+the same directory holds those copies (the tests at the end of this module).
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -46,9 +49,14 @@ from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.phases import scanner_executor
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sandbox.backends import SpawnPlan
-from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.policy import (
+    SandboxPolicy,
+    SandboxRequirements,
+)
 from automated_security_helper.utils.sandbox.scope import SandboxScope
+from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
 PluginContext.model_rebuild()
@@ -339,7 +347,9 @@ class _Tool:
         return {"returncode": 0, "stdout": self.case.stdout, "stderr": ""}
 
 
-def _run_through_the_executor(context: PluginContext, case: Case, scanner: Any):
+def _run_through_the_executor(
+    context: PluginContext, case: "Case | CopyCase", scanner: Any
+):
     executor = ScannerExecutor(
         plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
     )
@@ -552,3 +562,221 @@ def test_constructing_ferret_scan_writes_no_config(
         p for p in temp.iterdir() if p.name.startswith(TOOL_CONFIG_DIR_PREFIX)
     ] == []
     assert not (Path(scanner.results_dir) / case.old_name).exists()
+
+
+# --------------------------------------------------------------------------- #
+# Copies of files ASH read, handed to the tool in their place
+# --------------------------------------------------------------------------- #
+
+#: The operator's cfn-guard rules, in a file outside the scanned tree.
+_OPERATOR_RULES = "rule mine { }\n"
+
+
+@dataclass(frozen=True)
+class CopyCase:
+    """One scanner whose tool is handed a copy of a file ASH read."""
+
+    scanner: str
+    #: Under the scanner's results directory, where the copies used to be.
+    old_dir: str
+    #: Writes what the scan needs and returns the scanner, set up by the operator.
+    setup: Callable[[Path, PluginContext, pytest.MonkeyPatch], Any]
+    #: The copy one tool run is handed, from its argv and working directory and
+    #: the source directory; None for a run handed none.
+    copy_in: Callable[[List[str], Optional[Path], Path], Optional[Path]]
+    #: What the tool prints. A tool that writes a report writes it here.
+    respond: Callable[[List[str]], str]
+    #: What the copy holds: what ASH read.
+    expected: str
+
+    def __str__(self) -> str:
+        return self.scanner
+
+
+def _cfn_guard(
+    tmp_path: Path, context: PluginContext, monkeypatch: pytest.MonkeyPatch
+) -> Any:
+    """cfn-guard with only the operator's own rules, a file outside the tree."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
+        CfnGuardScanner,
+        CfnGuardScannerConfig,
+        CfnGuardScannerConfigOptions,
+    )
+
+    (Path(context.source_dir) / "template.yaml").write_text(_TEMPLATE, encoding="utf-8")
+    rules = tmp_path / "operator" / "mine.guard"
+    rules.parent.mkdir()
+    rules.write_text(_OPERATOR_RULES, encoding="utf-8")
+    monkeypatch.setattr(
+        CfnGuardScanner, "validate_plugin_dependencies", lambda self: True
+    )
+    return CfnGuardScanner(
+        context=context,
+        config=CfnGuardScannerConfig(
+            options=CfnGuardScannerConfigOptions(
+                rule_sets=[], rules_paths=[rules.as_posix()]
+            )
+        ),
+    )
+
+
+def _cfn_guard_copy(
+    argv: List[str], cwd: Optional[Path], source: Path
+) -> Optional[Path]:
+    """The copy of the operator's rules file, the one ``--rules`` cfn-guard gets."""
+    return _config_arg(argv, "--rules")
+
+
+def _cfn_guard_respond(argv: List[str]) -> str:
+    """cfn-guard prints its SARIF; no rule failed."""
+    return _EMPTY_SARIF
+
+
+COPY_CASES = [
+    CopyCase(
+        "cfn-guard",
+        "source/cfn-guard-rules",
+        _cfn_guard,
+        _cfn_guard_copy,
+        _cfn_guard_respond,
+        _OPERATOR_RULES,
+    ),
+]
+
+
+def _copy_context(tmp_path: Path) -> PluginContext:
+    """``_context``, with every setting the operator's."""
+    context = _context(tmp_path)
+    record_provenance(context.config, in_tree=[], trusted=AshConfig())
+    return context
+
+
+def _run_dir(path: Path) -> Optional[Path]:
+    """The scanner run's directory ``path`` is in (``utils/tool_config_dir``)."""
+    for parent in path.parents:
+        if parent.name.startswith(TOOL_CONFIG_DIR_PREFIX):
+            return parent
+    return None
+
+
+class _CopyTool:
+    """Stands in for the tool and reads each copy it is handed."""
+
+    def __init__(self, case: CopyCase, source: Path):
+        self.case = case
+        self.source = source
+        self.copies: List[SimpleNamespace] = []
+
+    def __call__(self, command: List[str], *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        argv = [str(a) for a in command]
+        cwd = kwargs.get("cwd")
+        copy = self.case.copy_in(argv, Path(cwd) if cwd else None, self.source)
+        if copy is not None:
+            self.copies.append(
+                SimpleNamespace(path=copy, text=copy.read_text(encoding="utf-8"))
+            )
+        return {"returncode": 0, "stdout": self.case.respond(argv), "stderr": ""}
+
+
+@pytest.mark.parametrize("case", COPY_CASES, ids=str)
+def test_the_copies_a_tool_is_handed_are_outside_the_scanned_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: CopyCase
+) -> None:
+    context = _copy_context(tmp_path)
+    scanner = case.setup(tmp_path, context, monkeypatch)
+    tool = _CopyTool(case, Path(context.source_dir))
+    with patch.object(scanner, "_run_subprocess", side_effect=tool):
+        _run_through_the_executor(context, case, scanner)
+
+    assert len(tool.copies) == 1, scanner.errors
+    (copy,) = tool.copies
+    assert not in_scanned_tree(copy.path, context.source_dir), copy.path
+    assert not copy.path.is_relative_to(Path(context.output_dir).resolve())
+    run_dir = _run_dir(copy.path)
+    assert run_dir is not None, copy.path
+    assert copy.text == case.expected
+    assert not copy.path.exists()
+    assert not run_dir.exists()
+    assert not (Path(scanner.results_dir) / case.old_dir).exists()
+
+
+class _CopyRecordingBackend:
+    """A sandbox backend that records the policy of each run handed a copy."""
+
+    name = "recording"
+
+    def __init__(self, case: CopyCase, source: Path):
+        self.case = case
+        self.source = source
+        self.copies: List[SimpleNamespace] = []
+
+    def plan(
+        self, argv: List[str], env: Dict[str, str], policy: SandboxPolicy
+    ) -> SpawnPlan:
+        argv = [str(a) for a in argv]
+        copy = self.case.copy_in(argv, policy.cwd, self.source)
+        if copy is not None:
+            # Measured now, while the run's directory exists.
+            run_dir = _run_dir(copy)
+            self.copies.append(
+                SimpleNamespace(
+                    path=copy,
+                    run_dir=run_dir,
+                    run_dir_mode=(
+                        None
+                        if run_dir is None
+                        else stat.S_IMODE(os.lstat(run_dir).st_mode)
+                    ),
+                    readable=_inside(copy, policy.read_only),
+                    writable=_inside(copy, policy.writable),
+                    cached=_inside(copy, policy.cache),
+                    executable=(
+                        run_dir is not None
+                        and _real(run_dir) in {_real(p) for p in policy.executable}
+                    ),
+                )
+            )
+        stdout = self.case.respond(argv)
+        return SpawnPlan(
+            argv=[sys.executable, "-c", "import sys; sys.stdout.write(sys.argv[1])"]
+            + [stdout],
+            env=dict(env),
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no sandbox backend on Windows")
+@pytest.mark.parametrize("case", COPY_CASES, ids=str)
+def test_a_sandboxed_tool_may_read_its_copies_and_not_write_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: CopyCase
+) -> None:
+    monkeypatch.setenv("ASH_OFFLINE", "true")
+    context = _copy_context(tmp_path)
+    scanner = case.setup(tmp_path, context, monkeypatch)
+    backend = _CopyRecordingBackend(case, Path(context.source_dir))
+
+    def scope(plugin: Any, plugin_context: PluginContext, target: Path) -> SandboxScope:
+        return SandboxScope(
+            backend=backend,  # type: ignore[arg-type]
+            scanner_name=case.scanner,
+            requirements=getattr(plugin, "sandbox_requirements", SandboxRequirements()),
+            source_dir=Path(plugin_context.source_dir),
+            output_dir=Path(plugin_context.output_dir),
+            results_dir=Path(plugin.results_dir),
+            scan_target=Path(target),
+            offline=True,
+        )
+
+    monkeypatch.setattr(scanner_executor, "scanner_sandbox_scope", scope)
+    _run_through_the_executor(context, case, scanner)
+
+    assert len(backend.copies) == 1, scanner.errors
+    (copy,) = backend.copies
+    assert copy.run_dir is not None, copy.path
+    assert copy.run_dir_mode == 0o700
+    assert copy.readable
+    assert not copy.writable
+    assert not copy.cached
+    # Data, never a place programs run from (sandbox-exec restricts exec).
+    assert not copy.executable
+    assert not in_scanned_tree(copy.path, context.source_dir)
+    assert not copy.path.exists()

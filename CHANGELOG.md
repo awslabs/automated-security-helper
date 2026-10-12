@@ -1270,7 +1270,8 @@
   running the tool. With `rules_paths` ignored and `rule_sets` empty,
   cfn-guard falls back to `wa-Security-Pillar`. In an operator's rules directory, a
   rules file that resolves outside it through a symlink is refused, and cfn-guard
-  is given copies of the files ASH read. gitleaks runs with
+  is given copies of the files ASH read, written outside the scanned tree in the
+  same per-run directory as the config files ASH writes for a tool. gitleaks runs with
   `--ignore-gitleaks-allow` and zizmor with `--no-ignores`, so `gitleaks:allow`
   and `# zizmor: ignore[...]` comments apply only when the operator sets that
   scanner's `honor_inline_ignores`. Tool output quoted in a scanner's error

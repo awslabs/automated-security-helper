@@ -37,6 +37,7 @@ from pydantic import ValidationError
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
     DEFAULT_RULE_SET,
     VIOLATION_LEVEL,
@@ -53,6 +54,7 @@ from automated_security_helper.utils.rules_bundles import (
     RulesBundleUnavailable,
 )
 from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
 FIXTURES = (
@@ -781,9 +783,9 @@ class TestScan:
     def test_cfn_guard_is_given_a_copy_of_what_was_checked(
         self, repo, rules_root, ash_temp_path
     ):
-        """The operator's rules reach cfn-guard as copies in the results
-        directory, so a link swapped in after the check is never followed, and
-        a link that left the directory is not passed at all."""
+        """The operator's rules reach cfn-guard as copies outside the scanned
+        tree, so a link swapped in after the check is never followed, and a
+        link that left the directory is not passed at all."""
         _fake_bundle(rules_root)
         not_a_rule = ash_temp_path / "elsewhere" / "notes.txt"
         not_a_rule.parent.mkdir()
@@ -792,12 +794,13 @@ class TestScan:
         mine.mkdir()
         (mine / "mine.guard").write_text("rule mine { }\n")
         _symlink_or_skip(mine / "leak.guard", not_a_rule)
-        given = []
+        given = {}
 
         def fake(command, **kwargs):
-            given.extend(
-                Path(a.split("=", 1)[1]) for a in command if a.startswith("--rules=")
-            )
+            for arg in command:
+                if arg.startswith("--rules="):
+                    path = Path(arg.split("=", 1)[1])
+                    given[path] = (path.is_symlink(), path.read_bytes())
             return {
                 "returncode": 0,
                 "stdout": CAPTURED_COMPLIANT.read_text(),
@@ -806,12 +809,65 @@ class TestScan:
 
         scanner = _scanner(repo, rules_paths=[str(mine)])
         self._run(scanner, fake)
-        operator_given = {p for p in given if "aws-guard-rules-registry" not in str(p)}
-        assert operator_given, given
+        operator_given = {
+            p: seen
+            for p, seen in given.items()
+            if "aws-guard-rules-registry" not in str(p)
+        }
+        assert list(operator_given.values()) == [(False, b"rule mine { }\n")], given
         for path in operator_given:
-            assert path.is_relative_to(Path(scanner.results_dir)), path
-            assert not path.is_symlink()
-            assert path.read_text() == "rule mine { }\n"
+            assert not path.resolve().is_relative_to(repo.resolve()), path
+            assert path.parent.name.startswith(TOOL_CONFIG_DIR_PREFIX), path
+
+    def test_a_copy_holds_the_bytes_that_were_read(
+        self, repo, rules_root, ash_temp_path
+    ):
+        """Bytes that are not UTF-8 reach cfn-guard as they were (surrogateescape
+        on the way in and out); only a CRLF line ending becomes LF."""
+        mine = ash_temp_path / "operator" / "mine.guard"
+        mine.parent.mkdir()
+        mine.write_bytes(b"rule mine { }\r\n# caf\xe9 \xff\n")
+        given = []
+
+        def fake(command, **kwargs):
+            given.extend(
+                Path(a.split("=", 1)[1]).read_bytes()
+                for a in command
+                if a.startswith("--rules=")
+            )
+            return {
+                "returncode": 0,
+                "stdout": CAPTURED_COMPLIANT.read_text(),
+                "stderr": "",
+            }
+
+        self._run(_scanner(repo, rule_sets=[], rules_paths=[str(mine)]), fake)
+        assert given == [b"rule mine { }\n# caf\xe9 \xff\n"] * 2
+
+    def test_a_copy_that_cannot_be_written_fails_the_scan(
+        self, repo, rules_root, ash_temp_path, monkeypatch
+    ):
+        """cfn-guard is not run without the operator's rules it was to evaluate."""
+        import errno
+
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            cfn_guard_scanner as module,
+        )
+
+        def full_disk(*args, **kwargs):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(module, "write_tool_config", full_disk)
+        mine = ash_temp_path / "operator" / "mine.guard"
+        mine.parent.mkdir()
+        mine.write_text("rule mine { }\n")
+        calls = []
+        with pytest.raises(ScannerError, match="No space left on device"):
+            self._run(
+                _scanner(repo, rule_sets=[], rules_paths=[str(mine)]),
+                lambda command, **kwargs: calls.append(command),
+            )
+        assert calls == []
 
     def test_one_failing_template_does_not_cost_the_others(self, repo, rules_root):
         _fake_bundle(rules_root)

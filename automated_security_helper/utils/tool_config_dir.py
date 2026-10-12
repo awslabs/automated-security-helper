@@ -10,7 +10,9 @@ from the scanned tree unless they are given one, so ASH always gives one: the
 operator's, or a file ASH writes that sets nothing
 (``config/tool_config_trust.empty_tool_config``). A tool that loads what a
 directory holds (trivy-repo's modules directory) gets an empty one the same way
-(``empty_tool_directory``, :func:`make_tool_config_directory`). Those used to be written in
+(``empty_tool_directory``, :func:`make_tool_config_directory`). cfn-guard is
+handed copies of the operator's rules files ASH read, which are written here
+too. Those used to be written in
 the scanner's results directory. That is under the output directory, which
 defaults to ``<source>/.ash/ash_output``, so the file sat inside the tree being
 scanned, at a path the scanned repository could already occupy with a committed
@@ -285,7 +287,9 @@ def _run_directory(name: str, context: Any) -> Path:
     return holder.directory()
 
 
-def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
+def write_tool_config(
+    name: str, content: str, *, context: Any = None, errors: str = "strict"
+) -> Path:
     """Write ``content`` as ``name`` in the run's directory and return its path.
 
     The file is created, never opened as an existing one, and a link at its name is
@@ -299,6 +303,9 @@ def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
         context: The scanner's PluginContext, for a run outside a scope: the file
             then gets a directory of its own, outside that context's scanned tree,
             removed when the process exits.
+        errors: How ``content`` is encoded to UTF-8, as for ``open``.
+            ``surrogateescape`` writes back the bytes of a file that was read
+            with it (cfn-guard's copies of the operator's rules).
     """
     directory = _run_directory(name, context)
     path = directory / name
@@ -307,7 +314,7 @@ def write_tool_config(name: str, content: str, *, context: Any = None) -> Path:
     except FileExistsError:
         path = Path(tempfile.mkdtemp(dir=directory)) / name
         fd = os.open(path, _CREATE_FLAGS, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+    with os.fdopen(fd, "w", encoding="utf-8", errors=errors, newline="") as handle:
         handle.write(content)
     return path
 

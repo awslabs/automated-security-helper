@@ -108,8 +108,9 @@ it needs.
 - The config files ASH writes for a scanner's tool (the empty config bandit, grype,
   syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name
   none, gitleaks' default-rules config, trivy's and trivy-repo's empty ignore file
-  and secret config, and the empty directories ASH passes trivy-repo as its modules
-  directory and gitleaks as its ignore path) are in a directory of that scanner run's own, outside the
+  and secret config, the empty directories ASH passes trivy-repo as its modules
+  directory and gitleaks as its ignore path, and the copies of your `rules_paths`
+  files ASH gives cfn-guard) are in a directory of that scanner run's own, outside the
   scanned tree (normally in the system temporary directory, never under one another
   account can change), made with mode 0700 and removed when the run ends. The
   scanner can read it and cannot write to it. Under sandbox-exec, the one backend
@@ -324,7 +325,8 @@ The community scanners declare theirs:
 - ferret-scan asks only for its `FERRET_` variables.
 
 A file outside the source tree that a scanner option names is not mounted (cfn-guard's
-`rules_paths` needs no mount: ASH copies those rules into the results directory): a
+`rules_paths` needs no mount: ASH copies those rules into the scanner run's own
+directory above): a
 `config_file` of actionlint, gitleaks, cfn-lint,
 zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
 `secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or a

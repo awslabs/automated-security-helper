@@ -34,8 +34,9 @@ ignored with a warning, and an empty ``rule_sets`` then falls back to the defaul
 set rather than leaving nothing to evaluate. ASH expands a directory itself, as
 cfn-guard would (``.guard`` and ``.ruleset`` files at any depth), refuses a file that
 resolves outside the directory the operator named, reads each one through
-``utils/scanned_tree.open_in_scanned_tree`` and gives cfn-guard a copy in the
-results directory. See ``CfnGuardScanner._operator_rules``.
+``utils/scanned_tree.open_in_scanned_tree`` and gives cfn-guard a copy, written in
+the scanner run's own directory outside the scanned tree
+(``utils/tool_config_dir``). See ``CfnGuardScanner._operator_rules``.
 
 Which files it reads
 --------------------
@@ -126,6 +127,7 @@ from automated_security_helper.utils.scanned_tree import (
     open_in_scanned_tree,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.tool_config_dir import write_tool_config
 from automated_security_helper.utils.tool_downloads import get_rules_bundle
 
 #: The registry bundle the bundled ``rule_sets`` come from.
@@ -156,9 +158,6 @@ _RULE_SET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 #: The files cfn-guard 3.2.1 reads from a ``cfn-guard --rules`` directory, case-sensitively
 #: (measured: ``x.ruleset`` read, ``UP.GUARD`` and ``x.txt`` not).
 _RULE_SUFFIXES = (".guard", ".ruleset")
-
-#: Under the results directory, where the operator's rules are copied for cfn-guard.
-_STAGED_RULES_DIR = "cfn-guard-rules"
 
 
 @dataclass(frozen=True)
@@ -253,7 +252,9 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         every ``--rules`` path would be missing inside the sandbox. A property
         because the location is read from the environment at scan time, as
         ``rule_files`` reads it. ``rules_paths`` needs no grant: ASH reads the
-        operator's rules itself and gives cfn-guard a copy in the results directory.
+        operator's rules itself and gives cfn-guard a copy in the scanner run's
+        own directory, which the sandbox grants read-only to the run it belongs
+        to (``utils/sandbox/scope.prepare_spawn``).
         """
         return SandboxRequirements(read_paths=(rules_root().as_posix(),))
 
@@ -433,7 +434,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 f"{exc.strerror or exc}"
             ) from exc
         # surrogateescape keeps every byte, and the copy is written back the same
-        # way; only line endings become the platform's.
+        # way; only a CRLF line ending becomes LF.
         text = raw.decode("utf-8", errors="surrogateescape")
         return _RuleFile(path=path, content=text.replace("\r\n", "\n"))
 
@@ -504,21 +505,30 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
         """
         return [rule.path for rule in self._selected_rules()]
 
-    @staticmethod
-    def _rules_arguments(rules: List[_RuleFile], staging: Path) -> List[str]:
+    def _rules_arguments(self, rules: List[_RuleFile]) -> List[str]:
         """``--rules`` for each rule: a bundled file by path, an operator's as a copy.
 
-        The copies are named by position, so two files of the same name in
-        different directories stay apart. cfn-guard's SARIF names rules by rule
-        name, not by file (measured with 3.2.1), so the findings are the same.
+        The copies are written in the scanner run's own directory outside the
+        scanned tree, new for the run and removed when it ends
+        (``utils/tool_config_dir``), not in the results directory, which is
+        inside the tree with the default output directory. They are named by
+        position, so two files of the same name in different directories stay
+        apart. cfn-guard's SARIF names rules by rule name, not by file (measured
+        with 3.2.1), so the findings are the same.
+
+        Raises:
+            OSError: a copy could not be written. ``scan`` fails the scan with it.
         """
         arguments: List[str] = []
         for index, rule in enumerate(rules):
             path = rule.path
             if rule.content is not None:
-                path = staging / f"{index:03d}-{rule.path.name}"
-                with open_for_write(path, errors="surrogateescape") as handle:
-                    handle.write(rule.content)
+                path = write_tool_config(
+                    f"{index:03d}-{rule.path.name}",
+                    rule.content,
+                    context=self.context,
+                    errors="surrogateescape",
+                )
             arguments.append(f"--rules={path.as_posix()}")
         return arguments
 
@@ -662,9 +672,8 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             if self.results_dir is None:
                 raise ScannerError("cfn-guard has no results directory")
             results_dir = self.results_dir.joinpath(target_type)
-            staging = results_dir.joinpath(_STAGED_RULES_DIR)
-            staging.mkdir(parents=True, exist_ok=True)
-            rule_args = self._rules_arguments(selected, staging)
+            results_dir.mkdir(parents=True, exist_ok=True)
+            rule_args = self._rules_arguments(selected)
             discovery = discover_templates(self.context, target_type)
             for shown, reason in discovery.refused:
                 # Not read, so not known to be CloudFormation: skipped and named, as
