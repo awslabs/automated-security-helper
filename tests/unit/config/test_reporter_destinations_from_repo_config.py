@@ -646,10 +646,10 @@ def test_off_by_default_an_in_tree_config_cannot_enable_it(
 def test_off_by_default_a_delivered_config_cannot_enable_it(
     tmp_path, ash_log, defaults_off, reporter
 ):
-    """Refused under the default denied_paths, and kept off under a policy that
-    does not deny the field: the confinement holds on its own."""
-    from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.config.client_config_policy import rules_from
+    """Refused under the default denied_paths, and under a policy that lists
+    nothing of its own as well: a reporter that sends findings off the host is
+    denied whole whatever the list (ALWAYS_DENIED_PATHS). The confinement on its
+    own is covered by the in-tree route above."""
     from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
 
     upload = _write_config(
@@ -662,27 +662,14 @@ def test_off_by_default_a_delivered_config_cannot_enable_it(
         resolve_config(config_path=upload, source_dir=source, untrusted_config=True)
     assert f"reporters.{reporter}.enabled" in str(refused.value)
 
-    narrow = rules_from(
-        AshConfig.model_validate(
-            {
-                "global_settings": {
-                    "mcp": {
-                        "runtime_overrides": {
-                            "denied_paths": ["/fail_on_findings"],
-                            "replace_default_denied_paths": True,
-                        }
-                    }
-                }
-            }
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(
+            config_path=upload,
+            source_dir=source,
+            untrusted_config=True,
+            client_config_policy=_narrow_client_rules(),
         )
-    )
-    config = resolve_config(
-        config_path=upload,
-        source_dir=source,
-        untrusted_config=True,
-        client_config_policy=narrow,
-    )
-    assert _enabled(config, reporter) is False
+    assert f"reporters.{reporter}.enabled" in str(refused.value)
 
 
 #: A section that sets an option a repository's config may still set, and no
@@ -697,8 +684,9 @@ _OPTIONS_ONLY: Dict[str, dict] = {
 
 
 def _narrow_client_rules():
-    """A client policy that denies none of the reporter fields, so a delivered
-    section reaches the confinement rather than being refused first."""
+    """A client policy that lists none of the reporter fields itself. The
+    sections of the reporters that send findings off the host are still denied
+    whole (ALWAYS_DENIED_PATHS)."""
     from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.client_config_policy import rules_from
 
@@ -727,9 +715,12 @@ def test_every_off_host_reporter_has_an_options_only_section():
 def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_off(
     tmp_path, ash_log, reporter, route
 ):
-    """The section's reporter would be built from its own default, which is on:
-    the operator's off still holds, and since the section wrote no ``enabled``,
-    nothing about ``enabled`` is warned."""
+    """The operator's off holds, and since the section wrote no ``enabled``,
+    nothing about ``enabled`` is warned. A delivered section that sets an option
+    is refused, as the reporter's whole section is denied to a client
+    (ALWAYS_DENIED_PATHS); one that sets nothing is resolved."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
     section = {reporter: _OPTIONS_ONLY[reporter]}
     source = tmp_path / "repo"
     source.mkdir()
@@ -742,6 +733,17 @@ def test_a_section_without_enabled_does_not_turn_on_a_reporter_the_operator_has_
             "untrusted_config": True,
             "client_config_policy": _narrow_client_rules(),
         }
+        if _OPTIONS_ONLY[reporter]["options"]:
+            with pytest.raises(
+                ASHConfigFieldDeniedError, match=f"reporters.{reporter}"
+            ):
+                resolve_config(
+                    config_path=written,
+                    source_dir=source,
+                    trusted_config_path=_operator_off(tmp_path, reporter),
+                    **delivered,
+                )
+            return
 
     config = resolve_config(
         config_path=written,

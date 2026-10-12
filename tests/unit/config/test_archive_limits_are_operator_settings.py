@@ -320,49 +320,52 @@ class TestRepositoryConfig:
 
 
 class TestClientSuppliedConfig:
-    """A config an MCP client uploaded is resolved with ``untrusted_config``."""
+    """A config an MCP client uploaded is resolved with ``untrusted_config``.
+
+    The extraction limits are in the denied_paths every policy holds
+    (ALWAYS_DENIED_PATHS), so an upload that sets one is refused, naming it,
+    rather than resolved with the trusted value (client_config_policy).
+    """
 
     def test_an_uploaded_config_cannot_raise_the_limits_above_the_defaults(
-        self, layout, monkeypatch
+        self, layout
     ):
+        from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
         tree, outside = layout
         upload = outside / "uploaded.yaml"
         upload.write_text(options_yaml(RAISED, project_name="uploaded"))
-        archive = declared_archive(tree)
 
-        config = resolve_config(
-            config_path=upload,
-            source_dir=tree,
-            scanned_root=tree,
-            untrusted_config=True,
-        )
-        converter, results = convert_with(config, tree, archive, monkeypatch)
-
-        assert config.project_name == "uploaded", "the uploaded config was not used"
-        assert_refused(converter, results, archive)
+        with pytest.raises(ASHConfigFieldDeniedError) as refused:
+            resolve_config(
+                config_path=upload,
+                source_dir=tree,
+                scanned_root=tree,
+                untrusted_config=True,
+            )
+        for option in RAISED:
+            assert option in str(refused.value), refused.value
 
     @pytest.mark.parametrize("option, trusted, raised, members", LIMIT_CASES)
     def test_an_uploaded_config_cannot_raise_a_limit_above_ash_config(
         self, option, trusted, raised, members, layout, monkeypatch
     ):
+        from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
         tree, outside = layout
         operator = outside / "ash.yaml"
         operator.write_text(options_yaml({option: trusted}, project_name="operator"))
         monkeypatch.setenv("ASH_CONFIG", str(operator))
         upload = outside / "uploaded.yaml"
         upload.write_text(options_yaml({option: raised}, project_name="uploaded"))
-        archive = tree / "a.zip"
-        archive.write_bytes(zip_bytes(members))
 
-        config = resolve_config(
-            config_path=upload,
-            source_dir=tree,
-            scanned_root=tree,
-            untrusted_config=True,
-        )
-        converter, results = convert_with(config, tree, archive, monkeypatch)
-
-        assert_refused(converter, results, archive, option)
+        with pytest.raises(ASHConfigFieldDeniedError, match=option):
+            resolve_config(
+                config_path=upload,
+                source_dir=tree,
+                scanned_root=tree,
+                untrusted_config=True,
+            )
 
 
 class TestWorkspaceProjectConfig:

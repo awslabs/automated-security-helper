@@ -201,6 +201,37 @@ def _scan(
     return json.loads(results.read_text(encoding="utf-8"))
 
 
+def _refused_scan(repo: Path, out: Path, *, offline: bool, config: Path) -> object:
+    """Run the scan ``_scan`` runs with a config an MCP client supplied; its exit code.
+
+    Such a config that sets detect-secrets' settings is refused before anything
+    runs: the scanner's section is denied whole to a client
+    (ALWAYS_DENIED_PATHS), so no verification can be configured through it.
+    """
+    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+    try:
+        run_ash_scan(
+            source_dir=str(repo),
+            output_dir=str(out),
+            config=str(config),
+            offline=offline,
+            scanners=["detect-secrets"],
+            strategy=ExecutionStrategy.SEQUENTIAL,
+            progress=False,
+            fail_on_findings=False,
+            fail_on_incomplete_scanners=False,
+            show_summary=False,
+            quiet=True,
+            color=False,
+            untrusted_config=True,
+        )
+    except SystemExit as exited:
+        assert not (out / "ash_aggregated_results.json").exists()
+        return exited.code
+    raise AssertionError("the scan ran with the client's detect-secrets settings")
+
+
 def _workspace_scan(root: Path, out: Path, *, offline: bool, project: str) -> dict:
     """Run a workspace-mode scan of ``root`` with one project, detect-secrets only.
 
@@ -315,16 +346,10 @@ class TestOfflineScanSendsNoVerificationRequest:
     ):
         delivered = _write_ash_config(tmp_path / "delivered" / "ash.yaml", _settings())
 
-        results = _scan(
-            repo,
-            tmp_path / "out",
-            offline=True,
-            config=delivered,
-            untrusted_config=True,
-        )
+        code = _refused_scan(repo, tmp_path / "out", offline=True, config=delivered)
 
+        assert code == 3
         assert _issuer_requests(recorder) == [], recorder.requests
-        _assert_key_still_reported(results)
 
     def test_workspace_project_config_enabling_verification(
         self, recorder, repo, tmp_path, elsewhere
@@ -437,18 +462,12 @@ class TestOnlyTheOperatorEnablesVerification:
     ):
         delivered = _write_ash_config(tmp_path / "delivered" / "ash.yaml", _settings())
 
-        results = _scan(
-            repo,
-            tmp_path / "out",
-            offline=False,
-            config=delivered,
-            untrusted_config=True,
-        )
+        code = _refused_scan(repo, tmp_path / "out", offline=False, config=delivered)
 
+        assert code == 3
         assert _issuer_requests(recorder) == [], (
             f"an MCP client's config enabled secret verification: {recorder.requests}"
         )
-        _assert_key_still_reported(results)
 
     def test_workspace_project_config_cannot_enable_verification(
         self, recorder, repo, tmp_path, elsewhere

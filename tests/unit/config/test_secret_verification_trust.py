@@ -117,14 +117,16 @@ def test_a_repository_config_is_refused_even_without_the_filter(repo):
 
 
 def test_an_mcp_client_config_cannot_turn_verification_on(repo, tmp_path):
+    """Refused, naming the setting: detect-secrets' section is denied whole to a
+    client, as it sends candidate secrets off the host (ALWAYS_DENIED_PATHS)."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
     delivered = _config_file(tmp_path / "delivered" / "ash.yaml", VERIFYING_SETTINGS)
 
-    config = resolve_config(
-        config_path=delivered, source_dir=repo, untrusted_config=True
-    )
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=delivered, source_dir=repo, untrusted_config=True)
 
-    assert not names_verification(config)
-    assert _record(config) is not None
+    assert "scanners.detect-secrets" in str(refused.value)
 
 
 def test_an_operator_config_outside_the_tree_turns_it_on(repo, tmp_path):

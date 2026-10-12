@@ -205,7 +205,11 @@ def test_an_installed_module_in_a_virtualenv_inside_a_checkout_is_refused(
     assert f"the git checkout at {project.absolute().as_posix()}" in reason
 
 
-def test_an_uploaded_config_outside_every_checkout_cannot_grant(tmp_path, caplog):
+def test_an_uploaded_config_outside_every_checkout_cannot_grant(tmp_path):
+    """Refused, naming each grant: a file a client supplied that widens the
+    sandbox is refused rather than confined (client_config_policy)."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
     upload = tmp_path / "upload" / "ash.yaml"
     upload.parent.mkdir()
     upload.write_text(
@@ -214,16 +218,12 @@ def test_an_uploaded_config_outside_every_checkout_cannot_grant(tmp_path, caplog
     )
     target = tmp_path / "target"
     target.mkdir()
-    caplog.set_level("WARNING")
-    sandbox = resolve_config(
-        config_path=upload, source_dir=target, untrusted_config=True
-    ).sandbox
-    assert sandbox.network_scanners is None
-    assert sandbox.extra_read_paths == []
-    # The warning gives the reason that applies: a client supplied the file.
-    assert any(
-        "MCP client supplied" in record.getMessage() for record in caplog.records
-    )
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=upload, source_dir=target, untrusted_config=True)
+    # The refusal gives the reason that applies: a client supplied the file.
+    assert "came from an MCP client" in str(refused.value)
+    assert "sandbox.network_scanners" in str(refused.value)
+    assert "sandbox.extra_read_paths" in str(refused.value)
 
 
 def _plugin_package(root: Path, name: str) -> None:
@@ -257,6 +257,19 @@ def test_one_config_is_confined_by_both_rules(tmp_path, monkeypatch, supplied_by
         config_path.parent.mkdir()
         untrusted = True
     config_path.write_text(text)
+    if untrusted:
+        # A file a client supplied that widens the sandbox is refused rather
+        # than confined (client_config_policy), before any module is imported.
+        from automated_security_helper.core.exceptions import (
+            ASHConfigFieldDeniedError,
+        )
+
+        with pytest.raises(ASHConfigFieldDeniedError, match="sandbox"):
+            resolve_config(
+                config_path=config_path, source_dir=target, untrusted_config=True
+            )
+        assert module not in sys.modules
+        return
     try:
         config = resolve_config(
             config_path=config_path, source_dir=target, untrusted_config=untrusted

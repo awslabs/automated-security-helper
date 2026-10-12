@@ -108,5 +108,5 @@ def test_an_uploaded_config_cannot_add_an_uninstalled_module(workspace):
             untrusted_config=True,
             fallback_to_default=True,
         )
-    assert "no_such_module_anywhere" in str(refused.value)
+    assert "no_such_ash_plugins" in str(refused.value)
     assert "ash_trivy_plugins" not in str(refused.value)
