@@ -162,6 +162,59 @@ def test_control_online_npm_audit_audits_the_lockfile(online, spawns, tmp_path):
     assert not getattr(scanner, "inputs_not_scanned", None)
 
 
+def test_a_second_target_reports_only_its_own_inputs(offline, spawns, tmp_path):
+    """One scanner instance scans the source, then the converted tree.
+
+    The executor reads inputs_not_scanned and targets_attempted after each target,
+    so scan() resets both first. Without that, the converted target, which has no
+    package.json, carried the source's lockfile: the summaries listed it twice and
+    the converted container claimed an input it never had.
+    """
+    scanner = _scanner(tmp_path)
+    _projects(scanner.context.source_dir, only="web")
+    (scanner.context.work_dir / "nb.py").write_text("print(1)\n")
+
+    assert (
+        scanner.scan(target=scanner.context.source_dir, target_type="source") is False
+    )
+    assert [e["path"] for e in scanner.inputs_not_scanned] == ["web/package-lock.json"]
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.inputs_not_scanned == []
+    assert scanner.targets_attempted is None
+
+
+def test_the_executor_gives_each_target_container_its_own_inputs(
+    offline, spawns, tmp_path
+):
+    from unittest.mock import MagicMock
+
+    from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
+
+    scanner = _scanner(tmp_path)
+    _projects(scanner.context.source_dir, only="web")
+    (scanner.context.work_dir / "nb.py").write_text("print(1)\n")
+    executor = ScannerExecutor(
+        plugin_context=scanner.context, progress_display=MagicMock(), scanner_tasks=[]
+    )
+
+    containers = executor._execute_scanner(
+        "npm-audit",
+        scanner,
+        [
+            {"path": scanner.context.source_dir, "type": "source"},
+            {"path": scanner.context.work_dir, "type": "converted"},
+        ],
+    )
+
+    by_target = {c.target_type: c for c in containers}
+    assert [i.path for i in by_target["source"].inputs_not_scanned] == [
+        "web/package-lock.json"
+    ]
+    assert by_target["converted"].inputs_not_scanned == []
+
+
 def _offline_scan(tmp_path, monkeypatch, **options) -> int:
     """Run the whole offline scan with the default gates; return its exit code."""
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
