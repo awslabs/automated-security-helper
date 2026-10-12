@@ -246,7 +246,7 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 # cfn-nag (via Gemfile)
 #
 COPY automated_security_helper/assets/Gemfile automated_security_helper/assets/Gemfile.lock /deps/
-ARG BUNDLER_VERSION="2.4.22"
+ARG BUNDLER_VERSION="2.6.9"
 # Bundler installs the committed Gemfile.lock and does not resolve again. Frozen,
 # it refuses to run when the lockfile is missing or disagrees with the Gemfile, so
 # every build of one ASH commit installs the same gems. An ARG rather than an ENV:

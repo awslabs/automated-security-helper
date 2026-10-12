@@ -519,6 +519,15 @@ class TestGemsAreJudgedByTheImagesRuby:
         result = _judged(_gem_pin("bundler", "2.6.9"), {"version": "4.0.22"})
         assert result.status == "error", result
 
+    def test_the_bundler_pin_is_the_newest_release_the_image_can_run(self) -> None:
+        """The real pin, against bundler's real releases: current, 4.0.22 noted."""
+        pins = checker.enumerate_pins(checker.load_pins_module())
+        pin = {p.tool: p for p in pins}["bundler"]
+        ruby = checker.image_ruby(checker.enumerate_apt_pins())
+        result = _judged(pin, _BUNDLER_RELEASES, ruby)
+        assert (result.status, result.latest) == ("current", "2.6.9"), result
+        assert "4.0.22" in result.note, result.note
+
     def test_cfn_nag_goes_through_the_same_path(self) -> None:
         pin = _gem_pin("cfn-nag", "0.8.10")
         newer_ruby = _judged(pin, _releases(("0.9.0", ">= 3.3"), ("0.8.10", ">= 2.5")))
