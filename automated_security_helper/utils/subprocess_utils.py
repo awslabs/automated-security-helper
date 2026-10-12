@@ -36,10 +36,21 @@ if TYPE_CHECKING:
     from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
 
-# (command, sandbox, tree scope key) -> (path or None, refused in-tree file or None)
+# (command, sandbox, tree scope key, PATH, ASH_BIN_PATH)
+#   -> (path or None, refused in-tree file or None)
 _find_executable_cache: Dict[
-    Tuple[str, bool, Tuple[Tuple[str, ...], bool]], Tuple[Optional[str], Optional[str]]
+    Tuple[str, bool, Tuple[Tuple[str, ...], bool], str, str],
+    Tuple[Optional[str], Optional[str]],
 ] = {}
+
+
+def _is_executable_file(path: str) -> bool:
+    """A file this process may execute: not a directory, and on POSIX with the
+    execute bit. Windows decides by the file's suffix, which the candidate names
+    (``_executable_candidate_names``) already give, so there a file is enough."""
+    if not os.path.isfile(path):
+        return False
+    return platform.system().lower() == "windows" or os.access(path, os.X_OK)
 
 
 def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -557,15 +568,29 @@ def _executable_candidates(command: str) -> Iterator[str]:
                 continue
             poss = directory.joinpath(name)
             ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
-            if poss.exists():
+            if _is_executable_file(str(poss)):
                 yield poss.as_posix()
 
 
 def _lookup(command: str, sandbox: bool = False) -> Optional[str]:
-    """find_executable's search under the active scan, cached by what it depends on."""
+    """find_executable's search under the active scan, cached by what it depends on.
+
+    PATH and ASH_BIN_PATH are part of the key, and a remembered path is used only
+    while it is still an executable file: deleted, or without its execute bit, it
+    is searched for again.
+    """
     scope = _TREE_SCOPE.get()
-    key = (command, sandbox, tree_scope_key())
+    key = (
+        command,
+        sandbox,
+        tree_scope_key(),
+        os.environ.get("PATH", ""),
+        os.environ.get("ASH_BIN_PATH", ""),
+    )
     cached = _find_executable_cache.get(key)
+    if cached is not None and cached[0] is not None:
+        if not _is_executable_file(cached[0]):
+            cached = None
     if cached is None:
         try:
             cached = _first_usable(

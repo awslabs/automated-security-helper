@@ -36,18 +36,24 @@ def test_find_executable_found_in_path(mock_exists, mock_which):
 
 
 @patch("shutil.which")
-@patch("pathlib.Path.exists")
-def test_find_executable_found_in_ash_bin(mock_exists, mock_which):
-    """Test finding an executable in ASH_BIN_PATH."""
+def test_find_executable_found_in_ash_bin(mock_which, tmp_path, monkeypatch):
+    """Test finding an executable in ASH_BIN_PATH.
+
+    A real executable file: the directory probe counts only a file it may run, so a
+    patched ``Path.exists`` no longer stands for one.
+    """
     clear_find_executable_cache()
     mock_which.return_value = None
-    mock_exists.return_value = True
+    tool = tmp_path / "test_cmd"
+    tool.write_text("#!/bin/sh\n", encoding="utf-8")
+    tool.chmod(0o755)
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path))
 
     result = find_executable("test_cmd")
 
-    assert result is not None
+    assert result == tool.as_posix()
     mock_which.assert_called_once()
-    mock_exists.assert_called()
+    clear_find_executable_cache()
 
 
 @patch("shutil.which")
