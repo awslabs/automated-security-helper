@@ -43,8 +43,9 @@ by a plugin module (``confine_tool_versions``). The plugins read the value they
 are given, so this one step covers each of them, and a plugin added later is
 covered without a gate of its own.
 
-trivy-repo's ``disable_telemetry`` decides whether trivy sends anonymous usage
-data to its vendor on an online scan. Like opengrep's and semgrep's ``metrics``,
+trivy's and trivy-repo's ``disable_telemetry`` decides whether trivy sends
+anonymous usage data to its vendor on an online scan. Like opengrep's and semgrep's
+``metrics``,
 only the value that stops it applies from any config (``TIGHTENING_VALUES``);
 ``false`` is the operator's.
 
@@ -124,13 +125,14 @@ SCANNER_CONFIG_FILE_OPTIONS: Dict[str, Tuple[str, ...]] = {
 
 #: Values of a confined option that only narrow what the tool does, so a
 #: repository's or a client's config may still set them: opengrep and semgrep
-#: with ``metrics: off`` send no usage data, and neither does trivy-repo with
-#: ``disable_telemetry: true``. Only a value the file writes counts: a file that
-#: leaves the option out keeps the operator's choice.
+#: with ``metrics: off`` send no usage data, and neither do trivy and trivy-repo
+#: with ``disable_telemetry: true``. Only a value the file writes counts: a file
+#: that leaves the option out keeps the operator's choice.
 TIGHTENING_VALUES: Dict[Tuple[str, str], Tuple[Any, ...]] = {
     ("opengrep", "metrics"): ("off",),
     ("semgrep", "metrics"): ("off",),
     ("trivy-repo", "disable_telemetry"): (True,),
+    ("trivy", "disable_telemetry"): (True,),
 }
 
 #: detect-secrets ``scan_settings`` lists whose entries may name a file the
@@ -145,6 +147,7 @@ SCANNER_CONFIG_CHOICE_OPTIONS: Dict[str, Dict[str, Any]] = {
     "ferret-scan": {"profile": None, "use_default_config": True},
     "snyk-code": {"honor_tree_exclusions": False},
     "trivy-repo": {"disable_telemetry": True},
+    "trivy": {"disable_telemetry": True},
 }
 
 #: Options of every scanner and converter section, built in or added by a plugin

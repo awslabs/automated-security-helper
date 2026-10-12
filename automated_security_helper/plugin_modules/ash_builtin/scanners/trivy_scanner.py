@@ -257,7 +257,14 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
     disable_telemetry: Annotated[
         bool,
         Field(
-            description="Disable sending anonymous usage data to Aqua",
+            description=(
+                "Disable sending anonymous usage data to Aqua (--disable-telemetry). "
+                "Only the operator sets it to false, with --config-overrides or in a "
+                "config file outside every git checkout and the scanned directory: a "
+                "config file inside one, or one an MCP client delivered, may set it "
+                "to true but not to false. Offline, trivy sends none whatever this "
+                "says. As for trivy-repo."
+            ),
         ),
     ] = True
     config_file: Annotated[

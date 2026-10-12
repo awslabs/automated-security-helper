@@ -377,9 +377,10 @@
   name, a reporter's `extension`). For example, a suppression's expiration is
   refused with "Invalid expiration date format. Use YYYY-MM-DD", and a
   `denied_paths` entry by its position.
-- **Only the operator turns trivy-repo's telemetry on.** A config file inside a git
-  checkout or the scanned directory could set
-  `scanners.trivy-repo.options.disable_telemetry: false`, and trivy then sent
+- **Only the operator turns trivy's and trivy-repo's telemetry on.** A config file
+  inside a git checkout or the scanned directory could set
+  `scanners.trivy-repo.options.disable_telemetry: false`, or the same option of the
+  builtin `trivy` scanner, and trivy then sent
   anonymous usage data to its vendor on every online scan. Such a value is now
   ignored with a warning, and trivy gets `--disable-telemetry`. `true` still
   applies from any config, and `false` from `--config-overrides` or a config file

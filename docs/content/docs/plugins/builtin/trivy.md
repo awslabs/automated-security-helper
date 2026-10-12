@@ -41,6 +41,9 @@ scanners:
       ignore_unfixed: false
       # Look for licenses in source headers too. Only used with `license`.
       license_full: false
+      # Only the operator sets it to false (--config-overrides or a config file
+      # outside every git checkout and the scanned directory); any config may set
+      # it to true. Offline, trivy sends nothing whatever this says.
       disable_telemetry: true
       # A trivy.yaml (from the operator), a .trivyignore and a trivy-secret.yaml,
       # each outside the scanned tree. Unset, the ones in the scanned repository
