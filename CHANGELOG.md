@@ -2557,8 +2557,10 @@
   and semgrep and opengrep with `--exclude=<name>` for a name nothing else has.
   cfn-nag, cdk-nag and npm-audit leave the ignored files out of the scan set they
   read. A semgrep or opengrep scan whose every file is ignored is `SKIPPED`, not
-  `ERROR`. snyk-code, which has no such option and uploads what it reads, is not
-  run on a directory holding an ignored file: it is `ERROR`, and the error gives
+  `ERROR`. snyk-code, which has no such option and uploads what it reads, refuses
+  a directory holding an ignored file, the source directory and ASH's directory of
+  converted files alike: `snyk code test` is not started, snyk-code is `ERROR`,
+  and the error names the first such file and the pattern that matched it, with
   the number of files, the patterns, and the remedy (narrow `ignore_paths`, or
   `--exclude-scanners snyk-code`). This applies to the operator's ignore paths:
   those in a config an MCP client delivered drop their findings but do not stop

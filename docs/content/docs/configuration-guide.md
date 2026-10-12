@@ -527,10 +527,13 @@ ignored file, or once for a directory whose every file is ignored.
 A path a tool's option cannot carry (one with a comma for bandit and trivy, or a
 name that is not unique for semgrep and opengrep) is still read by that tool, and
 ASH drops what it finds there. snyk-code has no option that leaves out a path and
-uploads the files it reads, so it is not run on a directory holding a file an
-ignore path matches; its error gives the number of files and the patterns, and
-suggests narrowing `ignore_paths` or `--exclude-scanners snyk-code`. On Windows the
-other tools are given none of these.
+uploads the files it reads, so it refuses a directory holding a file an ignore path
+matches, whether the source directory or ASH's directory of converted files (a
+converted file is matched by its path below the source directory). It is `ERROR`,
+`snyk code test` is not started, and the error names the first such file and the
+pattern that matched it, gives the number of files and the patterns, and suggests
+narrowing `ignore_paths` or `--exclude-scanners snyk-code`. On Windows the other
+tools are given none of these.
 `--ignore-suppressions` lifts ignore paths along with
 suppressions: every scanner reads those files and their findings are reported. See
 [Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).
