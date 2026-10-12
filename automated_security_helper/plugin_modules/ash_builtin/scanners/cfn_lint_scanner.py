@@ -96,6 +96,7 @@ from automated_security_helper.base.options import (
     ScannerOptionsBase,
     tool_version_constraint,
 )
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.path_trust import (
     private_cwd_outside_scanned_tree,
 )
@@ -301,11 +302,9 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "source directory. When unset, ASH "
                 "gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned "
                 "repository or the home directory is NOT read: such a file can load "
-                "Python rules (append_rules) and switch checks off. Honored only when "
-                "set by --config-overrides or a config file outside every git "
-                "checkout and the scanned directory, and only for a file outside the "
-                "scanned tree; otherwise "
-                "it is ignored with a warning."
+                "Python rules (append_rules) and switch checks off. "
+                f"{SET_BY_THE_OPERATOR} The file is used only when it is outside the "
+                "scanned tree; otherwise it is ignored with a warning."
             ),
         ),
     ] = None
@@ -327,9 +326,8 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer "
                 "ASH suppressions for individual findings; this removes the rule from "
-                "every template. Honored only when set by --config-overrides or a "
-                "config file outside every git checkout and the scanned directory; "
-                "otherwise it is ignored with a warning."
+                f"every template. {SET_BY_THE_OPERATOR} Set by such a config, it is "
+                "ignored with a warning."
             ),
         ),
     ] = []
@@ -360,9 +358,8 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
                 "that sets merge_configs fails the scan. On, each template is "
                 "linted by a cfn-lint run of its own, so its settings reach no "
                 "other template; that adds a cfn-lint start-up per template. "
-                "Honored only when set by --config-overrides or a config file "
-                "outside every git checkout and the scanned directory; from a config "
-                "inside one it is ignored with a warning."
+                f"{SET_BY_THE_OPERATOR} Set by such a config, it is ignored with a "
+                "warning."
             ),
         ),
     ] = False
@@ -379,9 +376,8 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Version constraint for the cfn-lint installation, in pip requirement "
                 "syntax. The default is the range the scanner's SARIF handling was "
-                "verified against. Honored only when set by --config-overrides or a "
-                "config file outside every git checkout and the scanned directory; "
-                "otherwise it is ignored with a warning."
+                f"verified against. {SET_BY_THE_OPERATOR} Set by such a config, it is "
+                "ignored with a warning."
             )
         ),
     ] = ">=1.43.3,<2.0.0"

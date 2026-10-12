@@ -130,6 +130,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -399,10 +400,9 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "A relative path is taken from the directory of the config file "
                 "that sets it, or from the working directory for --config-overrides, "
                 "not from the source directory; an absolute path is used as given. "
-                "Honored only when set by --config-overrides or a config file "
-                "outside every git checkout and the scanned directory; "
-                "otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or "
-                "`.github/zizmor.yml` in the scanned repository is not read."
+                f"{SET_BY_THE_OPERATOR} Otherwise it runs `zizmor --no-config`, so a "
+                "`zizmor.yml` or `.github/zizmor.yml` in the scanned repository is "
+                "not read."
             ),
         ),
     ] = None
@@ -426,9 +426,8 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "ASH does not pass `zizmor --offline`, those variables reach zizmor "
                 "unchanged, and zizmor may "
                 "call the GitHub API with the token. ASH never reads or logs the "
-                "token. Honored only when set by --config-overrides or a config "
-                "file outside every git checkout and the scanned directory, and "
-                "ignored, with a warning, when ASH runs in offline mode."
+                f"token. {SET_BY_THE_OPERATOR} It is ignored, with a warning, when "
+                "ASH runs in offline mode."
             ),
         ),
     ] = False
@@ -439,10 +438,9 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
                 "Honor zizmor's inline `# zizmor: ignore[...]` comments and the "
                 "`ignore` rules of the operator's `config_file`. Off by default: "
                 "ASH runs `zizmor --no-ignores`, so every finding reaches ASH, "
-                "where suppressions are reported and counted. Honored only when "
-                "set by --config-overrides or a config file outside every git "
-                "checkout and the scanned directory; from a config inside one it "
-                "is ignored with a warning."
+                "where suppressions are reported and counted. "
+                f"{SET_BY_THE_OPERATOR} Set by such a config, it is ignored with a "
+                "warning."
             ),
         ),
     ] = False
@@ -453,10 +451,8 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Version constraint for zizmor installation, in pip requirement "
                 "syntax. The default below is the constraint the scanner enforces. "
-                "Another value is honored only when set by --config-overrides or a "
-                "config file outside every git checkout and the scanned directory; "
-                "from a config inside one it is ignored with a warning and the "
-                "default applies."
+                f"Another value: {SET_BY_THE_OPERATOR} Set by such a config, it is "
+                "ignored with a warning and the default applies."
             )
         ),
     ] = ZIZMOR_DEFAULT_VERSION_CONSTRAINT

@@ -83,6 +83,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -181,10 +182,8 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
                 "file name without the .guard extension, e.g. "
                 "['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the "
                 "Well-Architected Security Pillar set. Set to [] to evaluate only "
-                "rules_paths. Honored only when set by --config-overrides or a "
-                "config file outside every git checkout and the scanned directory; "
-                "otherwise it is ignored with a warning and the default set is "
-                "evaluated."
+                f"rules_paths. {SET_BY_THE_OPERATOR} Set by such a config, it is "
+                "ignored with a warning and the default set is evaluated."
             ),
         ),
     ] = [DEFAULT_RULE_SET]
@@ -196,11 +195,9 @@ class CfnGuardScannerConfigOptions(ScannerOptionsBase):
                 "relative path is taken from the directory of the config file that "
                 "sets it, or from the working directory for --config-overrides, not "
                 "from the source directory. Evaluated in addition to "
-                "rule_sets. Honored only when set by --config-overrides or a config "
-                "file outside every git checkout and the scanned directory: "
-                "cfn-guard prints a rules file it "
+                f"rule_sets. {SET_BY_THE_OPERATOR} cfn-guard prints a rules file it "
                 "cannot parse, so a path the scanned repository chose could put any "
-                "file the scan can read into the report. Set elsewhere, it is "
+                "file the scan can read into the report. Set by such a config, it is "
                 "ignored with a warning, and an empty rule_sets falls back to "
                 "wa-Security-Pillar. In a directory, the .guard and .ruleset files "
                 "are read, recursively; one that resolves outside the directory, "

@@ -147,6 +147,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import (
     empty_tool_config,
     empty_tool_directory,
@@ -344,9 +345,7 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
                 "directory of the config file that sets it, or from the working "
                 "directory for --config-overrides, not from the source directory. "
                 "Its rules and [[allowlists]] apply on top of ASH suppressions. "
-                "Honored only when set by --config-overrides or a config file "
-                "outside every git checkout and the scanned directory. Unset, "
-                "gitleaks uses GITLEAKS_CONFIG or "
+                f"{SET_BY_THE_OPERATOR} Unset, gitleaks uses GITLEAKS_CONFIG or "
                 "GITLEAKS_CONFIG_TOML from the environment if one is set, else its "
                 "default rules; a .gitleaks.toml in the scanned repository is not "
                 "read. A path that does not exist fails the scan."
@@ -359,9 +358,8 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Path to a gitleaks JSON report whose findings gitleaks ignores "
                 "(gitleaks --baseline-path). A relative path is taken as for "
-                "config_file. Honored only when set by --config-overrides or a "
-                "config file outside every git checkout and the scanned directory. "
-                "A path that does not exist fails the scan."
+                f"config_file. {SET_BY_THE_OPERATOR} A path that does not exist fails "
+                "the scan."
             ),
         ),
     ] = None
@@ -371,10 +369,9 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: "
                 "ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding "
-                "reaches ASH, where suppressions are reported and counted. Honored "
-                "only when set by --config-overrides or a config file outside every "
-                "git checkout and the scanned directory; from a config inside one "
-                "it is ignored with a warning."
+                "reaches ASH, where suppressions are reported and counted. "
+                f"{SET_BY_THE_OPERATOR} Set by such a config, it is ignored with a "
+                "warning."
             ),
         ),
     ] = False
@@ -383,10 +380,9 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Skip files larger than this many megabytes (gitleaks "
-                "--max-target-megabytes). Unset scans every file. Honored only "
-                "when set by --config-overrides or a config file outside every git "
-                "checkout and the scanned directory; from a config inside one it is "
-                "ignored with a warning."
+                "--max-target-megabytes). Unset scans every file. "
+                f"{SET_BY_THE_OPERATOR} Set by such a config, it is ignored with a "
+                "warning."
             ),
             ge=1,
         ),

@@ -53,7 +53,7 @@
             }
           ],
           "default": null,
-          "description": "Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.",
+          "description": "Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.",
           "title": "Config File"
         },
         "pyflakes": {
@@ -66,7 +66,7 @@
             }
           ],
           "default": null,
-          "description": "Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Accepted as for shellcheck: from a config inside a git checkout or the scanned directory only 'pyflakes'. When set and not found, the scanner reports MISSING.",
+          "description": "Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.",
           "title": "Pyflakes"
         },
         "scan_timeout": {
@@ -113,7 +113,7 @@
             }
           ],
           "default": null,
-          "description": "Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. A config file inside a git checkout or the scanned directory may set only 'shellcheck', looked up on PATH; another program, or a path that resolves outside the scanned tree, needs --config-overrides or a config file outside every git checkout and the scanned directory. Anything else is ignored with a warning. When set and not found, the scanner reports MISSING.",
+          "description": "Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. Any config may set 'shellcheck', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.",
           "title": "Shellcheck"
         }
       },
@@ -3222,7 +3222,7 @@
           "default": [
             "wa-Security-Pillar"
           ],
-          "description": "Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; otherwise it is ignored with a warning and the default set is evaluated.",
+          "description": "Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default set is evaluated.",
           "items": {
             "type": "string"
           },
@@ -3231,7 +3231,7 @@
         },
         "rules_paths": {
           "default": [],
-          "description": "Your own cfn-guard rules: .guard files or directories of them. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Evaluated in addition to rule_sets. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory: cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set elsewhere, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused.",
+          "description": "Your own cfn-guard rules: .guard files or directories of them. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Evaluated in addition to rule_sets. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set by such a config, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused.",
           "items": {
             "type": "string"
           },
@@ -3326,18 +3326,18 @@
             }
           ],
           "default": null,
-          "description": "Path to a cfn-lint configuration file (.cfnlintrc). A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory, and only for a file outside the scanned tree; otherwise it is ignored with a warning.",
+          "description": "Path to a cfn-lint configuration file (.cfnlintrc). A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning.",
           "title": "Config File"
         },
         "honor_inline_ignores": {
           "default": false,
-          "description": "Honor the ignore_checks and configure_rules a template sets for itself in `Metadata: cfn-lint: config` (ignore_checks also at the resource level). Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, and the config_file's configure_rules are passed on the command line, which cfn-lint takes instead of a template's, so a template cannot hide its own findings or the next template's parse errors, which reach ASH, where suppressions are reported and counted. A config_file setting the command line cannot carry (a list of more than one item, or a value with a comma, colon or equals sign) is then left out with a warning, and a config_file that sets merge_configs fails the scan. On, each template is linted by a cfn-lint run of its own, so its settings reach no other template; that adds a cfn-lint start-up per template. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; from a config inside one it is ignored with a warning.",
+          "description": "Honor the ignore_checks and configure_rules a template sets for itself in `Metadata: cfn-lint: config` (ignore_checks also at the resource level). Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, and the config_file's configure_rules are passed on the command line, which cfn-lint takes instead of a template's, so a template cannot hide its own findings or the next template's parse errors, which reach ASH, where suppressions are reported and counted. A config_file setting the command line cannot carry (a list of more than one item, or a value with a comma, colon or equals sign) is then left out with a warning, and a config_file that sets merge_configs fails the scan. On, each template is linted by a cfn-lint run of its own, so its settings reach no other template; that adds a cfn-lint start-up per template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "title": "Honor Inline Ignores",
           "type": "boolean"
         },
         "ignore_checks": {
           "default": [],
-          "description": "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer ASH suppressions for individual findings; this removes the rule from every template. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; otherwise it is ignored with a warning.",
+          "description": "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer ASH suppressions for individual findings; this removes the rule from every template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "items": {
             "type": "string"
           },
@@ -3412,7 +3412,7 @@
             }
           ],
           "default": ">=1.43.3,<2.0.0",
-          "description": "Version constraint for the cfn-lint installation, in pip requirement syntax. The default is the range the scanner's SARIF handling was verified against. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; otherwise it is ignored with a warning.",
+          "description": "Version constraint for the cfn-lint installation, in pip requirement syntax. The default is the range the scanner's SARIF handling was verified against. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "title": "Tool Version"
         }
       },
@@ -8826,7 +8826,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a gitleaks JSON report whose findings gitleaks ignores (gitleaks --baseline-path). A relative path is taken as for config_file. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory. A path that does not exist fails the scan.",
+          "description": "Path to a gitleaks JSON report whose findings gitleaks ignores (gitleaks --baseline-path). A relative path is taken as for config_file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. A path that does not exist fails the scan.",
           "title": "Baseline Path"
         },
         "config_file": {
@@ -8843,12 +8843,12 @@
             }
           ],
           "default": null,
-          "description": "Path to a gitleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.",
+          "description": "Path to a gitleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.",
           "title": "Config File"
         },
         "honor_inline_ignores": {
           "default": false,
-          "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; from a config inside one it is ignored with a warning.",
+          "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "title": "Honor Inline Ignores",
           "type": "boolean"
         },
@@ -8863,7 +8863,7 @@
             }
           ],
           "default": null,
-          "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; from a config inside one it is ignored with a warning.",
+          "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "title": "Max Target Megabytes"
         },
         "scan_timeout": {
@@ -21556,7 +21556,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy config file (trivy.yaml), passed as trivy --config. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory, for a file outside the scanned tree; otherwise ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree, and otherwise an empty config of its own, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. A path that does not exist fails the scan.",
+          "description": "A trivy config file (trivy.yaml), passed as --config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree, and otherwise an empty config of its own, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. A path that does not exist fails the scan.",
           "title": "Config File"
         },
         "disable_telemetry": {
@@ -21579,7 +21579,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy ignore file, passed as trivy --ignorefile. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory, for a file outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
+          "description": "A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
           "title": "Ignore File"
         },
         "ignore_unfixed": {
@@ -21618,7 +21618,7 @@
           "default": [
             "vuln"
           ],
-          "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; set by a config inside one, any set but the default is ignored with a warning.",
+          "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, any set but the default is ignored with a warning.",
           "items": {
             "enum": [
               "vuln",
@@ -21646,7 +21646,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy secret scanning config (trivy-secret.yaml), passed as trivy --secret-config. Only read when scanners includes secret. Honored only under the same rule as ignore_file, and otherwise TRIVY_SECRET_CONFIG is used, for a file outside the tree, and failing that trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo.",
+          "description": "A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Only read when scanners includes secret. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree, and a relative path is taken as for ignore_file. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo.",
           "title": "Secret Config File"
         },
         "severity_threshold": {
@@ -23671,12 +23671,12 @@
             }
           ],
           "default": null,
-          "description": "Path to a zizmor configuration file, passed as `zizmor --config`. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory; an absolute path is used as given. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
+          "description": "Path to a zizmor configuration file, passed as `zizmor --config`. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory; an absolute path is used as given. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
           "title": "Config File"
         },
         "honor_inline_ignores": {
           "default": false,
-          "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; from a config inside one it is ignored with a warning.",
+          "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "title": "Honor Inline Ignores",
           "type": "boolean"
         },
@@ -23688,7 +23688,7 @@
         },
         "online_audits": {
           "default": false,
-          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory, and ignored, with a warning, when ASH runs in offline mode.",
+          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.",
           "title": "Online Audits",
           "type": "boolean"
         },
@@ -23747,7 +23747,7 @@
             }
           ],
           "default": ">=1.29.0,<2.0.0",
-          "description": "Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. Another value is honored only when set by --config-overrides or a config file outside every git checkout and the scanned directory; from a config inside one it is ignored with a warning and the default applies.",
+          "description": "Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. Another value: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default applies.",
           "title": "Tool Version"
         }
       },

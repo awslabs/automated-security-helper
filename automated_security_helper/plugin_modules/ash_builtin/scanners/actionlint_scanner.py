@@ -179,6 +179,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.path_trust import in_scanned_tree
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.config_trust import (
@@ -556,11 +557,9 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
                 "Path to an actionlint config file. A relative path is taken from the "
                 "directory of the config file that sets it, or from the working "
                 "directory for --config-overrides, not from the source directory. "
-                "Honored only when set by --config-overrides or a config file outside "
-                "every git checkout and the scanned directory; otherwise actionlint "
-                "runs with an empty config, and "
-                "a .github/actionlint.yaml in the scanned repository is not read. A "
-                "path set here that does not exist fails the scan."
+                f"{SET_BY_THE_OPERATOR} Otherwise actionlint runs with an empty "
+                "config, and a .github/actionlint.yaml in the scanned repository is "
+                "not read. A path set here that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -570,12 +569,10 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Command name or path of shellcheck, which actionlint runs "
                 "on every run: script. Unset (the default) disables the integration so "
-                "results do not depend on what is installed on the host. A config file "
-                "inside a git checkout or the scanned directory may set only "
-                "'shellcheck', looked up on PATH; another program, or a path that "
-                "resolves outside the scanned tree, needs --config-overrides or a "
-                "config file outside every git checkout and the scanned directory. "
-                "Anything else is ignored with a warning. When set and not "
+                "results do not depend on what is installed on the host. Any config "
+                "may set 'shellcheck', looked up on PATH. Another program, or a path "
+                f"that resolves outside the scanned tree: {SET_BY_THE_OPERATOR} "
+                "From such a config it is ignored with a warning. When set and not "
                 "found, the scanner reports MISSING."
             ),
         ),
@@ -586,9 +583,10 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Command name or path of pyflakes, which actionlint runs on "
                 "'shell: python' steps. Unset (the default) disables the integration. "
-                "Accepted as for shellcheck: from a config inside a git checkout or "
-                "the scanned directory only 'pyflakes'. "
-                "When set and not found, the scanner reports MISSING."
+                "Any config may set 'pyflakes', looked up on PATH. Another program, or "
+                f"a path that resolves outside the scanned tree: {SET_BY_THE_OPERATOR} "
+                "From such a config it is ignored with a warning. When set and not "
+                "found, the scanner reports MISSING."
             ),
         ),
     ] = None

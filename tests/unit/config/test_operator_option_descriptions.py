@@ -34,8 +34,29 @@ STATED: Dict[str, Tuple[str, ...]] = {
     "syft": ("config_file",),
     "ferret-scan": ("profile", "use_default_config"),
     "snyk-code": ("honor_tree_exclusions",),
-    "trivy-repo": ("ignore_file", "secret_config_file"),
+    "trivy-repo": ("ignore_file", "secret_config_file", "config_file", "module_dir"),
+    # The scanners whose options are confined in the scanner itself
+    # (utils/config_trust.operator_path and repository_written), by the same rule.
+    "actionlint": ("config_file", "shellcheck", "pyflakes"),
+    "cfn-guard": ("rule_sets", "rules_paths"),
+    "cfn-lint": (
+        "config_file",
+        "ignore_checks",
+        "honor_inline_ignores",
+        "tool_version",
+    ),
+    "gitleaks": (
+        "config_file",
+        "baseline_path",
+        "honor_inline_ignores",
+        "max_target_megabytes",
+    ),
+    "trivy": ("scanners", "config_file", "ignore_file", "secret_config_file"),
+    "zizmor": ("config_file", "online_audits", "honor_inline_ignores", "tool_version"),
 }
+
+#: The rule as these options stated it before, which the shared sentence replaces.
+RESTATED = "Honored only when set by --config-overrides or a config file outside"
 
 #: The wording the rule used before, which a file in another checkout also meets.
 OUTDATED = "config file outside the scanned tree"
@@ -85,6 +106,16 @@ def test_no_scanner_option_states_the_outdated_rule():
     ]
 
     assert stale == []
+
+
+def test_no_scanner_option_restates_the_rule_in_its_own_words():
+    restated = [
+        f"{scanner}.{option}"
+        for scanner, option, description in _descriptions()
+        if RESTATED.lower() in description.lower()
+    ]
+
+    assert restated == []
 
 
 def test_control_the_options_are_found():

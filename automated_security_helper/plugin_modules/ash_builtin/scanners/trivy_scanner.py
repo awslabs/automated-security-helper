@@ -154,6 +154,7 @@ from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -228,10 +229,8 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "scanners already cover secrets (detect-secrets) and IaC "
                 "misconfigurations (checkov, cfn-nag, cdk-nag), and license findings "
                 "are a compliance question. Add secret, misconfig or license to run "
-                "trivy's checks for them as well. Honored only when set by "
-                "--config-overrides or a config file outside every git checkout and "
-                "the scanned directory; set by a config inside one, any set but the "
-                "default is ignored with a warning."
+                f"trivy's checks for them as well. {SET_BY_THE_OPERATOR} Set by such "
+                "a config, any set but the default is ignored with a warning."
             ),
             min_length=1,
         ),
@@ -265,10 +264,10 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy config file (trivy.yaml), passed as trivy --config. Honored "
-                "only when set by --config-overrides or a config file outside every "
-                "git checkout and the scanned directory, for a file outside the "
-                "scanned tree; otherwise ignored with a warning. A relative path is taken from the directory of the config "
+                "A trivy config file (trivy.yaml), passed as --config. "
+                f"{SET_BY_THE_OPERATOR} The file is used only when it is outside the "
+                "scanned tree; otherwise it is ignored with a warning. A relative "
+                "path is taken from the directory of the config "
                 "file that sets it, or from the working directory for "
                 "--config-overrides, not from the source directory. Unset or "
                 "ignored, ASH passes TRIVY_CONFIG when that names a file outside the "
@@ -284,15 +283,13 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy ignore file, passed as trivy --ignorefile. Honored only when set "
-                "by --config-overrides or a config file outside every git checkout and "
-                "the scanned directory, for a file outside the scanned tree; a relative path is taken from the "
-                "directory of the config file that sets it, or from the working "
-                "directory for --config-overrides and the environment variable. "
-                "Otherwise TRIVY_IGNOREFILE is used, for a file "
-                "outside the tree, and failing that trivy gets an empty one, so a "
-                ".trivyignore in the scanned repository does not remove findings. "
-                "As for trivy-repo."
+                f"A trivy ignore file, passed as --ignorefile. {SET_BY_THE_OPERATOR} "
+                "The file is used only when it is outside the scanned tree; a "
+                "relative path is taken from the directory of the config file that "
+                "sets it, or from the working directory for --config-overrides and "
+                "the environment variable. Unset, TRIVY_IGNOREFILE is used the same "
+                "way, and otherwise trivy gets an empty one, so a .trivyignore in the "
+                "scanned repository does not remove findings. As for trivy-repo."
             ),
         ),
     ] = None
@@ -301,12 +298,12 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A trivy secret scanning config (trivy-secret.yaml), passed as "
-                "trivy --secret-config. Only read when scanners includes secret. Honored "
-                "only under the same rule as ignore_file, and otherwise "
-                "TRIVY_SECRET_CONFIG is used, for a file outside the tree, and "
-                "failing that trivy gets an empty one, so a trivy-secret.yaml in the "
-                "scanned repository does not disable secret rules. As for "
-                "trivy-repo."
+                "--secret-config. Only read when scanners includes secret. "
+                f"{SET_BY_THE_OPERATOR} The file is used only when it is outside the "
+                "scanned tree, and a relative path is taken as for ignore_file. "
+                "Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy "
+                "gets an empty one, so a trivy-secret.yaml in the scanned repository "
+                "does not disable secret rules. As for trivy-repo."
             ),
         ),
     ] = None

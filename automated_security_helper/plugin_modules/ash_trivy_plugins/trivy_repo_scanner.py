@@ -83,10 +83,10 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A trivy config file (trivy.yaml), passed as trivy --config. Honored "
-                "only when set by --config-overrides or a config file outside every "
-                "git checkout and the scanned directory, for a file outside the "
-                "scanned tree; otherwise ignored with a warning. A relative path is taken from the directory of the config "
+                "A trivy config file (trivy.yaml), passed as --config. "
+                f"{SET_BY_THE_OPERATOR} The file is used only when it is outside the "
+                "scanned tree; otherwise it is ignored with a warning. A relative "
+                "path is taken from the directory of the config "
                 "file that sets it, or from the working directory for "
                 "--config-overrides, not from the source directory. Unset or "
                 "ignored, ASH passes TRIVY_CONFIG when that names a file outside the "
@@ -100,10 +100,10 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "A directory of trivy modules, passed as trivy --module-dir. Unset, "
-                "ASH passes an empty directory of its own. Honored, and a relative "
-                "path taken, as for config_file. A path that is not a directory "
-                "fails the scan."
+                "A directory of trivy modules, passed as --module-dir. Unset, ASH "
+                f"passes an empty directory of its own. {SET_BY_THE_OPERATOR} The "
+                "directory is used, and a relative path taken, as for config_file. A "
+                "path that is not a directory fails the scan."
             ),
         ),
     ] = None
