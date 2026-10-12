@@ -534,27 +534,35 @@ def test_the_result_processor_marks_the_sbom(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# trivy-repo ignore_file
+# trivy's and trivy-repo's ignore_file
 # ---------------------------------------------------------------------------
 
+#: The builtin trivy scanner and the trivy-repo plugin read the same ignore
+#: file format, and a delivered config's is handled the same way for each.
+TRIVY_SCANNERS = ["trivy-repo", "trivy"]
 
-def _trivy_delivered(files: Dict[str, str], ignore_file: str) -> Path:
+
+def _trivy_delivered(
+    files: Dict[str, str], ignore_file: str, scanner: str = "trivy-repo"
+) -> Path:
     document = {
         "project_name": "delivered",
-        "scanners": {"trivy-repo": {"options": {"ignore_file": ignore_file}}},
+        "scanners": {scanner: {"options": {"ignore_file": ignore_file}}},
     }
     return _upload({".ash/.ash.yaml": yaml.safe_dump(document), **files})
 
 
-def _trivy_options(config: Any) -> Dict[str, Any]:
-    return config.get_plugin_config("scanner", "trivy-repo")["options"]
+def _trivy_options(config: Any, scanner: str = "trivy-repo") -> Dict[str, Any]:
+    return config.get_plugin_config("scanner", scanner)["options"]
 
 
+@pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
 def test_a_delivered_trivy_ignore_file_is_applied_as_marked_suppressions(
-    tmp_path: Path,
+    tmp_path: Path, scanner: str
 ) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
+    other = "trivy" if scanner == "trivy-repo" else "trivy-repo"
     source = _trivy_delivered(
         {
             ".trivyignore": (
@@ -563,29 +571,34 @@ def test_a_delivered_trivy_ignore_file_is_applied_as_marked_suppressions(
             "app.py": "x = 1\n",
         },
         ".trivyignore",
+        scanner,
     )
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
-    assert not _trivy_options(config).get("ignore_file")
-    assert [item.pattern for item in config._client_scanner_exclusions] == [
-        "CVE-2020-0001",
-        "AVD-AWS-0086",
-    ]
+    assert not _trivy_options(config, scanner).get("ignore_file")
+    assert [
+        (item.scanner, item.pattern) for item in config._client_scanner_exclusions
+    ] == [(scanner, "CVE-2020-0001"), (scanner, "AVD-AWS-0086")]
     report = _sarif(
         [
-            {"scanner": "trivy-repo", "uri": "app.py", "rule": "CVE-2020-0001"},
-            {"scanner": "trivy-repo", "uri": "app.py", "rule": "AWS-0086"},
-            {"scanner": "trivy-repo", "uri": "app.py", "rule": "CVE-2020-0002"},
-            {"scanner": "trivy-repo", "uri": "app.py", "rule": "CVE-2020-0003"},
+            {"scanner": scanner, "uri": "app.py", "rule": "CVE-2020-0001"},
+            {"scanner": scanner, "uri": "app.py", "rule": "AWS-0086"},
+            {"scanner": scanner, "uri": "app.py", "rule": "CVE-2020-0002"},
+            {"scanner": scanner, "uri": "app.py", "rule": "CVE-2020-0003"},
             {"scanner": "grype", "uri": "app.py", "rule": "CVE-2020-0001"},
+            # The other trivy scanner's finding: the file was delivered for one.
+            {"scanner": other, "uri": "app.py", "rule": "CVE-2020-0001"},
         ]
     )
     results = _apply(source, config, report, tmp_path).runs[0].results
-    assert [len(_marks(result)) for result in results] == [1, 1, 0, 0, 0]
-    assert "scanners.trivy-repo.options.ignore_file" in _marks(results[0])[0]
+    assert [len(_marks(result)) for result in results] == [1, 1, 0, 0, 0, 0]
+    assert f"scanners.{scanner}.options.ignore_file" in _marks(results[0])[0]
 
 
-def test_a_delivered_yaml_trivy_ignore_file_keeps_its_paths(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
+def test_a_delivered_yaml_trivy_ignore_file_keeps_its_paths(
+    tmp_path: Path, scanner: str
+) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
     source = _trivy_delivered(
@@ -601,35 +614,37 @@ def test_a_delivered_yaml_trivy_ignore_file_keeps_its_paths(tmp_path: Path) -> N
             "app.py": "x = 1\n",
         },
         ".trivyignore.yaml",
+        scanner,
     )
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
     report = _sarif(
         [
             {
-                "scanner": "trivy-repo",
+                "scanner": scanner,
                 "uri": "vendor/a/go.mod",
                 "rule": "CVE-2020-0001",
             },
-            {"scanner": "trivy-repo", "uri": "go.mod", "rule": "CVE-2020-0001"},
-            {"scanner": "trivy-repo", "uri": "go.mod", "rule": "CVE-2020-0009"},
+            {"scanner": scanner, "uri": "go.mod", "rule": "CVE-2020-0001"},
+            {"scanner": scanner, "uri": "go.mod", "rule": "CVE-2020-0009"},
         ]
     )
     results = _apply(source, config, report, tmp_path).runs[0].results
     assert [len(_marks(result)) for result in results] == [1, 0, 0]
 
 
+@pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
 def test_a_trivy_ignore_file_outside_what_the_client_delivered_is_not_read(
-    _server,
+    _server, scanner: str
 ) -> None:
     from automated_security_helper.config.ash_config import AshConfig
 
     server_file = _server["tmp"] / "operator" / "elsewhere.trivyignore"
     server_file.write_text("CVE-2020-0001\n", encoding="utf-8")
-    source = _trivy_delivered({"app.py": "x = 1\n"}, str(server_file))
+    source = _trivy_delivered({"app.py": "x = 1\n"}, str(server_file), scanner)
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
-    assert not _trivy_options(config).get("ignore_file")
+    assert not _trivy_options(config, scanner).get("ignore_file")
     assert config._client_scanner_exclusions == []
     assert any(
         "only a regular file inside the scanned tree is read" in warning
@@ -647,35 +662,36 @@ def _host_file(tmp: Path) -> Path:
     return host
 
 
-def _no_trace_of_the_host_file(config: Any, tmp_path: Path) -> None:
+def _no_trace_of_the_host_file(
+    config: Any, tmp_path: Path, scanner: str = "trivy-repo"
+) -> None:
     """Nothing the host file holds reached the config, its warnings, or the results."""
     assert config._client_scanner_exclusions == []
     assert "host-only-marker" not in " ".join(config._resolution_warnings)
-    report = _sarif(
-        [{"scanner": "trivy-repo", "uri": "app.py", "rule": "CVE-2099-0001"}]
-    )
+    report = _sarif([{"scanner": scanner, "uri": "app.py", "rule": "CVE-2099-0001"}])
     source = Path(config._scanned_root or tmp_path)
     (result,) = _apply(source, config, report, tmp_path).runs[0].results
     assert not result.suppressions
     assert "host-only-marker" not in result.model_dump_json()
 
 
+@pytest.mark.parametrize("scanner", TRIVY_SCANNERS)
 def test_a_symlinked_trivy_ignore_file_in_the_delivered_tree_is_not_read(
-    _server, tmp_path: Path
+    _server, tmp_path: Path, scanner: str
 ) -> None:
     """A link inside the tree that points at a host file is refused, not followed."""
     from automated_security_helper.config.ash_config import AshConfig
 
     host = _host_file(_server["tmp"])
-    source = _trivy_delivered({"app.py": "x = 1\n"}, ".trivyignore")
+    source = _trivy_delivered({"app.py": "x = 1\n"}, ".trivyignore", scanner)
     (source / ".trivyignore").symlink_to(host)
     config = _scan_resolution(source)
     assert isinstance(config, AshConfig), config
-    assert not _trivy_options(config).get("ignore_file")
+    assert not _trivy_options(config, scanner).get("ignore_file")
     assert any(
         "it is a symbolic link" in warning for warning in config._resolution_warnings
     ), config._resolution_warnings
-    _no_trace_of_the_host_file(config, tmp_path)
+    _no_trace_of_the_host_file(config, tmp_path, scanner)
 
 
 def test_a_trivy_ignore_file_above_the_delivered_tree_is_not_read(
@@ -757,26 +773,34 @@ def test_the_checkov_matcher_reads_skip_path_as_checkov_does(
     assert checkov_skips(pattern, f"/scan/{relative}", relative) is skipped
 
 
+@pytest.mark.parametrize("name", TRIVY_SCANNERS)
 def test_the_trivy_scanner_gets_no_ignore_file_from_a_delivered_config(
-    tmp_path: Path,
+    tmp_path: Path, name: str
 ) -> None:
     from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+        TrivyScannerConfig,
+    )
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
     )
 
+    classes: Dict[str, Any] = {
+        "trivy-repo": (TrivyRepoScanner, TrivyRepoScannerConfig),
+        "trivy": (TrivyScanner, TrivyScannerConfig),
+    }
+    cls, cfg = classes[name]
     server_file = tmp_path / "operator" / "elsewhere.trivyignore"
     server_file.write_text("CVE-2020-0001\n", encoding="utf-8")
-    source = _trivy_delivered({"app.py": "x = 1\n"}, str(server_file))
+    source = _trivy_delivered({"app.py": "x = 1\n"}, str(server_file), name)
     config = _scan_resolution(source)
     output = tmp_path / "trivy-out"
     output.mkdir()
-    scanner = TrivyRepoScanner(
+    scanner = cls(
         context=PluginContext(source_dir=source, output_dir=output, config=config),
-        config=TrivyRepoScannerConfig.model_validate(
-            config.get_plugin_config("scanner", "trivy-repo")
-        ),
+        config=cfg.model_validate(config.get_plugin_config("scanner", name)),
     )
     assert Path(scanner._ignore_file()).resolve() != server_file.resolve()
 
@@ -1375,8 +1399,12 @@ def test_the_table_defaults_are_the_scanners_defaults() -> None:
     from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
         TrivyRepoScannerConfigOptions,
     )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScannerConfigOptions,
+    )
 
     classes = {
+        "trivy": TrivyScannerConfigOptions,
         "bandit": BanditScannerConfigOptions,
         "checkov": CheckovScannerConfigOptions,
         "opengrep": OpengrepScannerConfigOptions,

@@ -62,14 +62,15 @@ on a finding's path after the fact:
   any directory or run of directories in it, as semgrep documents it. A leading
   ``/`` anchors it at the scan root, and a leading ``./`` or ``**/`` is
   optional.
-* trivy-repo ``ignore_file``: the file lists finding IDs. Each unexpired ID
-  becomes an entry that matches a trivy finding with that rule ID (an ``AVD-``
-  prefix on either side is ignored); in a ``.trivyignore.yaml`` an entry's
-  ``paths`` limit it further. The file is read only when it is a regular file
-  inside the tree being scanned, opened without following a link
-  (``utils/scanned_tree.open_in_scanned_tree``). A file elsewhere, or a link
-  to one, is not read, since its contents would then reach the results, and
-  its entries are not applied; the scan's warnings say so without quoting it.
+* trivy and trivy-repo ``ignore_file``: the file lists finding IDs. Each
+  unexpired ID becomes an entry that matches a finding of that scanner with
+  that rule ID (an ``AVD-`` prefix on either side is ignored); in a
+  ``.trivyignore.yaml`` an entry's ``paths`` limit it further. The file is read
+  only when it is a regular file inside the tree being scanned, opened without
+  following a link (``utils/scanned_tree.open_in_scanned_tree``). A file
+  elsewhere, or a link to one, is not read, since its contents would then reach
+  the results, and its entries are not applied; the scan's warnings say so
+  without quoting it.
 
 Known limitations
 -----------------
@@ -157,6 +158,7 @@ SCANNER_EXCLUSION_OPTIONS: Tuple[ScannerExclusionOption, ...] = (
     ScannerExclusionOption("syft", "exclude", "glob"),
     ScannerExclusionOption("ferret-scan", "exclude_patterns", "glob"),
     ScannerExclusionOption("trivy-repo", "ignore_file", "trivy-ignore-file"),
+    ScannerExclusionOption("trivy", "ignore_file", "trivy-ignore-file"),
 )
 
 

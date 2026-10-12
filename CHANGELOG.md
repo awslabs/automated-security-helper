@@ -1156,10 +1156,10 @@
   reported suppressed and marked client-supplied, like a finding under a
   client-supplied ignore path. syft lists every component and marks the ones an
   entry would have dropped with an `ash:clientSuppliedExclusion` property. A
-  `scanners.trivy-repo.options.ignore_file` from a
-  delivered config is not passed to trivy; the IDs in it are applied the same
-  way when the file is a regular file inside the scanned tree, read without
-  following a link. The operator's own entries apply as before. The scanner
+  `scanners.trivy.options.ignore_file` or `scanners.trivy-repo.options.ignore_file`
+  from a delivered config is not passed to trivy; the IDs in it are applied the
+  same way, to that scanner's findings, when the file is a regular file inside
+  the scanned tree, read without following a link. The operator's own entries apply as before. The scanner
   options that drop findings by rule ID, by a baseline or by category join the
   default `denied_paths`, so a delivered config that changes one is refused:
   bandit's `confidence_level`, cdk-nag's `AwsSolutionsChecks` pack, checkov's

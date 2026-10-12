@@ -1023,7 +1023,7 @@ on which:
     | `scanners.checkov.options.skip_path` | As checkov's own filter reads it: a regular expression found in, or a substring of, the absolute path of the file or of a directory above it |
     | `scanners.opengrep.options.exclude`, `scanners.semgrep.options.exclude`, `scanners.ferret-scan.options.exclude_patterns` | A glob matching the file's path or any directory in it |
     | `scanners.syft.options.exclude` | The same glob; each SBOM component it would have dropped carries an `ash:clientSuppliedExclusion` property |
-    | `scanners.trivy-repo.options.ignore_file` | Each unexpired ID in the file, against the trivy finding's rule ID, when the file is a regular file inside the scanned tree (not a link); any other file is not read |
+    | `scanners.trivy.options.ignore_file`, `scanners.trivy-repo.options.ignore_file` | Each unexpired ID in the file, against the rule ID of that scanner's finding, when the file is a regular file inside the scanned tree (not a link); any other file is not read |
 
   - The scanner options below drop findings by rule ID, by a baseline, or by a
     whole category (a framework, a severity, a rule set, a detector, a confidence
