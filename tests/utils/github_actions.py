@@ -681,6 +681,8 @@ WATCHED_ENV = (
     "ASH_DEPENDENCIES_UNKNOWN_TOOLS",
     "UV_NO_CONFIG",
     "BUNDLE_GEMFILE",
+    "BUNDLE_FROZEN",
+    "BUNDLE_DEPLOYMENT",
     "PYTHONPATH",
     "PYTHONSAFEPATH",
 )
@@ -743,6 +745,12 @@ elif tool == "bundle":
         record["gemfile_realpath"] = os.path.realpath(gemfile)
         with open(gemfile, encoding="utf-8") as handle:
             record["gemfile_content"] = handle.read()
+        # Bundler's lockfile for a Gemfile is the same path plus ".lock".
+        lockfile = gemfile + ".lock"
+        record["lockfile_present"] = os.path.isfile(lockfile)
+        if record["lockfile_present"]:
+            with open(lockfile, encoding="utf-8") as handle:
+                record["lockfile_content"] = handle.read()
     if argv[:1] == ["binstubs"]:
         target_dir = value_after("--path")
         if target_dir:

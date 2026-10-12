@@ -1082,6 +1082,15 @@ jobs:
 
       - name: Install cfn-nag
         if: inputs.install-cfn-nag
+        env:
+          # Frozen: install exactly what Gemfile.lock records. Without it Bundler
+          # resolves again whenever the Gemfile and the lockfile disagree, or the
+          # lockfile is missing, and installs whatever rubygems.org serves that day.
+          # Frozen, it refuses both before contacting a gem server (measured on
+          # Bundler 2.4.22 against these two files: exit 16 each). The lockfile's
+          # only platform is `ruby`, which Bundler's platform check accepts on any
+          # runner, so frozen mode does not refuse it here.
+          BUNDLE_FROZEN: "true"
         run: |
           set -euo pipefail
           # ASH's own Gemfile and Gemfile.lock are the version pin -- naming
@@ -1097,6 +1106,13 @@ jobs:
           mkdir -p "$(dirname "${GEMFILE}")"
           curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
           curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
+          # Bundler reads the lockfile at "${BUNDLE_GEMFILE}.lock". Checked here so a
+          # fetch that left nothing names the file instead of surfacing as Bundler's
+          # frozen-mode refusal.
+          if [ ! -s "${GEMFILE}.lock" ]; then
+            echo "::error::No Gemfile.lock beside ${GEMFILE}; cfn-nag installs only what that lockfile records." >&2
+            exit 1
+          fi
           echo "Installing cfn-nag from ${GEMFILE}"
           # Every tool is resolved with `command -v` as the runner user rather than
           # assumed on PATH. The failure this names -- Ruby absent for the runner
