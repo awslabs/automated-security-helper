@@ -456,14 +456,15 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
     def _operator_option(self, name: str) -> Any:
         """``options.<name>`` when the operator set it, else its default.
 
-        For the options that decide what cfn-lint reports or which cfn-lint runs:
-        ``ignore_checks`` drops findings before ASH sees them, so they are neither
-        reported nor counted as suppressed (measured: ``ignore_checks: [E, W]`` in
-        the scanned tree's ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan),
-        and ``tool_version`` chooses the release uv installs. A value from a config
-        in the scanned tree or from an MCP client is ignored with a warning, once
-        per scanner, as ``config_file`` is; a value equal to the default is used
-        silently, since using it changes nothing.
+        For the options that decide what cfn-lint reports: ``ignore_checks`` drops
+        findings before ASH sees them, so they are neither reported nor counted as
+        suppressed (measured: ``ignore_checks: [E, W]`` in the scanned tree's
+        ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan). A value from a
+        config in the scanned tree or from an MCP client is ignored with a warning,
+        once per scanner, as ``config_file`` is; a value equal to the default is
+        used silently, since using it changes nothing. ``tool_version``, which
+        chooses the release uv installs, is held to the operator's value when the
+        config is resolved instead (``_get_tool_version_constraint``).
         """
         options = self._options()
         value = getattr(options, name)
@@ -484,8 +485,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         return copy.deepcopy(default)
 
     def _get_tool_version_constraint(self) -> str | None:
-        """The operator's ``tool_version``, else the verified range."""
-        return self._operator_option("tool_version")
+        """``tool_version``, which only the operator sets.
+
+        ``resolve_config`` replaces a value from a config that is not the
+        operator's (``config/tool_config_trust.confine_tool_versions``), so this
+        reads the option as every uv-installed scanner does.
+        """
+        return self._options().tool_version
 
     def _get_tool_package_extras(self) -> List[str] | None:
         """cfn-lint's SARIF formatter is behind its ``sarif`` extra."""

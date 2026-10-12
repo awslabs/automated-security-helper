@@ -41,11 +41,17 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScanner,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
     CheckovScanner,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+    ZizmorScanner,
 )
 from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
     FerretScanScanner,
@@ -73,6 +79,8 @@ PLUGINS = [
     Plugin("scanner", "scanners", "semgrep", SemgrepScanner, "==1.125.0"),
     Plugin("converter", "converters", "jupyter", JupyterConverter, "==7.16.1"),
     Plugin("scanner", "scanners", "ferret-scan", FerretScanScanner, "==1.0.1"),
+    Plugin("scanner", "scanners", "cfn-lint", CfnLintScanner, "==1.43.3"),
+    Plugin("scanner", "scanners", "zizmor", ZizmorScanner, "==1.29.0"),
 ]
 
 

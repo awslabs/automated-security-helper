@@ -68,9 +68,10 @@ on; it is honored only when the operator set it, and from a config in the
 scanned tree it is ignored with a warning.
 
 ``options.tool_version`` picks which zizmor is installed and which one on PATH is
-accepted. A value other than the default is honored only when the operator set
-it; from a config in the scanned tree it is ignored with a warning and the default
-constraint applies.
+accepted. It is the operator's: ``resolve_config`` replaces a value from a config
+in the scanned tree, or one an MCP client delivered, with the operator's value or
+the default constraint, and names it in a warning
+(``config/tool_config_trust.confine_tool_versions``).
 
 Severity mapping
 ----------------
@@ -496,8 +497,6 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     _online_refusal_logged: bool = PrivateAttr(default=False)
     # Whether the tree-set honor_inline_ignores refusal was already logged.
     _ignores_refusal_logged: bool = PrivateAttr(default=False)
-    # Whether the tree-set tool_version refusal was already logged.
-    _tool_version_refusal_logged: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context: Any) -> None:
         if self.config is None:
@@ -544,33 +543,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     # ------------------------------------------------------------------
 
     def _get_tool_version_constraint(self) -> str | None:
-        """The operator's ``tool_version``, or the default constraint.
+        """``tool_version``, which only the operator sets.
 
         The constraint chooses which zizmor ``uv tool install`` fetches and which
         one already on PATH is accepted, so a config in the scanned tree could pin a
         release that lacks audits or that ASH's output handling was never checked
-        against. Like ``config_file``, a value other than the default is honored
-        only when the operator set it; any other is ignored with a warning, once.
+        against. ``resolve_config`` replaces a value from such a config with the
+        operator's or the default (``config/tool_config_trust.confine_tool_versions``),
+        so this reads the option as every uv-installed scanner does.
         """
-        configured = self._options.tool_version
-        if configured == ZIZMOR_DEFAULT_VERSION_CONSTRAINT:
-            return configured
-        context_config = self.context.config if self.context is not None else None
-        if set_by_operator(
-            context_config, "scanners.zizmor.options.tool_version", configured
-        ):
-            return configured
-        if not self._tool_version_refusal_logged:
-            self._tool_version_refusal_logged = True
-            self._plugin_log(
-                f"Ignoring scanners.zizmor.options.tool_version ({configured!r}): "
-                "it came from a config in the scanned tree or from an MCP client, "
-                f"so zizmor is held to {ZIZMOR_DEFAULT_VERSION_CONSTRAINT!r}. Set "
-                "it with --config-overrides or a config file outside the scanned "
-                "tree.",
-                level=logging.WARNING,
-            )
-        return ZIZMOR_DEFAULT_VERSION_CONSTRAINT
+        return self._options.tool_version
 
     def _probe_executable_version(self, executable: str) -> Optional[str]:
         """``<executable> --version``, parsed. None when it does not run or parse."""
