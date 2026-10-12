@@ -374,6 +374,22 @@ class TestAPathTheMountCannotCarryIsRefused:
         assert rc == 0, output
         assert [call[0] for call in calls] == ["run"]
 
+    @pytest.mark.parametrize("which", ["source", "output"])
+    def test_a_build_without_a_run_mounts_nothing_and_is_not_refused(
+        self, which, fake_runner, project, tmp_path
+    ):
+        """Control: ``--no-run`` builds the image and mounts no directory."""
+        odd = tmp_path / "a,b"
+        odd.mkdir()
+        args = ["--no-run", "--source-dir", str(project), "--output-dir", str(odd)]
+        if which == "source":
+            args = ["--no-run", "--source-dir", str(odd)]
+
+        rc, output, calls = _run_ash_status(fake_runner, project, args)
+
+        assert rc == 0, output
+        assert [call[0] for call in calls] == ["build"]
+
 
 class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
     """A config inside the scanned checkout but outside the source directory.
@@ -414,6 +430,34 @@ class TestAConfigTheScannedRepositoryWroteKeepsItsLimits:
             fake_runner,
             checkout / "services" / "api",
             ["--no-build", "--config", str(tmp_path / "ops" / "ash.yaml")],
+        )
+
+        assert rc == 0, output
+        assert "--config-from-scanned-repository" in _inner_args(_only(calls, "run"))
+
+    def test_the_outermost_checkout_counts_when_checkouts_nest(
+        self, fake_runner, tmp_path
+    ):
+        """outer/.git and outer/svc/.git: the scanned tree is outer, as a local scan
+        defines it, so a config in outer/ci is the repository's."""
+        outer = tmp_path / "outer"
+        (outer / ".git").mkdir(parents=True)
+        (outer / "svc" / ".git").mkdir(parents=True)
+        (outer / "ci").mkdir()
+        (outer / "ci" / "ash.yaml").write_text("project_name: p\n")
+
+        rc, output, calls = _run_ash_status(
+            fake_runner,
+            tmp_path,
+            [
+                "--no-build",
+                "--source-dir",
+                str(outer / "svc"),
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--config",
+                str(outer / "ci" / "ash.yaml"),
+            ],
         )
 
         assert rc == 0, output

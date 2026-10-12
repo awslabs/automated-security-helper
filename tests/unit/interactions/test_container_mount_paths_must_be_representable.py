@@ -172,6 +172,44 @@ def test_a_container_path_the_mount_cannot_carry_is_refused(name, commands, tmp_
     _refused(result)
 
 
+def test_a_build_without_a_run_mounts_nothing_and_is_not_refused(commands, tmp_path):
+    """Control: run=False builds the image and mounts no directory."""
+    (tmp_path / "src").mkdir()
+
+    result = rac.run_ash_container(
+        source_dir="src",
+        output_dir=str(tmp_path / "a,b"),
+        ash_revision_to_install="v3.7.0",
+        build=True,
+        run=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert [cmd[1] for cmd in commands] == ["build"]
+
+
+def test_a_path_found_unmountable_only_when_the_command_is_built_exits_3(
+    commands, monkeypatch, tmp_path
+):
+    """The inputs are checked before the build; the command builder checks again,
+    and a refusal there is the same exit 3, with nothing run."""
+    (tmp_path / "src").mkdir()
+
+    def refuse(**_kwargs):
+        raise rac.UnmountablePathError("The output directory 'x,y' cannot be handed")
+
+    monkeypatch.setattr(rac, "_assemble_run_command", refuse)
+
+    result = rac.run_ash_container(
+        source_dir="src", output_dir="out", build=False, run=True
+    )
+
+    assert result.returncode == 3
+    assert not rac.container_was_started(result)
+    assert commands == []
+    assert "cannot be handed" in result.stderr
+
+
 def test_ordinary_paths_still_run(commands, tmp_path):
     """Control: spaces and other punctuation are carried as they are."""
     source = tmp_path / "with space; and (parens) & 'single quotes'"
