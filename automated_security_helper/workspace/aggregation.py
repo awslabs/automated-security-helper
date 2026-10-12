@@ -747,8 +747,8 @@ def workspace_ignore_file_exclusions(
         for path, count in outcome.ignore_file_exclusions.by_ignore_file.items():
             key = path if str(prefix) == "." else (prefix / path).as_posix()
             by_ignore_file[key] = by_ignore_file.get(key, 0) + count
-    honored_count = sum(
-        1 for outcome in recorded if outcome.ignore_file_exclusions.honored
+    honored_count = len(
+        [outcome for outcome in recorded if outcome.ignore_file_exclusions.honored]
     )
     aggregate: Dict[str, Any] = {
         "honored": honored_count == len(recorded),
