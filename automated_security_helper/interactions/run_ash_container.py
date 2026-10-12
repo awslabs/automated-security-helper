@@ -903,7 +903,9 @@ def _custom_containerfile_stage_refusal(
 ) -> str | None:
     """Why ``--build-target non-root`` cannot be built from this custom file, or None."""
     stage = _custom_containerfile_stage(build_target, custom_containerfile)
-    if stage is None:
+    # _custom_containerfile_stage is None without a custom file; the second test
+    # says so where the type checker can see it.
+    if stage is None or custom_containerfile is None:
         return None
     try:
         text = Path(custom_containerfile).read_text(encoding="utf-8")
