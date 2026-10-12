@@ -727,7 +727,9 @@ def test_each_target_is_judged_by_its_own_exit_code(tmp_path, monkeypatch):
     converted = _converted(scanner)
     _runs_through_the_base_class(monkeypatch, [1, 0])
 
-    with pytest.raises(ScannerError, match="trivy exited 1"):
+    # The shared grading refuses the run before its report is read
+    # (success_exit_codes), as it does trivy-repo's below.
+    with pytest.raises(ScannerError, match="exited with code 1"):
         scanner.scan(scanner.context.source_dir, "source", [])
     report = scanner.scan(converted, "converted", [])
 
