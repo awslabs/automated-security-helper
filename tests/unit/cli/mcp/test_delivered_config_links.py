@@ -652,7 +652,9 @@ def test_the_output_dir_check_does_not_read_it(_server) -> None:
 
     read = _reads(run)
 
-    assert exited == [1]
+    # The delivered config that links out of the tree is refused, as any config
+    # input outside the session's grant is (exit 3), and never read.
+    assert exited == [3]
     assert (_server["host"] / "ash.yaml").resolve() not in read
 
 
@@ -661,21 +663,28 @@ def test_the_workspace_knobs_reader_does_not_read_it(_server) -> None:
         _resolve_workspace_execution_config,
     )
 
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+
     source = _linked_tree(
         _server, f"# {CANARY}\nworkspace:\n  max_parallel_projects: 9\n"
     )
-    out: List[Any] = []
+    refused: List[Any] = []
 
-    read = _reads(
-        lambda: out.append(
+    def run() -> None:
+        try:
             _resolve_workspace_execution_config(
                 _remote_options(source, _server["tmp"] / "out")
             )
-        )
-    )
+        except ASHConfigInputNotPermittedError as exc:
+            refused.append(exc)
 
-    (knobs,) = out
-    assert knobs.max_parallel_projects != 9
+    read = _reads(run)
+
+    # Refused, as the run refuses it, rather than read or passed over.
+    (refusal,) = refused
+    assert CANARY not in str(refusal)
     assert (_server["host"] / "ash.yaml").resolve() not in read
 
 
