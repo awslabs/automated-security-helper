@@ -737,36 +737,32 @@ def workspace_ignore_file_exclusions(
     print that instead of either one-scan sentence. None when no project built a
     scan set.
     """
+    # Each project's relative path with its record, for the projects that have one.
     recorded = [
-        outcome for outcome in outcomes if outcome.ignore_file_exclusions is not None
+        (outcome.relative_path, record)
+        for outcome in outcomes
+        if (record := outcome.ignore_file_exclusions) is not None
     ]
     if not recorded:
         return None
     by_ignore_file: Dict[str, int] = {}
-    for outcome in recorded:
-        prefix = PurePosixPath(outcome.relative_path)
-        for path, count in outcome.ignore_file_exclusions.by_ignore_file.items():
+    for relative_path, record in recorded:
+        prefix = PurePosixPath(relative_path)
+        for path, count in record.by_ignore_file.items():
             key = path if str(prefix) == "." else (prefix / path).as_posix()
             by_ignore_file[key] = by_ignore_file.get(key, 0) + count
+    records = [record for _, record in recorded]
     aggregate: Dict[str, Any] = {
-        "excluded_file_count": sum(
-            outcome.ignore_file_exclusions.excluded_file_count for outcome in recorded
-        ),
+        "excluded_file_count": sum(record.excluded_file_count for record in records),
         "by_ignore_file": by_ignore_file,
         "output_dir_file_count": sum(
-            outcome.ignore_file_exclusions.output_dir_file_count for outcome in recorded
+            record.output_dir_file_count for record in records
         ),
     }
     # honored, and when the projects disagree the counts that give them their own
     # sentence: neither "excluded N files" nor "excluded no files" is true of the
     # workspace then (IgnoreFileExclusions.summary_text).
-    aggregate.update(
-        merged_honoring(
-            outcome.ignore_file_exclusions
-            for outcome in recorded
-            if outcome.ignore_file_exclusions is not None
-        )
-    )
+    aggregate.update(merged_honoring(records))
     return aggregate
 
 

@@ -32,7 +32,7 @@ Example usage:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import computed_field
 
 from automated_security_helper.models.asharp_model import (
@@ -284,8 +284,11 @@ def inputs_not_scanned(
                 path, reason = item.get("path"), item.get("reason")
                 if isinstance(path, str) and isinstance(reason, str):
                     entries.append((scanner_name, path, reason))
-    if is_workspace_scan(asharp_model):
-        for project in asharp_model.workspace.projects:
+    workspace = asharp_model.workspace
+    # is_workspace_scan implies a workspace block; the None check says so to the
+    # type checker.
+    if workspace is not None and is_workspace_scan(asharp_model):
+        for project in workspace.projects:
             for item in project.inputs_not_scanned:
                 entries.append((item.scanner, item.path, item.reason))
     return entries
@@ -568,7 +571,7 @@ def _populate_summary_stats_from_unified_metrics(
 _PER_TARGET_ROW_FIELDS = frozenset({"source", "converted"})
 
 
-def _row_fields(row: object) -> dict:
+def _row_fields(row: object) -> Dict[str, Any]:
     """The fields a scanner_results row was given, extras included.
 
     Only the fields that were set, so a field the row never had keeps its default and

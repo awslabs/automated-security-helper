@@ -103,7 +103,9 @@ class S3ReporterConfig(ReporterPluginConfigBase):
     # operator's credentials, so only the operator's config turns it on.
     enabled: bool = False
     # A factory, so the environment defaults are read when the config is built.
-    options: S3ReporterConfigOptions = Field(default_factory=S3ReporterConfigOptions)
+    options: Annotated[
+        S3ReporterConfigOptions, Field(default_factory=S3ReporterConfigOptions)
+    ]
 
 
 @ash_reporter_plugin

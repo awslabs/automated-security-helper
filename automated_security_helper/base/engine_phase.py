@@ -1,12 +1,9 @@
 """Base class for execution engine phases."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional, Sequence
 
-from automated_security_helper.base.converter_plugin import ConverterPluginBase
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.base.reporter_plugin import ReporterPluginBase
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
@@ -20,8 +17,7 @@ class EnginePhase(ABC):
     def __init__(
         self,
         plugin_context: PluginContext,
-        plugins: List[ConverterPluginBase | ScannerPluginBase | ReporterPluginBase]
-        | None = None,
+        plugins: Sequence[type] | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
         plugin_filter: Optional[Callable[[Any], bool]] = None,
@@ -30,6 +26,8 @@ class EnginePhase(ABC):
 
         Args:
             plugin_context: Plugin context with paths and configuration
+            plugins: The plugin classes the phase builds and runs (classes, not
+                instances: each phase constructs them with its context and config)
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
             plugin_filter: The event handlers this phase's notifications reach;

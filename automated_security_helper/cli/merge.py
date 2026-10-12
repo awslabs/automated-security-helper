@@ -181,7 +181,7 @@ import json
 import logging
 import shlex
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple, Type
 
 import typer
 import yaml
@@ -198,6 +198,7 @@ from rich.markup import escape
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
     off_host_reporter_refused,
     warn_off_host_section_without_enabled,
 )
@@ -2114,8 +2115,10 @@ def merge_command(
         )
         # The off-host reporters run with the operator's configuration, so their
         # destinations are the operator's too. No --output-formats value names one,
-        # so, as in a scan, they run only when no format is requested.
-        if off_host_reporters and not parsed_formats:
+        # so, as in a scan, they run only when no format is requested. With no
+        # --config every one is refused (select_merge_reporters), so the list is
+        # empty then; the None check states that to the type checker.
+        if off_host_reporters and not parsed_formats and operator_config is not None:
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
                 output_dir=output_dir_path,
@@ -2165,10 +2168,12 @@ def _section(config: Optional[AshConfig], reporter_class: type) -> Optional[Any]
 
 
 def select_merge_reporters(
-    reporter_classes: Sequence[type],
+    reporter_classes: Sequence[Type[ReporterPluginBase[Any]]],
     shard_config: Optional[AshConfig],
     operator_config: Optional[AshConfig],
-) -> Tuple[List[type], List[type], List[str]]:
+) -> Tuple[
+    List[Type[ReporterPluginBase[Any]]], List[Type[ReporterPluginBase[Any]]], List[str]
+]:
     """Split ``ash merge``'s reporters into local and off-host ones, and say what was ignored.
 
     A reporter that sends findings off the host runs only when the operator's own
@@ -2182,8 +2187,8 @@ def select_merge_reporters(
 
     Returns the local reporters, the off-host reporters that run, and the notices.
     """
-    local: List[type] = []
-    off_host: List[type] = []
+    local: List[Type[ReporterPluginBase[Any]]] = []
+    off_host: List[Type[ReporterPluginBase[Any]]] = []
     notices: List[str] = []
     for reporter_class in reporter_classes:
         if getattr(reporter_class, "sends_off_host", False) is not True:

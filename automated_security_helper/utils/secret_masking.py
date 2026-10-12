@@ -4,7 +4,17 @@ import html
 import json
 import math
 import re
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import (
+    AbstractSet,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
 from urllib.parse import unquote
 
 from pydantic import BaseModel, ConfigDict
@@ -210,7 +220,7 @@ _HARDCODED_PASSWORD_LABEL = "Possible hardcoded password:"
 _MATCHED_TEXT_LABEL = "Matched text:"
 
 
-def _value_patterns(label: str) -> Tuple[re.Pattern, re.Pattern]:
+def _value_patterns(label: str) -> Tuple[re.Pattern[str], re.Pattern[str]]:
     """(the quoted value ending the message, the first quoted value after ``label``).
 
     The value is written raw, so it can hold its own quote character, and it
@@ -226,7 +236,7 @@ def _value_patterns(label: str) -> Tuple[re.Pattern, re.Pattern]:
     )
 
 
-_VALUE_PATTERNS: Dict[str, Tuple[re.Pattern, re.Pattern]] = {
+_VALUE_PATTERNS: Dict[str, Tuple[re.Pattern[str], re.Pattern[str]]] = {
     label: _value_patterns(label)
     for label in (_HARDCODED_PASSWORD_LABEL, _MATCHED_TEXT_LABEL)
 }
@@ -414,7 +424,7 @@ def secret_detection_rule_ids(sarif_report: Any) -> Set[str]:
 
 
 def is_secret_detection(
-    result: Any, detection_rule_ids: Set[str] = frozenset()
+    result: Any, detection_rule_ids: AbstractSet[str] = frozenset()
 ) -> bool:
     """Whether ``result`` comes from a rule that detects a credential or key.
 
@@ -454,7 +464,9 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
     )
 
 
-def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> bool:
+def is_secret_finding(
+    result: Any, secret_rule_ids: AbstractSet[str] = frozenset()
+) -> bool:
     """Whether ``result`` reports a secret; see the module notes above."""
     from automated_security_helper.utils.scanner_tool_types import (
         SECRETS_TOOL_TYPE,
@@ -604,7 +616,7 @@ class _SecretIndex:
         #: every finding that overlaps it has these values masked, whatever they
         #: look like. The lines are None when the location gives none.
         self.local_values: List[Tuple[str, Optional[int], Optional[int], Set[str]]] = []
-        self._pattern: Optional[re.Pattern] = None
+        self._pattern: Optional[re.Pattern[str]] = None
 
     def add_values(self, values: Iterable[str]) -> None:
         """Add the values that are masked wherever they occur (``_propagates``)."""
@@ -874,7 +886,16 @@ def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
             for secret_uri, start, end, values in index.local_values:
                 if not _same_file(secret_uri, uri):
                     continue
-                if first is None or start is None or (first <= end and start <= last):
+                # A span with no line cannot be placed, so it overlaps. Each pair
+                # is None together (_line_spans, _index_secrets), so the end
+                # checks only say so to the type checker.
+                if (
+                    first is None
+                    or last is None
+                    or start is None
+                    or end is None
+                    or (first <= end and start <= last)
+                ):
                     found |= values
     return found
 
@@ -964,7 +985,7 @@ def _own_snippet_lines(result: Any) -> List[str]:
     for physical in _physical_locations_of(result):
         region = getattr(physical, "region", None)
         start = getattr(region, "startLine", None)
-        end = getattr(region, "endLine", None) or start
+        end_line = getattr(region, "endLine", None)
         text = getattr(getattr(region, "snippet", None), "text", None)
         if isinstance(text, str):
             lines.extend(_split_lines(text))
@@ -983,6 +1004,8 @@ def _own_snippet_lines(result: Any) -> List[str]:
             # a candidate; a candidate must still mask to exactly the quoted shape.
             lines.extend(context_lines)
             continue
+        # A region with no end line ends where it starts.
+        end = end_line if isinstance(end_line, int) and end_line else start
         for offset, line in enumerate(context_lines):
             if start <= context_start + offset <= end:
                 lines.append(line)
@@ -1133,7 +1156,8 @@ def _mask_report(
         message = getattr(result, "message", None)
         root = getattr(message, "root", message)
         text = getattr(root, "text", None)
-        if isinstance(text, str):
+        # A root with a text is never None; the check says so to the type checker.
+        if root is not None and isinstance(text, str):
             masked = _mask_message_values(text)
             if masked != text:
                 root.text = masked

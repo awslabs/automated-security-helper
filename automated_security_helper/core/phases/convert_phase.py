@@ -1,7 +1,7 @@
 """Implementation of the Convert phase."""
 
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
@@ -210,9 +210,7 @@ class ConvertPhase(EnginePhase):
                         config=(
                             self.plugin_context.config.get_plugin_config(
                                 plugin_type="converter",
-                                # EnginePhase annotates self.plugins as instances,
-                                # but this phase receives the plugin classes.
-                                plugin_name=plugin_config_key(cast(type, plugin_class)),
+                                plugin_name=plugin_config_key(plugin_class),
                             )
                             if self.plugin_context.config is not None
                             else None
