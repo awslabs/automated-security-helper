@@ -1,0 +1,1673 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""The actionlint scanner: argv, parsing, severity mapping and failure handling.
+
+The parser tests read output captured from the pinned actionlint (1.7.12) running
+over ``tests/test_data/scanners/actionlint/repo``:
+
+* ``actionlint-1.7.12-default.json`` -- the argv ASH uses (shellcheck and pyflakes
+  disabled), over ``clean.yml`` and ``vulnerable.yml``.
+* ``actionlint-1.7.12-shellcheck.json`` -- the same with ``-shellcheck=<path>``
+  (shellcheck 0.11.0), which adds one SC2086 finding.
+* ``actionlint-1.7.12-clean.json`` -- ``clean.yml`` alone, exit 0.
+
+The repository's pretty-format-json hook re-indents the captures; the content is the
+binary's output unchanged.
+
+To recapture after a version bump, run from the fixture repo::
+
+    actionlint -no-color -shellcheck= -pyflakes= -config-file <empty file> \\
+      -format '<ACTIONLINT_FORMAT>' -- .github/workflows/clean.yml \\
+      .github/workflows/vulnerable.yml > ../actionlint-<version>-default.json
+
+The subprocess is replaced in these tests; the real binary runs in
+``tests/integration/scanners/test_actionlint_real_binary.py``.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import logging
+import os
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    actionlint_scanner as module,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ACTIONLINT_FORMAT,
+    KIND_SEVERITY,
+    ActionlintScanner,
+    ActionlintScannerConfig,
+    ActionlintScannerConfigOptions,
+    build_sarif,
+    config_ignore_patterns,
+    is_workflow_file,
+    severity_for,
+)
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.config_trust import record_provenance
+from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from automated_security_helper.utils import subprocess_utils
+
+FIXTURES = Path(__file__).resolve().parents[3] / "test_data" / "scanners" / "actionlint"
+FIXTURE_REPO = FIXTURES / "repo"
+FAKE_ACTIONLINT = "/opt/fake/bin/actionlint"
+
+#: What ASH must report for the captured default run, in actionlint's order:
+#: (ruleId, SARIF level, ASH severity, uri, startLine, startColumn).
+EXPECTED_DEFAULT = [
+    ("credentials", "error", "HIGH", ".github/workflows/vulnerable.yml", 17, 21),
+    ("expression", "error", "HIGH", ".github/workflows/vulnerable.yml", 20, 24),
+    ("deprecated-commands", "note", "LOW", ".github/workflows/vulnerable.yml", 22, 14),
+    (
+        "deprecated-commands",
+        "warning",
+        "MEDIUM",
+        ".github/workflows/vulnerable.yml",
+        24,
+        14,
+    ),
+    ("if-cond", "warning", "MEDIUM", ".github/workflows/vulnerable.yml", 26, 13),
+    ("job-needs", "note", "LOW", ".github/workflows/vulnerable.yml", 28, 3),
+    ("runner-label", "note", "LOW", ".github/workflows/vulnerable.yml", 36, 14),
+    ("syntax-check", "note", "LOW", ".github/workflows/vulnerable.yml", 37, 5),
+]
+
+
+def _load(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def _summary(sarif: dict) -> list:
+    rows = []
+    for result in sarif["runs"][0]["results"]:
+        location = result["locations"][0]["physicalLocation"]
+        rows.append(
+            (
+                result["ruleId"],
+                result["level"],
+                result["properties"]["issue_severity"],
+                location["artifactLocation"]["uri"],
+                location["region"]["startLine"],
+                location["region"].get("startColumn"),
+            )
+        )
+    return rows
+
+
+def _assert_matches_default(sarif: dict) -> None:
+    assert _summary(sarif) == EXPECTED_DEFAULT
+
+
+@pytest.fixture
+def repo(tmp_path) -> Path:
+    target = tmp_path / "repo"
+    shutil.copytree(FIXTURE_REPO, target)
+    return target
+
+
+def _scanner(
+    source: Path,
+    output: Path | None = None,
+    *,
+    operator: bool = False,
+    overrides: tuple = (),
+    **options,
+) -> ActionlintScanner:
+    """A scanner whose config came from the scanned tree, or from the operator.
+
+    ``operator=True`` records a config file outside the tree; ``overrides`` records
+    --config-overrides keys. Otherwise the config is the tree's own .ash/.ash.yaml.
+    """
+    output = output or source.parent / "ash_output"
+    config = get_default_config()
+    # operator=True: built from no file in the scanned tree. Otherwise from the
+    # tree's .ash/.ash.yaml, judged against the defaults plus ``overrides``.
+    record_provenance(
+        config,
+        in_tree=[] if operator else [source / ".ash" / ".ash.yaml"],
+        trusted=AshConfig(),
+        config_overrides=list(overrides),
+    )
+    return ActionlintScanner(
+        context=PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / "converted",
+            config=config,
+        ),
+        config=ActionlintScannerConfig(
+            enabled=True, options=ActionlintScannerConfigOptions(**options)
+        ),
+    )
+
+
+class FakeRun:
+    """Stands in for ``_run_subprocess`` and records the argv it was given."""
+
+    def __init__(self, scanner, stdout: str = "", returncode: int = 0, **extra):
+        self.scanner = scanner
+        self.stdout = stdout
+        self.returncode = returncode
+        self.extra = extra
+        self.calls: list = []
+
+    def __call__(self, command, **kwargs):
+        self.calls.append((list(command), kwargs))
+        self.scanner.exit_code = self.returncode
+        return {"returncode": self.returncode, "stdout": self.stdout, **self.extra}
+
+
+@pytest.fixture
+def on_path(monkeypatch):
+    """actionlint (and nothing else) is installed."""
+    monkeypatch.setattr(
+        module,
+        "find_absolute_executable",
+        lambda name: FAKE_ACTIONLINT if name == "actionlint" else None,
+    )
+
+
+def _run(scanner, monkeypatch, stdout, returncode, **extra) -> FakeRun:
+    fake = FakeRun(scanner, stdout=stdout, returncode=returncode, **extra)
+    monkeypatch.setattr(scanner, "_run_subprocess", fake)
+    return fake
+
+
+# --------------------------------------------------------------------------- #
+# A builtin scanner, on by default
+# --------------------------------------------------------------------------- #
+
+
+def test_the_scanner_is_on_by_default():
+    assert ActionlintScannerConfig().enabled is True
+    assert ActionlintScannerConfig().name == "actionlint"
+
+
+# --------------------------------------------------------------------------- #
+# Parsing real output
+# --------------------------------------------------------------------------- #
+
+
+def test_captured_default_output_maps_to_the_expected_findings():
+    sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+
+    _assert_matches_default(sarif)
+    assert sarif["runs"][0]["tool"]["driver"]["name"] == "actionlint"
+    assert sarif["runs"][0]["tool"]["driver"]["version"] == "1.7.12"
+    # It is valid SARIF as ASH's model reads it.
+    SarifReport.model_validate(sarif)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda e: e.update(kind="syntax-check"), id="rule-id"),
+        pytest.param(lambda e: e.update(line=e["line"] + 1), id="line"),
+        pytest.param(lambda e: e.update(column=e["column"] + 1), id="column"),
+        pytest.param(
+            lambda e: e.update(filepath=".github/workflows/other.yml"), id="path"
+        ),
+        pytest.param(
+            lambda e: e.update(message=e["message"].replace("potentially ", "")),
+            id="level",
+        ),
+    ],
+)
+def test_negative_control_a_mutated_finding_fails_the_expectation(mutate):
+    """The expectation above bites: change any field of one finding and it fails."""
+    payload = _load("actionlint-1.7.12-default.json")
+    expression = next(e for e in payload["errors"] if e["kind"] == "expression")
+    mutate(expression)
+
+    with pytest.raises(AssertionError):
+        _assert_matches_default(build_sarif(payload, exit_code=1))
+
+
+def test_region_carries_snippet_and_exclusive_end_column():
+    sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+    region = sarif["runs"][0]["results"][1]["locations"][0]["physicalLocation"][
+        "region"
+    ]
+    # actionlint reports end_column 47, inclusive; SARIF's endColumn is exclusive.
+    assert region == {
+        "startLine": 20,
+        "endLine": 20,
+        "startColumn": 24,
+        "endColumn": 48,
+        "snippet": {
+            "text": '        run: echo "${{ github.event.issue.title }}"\n'
+            "                       ^~~~~~~~~~~~~~~~~~~~~~~~"
+        },
+    }
+
+
+def test_rules_list_each_kind_once_with_its_default_level():
+    sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+    rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+    assert [r["id"] for r in rules] == sorted({row[0] for row in EXPECTED_DEFAULT})
+    by_id = {r["id"]: r["defaultConfiguration"]["level"] for r in rules}
+    assert by_id["credentials"] == "error"
+    assert by_id["expression"] == "note"
+
+
+def test_captured_shellcheck_output_reports_shellcheck_as_low():
+    sarif = build_sarif(_load("actionlint-1.7.12-shellcheck.json"), exit_code=1)
+    shellcheck = [row for row in _summary(sarif) if row[0] == "shellcheck"]
+    assert shellcheck == [
+        ("shellcheck", "note", "LOW", ".github/workflows/vulnerable.yml", 34, 9)
+    ]
+
+
+def test_captured_clean_output_is_zero_findings():
+    sarif = build_sarif(_load("actionlint-1.7.12-clean.json"), exit_code=0)
+    assert sarif["runs"][0]["results"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Severity mapping
+# --------------------------------------------------------------------------- #
+
+
+def test_every_kind_of_the_pinned_version_has_a_deliberate_severity():
+    """The 18 kinds ``allKinds`` lists in 1.7.12, each mapped explicitly."""
+    assert sorted(KIND_SEVERITY) == [
+        "action",
+        "credentials",
+        "deprecated-commands",
+        "env-var",
+        "events",
+        "expression",
+        "glob",
+        "id",
+        "if-cond",
+        "job-needs",
+        "matrix",
+        "permissions",
+        "pyflakes",
+        "runner-label",
+        "shell-name",
+        "shellcheck",
+        "syntax-check",
+        "workflow-call",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "message", "expected"),
+    [
+        (
+            "expression",
+            '"github.event.issue.title" is potentially untrusted. avoid using it',
+            "HIGH",
+        ),
+        (
+            "expression",
+            (
+                "object filter extracts potentially untrusted properties "
+                '"github.event.commits.*.message"'
+            ),
+            "HIGH",
+        ),
+        ("expression", 'property "foo" is not defined in object type {}', "LOW"),
+        ("credentials", '"password" section in "db" service ...', "HIGH"),
+        ("deprecated-commands", 'workflow command "set-env" was deprecated', "MEDIUM"),
+        ("deprecated-commands", 'workflow command "add-path" was deprecated', "MEDIUM"),
+        ("deprecated-commands", 'workflow command "set-output" was deprecated', "LOW"),
+        ("deprecated-commands", 'workflow command "save-state" was deprecated', "LOW"),
+        ("if-cond", "is always evaluated to true", "MEDIUM"),
+        ("permissions", 'unknown permission scope "issue"', "MEDIUM"),
+        ("syntax-check", 'unexpected key "timeout-minute"', "LOW"),
+        ("shellcheck", "SC2086", "LOW"),
+        ("brand-new-kind", "anything", "LOW"),
+    ],
+)
+def test_severity_for(kind, message, expected):
+    assert severity_for(kind, message) == expected
+
+
+def test_an_unknown_kind_is_reported_low_and_logged_once(caplog):
+    payload = {
+        "version": "9.9.9",
+        "errors": [
+            {"kind": "brand-new-kind", "message": "m", "filepath": "a.yml", "line": 1},
+            {"kind": "brand-new-kind", "message": "m", "filepath": "a.yml", "line": 2},
+        ],
+    }
+    with caplog.at_level(logging.WARNING):
+        sarif = build_sarif(payload, exit_code=1)
+    assert [r["level"] for r in sarif["runs"][0]["results"]] == ["note", "note"]
+    assert sum("brand-new-kind" in r.getMessage() for r in caplog.records) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Malformed or contradictory output fails closed
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("payload", "exit_code", "match"),
+    [
+        ([], 0, "expected JSON object"),
+        ({"version": "1"}, 0, "expected JSON object"),
+        ({"errors": {}}, 0, "not a JSON array"),
+        ({"errors": []}, 1, "exited 1"),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": 1}]},
+            0,
+            "exited 0",
+        ),
+        ({"errors": ["text"]}, 1, "not a JSON object"),
+        ({"errors": [{"kind": "id", "message": "m", "line": 1}]}, 1, "missing"),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": 0}]},
+            1,
+            "missing",
+        ),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": True}]},
+            1,
+            "missing",
+        ),
+    ],
+)
+def test_malformed_output_raises(payload, exit_code, match):
+    with pytest.raises(ScannerError, match=match):
+        build_sarif(payload, exit_code)
+
+
+def test_null_errors_with_exit_zero_is_clean():
+    assert build_sarif({"version": "1", "errors": None}, 0)["runs"][0]["results"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Workflow discovery
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (".github/workflows/ci.yml", True),
+        (".github/workflows/ci.YAML", True),
+        ("svc/.github/workflows/ci.yaml", True),
+        (".github\\workflows\\ci.yml", True),
+        (".github/workflows/sub/ci.yml", False),
+        (".github/workflows/README.md", False),
+        (".github/actionlint.yaml", False),
+        ("github/workflows/ci.yml", False),
+        ("config/not-a-workflow.yml", False),
+    ],
+)
+def test_is_workflow_file(path, expected):
+    assert is_workflow_file(path) is expected
+
+
+# --------------------------------------------------------------------------- #
+# Running the scanner (subprocess replaced)
+# --------------------------------------------------------------------------- #
+
+
+def test_argv_disables_shellcheck_and_pyflakes_and_passes_workflows_explicitly(
+    repo, monkeypatch, on_path
+):
+    """Determinism: the integrations stay off even with shellcheck on PATH.
+
+    ``find_absolute_executable`` here answers for shellcheck and pyflakes too, so the only
+    reason they are absent from the argv is that ASH disabled them.
+    """
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/usr/bin/{name}"
+    )
+    scanner = _scanner(repo)
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    fake = _run(scanner, monkeypatch, stdout, 1)
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    ((argv, kwargs),) = fake.calls
+    separator = argv.index("--")
+    assert argv[0] == "/usr/bin/actionlint"
+    assert "-shellcheck=" in argv[:separator]
+    assert "-pyflakes=" in argv[:separator]
+    assert argv[argv.index("-format") + 1] == ACTIONLINT_FORMAT
+    assert argv[separator + 1 :] == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+    assert kwargs["cwd"] == repo
+    assert kwargs["timeout"] == 1800
+    assert isinstance(report, SarifReport)
+    assert scanner.targets_attempted == 2
+    assert scanner.targets_failed == 0
+    assert len(report.runs[0].results) == len(EXPECTED_DEFAULT)
+    assert report.runs[0].invocations[0].executionSuccessful is True
+
+
+def test_configured_shellcheck_is_passed_by_resolved_path(repo, monkeypatch):
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
+    )
+    scanner = _scanner(repo, shellcheck="shellcheck")
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert "-shellcheck=/opt/bin/shellcheck" in argv
+    assert "-pyflakes=" in argv
+
+
+def test_configured_shellcheck_that_is_absent_is_missing_not_skipped(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo, shellcheck="shellcheck")
+    fake = _run(scanner, monkeypatch, "", 0)
+
+    assert scanner.scan(target=repo, target_type="source") is False
+    assert fake.calls == []
+    assert "shellcheck" in scanner.dependency_unavailable_reason
+
+
+def test_configured_pyflakes_path_that_does_not_exist_is_missing(
+    repo, monkeypatch, on_path, tmp_path
+):
+    scanner = _scanner(
+        repo, operator=True, pyflakes=str(tmp_path / "nope" / "pyflakes")
+    )
+    assert scanner.validate_plugin_dependencies() is False
+    assert "pyflakes" in scanner.dependency_unavailable_reason
+
+
+def test_missing_actionlint_is_missing(repo, monkeypatch):
+    monkeypatch.setattr(module, "find_absolute_executable", lambda name: None)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, "", 0)
+
+    assert scanner.scan(target=repo, target_type="source") is False
+    assert fake.calls == []
+
+
+def test_non_workflow_yaml_and_ash_output_are_not_passed(repo, monkeypatch, on_path):
+    output = repo / ".ash" / "ash_output"
+    stale = output / "copy" / ".github" / "workflows"
+    stale.mkdir(parents=True)
+    (stale / "old.yml").write_text("name: x\n")
+    scanner = _scanner(repo, output=output)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    files = argv[argv.index("--") + 1 :]
+    assert "config/not-a-workflow.yml" not in files
+    assert not any(".ash/" in f for f in files)
+
+
+def test_global_ignore_paths_are_respected(repo, monkeypatch, on_path):
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    scanner.scan(
+        target=repo,
+        target_type="source",
+        global_ignore_paths=[
+            IgnorePathWithReason(path=".github/workflows/vulnerable.yml", reason="t")
+        ],
+    )
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]
+
+
+def test_gitignore_is_respected(repo, monkeypatch, on_path):
+    (repo / ".gitignore").write_text(".github/workflows/vulnerable.yml\n")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]
+
+
+def test_a_workflow_path_starting_with_a_dash_is_after_the_separator(
+    tmp_path, monkeypatch, on_path
+):
+    source = tmp_path / "src"
+    workflows = source / "-svc" / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("on: push\n")
+    scanner = _scanner(source)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    scanner.scan(target=source, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == ["-svc/.github/workflows/ci.yml"]
+
+
+def test_no_workflows_does_not_run_actionlint_and_evaluates_nothing(
+    tmp_path, monkeypatch, on_path
+):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("print(1)\n")
+    scanner = _scanner(source)
+    fake = _run(scanner, monkeypatch, "", 0)
+
+    report = scanner.scan(target=source, target_type="source")
+
+    assert fake.calls == []
+    assert isinstance(report, SarifReport) and report.runs == []
+    assert scanner.targets_attempted == 0
+
+
+def test_without_a_config_an_empty_one_is_passed_from_the_results_dir(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config.is_relative_to(Path(scanner.results_dir))
+    assert config.read_text().startswith("#")
+
+
+@pytest.mark.parametrize("name", ["actionlint.yaml", "actionlint.yml"])
+def test_the_scanned_trees_actionlint_config_is_not_read(
+    repo, monkeypatch, on_path, caplog, name
+):
+    """Its ``paths.ignore`` would drop findings neither reported nor suppressed."""
+    (repo / ".github" / name).write_text(
+        "paths:\n  .github/workflows/**/*.yml:\n    ignore:\n      - '.*'\n"
+    )
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.INFO):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config.is_relative_to(Path(scanner.results_dir))
+    assert config.read_text().startswith("#")
+    assert f".github/{name} in the scanned tree is not read" in caplog.text
+
+
+@pytest.mark.parametrize("operator", [True, False])
+def test_config_file_is_passed_only_when_the_operator_set_it(
+    repo, monkeypatch, on_path, caplog, operator
+):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text("self-hosted-runner:\n  labels: [x]\n")
+    scanner = _scanner(repo, operator=operator, config_file="ci/actionlint.yaml")
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    if operator:
+        assert config == (repo / "ci" / "actionlint.yaml").absolute()
+        assert "Ignoring scanners.actionlint.options.config_file" not in caplog.text
+    else:
+        assert config.is_relative_to(Path(scanner.results_dir))
+        assert "Ignoring scanners.actionlint.options.config_file" in caplog.text
+
+
+def test_an_operator_config_file_that_does_not_exist_is_an_error(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    fake = _run(scanner, monkeypatch, "", 0)
+
+    with pytest.raises(ScannerError, match="does not exist"):
+        scanner.scan(target=repo, target_type="source")
+    assert fake.calls == []
+    assert scanner.targets_failed == scanner.targets_attempted == 2
+
+
+_OUTSIDE_PATTERN = "pattern-from-a-file-outside-the-tree"
+
+
+def _config_linked_out(repo: Path, shape: str) -> str:
+    """A config_file value in the tree that leads to a file outside it, an
+    actionlint config whose ``ignore`` pattern ASH would log."""
+    outside = repo.parent / "outside"
+    outside.mkdir()
+    (outside / "creds").write_text(
+        f"paths:\n  '**':\n    ignore:\n      - {_OUTSIDE_PATTERN}\n"
+    )
+    link = repo / "ci" / "actionlint.yaml"
+    if shape in ("file", "chain", "dangling"):
+        link.parent.mkdir()
+    if shape == "file":
+        link.symlink_to(outside / "creds")
+    elif shape == "chain":
+        (repo / "ci" / "second.yaml").symlink_to(outside / "creds")
+        link.symlink_to("second.yaml")
+    elif shape == "dangling":
+        link.symlink_to(outside / "missing.yaml")
+    elif shape == "directory":
+        (repo / "ci").symlink_to(outside, target_is_directory=True)
+        return "ci/creds"
+    else:
+        (repo / "ci").mkdir()
+        (repo / "ci" / "up").symlink_to(outside, target_is_directory=True)
+        return "ci/up/creds"
+    return "ci/actionlint.yaml"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+@pytest.mark.parametrize(
+    "shape", ["file", "chain", "dangling", "directory", "nested directory"]
+)
+def test_an_operator_config_file_in_the_tree_cannot_link_out_of_it(
+    repo, monkeypatch, on_path, caplog, shape
+):
+    """The operator may name a config inside the scanned tree, but the tree decides
+    what is at that path. actionlint quotes the start of a value it cannot parse,
+    and ASH logs a config's ignore patterns, so a link there to a file outside the
+    tree put that file's text into ash.log. actionlint is not run, and the scan is
+    an error."""
+    value = _config_linked_out(repo, shape)
+    scanner = _scanner(repo, operator=True, config_file=value)
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ScannerError) as excinfo:
+        scanner.scan(target=repo, target_type="source")
+    assert fake.calls == []
+    message = str(excinfo.value)
+    assert "scanners.actionlint.options.config_file" in message
+    assert "symbolic link" in message and "actionlint is not run" in message
+    assert _OUTSIDE_PATTERN not in message + caplog.text
+    assert (repo.parent / "outside").as_posix() not in message
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_an_operator_config_file_in_the_tree_may_link_inside_it(
+    repo, monkeypatch, on_path
+):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "real.yaml").write_text("self-hosted-runner:\n  labels: [x]\n")
+    (repo / "ci" / "actionlint.yaml").symlink_to("real.yaml")
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+    scanner.scan(target=repo, target_type="source")
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config == (repo / "ci" / "real.yaml").resolve()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_an_operator_config_file_outside_the_tree_may_be_a_link(
+    repo, monkeypatch, on_path
+):
+    """Outside the tree the operator controls both the path and the link."""
+    shared = repo.parent / "shared"
+    shared.mkdir()
+    (shared / "actionlint.yaml").write_text("self-hosted-runner:\n  labels: [x]\n")
+    (repo.parent / "actionlint.yaml").symlink_to(shared / "actionlint.yaml")
+    scanner = _scanner(repo, operator=True, config_file="../actionlint.yaml")
+    fake = _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+    scanner.scan(target=repo, target_type="source")
+    ((argv, _),) = fake.calls
+    config = Path(argv[argv.index("-config-file") + 1])
+    assert config == (shared / "actionlint.yaml").resolve()
+
+
+def test_an_operator_config_that_ignores_findings_is_warned_about(
+    repo, monkeypatch, on_path, caplog
+):
+    (repo / "ci").mkdir()
+    (repo / "ci" / "actionlint.yaml").write_text(
+        "paths:\n  .github/workflows/**/*.yml:\n    ignore:\n"
+        "      - 'potentially untrusted'\n"
+    )
+    scanner = _scanner(repo, operator=True, config_file="ci/actionlint.yaml")
+    _run(scanner, monkeypatch, '{"version":"1","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    assert any("'potentially untrusted'" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("paths:\n  a/**:\n    ignore: [x, y]\n  b:\n    ignore: [x]\n", ["x", "y"]),
+        ("self-hosted-runner:\n  labels: [a]\n", []),
+        ("paths: [1]\n", []),
+        (": : :\n", []),
+        ("", []),
+    ],
+)
+def test_config_ignore_patterns(tmp_path, body, expected):
+    config = tmp_path / "actionlint.yaml"
+    config.write_text(body)
+    assert config_ignore_patterns(config) == expected
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [
+        (2, ""),
+        (3, 'could not read "x.yml"'),
+        (1, "not json"),
+        (1, '{"version":"1","errors":[]}'),
+    ],
+)
+def test_tool_errors_raise_rather_than_report_clean(
+    repo, monkeypatch, on_path, returncode, stdout
+):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, stdout, returncode)
+
+    with pytest.raises(ScannerError):
+        scanner.scan(target=repo, target_type="source")
+    assert scanner.targets_failed == scanner.targets_attempted == 2
+
+
+def test_a_timeout_says_timed_out(repo, monkeypatch, on_path):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, "", 124, timed_out=True)
+
+    with pytest.raises(ScannerError, match="timed out"):
+        scanner.scan(target=repo, target_type="source")
+
+
+def test_the_raw_output_and_sarif_are_kept_in_the_results_dir(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo)
+    stdout = (FIXTURES / "actionlint-1.7.12-default.json").read_text()
+    _run(scanner, monkeypatch, stdout, 1)
+
+    scanner.scan(target=repo, target_type="source")
+
+    results = Path(scanner.results_dir) / "source"
+    kept = json.loads((results / "actionlint.json").read_text())
+    original = json.loads(stdout)
+    assert len(kept["errors"]) == len(original["errors"])
+    assert "hunter2" in stdout and "hunter2" not in json.dumps(kept)
+    # Only the credentials snippet is dropped.
+    assert [e for e in kept["errors"] if e["kind"] != "credentials"] == [
+        e for e in original["errors"] if e["kind"] != "credentials"
+    ]
+    _assert_matches_default(
+        json.loads((results / "actionlint.sarif").read_text(encoding="utf-8"))
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Suppressions
+# --------------------------------------------------------------------------- #
+
+
+def _suppressed_rules(report: SarifReport, suppressions, source: Path) -> list:
+    config = get_default_config()
+    config.global_settings.suppressions = suppressions
+    context = PluginContext(
+        source_dir=source, output_dir=source.parent / "out", config=config
+    )
+    report = apply_suppressions_to_sarif(copy.deepcopy(report), context)
+    return [
+        (r.ruleId, r.locations[0].physicalLocation.root.region.startLine)
+        for r in report.runs[0].results
+        if r.suppressions
+    ]
+
+
+@pytest.fixture
+def default_report() -> SarifReport:
+    return SarifReport.model_validate(
+        build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+    )
+
+
+def test_rule_suppression(default_report, tmp_path):
+    suppressed = _suppressed_rules(
+        default_report,
+        [AshSuppression(rule_id="credentials", path="**", reason="test")],
+        tmp_path,
+    )
+    assert suppressed == [("credentials", 17)]
+
+
+def test_path_and_line_suppression(default_report, tmp_path):
+    suppressed = _suppressed_rules(
+        default_report,
+        [
+            AshSuppression(
+                rule_id="deprecated-commands",
+                path=".github/workflows/vulnerable.yml",
+                line_start=24,
+                line_end=24,
+                reason="test",
+            )
+        ],
+        tmp_path,
+    )
+    assert suppressed == [("deprecated-commands", 24)]
+
+
+def test_path_suppression_for_another_file_suppresses_nothing(default_report, tmp_path):
+    assert (
+        _suppressed_rules(
+            default_report,
+            [AshSuppression(path=".github/workflows/clean.yml", reason="test")],
+            tmp_path,
+        )
+        == []
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Review findings: confinement, integrations, exit codes, secrets, versions
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges")
+def test_a_workflow_symlinked_outside_the_root_is_not_passed(
+    repo, tmp_path, monkeypatch, on_path
+):
+    outside = tmp_path / "outside.yml"
+    outside.write_text("on: push\n")
+    (repo / ".github" / "workflows" / "leak.yml").symlink_to(outside)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    files = argv[argv.index("--") + 1 :]
+    assert ".github/workflows/leak.yml" not in files
+    assert files == [".github/workflows/clean.yml", ".github/workflows/vulnerable.yml"]
+
+
+@pytest.mark.parametrize("kind", ["dangling", "loop"])
+def test_a_workflow_link_that_resolves_to_no_file_is_skipped_with_a_warning(
+    repo, monkeypatch, on_path, caplog, kind
+):
+    """actionlint exits 3 on a file it cannot open, failing the whole run.
+
+    So a broken or looping link is skipped with a warning, as a link pointing
+    outside the scan root is, and the other workflows are still linted.
+    """
+    workflows = repo / ".github" / "workflows"
+    if kind == "dangling":
+        (workflows / "broken.yml").symlink_to("missing.yml")
+    else:
+        (workflows / "broken.yml").symlink_to("loop.yml")
+        (workflows / "loop.yml").symlink_to("broken.yml")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    files = argv[argv.index("--") + 1 :]
+    assert files == [".github/workflows/clean.yml", ".github/workflows/vulnerable.yml"]
+    assert "Not linting .github/workflows/broken.yml" in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_a_non_executable_integration_path_is_missing(
+    repo, monkeypatch, on_path, tmp_path
+):
+    tool = tmp_path / "operator-bin" / "shellcheck"
+    tool.parent.mkdir()
+    tool.write_text("not executable\n")
+    tool.chmod(0o644)
+    assert not os.access(tool, os.X_OK)
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert "shellcheck" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.parametrize("returncode", [2, 3])
+def test_a_failing_exit_code_raises_even_with_valid_json(
+    repo, monkeypatch, on_path, returncode
+):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', returncode)
+
+    with pytest.raises(ScannerError, match=f"exited {returncode}"):
+        scanner.scan(target=repo, target_type="source")
+
+
+def _through_the_base_class(monkeypatch, responses: list) -> None:
+    """Replace only the process call, one response per run.
+
+    ``_run_subprocess`` and the base class's exit-code accumulation (it keeps the
+    worst code across calls) run for real, which ``FakeRun`` bypasses.
+    """
+    remaining = iter(responses)
+    monkeypatch.setattr(
+        "automated_security_helper.utils.subprocess_utils."
+        "run_command_with_output_handling",
+        lambda **_: next(remaining),
+    )
+
+
+def _converted_target(output: Path, workflow: Path | None) -> Path:
+    """``work_dir`` as the archive converter leaves it, holding *workflow* or not."""
+    work_dir = output / "converted"
+    extracted = work_dir / "archive.zip"
+    extracted.mkdir(parents=True)
+    if workflow is None:
+        (extracted / "app.py").write_text("print(1)\n")
+    else:
+        destination = extracted / ".github" / "workflows"
+        destination.mkdir(parents=True)
+        shutil.copy(workflow, destination / workflow.name)
+    return work_dir
+
+
+@pytest.mark.parametrize("converted_has_workflows", [True, False])
+def test_each_target_starts_from_a_clean_exit_code(
+    repo, monkeypatch, on_path, converted_has_workflows
+):
+    """ScannerExecutor runs one instance over the source, then the converted target.
+
+    A source with findings exits 1. A clean converted target after it must report
+    its own exit 0, not fail as "exited 1 but reported none".
+    """
+    output = repo.parent / "ash_output"
+    work_dir = _converted_target(
+        output,
+        repo / ".github" / "workflows" / "clean.yml"
+        if converted_has_workflows
+        else None,
+    )
+    scanner = _scanner(repo, output=output)
+    _through_the_base_class(
+        monkeypatch,
+        [
+            {
+                "returncode": 1,
+                "stdout": (FIXTURES / "actionlint-1.7.12-default.json").read_text(),
+            },
+            {
+                "returncode": 0,
+                "stdout": (FIXTURES / "actionlint-1.7.12-clean.json").read_text(),
+            },
+        ],
+    )
+
+    source = scanner.scan(target=repo, target_type="source")
+    assert len(source.runs[0].results) == len(EXPECTED_DEFAULT)
+    assert scanner.exit_code == 1
+
+    converted = scanner.scan(target=work_dir, target_type="converted")
+
+    assert scanner.exit_code == 0
+    assert scanner.targets_failed == 0
+    if converted_has_workflows:
+        assert converted.runs[0].results == []
+        assert converted.runs[0].invocations[0].exitCode == 0
+    else:
+        assert converted.runs == []
+
+
+def test_a_credentials_finding_does_not_copy_the_password_into_the_report():
+    sarif = build_sarif(_load("actionlint-1.7.12-default.json"), exit_code=1)
+    credentials = sarif["runs"][0]["results"][0]
+    assert credentials["ruleId"] == "credentials"
+    region = credentials["locations"][0]["physicalLocation"]["region"]
+    assert "snippet" not in region
+    assert "hunter2" not in json.dumps(sarif)
+
+
+def test_a_version_other_than_the_pin_is_warned_about(
+    repo, monkeypatch, on_path, caplog
+):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1.6.0","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    assert any("not the pinned v1.7.12" in r.getMessage() for r in caplog.records)
+
+
+def test_the_pinned_version_is_not_warned_about(repo, monkeypatch, on_path, caplog):
+    scanner = _scanner(repo)
+    _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    assert not any("not the pinned" in r.getMessage() for r in caplog.records)
+
+
+def test_a_scan_set_path_outside_the_target_is_not_passed(
+    repo, tmp_path, monkeypatch, on_path
+):
+    outside = tmp_path / "elsewhere" / ".github" / "workflows" / "ci.yml"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("on: push\n")
+    inside = repo / ".github" / "workflows" / "clean.yml"
+    monkeypatch.setattr(
+        module, "scan_set", lambda **kwargs: [str(outside), str(inside)]
+    )
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, '{"version":"1.7.12","errors":[]}', 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [".github/workflows/clean.yml"]
+
+
+# --------------------------------------------------------------------------- #
+# shellcheck and pyflakes name the program actionlint pipes run: scripts to.
+# The scanned tree's config may only turn them on by their own names.
+# --------------------------------------------------------------------------- #
+
+_EMPTY_RUN = '{"version":"1.7.12","errors":[]}'
+
+
+def _plant(directory: Path, name: str = "planted") -> Path:
+    """An executable that would leave a marker beside itself if anything ran it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    tool = directory / name
+    tool.write_text(f"#!/bin/sh\ntouch '{directory / (name + '.ran')}'\n")
+    tool.chmod(0o755)
+    return tool
+
+
+def _argv(scanner, monkeypatch, repo) -> list:
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+    scanner.scan(target=repo, target_type="source")
+    ((argv, _),) = fake.calls
+    return argv
+
+
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+@pytest.mark.parametrize("value", ["sh", "bash", "python3", "env"])
+def test_the_scanned_tree_cannot_choose_another_program_by_name(
+    repo, monkeypatch, caplog, flag, value
+):
+    looked_up = []
+
+    def find(name):
+        looked_up.append(name)
+        return FAKE_ACTIONLINT if name == "actionlint" else f"/usr/bin/{name}"
+
+    monkeypatch.setattr(module, "find_absolute_executable", find)
+    scanner = _scanner(repo, **{flag: value})
+
+    with caplog.at_level(logging.WARNING):
+        argv = _argv(scanner, monkeypatch, repo)
+
+    assert [arg for arg in argv if arg.startswith(f"-{flag}=")] == [f"-{flag}="]
+    assert f"/usr/bin/{value}" not in " ".join(argv)
+    assert value not in looked_up
+    assert f"scanners.actionlint.options.{flag}" in caplog.text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.parametrize("spelling", ["absolute", "relative", "dot-relative"])
+def test_the_scanned_tree_cannot_point_an_integration_at_its_own_file(
+    repo, monkeypatch, on_path, spelling
+):
+    tool = _plant(repo / "tools")
+    value = {
+        "absolute": tool.as_posix(),
+        "relative": "tools/planted",
+        "dot-relative": "./tools/planted",
+    }[spelling]
+    scanner = _scanner(repo, shellcheck=value)
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert not any("planted" in arg for arg in argv)
+    assert not (repo / "tools" / "planted.ran").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_the_operator_cannot_point_an_integration_inside_the_scanned_tree(
+    repo, monkeypatch, on_path
+):
+    tool = _plant(repo / "tools")
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert not any("planted" in arg for arg in argv)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit and symlinks")
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+@pytest.mark.parametrize("shape", ["file", "directory"])
+def test_the_operator_cannot_name_a_path_in_the_tree_that_links_out_of_it(
+    repo, monkeypatch, on_path, caplog, flag, shape
+):
+    """A path written inside the scanned tree goes where the tree's links send it,
+    so the tree would choose the program actionlint pipes every run: script to
+    (a link to /bin/sh would execute them). The integration stays off."""
+    tool = _plant(repo.parent / "outside")
+    if shape == "file":
+        (repo / "tools").mkdir()
+        (repo / "tools" / flag).symlink_to(tool)
+        value = f"tools/{flag}"
+    else:
+        (repo / "tools").symlink_to(tool.parent, target_is_directory=True)
+        value = f"tools/{tool.name}"
+    scanner = _scanner(repo, operator=True, **{flag: value})
+
+    with caplog.at_level(logging.WARNING):
+        argv = _argv(scanner, monkeypatch, repo)
+
+    assert f"-{flag}=" in argv
+    assert tool.as_posix() not in " ".join(argv)
+    assert f"Ignoring scanners.actionlint.options.{flag}" in caplog.text
+    assert "symbolic link" in caplog.text
+
+
+def test_a_name_that_resolves_inside_the_scanned_tree_is_refused(repo, monkeypatch):
+    # A relative PATH entry such as "." finds a file the repository committed.
+    inside = (repo / "shellcheck").as_posix()
+    monkeypatch.setattr(
+        module,
+        "find_absolute_executable",
+        lambda name: FAKE_ACTIONLINT if name == "actionlint" else inside,
+    )
+    scanner = _scanner(repo, shellcheck="shellcheck")
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert inside not in " ".join(argv)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit and symlinks")
+def test_a_name_found_through_a_link_in_the_scanned_tree_is_refused(repo, monkeypatch):
+    """An absolute PATH entry inside the tree that is a link out of it: the name
+    is found at <tree>/bin/shellcheck, which resolves outside the tree, but the
+    tree's link chose the program."""
+    tool = _plant(repo.parent / "elsewhere", "shellcheck")
+    (repo / "bin").symlink_to(tool.parent, target_is_directory=True)
+    found = (repo / "bin" / "shellcheck").as_posix()
+    monkeypatch.setattr(
+        module,
+        "find_absolute_executable",
+        lambda name: FAKE_ACTIONLINT if name == "actionlint" else found,
+    )
+    scanner = _scanner(repo, shellcheck="shellcheck")
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert found not in " ".join(argv) and tool.as_posix() not in " ".join(argv)
+
+
+def _only_path(monkeypatch, *entries) -> None:
+    """PATH is exactly ``entries``, nothing is cached and ASH's bin dirs are empty."""
+    monkeypatch.setenv("PATH", os.pathsep.join(str(entry) for entry in entries))
+    monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
+    monkeypatch.setattr(subprocess_utils, "path_independent_dirs", list)
+    monkeypatch.setattr(module, "path_independent_dirs", list, raising=False)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+@pytest.mark.parametrize("flag", ["shellcheck", "pyflakes"])
+def test_a_relative_path_entry_never_chooses_an_integration(
+    repo, tmp_path, monkeypatch, flag
+):
+    """A relative PATH entry is relative to the working directory: ASH's when it
+    looks, the scan target when actionlint starts the program. So it is skipped,
+    and actionlint is handed the absolute path ASH checked."""
+    elsewhere = tmp_path / "elsewhere"
+    _plant(elsewhere / "bin", flag)
+    _plant(repo / "bin", flag)
+    absolute = _plant(tmp_path / "abs-bin", flag)
+    _plant(tmp_path / "abs-bin", "actionlint")
+    monkeypatch.chdir(elsewhere)
+    _only_path(monkeypatch, "bin", tmp_path / "abs-bin")
+    scanner = _scanner(repo, **{flag: flag})
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert f"-{flag}={absolute.as_posix()}" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_an_integration_reachable_only_through_a_relative_path_entry_is_missing(
+    repo, tmp_path, monkeypatch
+):
+    elsewhere = tmp_path / "elsewhere"
+    _plant(elsewhere / "bin", "shellcheck")
+    _plant(tmp_path / "abs-bin", "actionlint")
+    monkeypatch.chdir(elsewhere)
+    _only_path(monkeypatch, "bin", tmp_path / "abs-bin")
+    scanner = _scanner(repo, shellcheck="shellcheck")
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert "shellcheck" in scanner.dependency_unavailable_reason
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shebang scripts")
+def test_actionlint_itself_is_started_by_its_absolute_path(repo, tmp_path, monkeypatch):
+    """actionlint runs from the scan target. Started by a path a relative PATH entry
+    produced, it would be the repository's own ``bin/actionlint``."""
+    elsewhere = tmp_path / "elsewhere"
+    _plant(elsewhere / "bin", "actionlint")
+    marker = repo / "bin" / "actionlint.ran"
+    planted = repo / "bin" / "actionlint"
+    planted.parent.mkdir()
+    # A shell builtin, so the script works with a PATH that has no /usr/bin.
+    planted.write_text(f"#!/bin/sh\n: > '{marker}'\n")
+    planted.chmod(0o755)
+    real = tmp_path / "abs-bin" / "actionlint"
+    real.parent.mkdir()
+    real.write_text(f"#!/bin/sh\necho '{_EMPTY_RUN}'\n")
+    real.chmod(0o755)
+    monkeypatch.chdir(elsewhere)
+    _only_path(monkeypatch, "bin", tmp_path / "abs-bin")
+    scanner = _scanner(repo)
+
+    report = scanner.scan(target=repo, target_type="source")
+
+    assert not marker.exists()
+    assert report.runs[0].invocations[0].executionSuccessful is True
+
+
+def test_the_scanned_tree_may_turn_shellcheck_on_by_its_own_name(repo, monkeypatch):
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
+    )
+    scanner = _scanner(repo, shellcheck="shellcheck", pyflakes="pyflakes")
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=/opt/bin/shellcheck" in argv
+    assert "-pyflakes=/opt/bin/pyflakes" in argv
+
+
+def test_an_operator_override_may_name_another_program(repo, monkeypatch):
+    monkeypatch.setattr(
+        module, "find_absolute_executable", lambda name: f"/opt/bin/{name}"
+    )
+    scanner = _scanner(
+        repo,
+        overrides=("scanners.actionlint.options.shellcheck=shellcheck-0.10",),
+        shellcheck="shellcheck-0.10",
+    )
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=/opt/bin/shellcheck-0.10" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_an_operator_config_may_name_an_absolute_path_outside_the_tree(
+    repo, monkeypatch, on_path, tmp_path
+):
+    tool = _plant(tmp_path / "operator-bin", "shellcheck")
+    scanner = _scanner(repo, operator=True, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert f"-shellcheck={tool.as_posix()}" in argv
+
+
+def test_an_override_of_another_option_does_not_vouch_for_shellcheck(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(
+        repo,
+        overrides=("scanners.actionlint.options.pyflakes=pyflakes",),
+        shellcheck="sh",
+    )
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
+def test_the_scanned_tree_cannot_name_an_absolute_program_outside_it(
+    repo, monkeypatch, on_path, tmp_path
+):
+    """The operator rule on its own: outside the tree, but the tree's config chose it."""
+    tool = _plant(tmp_path / "elsewhere", "shellcheck")
+    scanner = _scanner(repo, shellcheck=tool.as_posix())
+
+    argv = _argv(scanner, monkeypatch, repo)
+
+    assert "-shellcheck=" in argv
+    assert tool.as_posix() not in " ".join(argv)
+
+
+# --------------------------------------------------------------------------- #
+# Which files: the workflows zizmor audits, no more and no fewer
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "vendored", ["node_modules/pkg", "web/node_modules/pkg", ".venv/lib", "venv"]
+)
+def test_workflows_under_vendored_directories_are_not_passed(
+    repo, monkeypatch, on_path, vendored
+):
+    """KNOWN_IGNORE_PATHS, as zizmor applies it: the repository does not own these."""
+    nested = repo / vendored / ".github" / "workflows"
+    nested.mkdir(parents=True)
+    shutil.copy(repo / ".github" / "workflows" / "vulnerable.yml", nested / "v.yml")
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+
+
+@pytest.mark.parametrize("source_dir", [".github", ".github/workflows"])
+def test_a_source_dir_that_is_a_github_or_workflows_dir_is_linted(
+    repo, monkeypatch, on_path, source_dir
+):
+    """``<source>/workflows/ci.yml`` with the source dir ``.github`` is a file whose
+    parent directory is ``.github/workflows``, which is what the scanner lints."""
+    source = repo / source_dir
+    scanner = _scanner(source, output=repo.parent / "ash_output")
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=source, target_type="source")
+
+    ((argv, kwargs),) = fake.calls
+    prefix = "workflows/" if source_dir == ".github" else ""
+    assert argv[argv.index("--") + 1 :] == [
+        f"{prefix}clean.yml",
+        f"{prefix}vulnerable.yml",
+    ]
+    assert kwargs["cwd"] == source
+
+
+@pytest.mark.parametrize(
+    ("relative", "scan_root", "expected"),
+    [
+        ("workflows/ci.yml", "/r/.github", True),
+        ("ci.yml", "/r/.github/workflows", True),
+        ("sub/ci.yml", "/r/.github/workflows", False),
+        ("workflows/ci.yml", "/r/github", False),
+        ("ci.yml", "/r/.github", False),
+        ("workflows/ci.yml", None, False),
+        (".github/workflows/ci.yml", "/r/anything", True),
+    ],
+)
+def test_is_workflow_file_counts_the_scan_roots_own_name(relative, scan_root, expected):
+    root = None if scan_root is None else Path(scan_root)
+    assert is_workflow_file(relative, scan_root=root) is expected
+
+
+_PARITY_LAYOUT = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.YAML",
+    ".github/workflows/sub/nested.yml",
+    "svc/.github/workflows/deploy.yaml",
+    "node_modules/pkg/.github/workflows/v.yml",
+    "web/node_modules/pkg/.github/workflows/v.yml",
+    ".venv/lib/.github/workflows/v.yml",
+    "venv/.github/workflows/v.yml",
+    "ignored/.github/workflows/v.yml",
+    "config/not-a-workflow.yml",
+    "actions/greet/action.yml",
+]
+
+
+@pytest.mark.parametrize(
+    ("target_name", "expected"),
+    [
+        (
+            "source",
+            [
+                ".github/workflows/ci.yml",
+                ".github/workflows/release.YAML",
+                "svc/.github/workflows/deploy.yaml",
+            ],
+        ),
+        ("source/.github", ["workflows/ci.yml", "workflows/release.YAML"]),
+        ("source/.github/workflows", ["ci.yml", "release.YAML"]),
+        (
+            "converted",
+            [
+                "archive.zip/.github/workflows/ci.yml",
+                "archive.zip/.github/workflows/release.YAML",
+                "archive.zip/ignored/.github/workflows/v.yml",
+                "archive.zip/svc/.github/workflows/deploy.yaml",
+            ],
+        ),
+    ],
+)
+def test_actionlint_lints_exactly_the_workflows_zizmor_audits(
+    tmp_path, monkeypatch, on_path, target_name, expected
+):
+    """Both scanners select workflows from the same tree the same way.
+
+    zizmor also audits composite actions, which actionlint does not lint, so its
+    ``action.yml`` inputs are left out of the comparison. ``ignored/`` is in the
+    source's ``.gitignore``, which the converted files (not from the scan set) do
+    not read.
+    """
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+        ZizmorScanner,
+        ZizmorScannerConfig,
+    )
+
+    monkeypatch.setattr(
+        ZizmorScanner, "_get_uv_tool_version", lambda self, *_: "1.30.1"
+    )
+    repo_root = tmp_path / "source"
+    output = tmp_path / "ash_output"
+    work_dir = output / "converted"
+    for base in (repo_root, work_dir / "archive.zip"):
+        for relative in _PARITY_LAYOUT:
+            (base / relative).parent.mkdir(parents=True, exist_ok=True)
+            (base / relative).write_text("on: push\n")
+    (repo_root / ".gitignore").write_text("ignored/\n")
+    if target_name == "converted":
+        target, target_type, source = work_dir, "converted", repo_root
+    else:
+        target = tmp_path / target_name
+        target_type, source = "source", target
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=work_dir,
+        config=get_default_config(),
+    )
+    actionlint = ActionlintScanner(context=context, config=ActionlintScannerConfig())
+    zizmor = ZizmorScanner(context=context, config=ZizmorScannerConfig())
+
+    linted = actionlint._workflow_files(target, target_type, [])
+    audited = [
+        path.relative_to(target.absolute()).as_posix()
+        for path in zizmor._collect_inputs(target, target_type, [])
+        if path.name.lower() not in ("action.yml", "action.yaml")
+    ]
+
+    assert linted == expected
+    assert sorted(audited) == linted
+
+
+# --------------------------------------------------------------------------- #
+# Local ``uses: ./...`` references: actionlint reads the action metadata or the
+# reusable workflow they name, from the project root, and puts what it read (the
+# action's name, its input names) into its findings.
+# --------------------------------------------------------------------------- #
+
+_OUTSIDE_ACTION = (
+    "name: outside\ndescription: x\ninputs:\n  leaked:\n    description: x\n"
+    "runs:\n  using: composite\n  steps: []\n"
+)
+_OUTSIDE_REUSABLE = (
+    "on:\n  workflow_call:\n    inputs:\n      leaked:\n        type: string\n"
+    "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
+)
+
+
+def _step_uses(spec: str) -> str:
+    return (
+        "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n"
+        f"      - uses: {spec}\n"
+    )
+
+
+def _job_uses(spec: str) -> str:
+    return f"on: push\njobs:\n  a:\n    uses: {spec}\n"
+
+
+def _local_reference_layout(repo: Path, outside: Path, case: str) -> None:
+    """``.github/workflows/refs.yml`` naming a file outside the tree, by ``case``."""
+    (repo / ".git").mkdir()
+    (outside / "action").mkdir(parents=True)
+    (outside / "action" / "action.yml").write_text(_OUTSIDE_ACTION)
+    (outside / "reusable.yml").write_text(_OUTSIDE_REUSABLE)
+    actions = repo / ".github" / "actions"
+    actions.mkdir()
+    workflows = repo / ".github" / "workflows"
+    if case == "linked-action-dir":
+        (actions / "linked").symlink_to(outside / "action")
+        body = _step_uses("./.github/actions/linked")
+    elif case == "linked-action-file":
+        (actions / "linked").mkdir()
+        (actions / "linked" / "action.yml").symlink_to(
+            outside / "action" / "action.yml"
+        )
+        body = _step_uses("./.github/actions/linked")
+    elif case == "dot-dot-action":
+        body = _step_uses("./../outside/action")
+    elif case == "linked-reusable":
+        (workflows / "linked.yml").symlink_to(outside / "reusable.yml")
+        body = _job_uses("./.github/workflows/linked.yml")
+    elif case == "dot-dot-reusable":
+        body = _job_uses("./../outside/reusable.yml")
+    elif case == "flow-mapping":
+        body = (
+            "on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n"
+            '    steps: [{"uses": "./../outside/action"}]\n'
+        )
+    else:
+        raise AssertionError(case)
+    (workflows / "refs.yml").write_text(body)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+@pytest.mark.parametrize(
+    "case",
+    [
+        "linked-action-dir",
+        "linked-action-file",
+        "dot-dot-action",
+        "linked-reusable",
+        "dot-dot-reusable",
+        "flow-mapping",
+    ],
+)
+def test_a_workflow_whose_local_reference_leaves_the_tree_is_not_linted(
+    repo, tmp_path, monkeypatch, on_path, caplog, case
+):
+    _local_reference_layout(repo, tmp_path / "outside", case)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    with caplog.at_level(logging.WARNING):
+        scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert argv[argv.index("--") + 1 :] == [
+        ".github/workflows/clean.yml",
+        ".github/workflows/vulnerable.yml",
+    ]
+    assert "Not linting .github/workflows/refs.yml" in caplog.text
+    assert "outside the scanned tree" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _step_uses("./.github/actions/inside"),
+        _step_uses("./"),
+        _job_uses("./.github/workflows/clean.yml"),
+        _step_uses("actions/checkout@v4"),
+        _step_uses("./${{ matrix.dir }}"),
+    ],
+    ids=["in-tree-action", "root-action", "in-tree-reusable", "remote", "expression"],
+)
+def test_a_workflow_whose_local_references_stay_in_the_tree_is_linted(
+    repo, monkeypatch, on_path, body
+):
+    (repo / ".git").mkdir()
+    inside = repo / ".github" / "actions" / "inside"
+    inside.mkdir(parents=True)
+    (inside / "action.yml").write_text(_OUTSIDE_ACTION)
+    (repo / ".github" / "workflows" / "refs.yml").write_text(body)
+    scanner = _scanner(repo)
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    scanner.scan(target=repo, target_type="source")
+
+    ((argv, _),) = fake.calls
+    assert ".github/workflows/refs.yml" in argv[argv.index("--") + 1 :]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("jobs:\n  a:\n    steps:\n      - uses: ./a\n", {"./a"}),
+        ('steps:\n  - "uses": "./b"\n', {"./b"}),
+        ('steps: [{uses: ./c}, {"uses": "./d"}]\n', {"./c", "./d"}),
+        ("steps:\n  - uses: >-\n      ./e\n", {"./e"}),
+        ("x: &A ./f\nsteps:\n  - uses: *A\n", {"./f"}),
+        ("base: &B {uses: ./g}\nsteps:\n  - <<: *B\n", {"./g"}),
+        ("steps:\n  - uses: ./h\n  bad: [\n", {"./h"}),
+        ("steps:\n  - uses: ./i # a comment\n", {"./i"}),
+        ("steps:\n  - uses: actions/checkout@v4\n", set()),
+        ("steps:\n  - uses: ./${{ matrix.dir }}\n", set()),
+        ("steps:\n  - run: ./build.sh\n", set()),
+    ],
+    ids=[
+        "block",
+        "quoted-key",
+        "flow",
+        "folded",
+        "alias",
+        "merge-key",
+        "invalid-yaml",
+        "comment",
+        "remote",
+        "expression",
+        "not-uses",
+    ],
+)
+def test_local_uses_references(text, expected):
+    """Every form actionlint's parser could read a local ``uses`` from."""
+    assert module.local_uses_references(text) == expected

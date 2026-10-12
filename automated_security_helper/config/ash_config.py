@@ -82,6 +82,24 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ActionlintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
+    CfnGuardScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+    ZizmorScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -112,6 +130,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
+from automated_security_helper.utils.config_trust import ConfigProvenance
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
@@ -546,6 +565,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
+    actionlint: Annotated[
+        ActionlintScannerConfig,
+        Field(description="Configure the options for actionlint"),
+    ] = ActionlintScannerConfig()
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
     ] = BanditScannerConfig()
@@ -553,6 +576,14 @@ class ScannerConfigSegment(_PluginConfigSegment):
         CdkNagScannerConfig,
         Field(description="Configure the options for CdkNag", alias="cdk-nag"),
     ] = CdkNagScannerConfig()
+    cfn_guard: Annotated[
+        CfnGuardScannerConfig,
+        Field(description="Configure the options for cfn-guard", alias="cfn-guard"),
+    ] = CfnGuardScannerConfig()
+    cfn_lint: Annotated[
+        CfnLintScannerConfig,
+        Field(description="Configure the options for cfn-lint", alias="cfn-lint"),
+    ] = CfnLintScannerConfig()
     cfn_nag: Annotated[
         CfnNagScannerConfig,
         Field(description="Configure the options for CfnNag", alias="cfn-nag"),
@@ -567,6 +598,9 @@ class ScannerConfigSegment(_PluginConfigSegment):
             alias="detect-secrets",
         ),
     ] = DetectSecretsScannerConfig()
+    gitleaks: Annotated[
+        GitleaksScannerConfig, Field(description="Configure the options for Gitleaks")
+    ] = GitleaksScannerConfig()
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
@@ -583,6 +617,13 @@ class ScannerConfigSegment(_PluginConfigSegment):
     syft: Annotated[
         SyftScannerConfig, Field(description="Configure the options for Syft")
     ] = SyftScannerConfig()
+    trivy: Annotated[
+        TrivyScannerConfig,
+        Field(description="Configure the options for Trivy (trivy fs)"),
+    ] = TrivyScannerConfig()
+    zizmor: Annotated[
+        ZizmorScannerConfig, Field(description="Configure the options for zizmor")
+    ] = ZizmorScannerConfig()
 
 
 class ReporterConfigSegment(_PluginConfigSegment):
@@ -958,6 +999,8 @@ class RuntimeOverridesConfig(BaseModel):
         # Turning the scanned repository's ignore files off or on changes which
         # files are scanned; it is the operator's choice.
         "/honor_ignore_files",
+        # Turning it back on after the operator turned it off would relax trivy-db.
+        "/content_db_staleness_offline_image_default",
         # The scanner sandbox: a client must not be able to switch it off, hand a
         # scanner a network, or widen what it can read.
         "/sandbox",
@@ -1482,7 +1525,9 @@ class ContentDbStalenessOverride(BaseModel):
     same two fields a time-boxed suppression carries: an exception to a freshness
     gate that has no end date is a permanent one. On and after ``expiration``
     (00:00 UTC) the entry is ignored, with a warning in the log, and the database
-    falls back to ``content_db_staleness``.
+    is held to the policy it has without the entry: ``content_db_staleness``, or,
+    for trivy-db in an image built with ``OFFLINE=YES``, that image's ``warn``
+    default unless ``content_db_staleness_offline_image_default`` is false.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -1508,8 +1553,10 @@ class ContentDbStalenessOverride(BaseModel):
         Field(
             description=(
                 "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer "
-                "applies: at 00:00 UTC that day the database returns to "
-                "content_db_staleness."
+                "applies: at 00:00 UTC that day the database returns to the policy it "
+                "has without the entry, which is content_db_staleness, or, for "
+                "trivy-db in an image built with OFFLINE=YES, that image's warn "
+                "default unless content_db_staleness_offline_image_default is false."
             )
         ),
     ]
@@ -1580,6 +1627,10 @@ class AshConfig(BaseModel):
 
     # Internal field to track config resolution warnings (not serialized)
     _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
+    # Whether the operator or the scanned tree supplied this config, recorded by the
+    # orchestrator (utils/config_trust.py). None means unknown, which counts as the
+    # scanned tree.
+    _provenance: Optional[ConfigProvenance] = PrivateAttr(default=None)
 
     # The tree a scan with this config covers, when it is wider than the source
     # directory: workspace mode sets the workspace root. config/path_trust.py
@@ -1739,6 +1790,26 @@ class AshConfig(BaseModel):
             )
         ),
     ] = []
+
+    content_db_staleness_offline_image_default: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather "
+                "than to content_db_staleness: fail. Such an image carries the trivy "
+                "database it was built with, and trivy's own bound would fail every scan "
+                "in it from a day after the build; with this, those scans pass and every "
+                "report records the stale database. Only trivy-db: grype-db and the "
+                "offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES "
+                "in ASH's environment, which the image sets from its OFFLINE build "
+                "argument, turns it on; without that variable this does nothing, whatever "
+                "it says. Set false to hold trivy-db to content_db_staleness in the image "
+                "too. A content_db_staleness_overrides "
+                "entry for trivy-db outranks it, and either form of "
+                "--allow-stale-content-db sets this to false for that scan."
+            )
+        ),
+    ] = True
 
     ash_plugin_modules: Annotated[
         List[str],

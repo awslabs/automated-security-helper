@@ -1,0 +1,1196 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""cfn-lint: CloudFormation template validation, as a builtin ASH scanner.
+
+What it adds next to cfn-nag and checkov
+----------------------------------------
+cfn-lint validates templates against the CloudFormation resource schemas and its own
+best-practice rules: misspelled or invalid properties, values the service rejects,
+deprecated runtimes, unused parameters. It is a correctness linter rather than a
+security scanner, which is why its severities are mapped below security findings
+(see ``severity_for_rule``).
+
+Which files it reads
+--------------------
+Exactly the files cfn-nag reads: ``utils.cfn_template_discovery`` applies cfn-nag's
+selection (JSON/YAML in the scan set that ``cfn_template_model`` models as
+CloudFormation). A CloudFormation file the model rejects is counted as a failed target
+with its reason, as cfn-nag counts it.
+
+How it is invoked, and why each argument is there
+-------------------------------------------------
+``cfn-lint --format sarif --output-file <f> [options] -- <template>...``, run in a
+new empty directory outside the scanned tree with every path absolute, because
+cfn-lint resolves a config file's relative paths against its working directory
+(``CfnLintScanner._private_cwd``). cfn-lint writes each URI as the
+absolute path it was given, and ``normalize_report`` maps it back to the
+repository-relative path ASH reports.
+
+* Template paths are passed through ``glob.escape``. cfn-lint expands every filename
+  argument with ``glob.glob(filename, recursive=True)`` (cfnlint/config.py at 1.57.1),
+  so a template named ``a[1].yaml`` was reported as "could not be processed by
+  glob.glob" (rule E0003) and never linted, and one named ``*.yaml`` would have
+  expanded to every YAML file in its directory. Measured against 1.57.1: unescaped,
+  ``g[1].yaml`` yields one E0003 and no lint results; escaped, it yields the three
+  findings the same template produces under a plain name.
+* ``--`` ends option parsing, so a template whose name starts with ``-`` is a file.
+* ``--mandatory-checks`` and ``--configure-rule`` keep a template's own
+  ``Metadata: cfn-lint: config`` from changing what is reported, unless the operator
+  sets ``honor_inline_ignores`` (``CfnLintScanner._honor_inline_ignores``).
+* Templates are batched under ``_ARGV_CHAR_BUDGET`` characters per invocation, so a
+  repository with thousands of templates stays inside Windows' 32767-character
+  command-line limit. With ``honor_inline_ignores`` on, each template gets an
+  invocation of its own instead (``CfnLintScanner._honor_inline_ignores``).
+* ``AWS_REGION`` and ``AWS_DEFAULT_REGION`` are set to us-east-1 in cfn-lint's
+  environment, so the region it falls back to does not depend on the host
+  (``CfnLintScanner._child_env``).
+
+Network
+-------
+None. cfn-lint ships its resource schemas inside the package and only fetches when
+asked to (``--update-specs``, ``--update-iam-policies``, ``--update-documentation``),
+which ASH never passes. Measured: a run inside a network namespace with no interfaces
+(``unshare -rn``) produced the same results as a run with network access. Installing
+cfn-lint needs network once, like every uv-installed scanner; offline with cfn-lint
+absent, the scanner reports MISSING with the uv reason (#520).
+
+Exit codes
+----------
+cfn-lint's exit status is a bitmask of the levels it reported: 2 error, 4 warning,
+8 informational (cfnlint/runner/cli.py). Any combination of those is a completed run.
+1 is a fatal error and anything with bit 0 set, or above 15, is treated as a failed
+invocation. E0003 ("Error with cfn-lint configuration", which is also what a template
+path cfn-lint cannot open produces) is likewise a failed invocation rather than a
+finding, because it means the named templates were not linted.
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import logging
+import os
+import re
+import string
+from pathlib import Path
+import copy
+from contextlib import ExitStack
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    ContextManager,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+)
+
+import yaml
+from pydantic import AnyUrl, Field, PrivateAttr, field_validator
+
+from automated_security_helper.base.options import (
+    ScannerOptionsBase,
+    tool_version_constraint,
+)
+from automated_security_helper.config.path_trust import (
+    private_cwd_outside_scanned_tree,
+)
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.schemas.sarif_schema_model import (
+    ArtifactLocation,
+    Invocation,
+    Level,
+    PropertyBag,
+    ReportingDescriptor,
+    Result,
+    Run,
+    SarifReport,
+    Tool,
+    ToolComponent,
+)
+from automated_security_helper.utils.cfn_template_discovery import (
+    cloudformation_templates_nothing_to_scan_reason,
+    discover_templates,
+    display_path,
+)
+from automated_security_helper.utils.config_trust import (
+    NOT_THE_OPERATORS,
+    operator_path,
+    set_by_operator,
+)
+from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.output_excerpt import tool_output_excerpt
+from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
+
+#: cfn-lint's rule-id letter, mapped to an ASH severity and the SARIF level that
+#: severity reads as everywhere else in ASH.
+#:
+#: Why below security severities: cfn-lint reports template correctness, not
+#: security weaknesses. An E rule means the template is invalid or will fail to
+#: deploy (a misspelled property, a value the service rejects, an end-of-life Lambda
+#: runtime), so it is MEDIUM: at ASH's default threshold an invalid template fails the
+#: scan. A W rule is a best-practice or hygiene finding (an unused parameter, an
+#: obsolete DependsOn) and is LOW, so it is reported without failing a default scan.
+#: An I rule is informational and is INFO; cfn-lint emits those only when asked with
+#: ``include_checks: [I]``.
+#:
+#: The SARIF level is set alongside ``issue_severity`` because ASH reads severity in
+#: two ways that disagree for a bare level -- the scan gate maps ``error`` to CRITICAL,
+#: the flat reporters map it to HIGH -- and both honor ``issue_severity``. Setting the
+#: level to the one that matches keeps reporters that read only the level (the GitHub
+#: code-scanning output) consistent with the rest. cfn-lint's own letter is never lost:
+#: it is the first character of the rule id.
+SEVERITY_BY_RULE_LETTER: Dict[str, Tuple[str, str]] = {
+    "E": ("MEDIUM", "warning"),
+    "W": ("LOW", "note"),
+    "I": ("INFO", "none"),
+}
+
+#: Rule id cfn-lint uses for its own configuration errors, which includes a template
+#: path it could not open.
+_CONFIG_ERROR_RULE = "E0003"
+
+#: The executable this scanner runs.
+_COMMAND = "cfn-lint"
+
+#: The region cfn-lint validates against when neither ``regions``, the template's
+#: own metadata nor an operator's ``.cfnlintrc`` names one. See ``_child_env``.
+DEFAULT_REGION = "us-east-1"
+
+# Under Windows' 32767-character CreateProcess limit with room for the interpreter
+# path, uv's own arguments and the options above.
+_ARGV_CHAR_BUDGET = 24000
+
+# What cfn-lint accepts for these options, checked here so a config value can never
+# be read as another option.
+_REGION_PATTERN = re.compile(r"^(ALL_REGIONS|[a-z]{2}(-[a-z]+)+-\d+)$")
+_CHECK_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+
+#: The characters a rule id prefix is built from in ``mandatory_prefixes``: the ones
+#: ``_CHECK_PATTERN`` allows, which cover every built-in id (a letter and four
+#: digits) and the usual custom ones.
+_RULE_ID_ALPHABET = string.digits + string.ascii_uppercase + string.ascii_lowercase
+
+#: The most option text cfn-lint may be given; the rest of ``_ARGV_CHAR_BUDGET`` is
+#: left for templates. A ``cfn-lint --mandatory-checks`` list longer than this comes from an
+#: ignore list too long to express, and is refused rather than truncated.
+_OPTION_CHAR_BUDGET = 20000
+
+#: The ``cfn-lint --configure-rule`` value passed when the operator configures no rule, so
+#: that a template's own configure_rules never apply (``_configure_rule_args``).
+#: E3012's ``strict`` is false by default, so this sets it to what it already is;
+#: measured with 1.43.3 and 1.57.2, it changes no finding on the fixture templates.
+_NO_OP_CONFIGURE_RULE = "E3012:strict=false"
+
+#: The ``cfn-lint --ignore-checks`` value passed when nothing is ignored, so that a
+#: template's own ignore_checks never stand in for the command line's (see
+#: ``_honor_inline_ignores``). It ignores nothing: every rule is mandatory then,
+#: and mandatory outranks ignored. It is not a prefix of E0000, which cfn-lint
+#: tests against ignore_checks alone.
+_NO_OP_IGNORE_CHECK = "W0000"
+
+#: What a configure_rules key may be when it is passed on the command line.
+_CONFIG_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+#: Characters the ``cfn-lint --configure-rule`` parser splits a value on
+#: (cfnlint/config.py, ``RuleConfigurationAction``), so a value holding one cannot
+#: be passed whole.
+_CONFIGURE_RULE_SEPARATORS = frozenset(",:=")
+
+
+def severity_for_rule(rule_id: Optional[str]) -> Tuple[str, str]:
+    """The (ASH severity, SARIF level) for a cfn-lint rule id.
+
+    An id that does not start with E, W or I is treated as E: an unknown class is
+    reported at the level that fails a default scan rather than below it.
+    """
+    letter = (rule_id or "E")[:1].upper()
+    return SEVERITY_BY_RULE_LETTER.get(letter, SEVERITY_BY_RULE_LETTER["E"])
+
+
+def mandatory_prefixes(ignored: List[str]) -> List[str]:
+    """Rule-id prefixes that match exactly the ids no prefix in ``ignored`` matches.
+
+    cfn-lint matches ``--mandatory-checks`` and ``--ignore-checks`` entries as
+    prefixes of a rule id, and a mandatory match wins over every ignore. So the
+    complement of the ignored prefixes, over ``_RULE_ID_ALPHABET``, makes every
+    other rule mandatory and leaves the ignored ones to ``--ignore-checks``. With
+    nothing ignored it is each single character. For ``W2001`` it is every first
+    character but ``W``, then every ``W`` and a second character but ``2``, and so
+    on down to ``W200`` and a fifth character but ``1``.
+
+    One kind of id cannot be covered: one that is a proper prefix of an ignored
+    prefix (``W20`` when ``W2001`` is ignored), because every prefix of it is a
+    prefix of the ignored one too. Every built-in id is a letter and four digits,
+    and the ignored prefixes are validated as rule ids or prefixes, so only a
+    custom rule with a shorter id is affected.
+    """
+    distinct = sorted(set(ignored))
+    minimal = [
+        p for p in distinct if not any(p != q and p.startswith(q) for q in distinct)
+    ]
+    result: List[str] = []
+
+    def walk(prefix: str, below: List[str]) -> None:
+        following = {entry[len(prefix)] for entry in below}
+        for char in _RULE_ID_ALPHABET:
+            extended = prefix + char
+            if char not in following:
+                result.append(extended)
+            elif extended not in below:
+                walk(extended, [entry for entry in below if entry.startswith(extended)])
+
+    walk("", minimal)
+    return result
+
+
+def _command_line_value(value: Any) -> Optional[str]:
+    """A configure_rules value as ``--configure-rule`` would read it back, or None.
+
+    cfn-lint splits a ``--configure-rule`` value on commas, then takes the text
+    between the first and second colon and after the first equals sign, and keeps
+    one value per key. So a value is passed only when it survives that whole: a
+    boolean, an integer, a string without ``,``, ``:`` or ``=``, or a list of
+    exactly one of those (cfn-lint makes a list of a single value for a list
+    option). Anything else returns None.
+    """
+    if isinstance(value, list):
+        if len(value) != 1:
+            return None
+        value = value[0]
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and not _CONFIGURE_RULE_SEPARATORS & set(value):
+        return value
+    return None
+
+
+def _successful_exit(code: object) -> bool:
+    try:
+        value = int(code)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return False
+    return 0 <= value <= 14 and value % 2 == 0
+
+
+class CfnLintScannerConfigOptions(ScannerOptionsBase):
+    config_file: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "Path to a cfn-lint configuration file (.cfnlintrc). When unset, ASH "
+                "gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned "
+                "repository or the home directory is NOT read: such a file can load "
+                "Python rules (append_rules) and switch checks off. Honored only when "
+                "set by --config-overrides or a config file outside the scanned tree, "
+                "and only for a file outside the scanned tree; otherwise "
+                "it is ignored with a warning."
+            ),
+        ),
+    ] = None
+    regions: Annotated[
+        List[str],
+        Field(
+            description=(
+                "AWS regions to validate templates against, e.g. ['us-east-1', "
+                "'eu-west-1'], or ['ALL_REGIONS']. Empty validates against "
+                "us-east-1, or the regions a template names in its own cfn-lint "
+                "metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION "
+                "are not read."
+            ),
+        ),
+    ] = []
+    ignore_checks: Annotated[
+        List[str],
+        Field(
+            description=(
+                "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer "
+                "ASH suppressions for individual findings; this removes the rule from "
+                "every template. Honored only when set by --config-overrides or a "
+                "config file outside the scanned tree; otherwise it is ignored with "
+                "a warning."
+            ),
+        ),
+    ] = []
+    include_checks: Annotated[
+        List[str],
+        Field(
+            description=(
+                "cfn-lint rule ids or prefixes to enable in addition to the defaults, "
+                "e.g. ['I'] for informational rules."
+            ),
+        ),
+    ] = []
+    honor_inline_ignores: Annotated[
+        bool,
+        Field(
+            description=(
+                "Honor the ignore_checks and configure_rules a template sets for "
+                "itself in `Metadata: cfn-lint: config` (ignore_checks also at the "
+                "resource level). Off by default: every rule outside ignore_checks "
+                "and the config_file's ignore_checks is passed to cfn-lint as "
+                "mandatory, and the config_file's configure_rules are passed on the "
+                "command line, which cfn-lint takes instead of a template's, so a "
+                "template cannot hide its own findings or the next template's "
+                "parse errors, which reach ASH, where suppressions are reported "
+                "and counted. A config_file setting the command line cannot carry "
+                "(a list of more than one item, or a value with a comma, colon or "
+                "equals sign) is then left out with a warning, and a config_file "
+                "that sets merge_configs fails the scan. On, each template is "
+                "linted by a cfn-lint run of its own, so its settings reach no "
+                "other template; that adds a cfn-lint start-up per template. "
+                "Honored only when set by "
+                "--config-overrides or a config file outside the scanned tree; from "
+                "a config in the scanned tree it is ignored with a warning."
+            ),
+        ),
+    ] = False
+    # The floor is 1.43.3, the cfn-lint the Nix flake's nixpkgs revision ships, so a
+    # Nix run can use the flake's copy. Both ends were measured: 1.43.3 and 1.57.1
+    # give identical SARIF on the fixture templates under
+    # tests/test_data/scanners/cfn_lint_guard, and 1.57.2, the release the image
+    # pins, the same results. The ceiling excludes the next major, whose rule ids
+    # and output may change.
+    tool_version: Annotated[
+        str | None,
+        tool_version_constraint("scanners.cfn-lint.options.tool_version"),
+        Field(
+            description=(
+                "Version constraint for the cfn-lint installation, in pip requirement "
+                "syntax. The default is the range the scanner's SARIF handling was "
+                "verified against. Honored only when set by --config-overrides or a "
+                "config file outside the scanned tree; otherwise it is ignored with "
+                "a warning."
+            )
+        ),
+    ] = ">=1.43.3,<2.0.0"
+    install_timeout: Annotated[
+        int,
+        Field(description="Timeout in seconds for tool installation"),
+    ] = 300
+
+    @field_validator("regions")
+    @classmethod
+    def _valid_regions(cls, value: List[str]) -> List[str]:
+        for item in value:
+            if not _REGION_PATTERN.match(item):
+                raise ValueError(f"{item!r} is not an AWS region name or ALL_REGIONS")
+        return value
+
+    @field_validator("ignore_checks", "include_checks")
+    @classmethod
+    def _valid_checks(cls, value: List[str]) -> List[str]:
+        for item in value:
+            if not _CHECK_PATTERN.match(item):
+                raise ValueError(
+                    f"{item!r} is not a cfn-lint rule id or prefix (letters and digits)"
+                )
+        return value
+
+
+class CfnLintScannerConfig(ScannerPluginConfigBase):
+    name: Literal["cfn-lint"] = "cfn-lint"
+    enabled: bool = True
+    options: Annotated[
+        CfnLintScannerConfigOptions,
+        Field(description="Configure the cfn-lint scanner"),
+    ] = CfnLintScannerConfigOptions()
+
+
+@ash_scanner_plugin
+class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
+    """Validates CloudFormation templates with cfn-lint."""
+
+    #: Python-only: cfn-lint is a Python package ASH runs through uv, so it needs
+    #: nothing but Python. Stated here rather than read from use_uv_tool, which the
+    #: dependency check sets to False when it uses a cfn-lint on PATH instead.
+    python_only: ClassVar[bool | None] = True
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+    # The strict default, declared so the choice is visible: cfn-lint is a uv tool,
+    # whose directories and cache the baseline already exposes, and it reads the
+    # templates and ASH's empty config, both mounted. Its resource specs ship in the
+    # package. An operator's config_file outside the tree needs extra_read_paths.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements()
+
+    # Options already refused with a warning; each is read on every invocation and
+    # warned about once per scanner.
+    _refused_options: Set[str] = PrivateAttr(default_factory=set)
+
+    def model_post_init(self, context: Any) -> None:
+        if self.config is None:
+            self.config = CfnLintScannerConfig()
+        self.command = _COMMAND
+        self.tool_type = ScannerToolType.IAC
+        self.use_uv_tool = True
+        self._setup_uv_tool_install_commands()
+        self.tool_version = self._get_uv_tool_version("cfn-lint")
+        super().model_post_init(context)
+
+    def _options(self) -> CfnLintScannerConfigOptions:
+        """This scanner's options, typed. The config is set in model_post_init."""
+        options = getattr(self.config, "options", None)
+        if not isinstance(options, CfnLintScannerConfigOptions):
+            raise ScannerError(
+                f"cfn-lint was configured with {type(options).__name__}, not "
+                "CfnLintScannerConfigOptions"
+            )
+        return options
+
+    def _operator_option(self, name: str) -> Any:
+        """``options.<name>`` when the operator set it, else its default.
+
+        For the options that decide what cfn-lint reports or which cfn-lint runs:
+        ``ignore_checks`` drops findings before ASH sees them, so they are neither
+        reported nor counted as suppressed (measured: ``ignore_checks: [E, W]`` in
+        the scanned tree's ``.ash/.ash.yaml`` turned 3 findings into a PASSED scan),
+        and ``tool_version`` chooses the release uv installs. A value from a config
+        in the scanned tree or from an MCP client is ignored with a warning, once
+        per scanner, as ``config_file`` is; a value equal to the default is used
+        silently, since using it changes nothing.
+        """
+        options = self._options()
+        value = getattr(options, name)
+        default = type(options).model_fields[name].default
+        if value == default or set_by_operator(
+            self.context.config if self.context is not None else None,
+            f"scanners.cfn-lint.options.{name}",
+            value,
+        ):
+            return value
+        if name not in self._refused_options:
+            self._refused_options.add(name)
+            self._plugin_log(
+                f"Ignoring scanners.cfn-lint.options.{name} ({value!r}): "
+                f"{NOT_THE_OPERATORS}. cfn-lint uses the default, {default!r}.",
+                level=logging.WARNING,
+            )
+        return copy.deepcopy(default)
+
+    def _get_tool_version_constraint(self) -> str | None:
+        """The operator's ``tool_version``, else the verified range."""
+        return self._operator_option("tool_version")
+
+    def _get_tool_package_extras(self) -> List[str] | None:
+        """cfn-lint's SARIF formatter is behind its ``sarif`` extra."""
+        return ["sarif"]
+
+    def validate_plugin_dependencies(self) -> bool:
+        """The bandit/checkov resolution: uv, then a verified binary on PATH, then install."""
+        if self.dependency_unavailable_reason:
+            return False
+        if not self._validate_uv_tool_availability():
+            if get_uv_tool_command(_COMMAND) is not None:
+                self.use_uv_tool = False
+                self.dependencies_satisfied = True
+                return True
+            return False
+        if self.use_uv_tool:
+            installation_info = self._get_tool_installation_info()
+            if installation_info.get("available"):
+                return self._select_tool_execution(installation_info)
+            self._plugin_log(
+                "cfn-lint not found via UV tool, attempting explicit installation..."
+            )
+            timeout = self._options().install_timeout
+            if self._install_uv_tool(timeout=timeout):
+                self.dependencies_satisfied = True
+                return True
+            self._plugin_log(
+                "UV tool installation failed for cfn-lint, falling back to the "
+                "consolidated resolver",
+                level=logging.WARNING,
+            )
+        return get_uv_tool_command(_COMMAND) is not None
+
+    def nothing_to_scan_reason(self) -> Optional[str]:
+        """Why cfn-lint has nothing to scan in this run, or None.
+
+        From the selection ``scan()`` makes, which cfn-guard shares
+        (``cloudformation_templates_nothing_to_scan_reason``).
+        """
+        if self.context is None:
+            return None
+        return cloudformation_templates_nothing_to_scan_reason(self.context)
+
+    def _option_args(self, results_dir: Path) -> List[str]:
+        """Arguments from config, each as one ``--flag=value`` token.
+
+        The ``=`` form keeps a value from ever being parsed as a flag of its own.
+
+        A ``--config-file`` is always passed. Without one, cfn-lint reads
+        ``.cfnlintrc`` from the working directory (the scanned repository) and from
+        the home directory (cfnlint/config.py, ``_find_config``), and reads neither
+        once a config file is named. A repository's ``.cfnlintrc`` is not inert
+        configuration: ``append_rules`` loads Python files as rules, which runs them
+        in the scan's environment (measured: a ``rules/extra.py`` beside a
+        ``.cfnlintrc`` naming it ran on a plain ``cfn-lint -- t.yaml``), and
+        ``ignore_checks: [E, W]`` turns every finding off without anything reaching
+        ASH's suppression accounting. So the default is an empty configuration ASH
+        writes itself, and a ``.cfnlintrc`` is used only when the ASH config names
+        it in ``config_file``.
+
+        The ASH config usually comes from the scanned repository too, so
+        ``config_file`` is honored only when the operator set it (through
+        ``--config-overrides`` or a config file outside the scanned tree, see
+        ``utils/config_trust.py``) and it resolves outside the scanned tree.
+        Otherwise it is ignored with a warning and the empty configuration is used.
+        """
+        options = self._options()
+        args: List[str] = []
+        config_file = (
+            self._operator_config_file(options.config_file)
+            if options.config_file
+            else None
+        )
+        if config_file is None:
+            empty = Path(results_dir).joinpath("ash-empty.cfnlintrc")
+            # Unlinked and recreated rather than overwritten, so a symlink left at
+            # this path (the output directory usually sits inside the scanned tree)
+            # is replaced instead of written through. open_for_write also refuses
+            # to follow a link created after the unlink inside a sandbox's
+            # writable directory.
+            if empty.is_symlink() or empty.exists():
+                empty.unlink()
+            with open_for_write(empty) as handle:
+                handle.write("{}\n")
+            args.append(f"--config-file={empty.resolve().as_posix()}")
+        else:
+            args.append(
+                f"--config-file={Path(os.path.abspath(config_file)).as_posix()}"
+            )
+        if options.regions:
+            args.extend(["--regions", *options.regions])
+        ignore_checks = list(self._operator_option("ignore_checks"))
+        honor_inline_ignores = self._honor_inline_ignores()
+        settings: Dict[str, Any] = {}
+        if not honor_inline_ignores and config_file is not None:
+            settings = self._config_file_settings(config_file)
+            if settings.get("merge_configs"):
+                raise ScannerError(
+                    f"{Path(config_file).as_posix()} sets merge_configs, under which "
+                    "cfn-lint merges a template's own Metadata configure_rules into "
+                    "the ones ASH passes, so a template could change what is "
+                    "reported. Remove merge_configs from it, or set "
+                    "scanners.cfn-lint.options.honor_inline_ignores to let "
+                    "templates configure rules."
+                )
+            for check in self._config_file_ignores(settings, config_file):
+                if check not in ignore_checks:
+                    ignore_checks.append(check)
+        if ignore_checks:
+            args.extend(["--ignore-checks", *ignore_checks])
+        elif not honor_inline_ignores:
+            args.extend(["--ignore-checks", _NO_OP_IGNORE_CHECK])
+        if options.include_checks:
+            args.extend(["--include-checks", *options.include_checks])
+        if not honor_inline_ignores:
+            # See _honor_inline_ignores. One token each, so no value is read as a flag.
+            args.append(
+                "--mandatory-checks=" + ",".join(mandatory_prefixes(ignore_checks))
+            )
+            args.extend(
+                f"--configure-rule={entry}"
+                for entry in self._configure_rule_args(
+                    settings.get("configure_rules"), config_file
+                )
+            )
+        option_chars = sum(len(arg) + 1 for arg in args)
+        if option_chars > _OPTION_CHAR_BUDGET:
+            raise ScannerError(
+                f"cfn-lint's options take {option_chars} characters, more than the "
+                f"{_OPTION_CHAR_BUDGET} a command line can spare: ignore_checks names "
+                "too many rule ids to pass the rest as mandatory, or the config "
+                "file's configure_rules are too long to pass. Use fewer, shorter "
+                "prefixes, or ASH suppressions."
+            )
+        return args
+
+    def _honor_inline_ignores(self) -> bool:
+        """Whether a template's own ``ignore_checks`` and ``configure_rules`` may apply.
+
+        A template can set ``Metadata: cfn-lint: config: ignore_checks`` for the
+        whole template and for each resource, and cfn-lint drops what they name
+        before ASH sees it, so it is neither reported nor counted as suppressed
+        (measured with 1.57.2: ``[E, W]`` at the template level turned the
+        fixture's three findings into none, and so did one rule per resource).
+        cfn-lint applies neither to a rule ``--mandatory-checks`` names, so unless
+        the operator turned this on, ``_option_args`` passes every rule outside
+        the operator's own ignores as mandatory (``mandatory_prefixes``). Those
+        ignores, from ``ignore_checks`` and the operator's ``config_file``, are
+        passed as ``--ignore-checks``, which cfn-lint ranks above a template's.
+
+        A template's ``configure_rules`` change what a rule reports, and
+        --mandatory-checks does not stop them (measured with 1.57.2: E3031
+        ``exceptions`` and E1029 ``custom_excludes`` turned a template's E3031,
+        E1029 and E1161 into E1161 alone). cfn-lint takes configure_rules from the
+        first of the command line, the template and the config file that sets
+        any, whole, not rule by rule (cfnlint/config.py ``_get_argument_value``),
+        so ``_option_args`` passes them on the command line too
+        (``_configure_rule_args``).
+
+        A template's ignore_checks also reached the next template. cfn-lint keeps
+        the last decoded template's Metadata config while it reads the next one,
+        and when that one cannot be decoded it drops the E0000 results if the
+        kept ignore_checks name E0000 (cfnlint/runner/template/runner.py
+        ``run_template_by_file_path``), without consulting --mandatory-checks.
+        Measured with 1.43.3 and 1.57.2: a template with duplicate keys reported
+        two E0000 alone and none after a template ignoring ``[E]`` for itself.
+        A command-line --ignore-checks replaces the template's list, so one is
+        always passed, ``_NO_OP_IGNORE_CHECK`` when nothing is ignored. Nothing
+        else a template sets reached the next one: resource ignore_checks,
+        configure_rules, regions and ignore_bad_template all left it unchanged.
+        With this option on, no placeholder is passed, since it would replace
+        the template-level ignore_checks the operator let in. Each template is
+        linted by a cfn-lint run of its own instead (``scan``), so its ignores
+        reach only itself. That costs a cfn-lint start-up per template: measured
+        with 1.57.2 on the 8 CloudFormation templates under tests/test_data,
+        3.4 s in one run and 12.0 s in eight.
+        """
+        if not self._options().honor_inline_ignores:
+            return False
+        if set_by_operator(
+            self.context.config if self.context is not None else None,
+            "scanners.cfn-lint.options.honor_inline_ignores",
+            True,
+        ):
+            return True
+        if "honor_inline_ignores" not in self._refused_options:
+            self._refused_options.add("honor_inline_ignores")
+            self._plugin_log(
+                "Ignoring scanners.cfn-lint.options.honor_inline_ignores: "
+                f"{NOT_THE_OPERATORS}. A template's own ignore_checks do not apply; "
+                "suppress findings with ASH suppressions.",
+                level=logging.WARNING,
+            )
+        return False
+
+    def _config_file_settings(self, config_file: Path) -> Dict[str, Any]:
+        """The operator's ``.cfnlintrc`` as a mapping, or {} when it cannot be read.
+
+        Read so that its ``ignore_checks`` can be left out of ``--mandatory-checks``
+        and its ``configure_rules`` passed on the command line. A file that cannot
+        be parsed is reported with a warning; every check then runs and its
+        configure_rules do not apply.
+        """
+        try:
+            parsed = yaml.safe_load(Path(config_file).read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            self._plugin_log(
+                f"Could not read {Path(config_file).as_posix()} ({exc}); every "
+                "check runs and its configure_rules do not apply.",
+                level=logging.WARNING,
+            )
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _configure_rule_args(
+        self, configured: Any, config_file: Optional[Path]
+    ) -> List[str]:
+        """The ``--configure-rule`` values to pass while template config is off.
+
+        The operator's own configure_rules, from the ``config_file`` they named,
+        as ``RULE:key=value``, one per key. A command-line value replaces both
+        the template's and the file's, so the file's must be passed here to apply
+        at all. With none, ``_NO_OP_CONFIGURE_RULE`` keeps the template's out.
+
+        An entry that ``--configure-rule`` cannot carry (``_command_line_value``),
+        or whose rule id or key could be read as something else, is left out with
+        a warning, once per scanner. Its rule then uses the default, which for
+        every built-in rule reports at least as much as any setting.
+        """
+        entries: List[str] = []
+        shown = Path(config_file).as_posix() if config_file is not None else ""
+
+        def refuse(what: str, value: Any) -> None:
+            if f"configure_rules {what}" in self._refused_options:
+                return
+            self._refused_options.add(f"configure_rules {what}")
+            self._plugin_log(
+                f"Not passing configure_rules {what} ({value!r}) from {shown}: "
+                "cfn-lint's --configure-rule takes one value per key, without "
+                "commas, colons or equals signs, under a rule id and key of "
+                "letters, digits and underscores. The rule uses its default. To "
+                "have cfn-lint read the file as written, set "
+                "scanners.cfn-lint.options.honor_inline_ignores, which also lets "
+                "templates configure their own rules.",
+                level=logging.WARNING,
+            )
+
+        if configured is not None and not isinstance(configured, dict):
+            refuse("as a whole", configured)
+            configured = None
+        for rule_id, keys in (configured or {}).items():
+            if not isinstance(keys, dict):
+                refuse(repr(rule_id), keys)
+                continue
+            for key, value in keys.items():
+                text = _command_line_value(value)
+                if (
+                    isinstance(rule_id, str)
+                    and _CHECK_PATTERN.match(rule_id)
+                    and isinstance(key, str)
+                    and _CONFIG_KEY_PATTERN.match(key)
+                    and text is not None
+                ):
+                    entries.append(f"{rule_id}:{key}={text}")
+                else:
+                    refuse(f"{rule_id!r} {key!r}", value)
+        return entries or [_NO_OP_CONFIGURE_RULE]
+
+    def _config_file_ignores(
+        self, settings: Dict[str, Any], config_file: Path
+    ) -> List[str]:
+        """The ``ignore_checks`` the operator's ``.cfnlintrc`` sets, if any.
+
+        Read here so they can be left out of ``--mandatory-checks``. An entry that
+        is not a rule id or prefix is left out with a warning, so it can never be
+        read as an option, and that check then runs.
+        """
+        raw = settings.get("ignore_checks")
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        checks: List[str] = []
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, str) and _CHECK_PATTERN.match(item):
+                checks.append(item)
+            else:
+                self._plugin_log(
+                    f"Ignoring ignore_checks entry {item!r} in "
+                    f"{Path(config_file).as_posix()}: not a cfn-lint rule id or "
+                    "prefix (letters and digits).",
+                    level=logging.WARNING,
+                )
+        return checks
+
+    @staticmethod
+    def _child_env() -> Dict[str, str]:
+        """ASH's environment for cfn-lint, with its last-resort region pinned.
+
+        cfn-lint takes its regions from ``--regions``, then from the template's
+        ``Metadata: cfn-lint: config: regions``, then from the config file, and
+        only then from ``AWS_REGION``, ``AWS_DEFAULT_REGION`` and finally
+        us-east-1 (cfnlint/config.py, ``regions``, at 1.57.2). Inherited as is,
+        that last step made a scan's findings depend on the host. Measured with
+        1.57.2: ``AWS_REGION=``, which CI gets from an unset variable, makes
+        cfn-lint exit 32 ("Regions [''] are unsupported") on every template, and
+        ``AWS_REGION=af-south-1`` reports an ``AWS::Bedrock::Agent`` as E3006, a
+        resource type that region lacks.
+
+        Both variables are pinned rather than passing ``--regions us-east-1``,
+        because ``--regions`` also overrides the regions a template declares in
+        its own metadata and the ones an operator's config file names (measured:
+        a template declaring af-south-1 lost its E3006 under ``--regions``).
+        ASH's own environment is not changed. Under ``--sandbox`` the variables
+        are not passed at all, which leaves cfn-lint at the same us-east-1.
+
+        The copy is ``snapshot_environ``'s, taken under ``ENVIRON_LOCK``: other
+        scanner threads change the environment while this one runs
+        (utils/process_env.py).
+        """
+        return {
+            **snapshot_environ(),
+            "AWS_REGION": DEFAULT_REGION,
+            "AWS_DEFAULT_REGION": DEFAULT_REGION,
+        }
+
+    def _operator_config_file(self, configured: Path | str) -> Optional[Path]:
+        """The ``config_file`` to pass, or None when it must not be used.
+
+        Raises:
+            ScannerError: the operator named a file that does not exist.
+        """
+        chosen = operator_path(
+            self.context.config if self.context is not None else None,
+            "scanners.cfn-lint.options.config_file",
+            configured,
+            self._source_dir(),
+        )
+        if chosen.path is not None:
+            if not chosen.path.is_file():
+                raise ScannerError(
+                    f"scanners.cfn-lint.options.config_file names {chosen.path}, "
+                    "which does not exist"
+                )
+            return chosen.path
+        reason = chosen.refusal
+        # A .cfnlintrc can make cfn-lint import Python files (append_rules), so one
+        # the scanned repository chose is never handed to it.
+        self._plugin_log(
+            f"Ignoring scanners.cfn-lint.options.config_file ({str(configured)!r}): "
+            f"{reason}. A .cfnlintrc can load Python rules, so cfn-lint runs with "
+            "ASH's empty configuration instead.",
+            level=logging.WARNING,
+        )
+        return None
+
+    @staticmethod
+    def _recorded_args(option_args: List[str], source_dir: Path) -> List[str]:
+        """``option_args`` as recorded in the report, without host-specific paths.
+
+        ASH's own empty configuration is recorded by name only, and an operator's
+        config file relative to the source directory, so the aggregated results do
+        not carry the machine's absolute paths.
+        """
+        recorded = []
+        for arg in option_args:
+            if arg.startswith("--config-file="):
+                path = Path(arg.split("=", 1)[1])
+                shown = (
+                    path.name
+                    if path.name == "ash-empty.cfnlintrc"
+                    else display_path(path, source_dir)
+                )
+                arg = f"--config-file={shown}"
+            recorded.append(arg)
+        return recorded
+
+    @staticmethod
+    def batches(paths: List[str], budget: int = _ARGV_CHAR_BUDGET) -> List[List[str]]:
+        """Split ``paths`` into consecutive batches whose joined length fits ``budget``.
+
+        A single path longer than the budget gets a batch of its own rather than
+        being dropped.
+        """
+        out: List[List[str]] = []
+        current: List[str] = []
+        size = 0
+        for path in paths:
+            cost = len(path) + 1
+            if current and size + cost > budget:
+                out.append(current)
+                current, size = [], 0
+            current.append(path)
+            size += cost
+        if current:
+            out.append(current)
+        return out
+
+    def normalize_report(
+        self, report: SarifReport, shown_by_argument: Optional[Dict[str, str]] = None
+    ) -> SarifReport:
+        """Locate results as ASH reports them, map severities, sort rules, in place.
+
+        cfn-lint writes each URI as the template path it was given, which is
+        absolute (see ``_private_cwd``); ``shown_by_argument`` maps each such
+        path to the repository-relative one ASH reports, as cfn-guard's
+        ``normalize_results`` replaces its URIs. cfn-lint also tags every
+        location with ``uriBaseId: EXECUTIONROOT``, a base its own run declares
+        with a description and no uri. ASH builds its own run and the merged
+        SARIF never defines that base, so the reference is dropped: an ASH
+        location without a base is relative to the source directory.
+
+        cfn-lint lists driver rules in a different order from run to run (a set
+        iteration), so they are sorted by id to keep reports reproducible.
+        """
+        shown_by_argument = shown_by_argument or {}
+        for run in report.runs or []:
+            for result in run.results or []:
+                for location in [
+                    *(result.locations or []),
+                    *(result.relatedLocations or []),
+                ]:
+                    physical = location.physicalLocation
+                    artifact = physical.root.artifactLocation if physical else None
+                    if artifact is None:
+                        continue
+                    artifact.uriBaseId = None
+                    if artifact.uri:
+                        artifact.uri = shown_by_argument.get(
+                            artifact.uri.replace("\\", "/"), artifact.uri
+                        )
+                severity, level = severity_for_rule(result.ruleId)
+                result.level = Level(level)
+                if result.properties is None:
+                    result.properties = PropertyBag()
+                setattr(result.properties, "issue_severity", severity)  # noqa: B010
+            driver = run.tool.driver if run.tool else None
+            if driver is not None and driver.rules:
+                driver.rules = sorted(driver.rules, key=lambda r: r.id or "")
+        return report
+
+    def _source_dir(self) -> Path:
+        if self.context is None:
+            raise ScannerError("cfn-lint has no plugin context")
+        return Path(self.context.source_dir)
+
+    def _private_cwd(self, results_dir: Path) -> ContextManager[Path]:
+        """A new, empty directory of this scan's own to run cfn-lint in.
+
+        cfn-lint resolves every relative path in a config file (``append_rules``,
+        ``custom_rules``, ``override_spec`` and the rest) against its working
+        directory, not against the file (cfnlint/helpers.py ``load_plugins``
+        walks the directory as written). Run in the source directory, an
+        operator's ``.cfnlintrc`` outside the tree with ``append_rules: [rules]``
+        imported the scanned tree's ``rules/*.py`` (measured with 1.57.2). Run
+        from the filesystem root, ``append_rules: [tmp/x]`` read ``/tmp/x``,
+        which any local user can write to. From a new empty directory outside
+        the tree that only this user can enter, removed after the scan, a
+        relative path names nothing (``private_cwd_outside_scanned_tree``), so
+        templates, the output file and the config file are all passed as
+        absolute paths. The ``.cfnlintrc`` lookup in the working directory is
+        already off: ASH always names a config file.
+        """
+        return private_cwd_outside_scanned_tree(
+            results_dir=results_dir,
+            source_dir=self._source_dir(),
+            config=getattr(self.context, "config", None),
+        )
+
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[Dict[str, Any]]]:
+        """Abstract stub; cfn-lint overrides scan() to batch templates."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
+    def _empty_report(self, target: Path) -> SarifReport:
+        return SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(
+                        driver=ToolComponent(
+                            name="cfn-lint",
+                            version=self.tool_version,
+                            informationUri=AnyUrl(
+                                "https://github.com/aws-cloudformation/cfn-lint"
+                            ),
+                        )
+                    ),
+                    results=[],
+                )
+            ],
+        )
+
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+        config: ScannerPluginConfigBase | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        # Reset first, above every return, for the reason cfn_nag_scanner gives: the
+        # executor reads these after scan() returns, and a return placed above the
+        # reset would report the previous target's counts. The exit code too:
+        # ScannerExecutor runs this instance over the source and then the converted
+        # target, and the base class keeps the worst code across subprocess calls,
+        # so the converted target's invocation recorded the source's exit code.
+        self.targets_attempted = 0
+        self.targets_failed = 0
+        self.exit_code = 0
+
+        report = self._empty_report(target)
+        if not target.exists() or not any(target.iterdir()):
+            self._plugin_log(
+                f"Target directory {target} is empty or doesn't exist. Skipping scan.",
+                target_type=target_type,
+                level=logging.INFO,
+                append_to_stream="stderr",
+            )
+            self._post_scan(target=target, target_type=target_type)
+            return report
+
+        if not self._pre_scan(target=target, target_type=target_type, config=config):
+            self._post_scan(target=target, target_type=target_type)
+            return False
+        if not self.dependencies_satisfied:
+            self._post_scan(target=target, target_type=target_type)
+            return False
+
+        # Removes cfn-lint's working directory however the scan ends.
+        cleanup = ExitStack()
+        try:
+            if self.context is None:
+                raise ScannerError("cfn-lint has no plugin context")
+            discovery = discover_templates(self.context, target_type)
+            for shown, reason in discovery.refused:
+                # Not read, so not known to be CloudFormation: skipped and named, as
+                # cfn-nag skips it.
+                self._plugin_log(
+                    f"Skipped {shown}: {reason}",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
+            for path, reason in discovery.unmodelable:
+                self.targets_attempted += 1
+                self.targets_failed += 1
+                self.errors.append(f"{path.as_posix()}: {reason}")
+                self._plugin_log(
+                    f"cfn-lint did not evaluate {path.as_posix()}: {reason}",
+                    target_type=target_type,
+                    level=logging.ERROR,
+                )
+
+            if not discovery.templates:
+                self._plugin_log(
+                    f"No CloudFormation templates found in the {target_type} target.",
+                    target_type=target_type,
+                    level=logging.INFO,
+                    append_to_stream="stderr",
+                )
+                self._post_scan(target=target, target_type=target_type)
+                return report
+
+            source_dir = self._source_dir()
+            if self.results_dir is None:
+                raise ScannerError("cfn-lint has no results directory")
+            results_dir = Path(os.path.abspath(self.results_dir.joinpath(target_type)))
+            results_dir.mkdir(parents=True, exist_ok=True)
+            option_args = self._option_args(results_dir)
+            # Absolute, because cfn-lint does not run in the source directory (see
+            # _private_cwd). Each maps back to the path ASH reports.
+            shown_by_argument = {
+                Path(template).absolute().as_posix(): display_path(template, source_dir)
+                for template in discovery.templates
+            }
+            merged: List[Result] = []
+            rules: Dict[str, ReportingDescriptor] = {}
+            driver = report.runs[0].tool.driver
+            child_env = self._child_env()
+            cwd = cleanup.enter_context(self._private_cwd(results_dir))
+
+            # _option_args keeps this under _OPTION_CHAR_BUDGET.
+            budget = _ARGV_CHAR_BUDGET - sum(len(arg) + 1 for arg in option_args)
+            # With template ignores honored, each template runs alone, so its
+            # ignores reach no other template (see _honor_inline_ignores).
+            groups = (
+                [[argument] for argument in shown_by_argument]
+                if self._honor_inline_ignores()
+                else self.batches(list(shown_by_argument), budget)
+            )
+            for index, arguments in enumerate(groups):
+                batch = [shown_by_argument[argument] for argument in arguments]
+                self.targets_attempted += len(batch)
+                batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")
+                command = [
+                    _COMMAND,
+                    "--format",
+                    "sarif",
+                    f"--output-file={batch_file.as_posix()}",
+                    *option_args,
+                    "--",
+                    *[glob.escape(argument) for argument in arguments],
+                ]
+                response = self._run_subprocess(
+                    command=command,
+                    results_dir=results_dir,
+                    stdout_preference="write",
+                    stderr_preference="both",
+                    cwd=cwd,
+                    env=child_env,
+                    timeout=self._effective_scan_timeout(),
+                )
+                failure = self._batch_failure(response, batch_file)
+                batch_report = None
+                if failure is None:
+                    try:
+                        batch_report = SarifReport.model_validate(
+                            json.loads(batch_file.read_text(encoding="utf-8"))
+                        )
+                    except Exception as exc:  # unreadable output is a failed batch
+                        failure = f"cfn-lint output was not valid SARIF ({exc})"
+                if failure is None and batch_report is not None:
+                    config_errors = [
+                        r
+                        for run in batch_report.runs or []
+                        for r in run.results or []
+                        if r.ruleId == _CONFIG_ERROR_RULE
+                    ]
+                    if config_errors:
+                        texts = "; ".join(
+                            (r.message.root.text or "") for r in config_errors
+                        )
+                        failure = f"cfn-lint reported a configuration error: {texts}"
+                if failure is not None or batch_report is None:
+                    failure = failure or "cfn-lint output could not be read"
+                    self.targets_failed += len(batch)
+                    self.errors.append(f"{', '.join(batch)}: {failure}")
+                    self._plugin_log(
+                        f"cfn-lint did not evaluate {len(batch)} template(s): {failure}",
+                        target_type=target_type,
+                        level=logging.ERROR,
+                    )
+                    continue
+                for run in batch_report.runs or []:
+                    merged.extend(run.results or [])
+                    run_driver = run.tool.driver if run.tool else None
+                    if run_driver is not None:
+                        if run_driver.version:
+                            driver.version = run_driver.version
+                        for rule in run_driver.rules or []:
+                            rules.setdefault(rule.id or "", rule)
+
+            report.runs[0].results = merged
+            driver.rules = list(rules.values()) or None
+            self.normalize_report(report, shown_by_argument)
+            self._post_scan(target=target, target_type=target_type)
+            report.runs[0].invocations = [
+                Invocation(
+                    commandLine="cfn-lint",
+                    arguments=[
+                        "--format",
+                        "sarif",
+                        *self._recorded_args(option_args, source_dir),
+                    ],
+                    startTimeUtc=self.start_time,
+                    endTimeUtc=self.end_time,
+                    executionSuccessful=self.targets_failed == 0,
+                    exitCode=self.exit_code,
+                    exitCodeDescription="\n".join(self.errors),
+                    workingDirectory=ArtifactLocation(
+                        uri=get_shortest_name(input=target)
+                    ),
+                )
+            ]
+            with open_for_write(results_dir.joinpath("cfn-lint.sarif")) as handle:
+                handle.write(
+                    report.model_dump_json(exclude_none=True, exclude_unset=True)
+                )
+            return report
+        except ScannerError:
+            raise
+        except Exception as exc:
+            raise ScannerError(f"{self.__class__.__name__} failed: {exc}") from exc
+        finally:
+            cleanup.close()
+
+    @staticmethod
+    def _batch_failure(response: object, batch_file: Path) -> Optional[str]:
+        """Why one cfn-lint invocation produced nothing usable, or None if it did."""
+        if not isinstance(response, dict):
+            return "cfn-lint did not run"
+        if response.get("timed_out"):
+            return "cfn-lint timed out and was killed"
+        if "error" in response:
+            return f"cfn-lint could not be started: {response['error']}"
+        code = response.get("returncode")
+        if not _successful_exit(code):
+            stderr = tool_output_excerpt((response.get("stderr") or "").strip(), 500)
+            return f"cfn-lint exited {code}" + (f": {stderr}" if stderr else "")
+        if not batch_file.is_file() or batch_file.stat().st_size == 0:
+            return f"cfn-lint exited {code} without writing {batch_file.name}"
+        return None

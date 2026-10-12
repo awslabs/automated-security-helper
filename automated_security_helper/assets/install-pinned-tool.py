@@ -418,6 +418,191 @@ def install(
     return final
 
 
+# Must match automated_security_helper/utils/rules_bundles.py: the image installs a
+# bundle with this script, and `ash dependencies install` later reads what it wrote
+# to decide the bundle is already in place. tests/unit/utils/test_rules_bundles.py
+# installs one fake bundle both ways and asserts the two manifests are identical.
+_RULES_MANIFEST_NAME = ".ash-rules-manifest.json"
+_SAFE_MEMBER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_MAX_MEMBER_BYTES = 16 * 1024 * 1024
+_MAX_TOTAL_BYTES = 128 * 1024 * 1024
+
+
+def _bundle_members(bundle_zip: zipfile.ZipFile, bundle) -> "list[tuple]":
+    """(ZipInfo, basename) for every rule file in the bundle, refusing unsafe names.
+
+    The same selection rules_bundles.extract_bundle applies: regular files directly
+    inside ``member_dir`` ending in ``member_suffix``, each written to its basename,
+    so no path from the archive is used as a destination.
+    """
+    members = []
+    seen = set()
+    for info in bundle_zip.infolist():
+        if info.is_dir():
+            continue
+        parts = info.filename.replace("\\", "/").split("/")
+        if len(parts) != 2 or parts[0] != bundle.member_dir:
+            continue
+        name = parts[1]
+        if not name.endswith(bundle.member_suffix):
+            continue
+        if not _SAFE_MEMBER_NAME.match(name):
+            raise SystemExit(f"bundle member {info.filename!r} has an unsafe name")
+        if name in seen:
+            raise SystemExit(f"bundle holds two members named {name}")
+        if info.file_size > _MAX_MEMBER_BYTES:
+            raise SystemExit(f"bundle member {name} is over the size cap")
+        seen.add(name)
+        members.append((info, name))
+    if not members:
+        raise SystemExit(
+            f"bundle holds no {bundle.member_suffix} files under {bundle.member_dir}/"
+        )
+    return members
+
+
+def install_bundle(
+    name: str,
+    rules_dir: Path,
+    package_root: Path,
+    third_party_dir: "Path | None" = None,
+) -> Path:
+    """Install the pinned rules bundle ``name`` under ``rules_dir``.
+
+    Verifies the archive against its pinned digest before reading it, extracts the
+    rule files into a staging directory, writes the manifest, and moves the staging
+    directory into place with one rename.
+
+    With ``third_party_dir`` set (``ASH_THIRD_PARTY_DIR``, as for a tool), the
+    bundle's license entry is resolved before anything is downloaded and its
+    URL-pinned license files are installed before the rules are, so the rules never
+    land without them.
+    """
+    pins = load_pins(package_root)
+    bundle = pins.get_rules_bundle(name)
+    if not bundle.url.startswith("https://"):
+        raise SystemExit(f"refusing a non-https bundle URL: {bundle.url}")
+    if third_party_dir is not None:
+        entry = _third_party_entry(pins, name, bundle.version)
+        with tempfile.TemporaryDirectory(prefix="ash-third-party-") as staging_name:
+            staged = stage_third_party(
+                entry, None, Path(staging_name), installed_from=bundle.url
+            )
+            publish_third_party(staged, third_party_dir)
+
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    final = rules_dir / f"{bundle.name}-{bundle.version}"
+    staging = Path(tempfile.mkdtemp(prefix=".ash-rules-staging-", dir=rules_dir))
+    try:
+        with tempfile.TemporaryDirectory(prefix="ash-rules-download-") as dl:
+            archive = Path(dl) / bundle.url.rsplit("/", 1)[-1]
+            print(
+                f"Fetching {bundle.name} {bundle.version} from {bundle.url}", flush=True
+            )
+            actual = download(bundle.url, archive)
+            if actual.lower() != bundle.sha256.lower():
+                print(
+                    f"SHA256 mismatch for {bundle.url}: "
+                    f"expected {bundle.sha256.lower()}, got {actual.lower()}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(_EXIT_INTEGRITY)
+            print(f"Verified SHA256 {bundle.sha256.lower()}", flush=True)
+            files = {}
+            total = 0
+            with zipfile.ZipFile(archive) as bundle_zip:
+                for info, member in _bundle_members(bundle_zip, bundle):
+                    digest = hashlib.sha256()
+                    size = 0
+                    with (
+                        bundle_zip.open(info) as source,
+                        (staging / member).open("xb") as handle,
+                    ):
+                        for chunk in iter(lambda: source.read(1024 * 256), b""):
+                            size += len(chunk)
+                            total += len(chunk)
+                            if size > _MAX_MEMBER_BYTES or total > _MAX_TOTAL_BYTES:
+                                raise SystemExit("bundle expands past the size cap")
+                            digest.update(chunk)
+                            handle.write(chunk)
+                    files[member] = digest.hexdigest()
+        manifest = {
+            "bundle": bundle.name,
+            "version": bundle.version,
+            "url": bundle.url,
+            "sha256": bundle.sha256.lower(),
+            "files": dict(sorted(files.items())),
+        }
+        (staging / _RULES_MANIFEST_NAME).write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        # A directory: group/other need read and search (x) to load the rules, and
+        # nothing beyond the owner may write. B103 flags any group x bit.
+        os.chmod(staging, 0o755)  # nosec B103 - read-only rules directory
+        for child in staging.iterdir():
+            os.chmod(child, 0o644)
+        if final.exists() or final.is_symlink():
+            aside = Path(tempfile.mkdtemp(prefix=".ash-rules-old-", dir=rules_dir))
+            os.replace(final, aside / "old")
+            shutil.rmtree(aside, ignore_errors=True)
+        os.replace(staging, final)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    print(f"Installed {bundle.name} {bundle.version} to {final}", flush=True)
+    return final
+
+
+def installed_bundle_problem(
+    name: str, rules_dir: Path, package_root: Path
+) -> "str | None":
+    """Why the bundle under ``rules_dir`` is not the pinned ``name``; None when it is.
+
+    The same test as rules_bundles.verify_installed_bundle, which ``ash dependencies
+    install`` makes before it skips a bundle: the pinned version's directory holds a
+    manifest naming the pinned url and digest, and every file the manifest lists
+    still hashes to the digest recorded for it. Nothing is downloaded. The nix shell
+    runs this (``--check``) on every entry, so an ASH upgrade that bumps the pin
+    reinstalls the rules instead of leaving only the previous release's directory,
+    where the scanner does not look. tests/unit/test_nix_cfn_guard_rules_reseed.py
+    asks both functions about the same directories and requires the same answer.
+    """
+    pins = load_pins(package_root)
+    try:
+        bundle = pins.get_rules_bundle(name)
+    except pins.ToolNotProvisionableError as exc:
+        raise SystemExit(str(exc))
+    directory = rules_dir / f"{bundle.name}-{bundle.version}"
+    manifest_path = directory / _RULES_MANIFEST_NAME
+    if not manifest_path.is_file():
+        return f"{manifest_path} does not exist"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"{manifest_path} is unreadable ({exc})"
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
+        return f"{manifest_path} is malformed"
+    if (
+        manifest.get("url") != bundle.url
+        or str(manifest.get("sha256", "")).lower() != bundle.sha256.lower()
+    ):
+        return (
+            f"{directory} holds {manifest.get('url')!r}, not the pinned "
+            f"{bundle.name} {bundle.version}"
+        )
+    for member, expected in manifest["files"].items():
+        path = directory / str(member)
+        if not path.is_file():
+            return f"{path} is listed in the manifest but missing"
+        try:
+            actual = _sha256_file(path)
+        except OSError as exc:
+            return f"{path} could not be read ({exc})"
+        if actual != str(expected):
+            return f"{path} no longer matches the digest in its manifest"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Third-party license and notice files
 #
@@ -727,8 +912,10 @@ def reports_version(output: str, bare_version: str) -> bool:
     return re.search(pattern, output) is not None
 
 
-def version_output(executable: str) -> str:
+def version_output(executable: str, argv: "list[str] | None" = None) -> str:
     """``executable --version``'s combined output, run in a throwaway HOME.
+
+    With ``argv``, that command is run instead (an entry's ``version_probe``).
 
     Throwaway because a version query is not always read-only. opengrep is a
     self-extracting bundle that unpacks 208 MB into ``$HOME/.cache/opengrep`` on
@@ -740,7 +927,7 @@ def version_output(executable: str) -> str:
             os.environ, HOME=scratch, XDG_CACHE_HOME=f"{scratch}/cache", TMPDIR=scratch
         )
         result = subprocess.run(  # nosec B603 - executable from the pinned table, resolved on PATH
-            [executable, "--version"],
+            argv or [executable, "--version"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -869,6 +1056,24 @@ def verify_third_party(
             problems.append(f"{tool}: {source} does not name commit {entry.commit}")
 
         bare_version = entry.version.lstrip("v")
+        # getattr: a table from before version_probe existed has executables only.
+        probe = getattr(entry, "version_probe", ())
+        if probe:
+            # Not an executable on PATH (a rules bundle): the probe reports the
+            # version that is installed.
+            argv = list(probe)
+            try:
+                output = version_output(argv[0], argv)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                problems.append(f"{tool}: version probe {argv[0]} failed: {exc}")
+                continue
+            if not reports_version(output, bare_version):
+                problems.append(
+                    f"{tool}: its version probe does not report {bare_version}, so "
+                    f"the files under {directory} describe a different release than "
+                    f"the one installed. Output: {output.strip()[:200]!r}"
+                )
+            continue
         for position, executable in enumerate(entry.executable_names):
             copies = [
                 c
@@ -953,14 +1158,102 @@ def third_party_main(argv: "list[str]") -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Root-only install targets
+#
+# The image installs content a later scan trusts (the cfn-guard rules bundle) as
+# root, so the scan user cannot change it. A file's own mode is not enough: in a
+# directory the scan user can write, it can rename the file or its directory away
+# and put another in its place, which the sticky bit is what prevents. So the
+# check covers every ancestor up to "/" as well as everything under the target.
+# ---------------------------------------------------------------------------
+
+_ASSERT_ROOT_ONLY = "--assert-root-only"
+
+
+def root_only_problems(
+    paths: "list[Path]", trusted_uids: "tuple[int, ...]" = (0,)
+) -> "list[str]":
+    """Why each of ``paths`` could be changed by a user other than its owner.
+
+    A path passes when it and everything under it is owned by a trusted uid and
+    writable by neither group nor others, and when every ancestor up to "/" is
+    owned by a trusted uid and either writable by neither group nor others, or a
+    directory with the sticky bit (a user who can write it still cannot rename or
+    remove what someone else owns, which is what /tmp relies on). Symlinks are not
+    followed: each name is checked where it is.
+    """
+    import stat
+
+    problems: "list[str]" = []
+
+    def check(path: Path, allow_sticky: bool) -> None:
+        try:
+            info = os.lstat(path)
+        except OSError as exc:
+            problems.append(f"{path}: {exc.strerror or exc}")
+            return
+        if info.st_uid not in trusted_uids:
+            problems.append(f"{path}: owned by uid {info.st_uid}")
+        writable = info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        sticky_dir = stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX
+        if writable and not (allow_sticky and sticky_dir):
+            problems.append(
+                f"{path}: mode {stat.filemode(info.st_mode)} lets group or others "
+                "write it"
+            )
+
+    for given in paths:
+        target = Path(os.path.abspath(given))
+        for ancestor in reversed(target.parents):
+            check(ancestor, allow_sticky=True)
+        check(target, allow_sticky=False)
+        if target.is_dir() and not target.is_symlink():
+            for root, dirs, files in os.walk(target):
+                for name in sorted(dirs) + sorted(files):
+                    check(Path(root) / name, allow_sticky=False)
+    return problems
+
+
+def assert_root_only_main(argv: "list[str]") -> int:
+    parser = argparse.ArgumentParser(
+        prog=f"install-pinned-tool {_ASSERT_ROOT_ONLY}",
+        description=(
+            "Fail unless each PATH, everything under it and every ancestor is "
+            "owned by root and cannot be changed by any other user."
+        ),
+    )
+    parser.add_argument("paths", nargs="+", metavar="PATH")
+    parser.add_argument(
+        "--trusted-uid",
+        type=int,
+        action="append",
+        default=[],
+        help="another owner to accept besides root (repeatable; for tests)",
+    )
+    args = parser.parse_args(argv)
+    problems = root_only_problems([Path(p) for p in args.paths], (0, *args.trusted_uid))
+    for problem in problems:
+        print(f"root-only check: {problem}", file=sys.stderr)
+    if problems:
+        return 1
+    print(f"Root-only: {', '.join(args.paths)}")
+    return 0
+
+
 def main(argv: "list[str] | None" = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == _ASSERT_ROOT_ONLY:
+        return assert_root_only_main(argv[1:])
     if argv and argv[0] in _THIRD_PARTY_MODES:
         return third_party_main(argv)
     parser = argparse.ArgumentParser(
         description="Install a pinned ASH scanner binary, verified against its digest.",
     )
-    parser.add_argument("tool", help="grype, opengrep, syft, trivy or uv")
+    parser.add_argument(
+        "tool",
+        help=("actionlint, cfn-guard, gitleaks, grype, opengrep, syft, trivy or uv"),
+    )
     parser.add_argument(
         "-b",
         "--bin-dir",
@@ -976,10 +1269,55 @@ def main(argv: "list[str] | None" = None) -> int:
             "from this script's location)"
         ),
     )
+    parser.add_argument(
+        "--rules-bundle",
+        action="store_true",
+        help=(
+            "treat TOOL as the name of a pinned rules bundle "
+            "(e.g. aws-guard-rules-registry) and install it under --rules-dir"
+        ),
+    )
+    parser.add_argument(
+        "-d",
+        "--rules-dir",
+        default=None,
+        help="directory to install a rules bundle under (required with --rules-bundle)",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "with --rules-bundle, install nothing: exit 0 when the bundle under "
+            "--rules-dir is the pinned one with every file intact, 1 otherwise"
+        ),
+    )
     args = parser.parse_args(argv)
 
     package_root = Path(args.pins_dir) if args.pins_dir else default_package_root()
     third_party_dir = os.environ.get(_THIRD_PARTY_ENV)
+    if args.check and not args.rules_bundle:
+        parser.error("--check needs --rules-bundle")
+    if args.rules_bundle:
+        if not args.rules_dir:
+            parser.error("--rules-bundle needs --rules-dir")
+        if args.check:
+            problem = installed_bundle_problem(
+                args.tool, Path(args.rules_dir), package_root
+            )
+            if problem is not None:
+                print(
+                    f"{args.tool} is not the pinned bundle: {problem}", file=sys.stderr
+                )
+                return 1
+            print(f"{args.tool} is installed and matches its pin")
+            return 0
+        install_bundle(
+            args.tool,
+            Path(args.rules_dir),
+            package_root,
+            Path(third_party_dir) if third_party_dir else None,
+        )
+        return 0
     install(
         args.tool,
         Path(args.bin_dir),

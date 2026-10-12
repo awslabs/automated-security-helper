@@ -2,7 +2,7 @@
 
 import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Set, Tuple
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
@@ -328,6 +328,10 @@ class ScanPhase(EnginePhase):
 
             # Create scanner instances for validation and processing
             scanner_instances = []
+            # Names of scanners whose constructor raised. They resolved: the ERROR row
+            # recorded for each is the result, so a selection naming one is not
+            # unresolved and must not be told its module is missing.
+            construction_failed: Set[str] = set()
             if scanner_classes:
                 ASH_LOGGER.debug(
                     f"Creating instances for {len(scanner_classes)} scanner classes"
@@ -408,6 +412,7 @@ class ScanPhase(EnginePhase):
                         failed_name = _unconstructed_scanner_name(
                             plugin_config, plugin_class
                         )
+                        construction_failed.add(failed_name.lower().strip())
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
                             f"did not run: {type(e).__name__}: {e}"
@@ -497,23 +502,62 @@ class ScanPhase(EnginePhase):
             # warns and continues: such a run still scans and reports what did
             # resolve, so it is not the silent-zero case, and a CI matrix whose
             # runners load different plugin modules can produce that shape
-            # legitimately. The unresolved name is named either way.
+            # legitimately. The unresolved name is named either way, and a name
+            # that belongs to a community module ASH ships but that this run did
+            # not import is named with the module to add, in the warning and in
+            # the refusal alike.
             if enabled_scanners and scanner_instances:
                 registered_names = {
                     _scanner_display_name(instance).lower().strip()
                     for instance in scanner_instances
                 }
+                known_names = registered_names | construction_failed
                 requested = [(name, name.lower().strip()) for name in enabled_scanners]
-                unresolved = [
-                    name for name, key in requested if key not in registered_names
-                ]
+                unresolved = [name for name, key in requested if key not in known_names]
+                from automated_security_helper.core.community_scanners import (
+                    community_module_for,
+                )
+
+                # "Not loaded" means no scanner class handed to this phase comes
+                # from the module. A module that did supply this run's scanners,
+                # but not the requested name, falls through to the generic
+                # message: the module hint would send the operator to add what is
+                # already there. Read from the classes, not sys.modules, because
+                # anything in the process may have imported a module this run did
+                # not list.
+                loaded_modules = {
+                    str(getattr(cls, "__module__", "")) for cls in scanner_classes
+                }
+                unloaded: Dict[str, str] = {}
+                for name in unresolved:
+                    module = community_module_for(name)
+                    if module and not any(
+                        m == module or m.startswith(module + ".")
+                        for m in loaded_modules
+                    ):
+                        unloaded[name] = module
+                hint = ""
+                if unloaded:
+                    modules = sorted(set(unloaded.values()))
+                    hint = (
+                        f" {', '.join(sorted(unloaded))} "
+                        f"{'is a community scanner' if len(unloaded) == 1 else 'are community scanners'}"
+                        " whose plugin module is not loaded. Add "
+                        f"{', '.join(modules)} to ash_plugin_modules in the ASH "
+                        "config, or pass "
+                        + " ".join(f"--ash-plugin-modules {m}" for m in modules)
+                        + "."
+                    )
                 if unresolved:
                     ASH_LOGGER.warning(
                         "No registered scanner matches "
                         f"{', '.join(sorted(unresolved))}. Registered scanners: "
                         f"{', '.join(sorted(registered_names))}"
+                        + (f".{hint}" if hint else "")
                     )
-                if not any(key in registered_names for _, key in requested):
+                if not any(key in known_names for _, key in requested):
+                    if hint:
+                        raise ScannerSelectionError(hint.strip())
                     raise ScannerSelectionError(
                         "None of the requested scanners exist: "
                         f"{', '.join(sorted(unresolved))}. "

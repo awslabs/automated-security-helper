@@ -113,16 +113,17 @@ there because npm-audit and grype report different paths for the same finding
 | Scanner    | `package_name` | `package_version`       | `package_path`                                     |
 |------------|----------------|-------------------------|----------------------------------------------------|
 | npm-audit  | Yes            | Yes, from the lockfile  | Yes, for every node npm audit lists                |
+| trivy      | Yes            | Yes                     | npm lockfiles only                                 |
 | trivy-repo | Yes            | Yes                     | npm lockfiles only                                 |
 | grype      | Yes            | Yes                     | npm lockfiles only, and only when the name and version occur once in the lockfile |
 
 The rule IDs also differ: grype appends the package name to the advisory
 (`GHSA-6j4f-fj2g-mc7p-brace-expansion`), npm-audit uses the bare GHSA ID, and
-trivy-repo uses the CVE alias when the advisory has one. A glob such as
-`GHSA-6j4f-fj2g-mc7p*` covers the first two. trivy-repo needs its own entry keyed
-on the CVE.
+trivy and trivy-repo use the CVE alias when the advisory has one. A glob such as
+`GHSA-6j4f-fj2g-mc7p*` covers the first two. trivy and trivy-repo need their own
+entry keyed on the CVE; one entry covers both of them.
 
-Paths differ too. grype and trivy-repo report the lockfile, for example
+Paths differ too. grype, trivy and trivy-repo report the lockfile, for example
 `deploy/cdk/package-lock.json`. npm-audit reports
 `node_modules/<path>/package.json` with each `node_modules/` segment removed
 from the middle, and without the lockfile's directory. That shape predates the

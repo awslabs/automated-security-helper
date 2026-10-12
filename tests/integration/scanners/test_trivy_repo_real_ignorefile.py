@@ -21,6 +21,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
@@ -63,8 +64,11 @@ def _repo(tmp_path: Path) -> Path:
 def _ash_rule_ids(tmp_path: Path, source: Path, options=None) -> set:
     output = tmp_path / "out"
     output.mkdir(exist_ok=True)
+    # Built from no config file in the tree: the options here are the operator's.
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     scanner = TrivyRepoScanner(
-        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyRepoScannerConfig(
             options={"scanners": ["secret"], "offline": True, **(options or {})}
         ),

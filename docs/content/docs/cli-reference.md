@@ -22,7 +22,7 @@ These parameters are available across multiple ASH commands:
 | `--version`            | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
 | `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set: a branch, a tag or a commit, optionally followed by `~<n>` or `^<n>` (`origin/main`, `v1.2.0`, `HEAD~1`). With --changed-files-only, a value that starts with `-`, holds a character other than letters, digits and `. _ / ~ ^ @ { } -`, or is not a ref name `git check-ref-format --allow-onelevel` accepts (`main..HEAD`, `main@{1}`) is refused with exit 1 before git runs, and nothing is scanned. Without --changed-files-only the value is not used. | `origin/main` | `ASH_BASE_REF` | `scan` |
-| `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
+| `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1, except for trivy's database in an image built with `OFFLINE=YES`, which warns by default. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
 | `--allow-in-tree-tools` | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo `.venv/bin` or `node_modules/.bin`, and the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`, `true`). Without it such a tool is treated as missing and the scanner is reported MISSING with the in-tree path. Only this flag (also the `allow_in_tree_tools` key of `--cli-json-input`) and the environment variable, set to `1`, `true`, `yes` or `on`, turn it on, never a config file, and `ash mcp` never does; see [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory). | Off | `ASH_ALLOW_IN_TREE_TOOLS` | `scan` |
 | `--sandbox` | Run every scanner subprocess in an OS-level sandbox: `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` or `off`. A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the `sandbox.mode` config value; ignored in container mode. See [Scanner sandboxing](scanner-sandbox.md). | `off` (or `sandbox.mode`) |  | `scan` |
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. File names are read from `git diff` unquoted and NUL-separated, so names with spaces or non-ASCII characters match their findings. When git is not installed, or the base ref names no commit in the local repository (for example `origin/main` in a shallow clone), every file is scanned; the base ref is only ever read as a revision, never as a path in the checkout. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
@@ -583,7 +583,7 @@ A shard that owned only `syft` and `grype` finds nothing and exits 0. Five such 
 
 Balance is by scanner count, not by scanner cost. `semgrep` and `checkov` dominate ASH's runtime, so a shard holding semgrep finishes long after a shard holding syft: wall clock is bounded by the slowest single scanner, and counts above about four buy very little. Nothing models or measures per-scanner cost.
 
-A `--shard-count` above the number of scanners leaves the surplus shards with nothing assigned. They run, produce a valid empty report, and merge correctly, so this is wasteful rather than wrong. It is allowed on purpose, so that a pipeline can parameterize its shard count without knowing how many scanners are registered — ASH ships ten built-in scanners, and any scanner plugins you register count too.
+A `--shard-count` above the number of scanners leaves the surplus shards with nothing assigned. They run, produce a valid empty report, and merge correctly, so this is wasteful rather than wrong. It is allowed on purpose, so that a pipeline can parameterize its shard count without knowing how many scanners are registered — ASH ships sixteen built-in scanners, and any scanner plugins you register count too.
 
 #### Interaction with other options
 
@@ -859,7 +859,7 @@ $ ash config validate
 ✓ Schema validation passed
 ✓ All required fields present
 ✓ Suppression rules validated (3 rules)
-✓ Scanner configurations validated (10 scanners)
+✓ Scanner configurations validated (16 scanners)
 
 Configuration is valid!
 
@@ -1599,7 +1599,8 @@ built. Measured with grype 0.111.0 under ASH's offline settings, a database buil
 10 days earlier scanned with exit 0 and no warning. ASH now reads each content
 database's own build time after its scanner runs and exits 1 when it is past the
 declared bound (grype 120h, trivy 24h, the offline semgrep and opengrep rulesets
-30 days):
+30 days). In an image built with `OFFLINE=YES`, a stale trivy database warns instead;
+see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database):
 
 ```console
 $ ash scan --offline

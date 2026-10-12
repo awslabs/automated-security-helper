@@ -92,6 +92,7 @@ class ConfigValidator:
         "content_db_staleness",
         "content_db_staleness_overrides",
         "honor_ignore_files",
+        "content_db_staleness_offline_image_default",
         "sandbox",
         "ash_plugin_modules",
         "external_reports_to_include",

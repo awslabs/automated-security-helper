@@ -33,7 +33,9 @@ A file is read only when all of these hold:
 
 ``follow_links_inside=True`` relaxes rules 3 and 5 for readers that look up a file a
 scanner already reported: a link is followed when its target is inside the tree, and
-a hard-linked file is read. See :func:`open_in_scanned_tree`.
+a hard-linked file is read. ``allow_hardlinks=True`` relaxes rule 5 alone, for a
+reader that copies files a directory walk of the tree reads under these names. See
+:func:`open_in_scanned_tree`.
 
 How the check is made, and why that way
 ---------------------------------------
@@ -406,7 +408,11 @@ def _resolved_inside(
 
 
 def open_in_scanned_tree(
-    path: PathLike, root: PathLike, *, follow_links_inside: bool = False
+    path: PathLike,
+    root: PathLike,
+    *,
+    follow_links_inside: bool = False,
+    allow_hardlinks: bool = False,
 ) -> BinaryIO:
     """Open ``path`` for binary reading if it is a regular file inside ``root``.
 
@@ -429,6 +435,12 @@ def open_in_scanned_tree(
             more than one hard link is accepted too, for the same reason: the
             scanner already read it under this name, and installers that hard-link
             files (uv, pnpm, conda) would otherwise draw a warning per file.
+        allow_hardlinks: Accept a file with more than one hard link, and still
+            follow no link. For a reader that stands in for a directory walk of the
+            tree, which reads a hard-linked file under each of its names but
+            follows no symlink: the gitleaks ``.gitleaksignore`` re-scan copies the
+            files it names, and refusing a hard-linked one would leave a file the
+            scan covers unread.
 
     Returns:
         A binary file object positioned at the start of the file.
@@ -441,10 +453,11 @@ def open_in_scanned_tree(
     display = "/".join(parts)
     if follow_links_inside:
         anchor, parts = _resolved_inside(path, root, display)
+    hardlinks = follow_links_inside or allow_hardlinks
     if _DESCRIPTOR_WALK:
-        fd = _open_by_descriptor_walk(anchor, parts, display, follow_links_inside)
+        fd = _open_by_descriptor_walk(anchor, parts, display, hardlinks)
     else:
-        fd = _open_by_checked_path(anchor, parts, display, follow_links_inside)
+        fd = _open_by_checked_path(anchor, parts, display, hardlinks)
     return os.fdopen(fd, "rb")
 
 

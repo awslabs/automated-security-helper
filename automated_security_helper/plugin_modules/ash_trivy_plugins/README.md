@@ -91,11 +91,16 @@ scanners:
       license_full: true          # Deep license scanning (default: true)
       ignore_unfixed: true        # Only show fixed vulnerabilities (default: true)
       disable_telemetry: true     # Disable usage analytics (default: true)
-      ignore_file: /etc/ash/trivyignore  # Passed as --ignorefile; must be outside the scanned tree
-      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as --secret-config; same rule
+      ignore_file: /etc/ash/trivyignore  # Passed as trivy --ignorefile; must be outside the scanned tree
+      secret_config_file: /etc/ash/trivy-secret.yaml  # Passed as trivy --secret-config; same rule
 ```
 
-trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
+trivy-repo always passes `trivy --config` and `trivy --module-dir`: an empty config file and an
+empty modules directory of ASH's, unless `config_file` and `module_dir` are set
+through `--config-overrides` or a config file outside the scanned tree, for paths
+outside that tree.
+
+trivy-repo always passes `trivy --ignorefile` and `trivy --secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the
 options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set
 nothing, which ASH writes in a directory outside the scanned tree and removes when

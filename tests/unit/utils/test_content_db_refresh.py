@@ -38,8 +38,19 @@ from automated_security_helper.utils.sandbox.scope import (
 )
 
 
+#: trivy's own opt-outs of its database updates, which the refresh honors; cleared
+#: so a developer's shell cannot change what these tests see.
+_TRIVY_UPDATE_ENV = (
+    "TRIVY_SKIP_DB_UPDATE",
+    "TRIVY_SKIP_UPDATE",
+    "TRIVY_SKIP_JAVA_DB_UPDATE",
+)
+
+
 @pytest.fixture(autouse=True)
-def _fresh_memo():
+def _fresh_memo(monkeypatch):
+    for name in _TRIVY_UPDATE_ENV:
+        monkeypatch.delenv(name, raising=False)
     refresh.forget_prepared()
     yield
     refresh.forget_prepared()
@@ -138,6 +149,27 @@ def test_grype_is_updated_outside_the_sandbox_and_away_from_the_repo(
     assert not any((p / ".git").exists() for p in [call.cwd, *call.cwd.parents])
 
 
+@pytest.mark.parametrize("tool", ["grype", "trivy"])
+def test_a_temporary_directory_inside_a_checkout_is_not_the_working_directory(
+    recorder, tmp_path, monkeypatch, tool
+):
+    """When the temporary directory is inside a checkout, the update runs from the
+    filesystem root instead, so no config file the checkout holds can be found."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "tmp").mkdir()
+    monkeypatch.setattr(refresh.tempfile, "tempdir", str(checkout / "tmp"))
+    refresh.prepare_content_db(tool, tmp_path / "cache", offline=False, executable=tool)
+    (call,) = recorder.calls
+    config = Path(
+        call.argv[call.argv.index("-c" if tool == "grype" else "--config") + 1]
+    )
+    # Not vacuous: the update's own files were made inside the checkout.
+    assert checkout in config.parents
+    assert not any((p / ".git").exists() for p in [call.cwd, *call.cwd.parents])
+    assert call.cwd == Path(call.cwd.anchor)
+
+
 def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_path):
     cache = tmp_path / "trivy"
     refresh.prepare_content_db(
@@ -157,6 +189,39 @@ def test_trivy_gets_its_database_and_when_asked_its_checks_bundle(recorder, tmp_
     assert db.argv[1:3] == ["image", "--download-db-only"]
     # trivy fetches its checks bundle by checking configuration; here, of nothing.
     assert checks.argv[1] == "config" and checks.last_is_empty_dir
+
+
+def test_trivy_takes_the_operators_config_when_given_one(recorder, tmp_path):
+    """A database mirror in the operator's trivy.yaml applies to the update too."""
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text("db:\n  repository: mirror.example/trivy-db\n")
+    refresh.prepare_content_db(
+        "trivy",
+        tmp_path / "trivy",
+        offline=False,
+        checks=True,
+        executable="trivy",
+        config_file=operator,
+    )
+    for call in recorder.calls:
+        assert Path(call.argv[call.argv.index("--config") + 1]) == operator.absolute()
+        assert "mirror.example" in call.config_text
+        assert call.cwd != operator.parent
+    # The operator's file is left where it is.
+    assert operator.is_file()
+
+
+def test_grype_takes_no_config_file(recorder, tmp_path):
+    with pytest.raises(ValueError):
+        refresh.prepare_content_db(
+            "grype",
+            tmp_path,
+            offline=False,
+            executable="grype",
+            config_file=tmp_path / "x.yaml",
+        )
+    assert recorder.calls == []
 
 
 def test_without_checks_trivy_only_updates_its_database(recorder, tmp_path):
@@ -189,6 +254,130 @@ def test_the_java_database_is_updated_only_when_asked(recorder, tmp_path):
         executable="trivy",
     )
     assert len(recorder.calls) == 2, "offline, the Java database is not updated"
+
+
+# --------------------------------------------------------------------------- #
+# The operator's own opt-out of trivy's database update
+#
+# trivy refuses `--download-db-only` when its settings also say to skip the update
+# ("--skip-db-update and --download-db-only cannot be specified together"), so the
+# operator's opt-out is honored rather than failing every online scan. Each case's
+# expectation is what trivy 0.75.0 itself did: a refusal means it reads the setting
+# as "skip". Measured against the real binary, see the commit that added this.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "env, skips",
+    [
+        ({"TRIVY_SKIP_DB_UPDATE": "true"}, True),
+        ({"TRIVY_SKIP_DB_UPDATE": "TRUE"}, True),
+        ({"TRIVY_SKIP_DB_UPDATE": "1"}, True),
+        ({"TRIVY_SKIP_DB_UPDATE": "t"}, True),
+        # strconv.ParseBool, which is how trivy reads it: neither is true.
+        ({"TRIVY_SKIP_DB_UPDATE": "yes"}, False),
+        ({"TRIVY_SKIP_DB_UPDATE": "false"}, False),
+        # The deprecated --skip-update's variable, read after the flag's own.
+        ({"TRIVY_SKIP_UPDATE": "true"}, True),
+        ({"TRIVY_SKIP_DB_UPDATE": "", "TRIVY_SKIP_UPDATE": "true"}, True),
+        ({"TRIVY_SKIP_DB_UPDATE": "false", "TRIVY_SKIP_UPDATE": "true"}, False),
+        ({"TRIVY_SKIP_JAVA_DB_UPDATE": "true"}, False),
+    ],
+)
+def test_an_operators_environment_can_turn_the_database_update_off(
+    recorder, tmp_path, monkeypatch, env, skips
+):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    refresh.prepare_content_db(
+        "trivy", tmp_path, offline=False, checks=True, executable="trivy"
+    )
+    ran = [c.argv[1:3] for c in recorder.calls]
+    assert (["image", "--download-db-only"] not in ran) is skips
+    # The checks bundle has an opt-out of its own, which trivy applies itself.
+    assert ran[-1][:1] == ["config"]
+
+
+@pytest.mark.parametrize(
+    "config, skips",
+    [
+        ("db:\n  skip-update: true\n", True),
+        ('db:\n  skip-update: "true"\n', True),
+        ("db:\n  skip-update: 1\n", True),
+        ("db:\n  skip-update: 2\n", True),
+        ("db: {skip-update: true}\n", True),
+        ("db.skip-update: true\n", True),
+        ("DB:\n  Skip-Update: true\n", True),
+        # yaml.v3 reads these as strings, which ParseBool rejects.
+        ("db:\n  skip-update: yes\n", False),
+        ('db:\n  skip-update: "2"\n', False),
+        ("db:\n  skip-update: false\n", False),
+        ("db:\n  skip-update:\n", False),
+        ("skip-db-update: true\n", False),
+        ("db:\n  repository: mirror.example/trivy-db\n", False),
+    ],
+)
+def test_an_operators_trivy_config_can_turn_the_database_update_off(
+    recorder, tmp_path, monkeypatch, config, skips
+):
+    operator = tmp_path / "operator" / "trivy.yaml"
+    operator.parent.mkdir()
+    operator.write_text(config)
+    refresh.prepare_content_db(
+        "trivy",
+        tmp_path / "cache",
+        offline=False,
+        executable="trivy",
+        config_file=operator,
+    )
+    assert (recorder.calls == []) is skips
+
+
+def test_the_environment_outranks_the_operators_config(recorder, tmp_path, monkeypatch):
+    operator = tmp_path / "trivy.yaml"
+    operator.write_text("db:\n  skip-update: true\n")
+    monkeypatch.setenv("TRIVY_SKIP_DB_UPDATE", "false")
+    refresh.prepare_content_db(
+        "trivy",
+        tmp_path / "cache",
+        offline=False,
+        executable="trivy",
+        config_file=operator,
+    )
+    assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
+
+
+def test_the_java_database_has_its_own_opt_out(recorder, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRIVY_SKIP_JAVA_DB_UPDATE", "true")
+    refresh.prepare_content_db(
+        "trivy", tmp_path, offline=False, java=True, executable="trivy"
+    )
+    assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
+    operator = tmp_path / "trivy.yaml"
+    operator.write_text("db:\n  java-skip-update: true\n")
+    monkeypatch.delenv("TRIVY_SKIP_JAVA_DB_UPDATE")
+    refresh.forget_prepared()
+    recorder.calls.clear()
+    refresh.prepare_content_db(
+        "trivy",
+        tmp_path,
+        offline=False,
+        java=True,
+        executable="trivy",
+        config_file=operator,
+    )
+    assert [c.argv[1:3] for c in recorder.calls] == [["image", "--download-db-only"]]
+
+
+def test_a_skipped_update_is_logged_with_the_setting_that_skipped_it(
+    recorder, tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setenv("TRIVY_SKIP_DB_UPDATE", "true")
+    with caplog.at_level("WARNING"):
+        refresh.prepare_content_db("trivy", tmp_path, offline=False, executable="trivy")
+    assert recorder.calls == []
+    assert "TRIVY_SKIP_DB_UPDATE=true" in caplog.text
+    assert "did not update" in caplog.text
 
 
 def test_once_per_scan(recorder, tmp_path):
@@ -510,12 +699,13 @@ class TestScannersUseThePreparedDatabase:
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
             grype_scanner,
         )
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            _trivy_scanner_base,
         )
 
         monkeypatch.setattr(grype_scanner, "prepare_content_db", record)
-        monkeypatch.setattr(trivy_repo_scanner, "prepare_content_db", record)
+        # trivy and trivy-repo prepare through their shared base.
+        monkeypatch.setattr(_trivy_scanner_base, "prepare_content_db", record)
         monkeypatch.delenv("ASH_OFFLINE", raising=False)
         return calls
 
@@ -572,10 +762,14 @@ class TestScannersUseThePreparedDatabase:
         # the scanner builds, and the run itself is replaced below.
         monkeypatch.setattr(scanner, "validate_plugin_dependencies", lambda: True)
         commands = []
+        # The spawn under TrivyScannerBase._run_subprocess, which adds the update
+        # and its skip flags for trivy and trivy-repo alike.
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
         monkeypatch.setattr(
-            scanner,
+            ScannerPluginBase,
             "_run_subprocess",
-            lambda command, **kwargs: commands.append(list(command)) or {},
+            lambda self, command, **kwargs: commands.append(list(command)) or {},
         )
         target = tmp_path / "repo"
         target.mkdir()

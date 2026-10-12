@@ -1073,7 +1073,9 @@ jobs:
       # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
       # is MISSING in both runs cannot pass parity by being absent; --require-offline
-      # holds trivy-repo to that in the offline pair too.
+      # holds trivy-repo to that in the offline pair too. The config loads the Trivy
+      # community module, so trivy-repo, which shares the builtin trivy's code, is
+      # compared too.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
@@ -1086,7 +1088,7 @@ jobs:
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
             --config "$PARITY_CONFIG" \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,trivy-repo \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo \
             --require-offline trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
@@ -1368,24 +1370,35 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
-      # The integration suite runs bandit for real, and nothing else in this job installs
-      # it, so the first test that needed it ran `uv tool install` from inside the suite.
-      # This is the installer users run, and it installs before any test starts.
+      # The integration suite runs bandit, actionlint, cfn-lint, cfn-guard and gitleaks
+      # for real, and nothing else in this job installs them: the first test that
+      # needed bandit ran `uv tool install` from inside the suite. This is the
+      # installer users run, it installs before any test starts, and it also exercises
+      # the pinned downloads and the cfn-guard rules-bundle install.
+      # ASH_REQUIRE_ACTIONLINT, ASH_REQUIRE_CFN_TOOLS and ASH_REQUIRE_GITLEAKS below make
+      # a missing tool fail those tests instead of skipping them. Without gitleaks here,
+      # both tests in test_repo_tool_configs_are_not_read.py skipped.
+      # tests/unit/test_integration_job_installs_required_tools.py holds this list.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ash dependencies install --tool bandit
+        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
-      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
-      # ASH_REQUIRE_PREINSTALLED_TOOLS names what the step above installed: the suite
-      # fails at start if it cannot find them, and a test fails if it installs one, so a
-      # pre-install that stops reaching the scanner shows up instead of being redone.
+      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
+      # ASH_REQUIRE_ACTIONLINT for the actionlint tests, and ASH_REQUIRE_GITLEAKS for the
+      # tests that run gitleaks from PATH. ASH_REQUIRE_PREINSTALLED_TOOLS names the uv
+      # tools the step above installed: the suite fails at start if it cannot find them,
+      # and a test fails if it installs one, so a pre-install that stops reaching the
+      # scanner shows up instead of being redone.
       #
       # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
       # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
       # later step of the job runs an executable by name from either directory.
       - name: Run the integration suite
         env:
+          ASH_REQUIRE_ACTIONLINT: "1"
           ASH_REQUIRE_CDK_EXTRA: "1"
+          ASH_REQUIRE_CFN_TOOLS: "1"
+          ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
           ASH_REQUIRE_PREINSTALLED_TOOLS: bandit
         run: |

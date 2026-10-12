@@ -312,6 +312,17 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             ]
         },
     ),
+    # Any write is refused. The one that matters is true over an operator's false,
+    # which would relax trivy-db in an offline image; false differs from the
+    # profile's default, so the gate sees a change on both routes.
+    "/content_db_staleness_offline_image_default": (
+        {
+            "op": "replace",
+            "path": "/content_db_staleness_offline_image_default",
+            "value": False,
+        },
+        {"content_db_staleness_offline_image_default": False},
+    ),
     "/sandbox": (
         {"op": "replace", "path": "/sandbox", "value": {"mode": "off"}},
         {"sandbox": {"mode": "off"}},

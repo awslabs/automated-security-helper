@@ -2,63 +2,41 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import os
 import re
 import shlex
+import shutil
 import logging
 import threading
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Tuple
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field
 
-from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs
-from automated_security_helper.models.core import (
-    ToolExtraArg,
+from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
+    TrivyScannerBase,
 )
-from automated_security_helper.base.scanner_plugin import (
-    ScannerPluginBase,
-)
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
-    PropertyBag,
     SarifReport,
 )
-from automated_security_helper.utils.package_identity import (
-    NpmLockIndex,
-    identity_properties,
-    install_path,
-)
-from automated_security_helper.utils.download_utils import (
-    pinned_tool_install_commands,
-)
-from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
-from automated_security_helper.config.path_trust import honored_path
-from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.utils.link_exclusions import (
     trivy_skip_dirs,
     trivy_skip_files,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import find_executable
-from automated_security_helper.utils.content_db_refresh import (
-    EMPTY_TOOL_CONFIG,
-    default_cache_dir,
-    prepare_content_db,
-    sandboxed_online,
-    scan_id_for,
-)
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 
 
 #: The trivy misconfiguration scanner that downloads the module sources a .tf file
@@ -163,6 +141,30 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
             default=False,
         ),
     ]
+    config_file: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A trivy config file (trivy.yaml), passed as trivy --config. Unset, "
+                "ASH passes an empty one, so trivy does not load a trivy.yaml from the "
+                "directory it runs in. Honored only when set by --config-overrides "
+                "or a config file outside the scanned tree, for a file outside that "
+                "tree; otherwise ignored with a warning. A path that does not exist "
+                "fails the scan."
+            ),
+        ),
+    ] = None
+    module_dir: Annotated[
+        Path | str | None,
+        Field(
+            description=(
+                "A directory of trivy modules, passed as trivy --module-dir. Unset, "
+                "ASH passes an empty directory of its own. Honored under the same rule "
+                "as config_file. A path that is not a directory fails the scan."
+            ),
+        ),
+    ] = None
+
     ignore_file: Annotated[
         str | None,
         Field(
@@ -207,45 +209,20 @@ class TrivyRepoScannerConfig(ScannerPluginConfigBase):
 
 
 @ash_scanner_plugin
-class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
-    """Trivy repo scanner plugin."""
+class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
+    """Trivy repo scanner plugin.
 
-    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
-        network=True,
-        # Every place content_db_refresh.default_cache_dir can put trivy's cache:
-        # ~/.cache or XDG_CACHE_HOME on Linux, ~/Library/Caches on macOS, and
-        # TRIVY_CACHE_DIR. Caches rather than read paths: a cache is read-only on
-        # every backend but bwrap, whose overlay throws writes away, and
-        # sandbox-exec runs no program from one, where it runs programs from read
-        # paths. The database is updated outside the sandbox before an online scan
-        # (utils/content_db_refresh.py), and trivy only reads it.
-        cache_paths=(
-            "~/.cache/trivy",
-            "~/Library/Caches/trivy",
-            "$XDG_CACHE_HOME/trivy",
-            "$TRIVY_CACHE_DIR",
-        ),
-        env_prefixes=("TRIVY_",),
-    )
-
-    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+    The option-to-flag mapping, install commands and package identity are shared
+    with the ``trivy`` scanner of this module through ``TrivyScannerBase``; this class
+    keeps its own config and its own ``scan()``, so what it reports is unchanged.
+    """
 
     # trivy exits 0 for a completed run, findings or not, unless --exit-code names
     # another code for findings (default 0, pkg/flag/report_flags.go), and 1 from
-    # log.Fatal on any error (cmd/trivy/main.go). ASH passes no --exit-code, so 1 is
-    # an error. An exit-code set in the TRIVY_CONFIG file or in TRIVY_EXIT_CODE
-    # makes a run with findings exit with that code, and it is then recorded as a
-    # failed run: 1 is indistinguishable from trivy's own error exit. A trivy.yaml in
-    # the scanned directory is not read (_config_file).
+    # log.Fatal on any error (cmd/trivy/main.go). TrivyScannerBase._run_subprocess
+    # passes --exit-code=0, which outranks TRIVY_EXIT_CODE and a trivy.yaml, so a
+    # nonzero exit only ever means trivy failed.
     success_exit_codes: ClassVar[Set[int]] = {0}
-
-    # Env vars layered onto the subprocess. Populated by _process_config_options
-    # when offline mode is active. Kept on the instance so concurrent scanners
-    # do not race on os.environ.
-    extra_env: Annotated[dict, Field(default_factory=dict)]
-
-    # The in-tree trivy input files already reported as ignored.
-    _warned_inputs: Set[str] = PrivateAttr(default_factory=set)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -262,17 +239,6 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         )
         super().model_post_init(context)
 
-    @model_validator(mode="after")
-    def setup_custom_install_commands(self) -> "TrivyRepoScanner":
-        """Set up custom installation commands for trivy.
-
-        trivy had no install path inside ASH. It could only arrive from the
-        container image, the nix toolchain or a package manager, so a
-        ``python-local`` run on a machine without it scanned without it.
-        """
-        self.custom_install_commands.update(pinned_tool_install_commands("trivy"))
-        return self
-
     def validate_plugin_dependencies(self) -> bool:
         """Validate scanner configuration.
 
@@ -285,82 +251,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         return True
 
     def _process_config_options(self):
-        if len(self.config.options.scanners) > 0:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--scanners",
-                    value=",".join(self.config.options.scanners),
-                )
-            )
-
-        if self.config.options.license_full:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--license-full",
-                    value=None,
-                )
-            )
-
-        if self.config.options.ignore_unfixed:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--ignore-unfixed",
-                    value=None,
-                )
-            )
-
-        if self.config.options.disable_telemetry:
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--disable-telemetry",
-                    value=None,
-                )
-            )
-
-        severity_inclusion_map = {
-            "LOW": "LOW,MEDIUM,HIGH,CRITICAL",
-            "MEDIUM": "MEDIUM,HIGH,CRITICAL",
-            "HIGH": "HIGH,CRITICAL",
-            "CRITICAL": "CRITICAL",
-        }
-        threshold = self.config.options.severity_threshold
-        if threshold is not None and threshold != "ALL":
-            self.args.extra_args.append(
-                ToolExtraArg(
-                    key="--severity",
-                    value=severity_inclusion_map[threshold],
-                )
-            )
-
-        if self._scanner_offline():
-            # --skip-check-update only skips the checks bundle. trivy's version
-            # check and its telemetry both contact check.trivy.dev (measured with
-            # trivy 0.75.0); offline both are turned off by TRIVY_SKIP_VERSION_CHECK
-            # and TRIVY_DISABLE_TELEMETRY (utils/offline_tool_env.py), whatever
-            # disable_telemetry says. Variables rather than flags: a trivy too old to
-            # know them ignores a variable, but refuses the whole command over an
-            # unknown flag.
-            for flag in (
-                "--skip-db-update",
-                "--skip-java-db-update",
-                "--offline-scan",
-                "--skip-check-update",
-            ):
-                self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
-
-            from automated_security_helper.utils.offline_mode_validator import (
-                validate_trivy_offline_mode,
-            )
-
-            offline_valid, offline_messages = validate_trivy_offline_mode()
-            if not offline_valid:
-                for msg in offline_messages:
-                    self._plugin_log(msg, level=logging.WARNING)
-
-            ASH_LOGGER.info(
-                "Running Trivy in offline mode - DB updates and check-update disabled"
-            )
-
+        self._append_trivy_options()
         return super()._process_config_options()
 
     def _offline_misconfig_args(self, final_args: List[str]) -> List[str]:
@@ -414,218 +305,62 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             self._plugin_log(message, level=logging.WARNING)
         return args
 
-    def _config_file(self) -> str:
-        """The trivy config file (``--config``), online and offline.
+    def _pinned_config_args(self, results_dir: Path) -> List[str]:
+        """``--config`` and ``--module-dir``, so trivy loads neither from where it runs.
 
-        Without the flag trivy reads ``trivy.yaml`` from its working directory, the
-        source directory. A trivy.yaml in the scanned repository could turn on a VEX
-        repository download or client/server mode, and both reach the network
-        whatever offline flags ASH passes (measured with trivy 0.75.0), or change
-        what is reported. So trivy always gets ``TRIVY_CONFIG`` when that names a
-        file outside the scanned tree (config/path_trust.py), and otherwise ASH's
-        empty config (``EMPTY_TOOL_CONFIG``, readable under every sandbox backend).
-        The variable is the operator's, set where ASH runs, so a relative path in
-        it is taken from the working directory, as ``TRIVY_IGNOREFILE``'s and
-        ``TRIVY_SECRET_CONFIG``'s are (``operator_paths.anchored_environment_path``).
+        trivy runs with the scan target as its working directory and loads a
+        ``trivy.yaml`` from there unless ``--config`` names another, and loads the
+        modules in ``--module-dir`` (or the config's ``module.dir``). Both are
+        always passed: the operator's, when ``_operator_path`` accepts them, and
+        otherwise an empty config file and an empty modules directory that ASH
+        creates in this run's results directory.
         """
-        from automated_security_helper.config.operator_paths import (
-            anchored_environment_path,
-        )
-
-        source_dir = Path(self.context.source_dir)
-        variable = os.environ.get("TRIVY_CONFIG")
-        configured = anchored_environment_path(variable, Path.cwd())
-        if configured:
-            path = honored_path(
-                configured,
-                source_dir=source_dir,
-                key="TRIVY_CONFIG",
-                config=getattr(self.context, "config", None),
+        options = self.config.options
+        config_file: Optional[Path] = None
+        if options.config_file:
+            config_file = self._operator_path(
+                "config_file",
+                options.config_file,
+                "trivy-repo runs with ASH's empty config instead.",
             )
-            if path is not None:
-                if not path.is_file():
-                    raise ScannerError(
-                        f"TRIVY_CONFIG is {variable!r}, which is not a file "
-                        f"(resolved to {escape_controls(path.as_posix())}). Fix the "
-                        "path or unset it; trivy is not run without it."
-                    )
-                return path.as_posix()
-        in_tree = source_dir / "trivy.yaml"
-        if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
-            self._warned_inputs.add(in_tree.as_posix())
-            self._plugin_log(
-                f"Ignoring {in_tree.as_posix()}: it is inside the scanned tree, and "
-                "its settings can reach the network or change what is reported. Set "
-                "TRIVY_CONFIG to a file outside the tree to use one.",
-                level=logging.WARNING,
-            )
-        return EMPTY_TOOL_CONFIG.as_posix()
-
-    def _ignore_file(self) -> str:
-        """The file trivy reads finding IDs to ignore from (``--ignorefile``)."""
-        return self._trivy_input_file(
-            option="ignore_file",
-            env="TRIVY_IGNOREFILE",
-            default_name=".trivyignore",
-            ash_name="trivyignore-empty",
-            ash_content="",
-        )
-
-    def _secret_config_file(self) -> str:
-        """The file trivy reads secret rules from (``--secret-config``)."""
-        return self._trivy_input_file(
-            option="secret_config_file",
-            env="TRIVY_SECRET_CONFIG",
-            default_name="trivy-secret.yaml",
-            ash_name="trivy-secret-empty.yaml",
-            # An empty file is a decode error in trivy; an empty mapping is not.
-            ash_content="{}\n",
-        )
-
-    def _trivy_input_file(
-        self,
-        *,
-        option: str,
-        env: str,
-        default_name: str,
-        ash_name: str,
-        ash_content: str,
-    ) -> str:
-        """A file to pass trivy for an input it would otherwise read from its cwd.
-
-        Without the flag, trivy reads ``default_name`` (``.trivyignore``,
-        ``trivy-secret.yaml``) from its working directory, the source directory,
-        so the scanned repository could remove findings from its own report
-        (measured with trivy 0.75.0). The operator's file, from the option or the
-        environment variable, is used when it is outside the scanned tree
-        (config/path_trust.py); a refused option falls through to the variable.
-        Otherwise trivy gets a file that sets nothing, which ASH writes outside the
-        scanned tree (``empty_tool_config``).
-        """
-        context_config = getattr(self.context, "config", None)
-        source_dir = Path(self.context.source_dir)
-        from automated_security_helper.config.operator_paths import (
-            anchored_environment_path,
-        )
-
-        for key, value in (
-            (
-                f"scanners.trivy-repo.options.{option}",
-                getattr(self.config.options, option),
-            ),
-            # The variable is the operator's, set where ASH runs: a relative path
-            # in it is taken from the working directory (config/operator_paths.py).
-            (env, anchored_environment_path(os.environ.get(env), Path.cwd())),
-        ):
-            if not value:
-                continue
-            path = honored_path(
-                value, source_dir=source_dir, key=key, config=context_config
-            )
-            if path is None:
-                continue
-            if not path.is_file():
+            if config_file is not None and not config_file.is_file():
                 raise ScannerError(
-                    f"{key} is {value!r}, which is not a file (resolved to "
-                    f"{escape_controls(path.as_posix())}). Fix the path or unset "
-                    "it; trivy is not run without it."
+                    f"scanners.trivy-repo.options.config_file is "
+                    f"{str(options.config_file)!r}, which is not a file (resolved to "
+                    f"{config_file.as_posix()}). Fix the path or unset the option."
                 )
-            return path.as_posix()
-        in_tree = source_dir / default_name
-        if in_tree.is_file() and in_tree.as_posix() not in self._warned_inputs:
-            self._warned_inputs.add(in_tree.as_posix())
-            self._plugin_log(
-                f"Ignoring {in_tree.as_posix()}: it is inside the scanned tree. Set "
-                f"scanners.trivy-repo.options.{option} to a file outside the tree "
-                "to use one.",
-                level=logging.WARNING,
+        if config_file is None:
+            config_file = results_dir / "trivy-config.yaml"
+            with open_for_write(config_file) as handle:
+                handle.write("")
+        module_dir: Optional[Path] = None
+        if options.module_dir:
+            module_dir = self._operator_path(
+                "module_dir",
+                options.module_dir,
+                "trivy-repo runs with an empty modules directory instead.",
             )
-        return empty_tool_config(ash_name, ash_content, context=self.context).as_posix()
-
-    @staticmethod
-    def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
-        """Name and version from trivy's vulnerability message.
-
-        trivy writes ``Package: <name>`` and ``Installed Version: <version>``
-        as their own lines. A message without them (a misconfiguration or
-        secret finding) is not about a package.
-        """
-        name = version = None
-        for line in (message or "").splitlines():
-            if line.startswith("Package: "):
-                name = line[len("Package: ") :].strip() or None
-            elif line.startswith("Installed Version: "):
-                version = line[len("Installed Version: ") :].strip() or None
-        return name, version
-
-    def _attach_package_identity(
-        self, sarif_report: SarifReport, target: Path
-    ) -> SarifReport:
-        """Give each dependency result one package copy and say which it is.
-
-        trivy groups packages by name and version before matching, so the same
-        version installed at two places in one lockfile becomes ONE result with
-        one location per copy. No suppression can then cover one copy and not
-        the other. For npm lockfiles, each location's line is the line of that
-        copy's ``packages`` key, so such a result is split into one result per
-        location, each with ``package_path``. Results whose locations do not
-        all resolve to a lockfile entry are left whole.
-        """
-        lock_index = NpmLockIndex(target)
-        for run in sarif_report.runs or []:
-            new_results = []
-            for result in run.results or []:
-                message = result.message.root.text if result.message else None
-                name, version = self._package_from_message(message)
-                if name is None:
-                    new_results.append(result)
-                    continue
-
-                resolved = []
-                for location in result.locations or []:
-                    physical = location.physicalLocation
-                    root = physical.root if physical else None
-                    uri = (
-                        root.artifactLocation.uri
-                        if root and root.artifactLocation
-                        else None
-                    )
-                    line = root.region.startLine if root and root.region else None
-                    # Relativized the same way as grype's, so package_path is
-                    # POSIX and scan-root-relative whatever form trivy used.
-                    lock_rel = lock_index.relative(uri) if uri else None
-                    entry = (
-                        lock_index.by_line(lock_rel, line)
-                        if lock_rel and line
-                        else None
-                    )
-                    resolved.append(
-                        install_path(lock_rel, entry.key)
-                        if lock_rel and entry is not None
-                        else None
-                    )
-
-                if resolved and all(resolved):
-                    for location, path in zip(result.locations or [], resolved):
-                        copy = result.model_copy(deep=True)
-                        copy.locations = [location.model_copy(deep=True)]
-                        self._set_identity(copy, name, version, path)
-                        new_results.append(copy)
-                else:
-                    path = resolved[0] if len(resolved) == 1 else None
-                    self._set_identity(result, name, version, path)
-                    new_results.append(result)
-            run.results = new_results
-        return sarif_report
-
-    @staticmethod
-    def _set_identity(result, name, version, path) -> None:
-        identity = identity_properties(name, version, path)
-        if result.properties is None:
-            result.properties = PropertyBag.model_validate(identity)
-        else:
-            for key, value in identity.items():
-                setattr(result.properties, key, value)
+            if module_dir is not None and not module_dir.is_dir():
+                raise ScannerError(
+                    f"scanners.trivy-repo.options.module_dir is "
+                    f"{str(options.module_dir)!r}, which is not a directory "
+                    f"(resolved to {module_dir.as_posix()}). Fix the path or unset "
+                    "the option."
+                )
+        if module_dir is None:
+            module_dir = results_dir / "trivy-modules"
+            # Fresh and empty every run: the output directory usually sits inside
+            # the scanned tree, so whatever is already at this path is not ASH's.
+            if module_dir.is_symlink() or module_dir.is_file():
+                module_dir.unlink()
+            elif module_dir.is_dir():
+                shutil.rmtree(module_dir)
+            module_dir.mkdir()
+        self._scan_config_file = config_file.resolve().as_posix()
+        return [
+            f"--config={self._scan_config_file}",
+            f"--module-dir={module_dir.resolve().as_posix()}",
+        ]
 
     def content_databases_in_use(self) -> list:
         """trivy-db, unless the scan's ``--scanners`` leave out ``vuln``.
@@ -722,21 +457,10 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             insert_at = (
                 len(head) if final_args[: len(head)] == head else len(final_args)
             )
-            subprocess_env = (
-                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
-            )
-            # The database's directory, resolved once as trivy resolves it on this
-            # host and named to the scan, the refresh and the staleness check alike:
-            # the sandbox drops XDG_CACHE_HOME, and the flag beats a cache.dir in a
-            # trivy.yaml, the scanned repository's included. See "Which cache" in
-            # utils/content_db_refresh.py.
-            cache = default_cache_dir("trivy", subprocess_env or snapshot_environ())
-            self._content_db_cache_dir = cache
             final_args[insert_at:insert_at] = [
                 f"--ignorefile={self._ignore_file()}",
                 f"--secret-config={self._secret_config_file()}",
-                f"--cache-dir={cache.as_posix()}",
-                f"--config={self._config_file()}",
+                *self._pinned_config_args(target_results_dir),
                 # Each link leaving the target (trivy follows no link), and each
                 # path the global ignore paths ignore. In the joined form, since a
                 # path can start with "-". See utils/link_exclusions.py.
@@ -753,44 +477,14 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                     )
                 ),
             ]
-            if self._scanner_offline():
+            if self._offline():
                 final_args = self._offline_misconfig_args(final_args)
-            cache_flags: List[str] = []
-            if sandboxed_online(self._scanner_offline()):
-                # The sandbox mounts trivy's cache read-only, so its database (and
-                # the checks bundle, for misconfiguration scans) is updated first,
-                # outside the sandbox, and trivy only reads it: no update of its
-                # own. See utils/content_db_refresh.py. Not the Java database:
-                # `trivy repository` does not analyze JAR, WAR or EAR files and never
-                # reads it (measured with trivy 0.75), so its update is skipped
-                # rather than downloading about 935 MiB the scan would not use.
-                checks = "misconfig" in (self.config.options.scanners or [])
-                prepare_content_db(
-                    "trivy",
-                    cache,
-                    offline=False,
-                    source_dir=self.context.source_dir,
-                    results_dir=self.results_dir or target_results_dir,
-                    config=getattr(self.context, "config", None),
-                    checks=checks,
-                    scan_id=scan_id_for(self.context),
-                )
-                cache_flags += [
-                    "--skip-db-update",
-                    "--skip-java-db-update",
-                    *(["--skip-check-update"] if checks else []),
-                ]
-            # Every run, sandboxed or not, online or offline: trivy keeps its scan
-            # cache (fanal/fanal.db) in the cache directory, which every sandbox
-            # backend but bwrap mounts read-only, and which can be read-only with
-            # no sandbox at all (a shared or image-baked cache). Measured with trivy
-            # 0.75.0 against a read-only cache, offline, sandboxed and not: "unable
-            # to initialize fs cache: failed to create cache dir ... permission
-            # denied", exit 1, and with --cache-backend=memory the same scan's
-            # findings. The scan cache only saves re-analysing an unchanged target,
-            # so the results are the same either way.
-            cache_flags.append("--cache-backend=memory")
-            final_args[insert_at:insert_at] = cache_flags
+            subprocess_env = (
+                {**snapshot_environ(), **self.extra_env} if self.extra_env else None
+            )
+            # The database update, its skip flags and --cache-backend=memory are
+            # added by TrivyScannerBase._run_subprocess, for trivy and trivy-repo
+            # alike (utils/content_db_refresh.py).
 
             self._plugin_log(
                 f"Running command: {' '.join(final_args)}",

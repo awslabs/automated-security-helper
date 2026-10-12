@@ -180,24 +180,37 @@ ash build-image --build-target non-root --offline
 ```
 
 The build itself still requires network access — that is when the dependencies and
-databases are fetched. Only the resulting scan is offline. An offline image's
+databases are fetched. The image keeps trivy's database in `TRIVY_CACHE_DIR`
+(`/deps/.trivy`) and the cfn-guard rules in `ASH_CFN_GUARD_RULES_DIR`
+(`/usr/share/ash/cfn-guard-rules`, owned by root). Only the resulting scan is offline. An offline image's
 databases are frozen at build time, which makes the rebuild cadence above load-bearing
 rather than optional.
 
-**An offline image stops passing once its databases are past their bound.** ASH reads
-each database's own build time after the scan and exits 1 when it is too old: grype's
-database 5 days (120h) after it was built, which is grype's own default, and the
-offline semgrep and opengrep rulesets 30 days after they were downloaded (the build
-records that time in `.ash-rules-fetched-at`). This applies in offline mode exactly
-as online; before it, an offline scan with a weeks-old database exited 0 with no
-warning.
+**An offline image stops passing once grype's database or its rulesets are past
+their bound.** ASH reads each database's own build time after the scan and holds it
+to a bound: trivy's database 24 hours after it was published, which is trivy's own
+rule, grype's database 5 days (120h) after it was built, which is grype's own
+default, and the offline semgrep and opengrep rulesets 30 days after they were
+downloaded (the build records that time in `.ash-rules-fetched-at`). Past grype's or
+a ruleset's bound the scan exits 1. This applies in offline mode exactly as online;
+before it, an offline scan with a weeks-old database exited 0 with no warning.
 
-To keep an air-gapped image passing, rebuild it at least every 5 days with
-`ash build-image --offline`, which downloads a current grype database and current
-rulesets, and move the new image across the air gap. To scan with an older image
-anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn` in the ASH
-config: the scan passes, and the summary reports, `ash.sarif` and `ash.flat.json` all
-say which database was stale and how old it was. See
+trivy's database is the exception. Its bound would fail every trivy scan in the
+image from a day after the build, so an offline image holds it to `warn` instead:
+past 24 hours the scan still passes, and the summary reports, `ash.sarif` and
+`ash.flat.json` all say the trivy database was stale, how old it was, and that the
+offline image's default let the scan pass. To make it fail the scan in the image
+too, set `content_db_staleness_offline_image_default: false` in the ASH config or
+pass `--no-allow-stale-content-db`.
+
+A stale trivy database still lacks every advisory published since the build, so
+refresh the image anyway. Rebuild it with `ash build-image --offline`, which
+downloads current databases and rulesets, and move the new image across the air
+gap: at least every 5 days to keep grype's scans passing (every 30 days, for the
+rulesets, with `scanners.grype.enabled: false`), and as often as you want trivy's
+findings current. To scan with an image older than that anyway, pass
+`--allow-stale-content-db` or set `content_db_staleness: warn`; the scan passes, and
+the same reports say which databases were stale and how old they were. See
 [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
 
 ## If you would rather not run a container
@@ -246,8 +259,10 @@ built, since the image would otherwise run as root without a word.
 ## Third-party license files in the image
 
 The image bundles third-party programs that ASH installs from their upstream
-releases: grype, syft, trivy, opengrep and uv today. Each one's license and notice
-files are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
+releases: actionlint, cfn-guard (with the AWS Guard Rules Registry it reads),
+gitleaks, grype, opengrep, syft, trivy and uv today, and the Python scanners bandit,
+checkov, cfn-lint, semgrep and zizmor (installed with `uv tool install`). Each one's
+license and notice files are in the image under `/usr/share/doc/ash/third-party/<tool>/`, taken from the
 exact release the image carries. Beside them, a `SOURCE` file names the upstream
 repository, release tag and commit. For a copyleft tool (opengrep is LGPL-2.1), that
 file also says where the corresponding source is.

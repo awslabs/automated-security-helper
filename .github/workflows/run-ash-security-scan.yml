@@ -179,25 +179,51 @@ on:
         required: false
         default: "3.12"
         type: string
+      # Every install-* input installs the tool of a builtin scanner that is on by
+      # default and that ASH does not install for itself, so each defaults to true:
+      # an unset input would leave its scanner MISSING in ash-mode: local, which
+      # fails the incomplete-scan gate. Sizes measured on 2026-10-11 against the
+      # pinned releases. tests/unit/test_scan_workflow_installs_default_scanners.py
+      # holds every install-* input to that default.
       install-grype:
-        description: "Whether to install Grype scanner"
+        description: "Whether to install the grype scanner (about 32 MB), which then downloads its vulnerability database during the scan (about 190 MB compressed) unless a cached copy inside grype's bound is restored. Set false when the scan does not need it, for example in ash-mode: container or with scanners.grype.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-syft:
-        description: "Whether to install Syft scanner"
+        description: "Whether to install the syft scanner (about 31 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.syft.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-opengrep:
-        description: "Whether to install OpenGrep scanner"
+        description: "Whether to install the OpenGrep scanner (about 46 MB, reused from the weekly Actions cache when it matches the pin). Set false when the scan does not need it, for example in ash-mode: container or with scanners.opengrep.enabled: false."
         required: false
-        default: false
+        default: true
         type: boolean
       install-cfn-nag:
-        description: "Whether to install the cfn-nag scanner"
+        description: "Whether to install the cfn-nag scanner: sets up Ruby 3.3 and installs cfn-nag's pinned gems (about 2.1 MB, two of them built natively). Set false when the scan does not need it, for example in ash-mode: container or with scanners.cfn-nag.enabled: false."
         required: false
-        default: false
+        default: true
+        type: boolean
+      install-actionlint:
+        description: "Whether to install the actionlint scanner (about 2.4 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.actionlint.enabled: false."
+        required: false
+        default: true
+        type: boolean
+      install-cfn-guard:
+        description: "Whether to install the cfn-guard scanner and the rules it evaluates (about 3.4 MB for the binary). Set false when the scan does not need it, for example in ash-mode: container or with scanners.cfn-guard.enabled: false."
+        required: false
+        default: true
+        type: boolean
+      install-gitleaks:
+        description: "Whether to install the gitleaks scanner (about 8.2 MB). Set false when the scan does not need it, for example in ash-mode: container or with scanners.gitleaks.enabled: false."
+        required: false
+        default: true
+        type: boolean
+      install-trivy:
+        description: "Whether to install the trivy scanner (a 52 MB download), which then downloads its vulnerability database during the scan (about 127 MB compressed), so about 180 MB per run. Set false when the scan does not need it, for example in ash-mode: container or with scanners.trivy.enabled: false."
+        required: false
+        default: true
         type: boolean
       changed-files-only:
         description: "Limit the scan to files changed in the PR (reduces scan time and focuses feedback)"
@@ -215,9 +241,9 @@ env:
   # scanner's availability check -- a metadata read of cdk_nag, aws-cdk-lib and
   # constructs -- comes up short and cdk-nag reports MISSING, so a consumer with
   # CloudFormation got no IaC findings from the one scanner that produces them.
-  # Neither `ash dependencies install` step below fixes this: both are scoped to a
-  # single --tool, and cdk-nag is a Python dependency rather than a downloaded
-  # binary.
+  # None of the `ash dependencies install` steps below fixes this: each is scoped
+  # to the tools it names, and cdk-nag is a Python dependency rather than a
+  # downloaded binary.
   #
   # Extras on a PEP 508 direct reference, rather than a second install step: the
   # extra's contents are read from pyproject.toml at the pinned ref, so there is no
@@ -1102,6 +1128,34 @@ jobs:
               --bin-path "${ASH_TOOL_BIN}")
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
+      # actionlint, cfn-guard, gitleaks and trivy go through the same verified
+      # installer, in one step: each input only adds its tool to the list. Run from
+      # RUNNER_TEMP and without ASH_CONFIG, as for OpenGrep below, so the scanned
+      # repository's .ash.yaml cannot change what is installed.
+      #
+      # cfn-guard's rules land next to the bin path, in
+      # ${RUNNER_TEMP}/share/cfn-guard-rules; the Run ASH step points
+      # ASH_CFN_GUARD_RULES_DIR there.
+      - name: Install actionlint, cfn-guard, gitleaks and trivy
+        if: inputs.install-actionlint || inputs.install-cfn-guard || inputs.install-gitleaks || inputs.install-trivy
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+          INSTALL_ACTIONLINT: ${{ inputs.install-actionlint && 'actionlint' || '' }}
+          INSTALL_CFN_GUARD: ${{ inputs.install-cfn-guard && 'cfn-guard' || '' }}
+          INSTALL_GITLEAKS: ${{ inputs.install-gitleaks && 'gitleaks' || '' }}
+          INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
+        run: |
+          set -euo pipefail
+          tools=()
+          for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
+            if [ -n "${tool}" ]; then tools+=(--tool "${tool}"); fi
+          done
+          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+              "${tools[@]}" \
+              --bin-path "${ASH_TOOL_BIN}")
+          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
+
       # OpenGrep goes through the same verified installer as Grype and Syft above.
       #
       # This was a bare `gh release download --repo opengrep/opengrep --pattern
@@ -1420,6 +1474,9 @@ jobs:
           VERBOSE: ${{ inputs.verbose && '--verbose' || '' }}
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only == true && '--changed-files-only' || '' }}
           BASE_REF: ${{ steps.inputs.outputs.base_ref }}
+          # Where the install step above put cfn-guard's rules. Empty when it did
+          # not install cfn-guard, and ASH then looks in its default place.
+          ASH_CFN_GUARD_RULES_DIR: ${{ inputs.install-cfn-guard && format('{0}/share/cfn-guard-rules', runner.temp) || '' }}
         run: |-
           # ${ASH_ARGS} is last so a flag the caller passes explicitly wins.
           # `click` resolves a boolean flag pair last-occurrence-wins, and while

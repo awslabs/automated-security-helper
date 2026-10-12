@@ -1,0 +1,188 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "fullName": "Trivy Vulnerability Scanner",
+          "informationUri": "https://github.com/aquasecurity/trivy",
+          "name": "Trivy",
+          "rules": [
+            {
+              "id": "CVE-2014-9939",
+              "name": "OsPackageVulnerability",
+              "shortDescription": {
+                "text": "binutils: buffer overflow in ihex.c"
+              },
+              "fullDescription": {
+                "text": "ihex.c in GNU Binutils before 2.26 contains a stack buffer overflow when printing bad bytes in Intel Hex objects."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://avd.aquasec.com/nvd/cve-2014-9939",
+              "help": {
+                "text": "Vulnerability CVE-2014-9939\nSeverity: LOW\nPackage: gdb\nFixed Version: 7.10-1\nLink: [CVE-2014-9939](https://avd.aquasec.com/nvd/cve-2014-9939)\nihex.c in GNU Binutils before 2.26 contains a stack buffer overflow when printing bad bytes in Intel Hex objects.",
+                "markdown": "**Vulnerability CVE-2014-9939**\n| Severity | Package | Fixed Version | Link |\n| --- | --- | --- | --- |\n|LOW|gdb|7.10-1|[CVE-2014-9939](https://avd.aquasec.com/nvd/cve-2014-9939)|\n\nihex.c in GNU Binutils before 2.26 contains a stack buffer overflow when printing bad bytes in Intel Hex objects."
+              },
+              "properties": {
+                "precision": "very-high",
+                "security-severity": "2.0",
+                "tags": [
+                  "vulnerability",
+                  "security",
+                  "LOW"
+                ]
+              }
+            },
+            {
+              "id": "CVE-2014-8501",
+              "name": "OsPackageVulnerability",
+              "shortDescription": {
+                "text": "binutils: out-of-bounds write when parsing specially crafted PE executable"
+              },
+              "fullDescription": {
+                "text": "The _bfd_XXi_swap_aouthdr_in function in bfd/peXXigen.c in GNU binutils 2.24 and earlier allows remote attackers to cause a denial of service (out-of-bounds write) and possibly have other unspecified impact via a crafted NumberOfRvaAndSizes field in the AOUT header in a PE executable."
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://avd.aquasec.com/nvd/cve-2014-8501",
+              "help": {
+                "text": "Vulnerability CVE-2014-8501\nSeverity: LOW\nPackage: gdb\nFixed Version: \nLink: [CVE-2014-8501](https://avd.aquasec.com/nvd/cve-2014-8501)\nThe _bfd_XXi_swap_aouthdr_in function in bfd/peXXigen.c in GNU binutils 2.24 and earlier allows remote attackers to cause a denial of service (out-of-bounds write) and possibly have other unspecified impact via a crafted NumberOfRvaAndSizes field in the AOUT header in a PE executable.",
+                "markdown": "**Vulnerability CVE-2014-8501**\n| Severity | Package | Fixed Version | Link |\n| --- | --- | --- | --- |\n|LOW|gdb||[CVE-2014-8501](https://avd.aquasec.com/nvd/cve-2014-8501)|\n\nThe _bfd_XXi_swap_aouthdr_in function in bfd/peXXigen.c in GNU binutils 2.24 and earlier allows remote attackers to cause a denial of service (out-of-bounds write) and possibly have other unspecified impact via a crafted NumberOfRvaAndSizes field in the AOUT header in a PE executable."
+              },
+              "properties": {
+                "precision": "very-high",
+                "security-severity": "2.0",
+                "tags": [
+                  "vulnerability",
+                  "security",
+                  "LOW"
+                ]
+              }
+            }
+          ],
+          "version": "0.75.0"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CVE-2014-9939",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Package: binutils\nInstalled Version: 0.0.1-1\nVulnerability CVE-2014-9939\nSeverity: CRITICAL\nFixed Version: 2.25.90.20151125-1\nLink: [CVE-2014-9939](https://avd.aquasec.com/nvd/cve-2014-9939)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "library/.",
+                  "uriBaseId": "ROOTPATH"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 1
+                }
+              },
+              "message": {
+                "text": "library/.: binutils@0.0.1-1"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CVE-2014-8501",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": {
+            "text": "Package: binutils\nInstalled Version: 0.0.1-1\nVulnerability CVE-2014-8501\nSeverity: HIGH\nFixed Version: 2.24.90.20141104-1\nLink: [CVE-2014-8501](https://avd.aquasec.com/nvd/cve-2014-8501)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "library/.",
+                  "uriBaseId": "ROOTPATH"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 1
+                }
+              },
+              "message": {
+                "text": "library/.: binutils@0.0.1-1"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CVE-2014-8501",
+          "ruleIndex": 1,
+          "level": "note",
+          "message": {
+            "text": "Package: gdb\nInstalled Version: 0.0.1-1\nVulnerability CVE-2014-8501\nSeverity: LOW\nFixed Version: \nLink: [CVE-2014-8501](https://avd.aquasec.com/nvd/cve-2014-8501)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "library/.",
+                  "uriBaseId": "ROOTPATH"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 1
+                }
+              },
+              "message": {
+                "text": "library/.: gdb@0.0.1-1"
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CVE-2014-9939",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "Package: gdb\nInstalled Version: 0.0.1-1\nVulnerability CVE-2014-9939\nSeverity: LOW\nFixed Version: 7.10-1\nLink: [CVE-2014-9939](https://avd.aquasec.com/nvd/cve-2014-9939)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "library/.",
+                  "uriBaseId": "ROOTPATH"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 1
+                }
+              },
+              "message": {
+                "text": "library/.: gdb@0.0.1-1"
+              }
+            }
+          ]
+        }
+      ],
+      "columnKind": "utf16CodeUnits",
+      "originalUriBaseIds": {
+        "ROOTPATH": {
+          "uri": "file:///src/"
+        }
+      }
+    }
+  ]
+}

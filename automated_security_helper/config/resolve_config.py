@@ -109,6 +109,7 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.display_text import (
     escape_controls_in,
     path_spellings,
@@ -803,6 +804,7 @@ def resolve_config(
         in_tree = [*in_tree, Path("config_overrides")]
     if not in_tree:
         config._environment_references = tuple(references)
+        record_provenance(config, in_tree=[])
         return config
     operator = _load_operator_config(
         trusted_config_path, source_dir, permit_base, operators_files
@@ -870,6 +872,15 @@ def resolve_config(
         list(config_overrides or [])
         if client_config_policy is None and not client_overrides
         else []
+    )
+    # What scanners consult before honoring an option that names code to run
+    # (utils/config_trust.py): the same trusted base, with the overrides replayed
+    # per section when a scanner asks.
+    record_provenance(
+        config,
+        in_tree=in_tree,
+        trusted=trusted.model_copy(deep=True),
+        config_overrides=operator_overrides,
     )
     confine_to_trusted_base(
         config,

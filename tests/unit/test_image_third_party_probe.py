@@ -330,3 +330,62 @@ class TestTheCheckIsWiredIntoCi:
     def test_the_container_runtime_action_runs_it(self):
         (step,) = self._steps(".github/actions/validate-container/action.yml")
         assert "${RUNTIME}" in step["run"]
+
+
+def _uv_tool_env(tmp_path: Path, record_names: str) -> Path:
+    """A uv tool environment holding a compiled executable, linked onto PATH."""
+    venv = tmp_path / "uv-tools" / "ziz"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr/local/bin\n")
+    exe = venv / "bin" / "ziz"
+    exe.write_bytes(ELF)
+    exe.chmod(0o755)
+    dist = venv / "lib" / "python3.12" / "site-packages" / "ziz-1.0.dist-info"
+    dist.mkdir(parents=True)
+    (dist / "RECORD").write_text(record_names)
+    return exe
+
+
+def test_a_compiled_executable_from_a_uv_tool_environment_is_accepted(tmp_path):
+    """zizmor: an ELF in a uv tool's own venv, listed by that venv's RECORD."""
+    spec = _tree(tmp_path)
+    exe = _uv_tool_env(tmp_path, "../../../bin/ziz,sha256=x,64\n")
+    (Path(spec["search_dirs"][0]) / "ziz").symlink_to(exe)
+    result = probe.probe(spec)
+    assert result["problems"] == []
+    assert any("installed by a Python distribution" in a for a in result["accounted"])
+
+
+def test_a_uv_tool_environment_record_must_name_the_executable(tmp_path):
+    spec = _tree(tmp_path)
+    exe = _uv_tool_env(tmp_path, "../../../bin/other,sha256=x,64\n")
+    (Path(spec["search_dirs"][0]) / "ziz").symlink_to(exe)
+    assert any("ziz is an executable on PATH" in p for p in _problems(spec))
+
+
+def test_a_bin_dir_that_is_not_a_virtualenv_is_not_consulted(tmp_path):
+    spec = _tree(tmp_path)
+    exe = _uv_tool_env(tmp_path, "../../../bin/ziz,sha256=x,64\n")
+    (exe.parent.parent / "pyvenv.cfg").unlink()
+    (Path(spec["search_dirs"][0]) / "ziz").symlink_to(exe)
+    assert any("ziz is an executable on PATH" in p for p in _problems(spec))
+
+
+def test_an_entry_with_no_executables_needs_none_on_path(tmp_path):
+    """A probed entry (a library in a uv tool environment) is not on PATH."""
+    spec = _tree(tmp_path)
+    spec["tools"][0]["executables"] = []
+    (Path(spec["search_dirs"][0]) / "demo").unlink()
+    assert _problems(spec) == []
+
+
+def test_the_host_spec_lists_no_executables_for_probed_entries():
+    from automated_security_helper.utils.tool_downloads import THIRD_PARTY_LICENSES
+
+    spec = host.build_spec(host._load_pins())
+    by_tool = {t["tool"]: t for t in spec["tools"]}
+    for tool, entry in THIRD_PARTY_LICENSES.items():
+        if entry.version_probe:
+            assert by_tool[tool]["executables"] == [], tool
+        else:
+            assert by_tool[tool]["executables"], tool

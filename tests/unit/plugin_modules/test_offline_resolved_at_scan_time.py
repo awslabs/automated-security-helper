@@ -53,6 +53,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
     SyftScannerConfigOptions,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScanner,
+    TrivyScannerConfig,
+    TrivyScannerConfigOptions,
+)
 from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
@@ -121,6 +126,16 @@ CASES = {
         "syft",
         lambda s: s.extra_env.get("SYFT_CHECK_FOR_APP_UPDATE") == "false",
     ),
+    # trivy shares trivy-repo's argument building (TrivyScannerBase).
+    "trivy": Case(
+        TrivyScanner,
+        TrivyScannerConfig,
+        TrivyScannerConfigOptions,
+        "",  # community plugin: not a declared ScannerConfigSegment field
+        lambda s: (
+            "--offline-scan" in _arg_keys(s) and "--skip-db-update" in _arg_keys(s)
+        ),
+    ),
     "trivy-repo": Case(
         TrivyRepoScanner,
         TrivyRepoScannerConfig,
@@ -133,7 +148,8 @@ CASES = {
 }
 
 params = pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
-# trivy-repo is a community plugin, so ScannerConfigSegment has no field for it.
+# trivy and trivy-repo are community plugins, so ScannerConfigSegment has no field
+# for them.
 SEGMENT_CASES = {k: c for k, c in CASES.items() if c.segment_field}
 segment_params = pytest.mark.parametrize(
     "case", list(SEGMENT_CASES.values()), ids=list(SEGMENT_CASES)

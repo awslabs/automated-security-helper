@@ -254,12 +254,14 @@ how to refresh it. This happens in online and offline mode alike.
 | Database | Scanner | Bound | Where the bound comes from | Age read from |
 | --- | --- | --- | --- | --- |
 | `grype-db` | grype | 120h (5 days) | grype's own default, `db.max-allowed-built-age` | `built` in `grype db status -o json` |
-| `trivy-db` | trivy-repo, unless its `scanners` list leaves out `vuln` | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
+| `trivy-db` | trivy-repo, unless its `scanners` list leaves out `vuln`, and trivy | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
 | `semgrep-offline-rules` | semgrep (offline only) | 720h (30 days) | ASH's own choice; semgrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$SEMGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 | `opengrep-offline-rules` | opengrep (offline only) | 720h (30 days) | ASH's own choice; opengrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$OPENGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 
 A database whose build time cannot be read is treated as stale, because an
-unmeasurable database is not evidence of a fresh one.
+unmeasurable database is not evidence of a fresh one. So is a database whose build
+time is more than 15 minutes ahead of the host's clock: its age cannot be measured,
+and the message says so.
 
 A database the tool reports does not exist at all (grype's `database does not
 exist`, no `VulnerabilityDB` from trivy, no rules files in the offline rules
@@ -297,16 +299,40 @@ content_db_staleness_overrides:
 The entry applies only to the database it names, so every other database is
 still held to `content_db_staleness`. It stops applying at 00:00 UTC on its
 expiration date: from then on it is ignored, with a warning in the log, and the
-database is held to `content_db_staleness` again. A stale database relaxed this
-way is reported the same as under `warn`, and the message names the entry and its
-expiry. Each database can appear in at most one entry, and an unknown database
-name is a config error. The list is empty by default.
+database is held to the policy it has without the entry. That is
+`content_db_staleness`, except for `trivy-db` in an image built with
+`OFFLINE=YES`, which returns to that image's `warn` default described below. A
+stale database relaxed this way is reported the same as under `warn`, and the
+message names the entry and its expiry. Each database can appear in at most one
+entry, and an unknown database name is a config error. The list is empty by
+default.
+
+An image built with `OFFLINE=YES` (`ash build-image --offline`) holds `trivy-db` to
+`warn` rather than to `content_db_staleness: fail`. The image carries the trivy
+database it was built with, and the 24h bound would otherwise fail every scan in it
+from a day after the build. So those scans pass, and each report records the stale
+database as it does under `warn`, with a message saying the offline image's default
+let the scan pass. Only `trivy-db` is relaxed: `grype-db` and the offline rulesets
+still fail the scan once they are past their bounds. What turns this on is
+`ASH_OFFLINE_AT_BUILD_TIME=YES` in ASH's environment, which the image sets from its
+`OFFLINE` build argument and nothing else in ASH sets; the config cannot turn it on,
+and a process given that variable some other way gets the same default. To hold
+`trivy-db` to `content_db_staleness` in the image as well:
+
+```yaml
+content_db_staleness_offline_image_default: false  # default true
+```
+
+A `content_db_staleness_overrides` entry for `trivy-db` outranks this default, and
+once the entry expires the database returns to it.
 
 The CLI flag takes precedence over the config value in both directions:
 `--no-allow-stale-content-db` restores `fail` for one scan even when the config
 says `warn`, and either form of the flag also clears
-`content_db_staleness_overrides` for that scan. Like `fail_on_incomplete_scanners`,
-neither key can be changed by an MCP runtime patch.
+`content_db_staleness_overrides` and sets `content_db_staleness_offline_image_default`
+to false for that scan, so it decides for every database, `trivy-db` in an offline
+image included. Like `fail_on_incomplete_scanners`, none of these keys can be
+changed by an MCP runtime patch.
 
 Relaxing the check is the operator's choice. Set `warn`, or an entry with
 `policy: warn`, with the flag, `--config-overrides` or a config file outside the
@@ -865,7 +891,12 @@ operator's file writes itself count as the operator's. An MCP client's
 | `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool by the rule above. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
 | `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept by the rule above. Entries read from a baseline file count as named inside the scanned tree. detect-secrets' built-in plugins and filters are unaffected. |
 | `scanners.detect-secrets.options.baseline_file` | Taken from the defaults, `--config-overrides` or a config file that is not repository-written. A baseline an MCP client delivered is not read. Under a sandbox, a baseline outside the source tree is read only when `sandbox.read_path_scanners` names detect-secrets and the file is inside a `sandbox.extra_read_paths` entry. |
-| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed by the rule above, and otherwise trivy gets a file that sets nothing, which ASH writes outside the scanned tree. |
+| trivy's and trivy-repo's ignore file and secret config | Both always get `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy.options.ignore_file` and `secret_config_file` (and trivy-repo's), set by `--config-overrides` or a config file outside the scanned tree, or else `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and not reached through a symbolic link in the tree, and otherwise trivy gets a file that sets nothing, which ASH writes outside the scanned tree. |
+| `scanners.trivy.options.config_file`, `scanners.trivy-repo.options.config_file` and `module_dir`, `scanners.cfn-lint.options.config_file` | Ignored with a warning. Honored only from `--config-overrides` or a config file outside the scanned tree, and only for a path outside the tree that no symbolic link in the tree leads to, because these files can make the tool load code (trivy modules, cfn-lint `append_rules`). Without them the tool gets an empty config of ASH's. |
+| `scanners.actionlint.options.config_file`, `scanners.gitleaks.options.config_file` and `baseline_path`, `scanners.zizmor.options.config_file`, `scanners.cfn-guard.options.rules_paths` | Ignored with a warning, and the tool runs without it: on ASH's own empty or default-rules config, or for cfn-guard on the bundled rule sets. Honored from `--config-overrides` or a config file outside the scanned tree, where the file named may also be inside the tree, unless it leads out of the tree through a symbolic link there: then the scanner reports `ERROR` (cfn-guard `MISSING`) and the tool is not run. |
+| `scanners.actionlint.options.shellcheck` and `pyflakes` | Only the option's own name (`shellcheck`, `pyflakes`), looked up on `PATH`. Another program, or a path, only from the operator. A program that resolves inside the scanned tree, or that a path in the tree reaches through a symbolic link there, is refused whoever set it. |
+| `scanners.trivy.options.scanners` | Ignored with a warning unless it is the default, `[vuln]`: a repository could otherwise turn vulnerability scanning off. Another set only from `--config-overrides` or a config file outside the scanned tree. |
+| `scanners.zizmor.options.online_audits` | Ignored with a warning: zizmor runs `--offline` without GitHub tokens. Only the operator turns online audits on. |
 | `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used from a repository-written config: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
 | `sandbox.mode` | From a repository-written config, applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
 | `honor_ignore_files` | Not honored in either direction. The value comes from a config file that is not repository-written, `--config-overrides`, `--no-honor-ignore-files` / `--honor-ignore-files`, or the default `true`. See [Ignore files and the scan set](#ignore-files-and-the-scan-set). |
@@ -892,7 +923,9 @@ To set any of these for a repository you trust, use `--config-overrides`,
 `--ash-plugin-modules`, or a config file outside every checkout and the scanned
 directory. A tool config path set that way follows the operator's rule above: it
 may be in a checkout of your own, but not inside the scanned tree, except a bandit,
-grype or syft config file. Under `--sandbox`,
+grype or syft config file and the findings configs above (actionlint's, gitleaks'
+and zizmor's `config_file`, gitleaks' `baseline_path` and cfn-guard's
+`rules_paths`). Under `--sandbox`,
 a file outside the system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.
@@ -1379,6 +1412,102 @@ the tree (see [Settings a repository's config cannot choose](#settings-a-reposit
 one, syft gets an empty config, so it does not read a `.syft.yaml` from the tree
 either. For the file's format, refer to the Syft
 [documentation](https://github.com/anchore/syft/wiki/Configuration).
+
+### actionlint
+
+```yaml
+scanners:
+  actionlint:
+    enabled: true
+    options:
+      config_file: null  # an actionlint config; operator-only, may be inside the tree
+      shellcheck: null   # "shellcheck" to enable it; another program or a path is operator-only
+      pyflakes: null     # "pyflakes" to enable it; same rule as shellcheck
+```
+
+actionlint lints the workflows in `.github/workflows`. The scanned repository's own `.github/actionlint.yaml` is not read. See [actionlint](plugins/builtin/actionlint.md).
+
+### cfn-lint
+
+```yaml
+scanners:
+  cfn-lint:
+    enabled: true
+    options:
+      config_file: null      # a .cfnlintrc; operator-only, outside the scanned tree
+      regions: []            # e.g. [us-east-1, eu-west-1] or [ALL_REGIONS]
+      ignore_checks: []      # rule ids or prefixes to skip
+      include_checks: []     # e.g. [I] for informational rules
+      honor_inline_ignores: false # a template's own Metadata ignore_checks and configure_rules; operator-only
+      tool_version: ">=1.43.3,<2.0.0"
+      install_timeout: 300
+```
+
+A `.cfnlintrc` in the scanned repository or the home directory is not read. See [cfn-lint and cfn-guard](plugins/builtin/cfn-lint-and-cfn-guard.md).
+
+### cfn-guard
+
+```yaml
+scanners:
+  cfn-guard:
+    enabled: true
+    options:
+      rule_sets: [wa-Security-Pillar]  # bundled Guard Rules Registry sets, by name
+      rules_paths: []                  # your own .guard files or directories; operator-only
+```
+
+See [cfn-lint and cfn-guard](plugins/builtin/cfn-lint-and-cfn-guard.md) for the bundled rule sets and how a rules directory is read.
+
+### gitleaks
+
+```yaml
+scanners:
+  gitleaks:
+    enabled: true
+    options:
+      config_file: null           # a gitleaks TOML config; operator-only, may be inside the tree
+      baseline_path: null         # a gitleaks report whose findings are ignored; same rule
+      honor_inline_ignores: false # honor gitleaks:allow comments; operator-only
+      max_target_megabytes: null  # skip files larger than this; operator-only
+```
+
+A `.gitleaks.toml` in the scanned repository is not read, and findings a root `.gitleaksignore` drops are reported anyway. See [Gitleaks](plugins/builtin/gitleaks.md).
+
+### trivy
+
+```yaml
+scanners:
+  trivy:
+    enabled: true
+    options:
+      scanners: [vuln]           # vuln, misconfig, secret, license; operator-only
+      ignore_unfixed: false
+      license_full: false
+      disable_telemetry: true
+      config_file: null          # a trivy.yaml; operator-only, outside the scanned tree
+      ignore_file: null          # a .trivyignore; same rule
+      secret_config_file: null   # a trivy-secret.yaml; same rule
+      offline: false
+      severity_threshold: null   # gates the verdict, as for every scanner
+```
+
+A scanner-level `severity_threshold` gates the verdict as it does for every other scanner: findings below it are reported and do not fail the scan. ASH does not pass it as `trivy --severity`. See [Trivy filesystem scanner](plugins/builtin/trivy.md).
+
+### zizmor
+
+```yaml
+scanners:
+  zizmor:
+    enabled: true
+    options:
+      persona: regular       # regular, pedantic or auditor
+      config_file: null      # a zizmor config; operator-only, may be inside the tree
+      online_audits: false   # operator-only; GitHub API audits with the token from the environment
+      tool_version: ">=1.29.0,<2.0.0"
+      install_timeout: 300
+```
+
+ASH runs `zizmor --no-config` and `zizmor --offline` unless the operator sets these. See [zizmor](plugins/builtin/zizmor.md).
 
 ## UV Tool Management
 

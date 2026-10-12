@@ -119,7 +119,9 @@ class TestTheDockerfileAndTheTableAgree:
 
     @pytest.mark.parametrize("tool", _INSTALLED_BY_THE_SCRIPT)
     def test_the_arg_version_matches_the_pinned_version(self, tool):
-        arg = f"{tool.upper()}_VERSION"
+        # A Dockerfile ARG cannot carry a hyphen usefully (`${CFN-GUARD_VERSION}`
+        # parses as a default-value expansion), so cfn-guard is CFN_GUARD_VERSION.
+        arg = f"{tool.upper().replace('-', '_')}_VERSION"
         match = re.search(
             rf'^ARG {arg}="([^"]+)"$', DOCKERFILE.read_text(), re.MULTILINE
         )
@@ -1025,6 +1027,21 @@ class TestVerifyThirdParty:
     """The last step of the image build. Each negative case is one mutation of a
     tree on which the positive case passes, so a failure is about that mutation."""
 
+    @pytest.fixture(autouse=True)
+    def _bundled_components(self, tmp_path, monkeypatch):
+        """What the version probe of the rules bundle reads in the image: its
+        manifest under ASH_CFN_GUARD_RULES_DIR."""
+        rules = tmp_path / "cfn-guard-rules"
+        registry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"].version
+        manifest_dir = rules / f"aws-guard-rules-registry-{registry}"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / ".ash-rules-manifest.json").write_text(
+            json.dumps({"version": registry})
+        )
+        monkeypatch.setenv("ASH_CFN_GUARD_RULES_DIR", str(rules))
+
+        self.rules = rules
+
     @staticmethod
     def _tree(tmp_path: Path):
         """A complete third-party tree, a PATH of fake executables, and the pins."""
@@ -1049,6 +1066,8 @@ class TestVerifyThirdParty:
                     payloads[f.url] if f.url else b"archive member\n"
                 )
             (directory / "SOURCE").write_text(entry.source_notice())
+            if entry.version_probe:
+                continue
             for name in entry.executable_names:
                 exe = bin_dir / name
                 exe.write_text(
@@ -1102,6 +1121,20 @@ class TestVerifyThirdParty:
         pins, third_party, path = self._tree(tmp_path)
         (Path(path) / "uv").unlink()
         self._fails(pins, third_party, path, "uv: uv is not on PATH")
+
+    def test_a_rules_bundle_at_another_version(self, tmp_path):
+        pins, third_party, path = self._tree(tmp_path)
+        for manifest in self.rules.glob("*/.ash-rules-manifest.json"):
+            manifest.write_text(json.dumps({"version": "0.9.0"}))
+        self._fails(
+            pins, third_party, path, "aws-guard-rules-registry: its version probe"
+        )
+
+    def test_a_probed_entry_needs_no_executable_on_path(self, tmp_path):
+        """The rules bundle is not on PATH, and need not be."""
+        pins, third_party, path = self._tree(tmp_path)
+        assert not (Path(path) / "aws-guard-rules-registry").exists()
+        assert installer.verify_third_party(pins, third_party, path, []) == []
 
     def test_a_secondary_executable_may_be_absent(self, tmp_path):
         """After #740 the release archive installs uv alone; uvx then exists only
@@ -1260,6 +1293,73 @@ class TestTheGuardsTheReviewFoundUntested:
 
         assert "is empty" in str(raised.value)
         assert not (tmp_path / "bin" / "syft").exists()
+
+
+class TestARulesBundleCarriesItsLicenses:
+    """`install-pinned-tool aws-guard-rules-registry --rules-bundle` in the image.
+
+    The registry's release zip holds no license file, so with ASH_THIRD_PARTY_DIR
+    set its URL-pinned LICENSE and NOTICE go in first, and a bad one stops the
+    rules from being installed at all.
+    """
+
+    _BUNDLE_DIGEST = "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296"  # pragma: allowlist secret
+
+    @staticmethod
+    def _zip() -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr("output/wa-Security-Pillar.guard", "rule A { }\n")
+        return buffer.getvalue()
+
+    def _setup(self, tmp_path, monkeypatch, license_payloads):
+        from automated_security_helper.utils.tool_downloads import RULES_BUNDLES
+
+        entry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"]
+        archive = self._zip()
+        served = {RULES_BUNDLES["aws-guard-rules-registry"].url: archive}
+        real = {f.url: f"{f.name} text\n".encode() for f in entry.files}
+        served.update(license_payloads or real)
+        pins = _pins_dir(
+            tmp_path, {self._BUNDLE_DIGEST: _sha(archive), **_url_file_overrides(real)}
+        )
+        server = _Server(served)
+        monkeypatch.setattr(installer, "download", server)
+        return pins, server, entry
+
+    def test_licenses_land_beside_the_rules(self, tmp_path, monkeypatch):
+        pins, server, entry = self._setup(tmp_path, monkeypatch, None)
+        third_party = tmp_path / "tp"
+        installed = installer.install_bundle(
+            "aws-guard-rules-registry", tmp_path / "rules", pins, third_party
+        )
+        directory = third_party / "aws-guard-rules-registry"
+        assert sorted(p.name for p in directory.iterdir()) == [
+            "LICENSE",
+            "NOTICE",
+            "SOURCE",
+        ]
+        assert entry.commit in (directory / "SOURCE").read_text()
+        assert (installed / "wa-Security-Pillar.guard").is_file()
+
+    def test_a_tampered_license_installs_no_rules(self, tmp_path, monkeypatch):
+        entry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"]
+        tampered = {f.url: b"not the license\n" for f in entry.files}
+        pins, server, _ = self._setup(tmp_path, monkeypatch, tampered)
+        with pytest.raises(SystemExit) as raised:
+            installer.install_bundle(
+                "aws-guard-rules-registry", tmp_path / "rules", pins, tmp_path / "tp"
+            )
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert not (tmp_path / "rules").exists() or not any(
+            (tmp_path / "rules").iterdir()
+        )
+
+    def test_without_the_dir_only_the_rules_are_written(self, tmp_path, monkeypatch):
+        pins, server, _ = self._setup(tmp_path, monkeypatch, None)
+        installer.install_bundle("aws-guard-rules-registry", tmp_path / "rules", pins)
+        assert not (tmp_path / "tp").exists()
+        assert len(server.calls) == 1, "only the bundle itself is downloaded"
 
 
 # ---------------------------------------------------------------------------
@@ -1562,3 +1662,128 @@ class TestUvToolPins:
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.split() == installer.uv_tool_pins(pins)
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership and modes")
+class TestAssertRootOnly:
+    """`--assert-root-only`: nobody but the owner can change the path or move it.
+
+    The tests cannot create files owned by root, so they trust the uid that owns
+    their own tmp_path. root_only_problems also walks every ancestor up to "/", and
+    those belong to the host: under a user namespace they show as the overflow uid,
+    and an image may make one group-writable. So the tests count only the problems
+    that name tmp_path or a path below it, which are the ones they set up.
+    """
+
+    def _tree(self, tmp_path, parent_mode):
+        parent = tmp_path / "shared"
+        rules = parent / "rules" / "bundle"
+        rules.mkdir(parents=True)
+        (rules / "a.guard").write_text("rule a { }\n")
+        for path in (rules.parent, rules):
+            path.chmod(0o755)
+        (rules / "a.guard").chmod(0o644)
+        parent.chmod(parent_mode)
+        return rules.parent
+
+    @staticmethod
+    def _local(problems, tmp_path):
+        """The problems naming tmp_path or a path below it."""
+        kept = []
+        for problem in problems:
+            named = Path(problem.split(": ", 1)[0])
+            if named == tmp_path or tmp_path in named.parents:
+                kept.append(problem)
+        return kept
+
+    def _problems(self, path, tmp_path, trusted=None):
+        owner = os.stat(tmp_path).st_uid
+        problems = installer.root_only_problems([path], trusted or (owner,))
+        return self._local(problems, tmp_path)
+
+    def test_a_root_only_tree_passes(self, tmp_path):
+        assert self._problems(self._tree(tmp_path, 0o755), tmp_path) == []
+
+    def test_a_world_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
+        """In a directory anyone can write, the rules directory could be renamed."""
+        target = self._tree(tmp_path, 0o777)
+        problems = self._problems(target, tmp_path)
+        assert any(str(target.parent) in p and "write" in p for p in problems)
+
+    def test_a_sticky_world_writable_parent_passes(self, tmp_path):
+        assert self._problems(self._tree(tmp_path, 0o1777), tmp_path) == []
+
+    def test_a_writable_file_inside_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle" / "a.guard").chmod(0o666)
+        assert any("a.guard" in p for p in self._problems(target, tmp_path))
+
+    def test_a_group_writable_file_inside_fails(self, tmp_path):
+        """Group write counts as much as world write: the group need not be root's."""
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle" / "a.guard").chmod(0o664)
+        problems = self._problems(target, tmp_path)
+        assert any("a.guard" in p and "write" in p for p in problems), problems
+
+    def test_a_group_writable_parent_without_the_sticky_bit_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o775)
+        problems = self._problems(target, tmp_path)
+        assert any(str(target.parent) in p and "write" in p for p in problems)
+
+    @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="no symlinks")
+    def test_a_symlink_inside_is_judged_as_the_link_not_its_target(self, tmp_path):
+        """lstat, not stat. The link points at the bundle's own root-only rule
+        file, so following it would find nothing wrong; the link itself is a name
+        in the bundle that the check must see as it is."""
+        target = self._tree(tmp_path, 0o755)
+        link = target / "bundle" / "b.guard"
+        try:
+            link.symlink_to("a.guard")
+        except OSError:
+            pytest.skip("symlinks need privileges here")
+        if hasattr(os, "lchmod"):
+            try:
+                os.lchmod(link, 0o777)
+            except (NotImplementedError, OSError):
+                pass
+        if not os.lstat(link).st_mode & 0o022:
+            pytest.skip("a symlink here has a mode that lets no one else write it")
+        problems = self._problems(target, tmp_path)
+        assert any(p.startswith(f"{link}:") for p in problems), problems
+        assert not any(
+            p.startswith(f"{target / 'bundle' / 'a.guard'}:") for p in problems
+        )
+
+    def test_a_sticky_directory_inside_still_fails(self, tmp_path):
+        """Inside the target, sticky is no excuse: the content itself must be root's."""
+        target = self._tree(tmp_path, 0o755)
+        (target / "bundle").chmod(0o1777)
+        assert any("bundle" in p for p in self._problems(target, tmp_path))
+
+    def test_an_owner_that_is_not_trusted_fails(self, tmp_path):
+        target = self._tree(tmp_path, 0o755)
+        owner = os.stat(tmp_path).st_uid
+        problems = self._problems(target, tmp_path, trusted=(owner + 1,))
+        assert any(f"owned by uid {owner}" in p for p in problems)
+
+    def test_the_mode_exits_nonzero_and_names_the_path(self, tmp_path):
+        target = self._tree(tmp_path, 0o777)
+        result = subprocess.run(  # nosec B603 - fixed interpreter and script path
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                str(SCRIPT),
+                "--assert-root-only",
+                str(target),
+                "--trusted-uid",
+                str(os.getuid()),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert str(target.parent) in result.stderr
+        target.parent.chmod(0o755)
