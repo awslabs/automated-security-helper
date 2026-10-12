@@ -199,6 +199,20 @@ class TestPlainGzip:
     # more before the refusal, or names a different limit. Zeros compress far past
     # any ratio, so each limit below is the one that binds.
 
+    def test_an_uncompressed_tar_named_gz_is_extracted_as_a_tar(
+        self, test_plugin_context, monkeypatch
+    ):
+        """The content decides: a .gz that does not start with gzip's magic is a tar."""
+        converter, results = convert(
+            test_plugin_context,
+            monkeypatch,
+            {"bundle.gz": tar_bytes({"inside.py": "x = 1\n"})},
+        )
+
+        (extracted,) = results
+        assert (extracted / "inside.py").read_bytes() == b"x = 1\n"
+        assert converter.failed_inputs == []
+
     def test_a_gzip_under_the_ratio_floor_is_decompressed_whole(
         self, test_plugin_context, monkeypatch, copy_limits
     ):

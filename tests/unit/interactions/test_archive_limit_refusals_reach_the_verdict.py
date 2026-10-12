@@ -52,6 +52,7 @@ from automated_security_helper.utils.converter_refusals import (
     REFUSED_INPUT_NOTIFICATION_ID,
     SHOWN_IN_SUMMARY,
     converter_refusals,
+    refusal_invocations,
 )
 
 _MODULE = "automated_security_helper.interactions.run_ash_scan"
@@ -269,6 +270,38 @@ class TestTheReports:
 
         assert report.count("member 'm") == SHOWN_IN_SUMMARY
         assert "and 5 more" in report
+
+    def test_the_markdown_summary_cuts_a_long_list_short_with_a_count(self):
+        """The summary posted to pull requests, not only the text one."""
+        many = [
+            RefusedInputInfo(path="a.tar", member=f"m{i}.zip", reason="nested")
+            for i in range(SHOWN_IN_SUMMARY + 5)
+        ]
+
+        report = MarkdownReporter(context=_context()).report(_model(*many))
+
+        assert report.count("member 'm") == SHOWN_IN_SUMMARY
+        assert "- ... and 5 more" in report
+
+    def test_the_console_cuts_a_long_list_short_with_a_count(self):
+        many = [
+            RefusedInputInfo(path="a.tar", member=f"m{i}.zip", reason="nested")
+            for i in range(SHOWN_IN_SUMMARY + 5)
+        ]
+        console = Console(record=True, width=300, color_system=None)
+
+        print_converter_refusals(_model(*many), console)
+
+        text = console.export_text()
+        assert text.count("member 'm") == SHOWN_IN_SUMMARY
+        assert "Not scanned: 5 more converter input(s)" in text
+
+    def test_a_sarif_invocation_is_unsuccessful_only_when_coverage_was_lost(self):
+        (lost,) = refusal_invocations(_model(OVER_LIMIT, NESTED))
+        (reported,) = refusal_invocations(_model(NESTED, SYMLINK))
+
+        assert lost.executionSuccessful is False
+        assert reported.executionSuccessful is True
 
     def test_the_console_summary_names_each_refusal(self):
         console = Console(record=True, width=300, color_system=None)
