@@ -580,15 +580,12 @@ def get_logger(
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
-        # Imported here: fs_guard logs through this module.
-        from automated_security_helper.utils.sandbox import fs_guard
-
-        # The output directory is a guarded root from here on, as it is for every
-        # PluginContext, so the log files below are opened as ASH's other writes
-        # there are: a link at the file name, or a file another name refers to,
-        # raises before anything is written.
+        # The log files are opened with the output directory guarded, as ASH's
+        # other writes there are: a link at the file name, or a file another name
+        # refers to, raises before anything is written (_log_file_handler). That
+        # holds whether or not a root is registered; run_ash_scan registers the
+        # output directory for the whole run, which guards every write below it.
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        fs_guard.register_writable_root(output_dir)
         # Determine file log level (default to INFO to avoid huge log files)
         final_file_log_level = (
             file_log_level if file_log_level is not None else logging.INFO

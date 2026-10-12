@@ -137,13 +137,20 @@ class PluginContext(BaseModel):
         # ASH's own writes below the output directory never follow a symlink, with
         # or without a sandbox: the default output directory is inside the
         # scanned tree. See utils/sandbox/fs_guard.py:open_for_write.
+        # Registered for as long as this context exists, and released when it is
+        # collected, so a process that runs many scans does not keep every output
+        # directory it ever had registered.
         output_dir = getattr(self, "output_dir", None)
         if output_dir is not None:
+            import weakref
+
             from automated_security_helper.utils.sandbox.fs_guard import (
                 register_writable_root,
+                release_writable_root_later,
             )
 
-            register_writable_root(output_dir)
+            root = register_writable_root(output_dir)
+            weakref.finalize(self, release_writable_root_later, root)
         return self
 
     @model_validator(mode="after")

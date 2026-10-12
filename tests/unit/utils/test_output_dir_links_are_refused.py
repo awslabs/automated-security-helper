@@ -102,7 +102,7 @@ def _context(source: Path, output: Path, mode: str = "off") -> PluginContext:
 class TestOpenForWrite:
     def test_a_link_at_the_file_name_is_refused(self, layout):
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "scanners" / "tool" / "source" / "out.log"
         path.parent.mkdir(parents=True)
         path.symlink_to(target)
@@ -117,7 +117,7 @@ class TestOpenForWrite:
 
     def test_a_link_at_a_directory_component_is_refused(self, layout):
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         (output / "scanners" / "tool").mkdir(parents=True)
         (output / "scanners" / "tool" / "source").symlink_to(
             target.parent, target_is_directory=True
@@ -133,7 +133,7 @@ class TestOpenForWrite:
     def test_a_file_another_name_refers_to_is_refused(self, layout):
         """A hard link to a file outside the output directory, as an archive can hold."""
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "scanners" / "tool" / "source" / "out.log"
         path.parent.mkdir(parents=True)
         os.link(target, path)
@@ -152,7 +152,7 @@ class TestOpenForWrite:
 
     def test_a_regular_file_there_is_written(self, layout):
         source, output, _target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "scanners" / "tool" / "source" / "out.log"
         path.parent.mkdir(parents=True)
         path.write_text("previous\n")
@@ -208,7 +208,7 @@ class TestStreamLogs:
         )
 
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         results = output / "scanners" / "tool" / "source"
         results.mkdir(parents=True)
         (results / "Probe.stdout.log").symlink_to(target)
@@ -229,7 +229,7 @@ class TestStreamLogs:
         )
 
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         results = output / "scanners" / "tool" / "source"
         results.mkdir(parents=True)
         os.link(target, results / "Probe.stdout.log")
@@ -250,7 +250,7 @@ class TestStreamLogs:
         )
 
         source, output, _target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         results = output / "scanners" / "tool" / "source"
         results.mkdir(parents=True)
         (results / "Probe.stdout.log").write_text("previous\n")
@@ -492,7 +492,7 @@ class TestAtomicWrites:
         from automated_security_helper.utils.atomic_write import write_text_atomically
 
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         (output / "reports").symlink_to(target.parent, target_is_directory=True)
 
         with pytest.raises(fs_guard.OutputLinkRefused) as refused:
@@ -505,7 +505,7 @@ class TestAtomicWrites:
         from automated_security_helper.utils.atomic_write import write_text_atomically
 
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "ash_aggregated_results.json"
         path.symlink_to(target)
 
@@ -520,7 +520,7 @@ class TestAtomicWrites:
         from automated_security_helper.utils.atomic_write import write_text_atomically
 
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "ash_aggregated_results.json"
         os.link(target, path)
 
@@ -533,7 +533,7 @@ class TestAtomicWrites:
         from automated_security_helper.utils.atomic_write import write_text_atomically
 
         source, output, _target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "reports" / "ash.sarif"
         path.parent.mkdir()
         path.write_text("previous\n")
@@ -580,7 +580,7 @@ class TestOtherOutputWriters:
         )
 
         source, output, target = layout
-        _context(source, output)
+        _held = _context(source, output)  # its root lasts as long as it does
         path = output / "mcp" / "state.json"
         path.parent.mkdir()
         path.symlink_to(target)

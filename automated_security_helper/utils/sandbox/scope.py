@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextvars
 import platform
 import threading
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,8 @@ from automated_security_helper.utils.sandbox.backends import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import (
     register_writable_root,
+    release_writable_root,
+    release_writable_root_later,
     sweep_writable,
 )
 from automated_security_helper.utils.sandbox.policy import (
@@ -221,8 +224,8 @@ def scanner_sandbox_scope(
     refuse_symlinked_output_dir(Path(context.source_dir), Path(context.output_dir))
     _refuse_symlinked_results_dir(Path(context.output_dir), Path(results_dir))
     # Registered before the scanner runs anything, so even ASH's first write
-    # there (a worker's request file) is guarded.
-    register_writable_root(results_dir)
+    # there (a worker's request file) is guarded, and released with the scope.
+    results_root = register_writable_root(results_dir)
     network_scanners = getattr(settings, "network_scanners", None)
     if (
         requirements.network
@@ -262,7 +265,7 @@ def scanner_sandbox_scope(
                 "--config-overrides or a config file outside every git checkout "
                 "and the scanned directory."
             )
-    return SandboxScope(
+    scope = SandboxScope(
         backend=backend,
         scanner_name=name,
         requirements=requirements,
@@ -281,6 +284,8 @@ def scanner_sandbox_scope(
         read_path_scanners=read_path_scanners,
         env_scanners=env_scanners,
     )
+    weakref.finalize(scope, release_writable_root_later, results_root)
+    return scope
 
 
 @contextmanager
@@ -530,14 +535,18 @@ def _plan_spawn(
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the
     # results directory afterwards may follow a link the scanner left there.
-    writable = list(policy.writable)
-    for path in writable:
-        register_writable_root(path)
+    writable = [register_writable_root(path) for path in policy.writable]
 
     def sweep() -> None:
         sweep_writable(writable)
 
+    def release() -> None:
+        # This spawn's registrations; its scope's and the output directory's stay.
+        for root in writable:
+            release_writable_root(root)
+
     plan.cleanup.insert(0, sweep)
+    plan.cleanup.insert(1, release)
     ASH_LOGGER.debug(
         f"Scanner sandbox ({scope.backend.name}, network={'yes' if policy.network else 'no'}) "
         f"for {scope.scanner_name}: {' '.join(plan.argv)}"

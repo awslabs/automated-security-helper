@@ -21,6 +21,7 @@ that:
 
 from __future__ import annotations
 
+import collections
 import errno
 import os
 import stat
@@ -30,8 +31,9 @@ try:
     import fcntl
 except ImportError:  # Windows, where no sandbox backend exists
     fcntl = None  # type: ignore[assignment]
+from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, Iterable, Optional, Set, Tuple, Union
+from typing import IO, Dict, FrozenSet, Iterable, Iterator, Optional, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_dir_links import (
@@ -100,23 +102,87 @@ class OutputHardLinkRefused(OSError, OutputDirLinkRefused):
 
 
 _roots_lock = threading.Lock()
-_writable_roots: Set[Path] = set()
+#: Each registered root, with how many holders registered it.
+_writable_roots: Dict[Path, int] = {}
+#: Releases queued by garbage-collection finalizers, applied under the lock by the
+#: next registry call. A finalizer can run inside any allocation, including one made
+#: while this thread holds _roots_lock, so it must not take the lock itself.
+_pending_releases: "collections.deque[Path]" = collections.deque()
 
 
-def register_writable_root(path: Union[str, Path]) -> None:
+def _apply_pending_releases() -> None:
+    """Apply queued releases; the caller holds _roots_lock."""
+    while True:
+        try:
+            root = _pending_releases.popleft()
+        except IndexError:
+            return
+        _decrement(root)
+
+
+def _decrement(root: Path) -> None:
+    count = _writable_roots.get(root, 0) - 1
+    if count > 0:
+        _writable_roots[root] = count
+    else:
+        _writable_roots.pop(root, None)
+
+
+def register_writable_root(path: Union[str, Path]) -> Path:
     """Record that ASH writes beneath ``path`` and must not follow a link there.
 
-    A sandboxed scanner's results directory, and the output directory of every
-    PluginContext. open_for_write then opens every component below it without
-    following a link, and refuses one.
+    A run's output directory (run_ash_scan), the output directory of each
+    PluginContext while it exists, and a sandboxed scanner's results and writable
+    directories while its scope or spawn lasts. open_for_write then opens every
+    component below it without following a link, and refuses one. Registrations
+    are counted: each holder releases its own with release_writable_root, or uses
+    writable_root, and the root stays until the last holder has. Returns the root.
     """
+    root = Path(os.path.abspath(path))
     with _roots_lock:
-        _writable_roots.add(Path(os.path.abspath(path)))
+        _apply_pending_releases()
+        _writable_roots[root] = _writable_roots.get(root, 0) + 1
+    return root
+
+
+def release_writable_root(path: Union[str, Path]) -> None:
+    """Release one registration of ``path``; a root never registered is ignored."""
+    root = Path(os.path.abspath(path))
+    with _roots_lock:
+        _apply_pending_releases()
+        _decrement(root)
+
+
+def release_writable_root_later(root: Path) -> None:
+    """Queue one release of ``root``, for a ``weakref.finalize`` callback.
+
+    Takes no lock: a finalizer may run while this thread is inside the registry.
+    The next registry call applies it.
+    """
+    _pending_releases.append(root)
+
+
+@contextmanager
+def writable_root(path: Union[str, Path]) -> Iterator[Path]:
+    """``path`` registered for the block, and released after it."""
+    root = register_writable_root(path)
+    try:
+        yield root
+    finally:
+        release_writable_root(root)
+
+
+def registered_roots() -> FrozenSet[Path]:
+    """The roots registered now."""
+    with _roots_lock:
+        _apply_pending_releases()
+        return frozenset(_writable_roots)
 
 
 def _writable_root_for(path: Path) -> Optional[Path]:
     """The deepest registered root ``path`` is below, or None."""
     with _roots_lock:
+        _apply_pending_releases()
         roots = list(_writable_roots)
     inside = [r for r in roots if r in path.parents]
     return max(inside, key=lambda r: len(r.parts)) if inside else None

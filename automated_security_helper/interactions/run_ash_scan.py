@@ -3391,6 +3391,18 @@ def run_ash_scan(
 
     _apply_log_level_env(opts)
     _refuse_symlinked_output_dir(opts)
+    # Every write this run makes below the output directory, from ash.log on, is
+    # guarded (fs_guard). The registration is this run's and is released when it
+    # ends, so a process that runs many scans, as the MCP server does, does not
+    # keep guarding every output directory it ever wrote.
+    from automated_security_helper.utils.sandbox.fs_guard import writable_root
+
+    with writable_root(opts.output_dir):
+        return _run_with_options(opts, scan_start_time)
+
+
+def _run_with_options(opts: ScanOptions, scan_start_time: float):
+    """The rest of ``run_ash_scan``, from the logger on, with its root registered."""
     logger = _setup_logger(opts)
 
     if opts.workspace_plan is not None and opts.mode != RunMode.container:

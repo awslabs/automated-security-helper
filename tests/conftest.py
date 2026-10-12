@@ -747,6 +747,29 @@ def _no_ash_config_from_the_shell(monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _restore_writable_roots():
+    """Give each test the guarded output roots it started with (``fs_guard``).
+
+    The registry is process-global. A test that registers a root and does not
+    release it, or makes a PluginContext the garbage collector has not reclaimed
+    yet, would otherwise leave every later test on the same xdist worker writing
+    below a root it never registered: those writes refuse links where the test
+    expects open(). A finalizer that fires after the restore releases a root that
+    is no longer there, which changes nothing.
+    """
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    with fs_guard._roots_lock:
+        fs_guard._apply_pending_releases()
+        saved = dict(fs_guard._writable_roots)
+    yield
+    with fs_guard._roots_lock:
+        fs_guard._pending_releases.clear()
+        fs_guard._writable_roots.clear()
+        fs_guard._writable_roots.update(saved)
+
+
 @pytest.fixture
 def ash_temp_path():
     """Create a temporary directory using the gitignored tests/pytest-temp directory.
