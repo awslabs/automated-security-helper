@@ -27,6 +27,9 @@ inside the scanned tree, which keeps neither grant.
 The rule is the same for the root file: a ``--config`` inside a git checkout that
 is not scanned, such as ``W/other``, grants nothing either, and the warning names
 it. Only a file outside every checkout keeps the grants it writes.
+
+Every one of those warnings also says how to keep the grant: move the file
+outside every git checkout, or pass the setting with ``--config-overrides``.
 """
 
 from __future__ import annotations
@@ -44,6 +47,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 OWN_GRANT = "/opt/operator-own-grant"
 BASE_SCANNER = "grype"
+#: How every warning that drops a grant says to keep it.
+REMEDY = (
+    "move the file outside every git checkout, or pass the setting with "
+    "--config-overrides"
+)
 OPERATOR = f"sandbox:\n  extra_read_paths:\n    - {OWN_GRANT}\n"
 BASE = f"project_name: base\nsandbox:\n  network_scanners:\n    - {BASE_SCANNER}\n"
 
@@ -164,6 +172,7 @@ def test_the_operators_own_grant_is_kept_and_the_bases_is_dropped(
     for message in dropped:
         assert _ignored_keys(message) == {"sandbox.network_scanners"}, message
         assert "base.yaml" in message, message
+        assert REMEDY in message, message
         assert config.name not in message, message
 
 
@@ -205,6 +214,7 @@ def test_a_config_inside_the_scanned_tree_keeps_neither_grant(
     assert any(
         _ignored_keys(message)
         == {"sandbox.network_scanners", "sandbox.extra_read_paths"}
+        and REMEDY in message
         for message in _dropped(sandbox_warnings)
     ), sandbox_warnings
 
@@ -226,5 +236,6 @@ def test_a_root_config_in_a_checkout_that_is_not_scanned_keeps_no_grant(
     assert any(
         _ignored_keys(message) == {"sandbox.extra_read_paths"}
         and named in message.replace("\\", "/")
+        and REMEDY in message
         for message in _dropped(sandbox_warnings)
     ), sandbox_warnings
