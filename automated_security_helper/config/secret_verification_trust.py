@@ -120,9 +120,9 @@ def same_baseline(
     return resolved[0] == resolved[1]
 
 
-def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> list:
+def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> List[str]:
     """The ``--config-overrides`` entries that can change detect-secrets' settings."""
-    selected = []
+    selected: List[str] = []
     for override in config_overrides or []:
         key = override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
         if key == "scanners" or key.startswith("scanners.detect_secrets"):

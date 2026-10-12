@@ -40,6 +40,7 @@ changed, copies ``os.environ`` and passes ``env=`` itself.
 import os
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Dict, Iterator, Mapping, Optional
 
 #: Re-entrant so a helper here can call another helper here without deadlocking.
@@ -103,8 +104,18 @@ def environ_overrides(
         restore_environ(previous)
 
 
-#: Variables held by hold_environ: key -> [value, holders, value before the first hold].
-_HELD: Dict[str, list] = {}
+@dataclass
+class _Hold:
+    """One variable hold_environ holds."""
+
+    value: str
+    holders: int
+    #: The variable's value before the first hold, None when it was unset.
+    original: Optional[str]
+
+
+#: Variables held by hold_environ, by name.
+_HELD: Dict[str, _Hold] = {}
 
 
 def hold_environ(key: str, value: str) -> None:
@@ -124,13 +135,13 @@ def hold_environ(key: str, value: str) -> None:
     with ENVIRON_LOCK:
         held = _HELD.get(key)
         if held is None:
-            _HELD[key] = [value, 1, os.environ.get(key)]
-        elif held[0] != value:
+            _HELD[key] = _Hold(value=value, holders=1, original=os.environ.get(key))
+        elif held.value != value:
             raise ValueError(
-                f"{key} is held at {held[0]!r}; it cannot also be held at {value!r}"
+                f"{key} is held at {held.value!r}; it cannot also be held at {value!r}"
             )
         else:
-            held[1] += 1
+            held.holders += 1
         os.environ[key] = value
 
 
@@ -144,11 +155,11 @@ def release_environ(key: str) -> None:
         held = _HELD.get(key)
         if held is None:
             raise RuntimeError(f"{key} is released but not held")
-        held[1] -= 1
-        if held[1]:
+        held.holders -= 1
+        if held.holders:
             return
         del _HELD[key]
-        original = held[2]
+        original = held.original
         if original is None:
             os.environ.pop(key, None)
         else:

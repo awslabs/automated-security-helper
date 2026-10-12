@@ -366,7 +366,9 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         """
         if "misconfig" not in (self.config.options.scanners or []):
             return final_args
-        binary = find_executable(self.command) or self.command
+        # model_post_init sets the command to "trivy"; the base class allows None.
+        command = self.command or "trivy"
+        binary = find_executable(command) or command
         defaults = trivy_default_misconfig_scanners(binary, list(self.subcommands))
         kept = [name for name in defaults or [] if name != _TERRAFORM_MISCONFIG_SCANNER]
         args = list(final_args)

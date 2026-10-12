@@ -1049,7 +1049,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     break
         self.inputs_not_scanned = skipped
         if not skipped:
-            self.targets_attempted = 0
+            # None elsewhere: no claim (scanner_executor._target_count_attr).
+            self.targets_attempted: int | None = 0
         else:
             self._plugin_log(
                 f"Offline, npm-audit audits nothing: {self._OFFLINE_REASON}. Not "
