@@ -311,6 +311,19 @@
   as a repository suppression: it applies, and `--ignore-suppressions` removes it.
   Offline npm-audit still runs no package manager.
 
+- **npm-audit does not audit a package whose files link out of the scanned tree.**
+  ASH found a lockfile by name and npm, pnpm and yarn follow links, so a
+  `package-lock.json` linking to a file elsewhere on the host, next to a real
+  `package.json`, was read by each (measured offline under bwrap: npm counted its
+  packages, pnpm parsed it, yarn quoted it in an error). Every file the tool reads
+  from the package (`package.json`, its lockfiles including `npm-shrinkwrap.json`,
+  and for yarn every workspace `package.json`) now has to resolve inside the scanned
+  tree and be a regular file. A package with any other is not audited: the file is
+  listed as not scanned ("link leaves the scanned tree") and npm-audit is ERROR, so
+  the scan exits 1, as when an audit fails. Links within the scanned tree are
+  followed as before, and a linked workspace member inside the tree is now copied
+  for yarn, where it used to be left out.
+
 - **A workspace with an incomplete project exits 1, even when another project has
   findings.** A project that failed, or whose scanners did not all complete
   (`scan_incomplete`), now ranks above actionable findings, as in a

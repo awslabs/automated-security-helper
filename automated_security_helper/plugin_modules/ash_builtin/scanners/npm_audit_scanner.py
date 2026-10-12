@@ -55,6 +55,7 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.utils.package_manager_child import (
     package_manager_child,
+    refused_inputs,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -194,19 +195,40 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _process_config_options(self):
         return super()._process_config_options()
 
-    def _package_manager_options(self, results_dir: Path) -> Dict[str, Any]:
-        """What utils/package_manager_child.py needs from this scan."""
+    def _package_manager_options(
+        self, results_dir: Path, target: Path
+    ) -> Dict[str, Any]:
+        """What utils/package_manager_child.py needs from this scan.
+
+        ``roots`` is the scanned tree a file the tool reads has to resolve inside:
+        the scanned root (the workspace root in workspace mode) and the target, which
+        for the converted target is ASH's work directory.
+        """
         config = getattr(self.context, "config", None)
+        scan_root = Path(
+            getattr(config, "_scanned_root", None) or self.context.source_dir
+        )
         return {
             "parent": Path(results_dir),
-            "scan_root": Path(
-                getattr(config, "_scanned_root", None) or self.context.source_dir
-            ),
+            "scan_root": scan_root,
             "skip": [Path(self.context.output_dir)],
+            "roots": [scan_root, Path(target)],
             "ignore_suppressions": bool(
                 getattr(self.context, "ignore_suppressions", False)
             ),
         }
+
+    def _shown_path(self, path: Path, target_type: str) -> str:
+        """``path`` as recorded in the results: relative to the target, as named."""
+        base = Path(
+            self.context.work_dir
+            if target_type == "converted"
+            else self.context.source_dir
+        ).absolute()
+        try:
+            return Path(path).absolute().relative_to(base).as_posix()
+        except ValueError:
+            return Path(path).as_posix()
 
     @staticmethod
     def _lock_context(
@@ -1012,21 +1034,13 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         scanner that did not run. With no lockfile there was nothing the network
         would have audited, so ``targets_attempted = 0`` grades that target SKIPPED.
         """
-        base = Path(
-            self.context.work_dir
-            if target_type == "converted"
-            else self.context.source_dir
-        ).absolute()
         skipped = []
         for item in package_files:
             package_dir = Path(item).parent
             for name in ("yarn.lock", "pnpm-lock.yaml", "package-lock.json"):
                 lock_file = package_dir / name
                 if lock_file.exists():
-                    try:
-                        shown = lock_file.absolute().relative_to(base).as_posix()
-                    except ValueError:
-                        shown = lock_file.as_posix()
+                    shown = self._shown_path(lock_file, target_type)
                     skipped.append({"path": shown, "reason": self._OFFLINE_REASON})
                     break
         self.inputs_not_scanned = skipped
@@ -1223,6 +1237,31 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         else:
                             binary = "npm"
 
+                        # npm, pnpm and yarn follow links, so a file they read
+                        # that is a link leaving the scanned tree hands them a
+                        # file from elsewhere. That package is not audited; the
+                        # file is recorded, and its dependencies go unchecked,
+                        # which fails the scan like any unaudited lockfile.
+                        child_options = self._package_manager_options(
+                            target_results_dir, target
+                        )
+                        refused = refused_inputs(
+                            binary,
+                            package_dir,
+                            roots=child_options["roots"],
+                            skip=child_options["skip"],
+                        )
+                        if refused:
+                            for path, reason in refused:
+                                shown = self._shown_path(path, target_type)
+                                self.inputs_not_scanned.append(
+                                    {"path": shown, "reason": reason}
+                                )
+                                audit_failures.append(
+                                    f"{shown}: {reason}, so its package was not audited"
+                                )
+                            continue
+
                         # Check that the binary is installed before
                         # attempting to run it (#180).  npm is already
                         # validated in validate_plugin_dependencies, but
@@ -1246,9 +1285,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # yarn-path (see utils/package_manager_child.py).
                         yarn_major: int | None = None
                         cmd = [binary, "audit", "--json"]
-                        child_options = self._package_manager_options(
-                            target_results_dir
-                        )
                         if binary == "yarn":
                             with package_manager_child(
                                 binary, package_dir, **child_options

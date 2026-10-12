@@ -245,6 +245,15 @@ A `pnpm.auditConfig` in the repository's `package.json` (`ignoreCves`,
 `ignoreGhsas`) hides those advisories, as a suppression in the repository's ASH
 configuration would; `--ignore-suppressions` removes it from the copy pnpm audits.
 
+npm, pnpm and yarn follow links. So every file npm-audit hands one of them (the
+package's `package.json`, the lockfiles it reads, `npm-shrinkwrap.json` included,
+and for yarn every workspace `package.json` below the package) has to resolve inside
+the scanned tree and be a regular file. A package with a file that is a link out of
+the tree, or that sits in a linked directory pointing out of it, is not audited: the
+file is listed as not scanned, with the reason "link leaves the scanned tree", and
+the scan fails, as for any lockfile left unaudited. A link to a file elsewhere in the
+scanned tree (another project of the workspace, in workspace mode) is followed.
+
 **Dependencies**: Node.js, npm
 
 ---
