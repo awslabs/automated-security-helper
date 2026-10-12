@@ -10,8 +10,8 @@ does not expand them, so no read-size bound stops this. ASH's own YAML files use
 no aliases, so every config reader refuses them at parse time, with a message
 that names the alias and its line, and nothing past the parse runs.
 
-One test per reader, plus a static check that no YAML load in the package
-bypasses the shared loaders (``load_config_yaml`` and ``load_yaml_config``).
+One test per reader, plus a static check that every YAML load in the package
+goes through the shared loaders (``load_config_yaml`` and ``load_yaml_config``).
 """
 
 from __future__ import annotations
@@ -213,7 +213,7 @@ class TestEveryReaderRefusesAnAlias:
 
 
 # ---------------------------------------------------------------------------
-# No YAML load in the package bypasses the shared loaders
+# Every YAML load in the package goes through the shared loaders
 # ---------------------------------------------------------------------------
 
 PACKAGE = Path(__file__).resolve().parents[3] / "automated_security_helper"
@@ -267,7 +267,7 @@ def yaml_loads_in(source: str) -> List[Tuple[int, str]]:
     return found
 
 
-class TestNoYamlLoadBypassesTheSharedLoaders:
+class TestEveryYamlLoadUsesTheSharedLoaders:
     def test_no_module_calls_pyyaml_load_directly(self):
         offenders = []
         for path in sorted(PACKAGE.rglob("*.py")):
