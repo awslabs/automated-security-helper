@@ -351,7 +351,7 @@
       '<TMP>/workspaces/session-a/source',
       'checkout',
       '--detach',
-      'v1.2.3',
+      'FETCH_HEAD',
     ]),
   ])
 # ---

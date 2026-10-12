@@ -801,11 +801,12 @@ def _clone(
     if not ref:
         return
 
-    # ``--depth 1`` may not have fetched the requested ref. Fetch it explicitly
-    # before checking out so non-default refs work reliably. Not all refs need it
-    # (a tag already in the initial clone), so a failed fetch is left to the
-    # checkout to diagnose.
-    _run_git(
+    # A shallow clone is single-branch, so a ref off the default branch is not in
+    # it. The fetch brings it, and records it only in FETCH_HEAD: a named branch
+    # or tag gets no local ref, so the checkout takes FETCH_HEAD. A fetch that
+    # fails (a commit id the remote won't serve by id) leaves the checkout to
+    # find the ref in the clone itself, and to report it if it isn't there.
+    fetch = _run_git(
         [
             *argv,
             *_GIT_CONFIG,
@@ -819,8 +820,17 @@ def _clone(
         ],
         env=env,
     )
+    revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
     checkout = _run_git(
-        [*argv, *_GIT_CONFIG, "-C", str(target), "checkout", "--detach", ref],
+        [
+            *argv,
+            *_GIT_CONFIG,
+            "-C",
+            str(target),
+            "checkout",
+            "--detach",
+            revision,
+        ],
         env=env,
     )
     if checkout.returncode != 0:
