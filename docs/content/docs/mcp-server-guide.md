@@ -422,6 +422,7 @@ The server reads its operator configuration from the file `ASH_CONFIG` names, fo
 ### Configuration Options
 
 - `max_concurrent_scans`: Maximum number of concurrent scans
+- `max_concurrent_scans_per_session`: Maximum number of scans one session of a network transport (streamable-http, sse) may run at once, default 2; `0` turns the per-session limit off. A `run_ash_workspace_scan` counts once, however many projects it has, and stdio's single session is not limited. A scan past the limit is refused with `error_type: session_scan_limit`, and other sessions are unaffected. Read only from the file `ASH_CONFIG` names, never from a config inside a scanned or delivered tree.
 - `max_concurrent_tasks`: Maximum number of concurrent tasks
 - `thread_pool_max_workers`: Maximum number of worker threads
 - `scan_timeout_seconds`: Timeout for scans in seconds

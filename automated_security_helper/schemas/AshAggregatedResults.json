@@ -1473,6 +1473,7 @@
             "health_check_interval_seconds": 60,
             "log_resource_operations": false,
             "max_concurrent_scans": 3,
+            "max_concurrent_scans_per_session": 2,
             "max_concurrent_tasks": 20,
             "max_directory_size_mb": 1000,
             "max_message_size_bytes": 10485760,
@@ -10379,6 +10380,14 @@
           "maximum": 10,
           "minimum": 1,
           "title": "Max Concurrent Scans",
+          "type": "integer"
+        },
+        "max_concurrent_scans_per_session": {
+          "default": 2,
+          "description": "Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Max Concurrent Scans Per Session",
           "type": "integer"
         },
         "max_concurrent_tasks": {

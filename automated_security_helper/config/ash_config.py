@@ -544,6 +544,21 @@ class MCPResourceManagementConfig(BaseModel):
         ),
     ] = 3
 
+    max_concurrent_scans_per_session: Annotated[
+        int,
+        Field(
+            description=(
+                "Maximum number of scans one session of a network transport "
+                "(streamable-http, sse) may run at once; 0 for no per-session "
+                "limit. A run_ash_workspace_scan counts once. Read from the "
+                "operator's config (ASH_CONFIG) only, never from a scanned or "
+                "delivered one. stdio's single session is not limited."
+            ),
+            ge=0,
+            le=100,
+        ),
+    ] = 2
+
     max_concurrent_tasks: Annotated[
         int,
         Field(

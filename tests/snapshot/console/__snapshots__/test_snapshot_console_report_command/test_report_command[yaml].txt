@@ -124,6 +124,7 @@ ash_config:
     health_check_interval_seconds: 60
     log_resource_operations: false
     max_concurrent_scans: 3
+    max_concurrent_scans_per_session: 2
     max_concurrent_tasks: 20
     max_directory_size_mb: 1000
     max_message_size_bytes: 10485760

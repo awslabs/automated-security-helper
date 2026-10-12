@@ -302,6 +302,7 @@ reporters:
     extension: yaml
 mcp-resource-management:
   max_concurrent_scans: 3
+  max_concurrent_scans_per_session: 2
   max_concurrent_tasks: 20
   thread_pool_max_workers: 4
   scan_timeout_seconds: 1800

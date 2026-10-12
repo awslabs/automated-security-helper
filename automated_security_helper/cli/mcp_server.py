@@ -68,6 +68,7 @@ from automated_security_helper.cli.mcp.session_identity import (
     serving_local_client,
     session_identity_refusal,
 )
+from automated_security_helper.cli.mcp.sessions import SESSION_SCAN_LIMIT
 from automated_security_helper.cli.mcp.source_delivery import (
     SOURCE_DELIVERY_BUSY,
     delivered_session_count,
@@ -289,6 +290,10 @@ async def run_ash_scan(
     --trust-upstream-session-id. run_ash_workspace_scan returns its results in
     its response and needs none.
 
+    On a network transport a session runs at most the operator's
+    max_concurrent_scans_per_session scans at once (default 2); one more is
+    refused (error_type session_scan_limit) until one has finished.
+
     Returns:
         Dict with scan_id, status, and connection management guidance
     """
@@ -427,13 +432,17 @@ async def run_ash_scan(
             await ctx.error(
                 f"Failed to start scan: {result.get('error', 'Unknown error')}"
             )
-            # A change to the session's delivered source in progress keeps its
-            # own type, so a client can tell it from a scan that cannot start.
-            busy = result.get("error_type") == SOURCE_DELIVERY_BUSY
+            # A change to the session's delivered source in progress, and a
+            # session at its scan limit, keep their own types, so a client can
+            # tell them from a scan that cannot start.
+            kept = result.get("error_type") in (
+                SOURCE_DELIVERY_BUSY,
+                SESSION_SCAN_LIMIT,
+            )
             return {
                 "success": False,
                 "error": f"Failed to start scan: {result.get('error', 'Unknown error')}",
-                "error_type": SOURCE_DELIVERY_BUSY if busy else "scan_start_failure",
+                "error_type": result["error_type"] if kept else "scan_start_failure",
             }
 
         scan_id = result["scan_id"]

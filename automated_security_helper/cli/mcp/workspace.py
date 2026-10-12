@@ -1015,11 +1015,25 @@ class _WorkspaceScanClaim:
     removed (``finish_ended_session``), by whichever of the two leaves last: the
     call, or the worker it handed the run to. A worker that the call left before
     it started never runs the scan.
+
+    The same object carries the scan's place in its session's per-session limit
+    (``MCPSession.try_start_scan``), released at the same time. ``claimed`` and
+    ``counted`` say which of the two this scan took: a session that delivered
+    nothing takes no claim, and a session of stdio is not counted.
     """
 
-    def __init__(self, session: MCPSession, session_id: str) -> None:
+    def __init__(
+        self,
+        session: MCPSession,
+        session_id: str,
+        *,
+        claimed: bool = True,
+        counted: bool = False,
+    ) -> None:
         self._session = session
         self._session_id = session_id
+        self.claimed = claimed
+        self.counted = counted
         self._lock = threading.Lock()
         self._holder = "call"  # then "worker", then "released"
 
@@ -1045,8 +1059,11 @@ class _WorkspaceScanClaim:
         self._release()
 
     def _release(self) -> None:
-        self._session.release_scan()
-        finish_ended_session(self._session_id)
+        if self.counted:
+            self._session.scan_returned()
+        if self.claimed:
+            self._session.release_scan()
+            finish_ended_session(self._session_id)
 
 
 def _session_holds_something_on_disk(session_id: str, profile: Optional[str]) -> bool:
@@ -1127,7 +1144,9 @@ async def _execute(
         if claim is not None and not claim.worker_starts():
             raise RuntimeError("the workspace scan was cancelled before it started")
         try:
-            with ScanPresence(session_id if claim is not None else None):
+            with ScanPresence(
+                session_id if claim is not None and claim.claimed else None
+            ):
                 # Held under the process-wide environment lock, because other
                 # sessions' scans may be copying the environment for a spawn on
                 # another thread right now, and counted, so overlapping offline
@@ -1543,22 +1562,25 @@ async def mcp_scan_workspace(
         that is not a git repository under precommit.
     """
     claim: Optional[_WorkspaceScanClaim] = None
-    if (
-        session_id is not None
-        and session_id != UNIDENTIFIED_SESSION_ID
-        and _session_holds_something_on_disk(session_id, profile)
-    ):
-        try:
-            # The in-memory session: the claim creates nothing on disk.
-            session: Optional[MCPSession] = get_default_registry().session_for(
-                session_id
-            )
-        except ValueError:
-            # An id that names no directory has no delivered tree to hold; the
-            # checks below refuse it.
-            session = None
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+        from automated_security_helper.cli.mcp.sessions import (
+            per_session_scan_limit,
+            session_scan_limit_refusal,
+        )
+
+        claims_tree = _session_holds_something_on_disk(session_id, profile)
+        limit = per_session_scan_limit(session_id)
+        session: Optional[MCPSession] = None
+        if claims_tree or limit is not None:
+            try:
+                # The in-memory session: neither hold creates anything on disk.
+                session = get_default_registry().session_for(session_id)
+            except ValueError:
+                # An id that names no directory has no delivered tree to hold;
+                # the checks below refuse it.
+                session = None
         if session is not None:
-            if not session.try_claim_scan():
+            if claims_tree and not session.try_claim_scan():
                 response = _error_response(
                     SourceDeliveryBusyError(
                         "the delivered source of this session is being changed; "
@@ -1568,7 +1590,17 @@ async def mcp_scan_workspace(
                 )
                 response["error_type"] = SOURCE_DELIVERY_BUSY
                 return response
-            claim = _WorkspaceScanClaim(session, session_id)
+            # One place in the per-session limit, however many projects.
+            if limit is not None and not session.try_start_scan(limit):
+                if claims_tree:
+                    session.release_scan()
+                return session_scan_limit_refusal("scan_workspace", limit)
+            claim = _WorkspaceScanClaim(
+                session,
+                session_id,
+                claimed=claims_tree,
+                counted=limit is not None,
+            )
     try:
         return await _scan_workspace(
             workspace_file=workspace_file,

@@ -123,6 +123,9 @@ class MCPSession(BaseModel):
     _state_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
     _claimed_scans: int = PrivateAttr(default=0)
     _changing: bool = PrivateAttr(default=False)
+    # Scans counted against the per-session limit and not yet returned; guarded
+    # by _state_lock. See try_start_scan.
+    _running_scans: int = PrivateAttr(default=0)
 
     @property
     def lock(self) -> threading.Lock:
@@ -177,6 +180,24 @@ class MCPSession(BaseModel):
         with self._state_lock:
             self._changing = False
         self._lock.release()
+
+    def try_start_scan(self, limit: Optional[int]) -> bool:
+        """Count a scan of this session as running, unless ``limit`` already are.
+
+        Counted and checked under one lock, so two calls at once can't both take
+        the last place. ``None`` is no limit. Each True is paired with one
+        :meth:`scan_returned`, once nothing of that scan runs any more.
+        """
+        with self._state_lock:
+            if limit is not None and self._running_scans >= limit:
+                return False
+            self._running_scans += 1
+            return True
+
+    def scan_returned(self) -> None:
+        """Uncount a scan :meth:`try_start_scan` counted."""
+        with self._state_lock:
+            self._running_scans = max(0, self._running_scans - 1)
 
 
 # Resolve the ``AshConfig`` forward reference. Pydantic v2 refuses to
@@ -402,6 +423,53 @@ def finish_ended_session(session_id: Optional[str]) -> None:
         pending = session_id in _ended_while_scanning
     if pending:
         end_session(session_id)
+
+
+#: ``error_type`` of a scan refused because its session is at the per-session limit.
+SESSION_SCAN_LIMIT = "session_scan_limit"
+
+
+def per_session_scan_limit(session_id: Optional[str]) -> Optional[int]:
+    """How many scans ``session_id`` may run at once, or None for no limit.
+
+    The operator's ``mcp-resource-management.max_concurrent_scans_per_session``,
+    read from ``ASH_CONFIG`` (``get_default_config``), never from the config a
+    scan resolves: that can be the scanned tree's own or one a client delivered,
+    and a limit the limited party can raise is no limit. Read per scan, so a
+    changed ``ASH_CONFIG`` applies to the next one; a file that no longer loads
+    leaves the default. 0 is no limit.
+
+    Only a caller of a network transport is limited. stdio has one session, the
+    local client's, and nobody to share the host with.
+    """
+    from automated_security_helper.cli.mcp.sandbox import caller_is_remote
+    from automated_security_helper.config.ash_config import (
+        MCPResourceManagementConfig,
+    )
+    from automated_security_helper.config.default_config import get_default_config
+
+    if not caller_is_remote(session_id):
+        return None
+    try:
+        settings = get_default_config().mcp_resource_management
+    except Exception:  # noqa: BLE001 -- an unloadable ASH_CONFIG keeps the default
+        settings = MCPResourceManagementConfig()
+    return settings.max_concurrent_scans_per_session or None
+
+
+def session_scan_limit_refusal(operation: str, limit: int) -> Dict[str, Any]:
+    """The response for a scan refused because its session is at its limit."""
+    return {
+        "success": False,
+        "operation": operation,
+        "error_type": SESSION_SCAN_LIMIT,
+        "error": (
+            f"this session is already running {limit} scan(s), which is the "
+            f"server's per-session limit (mcp-resource-management."
+            f"max_concurrent_scans_per_session); start another once one has "
+            f"finished, or cancel one with cancel_scan"
+        ),
+    }
 
 
 #: Directory under the workspace root holding one entry per live stdio server.
@@ -814,10 +882,13 @@ def _remove_if_still_stale(
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "SESSION_SCAN_LIMIT",
     "StdioServerPresence",
     "end_session",
     "finish_ended_session",
     "get_default_registry",
+    "per_session_scan_limit",
+    "session_scan_limit_refusal",
     "reset_default_registry_for_tests",
     "sweep_stale_workspaces",
     "touch_session_workspace",
