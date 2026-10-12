@@ -31,6 +31,7 @@ from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
     describe_config_path,
+    is_regular_file,
     read_config_bytes,
     read_config_file,
 )
@@ -949,7 +950,7 @@ def wizard(
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
-    if os.path.lexists(config_path) and not config_path.is_file():
+    if os.path.lexists(config_path) and not is_regular_file(config_path):
         # A link to nothing, a directory: not "no config yet", and writing the
         # answers would go through the link to wherever it points.
         typer.secho(

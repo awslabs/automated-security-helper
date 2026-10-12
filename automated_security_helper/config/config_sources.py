@@ -254,6 +254,20 @@ def is_pyproject(path: Path) -> bool:
     return Path(path).name == ASH_PYPROJECT_FILE_NAME
 
 
+def is_regular_file(path: Path) -> bool:
+    """Whether `path` leads to a regular file; False for any error.
+
+    os.stat rather than Path.is_file: before Python 3.14, is_file raises for an
+    error other than "not found" (a directory above that cannot be searched),
+    which let a bare OSError out of a check that only meant to ask.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        # ValueError: a path with a NUL in it.
+        return False
+
+
 def read_config_bytes(path: Path) -> bytes:
     """A config file's bytes; see "Bounds" in the module docstring.
 
@@ -304,7 +318,7 @@ def _read_toml_text(path: Path) -> str:
 def _tool_ash_line(path: Path) -> Optional[int]:
     # Only a regular file is read: this names a file in messages, including the
     # one that says a path is not a regular file.
-    if not Path(path).is_file():
+    if not is_regular_file(path):
         return None
     try:
         text = _read_toml_text(path)
@@ -439,17 +453,25 @@ def _pyproject_is_a_source(
     What cannot be used behind a higher-precedence source is appended to
     ``notes`` rather than logged; see ``ConfigDiscovery``.
     """
+    # Classified from os.stat and its errno, so each name that cannot be followed
+    # is reported for what it is.
     try:
-        regular = path.is_file()
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except FileNotFoundError:
+        # The name exists (discovery found it) but leads nowhere.
+        missing = FileNotFoundError(
+            errno.ENOENT, "a symbolic link to nothing", os.fspath(path)
+        )
+        return _unreadable_pyproject(path, found_before, missing, notes)
     except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            exc = OSError(
+                errno.ELOOP,
+                "a symbolic link that leads back to itself",
+                os.fspath(path),
+            )
         return _unreadable_pyproject(path, found_before, exc, notes)
     if not regular:
-        if not os.path.exists(path):
-            # A name that exists but leads nowhere: a symbolic link to nothing.
-            missing = FileNotFoundError(
-                errno.ENOENT, "a symbolic link to nothing", os.fspath(path)
-            )
-            return _unreadable_pyproject(path, found_before, missing, notes)
         return _unreadable_pyproject(
             path,
             found_before,
@@ -945,7 +967,7 @@ def _resolve(
         data = read_config_file(path)
     else:
         extending = stack[-1]
-        if not real.is_file():
+        if not is_regular_file(real):
             raise ASHConfigSourceError(
                 f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
                 f"{real.as_posix()}, which does not exist or is not a file"

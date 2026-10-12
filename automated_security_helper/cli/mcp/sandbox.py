@@ -767,6 +767,7 @@ def validate_config_chain(
 
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        is_regular_file,
         resolve_config_document,
     )
     from automated_security_helper.core.exceptions import (
@@ -774,7 +775,7 @@ def validate_config_chain(
     )
 
     path = Path(config_path)
-    if not path.is_file():
+    if not is_regular_file(path):
         return None
     try:
         resolve_config_document(

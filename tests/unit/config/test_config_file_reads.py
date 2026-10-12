@@ -306,6 +306,97 @@ class TestDiscoveryThatCannotLookIsRefused:
         assert resolve_config(source_dir=tmp_path).project_name == "ash-scan"
 
 
+class TestAPyprojectLinkThatCannotBeFollowedIsNamedForWhatItIs:
+    """Each was reported as "a symbolic link to nothing"."""
+
+    def test_a_link_that_leads_back_to_itself(self, tmp_path):
+        link = tmp_path / "pyproject.toml"
+        link.symlink_to(link)
+
+        with pytest.raises(ASHConfigSourceError) as excinfo:
+            config_sources.discover_config_source(tmp_path)
+
+        assert "leads back to itself" in str(excinfo.value)
+        assert "link to nothing" not in str(excinfo.value)
+
+    @needs_permissions
+    def test_a_link_into_a_directory_that_cannot_be_searched(self, tmp_path):
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "pyproject.toml").write_text("[tool.ash]\n", encoding="utf-8")
+        (tmp_path / "pyproject.toml").symlink_to(locked / "pyproject.toml")
+        locked.chmod(0)
+        try:
+            with pytest.raises(ASHConfigSourceError) as excinfo:
+                config_sources.discover_config_source(tmp_path)
+        finally:
+            locked.chmod(0o755)
+
+        assert "Permission denied" in str(excinfo.value)
+        assert "link to nothing" not in str(excinfo.value)
+
+    def test_control_a_link_to_nothing_is_still_named_so(self, tmp_path):
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+
+        with pytest.raises(ASHConfigSourceError, match="link to nothing"):
+            config_sources.discover_config_source(tmp_path)
+
+
+class TestTheFileTypeChecksDoNotUsePathIsFile:
+    """Before Python 3.14, Path.is_file() raises for an error other than "not found".
+
+    Every check of a config path's type uses os.stat instead, so a check never
+    lets a bare OSError out. 3.14's is_file returns False for any error, so the
+    older behavior is reproduced by patching is_file to raise.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _is_file_raises(self, monkeypatch):
+        def raising_is_file(self):
+            raise PermissionError(13, "Permission denied", str(self))
+
+        monkeypatch.setattr(Path, "is_file", raising_is_file)
+
+    def test_naming_a_pyproject_for_a_message(self, tmp_path):
+        path = tmp_path / "pyproject.toml"
+        path.write_text('[tool.ash]\nproject_name = "x"\n', encoding="utf-8")
+
+        assert describe_config_path(path) == f"{path.as_posix()} [tool.ash] (line 1)"
+
+    def test_reading_an_extends_base(self, tmp_path):
+        (tmp_path / "base.yaml").write_text("project_name: base\n", encoding="utf-8")
+        child = tmp_path / ".ash.yaml"
+        child.write_text("extends: base.yaml\n", encoding="utf-8")
+
+        assert resolve_config(config_path=child, source_dir=tmp_path).project_name == (
+            "base"
+        )
+
+    def test_the_wizards_guard(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from automated_security_helper.cli.config import config_app
+
+        path = tmp_path / ".ash.yaml"
+        path.write_text("project_name: x\n", encoding="utf-8")
+
+        result = CliRunner().invoke(
+            config_app, ["wizard", "--config", str(path)], input="\n" * 200
+        )
+
+        assert not isinstance(result.exception, PermissionError), result.output
+
+    def test_the_mcp_chain_check(self, tmp_path, monkeypatch):
+        from automated_security_helper.cli.mcp import sandbox
+
+        monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
+        monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+        child = tmp_path / ".ash.yaml"
+        child.write_text("project_name: x\n", encoding="utf-8")
+
+        assert sandbox.validate_config_chain(child, source_dir=tmp_path) is None
+
+
 class TestEncodings:
     def test_a_json_config_with_a_utf8_byte_order_mark_is_read(self, tmp_path):
         """As YAML and TOML already are; Windows PowerShell 5 writes the mark."""
