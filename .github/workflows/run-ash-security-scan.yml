@@ -1345,13 +1345,20 @@ jobs:
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
           tree "${ASH_OUTPUT_DIR}"
 
+      # Only reports/ and the aggregated results, which are all the reporting job and
+      # a SARIF upload read. scanners/ and converted/ hold each tool's raw output, not
+      # masked, so a secret a scanner found would be in the artifact in full. With two
+      # paths, upload-artifact roots the artifact at their common parent, so the
+      # downloaded layout is the same as before (reports/ash.sarif and so on).
       - name: Collect ASH output artifact
         id: ash-output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: success() || failure()
         with:
           name: ash_output
-          path: ${{ inputs.output-dir }}
+          path: |
+            ${{ inputs.output-dir }}/reports
+            ${{ inputs.output-dir }}/ash_aggregated_results.json
           retention-days: 7
           if-no-files-found: error
 

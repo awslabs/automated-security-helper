@@ -457,7 +457,9 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### GitLab CI
@@ -470,8 +472,11 @@ ash-scan:
     - ash --mode local
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
+
+Both examples keep `scanners/` and `converted/` out of the artifact: those hold each tool's raw output, which is not masked.
 
 ## Performance Optimization
 

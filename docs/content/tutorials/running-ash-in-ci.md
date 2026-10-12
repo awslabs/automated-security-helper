@@ -6,6 +6,10 @@ This guide explains how to integrate ASH v3 into various CI/CD platforms.
 
 ASH supports running in CI environments as an executable container (e.g., via `docker run`) as well as via Container Job mechanisms, depending on CI platform support.
 
+### What to keep as a build artifact
+
+The examples on this page keep `reports/` and `ash_aggregated_results.json` from the output directory, not the whole directory. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files. Those are not masked, so a secret a scanner found is in them in full, and anyone who can download the build's artifacts could read it.
+
 ### Building ASH Container Images for CI Usage
 
 `ash --mode container` and `ash build-image` build the `non-root` stage of the
@@ -109,7 +113,9 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Using Container Mode
@@ -138,7 +144,9 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: ash-results
-          path: .ash/ash_output
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### GitHub Advanced Security (Code Scanning)
@@ -305,7 +313,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ash-merged-results
-          path: .ash/merged
+          path: |
+            .ash/merged/reports
+            .ash/merged/ash_aggregated_results.json
 ```
 
 Leaving `merge-multiple` off the download step is deliberate: each artifact then extracts into its own directory under `shards/`, which is what the loop iterates over. With `merge-multiple: true` all four shards would extract into the same directory and overwrite each other's `ash_aggregated_results.json`.
@@ -329,7 +339,8 @@ ash-scan:
     - ash --mode local
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Using Container Mode
@@ -348,7 +359,8 @@ ash-scan-container:
     - ash --mode container --build-target ci
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Gitlab Security Dashboard
@@ -372,7 +384,8 @@ ash-scan:
     - ash --mode local --no-fail-on-findings
   artifacts:
     paths:
-      - .ash/ash_output
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Distributed Scanning (Execute and Collect)
@@ -422,7 +435,8 @@ ash-merge:
   artifacts:
     when: always
     paths:
-      - .ash/merged
+      - .ash/merged/reports
+      - .ash/merged/ash_aggregated_results.json
 ```
 
 `needs` pointing at a `parallel` job depends on all of its instances, not one, so `ash-merge` starts only after all four shards have succeeded.
@@ -449,7 +463,8 @@ phases:
 
 artifacts:
   files:
-    - .ash/ash_output/**/*
+    - .ash/ash_output/reports/**/*
+    - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Using Container Mode
@@ -476,7 +491,8 @@ phases:
 
 artifacts:
   files:
-    - .ash/ash_output/**/*
+    - .ash/ash_output/reports/**/*
+    - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Distributed Scanning (Execute and Collect)
@@ -563,7 +579,8 @@ phases:
 
 artifacts:
   files:
-    - .ash/merged/**/*
+    - .ash/merged/reports/**/*
+    - .ash/merged/ash_aggregated_results.json
 ```
 
 `CODEBUILD_RESOLVED_SOURCE_VERSION` is the commit, and every task in the batch resolves it to the same value — that is what lets the merge task find the shards without being told where they are. It is not unique per batch, though. Re-running the batch on the same commit overwrites each shard's object in place, and `ash merge` verifies coverage rather than freshness, so a shard that fails on the re-run can leave the previous run's object in place for the merge to read. If you re-run batches, add a per-run value to the prefix from an environment variable override supplied when the batch is started.
@@ -630,7 +647,7 @@ pipeline {
     }
     post {
         always {
-            archiveArtifacts artifacts: '.ash/ash_output/**/*', allowEmptyArchive: true
+            archiveArtifacts artifacts: '.ash/ash_output/reports/**/*, .ash/ash_output/ash_aggregated_results.json', allowEmptyArchive: true
         }
     }
 }
@@ -662,7 +679,7 @@ pipeline {
     }
     post {
         always {
-            archiveArtifacts artifacts: '.ash/ash_output/**/*', allowEmptyArchive: true
+            archiveArtifacts artifacts: '.ash/ash_output/reports/**/*, .ash/ash_output/ash_aggregated_results.json', allowEmptyArchive: true
         }
     }
 }
@@ -743,7 +760,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: '.ash/merged/**/*', allowEmptyArchive: true
+                    archiveArtifacts artifacts: '.ash/merged/reports/**/*, .ash/merged/ash_aggregated_results.json', allowEmptyArchive: true
                 }
             }
         }
@@ -776,8 +793,11 @@ jobs:
           name: Run ASH scan
           command: ash --mode local
       - store_artifacts:
-          path: .ash/ash_output
-          destination: ash-results
+          path: .ash/ash_output/reports
+          destination: ash-results/reports
+      - store_artifacts:
+          path: .ash/ash_output/ash_aggregated_results.json
+          destination: ash-results/ash_aggregated_results.json
 
 workflows:
   version: 2
@@ -803,8 +823,11 @@ jobs:
           name: Run ASH scan
           command: ash --mode container
       - store_artifacts:
-          path: .ash/ash_output
-          destination: ash-results
+          path: .ash/ash_output/reports
+          destination: ash-results/reports
+      - store_artifacts:
+          path: .ash/ash_output/ash_aggregated_results.json
+          destination: ash-results/ash_aggregated_results.json
 
 workflows:
   version: 2
@@ -866,8 +889,11 @@ jobs:
             done
             ash merge $args --output-dir .ash/merged --output-formats sarif,markdown
       - store_artifacts:
-          path: .ash/merged
-          destination: ash-merged-results
+          path: .ash/merged/reports
+          destination: ash-merged-results/reports
+      - store_artifacts:
+          path: .ash/merged/ash_aggregated_results.json
+          destination: ash-merged-results/ash_aggregated_results.json
 
 workflows:
   version: 2

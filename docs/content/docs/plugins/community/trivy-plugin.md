@@ -1400,7 +1400,11 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: security-results
-          path: .ash/ash_output/
+          # Not the whole output directory: scanners/ and converted/ hold each
+          # tool's raw output, which is not masked.
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 #### GitLab CI
@@ -1416,7 +1420,8 @@ security-scan:
     reports:
       sast: .ash/ash_output/reports/ash_aggregated_results.sarif
     paths:
-      - .ash/ash_output/
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Pre-commit Hook

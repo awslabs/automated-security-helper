@@ -731,12 +731,17 @@ runs:
         cache-hit: ${{ steps.tool-cache.outputs.cache-hit }}
 
     # Common post-scan validation
+    #
+    # reports/ and the aggregated results only: scanners/ and converted/ hold each
+    # tool's raw output, not masked, and the steps below read nothing else either.
     - name: Collect ASH output artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: success() || failure()
       with:
         name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}${{ inputs.oci-runner && format('-{0}', inputs.oci-runner) || '' }}${{ inputs.offline == 'true' && '-offline' || '' }}
-        path: .ash/ash_output
+        path: |
+          .ash/ash_output/reports
+          .ash/ash_output/ash_aggregated_results.json
         retention-days: 7
         if-no-files-found: warn
 
