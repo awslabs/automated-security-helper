@@ -6,14 +6,21 @@
 from __future__ import annotations
 
 import fnmatch
-from typing import Any, Dict, List, Annotated, Optional, TYPE_CHECKING
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Annotated,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+)
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SerializerFunctionWrapHandler,
     field_validator,
-    model_serializer,
     model_validator,
 )
 from datetime import datetime, date
@@ -128,10 +135,14 @@ class IgnoreFileExclusions(BaseModel):
         ),
     ] = 0
 
+    # Both counts are left out of what is written while unset, so a single scan's
+    # record, and a merged one whose scans agreed, are written as before.
     honored_scan_count: Annotated[
         Optional[int],
         Field(
+            default=None,
             ge=0,
+            exclude_if=lambda value: value is None,
             description=(
                 "In merged results (a workspace scan's, or ash merge's) whose "
                 "scans did not agree, how many of the scan_count merged scans "
@@ -143,45 +154,66 @@ class IgnoreFileExclusions(BaseModel):
     scan_count: Annotated[
         Optional[int],
         Field(
+            default=None,
             ge=0,
+            exclude_if=lambda value: value is None,
             description=(
                 "With honored_scan_count: how many scans the merged record covers "
-                "(the projects or shards that recorded one)."
+                "(the projects or shards that recorded one; one that recorded none "
+                "is not counted)."
             ),
         ),
     ] = None
 
     @model_validator(mode="after")
-    def _counts_only_for_a_disagreement(self) -> "IgnoreFileExclusions":
-        """Keep the two counts only as a pair that says the merged scans disagreed.
+    def _drop_counts_that_agree_with_honored(self) -> "IgnoreFileExclusions":
+        """Leave out a pair of counts that only repeats what ``honored`` says.
 
-        Anything else (one count without the other, every scan or none honoring)
-        is not a disagreement, and is read as if the counts were absent, so a
-        stored record with stray values renders the sentence its other fields say.
+        Every scan honoring (with ``honored``) or none (without it) is not a
+        disagreement, so the record reads as one that never had the counts. Any
+        other pair that does not describe a disagreement is kept as stored, and
+        ``summary_text`` says the record is inconsistent.
         """
         h, n = self.honored_scan_count, self.scan_count
-        if h is None or n is None or not 0 < h < n:
-            self.honored_scan_count = None
-            self.scan_count = None
-        else:
-            self.honored = False
+        if h is not None and n is not None and n > 0:
+            if (h == n and self.honored) or (h == 0 and not self.honored):
+                self.honored_scan_count = None
+                self.scan_count = None
         return self
 
-    @model_serializer(mode="wrap")
-    def _leave_out_absent_counts(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> Dict[str, Any]:
-        # A single scan's record is written as it was before the counts existed.
-        data = handler(self)
-        if isinstance(data, dict) and self.scan_count is None:
-            data.pop("honored_scan_count", None)
-            data.pop("scan_count", None)
-        return data
+    def _disagreement(self) -> Optional[Tuple[int, int]]:
+        """(honoring, total) scans when the record says its merged scans disagreed."""
+        h, n = self.honored_scan_count, self.scan_count
+        if h is not None and n is not None and 0 < h < n and not self.honored:
+            return h, n
+        return None
+
+    def _inconsistent(self) -> bool:
+        has_counts = self.honored_scan_count is not None or self.scan_count is not None
+        return has_counts and self._disagreement() is None
+
+    def scan_counts(self) -> Tuple[int, int]:
+        """(honoring, total) scans this record stands for, to merge it with others.
+
+        A record that is itself merged from scans that disagreed stands for its
+        counts; any other stands for one scan, honoring or not as ``honored``
+        says.
+        """
+        return self._disagreement() or (1 if self.honored else 0, 1)
 
     def summary_text(self) -> str:
         """The sentence the text and markdown summaries print for this record."""
         files = "file" if self.excluded_file_count == 1 else "files"
-        if self.scan_count is not None and self.honored_scan_count is not None:
+        if self._inconsistent():
+            # Counts that contradict each other or honored, as only a hand-edited
+            # or partly lost record has: neither which scans honored the ignore
+            # files nor "excluded no files" can be taken from it.
+            text = (
+                "recorded inconsistently, so which merged scans honored them is "
+                f"not known; the ignore files that were applied excluded "
+                f"{self.excluded_file_count} {files} from ASH's scan sets"
+            )
+        elif self.scan_count is not None and self.honored_scan_count is not None:
             # Merged scans that disagreed. Neither one-scan sentence is true of
             # them: some scan sets were cut by the repository's ignore files and
             # some were not, and the count cannot be split between the two.
@@ -217,6 +249,26 @@ class IgnoreFileExclusions(BaseModel):
                 f"output directory {'was' if found == 1 else 'were'} left out as well"
             )
         return text
+
+
+def merged_honoring(records: Iterable[IgnoreFileExclusions]) -> Dict[str, Any]:
+    """``honored`` for the records of several scans merged into one record.
+
+    With ``honored_scan_count`` and ``scan_count`` as well when the scans
+    disagree. A record that is itself merged counts as the scans it stands for
+    (``IgnoreFileExclusions.scan_counts``), so merging merged records keeps their
+    counts. ``ash merge`` and a workspace scan's merged results both use this.
+    """
+    honoring = total = 0
+    for record in records:
+        record_honoring, record_total = record.scan_counts()
+        honoring += record_honoring
+        total += record_total
+    merged: Dict[str, Any] = {"honored": honoring == total}
+    if 0 < honoring < total:
+        merged["honored_scan_count"] = honoring
+        merged["scan_count"] = total
+    return merged
 
 
 def ignore_paths_that_skip_scanning(

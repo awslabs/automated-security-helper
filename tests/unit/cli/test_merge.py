@@ -2827,6 +2827,62 @@ class TestScanSetRecordsAcrossShards:
         stored = AshAggregatedResults.model_validate_json(merged.model_dump_json())
         assert stored.metadata.ignore_file_exclusions.summary_text() == expected
 
+    def test_one_of_three_shards(self):
+        shards = build_shards(3)
+        shards[0].metadata.ignore_file_exclusions = self._exclusions(honored=False)
+        shards[1].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 2}
+        )
+        shards[2].metadata.ignore_file_exclusions = self._exclusions(honored=False)
+
+        record = merge_shard_results(as_loaded(shards)).metadata.ignore_file_exclusions
+
+        assert (record.honored_scan_count, record.scan_count) == (1, 3)
+        assert record.summary_text().startswith(
+            "honored by 1 of 3 merged scans and not by the other 2 "
+        )
+
+    @pytest.mark.parametrize(
+        "second, counts",
+        [("mixed", (2, 4)), ("honored", (2, 3)), ("not-honored", (1, 3))],
+    )
+    def test_records_that_are_already_merged_keep_their_counts(self, second, counts):
+        """A record merged from 1 of 2 honoring scans counts as two scans, not one."""
+        from automated_security_helper.models.core import IgnoreFileExclusions
+
+        mixed = IgnoreFileExclusions(
+            honored=False,
+            excluded_file_count=2,
+            by_ignore_file={".gitignore": 2},
+            honored_scan_count=1,
+            scan_count=2,
+        )
+        other = {
+            "mixed": mixed.model_copy(),
+            "honored": self._exclusions(by={".gitignore": 2}),
+            "not-honored": self._exclusions(honored=False),
+        }[second]
+        shards = build_shards(2)
+        shards[0].metadata.ignore_file_exclusions = mixed
+        shards[1].metadata.ignore_file_exclusions = other
+
+        record = merge_shard_results(as_loaded(shards)).metadata.ignore_file_exclusions
+
+        assert record.honored is False
+        assert (record.honored_scan_count, record.scan_count) == counts
+
+    def test_agreeing_shards_write_no_scan_counts(self):
+        shards = build_shards(2)
+        for shard in shards:
+            shard.metadata.ignore_file_exclusions = self._exclusions(
+                by={".gitignore": 2}
+            )
+
+        dumped = json.loads(merge_shard_results(as_loaded(shards)).model_dump_json())
+
+        record = dumped["metadata"]["ignore_file_exclusions"]
+        assert "honored_scan_count" not in record and "scan_count" not in record
+
     def test_the_merge_does_not_depend_on_the_order_shards_are_given(self):
         def shards():
             built = build_shards(3)

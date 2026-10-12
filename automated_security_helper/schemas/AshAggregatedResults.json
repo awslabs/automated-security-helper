@@ -8899,7 +8899,7 @@
             }
           ],
           "default": null,
-          "description": "With honored_scan_count: how many scans the merged record covers (the projects or shards that recorded one).",
+          "description": "With honored_scan_count: how many scans the merged record covers (the projects or shards that recorded one; one that recorded none is not counted).",
           "title": "Scan Count"
         }
       },

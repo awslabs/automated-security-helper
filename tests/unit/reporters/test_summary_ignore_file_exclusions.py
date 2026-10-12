@@ -56,6 +56,14 @@ HONORED = IgnoreFileExclusions(
     by_ignore_file={".gitignore": 3, ".ignore": 1, "vendor/.gitignore": 3},
 )
 NOT_HONORED = IgnoreFileExclusions(honored=False)
+#: A record that is itself merged from two scans, one of which honored the files.
+MIXED = IgnoreFileExclusions(
+    honored=False,
+    excluded_file_count=2,
+    by_ignore_file={".gitignore": 2},
+    honored_scan_count=1,
+    scan_count=2,
+)
 
 
 def _model(record: IgnoreFileExclusions | None) -> AshAggregatedResults:
@@ -303,46 +311,22 @@ class TestTheWorkspaceAggregate:
             )
         ]
 
-
-class TestTheRecordsScanCounts:
-    def test_a_record_of_one_scan_serializes_as_before(self):
-        """The counts are written only for merged scans that disagreed."""
-        assert set(HONORED.model_dump()) == {
-            "honored",
-            "excluded_file_count",
-            "by_ignore_file",
-            "output_dir_file_count",
-        }
-
-    def test_a_mixed_record_keeps_its_counts_through_json(self):
-        record = IgnoreFileExclusions(
-            honored=False,
-            excluded_file_count=2,
-            by_ignore_file={".gitignore": 2},
-            honored_scan_count=1,
-            scan_count=2,
-        )
-
-        stored = IgnoreFileExclusions.model_validate_json(record.model_dump_json())
-
-        assert stored == record
-        assert stored.summary_text().startswith("honored by 1 of 2 merged scans")
-
     @pytest.mark.parametrize(
-        "honored_scan_count, scan_count",
-        [(2, 2), (0, 2), (1, None), (None, 2), (3, 2)],
+        "second, counts",
+        [("mixed", (2, 4)), ("honored", (2, 3)), ("not-honored", (1, 3))],
     )
-    def test_counts_that_do_not_describe_a_disagreement_are_dropped(
-        self, honored_scan_count, scan_count
+    def test_projects_whose_records_are_already_merged_keep_their_counts(
+        self, second, counts
     ):
-        record = IgnoreFileExclusions(
-            honored=False,
-            honored_scan_count=honored_scan_count,
-            scan_count=scan_count,
+        """A record merged from 1 of 2 honoring scans counts as two scans, not one."""
+        other = {"mixed": MIXED, "honored": HONORED, "not-honored": NOT_HONORED}[second]
+
+        aggregate = workspace_ignore_file_exclusions(
+            [_outcome("api", "api", MIXED), _outcome("web", "web", other)]
         )
 
-        assert record.honored_scan_count is None and record.scan_count is None
-        assert record.summary_text().startswith("not honored for this scan")
+        assert aggregate["honored"] is False
+        assert (aggregate["honored_scan_count"], aggregate["scan_count"]) == counts
 
     def test_the_merged_results_file_carries_it(self, tmp_path):
         plan = WorkspacePlan(
@@ -369,6 +353,85 @@ class TestTheRecordsScanCounts:
         assert merged is not None and merged.excluded_file_count == 7
         assert merged.by_ignore_file["api/.gitignore"] == 3
         assert model.workspace.projects[0].ignore_file_exclusions == HONORED
+
+
+#: Begins every sentence for a record whose counts and honored contradict each other.
+INCONSISTENT = "recorded inconsistently"
+
+
+class TestTheRecordsScanCounts:
+    def test_a_record_of_one_scan_serializes_as_before(self):
+        """The counts are written only for merged scans that disagreed."""
+        assert set(HONORED.model_dump()) == {
+            "honored",
+            "excluded_file_count",
+            "by_ignore_file",
+            "output_dir_file_count",
+        }
+        assert "scan_count" not in json.loads(HONORED.model_dump_json())
+
+    def test_a_mixed_record_keeps_its_counts_through_json(self):
+        stored = IgnoreFileExclusions.model_validate_json(MIXED.model_dump_json())
+
+        assert stored == MIXED
+        assert stored.summary_text().startswith("honored by 1 of 2 merged scans")
+
+    def test_the_serialization_schema_still_describes_the_record(self):
+        """No custom serializer: the schema of what is written lists every field."""
+        schema = IgnoreFileExclusions.model_json_schema(mode="serialization")
+
+        assert {"honored", "honored_scan_count", "scan_count"} <= set(
+            schema["properties"]
+        )
+
+    @pytest.mark.parametrize(
+        "honored, honored_scan_count, scan_count, starts",
+        [
+            (True, 2, 2, "the scanned repository's .gitignore"),
+            (False, 0, 2, "not honored for this scan"),
+        ],
+        ids=["every-scan", "no-scan"],
+    )
+    def test_counts_that_agree_with_honored_are_dropped(
+        self, honored, honored_scan_count, scan_count, starts
+    ):
+        record = IgnoreFileExclusions(
+            honored=honored,
+            honored_scan_count=honored_scan_count,
+            scan_count=scan_count,
+        )
+
+        assert record.honored_scan_count is None and record.scan_count is None
+        assert record.summary_text().startswith(starts)
+
+    @pytest.mark.parametrize(
+        "honored, honored_scan_count, scan_count",
+        [
+            (False, 2, 2),
+            (True, 0, 2),
+            (True, 1, 2),
+            (False, 1, None),
+            (False, None, 2),
+            (False, 3, 2),
+            (False, 0, 0),
+        ],
+    )
+    def test_counts_that_contradict_the_record_give_a_neutral_sentence(
+        self, honored, honored_scan_count, scan_count
+    ):
+        """Neither "excluded no files" nor a count of honoring scans can be trusted."""
+        record = IgnoreFileExclusions(
+            honored=honored,
+            excluded_file_count=2,
+            honored_scan_count=honored_scan_count,
+            scan_count=scan_count,
+        )
+
+        text = record.summary_text()
+
+        assert text.startswith(INCONSISTENT), text
+        assert "excluded 2 files from ASH's scan sets" in text
+        assert "excluded no files" not in text and "named by the caller" not in text
 
 
 # --------------------------------------------------------------------------- whole runs

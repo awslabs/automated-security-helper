@@ -250,7 +250,10 @@ from automated_security_helper.models.asharp_model import (
     InputNotScanned,
     RefusedInputInfo,
 )
-from automated_security_helper.models.core import IgnoreFileExclusions
+from automated_security_helper.models.core import (
+    IgnoreFileExclusions,
+    merged_honoring,
+)
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import (
     PluginModuleError,
@@ -1116,25 +1119,16 @@ def _merge_scan_set_records(
     for record in records:
         for path, count in record.by_ignore_file.items():
             by_ignore_file[path] = max(by_ignore_file.get(path, 0), count)
-    honored_count = sum(1 for record in records if record.honored)
     merged.metadata.ignore_file_exclusions = IgnoreFileExclusions(
-        honored=honored_count == len(records),
         excluded_file_count=max(
             sum(by_ignore_file.values()),
             max(record.excluded_file_count for record in records),
         ),
         by_ignore_file=by_ignore_file,
         output_dir_file_count=max(record.output_dir_file_count for record in records),
-        # Set only when the shards disagree; see IgnoreFileExclusions.
-        **_disagreement_counts(honored_count, len(records)),
+        # honored, and the scan counts when the shards disagree.
+        **merged_honoring(records),
     )
-
-
-def _disagreement_counts(honored_count: int, total: int) -> Dict[str, int]:
-    """``honored_scan_count`` and ``scan_count`` when some, not all, honored."""
-    if 0 < honored_count < total:
-        return {"honored_scan_count": honored_count, "scan_count": total}
-    return {}
 
 
 def _merge_converter_rows(

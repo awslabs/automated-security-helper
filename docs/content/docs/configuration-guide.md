@@ -472,7 +472,11 @@ shards, honored the ignore files and some did not), the record also carries
 `honored_scan_count` and `scan_count`, `honored` is false, and the summaries say,
 for example, `honored by 1 of 2 merged scans and not by the other 1
 (honor_ignore_files: false); the ignore files that were applied excluded 7 files from
-ASH's scan sets`. The log names every ignore file and its count at INFO level, and
+ASH's scan sets`. A project or shard that recorded no ignore-file record (it built no
+scan set, or an older ASH wrote its results) is not counted in `scan_count`. A record
+whose counts contradict each other or `honored` prints `recorded inconsistently`
+instead of either sentence. The log names every ignore file and its count at INFO
+level, and
 `ash-ignore-report.txt` in the output directory holds the rules that were applied.
 
 ### Global Settings
