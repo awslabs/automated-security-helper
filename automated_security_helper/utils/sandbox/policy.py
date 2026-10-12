@@ -683,8 +683,13 @@ def _shebang_interpreter(script: Path) -> Optional[Path]:
     return Path(program) if os.path.isabs(program) else None
 
 
-def _ash_paths() -> List[Path]:
-    """ASH's own package (rule packs and configs it passes to scanners) and Python."""
+def _ash_paths() -> Tuple[List[Path], List[Path]]:
+    """ASH's own package (rule packs and configs it passes to scanners) and Python.
+
+    Returns every path to mount, and the sys.path entries among them that are only
+    import entries (not an interpreter directory or a link directory of it), which
+    the caller keeps from being executable where they are the scan's data.
+    """
     from automated_security_helper.utils.subprocess_utils import _bin_path
 
     package_dir = Path(__file__).resolve().parents[2]
@@ -744,15 +749,22 @@ def _ash_paths() -> List[Path]:
     _refuse_a_home_among(
         interpreter_dirs, link_dirs, bin_path, homes, interpreter_roots
     )
-    return _existing(
-        [
-            package_dir,
-            import_root,
-            *import_path,
-            *interpreter_dirs,
-            *link_dirs,
-            bin_path,
-        ]
+    interpreter_real = {os.path.realpath(p) for p in [*interpreter_dirs, *link_dirs]}
+    import_only = [
+        p for p in import_path if os.path.realpath(p) not in interpreter_real
+    ]
+    return (
+        _existing(
+            [
+                package_dir,
+                import_root,
+                *import_path,
+                *interpreter_dirs,
+                *link_dirs,
+                bin_path,
+            ]
+        ),
+        _existing(import_only),
     )
 
 
@@ -1051,11 +1063,12 @@ def build_scanner_policy(
         _existing([source_dir, output_dir]) if requirements.staged_input_only else []
     )
     scan_tree = [] if requirements.staged_input_only else [source_dir, output_dir]
+    ash_paths, ash_import_entries = _ash_paths()
     read_only = _existing(
         [Path(p) for p in SYSTEM_READ_PATHS]
         + _path_directories([source_dir, output_dir])
         + _uv_directories()
-        + _ash_paths()
+        + ash_paths
         + _executable_prefix(argv0)
         + [path for program in also_runs for path in _executable_prefix(program)]
         + [_expand(p) for p in declared_read]
@@ -1100,7 +1113,20 @@ def build_scanner_policy(
             tool_config_dir,
         ]
     )
-    not_programs = {os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS]}
+    # An import entry of ASH's interpreter inside the scanned tree or the output
+    # directory (PYTHONPATH=src) is the repository's to write and is read as Python
+    # source, not run from: readable, and never executable, like the tree. ASH's
+    # interpreter and link directories stay executable wherever they are.
+    from automated_security_helper.utils.scanned_tree import is_inside_tree
+
+    in_tree_imports = [
+        entry
+        for entry in ash_import_entries
+        if any(is_inside_tree(entry, tree) for tree in (source_dir, output_dir))
+    ]
+    not_programs = {
+        os.path.realpath(p) for p in [*scan_data, *_DATA_SYSTEM_PATHS, *in_tree_imports]
+    }
     executable = [p for p in read_only if os.path.realpath(p) not in not_programs]
 
     extra_env: Dict[str, str] = {}

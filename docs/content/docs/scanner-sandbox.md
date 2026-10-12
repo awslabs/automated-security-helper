@@ -108,7 +108,9 @@ it needs.
   that limits where programs run from, it cannot run programs from it either.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
   are read-only. A `PATH` entry inside the scanned tree or the output directory is
-  not a tool directory; the tree is mounted only as the scan's data. Inside `$HOME`
+  not a tool directory; the tree is mounted only as the scan's data. The same goes
+  for an entry of ASH's own `sys.path` there (`PYTHONPATH=src`): it stays readable
+  for the imports, and nothing is run from it. Inside `$HOME`
   only `PATH` entries that are `bin`, `sbin` or `Scripts` directories are mounted,
   and a tool's install prefix only when it is deeper than a directory directly
   under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). A directory counts

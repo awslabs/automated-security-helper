@@ -1978,6 +1978,37 @@ class TestSandboxExecProfile:
             assert _as_argv(directory) not in allowed, directory
             assert _as_argv(directory) not in document["read_only"], directory
 
+    def test_an_import_entry_inside_the_scanned_tree_is_readable_and_not_executable(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """PYTHONPATH=src: ASH's sys.path names a directory of the repository.
+
+        Workers started with ASH's interpreter import from it, so it stays readable,
+        but it is the scan's data: no exec grant gives it back after sandbox-exec
+        denies running anything from the tree. An import entry outside the tree
+        stays executable, which shows the entry was read.
+        """
+        in_tree = layout.source / "src"
+        outside = tmp_path / "site" / "packages"
+        for directory in (in_tree, outside):
+            directory.mkdir(parents=True)
+        monkeypatch.setattr(sys, "path", [str(in_tree), str(outside), *sys.path])
+
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+
+        real = Path(os.path.realpath(in_tree))
+        assert real in _resolved(policy.read_only)
+        assert real not in _resolved(policy.executable)
+        assert _as_argv(in_tree) not in allowed
+        assert Path(os.path.realpath(outside)) in _resolved(policy.executable)
+
     def test_a_path_entry_in_an_output_directory_outside_the_source_is_no_exec_grant(
         self, layout, monkeypatch, tmp_path
     ):
