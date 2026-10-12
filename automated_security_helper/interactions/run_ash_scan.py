@@ -1580,6 +1580,12 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
             source_dir=opts.source_dir,
             config_overrides=list(opts.config_overrides or []),
             permit_base=opts.config_base_gate,
+            # As the scan resolves it (core/orchestrator.py), so a client's
+            # file cannot turn the sandbox off here and the session's own
+            # profile is read under the session's rules.
+            trusted_config_path=opts.trusted_config_path,
+            untrusted_config=opts.untrusted_config,
+            client_config_policy=opts.client_config_policy,
             remote_client=opts.remote_client,
         )
         if SandboxMode(config.sandbox.mode) == SandboxMode.off:

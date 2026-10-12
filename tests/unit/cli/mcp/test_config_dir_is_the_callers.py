@@ -279,3 +279,71 @@ def test_the_workspace_knobs_reader_judges_the_config_for_the_caller(
     )
 
     assert _resolve_workspace_execution_config(opts).max_parallel_projects == 3
+
+
+# ---------------------------------------------------------------------------
+# The symlinked-output check resolves the config as the scan does
+# ---------------------------------------------------------------------------
+
+
+def _linked_output(target: Path) -> Path:
+    real = target.parent / "real-out"
+    real.mkdir()
+    link = target.parent / "out"
+    link.symlink_to(real, target_is_directory=True)
+    return link
+
+
+def test_the_output_check_reads_the_callers_own_profile(own, target) -> None:
+    """The profile leaves the sandbox off, so a linked output directory is allowed."""
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _refuse_symlinked_output_dir,
+    )
+
+    opts = ScanOptions(
+        source_dir=target,
+        output_dir=_linked_output(target),
+        config=str(own),
+        remote_client=True,
+        client_config_policy=session_client_rules(MINE),
+        config_base_gate=config_base_gate(MINE),
+    )
+
+    _refuse_symlinked_output_dir(opts)
+
+
+def test_the_output_check_holds_a_client_named_config_to_the_trusted_mode(
+    _server: Path, target: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A config the client named cannot turn off the sandbox the operator turned on."""
+    from automated_security_helper.cli.mcp.sandbox import config_base_gate
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanOptions,
+        _refuse_symlinked_output_dir,
+    )
+
+    operator = _server.parent / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text("sandbox:\n  mode: bwrap\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    # Neither in the scanned tree nor delivered: only untrusted_config makes it
+    # the client's.
+    named = _server.parent / "elsewhere" / "client.yaml"
+    named.parent.mkdir()
+    named.write_text("sandbox:\n  mode: 'off'\n", encoding="utf-8")
+    opts = ScanOptions(
+        source_dir=target,
+        output_dir=_linked_output(target),
+        config=str(named),
+        untrusted_config=True,
+        remote_client=True,
+        client_config_policy=session_client_rules(MINE),
+        config_base_gate=config_base_gate(MINE),
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        _refuse_symlinked_output_dir(opts)
+
+    assert exited.value.code == 1
