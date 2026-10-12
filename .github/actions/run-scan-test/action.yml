@@ -28,6 +28,35 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # The steps below print os, method and config-file. The runner reads a line of a
+    # step's output as a workflow command when it starts with `::` or holds `##[`, and it
+    # starts a new line at a carriage return as well as a line feed, so an input holding
+    # either break, or `##[`, is refused here first, by name and without printing it.
+    # snyk-token is a secret and never printed.
+    - name: Refuse an input that could start a workflow command
+      shell: bash
+      env:
+        IN_METHOD: ${{ inputs.method }}
+        IN_OS: ${{ inputs.os }}
+        IN_CONFIG_FILE: ${{ inputs.config-file }}
+        IN_OCI_RUNNER: ${{ inputs.oci-runner }}
+        IN_OFFLINE: ${{ inputs.offline }}
+      run: |
+        set -euo pipefail
+        refuse_command_text() {
+          case "$2" in
+            *[[:cntrl:]]* | *'##['*)
+              echo "::error::the $1 input holds a line break, another control character or the legacy command marker, so it is refused without being printed."
+              exit 1
+              ;;
+          esac
+        }
+        refuse_command_text method "${IN_METHOD}"
+        refuse_command_text os "${IN_OS}"
+        refuse_command_text config-file "${IN_CONFIG_FILE}"
+        refuse_command_text oci-runner "${IN_OCI_RUNNER}"
+        refuse_command_text offline "${IN_OFFLINE}"
+
     # WHY THE PLATFORM STRING IS DERIVED HERE RATHER THAN PASSED IN
     #
     # This used to be a `platform` input, set from a `platform:` key on all 24 rows of

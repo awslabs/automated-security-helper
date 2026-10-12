@@ -232,12 +232,15 @@ env:
   # installed from, so the gem version can never disagree with the ASH that
   # invokes it, and the scanned checkout never picks it.
   #
-  # Both of these name ash-version as given. The job's first step replaces them,
+  # Both of these name ash-version as given. The job's pin step replaces them,
   # through GITHUB_ENV, with the commit that name resolved to when the job
   # started; see "Pin the ASH ref to a commit". Neither may be set again in a
   # step's own `env:`, which would win over that.
   ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
-  ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
+  # No ASH_OUTPUT_DIR here. The steps that use it map it from the input check's
+  # output_dir (see "Refuse an input that could start a workflow command"), so they
+  # use the value that was checked, not the input as given.
+  #
   # No ASH_CONFIG here. The Run ASH and Show ASH Summary Report steps set it to the
   # config the scan uses (from config-ref, or the `config` input), and no other
   # step should see a config path at all.
@@ -251,6 +254,9 @@ jobs:
       # Empty when nothing was uploaded; the report job and the caller's SARIF job
       # start only when it is set.
       artifact-id: ${{ steps.ash-output.outputs.artifact-id }}
+      # The checked values the report job uses, so it reads no input as given.
+      output-dir: ${{ steps.inputs.outputs.output_dir }}
+      repository-owner: ${{ steps.inputs.outputs.repository_owner }}
     # Read only. This job runs ASH, the scanners and whatever ASH loads, so it holds
     # no token that can write; the reporting steps are in the `report` job below.
     permissions:
@@ -289,8 +295,77 @@ jobs:
       # Only when the caller asks (skip-unknown-tools) and reads its config from a
       # commit (config-ref). Every other caller keeps the refusal, so a tool name it
       # mistypes fails its install instead of resolving MISSING later.
+      #
+      # Job-level env cannot read a step's outputs, so this reads config-ref as
+      # given, and only whether it is empty. The input check refuses a config-ref
+      # that is only a line feed, so that answer is the same for the checked value.
       ASH_DEPENDENCIES_UNKNOWN_TOOLS: ${{ (inputs.skip-unknown-tools && inputs.config-ref != '') && 'skip' || '' }}
     steps:
+      # NO STRING INPUT REACHES THE LOG BEFORE THIS STEP HAS CHECKED IT
+      #
+      # The runner reads each line of a step's stdout and stderr, and treats a line
+      # as a workflow command when it starts with `::` or holds `##[` anywhere. It
+      # ends a line at a carriage return as well as at a line feed. So an input
+      # holding a line break, or `##[`, would add a command of the caller's choosing
+      # (a warning, a mask, a stop-commands token) to any line that shows it: this
+      # workflow's own messages, git's and ASH's errors, and the actions that log
+      # their inputs. Every string input is checked here, before any other step
+      # runs, and a refusal names the input without printing it.
+      #
+      # One trailing line feed is dropped first: a YAML block scalar (`ash-args: |`)
+      # always ends in one, and nothing can follow it. Anything else is refused: a
+      # carriage return, a line feed with anything after it (so ash-args of more than
+      # one line, which Run ASH would cut to its first), two trailing line feeds,
+      # `##[`, and a value that is only a line feed (so job-level env, which reads
+      # config-ref as given, agrees with the checked value on whether it is empty).
+      #
+      # The checked value is written as this step's output, named like the input with
+      # `_` for `-` (steps.inputs.outputs.config_ref), and every later step reads that,
+      # never the input as given. The report job reads output-dir and
+      # repository-owner through this job's outputs. ash-version and ash-repo also
+      # reach ASH_UVX_SOURCE and ASH_ASSETS_URL above as given, because workflow env
+      # cannot read a step's output; the pin step replaces both from the checked
+      # values before any step uses them.
+      #
+      # One INPUT_<NAME> variable per string input; a new string input gets a line
+      # here, and the refusal names it by its input name (INPUT_CONFIG_REF is
+      # config-ref).
+      - name: Refuse an input that could start a workflow command
+        id: inputs
+        env:
+          INPUT_ASH_VERSION: ${{ inputs.ash-version }}
+          INPUT_ASH_REPO: ${{ inputs.ash-repo }}
+          INPUT_ASH_MODE: ${{ inputs.ash-mode }}
+          INPUT_CONFIG: ${{ inputs.config }}
+          INPUT_CONFIG_REF: ${{ inputs.config-ref }}
+          INPUT_CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
+          INPUT_OUTPUT_DIR: ${{ inputs.output-dir }}
+          INPUT_ASH_ARGS: ${{ inputs.ash-args }}
+          INPUT_REPOSITORY_OWNER: ${{ inputs.repository-owner }}
+          INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
+          INPUT_BASE_REF: ${{ inputs.base-ref }}
+        run: |
+          set -euo pipefail
+          for var in "${!INPUT_@}"; do
+            given="${!var}"
+            value="${given%$'\n'}"
+            name="${var#INPUT_}"
+            name="${name,,}"
+            case "${value}" in
+              *[[:cntrl:]]* | *'##['*)
+                echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
+                exit 1
+                ;;
+            esac
+            if [ -z "${value}" ] && [ -n "${given}" ]; then
+              echo "::error::the ${name//_/-} input is only a line feed; leave it empty instead."
+              exit 1
+            fi
+            # name=value is safe: the value holds no line feed now.
+            echo "${name}=${value}" >> "${GITHUB_OUTPUT}"
+          done
+          echo "No string input holds a line break, another control character or the legacy command marker."
+
       # THE ASH REF IS RESOLVED TO ONE COMMIT, ONCE, BEFORE ANYTHING INSTALLS ASH
       #
       # ash-version may be a branch or a tag (refs/heads/main in the merge queue,
@@ -307,16 +382,19 @@ jobs:
       - name: Pin the ASH ref to a commit
         id: ash-pin
         env:
-          ASH_REPO: ${{ inputs.ash-repo }}
-          ASH_VERSION: ${{ inputs.ash-version }}
+          ASH_REPO: ${{ steps.inputs.outputs.ash_repo }}
+          ASH_VERSION: ${{ steps.inputs.outputs.ash_version }}
         run: |
           set -euo pipefail
+          # Neither refusal prints the value, so this step prints nothing it has not
+          # checked even when it runs without the input check. The messages after
+          # these two checks may print it.
           if [[ ! "${ASH_REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-            echo "::error::ash-repo must be owner/name, not '${ASH_REPO}'."
+            echo "::error::ash-repo must be owner/name: letters, digits, '.', '_' and '-', one '/' between them."
             exit 1
           fi
           if [[ -z "${ASH_VERSION}" || "${ASH_VERSION}" == -* || "${ASH_VERSION}" =~ [[:space:][:cntrl:]] ]]; then
-            echo "::error::ash-version '${ASH_VERSION}' is not a branch, tag or commit name."
+            echo "::error::ash-version is not a branch, tag or commit name: it is empty, starts with '-', or holds a space or a control character."
             exit 1
           fi
           if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
@@ -390,13 +468,13 @@ jobs:
       # after Set up Python. A config that `extends` another file fails to load here.
       - name: Read the ASH config from config-ref
         id: config-ref
-        if: inputs.config-ref != ''
+        if: steps.inputs.outputs.config_ref != ''
         env:
-          CONFIG_REF: ${{ inputs.config-ref }}
-          CONFIG_PATH: ${{ inputs.config }}
-          CONFIG_REF_MISSING: ${{ inputs.config-ref-missing }}
-          ASH_VERSION: ${{ inputs.ash-version }}
-          ASH_REPO: ${{ inputs.ash-repo }}
+          CONFIG_REF: ${{ steps.inputs.outputs.config_ref }}
+          CONFIG_PATH: ${{ steps.inputs.outputs.config }}
+          CONFIG_REF_MISSING: ${{ steps.inputs.outputs.config_ref_missing }}
+          ASH_VERSION: ${{ steps.inputs.outputs.ash_version }}
+          ASH_REPO: ${{ steps.inputs.outputs.ash_repo }}
           SCANNED_REPO: ${{ github.repository }}
           ASH_COMMIT: ${{ steps.ash-pin.outputs.commit }}
         run: |
@@ -408,6 +486,14 @@ jobs:
               exit 1
               ;;
           esac
+          # git fetch reads a refspec that starts with '-' as an option, wherever it
+          # sits on the command line, and runs the command `--upload-pack=` names for
+          # a local or ssh remote. No branch, tag or commit name starts with '-' or
+          # holds a space, so such a value is refused before git sees it.
+          if [[ "${CONFIG_REF}" == -* || "${CONFIG_REF}" =~ [[:space:][:cntrl:]] ]]; then
+            echo "::error::config-ref is not a branch, tag or commit name: it starts with '-', or holds a space or a control character."
+            exit 1
+          fi
           if [ -z "${CONFIG_PATH}" ]; then
             echo "::error::config-ref is set but config is empty. Name the config file to read from ${CONFIG_REF}, for example 'config: .ash/.ash.yaml'."
             exit 1
@@ -426,7 +512,7 @@ jobs:
           rm -rf "${DEST_ROOT}"
           mkdir -p "$(dirname "${DEST}")"
           # When config-ref names the same ref of the same repository as ash-version,
-          # as in the merge queue, read the commit the first step pinned ASH to, so
+          # as in the merge queue, read the commit the pin step pinned ASH to, so
           # a merge landing in between cannot pair one commit's ASH with another's
           # config.
           FETCH="${CONFIG_REF}"
@@ -507,7 +593,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ inputs.python-version }}
+          python-version: ${{ steps.inputs.outputs.python_version }}
 
       # THE TOOL CONFIG FILES THAT CONFIG NAMES COME FROM CONFIG-REF TOO
       #
@@ -541,11 +627,11 @@ jobs:
       # `${...}` in YAML, any string in JSON) is written quoted.
       - name: Read the tool config files the config names from config-ref
         id: config-ref-files
-        if: inputs.config-ref != ''
+        if: steps.inputs.outputs.config_ref != ''
         env:
           CONFIG_FILE: ${{ steps.config-ref.outputs.path }}
           CONFIG_COMMIT: ${{ steps.config-ref.outputs.commit }}
-          CONFIG_REF: ${{ inputs.config-ref }}
+          CONFIG_REF: ${{ steps.inputs.outputs.config_ref }}
           DEST_ROOT: ${{ runner.temp }}/ash-config-ref
         run: |
           set -euo pipefail
@@ -1224,9 +1310,10 @@ jobs:
           # The config read from config-ref when the caller set one, else the
           # `config` input as before. Set here as well as passed as --config, so
           # every part of ASH that reads ASH_CONFIG sees the same file.
-          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || inputs.config }}
-          ASH_MODE: ${{ inputs.ash-mode }}
-          ASH_ARGS: ${{ inputs.ash-args }}
+          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
+          ASH_MODE: ${{ steps.inputs.outputs.ash_mode }}
+          ASH_ARGS: ${{ steps.inputs.outputs.ash_args }}
+          ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
           # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
           # mismatched operands to a number before comparing: a Boolean becomes 1
           # or 0, and a string is parsed as a JSON number or else becomes NaN. So
@@ -1250,7 +1337,7 @@ jobs:
           # so no `--no-verbose` exists and absence is how false is expressed.
           VERBOSE: ${{ inputs.verbose && '--verbose' || '' }}
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only == true && '--changed-files-only' || '' }}
-          BASE_REF: ${{ inputs.base-ref }}
+          BASE_REF: ${{ steps.inputs.outputs.base_ref }}
         run: |-
           # ${ASH_ARGS} is last so a flag the caller passes explicitly wins.
           # `click` resolves a boolean flag pair last-occurrence-wins, and while
@@ -1336,15 +1423,19 @@ jobs:
       # Not after a failed config-ref step: with no path from them, the expression
       # below would fall back to the checkout's config, which config-ref exists to
       # avoid.
+      #
+      # Only after the pin step succeeded: before it, ASH_UVX_SOURCE still holds
+      # ash-repo and ash-version as given, and uvx would print them in its errors.
       - name: Show ASH Summary Report
-        if: (success() || failure()) && steps.config-ref.outcome != 'failure' && steps.config-ref-files.outcome != 'failure'
+        if: (success() || failure()) && steps.ash-pin.outcome == 'success' && steps.config-ref.outcome != 'failure' && steps.config-ref-files.outcome != 'failure'
         shell: bash
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
           # The same config the scan used. `ash report` resolves a config too, and
           # loads the plugin modules it names, so without this it would discover the
           # checkout's.
-          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || inputs.config }}
+          ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
+          ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
           # No --reinstall here. The Run ASH step above already installed this exact
           # source, so re-forcing a download makes the report step do a second git
@@ -1355,8 +1446,10 @@ jobs:
             --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
 
       - name: Update step summary
-        if: success() || failure()
+        if: (success() || failure()) && steps.inputs.outcome == 'success'
         shell: bash
+        env:
+          ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
           tree "${ASH_OUTPUT_DIR}"
@@ -1371,14 +1464,14 @@ jobs:
       - name: Collect ASH output artifact
         id: ash-output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: success() || failure()
+        if: (success() || failure()) && steps.inputs.outcome == 'success'
         with:
           name: ash_output
           path: |
-            ${{ inputs.output-dir }}/reports
-            ${{ inputs.output-dir }}/ash_aggregated_results.json
-            ${{ inputs.output-dir }}/projects/*/reports
-            ${{ inputs.output-dir }}/projects/*/ash_aggregated_results.json
+            ${{ steps.inputs.outputs.output_dir }}/reports
+            ${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json
+            ${{ steps.inputs.outputs.output_dir }}/projects/*/reports
+            ${{ steps.inputs.outputs.output_dir }}/projects/*/ash_aggregated_results.json
           retention-days: 7
           if-no-files-found: error
 
@@ -1424,13 +1517,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # Into the same path the scan wrote, so every `inputs.output-dir` path below
-      # reads the file it always read.
+      # Into the same path the scan wrote, so every output-dir path below reads the
+      # file it always read. That path is the scan job's checked output-dir, not the
+      # input as given.
       - name: Download ASH output artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ash_output
-          path: ${{ inputs.output-dir }}
+          path: ${{ needs.ash.outputs.output-dir }}
 
       # GITHUB_TOKEN is read-only for pull requests opened from a fork, whatever
       # `permissions:` the caller declares -- GitHub downgrades it so untrusted
@@ -1443,7 +1537,7 @@ jobs:
       #   https://docs.github.com/rest/issues/comments#create-an-issue-comment
       #
       # That made every external contributor's PR unmergeable for a cosmetic
-      # reason. The existing `github.repository_owner == inputs.repository-owner`
+      # reason. The existing `github.repository_owner == <repository-owner>`
       # guard does not catch it: for a fork PR *into* this repo the owner is
       # still the base repo's owner, so the guard passes.
       #
@@ -1454,12 +1548,12 @@ jobs:
         uses: mshick/add-pr-comment@ec328af66588ab8f77cdeb2c264f14aba45bbf59 # v3.12.0
         if: >-
           inputs.post-pr-comment
-          && github.repository_owner == inputs.repository-owner
+          && github.repository_owner == needs.ash.outputs.repository-owner
           && (github.event_name != 'pull_request'
               || github.event.pull_request.head.repo.full_name == github.repository)
           && (success() || failure())
         with:
-          message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
+          message-path: ${{ needs.ash.outputs.output-dir }}/reports/ash.summary.md
 
       # Say so rather than leaving a contributor wondering why the bot went
       # quiet. The junit publish step below is skipped on the same condition and
@@ -1528,7 +1622,7 @@ jobs:
           # The explicit form also honors a caller that overrides output-dir, which
           # the glob only ever did by accident, and it matches how the PR comment and
           # SARIF upload in this same job already address their own report files.
-          report_paths: ${{ inputs.output-dir }}/reports/ash.junit.xml
+          report_paths: ${{ needs.ash.outputs.output-dir }}/reports/ash.junit.xml
           include_passed: true
           check_name: ASH Scan JUnit Test Report
           summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
@@ -1563,6 +1657,6 @@ jobs:
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
-          sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif
+          sarif_file: ${{ needs.ash.outputs.output-dir }}/reports/ash.ghas.sarif
           wait-for-processing: true
           category: ash

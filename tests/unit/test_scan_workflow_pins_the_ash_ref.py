@@ -10,14 +10,15 @@ Why this file exists
 name again, so a merge that landed while the job ran could give one step one ASH and
 the next step another, or install one ASH and the cfn-nag Gemfile of another.
 
-The job's first step now resolves ``ash-version`` in ``ash-repo`` to a commit with
-``git ls-remote`` and writes ``ASH_UVX_SOURCE`` and ``ASH_ASSETS_URL`` with that commit
-to ``GITHUB_ENV``, which the runner applies over the workflow-level values for every
-later step.
+The job's first step after the input check now resolves ``ash-version`` in
+``ash-repo`` to a commit with ``git ls-remote`` and writes ``ASH_UVX_SOURCE`` and
+``ASH_ASSETS_URL`` with that commit to ``GITHUB_ENV``, which the runner applies over
+the workflow-level values for every later step.
 
 What this asserts
 -----------------
-1. The pinning step is the job's first step, and for a branch name, a full branch ref,
+1. The pinning step is the job's first step after the input check, which only reads
+   its environment, and for a branch name, a full branch ref,
    an annotated tag and a lightweight tag it writes the commit the ref points at (the
    tag's commit, not the tag object) into both variables.
 2. Every later step that installs ASH or fetches the cfn-nag Gemfile uses that commit,
@@ -183,11 +184,25 @@ def _source_ref(value: str) -> str:
 
 
 class TestTheAshRefIsResolvedOnce:
-    def test_the_pin_is_the_jobs_first_step(self):
+    def test_the_pin_follows_only_the_input_check(self):
+        # The input check (test_an_input_cannot_add_a_workflow_command.py) runs
+        # first, so nothing prints an input before it is checked. It runs no tool and
+        # writes only its own outputs, so the pin is still the first step that
+        # resolves or installs anything.
         _, job = _workflow_and_job()
-        assert (job.get("steps") or [])[0] is _pin_step() or (
-            (job.get("steps") or [])[0].get("name") == _pin_step().get("name")
-        ), "the step that pins the ASH ref is not the job's first step"
+        steps = job.get("steps") or []
+        names = [step.get("name") for step in steps]
+        index = names.index(_pin_step().get("name"))
+        assert names[:index] == [
+            "Refuse an input that could start a workflow command"
+        ], f"the steps before the one that pins the ASH ref: {names[:index]}"
+        check = steps[0]
+        assert "uses" not in check, check
+        script = str(check.get("run") or "")
+        for word in ("git ", "uv ", "uvx ", "curl ", "GITHUB_ENV", "GITHUB_PATH"):
+            assert word not in script, (
+                f"the input check runs or writes {word.strip()!r}"
+            )
 
     @pytest.mark.parametrize(
         "ash_version,expected",
@@ -248,6 +263,28 @@ class TestTheAshRefIsResolvedOnce:
             f"{wrong}"
         )
 
+    @pytest.mark.parametrize("ash_version", ["main", "main\n"], ids=["plain", "block"])
+    def test_a_one_line_block_scalar_pins_like_the_plain_value(
+        self, tmp_path, ash_version
+    ):
+        # Through the real input check: its output is what the pin step reads.
+        repo = AshRepository(tmp_path / "ash")
+        workflow, job = _workflow_and_job()
+        (check,) = [s for s in job["steps"] if s.get("id") == ga.INPUT_CHECK_STEP_ID]
+        check_sandbox = ga.StepSandbox(tmp_path / "check")
+        checked = ga.run_step(
+            check_sandbox, workflow, job, check, _context(ash_version)
+        )
+        assert checked.proc.returncode == 0, checked.describe()
+        context = _context(ash_version)
+        context["steps"] = {
+            **context["steps"],
+            ga.INPUT_CHECK_STEP_ID: {"outputs": ga.read_github_output(check_sandbox)},
+        }
+        sandbox, run = _run_pin(tmp_path, repo, context)
+        assert run.proc.returncode == 0, run.describe()
+        assert _source_ref(ga.read_github_env(sandbox)["ASH_UVX_SOURCE"]) == repo.second
+
     def test_a_full_commit_id_is_used_without_contacting_the_repository(self, tmp_path):
         repo = AshRepository(tmp_path / "ash")
         commit = "0123456789abcdef0123456789abcdef01234567"
@@ -285,4 +322,32 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
         sandbox, run = _run_pin(tmp_path, repo, _context("main", ash_repo=ash_repo))
         assert run.proc.returncode != 0, run.describe()
         assert "::error::" in run.proc.stdout, run.describe()
+        assert ga.read_github_env(sandbox) == {}
+
+
+class TestARefusalPrintsOneErrorLineAndNotTheValue:
+    """The runner starts a new line at a line feed or a carriage return, and reads a
+    line that starts with `::` as a workflow command. Both refusals printed the value
+    they refused, so `ash-repo: "a/b\\n::warning::EXTRA"` issued a warning of the
+    caller's choosing. They must print one `::error::` line that does not hold it.
+
+    The pin step reads the input check's outputs; ga.with_inputs supplies those as the
+    check would write them, so this runs the pin step's own refusals."""
+
+    @pytest.mark.parametrize("brk", ["\n", "\r"], ids=["line feed", "carriage return"])
+    @pytest.mark.parametrize("which", ["ash-repo", "ash-version"])
+    def test_no_second_workflow_command_line_appears(self, tmp_path, which, brk):
+        repo = AshRepository(tmp_path / "ash")
+        if which == "ash-repo":
+            context = _context("main", ash_repo=f"a/b{brk}::warning::EXTRA")
+        else:
+            context = _context(f"x{brk}::warning::EXTRA")
+        sandbox, run = _run_pin(tmp_path, repo, context)
+        commands = ga.workflow_command_lines(run.proc.stdout, run.proc.stderr)
+        assert run.proc.returncode != 0, run.describe()
+        assert len(commands) == 1 and commands[0].startswith("::error::"), (
+            commands,
+            run.describe(),
+        )
+        assert "EXTRA" not in run.proc.stdout + run.proc.stderr, run.describe()
         assert ga.read_github_env(sandbox) == {}

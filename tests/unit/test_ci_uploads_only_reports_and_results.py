@@ -39,9 +39,15 @@ SOURCES = [
     REPO_ROOT / "README.md",
 ]
 
-# What names ASH's output: its default directories, the workflow input and the
-# tutorials' variable for it.
-_ASH_OUTPUT = re.compile(r"ash_output|\.ash/merged|ASH_OUTPUT|inputs\.output-dir")
+# What names ASH's output: its default directories, the workflow input, the scan
+# workflow's checked copy of it (the input check's output_dir, and the scan job's
+# output-dir output) and the tutorials' variable for it.
+_ASH_OUTPUT = re.compile(
+    r"ash_output|\.ash/merged|ASH_OUTPUT|inputs\.output-dir"
+    r"|outputs\.output_dir|outputs\.output-dir"
+)
+# The scan workflow's upload names the checked output-dir.
+_SCAN_OUTPUT_DIR = "${{ steps.inputs.outputs.output_dir }}"
 # reports/ (or something inside it) and the results file, at the top of the output
 # directory or, for a workspace scan, as exactly projects/*/reports and
 # projects/*/ash_aggregated_results.json.
@@ -215,9 +221,9 @@ def test_the_scan_workflow_uploads_the_per_project_copies_too():
     workflow = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
     values = {value for _, value in _uploads(workflow)}
     for expected in (
-        "${{ inputs.output-dir }}/reports",
-        "${{ inputs.output-dir }}/ash_aggregated_results.json",
-        "${{ inputs.output-dir }}/projects/*/reports",
-        "${{ inputs.output-dir }}/projects/*/ash_aggregated_results.json",
+        f"{_SCAN_OUTPUT_DIR}/reports",
+        f"{_SCAN_OUTPUT_DIR}/ash_aggregated_results.json",
+        f"{_SCAN_OUTPUT_DIR}/projects/*/reports",
+        f"{_SCAN_OUTPUT_DIR}/projects/*/ash_aggregated_results.json",
     ):
         assert expected in values, (expected, sorted(values))

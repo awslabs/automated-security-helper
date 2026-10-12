@@ -1637,6 +1637,27 @@
   excluded scanner is recorded `SKIPPED` rather than `MISSING`, which does not trip
   the completeness gate, and the report then says cdk-nag was not part of the run.
 
+- **The reusable scan workflow refuses a string input that could start a workflow
+  command, and prints no input before checking it.** The runner reads a line of a
+  step's output as a workflow command when it starts with `::` or holds `##[`, and
+  it ends a line at a carriage return as well as at a line feed. The workflow's
+  first two refusals printed the value they refused, so `ash-repo` set to
+  `a/b`, a line feed and `::warning::...` added a warning of the caller's choosing,
+  and other inputs reached git's and ASH's error messages unchecked. The job's
+  first step now fails, naming the input without printing it, when any string
+  input holds a line break, another control character or `##[`. A block scalar of
+  one line (`ash-args: |`, which YAML ends with a line feed) is fine: that one
+  trailing line feed is dropped. More than one line is refused, and that includes
+  `ash-args`, which Run ASH read one line of: a multi-line `ash-args` used to lose
+  every line after the first without a word. Every later step, and the reporting
+  job, uses the checked value rather than the input as given. A `config-ref` that
+  starts with `-` or holds a space is refused before `git fetch` reads it as an
+  option. The `prepull-base-image` and
+  `run-scan-test` actions check their inputs the same way, `prepull-base-image`
+  refuses an `ARG BASE_IMAGE` or `ARG BASE_IMAGE_DIGEST` holding a carriage
+  return, and the pull request title check refuses such a title before printing
+  it.
+
 - **`ash scan` refuses a `--source-dir` that does not exist.** A missing path, from
   `--source-dir` or `ASH_SOURCE_DIR`, used to be scanned anyway: every scanner found
   no files and the run could exit 0, the same answer as a clean scan of the directory

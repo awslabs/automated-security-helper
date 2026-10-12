@@ -338,10 +338,11 @@ def _job() -> tuple[ga.Workflow, dict[str, Any]]:
 
 def _config_ref_steps() -> list[dict[str, Any]]:
     _, job = _job()
+    # Gated on the input check's checked config-ref (steps.inputs.outputs.config_ref).
     return [
         s
         for s in job.get("steps") or []
-        if "inputs.config-ref" in str(s.get("if") or "")
+        if "outputs.config_ref" in str(s.get("if") or "")
     ]
 
 
@@ -379,7 +380,8 @@ def _run_config_ref_step(
     """
     workflow, job = _job()
     ctx = ga.with_inputs(context, inputs)
-    steps: dict[str, Any] = dict(earlier or {})
+    # ga.with_inputs put the input check's outputs in ctx["steps"]; keep them.
+    steps: dict[str, Any] = {**ctx["steps"], **(earlier or {})}
     run = None
     for step in _config_ref_steps():
         scoped = {**ctx, "steps": steps}

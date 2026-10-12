@@ -682,10 +682,42 @@ def call_inputs(
     return inputs
 
 
+#: The id of run-ash-security-scan.yml's first step, which checks every string input
+#: and writes the checked values as its outputs. Later steps read those, not inputs.
+INPUT_CHECK_STEP_ID = "inputs"
+
+
+def checked_inputs(inputs: dict[str, Any]) -> dict[str, str]:
+    """The outputs the scan workflow's input check writes for inputs it accepts.
+
+    Each string input, with one trailing line feed dropped, under its name with `_`
+    for `-`. test_an_input_cannot_add_a_workflow_command.py compares this with what
+    the real step writes, so a test that runs a later step alone sees the same values.
+    """
+    return {
+        name.replace("-", "_"): value.removesuffix("\n")
+        for name, value in inputs.items()
+        if isinstance(value, str)
+    }
+
+
 def with_inputs(context: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
+    """`inputs`, plus the input check's outputs (steps.inputs.outputs) unless set.
+
+    The one place this model fills in step outputs itself: the scan workflow's later
+    steps read the checked values, and checked_inputs is pinned to the real step.
+    """
     out = dict(context)
     out["inputs"] = inputs
+    steps = dict(context.get("steps") or {})
+    steps.setdefault(INPUT_CHECK_STEP_ID, {"outputs": checked_inputs(inputs)})
+    out["steps"] = steps
     return out
+
+
+def read_github_output(sandbox: "StepSandbox") -> dict[str, str]:
+    """What the steps run so far wrote to ``GITHUB_OUTPUT``, later lines winning."""
+    return _read_file_commands(sandbox.runner_temp / "_runner_file_commands" / "output")
 
 
 def render_env(env: dict[str, Any] | None, context: dict[str, Any]) -> dict[str, str]:
@@ -979,7 +1011,11 @@ def read_github_env(sandbox: StepSandbox) -> dict[str, str]:
     Both forms the runner accepts: ``NAME=value``, and ``NAME<<DELIMITER`` followed by
     the value's lines and a line holding only the delimiter.
     """
-    path = sandbox.runner_temp / "_runner_file_commands" / "env"
+    return _read_file_commands(sandbox.runner_temp / "_runner_file_commands" / "env")
+
+
+def _read_file_commands(path: Path) -> dict[str, str]:
+    """A GITHUB_ENV or GITHUB_OUTPUT file, in either of the forms the runner accepts."""
     if not path.exists():
         return {}
     values: dict[str, str] = {}
@@ -998,7 +1034,7 @@ def read_github_env(sandbox: StepSandbox) -> dict[str, str]:
                 i += 1
             if i >= len(lines):
                 raise ExpressionError(
-                    f"GITHUB_ENV: no closing {delimiter!r} for {name!r}"
+                    f"{path.name}: no closing {delimiter!r} for {name!r}"
                 )
             i += 1
             values[name] = "\n".join(body)
@@ -1006,8 +1042,33 @@ def read_github_env(sandbox: StepSandbox) -> dict[str, str]:
             name, value = line.split("=", 1)
             values[name] = value
         else:
-            raise ExpressionError(f"GITHUB_ENV: cannot read the line {line!r}")
+            raise ExpressionError(f"{path.name}: cannot read the line {line!r}")
     return values
+
+
+#: How the runner splits a step's output into lines: .NET's StreamReader.ReadLine
+#: (actions/runner src/Runner.Sdk/ProcessInvoker.cs) ends a line at "\r\n", "\r" or
+#: "\n", so a carriage return starts a new line as surely as a line feed does.
+_RUNNER_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+
+
+def workflow_command_lines(*streams: str) -> list[str]:
+    """The lines of a step's output that the runner would read as workflow commands.
+
+    The runner parses stdout and stderr alike (ScriptHandler wires both to an
+    OutputManager, which hands every line to ActionCommandManager). A line is a
+    command when, after leading whitespace, it starts with ``::``
+    (ActionCommand.TryParseV2), or when it holds the legacy ``##[`` marker anywhere
+    (ActionCommand.TryParse, which searches the whole line). This counts both
+    forms whatever the command name, so it may count a line the runner would
+    ignore, never the reverse. ``::stop-commands::`` is not modeled.
+    """
+    found: list[str] = []
+    for text in streams:
+        for line in _RUNNER_LINE_BREAK.split(text or ""):
+            if line.lstrip().startswith("::") or "##[" in line:
+                found.append(line)
+    return found
 
 
 def interpreter_options(python_argv: list[str]) -> list[str]:

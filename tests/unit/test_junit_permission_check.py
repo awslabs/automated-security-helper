@@ -209,10 +209,14 @@ class TestReportPathIsNotDotBlind:
         )
 
     def test_report_paths_honors_the_output_dir_input(self, workflow):
-        """A hardcoded path would ignore a caller that overrides output-dir."""
+        """A hardcoded path would ignore a caller that overrides output-dir.
+
+        The reporting job reads output-dir as the scan job's input check wrote it,
+        through the scan job's output-dir output, not the input as given.
+        """
         report_paths = str(_junit_publish_step(workflow)["with"]["report_paths"])
-        assert "inputs.output-dir" in report_paths, (
-            "report_paths must be built from the output-dir input so a caller "
+        assert "needs.ash.outputs.output-dir" in report_paths, (
+            "report_paths must be built from the checked output-dir so a caller "
             f"that overrides it is still published. Got: {report_paths!r}"
         )
 

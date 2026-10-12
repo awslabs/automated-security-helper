@@ -44,7 +44,7 @@ runs:
         case "${RUNTIME}" in
           podman | finch | nerdctl) ;;
           *)
-            echo "::error::validate-container has no scan leg for runtime '${RUNTIME}'. Add one rather than leaving this action build-only for it."
+            echo "::error::validate-container has a scan leg for runtime podman, finch or nerdctl only, and the runtime given is none of them (it is not printed). Add a leg rather than leaving this action build-only for a new runtime."
             exit 1
             ;;
         esac
