@@ -178,10 +178,17 @@ def test_a_policy_linking_out_of_the_roots_is_refused_unread(
     "text, where",
     [
         (f"workspace:\n  max_severity_threshold: {CANARY}\n", "max_severity_threshold"),
+        (
+            (
+                "workspace:\n  suppressions:\n    - path: 'app/**'\n      reason: r\n"
+                f"      expiration: '{CANARY}'\n"
+            ),
+            "expiration: invalid value (value_error)",
+        ),
         (f"workspace:\n  suppressions: [{{path: '{CANARY}'\n", "line"),
         (f"- {CANARY}\n", "mapping"),
     ],
-    ids=["invalid value", "unparseable", "not a mapping"],
+    ids=["invalid value", "validator message", "unparseable", "not a mapping"],
 )
 def test_an_error_about_a_delivered_policy_names_where_not_what(
     _server, text: str, where: str

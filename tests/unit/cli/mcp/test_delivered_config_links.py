@@ -427,6 +427,48 @@ def test_the_scan_tool_does_not_quote_it_either(_server) -> None:
     assert CANARY not in repr(result)
 
 
+#: A suppression expiration the model's own validator rejects, in a message that
+#: repeats the value.
+EXPIRY_CANARY = "canary-zz-41f7"
+BAD_EXPIRY = (
+    "project_name: linked\n"
+    "global_settings:\n"
+    "  suppressions:\n"
+    "    - rule_id: B101\n"
+    "      path: 'tests/**'\n"
+    "      reason: asserts in tests\n"
+    f"      expiration: '{EXPIRY_CANARY}'\n"
+)
+
+
+@pytest.mark.usefixtures("host_set_aside")
+def test_a_validators_own_message_is_reported_by_its_type(_server) -> None:
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    source = _linked_tree(_server, BAD_EXPIRY)
+
+    outcome = _scan_resolution(source)
+
+    assert isinstance(outcome, ASHConfigValidationError), outcome
+    assert "expiration: invalid value (value_error)" in str(outcome), outcome
+    assert EXPIRY_CANARY not in str(outcome)
+
+
+def test_positive_control_the_validators_message_quotes_the_value(_server) -> None:
+    """Without that, the test above could not fail: the operator's file shows it."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    host_file = _write(_server["host"] / "ash.yaml", BAD_EXPIRY)
+    elsewhere = _server["tmp"] / "elsewhere"
+    elsewhere.mkdir()
+
+    with pytest.raises(ASHConfigValidationError) as raised:
+        resolve_config(config_path=host_file, source_dir=elsewhere)
+
+    assert EXPIRY_CANARY in str(raised.value)
+
+
 def test_positive_control_an_operator_file_keeps_the_detailed_error(
     _server,
 ) -> None:
