@@ -14,7 +14,6 @@ because a fake orchestrator could not prove anything about it.
 from __future__ import annotations
 
 import json
-import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
 import sys
 import threading
 import time
@@ -35,6 +34,7 @@ from automated_security_helper.workspace.execution import (
     execute_workspace,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.git_fixture import run_git
 
 
 # ---------------------------------------------------------------------------
@@ -1366,15 +1366,8 @@ class TestConcurrencyBound:
 # ---------------------------------------------------------------------------
 
 
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
+def _git(cwd: Path, *args: str):
+    return run_git(*args, cwd=cwd, timeout=30)
 
 
 def _init_repo(path: Path, *, commit_extra: bool = False) -> None:
@@ -1393,10 +1386,7 @@ def _init_repo(path: Path, *, commit_extra: bool = False) -> None:
 
 @pytest.fixture
 def git_available() -> bool:
-    probe = subprocess.run(  # nosec B603 B607 -- probing for git on PATH
-        ["git", "--version"], capture_output=True, text=True, check=False, timeout=30
-    )
-    return probe.returncode == 0
+    return run_git("--version", timeout=30).returncode == 0
 
 
 class TestChangedFilesGate:

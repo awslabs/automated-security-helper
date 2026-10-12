@@ -27,7 +27,6 @@ import ast
 import os
 import shlex
 import stat
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -37,6 +36,7 @@ from automated_security_helper.utils.get_scan_set import (
     git_repository_root,
 )
 from automated_security_helper.utils.git_command import GIT_SAFETY_OPTIONS, git_argv
+from tests.utils.git_fixture import run_git
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[3] / "automated_security_helper"
 
@@ -61,9 +61,9 @@ def _git_env(home: Path) -> dict[str, str]:
 
 
 def _run(argv: list[str], repo: Path, env: dict[str, str]):
-    return subprocess.run(  # nosec B603 -- list argv, fixture repository only
-        argv, cwd=repo, env=env, capture_output=True, text=True, timeout=60
-    )
+    """Run *argv*, a plain ``["git", ...]`` or one ``git_argv`` built, verbatim."""
+    assert argv[0] == "git", argv
+    return run_git(*argv[1:], cwd=repo, env=env)
 
 
 def _marks(marker: Path) -> int:

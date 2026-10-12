@@ -31,6 +31,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from tests.utils.git_fixture import run_git
 
 
 #: What ``_git_executable`` answers in these tests, so the argv is known exactly.
@@ -189,14 +190,7 @@ class TestGetChangedFiles:
 
 
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
+    run_git(*args, cwd=cwd, check=True, timeout=30)
 
 
 class TestNamesFromARealRepository:
@@ -205,9 +199,7 @@ class TestNamesFromARealRepository:
     NAMES = ["\u00fcn\u00efcode.py", "dir with space/a b.py", " leading.py", "plain.py"]
 
     def test_quoted_names_come_back_as_the_files(self, tmp_path, monkeypatch):
-        probe = subprocess.run(  # nosec B603 B607 -- probing for git on PATH
-            ["git", "--version"], capture_output=True, text=True, check=False
-        )
+        probe = run_git("--version")
         if probe.returncode != 0:
             pytest.skip("git is not available on PATH")
         # The real git, by ASH's own lookup, in place of the autouse stand-in path.

@@ -32,13 +32,13 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import subprocess  # nosec B404 -- builds a throwaway repository and runs git on it
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from automated_security_helper.utils.get_scan_set import get_changed_files
+from tests.utils.git_fixture import run_git
 
 #: Values git reads as an option. ``{marker}`` is a path in a directory the test
 #: watches: an option that writes a file would leave it there.
@@ -46,15 +46,7 @@ OPTION_LIKE = ["--output={marker}", "-p", "--upload-pack=x", "-O{marker}"]
 
 
 def _git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(  # nosec B603 B607 -- list argv, fixture repository only
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    )
-    return result.stdout
+    return run_git(*args, cwd=cwd, check=True).stdout
 
 
 @pytest.fixture
@@ -147,24 +139,20 @@ class TestPlainGitReadsTheseValuesAsOptions:
         watched = tmp_path / "watched"
         watched.mkdir()
 
-        result = subprocess.run(  # nosec B603 B607 -- list argv, fixture repository only
-            ["git", "diff", "--name-only", "-z", f"--output={watched / 'diff'}...HEAD"],
+        result = run_git(
+            "diff",
+            "--name-only",
+            "-z",
+            f"--output={watched / 'diff'}...HEAD",
             cwd=repo.path,
-            capture_output=True,
-            text=True,
-            timeout=60,
         )
 
         assert result.returncode == 0, result.stderr
         assert [p.name for p in watched.iterdir()] == ["diff...HEAD"]
 
     def test_an_order_file_gives_a_different_diff_that_exits_zero(self, repo, tmp_path):
-        result = subprocess.run(  # nosec B603 B607 -- list argv, fixture repository only
-            ["git", "diff", "--name-only", "-z", f"-O{tmp_path / 'order'}...HEAD"],
-            cwd=repo.path,
-            capture_output=True,
-            text=True,
-            timeout=60,
+        result = run_git(
+            "diff", "--name-only", "-z", f"-O{tmp_path / 'order'}...HEAD", cwd=repo.path
         )
 
         # b.py changed since the first commit, but this diff is the working tree
@@ -232,12 +220,8 @@ class TestAMissingBaseRefIsNeverReadAsAPath:
         """The control: exit 0, and the names come from the planted file."""
         _plant_a_file_named_after_the_range(repo, state)
 
-        result = subprocess.run(  # nosec B603 B607 -- list argv, fixture repository only
-            ["git", "diff", "--name-only", "-z", "origin/main...HEAD"],
-            cwd=repo.path,
-            capture_output=True,
-            text=True,
-            timeout=60,
+        result = run_git(
+            "diff", "--name-only", "-z", "origin/main...HEAD", cwd=repo.path
         )
 
         assert result.returncode == 0, result.stderr
@@ -383,14 +367,7 @@ def test_the_ref_name_rule_agrees_with_git_check_ref_format(name):
         pytest.skip("git is not available on PATH")
     from automated_security_helper.utils.get_scan_set import validate_base_ref
 
-    git_accepts = (
-        subprocess.run(  # nosec B603 B607 -- list argv, no repository involved
-            ["git", "check-ref-format", "--allow-onelevel", name],
-            capture_output=True,
-            timeout=60,
-        ).returncode
-        == 0
-    )
+    git_accepts = run_git("check-ref-format", "--allow-onelevel", name).returncode == 0
     try:
         validate_base_ref(name)
         ash_accepts = True
