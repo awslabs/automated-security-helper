@@ -595,6 +595,62 @@ class TestMergeCommand:
 
         assert ("s3", "PutObject") in requests
 
+    @pytest.mark.parametrize(
+        "operator_file", [False, True], ids=["no-config", "config"]
+    )
+    def test_overrides_alone_enable_and_aim_s3(
+        self, tmp_path, monkeypatch, requests, operator_file
+    ):
+        """--config-overrides need no --config file to turn S3 on and aim it.
+
+        The overrides load the AWS module too. With an operator file that sets
+        nothing for S3, the result is the same: the upload goes to the bucket and
+        region the overrides name, and nowhere else.
+        """
+        refusing = botocore.client.BaseClient._make_api_call
+        sent = []
+        answers = {
+            "GetCallerIdentity": {"Account": "123456789012", "Arn": "a", "UserId": "u"},
+            "HeadBucket": {},
+        }
+
+        def recording(client, operation_name, api_params):
+            sent.append(
+                (
+                    client.meta.service_model.service_name,
+                    operation_name,
+                    client.meta.region_name,
+                    api_params.get("Bucket"),
+                )
+            )
+            if operation_name in answers:
+                return answers[operation_name]
+            return refusing(client, operation_name, api_params)
+
+        monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", recording)
+        config = None
+        if operator_file:
+            config = tmp_path / "operator" / "ash.yaml"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("project_name: operator\n", encoding="utf-8")
+
+        self._merge(
+            tmp_path,
+            {"s3": {"enabled": False}},
+            config=config,
+            overrides=[
+                f"ash_plugin_modules=[{AWS_PLUGIN_MODULE}]",
+                "reporters.s3.enabled=true",
+                "reporters.s3.options.bucket_name=operator-bucket",
+                "reporters.s3.options.aws_region=us-west-2",
+                "reporters.s3.options.max_retries=0",
+            ],
+        )
+
+        puts = [s for s in sent if s[:2] == ("s3", "PutObject")]
+        assert puts == [("s3", "PutObject", "us-west-2", "operator-bucket")], sent
+        assert all(s[3] in (None, "operator-bucket") for s in sent), sent
+
 
 class TestWorkspaceReporting:
     def test_a_per_project_reporter_is_not_checked_at_workspace_level(

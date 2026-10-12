@@ -2142,9 +2142,11 @@ def merge_command(
         )
         # The off-host reporters run with the operator's configuration, so their
         # destinations are the operator's too. No --output-formats value names one,
-        # so, as in a scan, they run only when no format is requested. With no
-        # --config every one is refused (select_merge_reporters), so the list is
-        # empty then; the None check states that to the type checker.
+        # so, as in a scan, they run only when no format is requested. With
+        # neither --config nor --config-overrides there is no operator config and
+        # every one is refused (select_merge_reporters), so the list is empty
+        # then; the None check states that to the type checker. Overrides alone
+        # are enough to enable and aim one.
         if off_host_reporters and not parsed_formats and operator_config is not None:
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
