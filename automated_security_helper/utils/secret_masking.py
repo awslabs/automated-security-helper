@@ -394,6 +394,91 @@ def is_secret_finding(result: Any, secret_rule_ids: Set[str] = frozenset()) -> b
     return bool(_quoted_values(text))
 
 
+def _same_file(first: str, second: str) -> bool:
+    """Whether two normalized URIs name one file: equal, or one a suffix of the other.
+
+    A finding written relative to another directory still matches. That can match
+    two different files of one name; masking both is the safe side.
+    """
+    return (
+        first == second or first.endswith("/" + second) or second.endswith("/" + first)
+    )
+
+
+#: Where a reported range runs to when where it ends is unknown.
+_TO_END_OF_FILE = 2**62
+
+#: A private-key finding's rule, message or tag.
+_PRIVATE_KEY = re.compile(r"(?i)private[\s_-]*key")
+_PEM_BEGIN = "-----BEGIN"
+_PEM_END = "-----END"
+
+
+def _is_private_key_finding(result: Any) -> bool:
+    from automated_security_helper.utils.scanner_tool_types import result_tags
+
+    texts = [
+        getattr(result, "ruleId", None) or "",
+        _text_of(getattr(result, "message", None)) or "",
+    ]
+    texts.extend(tag for tag in result_tags(result) if isinstance(tag, str))
+    return any(_PRIVATE_KEY.search(text) for text in texts)
+
+
+def _known_lines(sarif_report: Any) -> Dict[str, Dict[int, str]]:
+    """The text of every line any snippet of the report places: uri -> line -> text."""
+    known: Dict[str, Dict[int, str]] = {}
+
+    def record(uri: Any, first_line: Any, text: Any) -> None:
+        normalized = _normalized_uri(uri)
+        if normalized is None or not isinstance(first_line, int):
+            return
+        if not isinstance(text, str) or _UNCOUNTED_LINE_BREAK.search(text):
+            return
+        lines = known.setdefault(normalized, {})
+        for offset, line in enumerate(_split_lines(text)):
+            lines.setdefault(first_line + offset, line)
+
+    for result in sarif_report.get_all_results() or []:
+        for physical in _physical_locations_of(result, related=True):
+            uri = getattr(getattr(physical, "artifactLocation", None), "uri", None)
+            for name in ("region", "contextRegion"):
+                region = getattr(physical, name, None)
+                record(
+                    uri,
+                    getattr(region, "startLine", None),
+                    getattr(getattr(region, "snippet", None), "text", None),
+                )
+    for run in getattr(sarif_report, "runs", None) or []:
+        for artifact in getattr(run, "artifacts", None) or []:
+            record(
+                getattr(getattr(artifact, "location", None), "uri", None),
+                1,
+                getattr(getattr(artifact, "contents", None), "text", None),
+            )
+    return known
+
+
+def _block_end(known: Dict[str, Dict[int, str]], uri: str, start: int) -> Optional[int]:
+    """The first line at or after ``start`` known to end a PEM block in ``uri``."""
+    ends = [
+        number
+        for candidate, lines in known.items()
+        if _same_file(candidate, uri)
+        for number, text in lines.items()
+        if number >= start and _PEM_END in text
+    ]
+    return min(ends) if ends else None
+
+
+def _starts_a_block(known: Dict[str, Dict[int, str]], uri: str, line: int) -> bool:
+    return any(
+        _PEM_BEGIN in (lines.get(line) or "")
+        for candidate, lines in known.items()
+        if _same_file(candidate, uri)
+    )
+
+
 class _LineRanges:
     """A set of line numbers kept as inclusive (start, end) ranges.
 
@@ -494,11 +579,7 @@ class _SecretIndex:
         lines = _LineRanges()
         matched = False
         for candidate in self._by_basename.get(normalized.rsplit("/", 1)[-1], []):
-            if not (
-                candidate == normalized
-                or candidate.endswith("/" + normalized)
-                or normalized.endswith("/" + candidate)
-            ):
+            if not _same_file(candidate, normalized):
                 continue
             matched = True
             reported = self.lines[candidate]
@@ -572,10 +653,12 @@ def _mask_message_values(text: str) -> str:
 def _index_secrets(sarif_report: Any) -> _SecretIndex:
     index = _SecretIndex()
     rule_ids = secret_rule_ids(sarif_report)
+    known: Optional[Dict[str, Dict[int, str]]] = None
     for result in sarif_report.get_all_results() or []:
         if not is_secret_finding(result, rule_ids):
             continue
         index.secret_results.append(result)
+        private_key = _is_private_key_finding(result)
         for physical in _physical_locations_of(result):
             uri = _normalized_uri(
                 getattr(getattr(physical, "artifactLocation", None), "uri", None)
@@ -583,11 +666,18 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
             if uri is None:
                 continue
             region = getattr(physical, "region", None)
-            index.add_location(
-                uri,
-                getattr(region, "startLine", None),
-                getattr(region, "endLine", None),
-            )
+            start = getattr(region, "startLine", None)
+            end = getattr(region, "endLine", None)
+            if isinstance(start, int):
+                # A key reported on its BEGIN line (detect-secrets does) runs to
+                # its END line, which only some other finding's snippet may show.
+                # With no END line known, every later line is masked.
+                if known is None:
+                    known = _known_lines(sarif_report)
+                if private_key or _starts_a_block(known, uri, start):
+                    block_end = _block_end(known, uri, start)
+                    end = block_end if block_end is not None else _TO_END_OF_FILE
+            index.add_location(uri, start, end)
         text = _text_of(getattr(result, "message", None)) or ""
         for start, end in _quoted_values(text):
             index.add_values(_exposed_values(text[start:end].strip(), result))

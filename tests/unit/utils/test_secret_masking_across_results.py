@@ -628,6 +628,122 @@ class TestPathologicalInput:
         assert float(completed.stdout.strip().splitlines()[-1]) < 5.0
 
 
+#: A PEM block as a file holds it, lines 11-14; the body is derived, not a key.
+PEM_LINES = [
+    "-----BEGIN RSA PRIVATE " + "KEY-----\n",
+    _derived("pem-body-1", 40) + "\n",
+    _derived("pem-body-2", 40) + "\n",
+    "-----END RSA PRIVATE " + "KEY-----\n",
+]
+BEFORE_PEM = "x = 1\n"
+AFTER_PEM = "y = 2\n"
+
+
+def _private_key_finding(line=11, rule_id="SECRET-PRIVATE-KEY", tags=None):
+    """detect-secrets reports a private key on its BEGIN line only."""
+    result = _result(
+        rule_id,
+        "keys.py",
+        line,
+        "Secret of type 'Private Key' detected",
+        scanner="detect-secrets",
+    )
+    if tags is not None:
+        result["properties"]["tags"] = tags
+        result["message"]["text"] = "Custom finding"
+    return result
+
+
+def _neighbor(line, context_start, context_lines):
+    return _result(
+        "B108",
+        "keys.py",
+        line,
+        "other",
+        context=(context_start, "".join(context_lines)),
+        scanner="bandit",
+    )
+
+
+class TestPrivateKeyBlocks:
+    """A key reported on its BEGIN line is masked through its END line in every snippet."""
+
+    def _context(self, model, position):
+        return _region_text(model.sarif.runs[0].results[position], "contextRegion")
+
+    def test_a_neighbors_context_over_the_whole_block_is_masked(self):
+        model = _results(
+            _private_key_finding(),
+            _neighbor(10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert self._context(model, 1) == (
+            BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+        )
+
+    def test_a_context_over_the_body_alone_is_masked(self):
+        """The END line is known from another snippet; this one holds only body lines."""
+        model = _results(
+            _private_key_finding(),
+            _neighbor(12, 12, PEM_LINES[1:3]),
+            _neighbor(15, 14, [PEM_LINES[3], AFTER_PEM]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert self._context(model, 1) == (MASKED_LINE + "\n") * 2
+        assert self._context(model, 2) == MASKED_LINE + "\n" + AFTER_PEM
+
+    def test_with_no_end_line_in_any_snippet_every_later_line_is_masked(self):
+        """Fail closed: where the block ends is unknown."""
+        model = _results(
+            _private_key_finding(),
+            _neighbor(12, 12, PEM_LINES[1:3]),
+            _neighbor(40, 40, [AFTER_PEM]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert self._context(model, 1) == (MASKED_LINE + "\n") * 2
+        assert self._context(model, 2) == MASKED_LINE + "\n"
+
+    def test_a_secret_finding_on_a_begin_line_extends_through_end(self):
+        """Any secret finding whose line is a BEGIN line, not only a private-key rule."""
+        model = _results(
+            _private_key_finding(rule_id="CUSTOM-1", tags=["secret"]),
+            _neighbor(10, 10, [BEFORE_PEM] + PEM_LINES + [AFTER_PEM]),
+        )
+
+        mask_secrets_in_results(model)
+
+        assert self._context(model, 1) == (
+            BEFORE_PEM + (MASKED_LINE + "\n") * 4 + AFTER_PEM
+        )
+
+    def test_lines_before_the_block_and_in_other_files_are_kept(self):
+        """Control."""
+        other_file = _result(
+            "B108",
+            "other.py",
+            12,
+            "other",
+            context=(12, "".join(PEM_LINES[1:3])),
+            scanner="bandit",
+        )
+        model = _results(
+            _private_key_finding(),
+            _neighbor(9, 9, ["import os\n", BEFORE_PEM]),
+            other_file,
+        )
+
+        mask_secrets_in_results(model)
+
+        assert self._context(model, 1) == "import os\n" + BEFORE_PEM
+        assert self._context(model, 2) == "".join(PEM_LINES[1:3])
+
+
 class TestLargeRegions:
     def test_a_secret_region_of_millions_of_lines_takes_little_memory(self):
         """The reported lines are kept as ranges, not one entry per line.
