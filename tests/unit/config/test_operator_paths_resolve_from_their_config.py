@@ -29,9 +29,17 @@ import yaml
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.tool_config_trust import (
+    SCANNER_CONFIG_FILE_OPTIONS,
+)
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScanner,
+)
+from automated_security_helper.utils.config_trust import (
+    NOT_THE_OPERATORS,
+    OperatorPath,
+    operator_path,
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
@@ -82,11 +90,12 @@ def _same_file(value: Any, expected: Path) -> bool:
 
 
 class PathOption(NamedTuple):
-    """One option, how a config document sets it, and how to read it back."""
+    """One option, how a config document and an override set it, and how to read it back."""
 
     id: str
     document: Callable[[str], Dict[str, Any]]
     read: Callable[[AshConfig], Any]
+    override: Callable[[str], str]
 
 
 def _scanner_option(scanner: str, option: str) -> PathOption:
@@ -94,7 +103,48 @@ def _scanner_option(scanner: str, option: str) -> PathOption:
         f"{scanner}.{option}",
         lambda value: {"scanners": {scanner: {"options": {option: value}}}},
         lambda config: _options(config, scanner).get(option),
+        lambda value: f"scanners.{scanner}.options.{option}={value}",
     )
+
+
+class ScannerPath(NamedTuple):
+    """An option a scanner hands to ``config_trust.operator_path``, and how.
+
+    ``outside_tree`` is what the scanner passes: off for a findings config the
+    operator may keep in the tree, on for a file that can make the tool load code.
+    """
+
+    scanner: str
+    name: str
+    option: PathOption
+    outside_tree: bool
+
+    @property
+    def key(self) -> str:
+        return f"scanners.{self.scanner}.options.{self.name}"
+
+
+def _scanner_path(scanner: str, option: str, *, outside_tree: bool) -> ScannerPath:
+    return ScannerPath(scanner, option, _scanner_option(scanner, option), outside_tree)
+
+
+#: The path options of actionlint, cfn-lint, gitleaks, zizmor, trivy and
+#: trivy-repo, each as its scanner checks it. actionlint's ``shellcheck`` and
+#: ``pyflakes`` are not here: a bare name there is a program looked up on PATH.
+SCANNER_PATHS: List[ScannerPath] = [
+    _scanner_path("actionlint", "config_file", outside_tree=False),
+    _scanner_path("cfn-lint", "config_file", outside_tree=True),
+    _scanner_path("gitleaks", "config_file", outside_tree=False),
+    _scanner_path("gitleaks", "baseline_path", outside_tree=False),
+    _scanner_path("zizmor", "config_file", outside_tree=False),
+    _scanner_path("trivy", "config_file", outside_tree=True),
+    _scanner_path("trivy", "ignore_file", outside_tree=True),
+    _scanner_path("trivy", "secret_config_file", outside_tree=True),
+    _scanner_path("trivy-repo", "config_file", outside_tree=True),
+    _scanner_path("trivy-repo", "module_dir", outside_tree=True),
+    _scanner_path("trivy-repo", "ignore_file", outside_tree=True),
+    _scanner_path("trivy-repo", "secret_config_file", outside_tree=True),
+]
 
 
 PATH_OPTIONS: List[PathOption] = [
@@ -104,14 +154,14 @@ PATH_OPTIONS: List[PathOption] = [
     _scanner_option("checkov", "config_file"),
     _scanner_option("ferret-scan", "config_file"),
     _scanner_option("detect-secrets", "baseline_file"),
-    _scanner_option("trivy-repo", "ignore_file"),
-    _scanner_option("trivy-repo", "secret_config_file"),
     _scanner_option("semgrep", "config"),
     _scanner_option("opengrep", "config"),
+    *(path.option for path in SCANNER_PATHS),
     PathOption(
         "sandbox.extra_read_paths",
         lambda value: {"sandbox": {"extra_read_paths": [value]}},
         lambda config: (config.sandbox.extra_read_paths or [None])[0],
+        lambda value: f"sandbox.extra_read_paths={json.dumps([value])}",
     ),
 ]
 
@@ -242,6 +292,25 @@ def test_a_relative_path_in_an_override_is_taken_from_the_working_directory(
     assert _same_file(_options(config, "bandit").get("config_file"), wanted)
 
 
+@pytest.mark.parametrize("option", PATH_OPTIONS, ids=lambda o: o.id)
+def test_a_relative_path_option_in_an_override_is_taken_from_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, option: PathOption
+) -> None:
+    repo = _repo(tmp_path)
+    decoy = _touch(repo / "tools" / "named.cfg")
+    workdir = tmp_path / "ci"
+    wanted = _touch(workdir / "tools" / "named.cfg")
+    monkeypatch.chdir(workdir)
+
+    config = resolve_config(
+        source_dir=repo, config_overrides=[option.override("tools/named.cfg")]
+    )
+
+    value = option.read(config)
+    assert _same_file(value, wanted), value
+    assert not _same_file(value, decoy)
+
+
 def test_a_relative_list_entry_in_an_override_is_taken_from_the_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -361,3 +430,108 @@ def test_a_home_relative_or_absolute_path_is_left_as_written(
     config = resolve_config(config_path=operator, source_dir=repo)
 
     assert _options(config, "bandit").get("config_file") == value
+
+
+# --------------------------------------------------------------------------- #
+# What the scanner is given: config_trust.operator_path on the anchored value
+# --------------------------------------------------------------------------- #
+
+
+def _chosen(
+    config: AshConfig, path: ScannerPath, value: Any, source: Path
+) -> OperatorPath:
+    """What ``config_trust`` hands the scanner for ``value``, asked as it asks."""
+    return operator_path(
+        config, path.key, value, source, outside_tree=path.outside_tree
+    )
+
+
+@pytest.mark.parametrize("how", ["config file", "override", "workspace"])
+@pytest.mark.parametrize("path", SCANNER_PATHS, ids=lambda p: p.option.id)
+def test_the_scanner_is_given_the_file_where_the_operator_set_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: ScannerPath, how: str
+) -> None:
+    """Not the same-named file in the scanned tree.
+
+    With ``override`` the tree has a config of its own, and with ``workspace``
+    the project's config sets the option too, under the operator's ``--config``.
+    Either way ``set_by_operator`` compares the value with the trusted base plus
+    the overrides, which are anchored as the value is.
+    """
+    repo = _repo(tmp_path)
+    decoy = _touch(repo / "tools" / "named.cfg")
+    if how == "override":
+        workdir = tmp_path / "ci"
+        wanted = _touch(workdir / "tools" / "named.cfg")
+        monkeypatch.chdir(workdir)
+        _write(repo / ".ash" / ".ash.yaml", {"project_name": "scanned"})
+        config = resolve_config(
+            source_dir=repo,
+            config_overrides=[path.option.override("tools/named.cfg")],
+        )
+    else:
+        operator = _write(
+            tmp_path / "operator" / "ash.yaml", path.option.document("tools/named.cfg")
+        )
+        wanted = _touch(operator.parent / "tools" / "named.cfg")
+        if how == "workspace":
+            project = _write(
+                repo / ".ash" / ".ash.yaml", path.option.document("tools/named.cfg")
+            )
+            config = resolve_config(
+                config_path=project,
+                source_dir=repo,
+                trusted_config_path=operator,
+                overlay_config_path=operator,
+            )
+        else:
+            config = resolve_config(config_path=operator, source_dir=repo)
+
+    chosen = _chosen(config, path, path.option.read(config), repo)
+
+    assert chosen.path == wanted.resolve(), chosen
+    assert chosen.path != decoy.resolve()
+
+
+#: The options a config in the tree still sets: ``tool_config_trust`` does not
+#: put the trusted base's value in their place, so the scanner judges the
+#: tree's value itself.
+_SET_BY_THE_TREE = [
+    path
+    for path in SCANNER_PATHS
+    if path.name not in SCANNER_CONFIG_FILE_OPTIONS.get(path.scanner, ())
+]
+
+
+@pytest.mark.parametrize("operator_sets_it", [True, False])
+@pytest.mark.parametrize("path", _SET_BY_THE_TREE, ids=lambda p: p.option.id)
+def test_a_config_in_the_tree_is_left_as_written_and_is_not_the_operators(
+    tmp_path: Path, path: ScannerPath, operator_sets_it: bool
+) -> None:
+    """The tree's relative value names the tree's file, whatever the operator wrote.
+
+    With ``operator_sets_it`` the operator's file sets the same relative value,
+    which is anchored at that file's directory, so the two no longer compare
+    equal and the tree's value is not taken for the operator's.
+    """
+    repo = _repo(tmp_path)
+    _touch(repo / "tools" / "named.cfg")
+    project = _write(
+        repo / ".ash" / ".ash.yaml", path.option.document("tools/named.cfg")
+    )
+    operator = None
+    if operator_sets_it:
+        operator = _write(
+            tmp_path / "operator" / "ash.yaml", path.option.document("tools/named.cfg")
+        )
+        _touch(operator.parent / "tools" / "named.cfg")
+
+    config = resolve_config(
+        config_path=project, source_dir=repo, trusted_config_path=operator
+    )
+
+    value = path.option.read(config)
+    assert Path(str(value)) == Path("tools/named.cfg")
+    chosen = _chosen(config, path, value, repo)
+    assert chosen.path is None
+    assert chosen.refusal == NOT_THE_OPERATORS

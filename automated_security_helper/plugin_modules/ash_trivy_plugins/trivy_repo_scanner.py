@@ -151,8 +151,10 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
                 "ASH passes an empty one, so trivy does not load a trivy.yaml from the "
                 "directory it runs in. Honored only when set by --config-overrides "
                 "or a config file outside the scanned tree, for a file outside that "
-                "tree; otherwise ignored with a warning. A path that does not exist "
-                "fails the scan."
+                "tree; otherwise ignored with a warning. A relative path is taken "
+                "from the directory of the config file that sets it, or from the "
+                "working directory for --config-overrides, not from the source "
+                "directory. A path that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -161,8 +163,9 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "A directory of trivy modules, passed as trivy --module-dir. Unset, "
-                "ASH passes an empty directory of its own. Honored under the same rule "
-                "as config_file. A path that is not a directory fails the scan."
+                "ASH passes an empty directory of its own. Honored, and a relative "
+                "path taken, as for config_file. A path that is not a directory "
+                "fails the scan."
             ),
         ),
     ] = None

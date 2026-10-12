@@ -295,7 +295,10 @@ class CfnLintScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a cfn-lint configuration file (.cfnlintrc). When unset, ASH "
+                "Path to a cfn-lint configuration file (.cfnlintrc). A relative path "
+                "is taken from the directory of the config file that sets it, or "
+                "from the working directory for --config-overrides, not from the "
+                "source directory. When unset, ASH "
                 "gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned "
                 "repository or the home directory is NOT read: such a file can load "
                 "Python rules (append_rules) and switch checks off. Honored only when "

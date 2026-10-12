@@ -46,7 +46,7 @@ scanners:
     enabled: true
     options:
       persona: regular        # regular, pedantic or auditor
-      config_file: null       # zizmor config; relative to the source dir, or absolute
+      config_file: null       # zizmor config; relative to where it is set, or absolute
       online_audits: false    # see "Network access and tokens"
       honor_inline_ignores: false  # see "Suppressions"
       tool_version: ">=1.29.0,<2.0.0"
@@ -60,8 +60,10 @@ scanners:
   and `auditor` reports everything.
 - `config_file`: passed as `zizmor --config`, when the operator set it: from
   `--config-overrides`, or an ASH config file outside the scanned tree. A relative
-  path is resolved against the source directory; an absolute path may point outside
-  it (a config shared across repositories). Without it, ASH runs
+  path is taken from the directory of the ASH config file that sets it, or from the
+  working directory for `--config-overrides`, not from the source directory (see
+  [Relative paths in the operator's settings](../../configuration-guide.md#relative-paths-in-the-operators-settings));
+  an absolute path is used as given. Without it, ASH runs
   `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned
   repository is not read: a config there can disable audits or ignore findings,
   which zizmor then never reports, so they would be neither in ASH's results nor

@@ -2349,11 +2349,14 @@
   `--config-overrides`, `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` and `TRIVY_CONFIG`
   from the working directory. Before, the scanners joined it to the source directory, so
   an operator config naming `bandit.yaml` had bandit read a `bandit.yaml` at the
-  root of the scanned repository. It covers `config_file` of bandit, checkov,
-  ferret-scan, grype and syft, detect-secrets' `baseline_file` and `file://`
-  plugin and filter paths, trivy-repo's `ignore_file` and `secret_config_file`,
-  opengrep's and semgrep's `config` when a file or directory is there, and
-  `sandbox.extra_read_paths`, which ignored a relative path before. An operator
+  root of the scanned repository. It covers `config_file` of actionlint, bandit,
+  cfn-lint, checkov, ferret-scan, gitleaks, grype, syft, trivy, trivy-repo and
+  zizmor, gitleaks' `baseline_path`, detect-secrets' `baseline_file` and
+  `file://` plugin and filter paths, trivy's and trivy-repo's `ignore_file` and
+  `secret_config_file`, trivy-repo's `module_dir`, opengrep's and semgrep's
+  `config` when a file or directory is there, and `sandbox.extra_read_paths`,
+  which ignored a relative path before. actionlint's `shellcheck` and `pyflakes`
+  name a program, looked up on `PATH` by a bare name, and are not covered. An operator
   config that named a file in the scanned repository by a relative path now
   names one beside the config instead; to keep using the repository's file, give
   its absolute path, or a path relative to where ASH runs with

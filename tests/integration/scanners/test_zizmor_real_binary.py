@@ -316,6 +316,9 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
             "--config-overrides",
             "scanners.zizmor.options.config_file=zizmor-ci.yml",
         ],
+        # A relative override is taken from the working directory, so running
+        # from the source directory makes this name the tree's zizmor-ci.yml.
+        cwd=source,
         capture_output=True,
         text=True,
         encoding="utf-8",

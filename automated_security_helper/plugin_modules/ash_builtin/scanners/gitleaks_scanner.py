@@ -333,7 +333,9 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a gitleaks TOML config, relative to the source directory. "
+                "Path to a gitleaks TOML config. A relative path is taken from the "
+                "directory of the config file that sets it, or from the working "
+                "directory for --config-overrides, not from the source directory. "
                 "Its rules and [[allowlists]] apply on top of ASH suppressions. "
                 "Honored only when set by --config-overrides or a config file "
                 "outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or "
@@ -347,10 +349,11 @@ class GitleaksScannerConfigOptions(ScannerOptionsBase):
         Path | str | None,
         Field(
             description=(
-                "Path to a gitleaks JSON report, relative to the source directory, "
-                "whose findings gitleaks ignores (gitleaks --baseline-path). Honored "
-                "only when set by --config-overrides or a config file outside the "
-                "scanned tree. A path that does not exist fails the scan."
+                "Path to a gitleaks JSON report whose findings gitleaks ignores "
+                "(gitleaks --baseline-path). A relative path is taken as for "
+                "config_file. Honored only when set by --config-overrides or a "
+                "config file outside the scanned tree. A path that does not exist "
+                "fails the scan."
             ),
         ),
     ] = None

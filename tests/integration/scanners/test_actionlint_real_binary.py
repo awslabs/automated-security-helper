@@ -74,7 +74,9 @@ def repo(tmp_path) -> Path:
     return target
 
 
-def _ash(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+def _ash(
+    *args: str, env: dict | None = None, cwd: Path | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         capture_output=True,
@@ -83,6 +85,7 @@ def _ash(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         errors="replace",
         timeout=600,
         env=env,
+        cwd=cwd,
     )
 
 
@@ -217,7 +220,9 @@ def _repo_config(repo: Path, **options: str) -> None:
     (repo / ".ash" / ".ash.yaml").write_text("\n".join(lines) + "\n")
 
 
-def _scan(repo: Path, output: Path, *extra: str) -> subprocess.CompletedProcess:
+def _scan(
+    repo: Path, output: Path, *extra: str, cwd: Path | None = None
+) -> subprocess.CompletedProcess:
     return _ash(
         "scan",
         "--mode",
@@ -233,6 +238,7 @@ def _scan(repo: Path, output: Path, *extra: str) -> subprocess.CompletedProcess:
         "false",
         *extra,
         env={**os.environ, "ASH_OFFLINE": "true"},
+        cwd=cwd,
     )
 
 
@@ -413,11 +419,14 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
     (repo / "ci" / "actionlint.yaml").symlink_to(outside / "creds")
     output = tmp_path / "out"
 
+    # Run from the repository: a relative override is taken from the working
+    # directory, so this names the tree's ci/actionlint.yaml.
     result = _scan(
         repo,
         output,
         "--config-overrides",
         "scanners.actionlint.options.config_file=ci/actionlint.yaml",
+        cwd=repo,
     )
 
     console = result.stdout + result.stderr

@@ -268,8 +268,10 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "drop findings with nothing in the report saying so, and module.dir "
                 "can load WASM modules. Honored only when set by --config-overrides "
                 "or a config file outside the scanned tree, for a file outside that "
-                "tree; otherwise ignored with a warning. A path "
-                "that does not exist fails the scan."
+                "tree; otherwise ignored with a warning. A relative path is taken "
+                "from the directory of the config file that sets it, or from the "
+                "working directory for --config-overrides, not from the source "
+                "directory. A path that does not exist fails the scan."
             ),
         ),
     ] = None
@@ -280,7 +282,9 @@ class TrivyScannerConfigOptions(ScannerOptionsBase):
                 "A trivy ignore file, passed as trivy --ignorefile. Honored only when set "
                 "by --config-overrides or a config file outside the scanned tree, "
                 "for a file outside that tree; a relative path is taken from the "
-                "source directory. Otherwise TRIVY_IGNOREFILE is used, for a file "
+                "directory of the config file that sets it, or from the working "
+                "directory for --config-overrides. Otherwise TRIVY_IGNOREFILE is "
+                "used, for a file "
                 "outside the tree, and failing that trivy gets an empty one, so a "
                 ".trivyignore in the scanned repository does not remove findings. "
                 "As for trivy-repo."

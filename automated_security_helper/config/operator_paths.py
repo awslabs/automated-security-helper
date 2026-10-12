@@ -33,19 +33,30 @@ symbolic link before it points.
 
 The options (``SCANNER_PATH_OPTIONS``, ``SCANNER_RULES_OPTIONS``):
 
-* ``config_file`` of bandit, checkov, ferret-scan, grype and syft;
+* ``config_file`` of actionlint, bandit, cfn-lint, checkov, ferret-scan, gitleaks,
+  grype, syft, trivy, trivy-repo and zizmor;
+* gitleaks' ``baseline_path``;
 * detect-secrets' ``baseline_file``, and the ``file://`` entries of its
   ``scan_settings.plugins_used`` and ``filters_used``;
-* trivy-repo's ``ignore_file`` and ``secret_config_file``;
+* trivy's and trivy-repo's ``ignore_file`` and ``secret_config_file``, and
+  trivy-repo's ``module_dir``;
 * opengrep's and semgrep's ``config``, only when a file or directory is there:
   otherwise it is a registry entry such as ``p/ci``, which the tool resolves;
 * ``sandbox.extra_read_paths``.
 
+actionlint's ``shellcheck`` and ``pyflakes`` are left out: each names a program,
+and a bare name there (``shellcheck``) is looked up on PATH, so it is not a path
+to anchor. A path the operator gives them is still taken from the source
+directory, as the scanner's own check has it.
+
 A file inside the scanned tree, or one an MCP client delivered, is left as
-written. Each of these options is replaced by the operator's value when it comes
-from such a file (``tool_config_trust``, ``sandbox_grants``), and the comparison
-is with the operator's anchored value, so a repository file that names a
-same-named file of its own no longer matches the operator's.
+written. Such a file does not choose these options: most are replaced by the
+operator's value (``tool_config_trust``, ``sandbox_grants``), and the scanners
+of the rest (actionlint, cfn-lint, gitleaks, trivy, trivy-repo's ``config_file``
+and ``module_dir``, zizmor) use the value only when
+``utils/config_trust.set_by_operator`` finds the operator's equal to it. Either
+way the comparison is with the operator's anchored value, so a repository file
+that names a same-named file of its own no longer matches the operator's.
 
 Rejected: resolving against the source directory at the point of use, as before,
 which is the tree; and keeping each value relative and recording which file set
@@ -76,15 +87,22 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-#: Scanner options whose value names a file the scanner's tool reads, by scanner.
+#: Scanner options whose value names a file or directory the scanner's tool
+#: reads, by scanner. actionlint's ``shellcheck`` and ``pyflakes`` are not here:
+#: a bare name there is a program looked up on PATH, not a path.
 SCANNER_PATH_OPTIONS: Dict[str, Tuple[str, ...]] = {
+    "actionlint": ("config_file",),
     "bandit": ("config_file",),
+    "cfn-lint": ("config_file",),
     "checkov": ("config_file",),
     "detect-secrets": ("baseline_file",),
     "ferret-scan": ("config_file",),
+    "gitleaks": ("config_file", "baseline_path"),
     "grype": ("config_file",),
     "syft": ("config_file",),
-    "trivy-repo": ("ignore_file", "secret_config_file"),
+    "trivy": ("config_file", "ignore_file", "secret_config_file"),
+    "trivy-repo": ("config_file", "module_dir", "ignore_file", "secret_config_file"),
+    "zizmor": ("config_file",),
 }
 
 #: Scanner options that are a path when a file or directory is there, and a

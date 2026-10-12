@@ -1118,15 +1118,19 @@ not from the source directory being scanned:
 - in `--config-overrides`, in a CLI flag, and in `TRIVY_IGNOREFILE`,
   `TRIVY_SECRET_CONFIG` or `TRIVY_CONFIG`, from the working directory ASH runs in.
 
-This covers `config_file` of bandit, checkov, ferret-scan, grype and syft,
+This covers `config_file` of actionlint, bandit, cfn-lint, checkov, ferret-scan,
+gitleaks, grype, syft, trivy, trivy-repo and zizmor, gitleaks' `baseline_path`,
 detect-secrets' `baseline_file` and the `file://` entries of its `scan_settings`,
-trivy-repo's `ignore_file` and `secret_config_file`, opengrep's and semgrep's
-`config` when a file or directory is there (otherwise it is a registry entry such
-as `p/ci`), and `sandbox.extra_read_paths`. A path that starts with `~`, or is
-absolute, is used as written. In `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` and
-`TRIVY_CONFIG`, any other value is taken from the working directory exactly as
-written, a `$` or `://` in it included, and a `..` after a symbolic link goes up
-from where the link points. A config file inside the scanned tree does not set
+trivy's and trivy-repo's `ignore_file` and `secret_config_file`, trivy-repo's
+`module_dir`, opengrep's and semgrep's `config` when a file or directory is there
+(otherwise it is a registry entry such as `p/ci`), and `sandbox.extra_read_paths`.
+It does not cover actionlint's `shellcheck` and `pyflakes`, which name a program:
+a bare name there is looked up on `PATH`, and a relative path is taken from the
+source directory. A path that starts with `~`, or is absolute, is used as written.
+In `TRIVY_IGNOREFILE`, `TRIVY_SECRET_CONFIG` and `TRIVY_CONFIG`, any other value is
+taken from the working directory exactly as written, a `$` or `://` in it
+included, and a `..` after a symbolic link goes up from where the link points. A
+config file inside the scanned tree does not set
 these options (see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)).
 To name a file in the scanned repository, give its absolute path, or a path

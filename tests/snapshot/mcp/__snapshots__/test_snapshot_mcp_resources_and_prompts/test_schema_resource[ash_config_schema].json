@@ -42,7 +42,7 @@
             }
           ],
           "default": null,
-          "description": "Path to an actionlint config file, relative to the source directory. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.",
+          "description": "Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.",
           "title": "Config File"
         },
         "pyflakes": {
@@ -1747,7 +1747,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a cfn-lint configuration file (.cfnlintrc). When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Honored only when set by --config-overrides or a config file outside the scanned tree, and only for a file outside the scanned tree; otherwise it is ignored with a warning.",
+          "description": "Path to a cfn-lint configuration file (.cfnlintrc). A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Honored only when set by --config-overrides or a config file outside the scanned tree, and only for a file outside the scanned tree; otherwise it is ignored with a warning.",
           "title": "Config File"
         },
         "honor_inline_ignores": {
@@ -2856,7 +2856,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a gitleaks JSON report, relative to the source directory, whose findings gitleaks ignores (gitleaks --baseline-path). Honored only when set by --config-overrides or a config file outside the scanned tree. A path that does not exist fails the scan.",
+          "description": "Path to a gitleaks JSON report whose findings gitleaks ignores (gitleaks --baseline-path). A relative path is taken as for config_file. Honored only when set by --config-overrides or a config file outside the scanned tree. A path that does not exist fails the scan.",
           "title": "Baseline Path"
         },
         "config_file": {
@@ -2873,7 +2873,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a gitleaks TOML config, relative to the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Honored only when set by --config-overrides or a config file outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.",
+          "description": "Path to a gitleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Honored only when set by --config-overrides or a config file outside the scanned tree. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.",
           "title": "Config File"
         },
         "honor_inline_ignores": {
@@ -5423,7 +5423,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy config file (trivy.yaml), passed as trivy --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A path that does not exist fails the scan.",
+          "description": "A trivy config file (trivy.yaml), passed as trivy --config. Unset, ASH passes an empty one, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; otherwise ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. A path that does not exist fails the scan.",
           "title": "Config File"
         },
         "disable_telemetry": {
@@ -5446,7 +5446,7 @@
             }
           ],
           "default": null,
-          "description": "A trivy ignore file, passed as trivy --ignorefile. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; a relative path is taken from the source directory. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
+          "description": "A trivy ignore file, passed as trivy --ignorefile. Honored only when set by --config-overrides or a config file outside the scanned tree, for a file outside that tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides. Otherwise TRIVY_IGNOREFILE is used, for a file outside the tree, and failing that trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
           "title": "Ignore File"
         },
         "ignore_unfixed": {
@@ -5702,7 +5702,7 @@
             }
           ],
           "default": null,
-          "description": "Path to a zizmor configuration file, passed as `zizmor --config`. Relative paths are resolved against the source directory; absolute paths are used as given. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
+          "description": "Path to a zizmor configuration file, passed as `zizmor --config`. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory; an absolute path is used as given. Honored only when set by --config-overrides or a config file outside the scanned tree; otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
           "title": "Config File"
         },
         "honor_inline_ignores": {

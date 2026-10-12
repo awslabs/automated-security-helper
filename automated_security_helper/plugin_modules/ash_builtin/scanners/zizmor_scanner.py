@@ -395,8 +395,10 @@ class ZizmorScannerConfigOptions(ScannerOptionsBase):
         Field(
             description=(
                 "Path to a zizmor configuration file, passed as `zizmor --config`. "
-                "Relative paths are resolved against the source directory; "
-                "absolute paths are used as given. Honored only when set by "
+                "A relative path is taken from the directory of the config file "
+                "that sets it, or from the working directory for --config-overrides, "
+                "not from the source directory; an absolute path is used as given. "
+                "Honored only when set by "
                 "--config-overrides or a config file outside the scanned tree; "
                 "otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or "
                 "`.github/zizmor.yml` in the scanned repository is not read."

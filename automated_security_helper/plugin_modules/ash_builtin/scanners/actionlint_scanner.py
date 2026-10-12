@@ -543,7 +543,9 @@ class ActionlintScannerConfigOptions(ScannerOptionsBase):
         str | None,
         Field(
             description=(
-                "Path to an actionlint config file, relative to the source directory. "
+                "Path to an actionlint config file. A relative path is taken from the "
+                "directory of the config file that sets it, or from the working "
+                "directory for --config-overrides, not from the source directory. "
                 "Honored only when set by --config-overrides or a config file outside "
                 "the scanned tree; otherwise actionlint runs with an empty config, and "
                 "a .github/actionlint.yaml in the scanned repository is not read. A "
