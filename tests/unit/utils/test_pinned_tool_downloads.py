@@ -1287,25 +1287,29 @@ class TestAssetResolution:
         opens = next(
             i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
         )
-        # The range covers _DIGESTS and _EXECUTABLE_DIGESTS, which sits directly
-        # after it so one suppression can cover both tables.
-        executable_opens = next(
-            i + 1
-            for i, line in enumerate(source)
-            if line.startswith("_EXECUTABLE_DIGESTS")
-        )
-        digests_close = next(
-            i + 1 for i, line in enumerate(source[opens:], opens) if line == "}"
-        )
-        assert executable_opens - digests_close <= 3, (
-            "_EXECUTABLE_DIGESTS no longer follows _DIGESTS directly; the lines "
-            "between them are inside the suppression and would hide a real secret"
-        )
-        closes = next(
-            i + 1
-            for i, line in enumerate(source[executable_opens:], executable_opens)
-            if line == "}"
-        )
+
+        # The range covers _DIGESTS, _EXECUTABLE_DIGESTS and _BUNDLE_CONTENTS_DIGESTS,
+        # each directly after the one before so one suppression covers all three.
+        def table_lines(name: str) -> "tuple[int, int]":
+            start = next(
+                i + 1 for i, line in enumerate(source) if line.startswith(f"{name}:")
+            )
+            end = next(
+                i + 1 for i, line in enumerate(source[start:], start) if line == "}"
+            )
+            return start, end
+
+        tables = [
+            table_lines(name)
+            for name in ("_DIGESTS", "_EXECUTABLE_DIGESTS", "_BUNDLE_CONTENTS_DIGESTS")
+        ]
+        assert tables[0][0] == opens
+        for (_, previous_close), (next_open, _) in zip(tables, tables[1:]):
+            assert next_open - previous_close <= 3, (
+                "the digest tables are no longer adjacent; the lines between them "
+                "are inside the suppression and would hide a real secret"
+            )
+        closes = tables[-1][1]
 
         config = yaml.safe_load(
             (repo_root / ".ash" / ".ash_community_plugins.yaml").read_text(
@@ -1326,12 +1330,29 @@ class TestAssetResolution:
             f"suppression starts at {entry['line_start']} but _DIGESTS opens at {opens}"
         )
         assert entry["line_end"] == closes, (
-            f"suppression ends at {entry['line_end']} but _EXECUTABLE_DIGESTS "
+            f"suppression ends at {entry['line_end']} but _BUNDLE_CONTENTS_DIGESTS "
             f"closes at {closes}"
         )
 
+    def test_every_bundle_contents_digest_belongs_to_a_rules_bundle(self):
+        archives = {bundle.url.rsplit("/", 1)[-1] for bundle in RULES_BUNDLES.values()}
+        assert sorted(tool_downloads._BUNDLE_CONTENTS_DIGESTS) == sorted(archives)
+        for bundle in RULES_BUNDLES.values():
+            archive = bundle.url.rsplit("/", 1)[-1]
+            assert (
+                bundle.contents_sha256
+                == tool_downloads._BUNDLE_CONTENTS_DIGESTS[archive]
+            )
+
     def test_digests_are_well_formed_sha256(self):
-        for filename, digest in {**_DIGESTS, **_EXECUTABLE_DIGESTS}.items():
+        for filename, digest in {
+            **_DIGESTS,
+            **_EXECUTABLE_DIGESTS,
+            **{
+                f"{name} contents": value
+                for name, value in tool_downloads._BUNDLE_CONTENTS_DIGESTS.items()
+            },
+        }.items():
             assert len(digest) == 64, f"{filename} digest is not 64 hex chars"
             assert digest == digest.lower(), f"{filename} digest is not lowercase"
             int(digest, 16)

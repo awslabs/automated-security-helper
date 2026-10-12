@@ -489,7 +489,8 @@ RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 755 "${TRIVY_CACHE_DIR}"; \
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
 # utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
 # user cannot rewrite the rules a later scan trusts. `ash dependencies install`
-# below finds the bundle already in place, by its manifest, and leaves it alone.
+# below finds the bundle already in place, its rule files matching the contents
+# pinned beside the archive digest, and leaves it alone.
 # Under /usr/share rather than /deps, whose cache directories stay writable for the
 # scanners: the bundle and every directory above it are root's and writable by no one
 # else, which `--assert-root-only` checks here and again in the final stage.

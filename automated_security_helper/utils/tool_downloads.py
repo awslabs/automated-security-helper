@@ -310,7 +310,18 @@ _TRIVY_ASSETS: dict[PlatformArch, str] = {
 # executable that does not hash to this value, so a wrong entry fails the first real
 # install of that asset in CI rather than sitting here unnoticed.
 #
-# The two tables are adjacent so that one line-pinned suppression covers both (see
+# _BUNDLE_CONTENTS_DIGESTS, directly after that, does the same for a rules bundle
+# (RULES_BUNDLES): the archive is not what the scanner reads, the rule files extracted
+# from it are. Its value is ``rules_bundles.contents_digest`` of every file
+# ``rules_bundles.extract_bundle`` writes: the SHA256 of their sorted
+# ``<basename><TAB><sha256>`` lines. Derived the same way, not transcribed. For the
+# Guard Rules Registry 1.0.2 the archive was downloaded and checked against its digest
+# in _DIGESTS on 2026-10-12, then extracted with ``extract_bundle``: 50 files, 4,088,497
+# bytes. ``sha256sum`` over the extracted files, written as those lines in
+# ``LC_ALL=C`` order, gave the same value. Both installers refuse an extraction that
+# does not hash to it, and an installed bundle is checked against it and nothing else.
+#
+# The three tables are adjacent so that one line-pinned suppression covers them (see
 # .ash/.ash_community_plugins.yaml); keep nothing but digests between them.
 # ---------------------------------------------------------------------------
 
@@ -415,6 +426,12 @@ _EXECUTABLE_DIGESTS: dict[str, str] = {
     "uv-aarch64-unknown-linux-gnu.tar.gz": "ed797a095bf9aea58135fa7081c290e51a14cfd3a7b1f24e55cb1d1a0c1007b0",  # pragma: allowlist secret
 }
 
+# What each rules bundle archive extracts to; see the comment before _DIGESTS.
+_BUNDLE_CONTENTS_DIGESTS: dict[str, str] = {
+    # aws-guard-rules-registry 1.0.2: 50 rule files
+    "ruleset-build-v1.0.2.zip": "5b5c48e45051dbd862894d9fd494deee1f52319163ea19ebabd8fb08896cd323",  # pragma: allowlist secret
+}
+
 # The version each unversioned tool's digests above were taken from.
 #
 # The other tools put the version in every asset name, so bumping
@@ -467,12 +484,22 @@ class RulesBundle:
     that directory with that suffix are extracted, each to its basename, so the
     archive's own paths are never used as a destination. That also drops the
     ``__MACOSX/`` resource-fork entries the registry's zip carries.
+
+    ``sha256`` pins the archive (``_DIGESTS``). ``contents_sha256`` pins what it
+    extracts to (``_BUNDLE_CONTENTS_DIGESTS``): ``rules_bundles.contents_digest`` of
+    every file extracted, the SHA256 of the sorted ``"<basename>\\t<sha256>\\n"``
+    lines. An installed bundle is checked against it alone, never against the
+    manifest the installer writes beside the files. Both values move together when
+    the version does: download the new archive, extract it with
+    ``rules_bundles.extract_bundle`` and pin ``contents_digest`` of the map it
+    returns.
     """
 
     name: str
     version: str
     url: str
     sha256: str
+    contents_sha256: str
     member_dir: str
     member_suffix: str
     license: str
@@ -500,6 +527,9 @@ RULES_BUNDLES: dict[str, RulesBundle] = {
             f"ruleset-build-v{_CFN_GUARD_RULES_RELEASE}.zip"
         ),
         sha256=_DIGESTS[f"ruleset-build-v{_CFN_GUARD_RULES_RELEASE}.zip"],
+        contents_sha256=_BUNDLE_CONTENTS_DIGESTS[
+            f"ruleset-build-v{_CFN_GUARD_RULES_RELEASE}.zip"
+        ],
         member_dir="output",
         member_suffix=".guard",
         license="Apache-2.0",

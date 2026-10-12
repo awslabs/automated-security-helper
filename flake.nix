@@ -231,8 +231,8 @@
               # upgrade that bumps the pin the previous release's directory is still
               # there and cfn-guard would be MISSING. `--check` reads no network: it is
               # the test `ash dependencies install` makes before skipping a bundle (the
-              # manifest names the pinned url and digest, and every file still matches
-              # it). Both calls name this flake's pins rather than $ASH_PINS_DIR's.
+              # rule files there match the contents the pins name). Both calls name
+              # this flake's pins rather than $ASH_PINS_DIR's.
               # tests/unit/test_nix_cfn_guard_rules_reseed.py runs this block.
               if ! python3 ${self}/automated_security_helper/assets/install-pinned-tool.py \
                 --pins-dir ${self}/automated_security_helper \

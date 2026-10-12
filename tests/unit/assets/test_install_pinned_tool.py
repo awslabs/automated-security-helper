@@ -1304,13 +1304,21 @@ class TestARulesBundleCarriesItsLicenses:
     """
 
     _BUNDLE_DIGEST = "dc21aaad601c673843c299191d864cd9b9db32475b1937d930d6069ddde73296"  # pragma: allowlist secret
+    _CONTENTS_DIGEST = "5b5c48e45051dbd862894d9fd494deee1f52319163ea19ebabd8fb08896cd323"  # pragma: allowlist secret
+    _RULE = b"rule A { }\n"
 
-    @staticmethod
-    def _zip() -> bytes:
+    @classmethod
+    def _zip(cls) -> bytes:
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as bundle:
-            bundle.writestr("output/wa-Security-Pillar.guard", "rule A { }\n")
+            bundle.writestr("output/wa-Security-Pillar.guard", cls._RULE)
         return buffer.getvalue()
+
+    @classmethod
+    def _contents(cls) -> str:
+        """contents_sha256 for the one rule file ``_zip`` holds."""
+        line = f"wa-Security-Pillar.guard\t{_sha(cls._RULE)}\n"
+        return _sha(line.encode("ascii"))
 
     def _setup(self, tmp_path, monkeypatch, license_payloads):
         from automated_security_helper.utils.tool_downloads import RULES_BUNDLES
@@ -1321,7 +1329,12 @@ class TestARulesBundleCarriesItsLicenses:
         real = {f.url: f"{f.name} text\n".encode() for f in entry.files}
         served.update(license_payloads or real)
         pins = _pins_dir(
-            tmp_path, {self._BUNDLE_DIGEST: _sha(archive), **_url_file_overrides(real)}
+            tmp_path,
+            {
+                self._BUNDLE_DIGEST: _sha(archive),
+                self._CONTENTS_DIGEST: self._contents(),
+                **_url_file_overrides(real),
+            },
         )
         server = _Server(served)
         monkeypatch.setattr(installer, "download", server)
@@ -1360,6 +1373,36 @@ class TestARulesBundleCarriesItsLicenses:
         installer.install_bundle("aws-guard-rules-registry", tmp_path / "rules", pins)
         assert not (tmp_path / "tp").exists()
         assert len(server.calls) == 1, "only the bundle itself is downloaded"
+
+    def test_the_installed_rules_pass_the_check_against_the_same_pins(
+        self, tmp_path, monkeypatch
+    ):
+        pins, _, _ = self._setup(tmp_path, monkeypatch, None)
+        rules = tmp_path / "rules"
+        installer.install_bundle("aws-guard-rules-registry", rules, pins)
+        assert (
+            installer.installed_bundle_problem("aws-guard-rules-registry", rules, pins)
+            is None
+        )
+
+    def test_the_real_contents_pin_refuses_this_archive(self, tmp_path, monkeypatch):
+        """With only the archive digest moved, the one-file archive is not the
+        pinned contents, and nothing is installed."""
+        archive = self._zip()
+        from automated_security_helper.utils.tool_downloads import RULES_BUNDLES
+
+        monkeypatch.setattr(
+            installer,
+            "download",
+            _Server({RULES_BUNDLES["aws-guard-rules-registry"].url: archive}),
+        )
+        pins = _pins_dir(tmp_path, {self._BUNDLE_DIGEST: _sha(archive)})
+        with pytest.raises(SystemExit) as raised:
+            installer.install_bundle(
+                "aws-guard-rules-registry", tmp_path / "rules", pins
+            )
+        assert raised.value.code == installer._EXIT_INTEGRITY
+        assert list((tmp_path / "rules").iterdir()) == []
 
 
 # ---------------------------------------------------------------------------

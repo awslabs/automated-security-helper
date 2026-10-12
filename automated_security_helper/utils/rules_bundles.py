@@ -15,21 +15,52 @@ are pinned.
 What an installed bundle is
 ---------------------------
 ``<rules root>/<bundle>-<version>/`` holding the bundle's rule files, each extracted to
-its basename, plus ``MANIFEST_NAME``: a JSON record of the pinned url, the archive's
-SHA256 and the SHA256 of every file extracted. The rules root is
-``$ASH_CFN_GUARD_RULES_DIR`` when set (the container image sets it), otherwise
-``<ASH_BIN_PATH>/../share/cfn-guard-rules``, so ``ash dependencies install --bin-path X``
-keeps the rules beside the binaries it installed.
+its basename. The rules root is ``$ASH_CFN_GUARD_RULES_DIR`` when set (the container
+image sets it), otherwise ``<ASH_BIN_PATH>/../share/cfn-guard-rules``, so
+``ash dependencies install --bin-path X`` keeps the rules beside the binaries it
+installed.
 
-The manifest is checked twice. The installer skips a bundle whose manifest names the
-current pin and whose files still hash to what it records, so a second
-``ash dependencies install`` (the image runs it twice, once per stage) is a no-op and
-does not need write access to a directory root created. The scanner checks it again
-before every scan, for the rule files it is about to load, so a partial or corrupted
-install is reported as MISSING with a reason instead of evaluating a template against
-whatever is left. The nix shell makes the installer's check as well, on every entry,
-through ``install-pinned-tool --rules-bundle --check``, which cannot import this module;
+The directory also holds ``MANIFEST_NAME``, a JSON record of the pinned url, the
+archive's SHA256 and the SHA256 of every file extracted. It is a record: the image's
+license check reads the installed version from it, and a person can read what was
+installed. No check reads it to decide whether the rules may be used.
+
+What is checked, and when
+-------------------------
+``RulesBundle.contents_sha256`` in ``utils/tool_downloads.py`` pins what the archive
+extracts to: the SHA256 of the sorted ``"<basename>\\t<sha256>\\n"`` lines of every
+rule file (``contents_digest``). The archive's own SHA256 pins the bytes downloaded;
+this pins the files the extraction rules below select from them, which is what
+cfn-guard reads.
+
+An installed bundle's rule files are every entry in its directory whose name ends in
+``member_suffix``. Each must be a regular file with a name the installer would write,
+and together they must give the pinned digest, so a rule file edited, added, removed
+or renamed fails the check. Any other file there, the manifest among them, is not part
+of the bundle and is not read.
+
+The check is made in three places, each against the pin and nothing stored beside the
+files:
+
+* by the installer, on its own extraction before the final rename, so a changed
+  archive layout cannot install contents nobody pinned;
+* by the installer before it skips a bundle that is already in place, so a second
+  ``ash dependencies install`` (the image runs it twice, once per stage) is a no-op
+  and does not need write access to a directory root created. A bundle that fails is
+  downloaded and installed again; when that download fails, the installer refuses and
+  says the rules there do not match the pinned contents and that network access, or
+  the ASH container image, is needed;
+* by the scanner before every scan, so a partial or changed install is reported as
+  MISSING with a reason instead of evaluating a template against it.
+
+The nix shell makes the installer's check as well, on every entry, through
+``install-pinned-tool --rules-bundle --check``, which cannot import this module;
 tests/unit/test_nix_cfn_guard_rules_reseed.py keeps the two checks giving one answer.
+
+Every check hashes every rule file. For the registry's 50 files, about 4 MB, that
+measured about 5 ms per check, and it keeps the pin one value that moves with the
+archive's digest. A per-file table in ``tool_downloads.py`` would allow checking only the files
+a scan selects, at the price of 50 more pinned values to keep in step.
 
 Extraction rules, and why
 -------------------------
@@ -46,18 +77,17 @@ half-extracted bundle under the final name.
 
 Known limitation, stated plainly
 --------------------------------
-The manifest sits beside the files it describes. It detects truncation, a partial
-extraction and accidental edits. It does not stop someone who can write the bundle
-directory from replacing a rule file and rewriting the manifest to match; that is
-prevented by who can write the directory, not by this check. The container image
-installs the bundle as root with mode 0755/0644 for that reason, and the per-file
-digests are not pinned in the repository because the archive digest already pins the
-same bytes at install time.
+The check reads the files when it runs. A rule file changed after the scanner checked
+it and before cfn-guard reads it is not detected, so who can write the bundle
+directory still matters. The container image installs the bundle as root with mode
+0755/0644 for that reason, and checks at build time that no other user can change it
+or any directory above it.
 """
 
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -66,7 +96,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple
 
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -101,7 +131,10 @@ class RulesBundleUnavailable(Exception):
 
 @dataclass(frozen=True)
 class InstalledBundle:
-    """A bundle directory whose manifest matched the pin."""
+    """A bundle directory whose rule files matched the pinned contents.
+
+    ``files`` maps each rule file's basename to its SHA256.
+    """
 
     directory: Path
     files: Dict[str, str]
@@ -131,6 +164,79 @@ def _sha256(path: Path) -> str:
     from automated_security_helper.utils.download_utils import sha256_file
 
     return sha256_file(path)
+
+
+def contents_digest(files: Mapping[str, str]) -> str:
+    """The digest ``RulesBundle.contents_sha256`` pins, for ``files``.
+
+    ``files`` maps each rule file's basename to its SHA256. The result is the SHA256
+    of one ``"<basename>\\t<sha256>\\n"`` line per file, sorted by basename. Member
+    names are ASCII (``_SAFE_MEMBER_NAME``), so that order is byte order and the
+    value can be reproduced with ``sha256sum`` and ``LC_ALL=C sort``.
+    """
+    lines = "".join(
+        f"{name}\t{digest.lower()}\n" for name, digest in sorted(files.items())
+    )
+    return hashlib.sha256(lines.encode("utf-8")).hexdigest()
+
+
+def _installed_members(
+    directory: Path, suffix: str
+) -> Tuple[Dict[str, str], Optional[str]]:
+    """(basename -> SHA256 of each rule file in ``directory``, problem or None).
+
+    A rule file is any entry whose name ends in ``suffix``, which covers every file
+    the installer extracts. An entry of that name that is not a regular file, or
+    whose name the installer would not write, is reported as the problem rather
+    than hashed. Other names are not part of the bundle and are not opened.
+    """
+    members: Dict[str, str] = {}
+    try:
+        with os.scandir(directory) as listing:
+            entries = sorted(listing, key=lambda entry: entry.name)
+    except OSError as exc:
+        return members, f"{directory} could not be read ({exc})"
+    for entry in entries:
+        if not entry.name.endswith(suffix):
+            continue
+        path = directory.joinpath(entry.name)
+        if not _SAFE_MEMBER_NAME.match(entry.name):
+            return members, f"{path} has a name the installer does not write"
+        if not entry.is_file(follow_symlinks=False):
+            return members, f"{path} is not a regular file"
+        try:
+            members[entry.name] = _sha256(path)
+        except OSError as exc:
+            return members, f"{path} could not be read ({exc})"
+    return members, None
+
+
+def _bundle_problem(
+    bundle: "RulesBundle", directory: Path
+) -> Tuple[Dict[str, str], Optional[str]]:
+    """(the rule files found, why ``directory`` is not the pinned bundle or None).
+
+    The test both the installer and the scanner make, described in the module
+    docstring. It reads the rule files only; the manifest plays no part.
+    """
+    if not directory.is_dir():
+        if directory.exists() or directory.is_symlink():
+            return {}, (
+                f"{directory} is not a directory, so the {bundle.name} "
+                f"{bundle.version} rules are not installed there"
+            )
+        return {}, (
+            f"the {bundle.name} {bundle.version} rules are not installed: "
+            f"{directory} does not exist"
+        )
+    members, problem = _installed_members(directory, bundle.member_suffix)
+    detail = f" ({problem})" if problem else ""
+    if problem or contents_digest(members) != bundle.contents_sha256.lower():
+        return members, (
+            f"the rules installed at {directory} do not match the pinned contents "
+            f"of {bundle.name} {bundle.version}{detail}"
+        )
+    return members, None
 
 
 def _member_basename(
@@ -235,78 +341,30 @@ def verify_installed_bundle(
     root: Optional[Path] = None,
     files: Optional[List[str]] = None,
 ) -> InstalledBundle:
-    """Check an installed bundle against its pin, and ``files`` against the manifest.
+    """Check an installed bundle's rule files against the pinned contents.
 
-    ``files`` names the rule files the caller is about to use; each must be listed in
-    the manifest and still hash to the digest recorded there. When ``files`` is None
-    every file in the manifest is checked, which is what the installer does before it
-    decides to skip.
+    Every rule file is checked whatever ``files`` holds; see the module docstring.
+    ``files`` names the rule files the caller is about to use, and each must be one
+    of them.
 
     Raises:
         RulesBundleUnavailable: with a reason an operator can act on.
     """
     root = rules_root() if root is None else Path(root)
     directory = root.joinpath(bundle_dir_name(bundle))
-    reinstall = (
-        "Run `ash dependencies install --tool cfn-guard` with network access, or use "
-        "the ASH container image, which ships it."
-    )
-    manifest_path = directory.joinpath(MANIFEST_NAME)
-    if not manifest_path.is_file():
+    members, problem = _bundle_problem(bundle, directory)
+    if problem is not None:
         raise RulesBundleUnavailable(
-            f"the {bundle.name} {bundle.version} rules are not installed: "
-            f"{manifest_path} does not exist. {reinstall}"
+            f"{problem}. Run `ash dependencies install --tool cfn-guard` with network "
+            "access, or use the ASH container image, which ships it."
         )
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise RulesBundleUnavailable(
-            f"the {bundle.name} rules manifest at {manifest_path} is unreadable "
-            f"({exc}). {reinstall}"
-        ) from exc
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
-        raise RulesBundleUnavailable(
-            f"the {bundle.name} rules manifest at {manifest_path} is malformed. "
-            f"{reinstall}"
-        )
-    if (
-        manifest.get("url") != bundle.url
-        or str(manifest.get("sha256", "")).lower() != bundle.sha256.lower()
-    ):
-        raise RulesBundleUnavailable(
-            f"the rules installed at {directory} are not the pinned {bundle.name} "
-            f"{bundle.version} (manifest names {manifest.get('url')!r}). {reinstall}"
-        )
-    recorded: Dict[str, str] = {str(k): str(v) for k, v in manifest["files"].items()}
-    to_check = recorded if files is None else {}
-    if files is not None:
-        for name in files:
-            if name not in recorded:
-                raise RulesBundleUnavailable(
-                    f"{name} is not part of the installed {bundle.name} "
-                    f"{bundle.version} rules. Available: "
-                    f"{', '.join(sorted(recorded))}"
-                )
-            to_check[name] = recorded[name]
-    for name, expected in to_check.items():
-        path = directory.joinpath(name)
-        if not path.is_file():
+    for name in files or []:
+        if name not in members:
             raise RulesBundleUnavailable(
-                f"{path} is listed in the {bundle.name} rules manifest but is missing. "
-                f"{reinstall}"
+                f"{name} is not part of the installed {bundle.name} "
+                f"{bundle.version} rules. Available: {', '.join(sorted(members))}"
             )
-        try:
-            actual = _sha256(path)
-        except OSError as exc:
-            raise RulesBundleUnavailable(
-                f"{path} could not be read ({exc}). {reinstall}"
-            ) from exc
-        if actual != expected:
-            raise RulesBundleUnavailable(
-                f"{path} no longer matches the digest recorded when the "
-                f"{bundle.name} rules were installed. {reinstall}"
-            )
-    return InstalledBundle(directory=directory, files=recorded)
+    return InstalledBundle(directory=directory, files=members)
 
 
 def install_rules_bundle(
@@ -316,10 +374,16 @@ def install_rules_bundle(
 
     Returns the installed bundle directory.
 
+    A bundle already in place is kept when its rule files match the pinned
+    contents; otherwise the pinned archive is downloaded and installed over it.
+
     Raises:
         ToolNotProvisionableError: ``name`` is not a pinned bundle.
         ToolDownloadIntegrityError: the download does not match its pinned digest,
-            or the archive is unusable.
+            the files extracted from it do not match the pinned contents, or the
+            archive is unusable.
+        RulesBundleUnavailable: the bundle needs installing and the download
+            failed; the rules in place, if any, are left as they were.
     """
     from automated_security_helper.utils.download_utils import download_file
     from automated_security_helper.utils.tool_downloads import get_rules_bundle
@@ -328,28 +392,49 @@ def install_rules_bundle(
     root = rules_root() if root is None else Path(root)
     final = root.joinpath(bundle_dir_name(bundle))
 
+    problem = f"reinstalling the {bundle.name} {bundle.version} rules at {final}"
     if not force:
-        try:
-            verify_installed_bundle(bundle, root)
+        _, found = _bundle_problem(bundle, final)
+        if found is None:
             ASH_LOGGER.info(
                 f"{bundle.name} {bundle.version} rules already installed at {final}, "
                 "skipping download"
             )
             return final
-        except RulesBundleUnavailable as reason:
-            ASH_LOGGER.debug(f"Installing {bundle.name}: {reason}")
+        ASH_LOGGER.debug(f"Installing {bundle.name}: {found}")
+        problem = found
 
     root.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".ash-rules-staging-", dir=root))
     try:
         with tempfile.TemporaryDirectory(prefix="ash-rules-download-") as download_dir:
-            archive = download_file(
-                bundle.url,
-                Path(download_dir),
-                rename_to=bundle.url.rsplit("/", 1)[-1],
-                expected_sha256=bundle.sha256,
-            )
+            try:
+                archive = download_file(
+                    bundle.url,
+                    Path(download_dir),
+                    rename_to=bundle.url.rsplit("/", 1)[-1],
+                    expected_sha256=bundle.sha256,
+                )
+            except (OSError, http.client.HTTPException) as exc:
+                # URLError, HTTPError, timeouts and dropped connections, once
+                # download_file's retries are spent. A digest mismatch is a
+                # ToolDownloadIntegrityError and is not caught here.
+                raise RulesBundleUnavailable(
+                    f"{problem}, and the pinned archive {bundle.url} could not be "
+                    f"downloaded ({exc}). Installing the pinned rules needs network "
+                    "access, or use the ASH container image, which ships them."
+                ) from exc
             files = extract_bundle(archive, bundle, staging)
+        actual = contents_digest(files)
+        if actual != bundle.contents_sha256.lower():
+            # The archive matched its pin, so the extraction rules selected other
+            # files than the ones pinned: a changed layout, or a pin not updated
+            # with the archive's.
+            raise ToolDownloadIntegrityError(
+                f"the {len(files)} files extracted from {bundle.url} do not match the "
+                f"pinned contents of {bundle.name} {bundle.version}: expected "
+                f"{bundle.contents_sha256.lower()}, got {actual}. Refusing to install."
+            )
         staging.joinpath(MANIFEST_NAME).write_text(
             json.dumps(_manifest_for(bundle, files), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",

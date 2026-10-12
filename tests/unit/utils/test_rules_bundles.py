@@ -7,7 +7,9 @@ The archive here is built in the test with the same layout as the AWS Guard Rule
 Registry's ``ruleset-build-v1.0.2.zip`` -- rule files under ``output/`` plus
 ``__MACOSX/`` resource-fork entries -- and with entries the installers must refuse
 added. Only the network fetch is replaced; extraction, the manifest, the skip
-decision and verification are the real code.
+decision and verification are the real code. The fixture bundle's pin carries the
+archive's digest and ``contents_sha256`` for its two rule files, computed here
+rather than by the module under test.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import urllib.error
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -27,6 +31,7 @@ from automated_security_helper.utils import rules_bundles
 from automated_security_helper.utils.rules_bundles import (
     MANIFEST_NAME,
     RulesBundleUnavailable,
+    contents_digest,
     extract_bundle,
     install_rules_bundle,
     verify_installed_bundle,
@@ -54,12 +59,35 @@ GOOD_ENTRIES = {
     "output/nested/deeper.guard": "rule C { }\n",
 }
 
+#: The rule files GOOD_ENTRIES extracts to, as bytes.
+GOOD_MEMBERS = {
+    "wa-Security-Pillar.guard": b"rule A { }\n",
+    "cis-aws-benchmark-level-1.guard": b"rule B { }\n",
+}
+
+
+def _pinned_contents(members: dict) -> str:
+    """``contents_sha256`` for ``members`` (name -> bytes), written out by hand."""
+    lines = "".join(
+        f"{name}\t{hashlib.sha256(data).hexdigest()}\n"
+        for name, data in sorted(members.items())
+    )
+    return hashlib.sha256(lines.encode("ascii")).hexdigest()
+
+
+def _pinned(archive: Path, members: dict = GOOD_MEMBERS):
+    """The real pin's shape, pinned to ``archive`` and to ``members``."""
+    return replace(
+        REAL,
+        sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+        contents_sha256=_pinned_contents(members),
+    )
+
 
 @pytest.fixture
 def bundle_zip(tmp_path) -> tuple:
     archive = _zip(tmp_path / "ruleset-build-v1.0.2.zip", GOOD_ENTRIES)
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    return archive, replace(REAL, sha256=digest)
+    return archive, _pinned(archive)
 
 
 def _fake_download(archive: Path, calls: list):
@@ -75,11 +103,19 @@ def _fake_download(archive: Path, calls: list):
     return download_file
 
 
-def _install(tmp_path, bundle, archive, calls, **kwargs):
+def _offline(calls: list):
+    def download_file(url, destination, rename_to=None, expected_sha256=None):
+        calls.append((url, expected_sha256))
+        raise urllib.error.URLError("[Errno 101] Network is unreachable")
+
+    return download_file
+
+
+def _install(tmp_path, bundle, archive, calls, download=None, **kwargs):
     with (
         patch(
             "automated_security_helper.utils.download_utils.download_file",
-            side_effect=_fake_download(archive, calls),
+            side_effect=download or _fake_download(archive, calls),
         ),
         patch(
             "automated_security_helper.utils.tool_downloads.get_rules_bundle",
@@ -87,6 +123,39 @@ def _install(tmp_path, bundle, archive, calls, **kwargs):
         ),
     ):
         return install_rules_bundle(bundle.name, root=tmp_path / "rules", **kwargs)
+
+
+def _leftovers(rules: Path) -> list:
+    return [p.name for p in rules.iterdir() if p.name.startswith(".ash-rules")]
+
+
+def _tree(directory: Path) -> dict:
+    return {p.name: p.read_bytes() for p in sorted(directory.iterdir())}
+
+
+def _script():
+    spec = importlib.util.spec_from_file_location("_ipt_members", SCRIPT)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
+
+
+def _script_pins(bundle):
+    class Pins:
+        ToolNotProvisionableError = LookupError
+
+        @staticmethod
+        def get_rules_bundle(name):
+            return bundle
+
+    return Pins
+
+
+def _script_problem(bundle, rules: Path):
+    """install-pinned-tool --check's answer, against ``bundle`` as the pin."""
+    script = _script()
+    with patch.object(script, "load_pins", return_value=_script_pins(bundle)):
+        return script.installed_bundle_problem(bundle.name, rules, rules)
 
 
 class TestExtraction:
@@ -162,6 +231,35 @@ class TestExtraction:
             extract_bundle(archive, REAL, tmp_path)
 
 
+class TestTheContentsDigest:
+    def test_it_is_the_digest_of_sorted_name_and_digest_lines(self):
+        files = {
+            name: hashlib.sha256(data).hexdigest()
+            for name, data in GOOD_MEMBERS.items()
+        }
+        assert contents_digest(files) == _pinned_contents(GOOD_MEMBERS)
+
+    def test_names_count_as_well_as_bytes(self):
+        digest = hashlib.sha256(b"rule A { }\n").hexdigest()
+        assert contents_digest({"a.guard": digest}) != contents_digest(
+            {"b.guard": digest}
+        )
+
+    def test_the_script_computes_the_same_value(self):
+        files = {
+            name: hashlib.sha256(data).hexdigest()
+            for name, data in GOOD_MEMBERS.items()
+        }
+        assert _script().contents_digest(files) == contents_digest(files)
+
+    def test_an_uppercase_digest_in_the_pin_still_matches(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        _install(tmp_path, bundle, archive, [])
+        upper = replace(bundle, contents_sha256=bundle.contents_sha256.upper())
+        verify_installed_bundle(upper, tmp_path / "rules")
+        assert _script_problem(upper, tmp_path / "rules") is None
+
+
 class TestInstall:
     def test_install_writes_files_and_a_manifest_naming_the_pin(
         self, tmp_path, bundle_zip
@@ -176,9 +274,7 @@ class TestInstall:
             "cis-aws-benchmark-level-1.guard",
             "wa-Security-Pillar.guard",
         ]
-        assert not [
-            p for p in (tmp_path / "rules").iterdir() if p.name.startswith(".ash-rules")
-        ]
+        assert _leftovers(tmp_path / "rules") == []
 
     def test_a_digest_mismatch_installs_nothing(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
@@ -203,6 +299,15 @@ class TestInstall:
         assert len(calls) == 2
         assert (final / "wa-Security-Pillar.guard").read_text() == "rule A { }\n"
 
+    def test_an_added_rule_file_is_removed_by_the_reinstall(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        calls = []
+        final = _install(tmp_path, bundle, archive, calls)
+        (final / "extra.guard").write_text("rule extra { }\n")
+        _install(tmp_path, bundle, archive, calls)
+        assert len(calls) == 2
+        assert not (final / "extra.guard").exists()
+
     def test_force_reinstalls(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
         calls = []
@@ -211,95 +316,269 @@ class TestInstall:
         assert len(calls) == 2
 
 
+class TestTheInstallerChecksItsOwnExtraction:
+    """The archive matches its pin, but what it extracts to is not the pinned set."""
+
+    def test_extra_rule_files_in_the_archive_install_nothing(self, tmp_path):
+        archive = _zip(
+            tmp_path / "ruleset-build-v1.0.2.zip",
+            {**GOOD_ENTRIES, "output/added.guard": "rule added { }\n"},
+        )
+        bundle = _pinned(archive)
+        with pytest.raises(ToolDownloadIntegrityError, match="pinned contents"):
+            _install(tmp_path, bundle, archive, [])
+        assert list((tmp_path / "rules").iterdir()) == []
+
+    def test_a_changed_rule_file_leaves_the_installed_bundle_alone(
+        self, tmp_path, bundle_zip
+    ):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        before = _tree(final)
+        changed = _zip(
+            tmp_path / "changed.zip",
+            {**GOOD_ENTRIES, "output/wa-Security-Pillar.guard": "rule other { }\n"},
+        )
+        repinned = replace(
+            bundle, sha256=hashlib.sha256(changed.read_bytes()).hexdigest()
+        )
+        with pytest.raises(ToolDownloadIntegrityError, match="pinned contents"):
+            _install(tmp_path, repinned, changed, [], force=True)
+        assert _tree(final) == before
+        assert _leftovers(tmp_path / "rules") == []
+
+
+class TestOffline:
+    def test_a_mismatch_with_no_network_refuses_with_the_reason(
+        self, tmp_path, bundle_zip
+    ):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        (final / "wa-Security-Pillar.guard").write_text("rule weakened { }\n")
+        before = _tree(final)
+        calls = []
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, calls, download=_offline(calls))
+        message = str(refused.value)
+        assert str(final) in message
+        assert "do not match the pinned contents" in message
+        assert "network access" in message and "ASH container image" in message
+        assert len(calls) == 1
+        assert _tree(final) == before, "the rules in place are left as they were"
+        assert _leftovers(tmp_path / "rules") == []
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            verify_installed_bundle(bundle, tmp_path / "rules")
+
+    def test_nothing_installed_and_no_network_says_so(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        calls = []
+        with pytest.raises(RulesBundleUnavailable) as refused:
+            _install(tmp_path, bundle, archive, calls, download=_offline(calls))
+        message = str(refused.value)
+        assert "are not installed" in message and "does not exist" in message
+        assert "network access" in message and "ASH container image" in message
+        assert list((tmp_path / "rules").iterdir()) == []
+
+    def test_a_pinned_bundle_needs_no_network(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        calls = []
+        assert _install(tmp_path, bundle, archive, calls, download=_offline(calls))
+        assert calls == [] and (final / "wa-Security-Pillar.guard").is_file()
+
+
 class TestVerify:
     def test_missing_install_names_the_remedy(self, tmp_path):
         with pytest.raises(RulesBundleUnavailable, match="ash dependencies install"):
             verify_installed_bundle(REAL, tmp_path)
 
-    def test_unreadable_manifest(self, tmp_path):
-        directory = tmp_path / rules_bundles.bundle_dir_name(REAL)
-        directory.mkdir()
-        (directory / MANIFEST_NAME).write_text("{")
-        with pytest.raises(RulesBundleUnavailable, match="unreadable"):
-            verify_installed_bundle(REAL, tmp_path)
+    def test_a_clean_install_passes(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        installed = verify_installed_bundle(bundle, tmp_path / "rules")
+        assert installed.directory == final
+        assert sorted(installed.files) == sorted(GOOD_MEMBERS)
 
-    def test_a_listed_file_that_is_gone(self, tmp_path, bundle_zip):
+    def test_an_empty_directory_is_not_the_bundle(self, tmp_path, bundle_zip):
+        _, bundle = bundle_zip
+        (tmp_path / rules_bundles.bundle_dir_name(bundle)).mkdir()
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            verify_installed_bundle(bundle, tmp_path)
+
+    @pytest.mark.parametrize(
+        "manifest",
+        [None, "{", "[]", json.dumps({"url": "https://example.invalid/x.zip"})],
+        ids=["deleted", "unreadable", "malformed", "names another archive"],
+    )
+    def test_the_manifest_plays_no_part(self, tmp_path, bundle_zip, manifest):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        if manifest is None:
+            (final / MANIFEST_NAME).unlink()
+        else:
+            (final / MANIFEST_NAME).write_text(manifest)
+        verify_installed_bundle(bundle, tmp_path / "rules")
+        assert _script_problem(bundle, tmp_path / "rules") is None
+
+    def test_a_rule_file_that_is_gone(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
         final = _install(tmp_path, bundle, archive, [])
         (final / "wa-Security-Pillar.guard").unlink()
-        with pytest.raises(RulesBundleUnavailable, match="missing"):
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            verify_installed_bundle(
+                bundle, tmp_path / "rules", files=["cis-aws-benchmark-level-1.guard"]
+            )
+
+    def test_a_renamed_rule_file_is_refused(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        (final / "wa-Security-Pillar.guard").rename(final / "renamed.guard")
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            verify_installed_bundle(bundle, tmp_path / "rules")
+
+    def test_an_added_rule_file_is_refused(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        (final / "extra.guard").write_text("rule extra { }\n")
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            verify_installed_bundle(bundle, tmp_path / "rules", files=["extra.guard"])
+
+    def test_other_files_are_not_part_of_the_bundle(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        (final / "README.md").write_text("notes\n")
+        (final / "rules.guard.bak").write_text("rule old { }\n")
+        installed = verify_installed_bundle(bundle, tmp_path / "rules")
+        assert sorted(installed.files) == sorted(GOOD_MEMBERS)
+        with pytest.raises(RulesBundleUnavailable, match="is not part of"):
+            verify_installed_bundle(bundle, tmp_path / "rules", files=["README.md"])
+
+    def test_a_name_the_installer_would_not_write_is_refused(
+        self, tmp_path, bundle_zip
+    ):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        (final / ".hidden.guard").write_text("rule hidden { }\n")
+        with pytest.raises(RulesBundleUnavailable, match="does not write"):
+            verify_installed_bundle(bundle, tmp_path / "rules")
+
+    def test_a_directory_named_like_a_rule_file_is_refused(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        (final / "more.guard").mkdir()
+        with pytest.raises(RulesBundleUnavailable, match="not a regular file"):
+            verify_installed_bundle(bundle, tmp_path / "rules")
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+    def test_a_linked_rule_file_with_the_pinned_bytes_is_refused(
+        self, tmp_path, bundle_zip
+    ):
+        """The link's target lies outside the directory the bundle was installed
+        into, so whoever can write it can change the rules after the check."""
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        elsewhere = tmp_path / "elsewhere.guard"
+        elsewhere.write_bytes(GOOD_MEMBERS["wa-Security-Pillar.guard"])
+        (final / "wa-Security-Pillar.guard").unlink()
+        (final / "wa-Security-Pillar.guard").symlink_to(elsewhere)
+        with pytest.raises(RulesBundleUnavailable, match="not a regular file"):
+            verify_installed_bundle(bundle, tmp_path / "rules")
+        assert "not a regular file" in str(_script_problem(bundle, tmp_path / "rules"))
+
+    def test_a_file_where_the_directory_should_be(self, tmp_path, bundle_zip):
+        _, bundle = bundle_zip
+        (tmp_path / rules_bundles.bundle_dir_name(bundle)).write_text("x")
+        with pytest.raises(RulesBundleUnavailable, match="is not a directory"):
+            verify_installed_bundle(bundle, tmp_path)
+        assert "is not a directory" in str(_script_problem(bundle, tmp_path))
+
+
+def _edit_rule_and_rewrite_manifest(directory: Path) -> None:
+    """Change one rule file, then rewrite the manifest beside it to match."""
+    (directory / "wa-Security-Pillar.guard").write_text("rule weakened { }\n")
+    manifest = json.loads((directory / MANIFEST_NAME).read_text())
+    manifest["files"] = {
+        name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        for name in manifest["files"]
+    }
+    (directory / MANIFEST_NAME).write_text(json.dumps(manifest))
+
+
+class TestAnEditedRuleWithARewrittenManifest:
+    def test_the_verifier_refuses_it(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        _edit_rule_and_rewrite_manifest(final)
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            verify_installed_bundle(bundle, tmp_path / "rules")
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
             verify_installed_bundle(
                 bundle, tmp_path / "rules", files=["wa-Security-Pillar.guard"]
             )
 
+    def test_the_installer_downloads_it_again(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        calls = []
+        final = _install(tmp_path, bundle, archive, calls)
+        _edit_rule_and_rewrite_manifest(final)
+        _install(tmp_path, bundle, archive, calls)
+        assert len(calls) == 2
+        assert (final / "wa-Security-Pillar.guard").read_text() == "rule A { }\n"
+
+    def test_the_nix_check_refuses_it(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        final = _install(tmp_path, bundle, archive, [])
+        _edit_rule_and_rewrite_manifest(final)
+        problem = _script_problem(bundle, tmp_path / "rules")
+        assert problem is not None and "pinned contents" in problem
+
 
 class TestTheTwoInstallersAgree:
     """The image installs with install-pinned-tool; ash dependencies install skips on
-    what it wrote. A drift between the two manifests would make every image
-    re-download, or fail where the scan user cannot write the directory."""
+    what it wrote. A drift between the two would make every image re-download, or
+    fail where the scan user cannot write the directory."""
 
-    def test_both_write_the_same_manifest(self, tmp_path, bundle_zip):
-        archive, bundle = bundle_zip
-        python_dir = _install(tmp_path / "py", bundle, archive, [])
-
-        spec = importlib.util.spec_from_file_location("_ipt", SCRIPT)
-        script = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(script)
-
-        class Pins:
-            @staticmethod
-            def get_rules_bundle(name):
-                return bundle
+    @staticmethod
+    def _script_install(bundle, archive: Path, rules: Path, package_root: Path):
+        script = _script()
 
         def download(url, target):
             target.write_bytes(archive.read_bytes())
             return hashlib.sha256(target.read_bytes()).hexdigest()
 
         with (
-            patch.object(script, "load_pins", return_value=Pins),
+            patch.object(script, "load_pins", return_value=_script_pins(bundle)),
             patch.object(script, "download", side_effect=download),
         ):
-            script_dir = script.install_bundle(bundle.name, tmp_path / "sh", tmp_path)
+            return script.install_bundle(bundle.name, rules, package_root)
 
-        assert (script_dir / MANIFEST_NAME).read_text() == (
-            python_dir / MANIFEST_NAME
-        ).read_text()
-        assert sorted(p.name for p in script_dir.iterdir()) == sorted(
-            p.name for p in python_dir.iterdir()
-        )
+    def test_both_write_the_same_directory(self, tmp_path, bundle_zip):
+        archive, bundle = bundle_zip
+        python_dir = _install(tmp_path / "py", bundle, archive, [])
+        script_dir = self._script_install(bundle, archive, tmp_path / "sh", tmp_path)
+
+        assert _tree(script_dir) == _tree(python_dir)
         verify_installed_bundle(bundle, tmp_path / "sh")
+        assert _script_problem(bundle, tmp_path / "py" / "rules") is None
 
     def test_the_script_refuses_a_digest_mismatch(self, tmp_path, bundle_zip):
         archive, bundle = bundle_zip
-        spec = importlib.util.spec_from_file_location("_ipt2", SCRIPT)
-        script = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(script)
         wrong = replace(bundle, sha256="0" * 64)
-
-        class Pins:
-            @staticmethod
-            def get_rules_bundle(name):
-                return wrong
-
-        def download(url, target):
-            target.write_bytes(archive.read_bytes())
-            return hashlib.sha256(target.read_bytes()).hexdigest()
-
-        with (
-            patch.object(script, "load_pins", return_value=Pins),
-            patch.object(script, "download", side_effect=download),
-            pytest.raises(SystemExit) as exited,
-        ):
-            script.install_bundle(bundle.name, tmp_path / "sh", tmp_path)
+        with pytest.raises(SystemExit) as exited:
+            self._script_install(wrong, archive, tmp_path / "sh", tmp_path)
         assert exited.value.code == 3
         assert list((tmp_path / "sh").iterdir()) == []
 
-
-def _script():
-    spec = importlib.util.spec_from_file_location("_ipt_members", SCRIPT)
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
-    return script
+    def test_the_script_refuses_contents_that_are_not_pinned(
+        self, tmp_path, bundle_zip, capsys
+    ):
+        archive, bundle = bundle_zip
+        wrong = replace(bundle, contents_sha256="0" * 64)
+        with pytest.raises(SystemExit) as exited:
+            self._script_install(wrong, archive, tmp_path / "sh", tmp_path)
+        assert exited.value.code == 3
+        assert "pinned contents" in capsys.readouterr().err
+        assert list((tmp_path / "sh").iterdir()) == []
 
 
 class TestRefusedArchiveEntriesInBothInstallers:
@@ -344,5 +623,8 @@ def test_the_real_pin_is_well_formed():
     assert REAL.url.startswith(
         "https://github.com/aws-cloudformation/aws-guard-rules-registry/"
     )
-    assert len(REAL.sha256) == 64 and REAL.sha256 == REAL.sha256.lower()
+    for digest in (REAL.sha256, REAL.contents_sha256):
+        assert len(digest) == 64 and digest == digest.lower()
+        int(digest, 16)
+    assert REAL.contents_sha256 != REAL.sha256
     assert REAL.member_dir == "output" and REAL.member_suffix == ".guard"

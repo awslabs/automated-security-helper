@@ -87,17 +87,19 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 317
-      line_end: 416
+      line_start: 328
+      line_end: 433
       reason: >-
         False positive — every string in this range is a published SHA256 release
-        checksum or the SHA256 of the executable inside one of those verified
-        archives. The archive digests in _DIGESTS were transcribed from the vendor's
+        checksum or the SHA256 of what one of those verified archives extracts to.
+        The archive digests in _DIGESTS were transcribed from the vendor's
         own *_checksums.txt or `<asset>.sha256` file, or, for the projects that
         publish neither (cfn-guard, opengrep, the Guard Rules Registry), from the
         digest GitHub reports for each release asset and confirmed by hashing the
         asset. _EXECUTABLE_DIGESTS, the second table in the range, holds the SHA256
-        of the executable extracted from each verified archive. A 64-character hex
+        of the executable extracted from each verified archive, and
+        _BUNDLE_CONTENTS_DIGESTS, the third, the SHA256 over the names and digests of
+        the rule files extracted from a rules bundle archive. A 64-character hex
         string is what an entropy detector is built to find, so every one is
         reported at 95% confidence, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
@@ -109,8 +111,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 824
-      line_end: 850
+      line_start: 854
+      line_end: 880
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of

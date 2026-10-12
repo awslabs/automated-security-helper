@@ -419,9 +419,11 @@ def install(
 
 
 # Must match automated_security_helper/utils/rules_bundles.py: the image installs a
-# bundle with this script, and `ash dependencies install` later reads what it wrote
-# to decide the bundle is already in place. tests/unit/utils/test_rules_bundles.py
-# installs one fake bundle both ways and asserts the two manifests are identical.
+# bundle with this script, and `ash dependencies install` later checks what it wrote
+# against the same pinned contents to decide the bundle is already in place.
+# tests/unit/utils/test_rules_bundles.py installs one fake bundle both ways and
+# asserts the two directories are identical. The manifest is a record, not part of
+# that check; the image's license step reads the installed version from it.
 _RULES_MANIFEST_NAME = ".ash-rules-manifest.json"
 _SAFE_MEMBER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _MAX_MEMBER_BYTES = 16 * 1024 * 1024
@@ -461,6 +463,48 @@ def _bundle_members(bundle_zip: zipfile.ZipFile, bundle) -> "list[tuple]":
     return members
 
 
+def contents_digest(files: "dict[str, str]") -> str:
+    """rules_bundles.contents_digest: what ``RulesBundle.contents_sha256`` pins.
+
+    The SHA256 of one ``"<basename>\\t<sha256>\\n"`` line per file, sorted by
+    basename.
+    """
+    lines = "".join(
+        f"{name}\t{digest.lower()}\n" for name, digest in sorted(files.items())
+    )
+    return hashlib.sha256(lines.encode("utf-8")).hexdigest()
+
+
+def _installed_rule_files(
+    directory: Path, suffix: str
+) -> "tuple[dict[str, str], str | None]":
+    """rules_bundles._installed_members: the rule files in ``directory``, hashed.
+
+    Every entry whose name ends in ``suffix``; one that is not a regular file, or
+    whose name the installer would not write, is the problem returned. Other names,
+    the manifest among them, are not opened.
+    """
+    members: "dict[str, str]" = {}
+    try:
+        with os.scandir(directory) as listing:
+            entries = sorted(listing, key=lambda entry: entry.name)
+    except OSError as exc:
+        return members, f"{directory} could not be read ({exc})"
+    for entry in entries:
+        if not entry.name.endswith(suffix):
+            continue
+        path = directory / entry.name
+        if not _SAFE_MEMBER_NAME.match(entry.name):
+            return members, f"{path} has a name the installer does not write"
+        if not entry.is_file(follow_symlinks=False):
+            return members, f"{path} is not a regular file"
+        try:
+            members[entry.name] = _sha256_file(path)
+        except OSError as exc:
+            return members, f"{path} could not be read ({exc})"
+    return members, None
+
+
 def install_bundle(
     name: str,
     rules_dir: Path,
@@ -470,8 +514,10 @@ def install_bundle(
     """Install the pinned rules bundle ``name`` under ``rules_dir``.
 
     Verifies the archive against its pinned digest before reading it, extracts the
-    rule files into a staging directory, writes the manifest, and moves the staging
-    directory into place with one rename.
+    rule files into a staging directory, checks them against the pinned contents,
+    writes the manifest, and moves the staging directory into place with one rename.
+    Extracted files that do not match the pinned contents exit ``_EXIT_INTEGRITY``
+    and install nothing.
 
     With ``third_party_dir`` set (``ASH_THIRD_PARTY_DIR``, as for a tool), the
     bundle's license entry is resolved before anything is downloaded and its
@@ -526,6 +572,19 @@ def install_bundle(
                             digest.update(chunk)
                             handle.write(chunk)
                     files[member] = digest.hexdigest()
+        extracted = contents_digest(files)
+        if extracted != bundle.contents_sha256.lower():
+            # The archive matched its pin, so the selection above took other files
+            # than the ones pinned: a changed layout, or a pin not updated with the
+            # archive's. Fatal for the same reason as the archive check.
+            print(
+                f"the {len(files)} files extracted from {bundle.url} do not match "
+                f"the pinned contents of {bundle.name} {bundle.version}: expected "
+                f"{bundle.contents_sha256.lower()}, got {extracted}",
+                file=sys.stderr,
+            )
+            raise SystemExit(_EXIT_INTEGRITY)
+        print(f"Verified contents SHA256 {extracted}", flush=True)
         manifest = {
             "bundle": bundle.name,
             "version": bundle.version,
@@ -559,13 +618,14 @@ def installed_bundle_problem(
     """Why the bundle under ``rules_dir`` is not the pinned ``name``; None when it is.
 
     The same test as rules_bundles.verify_installed_bundle, which ``ash dependencies
-    install`` makes before it skips a bundle: the pinned version's directory holds a
-    manifest naming the pinned url and digest, and every file the manifest lists
-    still hashes to the digest recorded for it. Nothing is downloaded. The nix shell
-    runs this (``--check``) on every entry, so an ASH upgrade that bumps the pin
-    reinstalls the rules instead of leaving only the previous release's directory,
-    where the scanner does not look. tests/unit/test_nix_cfn_guard_rules_reseed.py
-    asks both functions about the same directories and requires the same answer.
+    install`` makes before it skips a bundle: the pinned version's directory holds
+    rule files whose ``contents_digest`` is the pinned ``contents_sha256``. The
+    manifest beside them is not read. Nothing is downloaded. The nix shell runs this
+    (``--check``) on every entry, so an ASH upgrade that bumps the pin reinstalls the
+    rules instead of leaving only the previous release's directory, where the scanner
+    does not look, and a rule file that no longer matches the pin is replaced.
+    tests/unit/test_nix_cfn_guard_rules_reseed.py asks both functions about the same
+    directories and requires the same answer.
     """
     pins = load_pins(package_root)
     try:
@@ -573,33 +633,17 @@ def installed_bundle_problem(
     except pins.ToolNotProvisionableError as exc:
         raise SystemExit(str(exc))
     directory = rules_dir / f"{bundle.name}-{bundle.version}"
-    manifest_path = directory / _RULES_MANIFEST_NAME
-    if not manifest_path.is_file():
-        return f"{manifest_path} does not exist"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return f"{manifest_path} is unreadable ({exc})"
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), dict):
-        return f"{manifest_path} is malformed"
-    if (
-        manifest.get("url") != bundle.url
-        or str(manifest.get("sha256", "")).lower() != bundle.sha256.lower()
-    ):
+    if not directory.is_dir():
+        if directory.exists() or directory.is_symlink():
+            return f"{directory} is not a directory"
+        return f"{directory} does not exist"
+    members, problem = _installed_rule_files(directory, bundle.member_suffix)
+    detail = f" ({problem})" if problem else ""
+    if problem or contents_digest(members) != bundle.contents_sha256.lower():
         return (
-            f"{directory} holds {manifest.get('url')!r}, not the pinned "
-            f"{bundle.name} {bundle.version}"
+            f"the rules in {directory} do not match the pinned contents of "
+            f"{bundle.name} {bundle.version}{detail}"
         )
-    for member, expected in manifest["files"].items():
-        path = directory / str(member)
-        if not path.is_file():
-            return f"{path} is listed in the manifest but missing"
-        try:
-            actual = _sha256_file(path)
-        except OSError as exc:
-            return f"{path} could not be read ({exc})"
-        if actual != str(expected):
-            return f"{path} no longer matches the digest in its manifest"
     return None
 
 
@@ -1287,8 +1331,8 @@ def main(argv: "list[str] | None" = None) -> int:
         "--check",
         action="store_true",
         help=(
-            "with --rules-bundle, install nothing: exit 0 when the bundle under "
-            "--rules-dir is the pinned one with every file intact, 1 otherwise"
+            "with --rules-bundle, install nothing: exit 0 when the rule files under "
+            "--rules-dir match the bundle's pinned contents, 1 otherwise"
         ),
     )
     args = parser.parse_args(argv)

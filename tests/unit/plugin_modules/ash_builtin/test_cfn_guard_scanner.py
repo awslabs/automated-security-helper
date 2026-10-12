@@ -25,9 +25,11 @@ the same command with a second ``--rules=<rules>/cis-aws-benchmark-level-1.guard
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -107,18 +109,31 @@ def _load(path: Path) -> SarifReport:
     return SarifReport.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
-def _fake_bundle(root: Path, names=("wa-Security-Pillar.guard", "custom-set.guard")):
-    """An installed bundle under ``root`` whose manifest matches the real pin."""
-    bundle = get_rules_bundle("aws-guard-rules-registry")
-    directory = root / rules_bundles.bundle_dir_name(bundle)
+#: The rule files ``_fake_bundle`` installs, and the pin the ``rules_root`` fixture
+#: gives the scanner for them: the real pin with these files' contents digest.
+_FAKE_RULES = {
+    name: f"rule {name.split('.')[0].replace('-', '_')} {{ }}\n".encode()
+    for name in ("wa-Security-Pillar.guard", "custom-set.guard")
+}
+_FAKE_PIN = replace(
+    get_rules_bundle("aws-guard-rules-registry"),
+    contents_sha256=rules_bundles.contents_digest(
+        {name: hashlib.sha256(data).hexdigest() for name, data in _FAKE_RULES.items()}
+    ),
+)
+
+
+def _fake_bundle(root: Path):
+    """An installed bundle under ``root`` holding ``_FAKE_RULES``, as installed."""
+    directory = root / rules_bundles.bundle_dir_name(_FAKE_PIN)
     directory.mkdir(parents=True)
     files = {}
-    for name in names:
+    for name, data in _FAKE_RULES.items():
         path = directory / name
-        path.write_text(f"rule {name.split('.')[0].replace('-', '_')} {{ }}\n")
+        path.write_bytes(data)
         files[name] = rules_bundles._sha256(path)
     (directory / MANIFEST_NAME).write_text(
-        json.dumps(rules_bundles._manifest_for(bundle, files))
+        json.dumps(rules_bundles._manifest_for(_FAKE_PIN, files))
     )
     return directory
 
@@ -148,8 +163,14 @@ def _symlink_or_skip(link: Path, target: Path) -> None:
 
 @pytest.fixture
 def rules_root(ash_temp_path, monkeypatch) -> Path:
+    """The rules root, with the scanner pinned to ``_fake_bundle``'s contents."""
     root = ash_temp_path / "rules"
     monkeypatch.setenv(RULES_DIR_ENV, str(root))
+    monkeypatch.setattr(
+        "automated_security_helper.plugin_modules.ash_builtin.scanners."
+        "cfn_guard_scanner.get_rules_bundle",
+        lambda name: _FAKE_PIN,
+    )
     return root
 
 
@@ -354,15 +375,57 @@ class TestRuleSelection:
     def test_a_modified_rules_file_is_refused(self, repo, rules_root):
         directory = _fake_bundle(rules_root)
         (directory / "wa-Security-Pillar.guard").write_text("rule weakened { }\n")
-        with pytest.raises(RulesBundleUnavailable, match="no longer matches"):
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
             _scanner(repo).rule_files()
 
-    def test_a_manifest_for_another_pin_is_refused(self, repo, rules_root):
+    def test_a_modified_rules_file_the_scan_does_not_select_is_refused(
+        self, repo, rules_root
+    ):
+        directory = _fake_bundle(rules_root)
+        (directory / "custom-set.guard").write_text("rule weakened { }\n")
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            _scanner(repo).rule_files()
+
+    def test_an_added_rules_file_cannot_be_selected(self, repo, rules_root):
+        directory = _fake_bundle(rules_root)
+        (directory / "added.guard").write_text("rule added { }\n")
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            _scanner(repo, rule_sets=["added"]).rule_files()
+
+    def test_an_edited_rule_with_a_rewritten_manifest_is_refused(
+        self, repo, rules_root
+    ):
+        directory = _fake_bundle(rules_root)
+        (directory / "wa-Security-Pillar.guard").write_text("rule weakened { }\n")
+        manifest = json.loads((directory / MANIFEST_NAME).read_text())
+        manifest["files"]["wa-Security-Pillar.guard"] = rules_bundles._sha256(
+            directory / "wa-Security-Pillar.guard"
+        )
+        (directory / MANIFEST_NAME).write_text(json.dumps(manifest))
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
+            _scanner(repo).rule_files()
+
+    def test_the_manifest_plays_no_part_in_the_check(self, repo, rules_root):
+        """A manifest naming another archive does not refuse pinned files, and a
+        missing one does not either: only the rule files are compared."""
         directory = _fake_bundle(rules_root)
         manifest = json.loads((directory / MANIFEST_NAME).read_text())
         manifest["sha256"] = "0" * 64
         (directory / MANIFEST_NAME).write_text(json.dumps(manifest))
-        with pytest.raises(RulesBundleUnavailable, match="not the pinned"):
+        assert _scanner(repo).rule_files() == [directory / "wa-Security-Pillar.guard"]
+        (directory / MANIFEST_NAME).unlink()
+        assert _scanner(repo).rule_files() == [directory / "wa-Security-Pillar.guard"]
+
+    def test_the_real_pin_refuses_the_fake_bundle(self, repo, rules_root, monkeypatch):
+        """The fixture's pin is what lets ``_fake_bundle`` pass; the real one is
+        the registry's 50 files and does not."""
+        _fake_bundle(rules_root)
+        monkeypatch.setattr(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "cfn_guard_scanner.get_rules_bundle",
+            get_rules_bundle,
+        )
+        with pytest.raises(RulesBundleUnavailable, match="pinned contents"):
             _scanner(repo).rule_files()
 
     def test_own_rules_paths_are_resolved_against_the_source(self, repo, rules_root):
