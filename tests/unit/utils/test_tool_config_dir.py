@@ -243,3 +243,60 @@ def test_a_directory_another_account_owns_is_not_used(
             write_tool_config("x.yaml", "{}\n")
     assert list(owned.iterdir()) == []
     assert list(tree.outside.iterdir()) == []
+
+
+# What a sandboxed scanner is granted.
+
+
+def _real(path) -> Path:
+    return Path(os.path.realpath(path))
+
+
+def _policy(tree, results: Path, grant):
+    from automated_security_helper.utils.sandbox.policy import (
+        SandboxRequirements,
+        build_scanner_policy,
+    )
+
+    return build_scanner_policy(
+        "probe",
+        SandboxRequirements(),
+        argv0="/bin/sh",
+        source_dir=tree.source,
+        output_dir=tree.inside,
+        results_dir=results,
+        scan_target=tree.source,
+        cwd=None,
+        offline=True,
+        network_scanners=None,
+        tool_config_dir=grant,
+    )
+
+
+@posix_only
+def test_the_grant_adds_the_directory_read_only_and_nothing_else(
+    tree, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _temp_dir(monkeypatch, tmp_path / "temp", 0o700)
+    results = tree.inside / "scanners" / "probe"
+    results.mkdir(parents=True)
+    with tool_config_scope(_context(tree.source, tree.inside)):
+        write_tool_config("x.yaml", "{}\n")
+        directory = _real(active_tool_config_dir())
+        without = _policy(tree, results, None)
+        granted = _policy(tree, results, directory)
+
+    def reals(paths):
+        return {_real(p) for p in paths}
+
+    assert reals(granted.read_only) - reals(without.read_only) == {directory}
+    assert reals(without.read_only) - reals(granted.read_only) == set()
+    # Nothing that holds the directory is readable either: not its parent, not
+    # the temporary directory, not anything above them.
+    assert not [
+        p for p in reals(granted.read_only) if p != directory and p in directory.parents
+    ]
+    assert reals(granted.writable) == reals(without.writable)
+    assert reals(granted.cache) == reals(without.cache)
+    assert directory not in reals(granted.executable)
+    assert directory in reals(granted.scan_data)
