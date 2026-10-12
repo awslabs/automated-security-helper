@@ -5,12 +5,14 @@
 
 ``set_source_git`` and ``set_source_zip_finalize`` both refuse to replace a
 session's source while one of its scans runs (``source_delivery._no_scan_running``).
-``set_source_zip_finalize`` reported the refusal with
-``error_type: SourceDeliveryBusyError``, while ``set_source_git`` caught the same
-exception as a clone failure and returned no ``error_type`` at all, so a client
-could not tell "try again after the scan" from a bad URL without reading the
-message. These tests call both tools as a client does, with the session's scan
-lock held, and check that each names the refusal the same way.
+``set_source_zip_finalize`` reported the refusal with an ``error_type``, while
+``set_source_git`` caught the same exception as a clone failure and returned no
+``error_type`` at all, so a client could not tell "try again after the scan" from
+a bad URL without reading the message. These tests call both tools as a client
+does, with the session's scan lock held, and check that each names the refusal
+the same way: ``source_delivery_busy`` (``source_delivery.SOURCE_DELIVERY_BUSY``).
+The clone host is one the operator allows, so the refusal is not the host
+allowlist's.
 """
 
 from __future__ import annotations
@@ -33,12 +35,16 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 
 SESSION = "busy-session"
-BUSY_MESSAGE = "a scan of this session is running; deliver the source after it finishes"
+BUSY_MESSAGE = (
+    "a scan of this session is running; change the delivered source after it finishes"
+)
+BUSY_ERROR_TYPE = "source_delivery_busy"
 
 
 @pytest.fixture
 def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
     clear_profile_registry()
     clear_session_state()
     yield tmp_path
@@ -78,7 +84,7 @@ def test_set_source_git_names_the_refusal(_server) -> None:
         )
 
     assert result["success"] is False, result
-    assert result["error_type"] == "SourceDeliveryBusyError", result
+    assert result["error_type"] == BUSY_ERROR_TYPE, result
     assert result["error"] == BUSY_MESSAGE, result
     assert result["session_id"] == SESSION, result
 
@@ -115,7 +121,7 @@ def test_both_delivery_tools_give_the_same_error_type(_server) -> None:
 
     assert finalized["success"] is False, finalized
     assert cloned["success"] is False, cloned
-    assert finalized["error_type"] == cloned["error_type"] == "SourceDeliveryBusyError"
+    assert finalized["error_type"] == cloned["error_type"] == BUSY_ERROR_TYPE
 
 
 def test_a_clone_failure_still_has_no_busy_error_type(_server) -> None:
