@@ -137,8 +137,10 @@ def warn_unmatched_directory_suppressions(
     not, and matches only that literal path, which no file has. A suppression
     written ``build/`` therefore suppresses nothing, and the findings it was
     written for are reported. The warning names the glob that suppresses the
-    directory's findings. Called after the scan's last suppression pass, with the
-    ids of the suppressions that pass used.
+    directory's findings, ``build/**/*``: as a suppression path that covers every
+    file below the directory and not a file named ``build``, which ``build/**``
+    would also cover. Called after the scan's last suppression pass, with the ids
+    of the suppressions that pass used.
     """
     used = set(used_ids)
     for suppression in suppressions:
@@ -152,7 +154,7 @@ def warn_unmatched_directory_suppressions(
             f"The suppression with path '{escape_markup(path)}' matched no finding: "
             "a suppression path ending in '/' matches only that literal path, not "
             "the files in the directory, as an ignore path's does. To suppress the "
-            f"findings below it, write '{escape_markup(directory)}/**'."
+            f"findings below it, write '{escape_markup(directory)}/**/*'."
         )
 
 

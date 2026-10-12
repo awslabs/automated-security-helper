@@ -57,7 +57,7 @@ Each suppression rule can include the following properties:
 ### Matching Rules
 
 - **Rule ID**: Must match exactly the rule ID reported by the scanner
-- **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`). To suppress the findings in a directory, write `build/**`: unlike an ignore path, a suppression path ending in `/` (`build/`) matches no file, and ASH warns after the scan about each such suppression that matched nothing, naming the `build/**` form. An ignore path ending in `/` does name the directory; see [Global settings](configuration-guide.md#global-settings).
+- **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`). To suppress the findings in a directory, write `build/**/*`, which covers every file below `build` and not a file named `build` (`build/**` covers that file too): unlike an ignore path, a suppression path ending in `/` (`build/`) matches no file, and ASH warns after the scan about each such suppression that matched nothing, naming the `build/**/*` form. An ignore path ending in `/` does name the directory; see [Global settings](configuration-guide.md#global-settings).
 - **Line Range**: If specified, only findings within this line range will be suppressed
 - **Package fields**: If specified, only findings about that package copy will be suppressed. See [Suppressing one package copy](#suppressing-one-package-copy).
 - **Symbol**: If specified, only findings inside that function, method or class will be suppressed, wherever it sits in the file. See [Suppressing by symbol](#suppressing-by-symbol).

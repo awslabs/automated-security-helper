@@ -183,7 +183,8 @@
   depth). `ash config lint`
   no longer warns about such an ignore path. Suppression paths keep their meaning:
   `build/` still matches no file, and ASH now warns once after the scan for each
-  suppression path ending in `/` that matched nothing, naming `build/**`. bandit's
+  suppression path ending in `/` that matched nothing, naming `build/**/*`, which
+  covers every file below `build` and not a file named `build`. bandit's
   and checkov's own exclusions, `node_modules/`, `.venv/` and `venv/`, were also
   passed to that step as ignore paths, written the same way, and matched nothing.
   They are no longer passed, so nothing changes for them: read as directories they

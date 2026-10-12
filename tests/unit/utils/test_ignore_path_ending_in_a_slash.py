@@ -24,7 +24,8 @@ one at any depth.
 
 Suppressions keep their meaning. A suppression path ending in ``/`` still matches
 only that literal path, so it suppresses nothing; ASH warns once, after the scan,
-for each such suppression that matched no finding, and names ``<dir>/**``.
+for each such suppression that matched no finding, and names ``<dir>/**/*``, which as
+a suppression path covers every file below the directory and not a file of its name.
 """
 
 from __future__ import annotations
@@ -37,8 +38,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
+from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 from automated_security_helper.utils import suppression_matcher
+from automated_security_helper.utils.suppression_matcher import should_suppress_finding
 from automated_security_helper.utils.link_exclusions import (
     drop_ignored,
     ignored_entries,
@@ -205,7 +208,45 @@ class TestUnmatchedDirectorySuppressions:
         messages = [record.getMessage() for record in ash_warnings]
         assert len(messages) == 1, messages
         assert "'build/'" in messages[0]
-        assert "'build/**'" in messages[0]
+        assert "'build/**/*'" in messages[0]
+
+    def test_the_suggested_spelling_is_what_is_inside_the_directory(self):
+        """As a suppression path, ``build/**/*`` covers every file below build
+        and not a file named build; ``build/**`` would cover that file too."""
+        suggested = AshSuppression(path="build/**/*", rule_id="R1", reason="r")
+
+        assert suggested.matches_path("build/a.js") is True
+        assert suggested.matches_path("build/x/y.js") is True
+        assert suggested.matches_path("build") is False
+        assert suggested.matches_path("src/build/a.js") is False
+
+    def test_a_suppression_build_slash_keeps_its_literal_meaning(self, ash_warnings):
+        """After the ignore-path change, ``build/`` as a suppression still matches
+        nothing below build, and the warning about it is given once."""
+        suppression = AshSuppression(path="build/", rule_id="R1", reason="r")
+        finding = FlatVulnerability(
+            id="x",
+            title="t",
+            description="d",
+            severity="HIGH",
+            scanner="s",
+            scanner_type="SAST",
+            rule_id="R1",
+            file_path="build/a.js",
+        )
+
+        assert suppression.matches(finding) is False
+        assert should_suppress_finding(finding, [suppression])[0] is False
+        report = apply_suppressions_to_sarif(
+            _sarif("build/a.js"), _context([], suppressions=[suppression])
+        )
+        assert _kept(report) == ["build/a.js"]
+
+        suppression_matcher.warn_unmatched_directory_suppressions(
+            [suppression], used_ids=set()
+        )
+
+        assert len(ash_warnings) == 1
 
     def test_nothing_is_said_when_every_such_suppression_matched(self, ash_warnings):
         used = AshSuppression(path="lib/", rule_id="R2", reason="r")

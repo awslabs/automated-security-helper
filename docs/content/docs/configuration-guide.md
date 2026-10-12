@@ -534,7 +534,7 @@ the vulnerabilities npm-audit reports. A path naming a
 directory without the slash, such as `tests/test_data`, matches no file in it, and
 `ash config lint` warns about one. A suppression's `path` is read differently: one
 ending in `/` matches no file, and ASH warns after the scan about each such
-suppression that matched nothing, naming the `<dir>/**` that would. bandit and
+suppression that matched nothing, naming the `<dir>/**/*` that would. bandit and
 checkov also skip `node_modules`, `.venv` and `venv` directories on their own; ASH
 does not drop findings there, since the dependency scanners report theirs there
 (npm-audit at `node_modules/<package>/package.json`).
