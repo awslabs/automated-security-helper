@@ -689,19 +689,79 @@ def _ash_paths() -> List[Path]:
         return any(real == root or root in real.parents for root in interpreter_roots)
 
     import_path = [Path(entry) for entry in sys.path if _importable(entry)]
+    interpreter_dirs = [
+        Path(sys.prefix),
+        Path(sys.base_prefix),
+        Path(sys.exec_prefix),
+        Path(os.path.realpath(sys.executable)).parent.parent,
+    ]
+    link_dirs = [hop.parent for hop in _symlink_hops(Path(sys.executable))]
+    _refuse_a_home_among(interpreter_dirs, link_dirs, homes, interpreter_roots)
     return _existing(
         [
             package_dir,
             import_root,
             *import_path,
-            Path(sys.prefix),
-            Path(sys.base_prefix),
-            Path(sys.exec_prefix),
-            Path(os.path.realpath(sys.executable)).parent.parent,
-            *[hop.parent for hop in _symlink_hops(Path(sys.executable))],
+            *interpreter_dirs,
+            *link_dirs,
             _bin_path(),
         ]
     )
+
+
+def _refuse_a_home_among(
+    interpreter_dirs: Sequence[Path],
+    link_dirs: Sequence[Path],
+    homes: Sequence[Path],
+    interpreter_roots: Iterable[Path],
+) -> None:
+    """Refuse the spawn when mounting ASH's interpreter would mount a home directory.
+
+    These paths are mounted as they are, with no breadth filter, so that the
+    interpreter can be started inside the sandbox by the path it was started with.
+    Refused: a prefix that is "/", a home directory or a directory holding one (a
+    Python built with --prefix=$HOME), and the directory of a link sys.executable
+    passes through when that directory is one of those, or is a directory inside a
+    home that is neither named bin, sbin or Scripts nor part of an interpreter. A
+    venv made by ``~/python3 -m venv ~/env`` links env/bin/python3 to ~/python3,
+    which mounted the whole home, ~/.ssh included. Mounting less instead would leave
+    that link dangling in the sandbox, and the interpreter would not start.
+
+    A HOME of "/", as in some containers, is not counted as a home here: every path
+    is inside it.
+    """
+    homes = [home for home in homes if home != Path("/")]
+    roots = [Path(os.path.realpath(root)) for root in interpreter_roots]
+
+    def holds_a_home(real: Path) -> bool:
+        return real == Path("/") or any(
+            real == home or real in home.parents for home in homes
+        )
+
+    for path in interpreter_dirs:
+        if holds_a_home(Path(os.path.realpath(path))):
+            raise SandboxUnavailable(
+                f"ASH's Python prefix {path.as_posix()} is a home directory or holds "
+                "one, so the sandbox would mount that home for every scanner. Run "
+                "ASH from a Python installed, or a virtual environment created, "
+                "outside it."
+            )
+    for path in link_dirs:
+        real = Path(os.path.realpath(path))
+        in_a_home = any(home in real.parents for home in homes)
+        part_of_an_interpreter = any(
+            real == root or root in real.parents for root in roots
+        )
+        if holds_a_home(real) or (
+            in_a_home and path.name not in _BIN_DIR_NAMES and not part_of_an_interpreter
+        ):
+            raise SandboxUnavailable(
+                f"ASH's Python ({sys.executable}) is reached through a link in "
+                f"{path.as_posix()}, a home directory or a directory in one, so the "
+                "sandbox would mount it for every scanner. Create the virtual "
+                "environment from the interpreter's real path "
+                f"({os.path.realpath(sys.executable)})."
+            )
 
 
 def _refuse_symlinked_results_dir(output_dir: Path, results_dir: Path) -> None:

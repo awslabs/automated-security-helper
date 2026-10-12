@@ -1172,6 +1172,74 @@ class TestPolicyPathsUnderThePasswdHome:
         assert Path(os.path.realpath(pw / "automated_security_helper")) in exposed
 
 
+class TestAshsInterpreterThroughAHome:
+    """ASH's interpreter paths are mounted unfiltered, so a home among them is refused.
+
+    _ash_paths adds sys.prefix, sys.base_prefix, sys.exec_prefix, the interpreter's
+    real prefix and the directory of every link sys.executable passes through, so
+    that exec of the interpreter by the path it was started with works inside the
+    sandbox. None of them went through a breadth filter. A venv created by a python
+    reached through a link in the home (``~/python3 -m venv ~/env``) has
+    env/bin/python3 -> ~/python3, which made the home itself, ~/.ssh included, a
+    read-only path of every scanner. Mounting less would break that exec, so the
+    spawn is refused instead, measured against both homes.
+    """
+
+    @staticmethod
+    def _interpreter_through(link, tmp_path, monkeypatch):
+        """sys.executable is env/bin/python -> ``link`` -> a stand-in binary."""
+        binary = tmp_path / "real-python" / "bin" / "python3.14"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(binary)
+        venv_python = tmp_path / "env" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.symlink_to(link)
+        monkeypatch.setattr(sys, "executable", str(venv_python))
+
+    @pytest.mark.parametrize("where", ["python3", ".config/python3"])
+    def test_a_link_in_the_home(self, layout, tmp_path, monkeypatch, where):
+        self._interpreter_through(layout.home / where, tmp_path, monkeypatch)
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    def test_a_link_in_the_passwd_home(self, layout, tmp_path, monkeypatch):
+        passwd_home = tmp_path / "passwd-home"
+        (passwd_home / ".ssh").mkdir(parents=True)
+        _fake_passwd_home(monkeypatch, passwd_home)
+        self._interpreter_through(passwd_home / "python3", tmp_path, monkeypatch)
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    @pytest.mark.parametrize("prefix", ["sys.prefix", "sys.base_prefix"])
+    def test_an_interpreter_prefix_that_is_the_home(self, layout, monkeypatch, prefix):
+        """A python built with --prefix=$HOME: its prefix is the home itself."""
+        monkeypatch.setattr(sys, prefix.split(".")[1], str(layout.home))
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    @pytest.mark.parametrize("where", ["bin/python3", ".local/opt/py/bin/python3"])
+    def test_a_link_in_a_bin_directory_in_the_home(
+        self, layout, tmp_path, monkeypatch, where
+    ):
+        """Positive control: ~/bin/python3, like a PATH entry named bin."""
+        link = layout.home / where
+        self._interpreter_through(link, tmp_path, monkeypatch)
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(link.parent)) in exposed
+        assert Path(os.path.realpath(layout.home)) not in exposed
+
+    def test_a_venv_directly_under_the_home(self, layout, monkeypatch):
+        """Positive control: sys.prefix ~/env is one installation, mounted as is."""
+        venv = layout.home / "env"
+        venv.mkdir()
+        monkeypatch.setattr(sys, "prefix", str(venv))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(venv)) in exposed
+        assert Path(os.path.realpath(layout.home)) not in exposed
+
+
 @pytest.mark.parametrize(
     "pw_dir", [None, "/", "", "relative/home", "HOME", "link to HOME"], ids=repr
 )
