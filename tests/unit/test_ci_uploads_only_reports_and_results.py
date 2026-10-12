@@ -42,7 +42,20 @@ SOURCES = [
 # What names ASH's output: its default directories, the workflow input and the
 # tutorials' variable for it.
 _ASH_OUTPUT = re.compile(r"ash_output|\.ash/merged|ASH_OUTPUT|inputs\.output-dir")
-_ALLOWED = re.compile(r"(?:^|/)(?:reports(?:/.*)?|ash_aggregated_results\.json)/?$")
+# reports/ (or something inside it) and the results file, at the top of the output
+# directory or, for a workspace scan, as exactly projects/*/reports and
+# projects/*/ash_aggregated_results.json.
+_ALLOWED = re.compile(
+    r"^(?:(?!/projects/).)*?/(?:reports(?:/.*)?|ash_aggregated_results\.json)/?$"
+    r"|/projects/\*/(?:reports(?:/.*)?|ash_aggregated_results\.json)/?$"
+)
+# Raw tool output and converted files, at any depth.
+_RAW = re.compile(r"(?:^|/)(?:scanners|converted)(?:/|$)")
+
+
+def _allowed(value: str) -> bool:
+    target = _normalized(value)
+    return bool(_ALLOWED.search(target)) and not _RAW.search(target)
 
 
 def _indent(line: str) -> int:
@@ -140,7 +153,7 @@ def test_every_upload_of_ash_output_names_only_reports_or_the_results_file():
     wide = [
         f"{where}:{line}: {value}"
         for where, line, value in uploads
-        if not _ALLOWED.search(_normalized(value))
+        if not _allowed(value)
     ]
     assert not wide, (
         "these uploads carry ASH's whole output directory, scanners/ and converted/ "
@@ -172,14 +185,39 @@ def test_the_allowed_forms():
         ".ash/ash_output/reports/ash.sarif",
         ".ash/ash_output/ash_aggregated_results.json",
         "${{ inputs.output-dir }}/reports",
+        "${{ inputs.output-dir }}/projects/*/reports",
+        "${{ inputs.output-dir }}/projects/*/ash_aggregated_results.json",
+        ".ash/ash_output/projects/*/reports/**/*",
     ):
-        assert _ALLOWED.search(_normalized(ok)), ok
+        assert _allowed(ok), ok
     for wide in (
         ".ash/ash_output",
         ".ash/ash_output/",
         ".ash/ash_output/**/*",
         "${{ inputs.output-dir }}",
         ".ash/ash_output/scanners",
+        ".ash/ash_output/converted",
         ".ash/merged",
+        "${{ inputs.output-dir }}/projects",
+        "${{ inputs.output-dir }}/projects/*",
+        "${{ inputs.output-dir }}/projects/**",
+        "${{ inputs.output-dir }}/projects/web/reports",
+        "${{ inputs.output-dir }}/projects/*/scanners",
+        "${{ inputs.output-dir }}/projects/*/converted",
+        "${{ inputs.output-dir }}/projects/*/scanners/reports",
+        "${{ inputs.output-dir }}/scanners/bandit/reports",
+        "${{ inputs.output-dir }}/projects/*/reports/../scanners",
     ):
-        assert not _ALLOWED.search(_normalized(wide)), wide
+        assert not _allowed(wide), wide
+
+
+def test_the_scan_workflow_uploads_the_per_project_copies_too():
+    workflow = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
+    values = {value for _, value in _uploads(workflow)}
+    for expected in (
+        "${{ inputs.output-dir }}/reports",
+        "${{ inputs.output-dir }}/ash_aggregated_results.json",
+        "${{ inputs.output-dir }}/projects/*/reports",
+        "${{ inputs.output-dir }}/projects/*/ash_aggregated_results.json",
+    ):
+        assert expected in values, (expected, sorted(values))

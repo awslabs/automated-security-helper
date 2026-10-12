@@ -2,7 +2,7 @@
 
 ASH produces scan results in multiple formats. Every scan writes an internal aggregated-results JSON file (`ash_aggregated_results.json`), and reporters transform that data into the formats listed below. You can enable any combination of reporters in your configuration or on the command line.
 
-The reports land in `reports/` under the output directory (`.ash/ash_output` by default), beside `ash_aggregated_results.json`. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files such as notebooks and archive contents. Those two are not masked: a secret a scanner found is in them in full. When you keep scan output as a CI artifact, keep `reports/` and `ash_aggregated_results.json` only, as the examples in [Running ASH in CI](../tutorials/running-ash-in-ci.md) do.
+The reports land in `reports/` under the output directory (`.ash/ash_output` by default), beside `ash_aggregated_results.json`. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files such as notebooks and archive contents. Those two are not masked: a secret a scanner found is in them in full. When you keep scan output as a CI artifact, keep `reports/` and `ash_aggregated_results.json` only, as the examples in [Running ASH in CI](../tutorials/running-ash-in-ci.md) do. A workspace scan repeats the layout per project under `projects/<key>/`, so keep `projects/*/reports` and `projects/*/ash_aggregated_results.json` too, and not the projects' `scanners/` or `converted/`.
 
 ## Quick reference
 

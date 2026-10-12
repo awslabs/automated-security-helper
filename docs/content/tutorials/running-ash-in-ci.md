@@ -8,7 +8,7 @@ ASH supports running in CI environments as an executable container (e.g., via `d
 
 ### What to keep as a build artifact
 
-The examples on this page keep `reports/` and `ash_aggregated_results.json` from the output directory, not the whole directory. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files. Those are not masked, so a secret a scanner found is in them in full, and anyone who can download the build's artifacts could read it.
+The examples on this page keep `reports/` and `ash_aggregated_results.json` from the output directory, not the whole directory. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files. Those are not masked, so a secret a scanner found is in them in full, and anyone who can download the build's artifacts could read it. A workspace scan (`--workspace`) writes the same layout once per project under `projects/<key>/`; keep `projects/*/reports` and `projects/*/ash_aggregated_results.json` as well, and leave each project's `scanners/` and `converted/` out.
 
 ### Building ASH Container Images for CI Usage
 
