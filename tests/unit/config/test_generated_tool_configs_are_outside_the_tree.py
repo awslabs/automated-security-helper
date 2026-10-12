@@ -8,7 +8,7 @@ writes when the operator names none, one that sets nothing, so the tool does not
 one from the tree on its own (``config/tool_config_trust.empty_tool_config``); gitleaks
 gets one that names only its default rules, and trivy and trivy-repo get the ignore
 file and secret config ASH writes. Their ``--config`` is the empty config ASH ships
-(``content_db_refresh.EMPTY_TOOL_CONFIG``), which is written once, with ASH, and not
+(``content_db_shared.EMPTY_TOOL_CONFIG``), which is written once, with ASH, and not
 per run. trivy-repo's modules directory and
 gitleaks' ignore directory are empty directories ASH makes the same way
 (``empty_tool_directory``). The
@@ -521,7 +521,7 @@ def test_trivy_s_database_probe_names_no_config_its_run_removed(
     read as "no usable database". The config is the empty one ASH ships, which no
     run removes, while the files the run wrote are gone.
     """
-    from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
+    from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 
     (case,) = [
         c for c in CASES if c.scanner == scanner_name and c.flag == "--ignorefile"

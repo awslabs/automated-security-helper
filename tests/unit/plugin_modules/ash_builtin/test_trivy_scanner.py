@@ -68,7 +68,7 @@ from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
 from automated_security_helper.utils.config_trust import record_provenance
-from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
+from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     get_severity_metrics_from_sarif,

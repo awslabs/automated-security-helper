@@ -70,11 +70,11 @@ from automated_security_helper.utils.config_trust import (
 )
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.content_db_refresh import (
-    EMPTY_TOOL_CONFIG,
     default_cache_dir,
     prepare_content_db,
     scan_id_for,
 )
+from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.link_exclusions import (
     trivy_skip_dirs,

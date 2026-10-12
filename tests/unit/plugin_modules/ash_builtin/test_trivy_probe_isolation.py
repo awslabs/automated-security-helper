@@ -246,7 +246,7 @@ def test_a_probe_whose_temporary_directory_is_in_a_checkout_runs_from_the_root(
     empty config ASH ships rather than a file there."""
     import tempfile
 
-    from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
+    from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
     from automated_security_helper.utils.content_db_staleness import (
         ProbeContext,
         _built_from_trivy,

@@ -36,7 +36,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScannerConfig,
     TrivyRepoScannerConfigOptions,
 )
-from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
+from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 
 PluginContext.model_rebuild()
 
