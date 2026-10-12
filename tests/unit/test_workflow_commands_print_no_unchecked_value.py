@@ -171,6 +171,16 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
     (
         ".github/actions/validate-container/action.yml",
         _COMPOSITE,
+        "Scan with the image's CloudFormation scanners",
+    ): {"rc": NUMBER},
+    (
+        ".github/actions/validate-container/action.yml",
+        _COMPOSITE,
+        "container: zizmor runs and reports",
+    ): {"rc": NUMBER},
+    (
+        ".github/actions/validate-container/action.yml",
+        _COMPOSITE,
         "nerdctl: build image",
     ): {
         "ATTEMPTS": LITERAL,
@@ -188,6 +198,11 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
     (".github/actions/validate-nix/action.yml", _COMPOSITE, "nix: scan"): {
         "rc": NUMBER
     },
+    (
+        ".github/actions/validate-nix/action.yml",
+        _COMPOSITE,
+        "nix: zizmor runs and reports",
+    ): {"rc": NUMBER},
     (
         ".github/workflows/ash-create-release.yml",
         "create-release-pr",

@@ -454,6 +454,27 @@ runs:
         done
         exit "${rc}"
 
+    # A value printed in a workflow command that this action does not set itself
+    # goes through one_line, the helper run-ash-security-scan.yml writes the same
+    # way: it turns every control character into a space, `::` into `: :` and `##[`
+    # into `# #[`, so the value cannot add a command of its own. Each step runs in
+    # its own shell, so this step writes the function to RUNNER_TEMP and a step that
+    # needs it loads the file.
+    - name: "Write the one_line helper"
+      shell: bash
+      run: |
+        cat > "${RUNNER_TEMP}/ash-one-line.sh" <<'EOF'
+        one_line() {
+          local LC_ALL=C
+          local text="${1//[[:cntrl:]]/ }"
+          text="${text//$'\xc2'[$'\x80'-$'\x9f']/ }"
+          text="${text//$'\xe2\x80'[$'\xa8\xa9']/ }"
+          while [[ "${text}" == *::* ]]; do text="${text//::/: :}"; done
+          while [[ "${text}" == *'##['* ]]; do text="${text//'##['/'# #['}"; done
+          printf '%s' "${text}"
+        }
+        EOF
+
     # === the built image has to run ===
     #
     # Shared rather than per-runtime: the whole point is that every runtime with a
@@ -489,6 +510,9 @@ runs:
       #
       # 1 stays rejected, and now has something to reject: see the flag below.
       run: |
+        # The stderr log paths below come from find, so they are printed through
+        # one_line.
+        . "${RUNNER_TEMP}/ash-one-line.sh"
         set +e
         ash scan \
           --mode container \
@@ -512,7 +536,7 @@ runs:
           # job uploads no artifacts, so without it the reason is only in the runner.
           find /tmp/ash-selftest/output/scanners -name '*.stderr.log' -size +0 2>/dev/null |
             sort | while read -r log; do
-              echo "::group::last 4000 bytes of ${log}"
+              echo "::group::last 4000 bytes of $(one_line "${log}")"
               tail -c 4000 "$log"
               echo
               echo "::endgroup::"
