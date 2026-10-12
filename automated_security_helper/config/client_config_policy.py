@@ -271,7 +271,9 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 #: scanner's defaults, so a delivered value equal to one is accepted as no
 #: change; it need not carry a plugin's section at all, so without this a
 #: delivered file that wrote such a default would be refused. Used only where
-#: the trusted config has no value of its own.
+#: the trusted config has no value of its own. snyk-code's and trivy-repo's
+#: whole sections are denied (``ALWAYS_DENIED_PATHS``), so every one of their
+#: options is listed.
 #: ``test_the_plugin_option_defaults_are_the_plugins`` derives the list from the
 #: default ``denied_paths`` and checks each value against the plugin's model.
 PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
@@ -289,10 +291,17 @@ PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = {
     ("ferret-scan", "use_default_config"): True,
     ("ferret-scan", "validator_budget"): None,
     ("snyk-code", "honor_tree_exclusions"): False,
+    ("snyk-code", "scan_timeout"): 1800,
+    ("snyk-code", "severity_threshold"): None,
+    ("trivy-repo", "disable_telemetry"): True,
+    ("trivy-repo", "ignore_file"): None,
+    ("trivy-repo", "ignore_unfixed"): True,
     ("trivy-repo", "license_full"): True,
     ("trivy-repo", "offline"): False,
+    ("trivy-repo", "scan_timeout"): 1800,
     ("trivy-repo", "scanners"): ["vuln", "secret", "misconfig", "license"],
     ("trivy-repo", "secret_config_file"): None,
+    ("trivy-repo", "severity_threshold"): None,
 }
 
 
