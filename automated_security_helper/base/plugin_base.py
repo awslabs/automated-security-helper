@@ -216,6 +216,10 @@ class PluginBase(UVToolMixin, BaseModel):
     # scan_spawn_failure.
     _scan_spawn_failure: str | None = PrivateAttr(default=None)
 
+    # A version probe construction deferred, as (tool, --from spec), or None. See
+    # uv_tool_mixin.deferred_tool_version_probes.
+    _deferred_tool_version_probe: tuple | None = PrivateAttr(default=None)
+
     # Installation-related properties
     dependencies: Annotated[
         Dict[str, Dict[str, List[PluginDependency]]],

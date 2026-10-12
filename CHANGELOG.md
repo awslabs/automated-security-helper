@@ -1410,6 +1410,14 @@
 
 ### Fixes
 
+- **A scanner the run does not select is not resolved against the package index.**
+  The scan phase builds every registered scanner to learn its name, and bandit,
+  checkov and semgrep ran `uv tool run --from <spec> <tool> --version` while being
+  built, so `ash scan --scanners detect-secrets` online had uv resolve three scanners
+  it never ran, and an excluded scanner was resolved too. Those version probes now
+  wait until a scanner is selected and run just before its dependency check, so a
+  selected scanner's version still reaches its report. A scanner built outside a scan
+  (`ash dependencies`, the MCP server) probes as before.
 - **Two offline scans overlapping in one process both stay offline, and the process
   is online again after them.** An offline scan set `ASH_OFFLINE=YES` and put back the
   value it had seen when it ended. With two overlapping (two MCP sessions, or two

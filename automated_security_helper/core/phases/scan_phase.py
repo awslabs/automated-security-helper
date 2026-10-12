@@ -17,6 +17,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
 from automated_security_helper.utils.subprocess_utils import (
     recording_in_tree_refusals,
@@ -344,7 +345,14 @@ class ScanPhase(EnginePhase):
 
                         # Create scanner instance. Under a sandbox, the tool probes
                         # some scanners run while they are constructed run sandboxed.
-                        with plugin_probe_scope(plugin_class, self.plugin_context):
+                        # Their `uv tool run` version probes are deferred until the
+                        # scanner is selected (see the dependency check below): a
+                        # scanner this run will not execute must not be resolved
+                        # against the package index.
+                        with (
+                            plugin_probe_scope(plugin_class, self.plugin_context),
+                            deferred_tool_version_probes(),
+                        ):
                             plugin_instance = plugin_class(
                                 config=plugin_config,
                                 context=self.plugin_context,
@@ -762,6 +770,14 @@ class ScanPhase(EnginePhase):
                             plugin_probe_scope(plugin_instance, self.plugin_context),
                             recording_in_tree_refusals() as in_tree_reasons,
                         ):
+                            # The version probe construction deferred, now that this
+                            # scanner is selected. getattr: a scanner plugin need not
+                            # inherit PluginBase (see unsupported_platform_reason above).
+                            resolve_version = getattr(
+                                plugin_instance, "resolve_deferred_tool_version", None
+                            )
+                            if callable(resolve_version):
+                                resolve_version()
                             plugin_instance.dependencies_satisfied = (
                                 plugin_instance.validate_plugin_dependencies()
                             )
