@@ -411,3 +411,197 @@ def test_invalid_additional_line_values_still_fail_validation(value, source_id):
         FlatVulnerability.from_additional_report(
             {"id": source_id, "line_start": value}, "scanner"
         )
+
+
+@pytest.mark.parametrize(
+    "field, values",
+    [
+        ("absoluteAddress", [0, 4096]),
+        ("relativeAddress", [-1, 0]),
+        ("offsetFromParent", [-1, 0]),
+        ("length", [0, 4]),
+        ("index", [0, 1]),
+        ("parentIndex", [0, 1]),
+        ("kind", ["data", "function"]),
+        ("name", ["one", "two"]),
+        ("fullyQualifiedName", ["module.one", "module.two"]),
+    ],
+)
+def test_address_identity_preserves_each_coordinate_and_name(field, values):
+    payloads = [
+        {
+            "ruleId": "RULE",
+            "message": {"text": "same"},
+            "locations": [{"physicalLocation": {"address": {field: value}}}],
+        }
+        for value in values
+    ]
+    assert _id(payloads[0]) != _id(payloads[1])
+    for payload in payloads:
+        result = Result.model_validate(payload)
+        before = result.model_dump(mode="json")
+        flat = FlatVulnerability.from_sarif_result(result, "scanner", "SAST")
+        assert result.model_dump(mode="json") == before
+        assert (
+            json.loads(flat.raw_data)["locations"][0]["physicalLocation"]["address"][
+                field
+            ]
+            == payload["locations"][0]["physicalLocation"]["address"][field]
+        )
+
+
+def test_address_defaults_properties_order_and_location_association():
+    base = _payload()
+    first = copy.deepcopy(base)
+    first["locations"][0]["physicalLocation"]["address"] = {
+        "absoluteAddress": -1,
+        "index": -1,
+        "parentIndex": -1,
+        "properties": {"private": "synthetic"},
+    }
+    assert _id(base) == _id(first)
+    first["locations"][0]["physicalLocation"]["address"] = {"relativeAddress": -1}
+    assert _id(base) != _id(first)
+    second_location = copy.deepcopy(first["locations"][0])
+    second_location["physicalLocation"]["artifactLocation"]["uri"] = "other.py"
+    second_location["physicalLocation"]["address"] = {"relativeAddress": 0}
+    first["locations"].append(second_location)
+    reordered = copy.deepcopy(first)
+    reordered["locations"].reverse()
+    assert _id(first) == _id(reordered)
+    changed = copy.deepcopy(first)
+    (
+        changed["locations"][0]["physicalLocation"]["address"],
+        changed["locations"][1]["physicalLocation"]["address"],
+    ) = (
+        changed["locations"][1]["physicalLocation"]["address"],
+        changed["locations"][0]["physicalLocation"]["address"],
+    )
+    assert _id(first) != _id(changed)
+
+
+def test_additional_default_and_validated_string_aliases_have_equal_identity():
+    flat = FlatVulnerability.from_additional_report({}, "scanner")
+    explicit = FlatVulnerability.from_additional_report(
+        {"title": "Unknown Issue", "description": "No description available"}, "scanner"
+    )
+    assert flat.id == explicit.id
+    padded = {
+        "title": " Title ",
+        "description": " same ",
+        "rule_id": " RULE ",
+        "cve_id": " CVE-2025-10001 ",
+        "cwe_id": " CWE-79 ",
+        "file_path": " file.py ",
+        "line_start": "10",
+    }
+    normalized = {
+        key: value.strip() if isinstance(value, str) else value
+        for key, value in padded.items()
+    }
+    first = FlatVulnerability.from_additional_report(padded, " scanner ")
+    second = FlatVulnerability.from_additional_report(normalized, "scanner")
+    assert first.id == second.id
+    assert json.loads(first.raw_data) == padded
+    assert first.id.startswith("scanner-v2-")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"ruleIndex": 0},
+        {"rule": {"id": "other"}},
+        {"rule": {"index": 0}},
+        {"rule": {"guid": "11111111-1111-4111-8111-111111111111"}},
+        {"rule": {"id": "RULE001", "toolComponent": {"name": "extension"}}},
+        {"rule": {"id": "RULE001", "toolComponent": {"index": 0}}},
+        {
+            "rule": {
+                "id": "RULE001",
+                "toolComponent": {"guid": "11111111-1111-4111-8111-111111111111"},
+            }
+        },
+    ],
+)
+def test_rule_references_distinguish_occurrences_without_changing_defaults(change):
+    first = _payload()
+    second = {**first, **change}
+    assert _id(first) != _id(second)
+    assert _id(first) == _id({**first, "ruleIndex": -1})
+
+
+@pytest.mark.parametrize(
+    "locations",
+    [
+        [],
+        [{"physicalLocation": {"address": {"absoluteAddress": 4096}}}],
+        [{"logicalLocations": [{"name": "function"}]}],
+    ],
+)
+def test_analysis_target_identity_without_physical_artifact(locations):
+    first = {
+        "ruleId": "RULE",
+        "message": {"text": "same"},
+        "locations": locations,
+        "analysisTarget": {"uri": "one.bin"},
+    }
+    second = {**first, "analysisTarget": {"uri": "two.bin"}}
+    assert _id(first) != _id(second)
+
+
+def test_ordinary_file_identity_is_stable_and_ignores_analysis_target():
+    payload = {
+        "ruleId": "RULE",
+        "message": {"text": "same"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "src/file.py"},
+                    "region": {"startLine": 10, "endLine": 10},
+                }
+            }
+        ],
+    }
+    assert _id(payload) == "scanner-RULE-v2-00a2e6434c0d01781d78fb9c0a4ee5ed"
+    assert _id(payload) == _id(
+        {
+            **payload,
+            "analysisTarget": {
+                "uri": "different.bin",
+                "properties": {"raw": "synthetic"},
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "artifact, fallback", [({"uriBaseId": "BASE"}, True), ({"index": 0}, False)]
+)
+def test_analysis_target_fallback_depends_on_artifact_not_namespace(artifact, fallback):
+    payload = {
+        "ruleId": "RULE",
+        "message": {"text": "same"},
+        "locations": [{"physicalLocation": {"artifactLocation": artifact}}],
+        "analysisTarget": {"uri": "one"},
+    }
+    assert (
+        _id(payload) != _id({**payload, "analysisTarget": {"uri": "two"}})
+    ) is fallback
+
+
+@pytest.mark.parametrize(
+    "field", ["title", "description", "rule_id", "cve_id", "cwe_id", "file_path"]
+)
+def test_each_validated_additional_string_controls_fallback_identity(field):
+    first = FlatVulnerability.from_additional_report({field: " one "}, " scanner ")
+    alias = FlatVulnerability.from_additional_report({field: "one"}, "scanner")
+    distinct = FlatVulnerability.from_additional_report({field: "two"}, "scanner")
+    assert first.id == alias.id
+    assert first.id != distinct.id
+
+
+def test_explicit_additional_id_keeps_raw_scanner_prefix_and_trimming():
+    assert (
+        FlatVulnerability.from_additional_report({"id": " native "}, " scanner ").id
+        == "scanner - native"
+    )

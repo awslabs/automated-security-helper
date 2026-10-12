@@ -147,3 +147,67 @@ def test_line_twenty_id_selects_line_twenty_from_saved_reports(
     assert suggestion["success"] is True
     assert suggestion["json"]["line_start"] == suggestion["json"]["line_end"] == 20
     assert len({item["id"] for item in findings}) == 2
+
+
+@pytest.mark.parametrize("kind", ["address", "rule-index", "message-arguments"])
+def test_followup_ids_select_second_saved_occurrence(
+    kind, tmp_path, monkeypatch, test_plugin_context
+):
+    monkeypatch.setenv(ASH_MCP_ALLOWED_ROOTS_ENV, str(tmp_path))
+    results = []
+    for index in (0, 1):
+        result = {"ruleId": "RULE", "message": {"text": "same"}}
+        if kind == "address":
+            result["locations"] = [
+                {
+                    "physicalLocation": {
+                        "address": {"absoluteAddress": 4096 * (index + 1)}
+                    }
+                }
+            ]
+        elif kind == "rule-index":
+            result["ruleIndex"] = index
+        else:
+            result["message"] = {"id": "msg", "arguments": [str(index)]}
+        results.append(result)
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "scanner",
+                            "rules": [
+                                {
+                                    "id": "RULE",
+                                    "messageStrings": {"msg": {"text": "Issue {0}"}},
+                                }
+                            ],
+                        }
+                    },
+                    "results": results,
+                }
+            ],
+        }
+    )
+    model = AshAggregatedResults(sarif=report)
+    path = tmp_path / "ash_aggregated_results.json"
+    path.write_text(model.model_dump_json())
+    loaded = AshAggregatedResults.from_json(path.read_text())
+    findings = json.loads(FlatJSONReporter(context=test_plugin_context).report(loaded))[
+        "findings"
+    ]
+    explanation = mcp_explain_finding(findings[1]["id"], results_path=str(tmp_path))
+    assert explanation["success"] is True
+    raw = explanation["finding"]["scanner_metadata"]
+    if kind == "address":
+        assert (
+            raw["locations"][0]["physicalLocation"]["address"]["absoluteAddress"]
+            == 8192
+        )
+    elif kind == "rule-index":
+        assert raw["ruleIndex"] == 1
+    else:
+        assert raw["message"]["arguments"] == ["1"]
+    assert len({item["id"] for item in findings}) == 2

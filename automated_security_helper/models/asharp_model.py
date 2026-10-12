@@ -787,7 +787,7 @@ class AshAggregatedResults(BaseModel):
 
                 for result in run.results:
                     flat_vuln = FlatVulnerability.from_sarif_result(
-                        result, tool_name, tool_type
+                        result, tool_name, tool_type, run=run
                     )
                     flat_vulns.append(flat_vuln)
 

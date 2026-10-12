@@ -107,6 +107,7 @@ Use the complete `id` from the current `ash.flat.json` for MCP finding lookups. 
 Generated SARIF IDs use `<scanner>-<rule>-v2-<32-hex-digest>`.
 Additional reports without source IDs use `<scanner>-v2-<32-hex-digest>`; explicit source IDs keep their existing scanner prefix.
 Refresh stored IDs when regenerating reports from older results.
+If an older aggregate discarded referenced scanner metadata, run a new scan to capture that metadata.
 
 ### Example output
 
