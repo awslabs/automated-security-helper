@@ -53,6 +53,12 @@ Failure modes and known limitations
 * A scanner run outside the scanner executor (a test, a scanner module run as a
   script) has no scope. Each file it writes gets a directory of its own, removed
   when the process exits.
+* An ASH process killed by a signal (SIGTERM, which the CLI does not handle, or
+  SIGKILL) runs neither the scope's ``finally`` nor ``atexit``, so its directory
+  stays behind in the temporary directory. It is 0700 and holds only the empty
+  configs. Turning SIGTERM into ``SystemExit`` would not remove it promptly either:
+  scanner runs are in worker threads, and the executor's pool waits for them, and
+  for their tools, before the process could exit.
 """
 
 from __future__ import annotations
