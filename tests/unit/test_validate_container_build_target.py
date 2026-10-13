@@ -8,6 +8,15 @@ image it removes before a retry, and the license check that follows reads
 ``automated-security-helper:ci`` by default. CI variables do not choose the stage,
 so each invocation asks for ``ci`` itself; without it the action would build
 ``non-root`` and then look for a ``ci`` image nothing built.
+
+What it does not cover: a command is checked when, with its backslash continuations
+joined, it starts with ``ash build-image``, ``ash scan`` or ``ash --mode``. A call
+behind a wrapper or a shell keyword (``timeout 600 ash scan``, ``env X=1 ash scan``,
+``if ash scan``) or through a variable (``"$ASH" scan``) does not, and is not
+checked. Only this action is read, on purpose: other CI builds the default
+``non-root`` stage deliberately, as
+tests/unit/test_ci_builds_and_probes_the_default_stage.py describes, so asking for
+``ci`` is this action's rule, not the repository's.
 """
 
 from __future__ import annotations
