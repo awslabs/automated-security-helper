@@ -41,6 +41,13 @@ GITHUB_PATH, and that the Run ASH step points ``ASH_CFN_GUARD_RULES_DIR`` at the
 directory the installer writes the rules to (``utils/rules_bundles.rules_root`` given
 the install's ``--bin-path``). Every ``install-*`` input is a boolean and gates at least
 one step that can run.
+
+The ash job's env reads ``github.event_name`` (no cache is restored on ``pull_request``
+or ``merge_group``), so every run above is repeated for each event in EVENTS: the events
+ASH's own callers start the workflow on, which under ``workflow_call`` is what
+``github.event_name`` holds. A test holds EVENTS to those callers' triggers and to every
+event name the workflow compares ``github.event_name`` with. The evaluator models no
+other part of ``github``; ``github.ref`` or the event payload is unsupported.
 """
 
 from __future__ import annotations
@@ -289,6 +296,9 @@ def _evaluate(node: Any, ctx: dict[str, Any]) -> Any:
             raise _Unsupported(node[1])
         value = ctx[root]
         for part in rest:
+            if root == "github" and not (isinstance(value, dict) and part in value):
+                # Only what _context models; github.ref and the payload are not.
+                raise _Unsupported(node[1])
             value = value.get(part) if isinstance(value, dict) else None
         return value
     if kind == "call":
@@ -344,13 +354,53 @@ def _step(name: str) -> dict[str, Any]:
     return found[0]
 
 
-def _context(tmp_path: Path, **on: bool) -> dict[str, Any]:
+#: The events ASH's own callers start the workflow on; workflow_dispatch is the one the
+#: workflow compares github.event_name with nowhere.
+EVENTS = ("merge_group", "pull_request", "push", "workflow_dispatch")
+
+
+def _caller_triggers() -> set[str]:
+    """The triggers of every workflow in this repository that calls the scan workflow."""
+    found: set[str] = set()
+    for path in sorted(SCAN_WORKFLOW.parent.glob("*.y*ml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        jobs = (data.get("jobs") or {}).values()
+        if not any(
+            SCAN_WORKFLOW.name in str((job or {}).get("uses", "")) for job in jobs
+        ):
+            continue
+        on = data.get(True, data.get("on"))
+        found |= {on} if isinstance(on, str) else set(on or ())
+    return found
+
+
+def _compared_event_names() -> set[str]:
+    text = SCAN_WORKFLOW.read_text(encoding="utf-8")
+    return set(re.findall(r"github\.event_name\s*[!=]=\s*'([a-z_]+)'", text))
+
+
+def test_the_events_cover_every_trigger_case() -> None:
+    callers = _caller_triggers()
+    compared = _compared_event_names()
+    # Pinned, so a reader that stopped finding them could not pass by finding nothing.
+    assert {"pull_request", "push"} <= callers, callers
+    assert {"merge_group", "pull_request", "push"} <= compared, compared
+    assert callers <= set(EVENTS), callers - set(EVENTS)
+    assert compared <= set(EVENTS), compared - set(EVENTS)
+    assert set(EVENTS) - compared, "no event takes the workflow's otherwise branch"
+
+
+def _context(tmp_path: Path, event_name: str, **on: bool) -> dict[str, Any]:
     """Every input at its default, then each install-* input as given (else off)."""
     inputs = {name: spec.get("default") for name, spec in _inputs().items()}
     inputs["config"] = ".ash/.ash.yaml"
     for name in _install_inputs():
         inputs[name] = on.get(name.removeprefix("install-").replace("-", "_"), False)
-    return {"inputs": inputs, "runner": {"temp": str(tmp_path / "runner-temp")}}
+    return {
+        "inputs": inputs,
+        "runner": {"temp": str(tmp_path / "runner-temp")},
+        "github": {"event_name": event_name},
+    }
 
 
 _UVX_STUB = """#!/bin/sh
@@ -444,16 +494,17 @@ _FOUR = ("actionlint", "cfn_guard", "gitleaks", "trivy")
 _COMBINATIONS = list(itertools.product((False, True), repeat=len(_FOUR)))
 
 
+@pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize(
     "combination",
     _COMBINATIONS,
     ids=["+".join(t for t, on in zip(_FOUR, c) if on) or "none" for c in _COMBINATIONS],
 )
 def test_the_install_step_installs_exactly_the_tools_switched_on(
-    tmp_path: Path, combination: tuple[bool, ...]
+    tmp_path: Path, combination: tuple[bool, ...], event_name: str
 ) -> None:
     on = dict(zip(_FOUR, combination))
-    ctx = _context(tmp_path, **on)
+    ctx = _context(tmp_path, event_name, **on)
     step = _install_step()
     wanted = {name.replace("_", "-") for name, enabled in on.items() if enabled}
 
@@ -475,12 +526,13 @@ def test_the_install_step_installs_exactly_the_tools_switched_on(
         assert call["ash_config"] == "<unset>", call
 
 
+@pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize("tool", ["grype", "syft"])
 @pytest.mark.parametrize("enabled", [True, False])
 def test_the_grype_and_syft_steps_install_their_tool(
-    tmp_path: Path, tool: str, enabled: bool
+    tmp_path: Path, tool: str, enabled: bool, event_name: str
 ) -> None:
-    ctx = _context(tmp_path, **{tool: enabled})
+    ctx = _context(tmp_path, event_name, **{tool: enabled})
     step = _step(f"Install {tool.capitalize()}")
     assert _runs(step, ctx) is enabled
     if not enabled:
@@ -490,12 +542,17 @@ def test_the_grype_and_syft_steps_install_their_tool(
     assert ran["bin_paths"] <= set(ran["on_path"]) and ran["bin_paths"]
 
 
-def test_every_install_input_gates_a_step_that_can_run(tmp_path: Path) -> None:
+@pytest.mark.parametrize("event_name", EVENTS)
+def test_every_install_input_gates_a_step_that_can_run(
+    tmp_path: Path, event_name: str
+) -> None:
     """A step gated on the input whose if: is true with only that input on."""
     gated_nothing = []
     for name in _install_inputs():
         ctx = _context(
-            tmp_path, **{name.removeprefix("install-").replace("-", "_"): True}
+            tmp_path,
+            event_name,
+            **{name.removeprefix("install-").replace("-", "_"): True},
         )
         runnable = []
         for step in _steps():
@@ -514,13 +571,14 @@ def test_every_install_input_gates_a_step_that_can_run(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("event_name", EVENTS)
 @pytest.mark.parametrize("enabled", [True, False])
 def test_the_rules_dir_is_where_the_install_step_writes_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool, event_name: str
 ) -> None:
     from automated_security_helper.utils.rules_bundles import RULES_DIR_ENV, rules_root
 
-    ctx = _context(tmp_path, cfn_guard=enabled, actionlint=True)
+    ctx = _context(tmp_path, event_name, cfn_guard=enabled, actionlint=True)
     scan_env = _step("Run ASH").get("env") or {}
     assert "ASH_CFN_GUARD_RULES_DIR" in scan_env
     pointed_at = _interpolate(scan_env["ASH_CFN_GUARD_RULES_DIR"], ctx)
@@ -543,7 +601,14 @@ def test_the_rules_dir_is_where_the_install_step_writes_it(
 
 def test_the_evaluator_reads_the_expressions_the_way_github_does() -> None:
     """The control for the harness above: known expressions, known values."""
-    ctx = {"inputs": {"a": True, "b": False, "s": "x"}, "runner": {"temp": "/t"}}
+    ctx = {
+        "inputs": {"a": True, "b": False, "s": "x"},
+        "runner": {"temp": "/t"},
+        "github": {"event_name": "merge_group"},
+    }
+    restore = (
+        "github.event_name != 'pull_request' && github.event_name != 'merge_group'"
+    )
     cases = {
         "inputs.a || inputs.b": True,
         "inputs.b || inputs.b": False,
@@ -553,9 +618,16 @@ def test_the_evaluator_reads_the_expressions_the_way_github_does() -> None:
         "!inputs.b && inputs.s == 'x'": True,
         "format('{0}/share', runner.temp)": "/t/share",
         "inputs.a && format('{0}/x', runner.temp) || ''": "/t/x",
+        "github.event_name == 'merge_group'": True,
+        restore: False,
     }
     for text, expected in cases.items():
         assert _evaluate(_parse(text), ctx) == expected, text
+    for event_name, expected in [("push", True), ("workflow_dispatch", True)]:
+        other = {**ctx, "github": {"event_name": event_name}}
+        assert _evaluate(_parse(restore), other) is expected, event_name
     with pytest.raises(_Unsupported):
         _evaluate(_parse("steps.x.outputs.y == 'true'"), ctx)
+    with pytest.raises(_Unsupported):
+        _evaluate(_parse("github.ref == 'refs/heads/main'"), ctx)
     assert _runs({"if": False}, ctx) is False
