@@ -809,7 +809,7 @@ jobs:
           echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
 
       - name: Collect ASH output artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success() || failure()
         with:
           name: ash_output
@@ -848,7 +848,7 @@ jobs:
       # check for the first time. That is intended, and the trade-off plus the
       # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@b7b80d7ac5b1da46d6aaff9fb57ad50d8453bcb3 # v6.6.0
         if: >-
           inputs.collect-junit-xml-report
           && (github.event_name != 'pull_request'
