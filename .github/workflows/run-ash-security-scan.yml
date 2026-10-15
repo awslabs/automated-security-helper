@@ -809,7 +809,7 @@ jobs:
           echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
 
       - name: Collect ASH output artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success() || failure()
         with:
           name: ash_output
@@ -848,7 +848,7 @@ jobs:
       # check for the first time. That is intended, and the trade-off plus the
       # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
         if: >-
           inputs.collect-junit-xml-report
           && (github.event_name != 'pull_request'
@@ -903,7 +903,7 @@ jobs:
       # should set `collect-sarif-report: false` and call upload-ash-sarif.yml in
       # a job of its own, granting security-events: write to that job only.
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif
