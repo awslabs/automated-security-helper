@@ -121,7 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: setup-uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           # Restore everywhere, save only from main. This setup-uv major defaults
@@ -826,7 +826,7 @@ jobs:
       # red run leaves real evidence instead of a pointer into a deleted runner.
       - name: Collect the kept fixture and scan output
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: external-target-scan-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/ash-external-target-*
@@ -915,7 +915,7 @@ jobs:
             | grep -E 'deny\(1\) (mach-lookup|process-exec)' | tail -n 200 || true
       - name: Collect the suite report
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sandbox-escape-report-${{ matrix.os }}
           path: test-results/sandbox.junit.xml
@@ -950,7 +950,7 @@ jobs:
           python-version: "3.12"
           install-ash: "false"
       - name: Set up Ruby for cfn-nag
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: "3.3"
       - name: Install bubblewrap
@@ -1007,7 +1007,7 @@ jobs:
           done
       - name: Collect the parity report and scan output
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sandbox-scanner-parity-${{ matrix.os }}
           path: |
@@ -1092,7 +1092,7 @@ jobs:
         run: python scripts/verify_multi_project_attribution.py --timeout 1200
       - name: Collect the kept workspace and scan output
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: multi-project-attribution-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/ash-multi-project-*
@@ -1165,7 +1165,7 @@ jobs:
       # rather than only the summary line that failed the step.
       - name: Collect the suite report
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: moto-server-suite-report
           path: test-results/moto-server-suite.junit.xml
@@ -1279,7 +1279,7 @@ jobs:
       # A red run leaves per-test evidence rather than only the summary line.
       - name: Collect the suite report
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: integration-suite-report
           path: test-results/integration.junit.xml
