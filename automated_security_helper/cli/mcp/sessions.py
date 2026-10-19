@@ -555,12 +555,20 @@ def end_session(session_id: str) -> bool:
     (:func:`finish_ended_session`), because removing the tree a scan is reading
     can turn its result into a clean one.
 
-    Idempotent.
+    Idempotent. The session is taken with ``session_for`` and not ``get``: the
+    registry may have forgotten the id, and a scan can recreate and claim it right
+    after a lookup that found nothing, which would leave the claim unseen by the
+    change guard. Ending an id that never existed makes an empty entry that the
+    removal drops at once, so it is still a no-op; an id that cannot name a session
+    has no entry and no state to remove.
 
     Returns:
         True when everything was removed now, False when it waits for a scan.
     """
-    session = get_default_registry().get(session_id)
+    try:
+        session: Optional[MCPSession] = get_default_registry().session_for(session_id)
+    except ValueError:
+        session = None
     if session is not None and not session.try_begin_change():
         with _ended_lock:
             _ended_while_scanning.add(session_id)
