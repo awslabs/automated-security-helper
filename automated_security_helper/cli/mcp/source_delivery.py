@@ -574,8 +574,8 @@ def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
     default, for comparison against the operator's allowlist.
 
     Raises:
-        ValueError: for a local path or ``file://`` URL, any other scheme, or a
-            host or port this parser cannot state unambiguously.
+        ValueError: for a local path or ``file://`` URL, any other scheme, port 0,
+            or a host or port this parser cannot state unambiguously.
     """
 
     from urllib.parse import urlsplit
@@ -613,6 +613,8 @@ def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
             raise ValueError(
                 f"refusing a clone url whose host cannot be read: {url!r}"
             ) from None
+        if named_port == 0:
+            raise ValueError(f"refusing a clone url that names port 0: {url!r}")
         port = _DEFAULT_PORTS[scheme] if named_port is None else named_port
     else:
         scheme = "ssh"
@@ -636,8 +638,8 @@ ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
 def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
     """The operator's entries as ``(scheme, host, port)``, None where unnamed.
 
-    An entry this cannot read (another scheme, a port that is not a number up to
-    65535, a host that is not a plain name) allows nothing.
+    An entry this cannot read (another scheme, a port that is not a number from 1
+    to 65535, a host that is not a plain name) allows nothing.
     """
 
     raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
@@ -655,7 +657,7 @@ def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
             if not (port_text.isascii() and port_text.isdigit()):
                 continue
             port = int(port_text)
-            if port > 65535:
+            if not 1 <= port <= 65535:
                 continue
         host = host.rstrip(".")
         if _HOST_NAME.fullmatch(host):
