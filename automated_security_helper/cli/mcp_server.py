@@ -10,9 +10,12 @@ the MCP protocol for ASH security scanning.
 """
 
 import asyncio
+import contextvars
+import functools
 import json
 import os
-from typing import Dict, Any, NamedTuple, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Dict, Any, NamedTuple, Optional
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer, Context
@@ -74,6 +77,7 @@ from automated_security_helper.cli.mcp.session_identity import (
 )
 from automated_security_helper.cli.mcp.sessions import SESSION_SCAN_LIMIT
 from automated_security_helper.cli.mcp.source_delivery import (
+    DELIVERY_MAX_WORKERS,
     SOURCE_DELIVERY_BUSY,
     delivered_session_count,
     get_session_source_dir,
@@ -85,6 +89,28 @@ from automated_security_helper.cli.mcp.workspace import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 logger = ASH_LOGGER
+
+#: Runs the four source-delivery tools. A scan or any other ``asyncio.to_thread``
+#: caller shares the loop's default executor, so a delivery that waits on a slow
+#: remote would take a worker a scan needs; deliveries get their own, bounded.
+_DELIVERY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=DELIVERY_MAX_WORKERS, thread_name_prefix="ash-mcp-delivery"
+)
+
+
+async def _run_delivery(function: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Run a delivery tool's implementation on ``_DELIVERY_EXECUTOR``.
+
+    Keeps the caller's context variables, as ``asyncio.to_thread`` does. Awaiting
+    this and then cancelling does not stop the thread: the delivery finishes or
+    times out server-side, and the session reads busy until then.
+    """
+
+    context = contextvars.copy_context()
+    return await asyncio.get_running_loop().run_in_executor(
+        _DELIVERY_EXECUTOR, functools.partial(context.run, function, **kwargs)
+    )
+
 
 # Backward-compatible private-name aliases (tests import these by name).
 _filter_summary = filter_summary
@@ -1631,7 +1657,7 @@ async def set_source_git(
     try:
         # Off the event loop: a clone takes as long as the remote makes it, and
         # every other session's calls share the loop.
-        result = await asyncio.to_thread(
+        result = await _run_delivery(
             mcp_set_source_git,
             url=url,
             ref=ref,
@@ -1694,7 +1720,7 @@ async def set_source_zip_chunk(
 
     try:
         return _with_session(
-            await asyncio.to_thread(
+            await _run_delivery(
                 mcp_set_source_zip_chunk,
                 upload_id=upload_id,
                 sequence=sequence,
@@ -1747,7 +1773,7 @@ async def set_source_zip_finalize(
         return refusal
 
     try:
-        result = await asyncio.to_thread(
+        result = await _run_delivery(
             mcp_set_source_zip_finalize,
             upload_id=upload_id,
             expected_sha256=expected_sha256,
@@ -1793,7 +1819,7 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         return refusal
 
     try:
-        result = await asyncio.to_thread(mcp_clear_source, session_id=session_id)
+        result = await _run_delivery(mcp_clear_source, session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in clear_source: {str(e)}")
         return {
