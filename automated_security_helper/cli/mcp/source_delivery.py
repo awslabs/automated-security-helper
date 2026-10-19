@@ -61,6 +61,7 @@ import shutil
 import signal
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -1046,6 +1047,20 @@ def _write_next_sequence(session_dir: Path, upload_id: str, value: int) -> None:
     _meta_path(session_dir, upload_id).write_text(str(value))
 
 
+#: Locks that serialize the chunks of one upload. An upload maps to one of a fixed
+#: number of locks by its (session, upload id), so the table never grows with the
+#: number of uploads; two uploads that share a lock only take turns.
+_UPLOAD_LOCK_STRIPES = 64
+_UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
+
+
+def _upload_lock(session_id: str, upload_id: str) -> threading.Lock:
+    """The lock held while a chunk of this upload reads and moves its sequence."""
+
+    digest = hashlib.sha256(f"{session_id}\0{upload_id}".encode()).digest()
+    return _UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
+
+
 def set_source_zip_chunk(
     upload_id: str,
     sequence: int,
@@ -1078,7 +1093,7 @@ def set_source_zip_chunk(
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 
-    with writing_session_state(session_id):
+    with writing_session_state(session_id), _upload_lock(session_id, upload_id):
         return _append_zip_chunk(
             upload_id,
             sequence,
