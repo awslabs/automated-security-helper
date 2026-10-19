@@ -278,7 +278,7 @@ function Invoke-ASH {
         function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
             $full = [System.IO.Path]::GetFullPath($Path)
             if ($Depth -gt 40) {
-                Stop-AshRefusal 3 "The path '$Path' is reached through more than 40 links. Invoke-ASH follows at most 40 links to find where a directory or file really is, and does not run on a path it cannot place. Use a path with fewer links."
+                Stop-AshRefusal 3 "The path '$Path' is reached through more than 40 links (the walk reached $Depth). Invoke-ASH follows at most 40 links to find where a directory or file really is, and does not run on a path it cannot place. Use a path with fewer links."
             }
             $root = [System.IO.Path]::GetPathRoot($full)
             $current = $root
@@ -352,7 +352,7 @@ function Invoke-ASH {
         # resolves it, so a link reached only through another link counts too:
         # whoever writes the directory a link sits in chooses where it leads
         # (config/sandbox_grants.links_followed). At most 40 links are followed, so
-        # a cycle of links ends, and a path with more counts as one that does.
+        # a cycle of links ends, and a path with more is refused.
         function Test-AshFollowsLinkInCheckout([string]$Path, [string[]]$Trees) {
             $full = [System.IO.Path]::GetFullPath($Path)
             $root = [System.IO.Path]::GetPathRoot($full)
@@ -378,9 +378,11 @@ function Invoke-ASH {
                     continue
                 }
                 $hops++
-                # Past 40 links the path is taken as reached through a link in a
-                # checkout, the side that checks more.
-                if ($hops -gt 40) { return $true }
+                # Past 40 links the path is refused, with the count named, rather than
+                # taken as reached through no link in a checkout.
+                if ($hops -gt 40) {
+                    Stop-AshRefusal 3 "The config file path '$Path' is reached through more than 40 links (the walk reached $hops). Invoke-ASH follows at most 40 links to find where a file really is, and does not run on a path it cannot place. Use a path with fewer links."
+                }
                 $linkDir = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
                 if (@($Trees | Where-Object { Test-AshUnder $linkDir $_ }).Count -gt 0) { return $true }
                 if (Test-AshInCheckout $walked) { return $true }
@@ -401,7 +403,7 @@ function Invoke-ASH {
         # tree by the operator's own link and comes back through a target is not named
         # inside it. So a tree reached through an alias, of the tree or of a directory
         # above it, is judged as the direct spelling is. A path of more than 40 links
-        # counts as named inside the tree, the side that refuses.
+        # is refused, with the count named.
         function Test-AshNamedInTree([string]$Path, [string[]]$Trees) {
             $full = [System.IO.Path]::GetFullPath($Path)
             $root = [System.IO.Path]::GetPathRoot($full)
@@ -432,7 +434,9 @@ function Invoke-ASH {
                     continue
                 }
                 $hops++
-                if ($hops -gt 40) { return $true }
+                if ($hops -gt 40) {
+                    Stop-AshRefusal 3 "The config file path '$Path' is reached through more than 40 links (the walk reached $hops). Invoke-ASH follows at most 40 links to find where a file really is, and does not run on a path it cannot place. Use a path with fewer links."
+                }
                 $target = [string]@($item.Target)[0]
                 if ([System.IO.Path]::IsPathRooted($target)) {
                     $walked = [System.IO.Path]::GetPathRoot($target)
