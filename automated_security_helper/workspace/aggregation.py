@@ -850,7 +850,7 @@ class WorkspaceAggregator:
         self._scanner_findings: Dict[str, int] = {}
         self._scanner_actionable: Dict[str, int] = {}
         self._scanner_status: Dict[str, Optional[str]] = {}
-        self._scanner_exit_code: Dict[str, int] = {}
+        self._scanner_exit_code: Dict[str, Optional[int]] = {}
         self._unconvertible = 0
 
     def add(
@@ -887,7 +887,7 @@ class WorkspaceAggregator:
             if scanner not in self._scanner_exit_code or worse != held:
                 self._scanner_exit_code[scanner] = code
             elif status == held:
-                self._scanner_exit_code[scanner] = max(
+                self._scanner_exit_code[scanner] = _larger_code(
                     self._scanner_exit_code[scanner], code
                 )
             self._scanner_status[scanner] = worse
