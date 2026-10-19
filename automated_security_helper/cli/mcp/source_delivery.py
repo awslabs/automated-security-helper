@@ -401,6 +401,15 @@ def _tree_bytes(root: Path) -> int:
     return total
 
 
+def _refuse_oversized(grows_in: Optional[Path]) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past ``MAX_CLONE_BYTES``."""
+
+    if grows_in is not None and _tree_bytes(grows_in) > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(
+            f"git wrote more than {MAX_CLONE_BYTES} bytes and was stopped"
+        )
+
+
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
     """Kill ``process`` and every process in the group it leads."""
 
@@ -464,11 +473,10 @@ def _run_git(
                 break
             except subprocess.TimeoutExpired:
                 pass
-            if grows_in is not None and _tree_bytes(grows_in) > MAX_CLONE_BYTES:
-                # Stopped, with its helpers, by the handler below.
-                raise CloneTooLargeError(
-                    f"git wrote more than {MAX_CLONE_BYTES} bytes and was stopped"
-                )
+            # Stopped, with its helpers, by the handler below.
+            _refuse_oversized(grows_in)
+        # A command that finished inside one poll interval was not looked at yet.
+        _refuse_oversized(grows_in)
     except subprocess.TimeoutExpired:
         _stop_process_group(process)
         with contextlib.suppress(subprocess.TimeoutExpired):
