@@ -1110,12 +1110,33 @@ def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> Non
         )
 
 
-def _refuse_oversized(grows_in: Optional[Path]) -> None:
-    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past ``MAX_CLONE_BYTES``."""
+def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past a clone limit.
 
-    if grows_in is not None and _tree_bytes(grows_in) > MAX_CLONE_BYTES:
+    The limits are ``MAX_CLONE_BYTES`` and the zip channel's ``_MAX_FILES``
+    entries. A tree that cannot be read is refused too.
+
+    Args:
+        grows_in: The directory the command writes into, or None.
+        running: True when the command is still running, so that it is about to
+            be stopped; False when it has already exited.
+    """
+
+    if grows_in is None:
+        return
+    suffix = " and was stopped" if running else ""
+    try:
+        size, entries = _tree_extent(grows_in)
+    except OSError as exc:
         raise CloneTooLargeError(
-            f"git wrote more than {MAX_CLONE_BYTES} bytes and was stopped"
+            f"the size of what git wrote could not be read ({exc.strerror or exc}); "
+            f"the delivery was refused"
+        ) from exc
+    if size > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(f"git wrote more than {MAX_CLONE_BYTES} bytes{suffix}")
+    if entries > _MAX_FILES:
+        raise CloneTooLargeError(
+            f"git wrote more than {_MAX_FILES} files and directories{suffix}"
         )
 
 
