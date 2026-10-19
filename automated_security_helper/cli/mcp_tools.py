@@ -1935,35 +1935,13 @@ async def mcp_scan_directory(
     # MCPSession.try_claim_scan. The claim is on the in-memory session: a scan
     # creates nothing under the workspace root, so it starts even when that root
     # can't be created.
+    #
+    # The block below begins before the claim, so that whatever raises after it
+    # reaches the ``finally``, which releases the claim and the count. A name is
+    # bound to ``claimed_session`` only once the claim is held, and to
+    # ``counted`` only once the scan is counted, so the ``finally`` releases
+    # exactly what was taken.
     claimed_session = None
-    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
-        from automated_security_helper.cli.mcp.sessions import (
-            get_default_registry as _get_session_registry,
-        )
-        from automated_security_helper.cli.mcp.source_delivery import (
-            SOURCE_DELIVERY_BUSY,
-        )
-
-        claimed_session = _get_session_registry().session_for(session_id)
-        if not claimed_session.try_claim_scan():
-            return {
-                "success": False,
-                "operation": "scan_directory",
-                "error_type": SOURCE_DELIVERY_BUSY,
-                "error": (
-                    "the delivered source of this session is being changed; start "
-                    "the scan after the change finishes"
-                ),
-            }
-    # Counted against the operator's per-session limit from here until the scan
-    # returns; the task uncounts it. A limited caller with no session counts on
-    # the count all such callers share. See sessions.per_session_scan_limit.
-    from automated_security_helper.cli.mcp.sessions import (
-        per_session_scan_limit,
-        session_scan_limit_refusal,
-        sessionless_scan_count,
-    )
-
     counted: Optional[Any] = None
     limit = per_session_scan_limit(session_id)
     if claimed_session is not None:
@@ -1982,6 +1960,53 @@ async def mcp_scan_directory(
             return session_scan_limit_refusal("scan_directory", limit, shared=True)
         counted = shared
     try:
+        if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+            from automated_security_helper.cli.mcp.sessions import (
+                get_default_registry as _get_session_registry,
+            )
+            from automated_security_helper.cli.mcp.source_delivery import (
+                SOURCE_DELIVERY_BUSY,
+            )
+
+            session = _get_session_registry().session_for(session_id)
+            if not session.try_claim_scan():
+                return {
+                    "success": False,
+                    "operation": "scan_directory",
+                    "error_type": SOURCE_DELIVERY_BUSY,
+                    "error": (
+                        "the delivered source of this session is being changed; "
+                        "start the scan after the change finishes"
+                    ),
+                }
+            claimed_session = session
+        # Counted against the operator's per-session limit from here until the
+        # scan returns; the task uncounts it. A limited caller with no session
+        # counts on the count all such callers share. See
+        # sessions.per_session_scan_limit.
+        from automated_security_helper.cli.mcp.sessions import (
+            per_session_scan_limit,
+            session_scan_limit_refusal,
+            sessionless_scan_count,
+        )
+
+        limit = per_session_scan_limit(session_id)
+        if claimed_session is not None:
+            if limit is None:
+                # No limit applies, and with none try_start_scan always counts.
+                # The scan is counted anyway, so a limit set later sees it
+                # running.
+                claimed_session.try_start_scan(None)
+            elif not claimed_session.try_start_scan(limit):
+                # Refused: the ``finally`` releases the claim.
+                return session_scan_limit_refusal("scan_directory", limit)
+            counted = claimed_session
+        elif limit is not None:
+            shared = sessionless_scan_count()
+            if not shared.try_start_scan(limit):
+                return session_scan_limit_refusal("scan_directory", limit, shared=True)
+            counted = shared
+
         # Create a unique scan ID
         scan_id = str(uuid.uuid4())
 
