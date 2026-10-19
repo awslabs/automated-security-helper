@@ -53,6 +53,16 @@ def _clone(url: str) -> Dict[str, Any]:
     return mcp_set_source_git(url=url, session_id=f"clone-{next(_sessions)}")
 
 
+#: 8443 written in digits that are not ASCII. ``int`` reads both as 8443.
+_ARABIC_INDIC_8443 = (
+    "\N{ARABIC-INDIC DIGIT EIGHT}\N{ARABIC-INDIC DIGIT FOUR}"
+    "\N{ARABIC-INDIC DIGIT FOUR}\N{ARABIC-INDIC DIGIT THREE}"
+)
+_FULLWIDTH_8443 = (
+    "\N{FULLWIDTH DIGIT EIGHT}\N{FULLWIDTH DIGIT FOUR}"
+    "\N{FULLWIDTH DIGIT FOUR}\N{FULLWIDTH DIGIT THREE}"
+)
+
 ALLOWED = [
     ("git.example.com", "https://git.example.com/r.git"),
     ("git.example.com", "https://git.example.com:443/r.git"),
@@ -94,6 +104,9 @@ REFUSED = [
     ("git.example.com:abc", "https://git.example.com/r.git"),
     ("git.example.com:", "https://git.example.com/r.git"),
     ("git.example.com:99999", "https://git.example.com/r.git"),
+    # Digits of another script are digits to str.isdigit and to int, but not a port.
+    (f"git.example.com:{_ARABIC_INDIC_8443}", "https://git.example.com:8443/r.git"),
+    (f"git.example.com:{_FULLWIDTH_8443}", "https://git.example.com:8443/r.git"),
     ("http://git.example.com", "https://git.example.com/r.git"),
     ("gopher://git.example.com", "https://git.example.com/r.git"),
     ("*.example.com", "https://git.example.com/r.git"),
@@ -126,6 +139,49 @@ def test_an_entry_does_not_allow_another_scheme_or_port(
     assert result.get("success") is False, result
     assert result.get("error_type") == "clone_host_not_permitted", result
     assert not git, "git ran for a refused url"
+
+
+@pytest.mark.parametrize("port", ["0", "00", "000"])
+def test_an_entry_naming_port_zero_allows_nothing(port, monkeypatch) -> None:
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", f"git.example.com:{port}")
+
+    assert sd._git_allowed_entries() == []
+    assert sd.git_allowed_hosts() == frozenset()
+
+
+@pytest.mark.parametrize(
+    "entry, expected",
+    [
+        ("git.example.com:1", ("git.example.com", 1)),
+        ("git.example.com:65535", ("git.example.com", 65535)),
+    ],
+)
+def test_the_ends_of_the_port_range_are_still_read(
+    entry, expected, monkeypatch
+) -> None:
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", entry)
+
+    assert [(host, port) for _, host, port in sd._git_allowed_entries()] == [expected]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://git.example.com:0/r.git",
+        "ssh://git@git.example.com:0/r.git",
+        "ssh://git@git.example.com:00/r.git",
+    ],
+)
+def test_a_url_naming_port_zero_is_refused(url, git, monkeypatch) -> None:
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.com,git.example.com:0")
+
+    with pytest.raises(ValueError):
+        sd.remote_clone_endpoint(url)
+    result = _clone(url)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "clone_url_not_permitted", result
+    assert not git, "git ran for a url naming port 0"
 
 
 def test_the_refusal_for_a_listed_host_names_the_scheme_and_port(

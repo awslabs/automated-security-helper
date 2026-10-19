@@ -16,8 +16,13 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.cli.mcp import sessions
+from automated_security_helper.cli.mcp import (
+    profile_registry,
+    sessions,
+    source_delivery,
+)
 from automated_security_helper.cli.mcp.sessions import MCPSession, MCPSessionRegistry
+from automated_security_helper.config.ash_config import AshConfig
 
 THRESHOLD = 8
 LONG_AGO = 10_000.0
@@ -121,14 +126,51 @@ def test_a_session_with_a_write_in_progress_is_kept(registry) -> None:
     assert registry.get("writing") is writing
 
 
-def test_a_session_with_a_bound_source_is_kept(registry, tmp_path) -> None:
+@pytest.fixture
+def clean_session_state():
+    """Scrub the process-wide delivered-source and profile stores around a test."""
+    profile_registry.clear_session_state()
+    yield
+    profile_registry.clear_session_state()
+    for session_id in ("bound", "bound-profile"):
+        source_delivery._drop_session_source_dir(session_id)
+
+
+def test_a_session_with_a_delivered_source_is_kept(
+    registry, tmp_path, clean_session_state
+) -> None:
     bound = _unused_for_a_long_time(registry.session_for("bound"))
-    bound.source_dir = tmp_path
+    source_delivery._set_session_source_dir("bound", tmp_path)
     _fill_with_idle_sessions(registry, THRESHOLD - 1)
 
     registry.session_for("newest")
 
     assert registry.get("bound") is bound
+
+
+def test_a_session_with_a_bound_profile_is_kept(registry, clean_session_state) -> None:
+    bound = _unused_for_a_long_time(registry.session_for("bound-profile"))
+    profile_registry.bind_session_config(
+        "bound-profile", config=AshConfig(), profile_name="strict"
+    )
+    _fill_with_idle_sessions(registry, THRESHOLD - 1)
+
+    registry.session_for("newest")
+
+    assert registry.get("bound-profile") is bound
+
+
+def test_a_session_that_only_looked_up_its_profile_state_is_forgotten(
+    registry, clean_session_state
+) -> None:
+    looked_up = _unused_for_a_long_time(registry.session_for("bound-profile"))
+    profile_registry.get_session_state("bound-profile")
+    _fill_with_idle_sessions(registry, THRESHOLD - 1)
+
+    registry.session_for("newest")
+
+    assert registry.get("bound-profile") is None
+    assert looked_up is not registry.session_for("bound-profile")
 
 
 def test_a_forgotten_id_comes_back_as_a_working_session(registry) -> None:
