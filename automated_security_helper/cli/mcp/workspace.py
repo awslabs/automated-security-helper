@@ -243,6 +243,7 @@ from automated_security_helper.utils.output_dir_links import (
     WHY as OUTPUT_LINK_WHY,
 )
 from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
     ignore_output_dir_in_git,
     refuse_linked_output_dir,
 )
