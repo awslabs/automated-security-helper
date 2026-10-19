@@ -2250,6 +2250,21 @@ async def suggest_suppression(
 # ---------------------------------------------------------------------------
 
 
+async def _tell_client_error(ctx: Context, message: str) -> None:
+    """Send ``message`` to the client as an error log, without ever raising.
+
+    The log is a courtesy: the result a tool returns is what the client acts on.
+    A client whose transport has closed makes the send raise, and that must not
+    replace the tool's own result with an exception, in a refusal branch or in an
+    ``except`` arm. ``get_scan_results`` and ``get_scan_result_paths`` guard their
+    send the same way.
+    """
+    try:
+        await ctx.error(message)
+    except Exception:
+        logger.error(f"Failed to send error message to client: {message}")
+
+
 def _session_error(e: ValueError) -> Dict[str, Any]:
     """Shape a rejected session header like the tools' other failures."""
     return {
