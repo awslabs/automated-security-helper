@@ -399,7 +399,10 @@ class SessionBoundary:
                     await self._end(known)
                 elif known and status == 404 and session_path:
                     await self._end(known)
-                elif issued and 200 <= status < 300:
+                elif issued and issued != header and 200 <= status < 300:
+                    # Only a response to a request that did not carry the value
+                    # is an issue (``initialize``); an echo of the client's own
+                    # header is not.
                     self._issued.add(issued)
             await send(message)
 
