@@ -36,7 +36,8 @@ from automated_security_helper.cli.mcp.profile_registry import (
 
 SESSION = "busy-session"
 BUSY_MESSAGE = (
-    "a scan of this session is running; change the delivered source after it finishes"
+    "a scan of this session is running, or its source is being written; "
+    "change the delivered source after it finishes"
 )
 BUSY_ERROR_TYPE = "source_delivery_busy"
 
