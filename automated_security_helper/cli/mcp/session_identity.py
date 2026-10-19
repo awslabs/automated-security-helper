@@ -156,12 +156,19 @@ def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
     return None
 
 
-def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
+def resolve_session_id(
+    headers: Optional[Mapping[str, str]], *, refuse_reserved: bool = False
+) -> str:
     """Resolve the session id a tool call belongs to.
 
     Args:
         headers: Request headers carried by the transport, or ``None`` on a
             transport that has none (stdio). ``Context.headers`` supplies this.
+        refuse_reserved: Also refuse a header that names a directory ASH owns
+            (:func:`is_reserved_session_id`). Off by default: the registry and
+            the transport agree on the *shape* of an id, and the reserved names
+            are a separate rule. ``resolve_caller_session_id`` turns it on for a
+            caller whose identity is the header.
 
     Returns:
         The ``Mcp-Session-Id`` header value when the transport carries a usable
@@ -172,9 +179,9 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
             directory, per :func:`validate_path_component` -- it contains a path
             separator, is a relative-path component, carries a control character
             or a character with path meaning such as a drive-specifying ``:``,
-            or exceeds ``session_paths.MAX_COMPONENT_LEN``; or if it names a
-            directory ASH owns (:func:`is_reserved_session_id`). Refused rather
-            than sanitized: see the module docstring.
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``; or, with
+            ``refuse_reserved``, if it names a directory ASH owns. Refused
+            rather than sanitized: see the module docstring.
 
     A header that is absent, empty, or whitespace-only is treated as "no session
     supplied" and resolves to the default, matching the ``session_id or
@@ -201,7 +208,9 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     if not candidate:
         return DEFAULT_SESSION_ID
 
-    return _validated_header_session(candidate)
+    if refuse_reserved:
+        return _validated_header_session(candidate)
+    return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
 def _validated_header_session(candidate: str) -> str:
@@ -287,7 +296,7 @@ def resolve_caller_session_id(ctx: object) -> str:
 
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
-        return resolve_session_id(getattr(ctx, "headers", None))
+        return resolve_session_id(getattr(ctx, "headers", None), refuse_reserved=True)
 
     try:
         request = sdk_context.request_context.request
