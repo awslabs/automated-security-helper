@@ -172,8 +172,9 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
             directory, per :func:`validate_path_component` -- it contains a path
             separator, is a relative-path component, carries a control character
             or a character with path meaning such as a drive-specifying ``:``,
-            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than sanitized:
-            see the module docstring.
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``; or if it names a
+            directory ASH owns (:func:`is_reserved_session_id`). Refused rather
+            than sanitized: see the module docstring.
 
     A header that is absent, empty, or whitespace-only is treated as "no session
     supplied" and resolves to the default, matching the ``session_id or
@@ -200,6 +201,22 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     if not candidate:
         return DEFAULT_SESSION_ID
 
+    return _validated_header_session(candidate)
+
+
+def _validated_header_session(candidate: str) -> str:
+    """``candidate`` if it names one session directory a caller may own.
+
+    Raises:
+        ValueError: if it could not name one directory, or names a directory
+            ASH owns (:func:`is_reserved_session_id`).
+    """
+
+    if is_reserved_session_id(candidate):
+        raise ValueError(
+            f"{MCP_SESSION_ID_HEADER} {candidate!r} is reserved and cannot name a "
+            f"session"
+        )
     return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
@@ -286,12 +303,7 @@ def resolve_caller_session_id(ctx: object) -> str:
     candidate = caller.session_id.strip()
     if not candidate:
         return UNIDENTIFIED_SESSION_ID
-    if is_reserved_session_id(candidate):
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} {candidate!r} is reserved and cannot name a "
-            f"session"
-        )
-    return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
+    return _validated_header_session(candidate)
 
 
 def session_identity_refusal(
