@@ -306,13 +306,13 @@ function Invoke-ASH {
 
         # /out is mounted read-write and /src read-only: an output directory that is
         # the source directory or above it would hold the source tree, writable, at
-        # /out. A directory that is itself a link is compared by its target. One that
+        # /out. Both directories are compared by their real paths, every link on the
+        # way followed, so a directory is the same one under any spelling: the output
+        # through a link to a directory above it, the source through another. One that
         # does not exist yet cannot hold the source, so this runs before it is created.
         if (-not $NoRun -and (Test-Path -LiteralPath $OutputDir -PathType Container)) {
             $existingOutput = (Get-Item -LiteralPath $OutputDir).FullName
-            $directories = foreach ($path in @($sourceDirFull, $existingOutput)) {
-                $item = Get-Item -LiteralPath $path
-                $real = if ($item.LinkType -and $item.ResolvedTarget) { [string]$item.ResolvedTarget } else { $item.FullName }
+            $directories = foreach ($real in @($sourceReal, (Get-AshRealPath $existingOutput))) {
                 $real.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
             }
             if ($directories[0].StartsWith($directories[1], $pathComparison)) {
@@ -324,9 +324,10 @@ function Invoke-ASH {
         # inside would write wherever the link leads, and a repository that commits
         # `.ash -> /some/host/dir` would choose that directory. Refused with exit 3:
         # the output directory when it is a symbolic link or junction, wherever it is,
-        # and any link from below SourceDir down to it, with SourceDir taken under its
-        # name and its real path. Links at or above SourceDir are the operator's own
-        # spelling. The path is walked as written, '..' included, and before the
+        # and any link from below SourceDir down to it, with SourceDir taken at its real
+        # path and each part of the output path placed at its real location. Links at
+        # or above SourceDir are the operator's own spelling. The path is walked as
+        # written, '..' included, and before the
         # directory is created, because creating it through a linked .ash already
         # writes where the link points; so -NoRun, which creates it too, is refused as
         # well. ./ash and `ash --mode container` apply the same rule.
@@ -454,9 +455,17 @@ function Invoke-ASH {
                 if ($walked.Count -gt 0) { $walked.RemoveAt($walked.Count - 1) }
                 continue
             }
+            # Where the directory this part sits in really is, every link on the way to
+            # it followed, so the part is placed against the real source directory
+            # whatever spelling the output was given: a link the repository committed
+            # below the source is seen through an alias of the source or of a directory
+            # above it. A link outside the source, at or above it, is the operator's
+            # own spelling and is followed.
+            $parentSpelled = if ($walked.Count -gt 0) { $outputRoot.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + ($walked -join [System.IO.Path]::DirectorySeparatorChar) } else { $outputRoot }
             $walked.Add($part)
             $current = $outputRoot.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + ($walked -join [System.IO.Path]::DirectorySeparatorChar)
-            if (((Test-AshUnder $current $sourceDirFull) -or (Test-AshUnder $current $sourceReal)) -and (Test-AshLink $current)) {
+            $partReal = Join-Path (Get-AshRealPath $parentSpelled) $part
+            if ((Test-AshUnder $partReal $sourceReal) -and (Test-AshLink $partReal)) {
                 $linkOnTheWay = $current
                 break
             }
