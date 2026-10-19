@@ -34,13 +34,14 @@ Where
 -----
 Each reference is replaced at its own position: the path of keys at which the
 file wrote it, spelled with ``-`` or ``_`` (the record keys a built-in plugin's
-section by its field name), at any index of a list, and moved to where a
-``patch`` operation puts its value. A string elsewhere that happens to equal the
-value is left alone, so a field the file set to "us-east-1" is not recorded as
-``${AWS_REGION}`` because that variable holds the same text. At its position, a
-string the load changed after reading it (a relative path the load takes from
-the file's directory) has the part read from the environment replaced inside
-it. A position the configuration no longer holds the value at, because a later
+section by its field name), and moved to where a ``patch`` operation puts its
+value. In a list a string equal to the value is recorded as the reference at any
+index. A string elsewhere that happens to equal the value is left alone, so a
+field the file set to "us-east-1" is not recorded as ``${AWS_REGION}`` because
+that variable holds the same text. At its own position, index included, a string
+the load changed after reading it (a relative path the load takes from the
+file's directory) has the part read from the environment replaced inside it; a
+neighboring entry that only contains the same text is left as it is. A position the configuration no longer holds the value at, because a later
 file or an override set it, is left as the configuration holds it.
 
 Reading a record
@@ -214,6 +215,13 @@ def _normal_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
     return tuple(_normal(segment) for segment in path)
 
 
+def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
+    """``path`` with its keys normalized and its list indices kept."""
+    return tuple(
+        segment if isinstance(segment, int) else _normal(segment) for segment in path
+    )
+
+
 def _bare(written: str) -> str:
     """The reference alone, ``${VAR}`` or ``${VAR:default}``, from ``written``."""
     text = _without_tag(written).strip()
@@ -229,9 +237,9 @@ def _recorded_string(
     """``text`` as the file wrote it, where ``references`` are those at its position.
 
     A string equal to what a reference resolved to is the reference. Only the
-    ``unclaimed`` references (``_Index.unclaimed``, all of them by default) are
-    also read into a longer string, since a reference some other entry of the
-    document already is does not write this one.
+    ``unclaimed`` references (``_Index.own``, all of them by default) are also
+    read into a longer string: those the file wrote at this very entry, since the
+    reference of a neighboring entry does not write this one.
     """
     for reference in references:
         if text == reference.resolved:
@@ -291,52 +299,42 @@ class _Index:
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.mark = mark
         self.whole_only = whole_only
-        #: How many strings of the data are, at each position a reference is at,
-        #: exactly what that reference resolved to (``count_whole``).
-        self.whole: Dict[Tuple[Tuple[PathSegment, ...], str], int] = {}
         for reference in references:
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path), []).append(reference)
 
-    def count_whole(self, item: Any, path: Tuple[PathSegment, ...]) -> None:
-        """Count the strings of ``item`` that are a reference's resolved value whole,
-        by position, before ``record`` reads references into longer strings."""
-        if isinstance(item, dict):
-            for key, value in item.items():
-                spelled = key if isinstance(key, str) else str(key)
-                self.count_whole(value, (*path, _normal(spelled)))
-        elif isinstance(item, (list, tuple)):
-            for value in item:
-                self.count_whole(value, (*path, _ANY_INDEX))
-        elif isinstance(item, str) and path in self.values:
-            self.whole[(path, item)] = self.whole.get((path, item), 0) + 1
-
-    def unclaimed(
-        self, path: Tuple[PathSegment, ...], references: List[EnvironmentReference]
+    @staticmethod
+    def own(
+        exact: Tuple[PathSegment, ...], references: List[EnvironmentReference]
     ) -> List[EnvironmentReference]:
-        """The references at ``path`` that no string of the data is whole.
+        """The references the file wrote at the entry at ``exact``, list index
+        included.
 
-        A list can hold ``${ASH_SCOPE}`` and ``vendor2``: positions are matched at
-        any index, so the reference at the first entry would also be read into the
-        second, which only starts with the same text. Each string that is a
-        reference's resolved value whole claims one reference to it; the rest are
-        the ones a longer string at this position may come from.
+        A list can hold ``${ASH_SCOPE}`` and ``vendor2``, or ``vendor`` and an
+        entry the load changed: a string equal to what any reference at this
+        position resolved to is recorded as it, whatever its index, but a longer
+        string has only its own entry's reference read into it. A neighboring
+        entry that happens to start or end with the same text keeps what the
+        file wrote, and does not hide the reference an entry the load changed
+        is read from.
         """
-        left: List[EnvironmentReference] = []
-        seen: Dict[str, int] = {}
-        for reference in references:
-            seen[reference.resolved] = seen.get(reference.resolved, 0) + 1
-            if seen[reference.resolved] > self.whole.get((path, reference.resolved), 0):
-                left.append(reference)
-        return left
+        return [r for r in references if _exact_path(r.path) == exact]
 
-    def record(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
+    def record(
+        self,
+        item: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Optional[Tuple[PathSegment, ...]] = None,
+    ) -> Any:
+        exact = path if exact is None else exact
         if isinstance(item, dict):
             renames = self.keys.get(path, ())
             result: Dict[Any, Any] = {}
             for key, value in item.items():
                 spelled = key if isinstance(key, str) else str(key)
-                recorded = self.record(value, (*path, _normal(spelled)))
+                recorded = self.record(
+                    value, (*path, _normal(spelled)), (*exact, _normal(spelled))
+                )
                 for reference in renames:
                     if _normal(spelled) == _normal(reference.resolved):
                         key = self._whole(reference)
@@ -344,11 +342,14 @@ class _Index:
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
-            return type(item)(self.record(value, (*path, _ANY_INDEX)) for value in item)
+            return type(item)(
+                self.record(value, (*path, _ANY_INDEX), (*exact, index))
+                for index, value in enumerate(item)
+            )
         if isinstance(item, str):
             here = self.values.get(path)
             if here:
-                return self._string(item, here, self.unclaimed(path, here))
+                return self._string(item, here, self.own(exact, here))
         return item
 
     def fill(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
@@ -414,10 +415,9 @@ def record_environment_references(
     """
     if not references:
         return data
-    index = _Index(references, mark, whole_only)
-    start = _normal_path(at)
-    index.count_whole(data, start)
-    return index.record(data, start)
+    return _Index(references, mark, whole_only).record(
+        data, _normal_path(at), _exact_path(at)
+    )
 
 
 def setting_names(
