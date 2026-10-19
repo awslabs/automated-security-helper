@@ -267,25 +267,69 @@ function Invoke-ASH {
         # Resolve source and output directories. -LiteralPath: -Path reads '[', ']',
         # '*' and '?' as wildcards, so 'src[1]' would name 'src1'. New-Item has no
         # -LiteralPath and reads its -Path as written.
-        $sourceDirFull = Get-Item -LiteralPath $SourceDir | Select-Object -ExpandProperty FullName
-        Write-Verbose "Resolved SourceDir to: $sourceDirFull"
+        $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+
+        # A '..' goes to the parent of where the part before it really is, as the
+        # operating system and ./ash apply it, not to the part before it in the
+        # spelling: 'a/../b' with 'a' a link is the file beside what 'a' leads to.
+        # [System.IO.Path]::GetFullPath and Get-Item's FullName drop the part before a
+        # '..' without looking at it, so a path with a '..' is walked here instead.
+        # A directory that cannot be searched has no parent to go up to (the OS refuses
+        # 'locked/..'), so a '..' after one refuses the path.
+        function Test-AshSearchable([string]$Directory) {
+            try {
+                $null = [System.IO.File]::GetAttributes((Join-Path $Directory '.ash-search-probe'))
+                return $true
+            }
+            catch [System.UnauthorizedAccessException] {
+                return $false
+            }
+            catch {
+                return $true
+            }
+        }
+        function Step-AshParent([string]$Real, [string]$Whole) {
+            if (-not (Test-AshSearchable $Real)) {
+                Stop-AshRefusal 3 "The path '$Whole' goes up with '..' from '$Real', which cannot be searched, so where it leads cannot be placed. Use a path without that '..'."
+            }
+            $parent = Split-Path -Parent $Real
+            if ($parent) { return $parent }
+            return [System.IO.Path]::GetPathRoot($Real)
+        }
 
         # The path with every link on the way followed, which is what the runner
         # mounts. Component by component, so a link to a directory higher up is
-        # followed too; bounded, so a cycle of links ends. A path that is still a link
-        # after 40 links is refused: taking it as spelled would judge a directory by a
-        # name the runner resolves differently.
+        # followed too, and a '..' is applied to the real location reached so far;
+        # bounded, so a cycle of links ends. A path that is still a link after 40 links
+        # is refused: taking it as spelled would judge a directory by a name the runner
+        # resolves differently. A '..' after a part that does not exist is refused: it
+        # cannot be placed. A relative path is taken from the process's real working
+        # directory.
         function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
-            $full = [System.IO.Path]::GetFullPath($Path)
             if ($Depth -gt 40) {
                 Stop-AshRefusal 3 "The path '$Path' is reached through more than 40 links (the walk reached $Depth). Invoke-ASH follows at most 40 links to find where a directory or file really is, and does not run on a path it cannot place. Use a path with fewer links."
             }
-            $root = [System.IO.Path]::GetPathRoot($full)
+            $whole = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path ([System.IO.Directory]::GetCurrentDirectory()) $Path }
+            $root = [System.IO.Path]::GetPathRoot($whole)
             $current = $root
-            foreach ($part in $full.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            $unplaced = $false
+            foreach ($part in $whole.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                if ($part -eq '.') { continue }
+                if ($part -eq '..') {
+                    if ($unplaced) {
+                        Stop-AshRefusal 3 "The path '$Path' goes up with '..' from a part that does not exist, so where it leads cannot be placed. Use a path without that '..'."
+                    }
+                    $current = Step-AshParent $current $Path
+                    continue
+                }
                 $current = Join-Path $current $part
+                if ($unplaced) { continue }
                 $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
-                if ($item -and $item.LinkType -and $item.Target) {
+                if (-not $item) {
+                    $unplaced = $true
+                    continue
+                }
+                if ($item.LinkType -and $item.Target) {
                     $target = [string]@($item.Target)[0]
                     if (-not [System.IO.Path]::IsPathRooted($target)) {
                         $target = Join-Path (Split-Path -Parent $current) $target
@@ -295,7 +339,31 @@ function Invoke-ASH {
             }
             return $current
         }
-        $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        # The path as the operator named it, made absolute with every '..' applied to
+        # the real location before it (Get-AshRealPath), and no other link followed. A
+        # path with no '..' comes out as the same absolute spelling it was given.
+        function Get-AshNamedPath([string]$Path) {
+            $whole = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path ([System.IO.Directory]::GetCurrentDirectory()) $Path }
+            $root = [System.IO.Path]::GetPathRoot($whole)
+            $named = $root
+            foreach ($part in $whole.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                if ($part -eq '.') { continue }
+                if ($part -eq '..') {
+                    $real = Get-AshRealPath $named
+                    if (-not (Get-Item -LiteralPath $real -Force -ErrorAction SilentlyContinue)) {
+                        Stop-AshRefusal 3 "The path '$Path' goes up with '..' from '$named', which does not exist, so where it leads cannot be placed. Use a path without that '..'."
+                    }
+                    $named = Step-AshParent $real $Path
+                    continue
+                }
+                $named = Join-Path $named $part
+            }
+            return $named
+        }
+
+        $null = Get-Item -LiteralPath $SourceDir
+        $sourceDirFull = Get-AshNamedPath $SourceDir
+        Write-Verbose "Resolved SourceDir to: $sourceDirFull"
         # Case is ignored on Windows and macOS, whose file systems usually ignore it: a
         # different spelling of a directory's case is the same directory there. Where
         # the file system is case-sensitive that only refuses more.
@@ -312,8 +380,9 @@ function Invoke-ASH {
         # way followed, so a directory is the same one under any spelling: the output
         # through a link to a directory above it, the source through another. One that
         # does not exist yet cannot hold the source, so this runs before it is created.
-        if (-not $NoRun -and (Test-Path -LiteralPath $OutputDir -PathType Container)) {
-            $existingOutput = (Get-Item -LiteralPath $OutputDir).FullName
+        $outputNamed = Get-AshNamedPath $OutputDir
+        if (-not $NoRun -and (Test-Path -LiteralPath $outputNamed -PathType Container)) {
+            $existingOutput = $outputNamed
             $directories = foreach ($real in @($sourceReal, (Get-AshRealPath $existingOutput))) {
                 $real.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
             }
@@ -450,7 +519,7 @@ function Invoke-ASH {
             }
             return $false
         }
-        $spelledOutput = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path (Get-Location).Path $OutputDir }
+        $spelledOutput = $outputNamed
         $outputRoot = [System.IO.Path]::GetPathRoot($spelledOutput)
         $walked = [System.Collections.Generic.List[string]]::new()
         $current = $null
@@ -484,11 +553,11 @@ function Invoke-ASH {
         }
 
         # Create the output directory if it doesn't exist
-        if (-not (Test-Path -LiteralPath $OutputDir)) {
+        if (-not (Test-Path -LiteralPath $outputNamed)) {
             Write-Verbose "Creating OutputDir: $OutputDir"
-            New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
+            New-Item -Path $outputNamed -ItemType Directory -Force | Out-Null
         }
-        $outputDirFull = Get-Item -LiteralPath $OutputDir | Select-Object -ExpandProperty FullName
+        $outputDirFull = Get-Item -LiteralPath $outputNamed | Select-Object -ExpandProperty FullName
 
         # --mount reads its value as comma-separated fields, so a comma in a host path
         # starts a field of its own (a,b), a double quote starts CSV
@@ -519,15 +588,15 @@ function Invoke-ASH {
                 Stop-AshRefusal 3 "Config file not found: $Config. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
             }
             # The runner mounts with its own rights, which can be wider than this user's.
+            $configNamed = Get-AshNamedPath $Config
             try {
-                [System.IO.File]::OpenRead((Get-Item -LiteralPath $Config).FullName).Close()
+                [System.IO.File]::OpenRead($configNamed).Close()
             }
             catch {
                 Stop-AshRefusal 3 "Config file cannot be read: $Config. ASH does not hand the container runner a file it cannot read itself."
             }
             # The config as named, and the real file the runner would mount
             # (Get-AshRealPath, above, with $sourceReal).
-            $configNamed = (Get-Item -LiteralPath $Config).FullName
             $configFull = Get-AshRealPath $configNamed
             Assert-Mountable 'config file' $configFull
             # The scanned tree, as a local scan defines it: the outermost directory at
