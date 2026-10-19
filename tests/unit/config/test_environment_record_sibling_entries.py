@@ -136,3 +136,37 @@ def test_a_reference_is_claimed_where_it_was_written_not_by_another_list(
     )
 
     assert recorded == {"first": [first], "second": ["/work/cfg/" + second]}
+
+
+def test_a_reference_is_still_found_when_defaults_shift_its_entry(monkeypatch):
+    """The file holds one entry; the configuration put two defaults before it, so
+    the entry the load anchored is no longer at the file's index. Nothing sits at
+    the old index that carries the value, so the reference is found at the entry
+    that does."""
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["default/a", "default/b", "/work/cfg/vendor"]}, references
+    )
+
+    assert recorded == {
+        "ignore_paths": ["default/a", "default/b", "/work/cfg/" + REFERENCE]
+    }
+
+
+def test_a_sibling_is_left_alone_while_the_references_own_entry_holds_the_value(
+    monkeypatch,
+):
+    """The fallback is for an index that lost the value: with the value still at
+    the reference's own entry, a longer sibling is not read from it."""
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["/work/cfg/vendor", "old/vendor"]}, references
+    )
+
+    assert recorded == {"ignore_paths": ["/work/cfg/" + REFERENCE, "old/vendor"]}
