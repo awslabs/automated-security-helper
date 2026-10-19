@@ -1110,6 +1110,15 @@ def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> Non
         )
 
 
+def _refuse_oversized(grows_in: Optional[Path]) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past ``MAX_CLONE_BYTES``."""
+
+    if grows_in is not None and _tree_bytes(grows_in) > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(
+            f"git wrote more than {MAX_CLONE_BYTES} bytes and was stopped"
+        )
+
+
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
     """Kill ``process`` and every process in the group it leads."""
 
