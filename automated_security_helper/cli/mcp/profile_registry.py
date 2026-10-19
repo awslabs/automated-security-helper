@@ -272,18 +272,20 @@ DEFAULT_SESSION_ID = "__default__"
 
 
 def get_session_state(session_id: Optional[str] = None) -> SessionState:
-    """Return the SessionState for ``session_id``, creating it on first use.
+    """Return the SessionState bound to ``session_id``, without creating one.
 
     ``None`` resolves to :data:`DEFAULT_SESSION_ID` so callers without an
     explicit id (stdio transport, in-process tests) still get a stable slot.
+
+    An id with no binding gets an empty state that is not stored: a lookup must
+    not leave an entry behind, because an entry for an id with no workspace is one
+    the TTL sweep and ``sessions.end_session`` never find. Changes to that empty
+    state are lost; :func:`bind_session_config` is the way to record a binding.
     """
     sid = session_id or DEFAULT_SESSION_ID
     with _session_lock:
         state = _session_state.get(sid)
-        if state is None:
-            state = SessionState(session_id=sid)
-            _session_state[sid] = state
-        return state
+    return state if state is not None else SessionState(session_id=sid)
 
 
 #: Filename a bound config is materialized under, inside the session sandbox's
