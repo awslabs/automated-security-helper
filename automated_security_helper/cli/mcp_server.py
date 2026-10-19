@@ -1637,7 +1637,10 @@ async def set_source_git(
 
     Each git command (the clone, and for a ref the fetch and the checkout) has
     10 minutes. One that runs longer is stopped, nothing is kept, and the call
-    fails with error_type clone_timed_out.
+    fails with error_type clone_timed_out. A clone that passes the archive size
+    or entry limits is refused with error_type clone_too_large. If this call is
+    cancelled, the clone finishes or times out on the server and the session
+    reads busy until then.
 
     Returns:
         Dict with success and source_dir, or success=False and error.
@@ -1704,7 +1707,10 @@ async def set_source_zip_chunk(
         and error on an out-of-order, oversize, or malformed chunk, and with
         error_type session_workspace_busy while the server removes this
         session's workspace for being unused longer than its time to live
-        (send the upload again from its first chunk).
+        (send the upload again from its first chunk). The same error_type is
+        returned while a change to the session's tree is in progress. If this
+        call is cancelled, the chunk finishes server-side and the session reads
+        busy until then.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
@@ -1751,7 +1757,9 @@ async def set_source_zip_finalize(
     '..' components, or symlinks are refused before anything is extracted, and
     the archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
     entries. After this returns, call run_ash_scan() with no source_dir. Refused
-    while a scan of this session runs (error_type source_delivery_busy).
+    while a scan of this session runs or a chunk is being written
+    (error_type source_delivery_busy). If this call is cancelled, the extraction
+    finishes or fails server-side and the session reads busy until then.
 
     Args:
         upload_id: The identifier used for the preceding chunk calls.
@@ -1800,8 +1808,10 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
 
     Idempotent: a session that delivered nothing still succeeds. Call this to
     reclaim space or before delivering a different tree. Refused while a scan of
-    this session runs (error_type source_delivery_busy); call it again once the
-    scan has finished.
+    this session runs or a chunk is being written (error_type
+    source_delivery_busy); call it again once that has finished. If this call is
+    cancelled, the clear finishes server-side and the session reads busy until
+    then.
 
     Returns:
         Dict with success.
