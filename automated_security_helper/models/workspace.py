@@ -618,6 +618,29 @@ class WorkspaceProjectResult(RecordModel):
             detail=self.skip_detail,
         )
 
+    # Carried in-process from the project run to the workspace rollup
+    # (WorkspaceAggregator.add) and never serialized: the rolled-up
+    # scanner_results entry is the public surface. A private attribute, not a
+    # field, because a declared field is listed in the published results schema
+    # even when it is excluded from dumps.
+    _scanner_exit_codes: Dict[str, Optional[int]] = PrivateAttr(default_factory=dict)
+
+    def carry_scanner_exit_codes(self, codes: Dict[str, Optional[int]]) -> None:
+        """Record the exit code each scanner's row recorded for this project.
+
+        Read from the same row as the status in ``scanners``. A scanner that did not
+        finish and whose row recorded none reads ``SCANNER_EXIT_CODE_UNRECORDED``; a
+        skipped scanner whose row recorded none reads what its own row carries
+        (``None``). Set after construction: a constructor argument is not accepted
+        into it.
+        """
+        self._scanner_exit_codes = dict(codes)
+
+    @property
+    def carried_scanner_exit_codes(self) -> Dict[str, Optional[int]]:
+        """The codes :meth:`carry_scanner_exit_codes` recorded; empty when none were."""
+        return self._scanner_exit_codes
+
 
 class WorkspaceResults(RecordModel):
     """Everything a workspace scan concluded, keyed under ``workspace``."""

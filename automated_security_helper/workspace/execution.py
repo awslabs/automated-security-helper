@@ -1367,6 +1367,7 @@ def _scan_one_project(
         ceiling_unreachable_findings=unreachable,
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
+    outcome.carry_scanner_exit_codes(_scanner_exit_codes(results))
     return _ProjectRun(
         outcome=outcome,
         run=run,
