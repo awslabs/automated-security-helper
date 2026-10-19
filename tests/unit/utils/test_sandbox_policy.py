@@ -1206,6 +1206,41 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
         assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
 
+    def test_firejail_hides_a_directory_a_link_inside_it_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/extra -> /persist/other: a link beside the way to the tool's
+        bin names a directory of the user's too, and firejail shows it."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
+
+    def test_firejail_ends_for_links_that_lead_back(self, layout, linked, tmp_path):
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+        (other / "back").symlink_to(linked.elsewhere)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_leaves_a_link_to_a_system_directory_inside_it(
+        self, layout, linked
+    ):
+        (linked.elsewhere / "system").symlink_to("/usr")
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv('/usr')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
     def test_firejail_keeps_a_scanned_tree_kept_in_a_linked_directory(
         self, layout, tmp_path, fake_tmp
     ):
