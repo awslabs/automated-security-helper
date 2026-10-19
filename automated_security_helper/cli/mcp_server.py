@@ -561,7 +561,8 @@ async def resolve_ash_workspace(
         same decisions structured), `session_config_path` (the config a scan of
         this plan would run under, or null), and `exit_code` -- 0 on success, 4 for
         a workspace definition, policy or confinement problem, 3 for a project
-        whose own config is invalid or an unknown profile.
+        whose own config is invalid or an unknown profile, 1 for an internal
+        error.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
