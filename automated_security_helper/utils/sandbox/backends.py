@@ -162,15 +162,25 @@ def _other_home(policy: SandboxPolicy) -> Optional[Path]:
     return _distinct_home(policy.home, _passwd_home())
 
 
-def _hidden_around(root: Path, shown: Sequence[Path]) -> List[Path]:
+def _hidden_around(
+    root: Path,
+    shown: Sequence[Path],
+    homes: Sequence[Path] = (),
+    seen: Optional[Set[Path]] = None,
+) -> List[Path]:
     """What to blacklist so that ``root`` shows only ``shown`` and the way to them.
 
     firejail whitelists only inside the home and a few system directories, so a
     directory a link at the top of a home names (policy._home_link_targets) is hidden
     with --blacklist: all of it, or, where the policy grants paths inside it, every
-    entry beside the way to those paths. Links among the entries are left alone,
-    since firejail would blacklist the directory they point to.
+    entry beside the way to those paths. A link among the entries is not blacklisted
+    itself, since firejail would blacklist the directory it points to; the directory
+    it names is hidden the same way as ``root`` is, unless it is one
+    _home_link_targets leaves out or a home. ``homes`` are the homes ``root`` was
+    reached from; ``seen`` holds the directories already hidden around, so links
+    among directories cannot loop.
     """
+    seen = {root} if seen is None else seen
     inside = [p for p in shown if p == root or _is_within(p, root)]
     if not inside:
         return [root]
@@ -185,9 +195,17 @@ def _hidden_around(root: Path, shown: Sequence[Path]) -> List[Path]:
         if entry.is_symlink():
             continue
         if any(p == entry or _is_within(p, entry) for p in inside):
-            hidden += _hidden_around(entry, inside)
+            hidden += _hidden_around(entry, shown, homes, seen)
         else:
             hidden.append(entry)
+    for target in _home_link_targets([root]):
+        if target in seen or any(
+            target == home or home in target.parents or target in home.parents
+            for home in homes
+        ):
+            continue
+        seen.add(target)
+        hidden += _hidden_around(target, shown, homes, seen)
     return hidden
 
 
@@ -642,7 +660,7 @@ class FirejailBackend(SandboxBackend):
         for target in _home_link_targets(homes):
             if _is_within(target, tmp_root):
                 continue
-            for hidden in _hidden_around(target, readable + writable):
+            for hidden in _hidden_around(target, readable + writable, homes):
                 cmd.append(f"--blacklist={hidden.as_posix()}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
