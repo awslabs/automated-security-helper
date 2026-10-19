@@ -1756,7 +1756,9 @@ function Invoke-ASH {
 
         # /out is mounted read-write and /src read-only: an output directory that is
         # the source directory or above it would hold the source tree, writable, at
-        # /out. A directory that is itself a link is compared by its target. One that
+        # /out. Both directories are compared by their real paths, every link on the
+        # way followed, so a directory is the same one under any spelling: the output
+        # through a link to a directory above it, the source through another. One that
         # does not exist yet cannot hold the source, so this runs before it is created.
         if (-not $NoRun -and (Test-Path -LiteralPath $outputDirAbsolute -PathType Container)) {
             $existingOutput = (Get-Item -LiteralPath $outputDirAbsolute).FullName
