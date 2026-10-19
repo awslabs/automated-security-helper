@@ -25,8 +25,9 @@ What this asserts
    even after the branch has moved on.
 3. A full commit id is used as given, without contacting the repository.
 4. A name that is both a branch and a tag on different commits, a name that matches
-   nothing, a value that starts with ``-``, and an ``ash-repo`` that is not
-   ``owner/name`` are refused.
+   nothing, a value that starts with ``-``, an abbreviated commit id (7 to 39 hex
+   digits that name no branch or tag), and an ``ash-repo`` that is not ``owner/name``
+   are refused. A branch whose name is 7 to 39 hex digits still resolves.
 
 ``https://github.com/<ash-repo>.git`` is served from a local repository through git's
 ``url.<base>.insteadOf``, set in the environment (``GIT_CONFIG_COUNT``), so the step's
@@ -308,6 +309,8 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
             pytest.param("dup", id="a branch and a tag on different commits"),
             pytest.param("no-such-ref", id="matches nothing"),
             pytest.param("--upload-pack=touch", id="starts with a dash"),
+            pytest.param("0123abc", id="abbreviated commit id, shortest"),
+            pytest.param("0123456789abcdef0123456789abcdef0123456", id="39 hex digits"),
         ],
     )
     def test_the_ref_is_refused(self, tmp_path, ash_version):
@@ -316,6 +319,27 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
         assert run.proc.returncode != 0, run.describe()
         assert "::error::" in run.proc.stdout, run.describe()
         assert "ASH_UVX_SOURCE" not in ga.read_github_env(sandbox)
+        assert "ASH_ASSETS_URL" not in ga.read_github_env(sandbox)
+
+    def test_an_abbreviated_commit_id_is_refused_by_a_message_that_names_the_fix(
+        self, tmp_path
+    ):
+        repo = AshRepository(tmp_path / "ash")
+        abbreviated = repo.first[:12]
+        sandbox, run = _run_pin(tmp_path, repo, _context(abbreviated))
+        assert run.proc.returncode != 0, run.describe()
+        assert "40-character commit id" in run.proc.stdout, run.describe()
+        assert ga.read_github_env(sandbox) == {}
+
+    def test_a_branch_named_like_an_abbreviated_id_still_resolves(self, tmp_path):
+        # The refusal is for an id that is not a ref. A branch whose name happens to
+        # be 7 to 39 hex digits is a ref and is pinned like any other.
+        repo = AshRepository(tmp_path / "ash")
+        _git("branch", "cafe1234", cwd=repo.seed)
+        repo.push()
+        sandbox, run = _run_pin(tmp_path, repo, _context("cafe1234"))
+        assert run.proc.returncode == 0, run.describe()
+        assert _source_ref(ga.read_github_env(sandbox)["ASH_UVX_SOURCE"]) == repo.second
 
     @pytest.mark.parametrize(
         "ash_repo",
