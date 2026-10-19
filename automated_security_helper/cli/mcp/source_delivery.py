@@ -1159,6 +1159,34 @@ def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> Non
         )
 
 
+#: Bytes a clone may grow the session's source directory to, the same limit the
+#: zip channel puts on the extracted tree. A command that passes it is stopped
+#: together with every process it started, and the delivery fails with
+#: :class:`CloneTooLargeError`.
+MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
+
+#: Seconds between looks at the size of the tree a git command is writing.
+GIT_POLL_SECONDS = 0.5
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
+CLONE_TOO_LARGE = "clone_too_large"
+
+
+class CloneTooLargeError(RuntimeError):
+    """A git command of a delivery wrote more than ``MAX_CLONE_BYTES`` and was stopped."""
+
+
+def _tree_bytes(root: Path) -> int:
+    """Bytes of the regular files under ``root``, without following links."""
+
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for name in filenames:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+    return total
+
+
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
     """Kill ``process`` and every process in the group it leads."""
 
