@@ -270,10 +270,14 @@ function Invoke-ASH {
 
         # The path with every link on the way followed, which is what the runner
         # mounts. Component by component, so a link to a directory higher up is
-        # followed too; bounded, so a cycle of links ends.
+        # followed too; bounded, so a cycle of links ends. A path that is still a link
+        # after 40 links is refused: taking it as spelled would judge a directory by a
+        # name the runner resolves differently.
         function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
             $full = [System.IO.Path]::GetFullPath($Path)
-            if ($Depth -gt 40) { return $full }
+            if ($Depth -gt 40) {
+                Stop-AshRefusal 3 "The path '$Path' is reached through more than 40 links. Invoke-ASH follows at most 40 links to find where a directory or file really is, and does not run on a path it cannot place. Use a path with fewer links."
+            }
             $root = [System.IO.Path]::GetPathRoot($full)
             $current = $root
             foreach ($part in $full.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
@@ -342,7 +346,7 @@ function Invoke-ASH {
         # resolves it, so a link reached only through another link counts too:
         # whoever writes the directory a link sits in chooses where it leads
         # (config/sandbox_grants.links_followed). At most 40 links are followed, so
-        # a cycle of links ends.
+        # a cycle of links ends, and a path with more counts as one that does.
         function Test-AshFollowsLinkInCheckout([string]$Path, [string[]]$Trees) {
             $full = [System.IO.Path]::GetFullPath($Path)
             $root = [System.IO.Path]::GetPathRoot($full)
@@ -368,7 +372,9 @@ function Invoke-ASH {
                     continue
                 }
                 $hops++
-                if ($hops -gt 40) { return $false }
+                # Past 40 links the path is taken as reached through a link in a
+                # checkout, the side that checks more.
+                if ($hops -gt 40) { return $true }
                 $linkDir = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
                 if (@($Trees | Where-Object { Test-AshUnder $linkDir $_ }).Count -gt 0) { return $true }
                 if (Test-AshInCheckout $walked) { return $true }
