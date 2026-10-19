@@ -374,6 +374,14 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
         assert "40-character commit id" in run.proc.stdout, run.describe()
         assert ga.read_github_env(sandbox) == {}
 
+    def test_a_tag_named_like_an_abbreviated_id_still_resolves(self, tmp_path):
+        repo = AshRepository(tmp_path / "ash")
+        _git("tag", "beef5678", cwd=repo.seed)
+        repo.push()
+        sandbox, run = _run_pin(tmp_path, repo, _context("beef5678"))
+        assert run.proc.returncode == 0, run.describe()
+        assert _source_ref(ga.read_github_env(sandbox)["ASH_UVX_SOURCE"]) == repo.second
+
     def test_a_branch_named_like_an_abbreviated_id_still_resolves(self, tmp_path):
         # The refusal is for an id that is not a ref. A branch whose name happens to
         # be 7 to 39 hex digits is a ref and is pinned like any other.
