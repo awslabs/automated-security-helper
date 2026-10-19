@@ -20,10 +20,12 @@ it is sent. The scanner already removes the verification filter from ``settings`
 when verification may not run; this also stops a filter or plugin that verifies under
 another name. Every detect-secrets plugin's ``verify()`` uses ``requests``, and
 detect-secrets reads a failed request as "unverified", so the secret is reported.
-The scanner also starts the worker with ``ASH_DETECT_SECRETS_REFUSE_HTTP=1`` in its
-environment, which this module reads when it runs as the worker or as a pool process:
-the processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again,
-as ``__mp_main__``, rather than inherit the worker's state, and refuse too.
+``run()`` also sets ``ASH_DETECT_SECRETS_REFUSE_HTTP=1`` in its own environment before
+it scans, which this module reads when it runs as the worker or as a pool process: the
+processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again, as
+``__mp_main__``, rather than inherit the worker's state, and refuse too. The scanner
+sets the same variable when it starts the worker, so the worker's own import refuses
+from its first line; a caller that does not set it gets the pool refusal all the same.
 
 OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pairs in
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
@@ -155,6 +157,10 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
     from detect_secrets.settings import transient_settings
 
     if request.get("verify") is not True:
+        # Set before scan_files so that spawned pool processes, which import this
+        # module again and inherit the environment, read it and refuse too. The
+        # caller does not have to have set it.
+        os.environ[REFUSE_HTTP_ENV] = "1"
         refuse_http_requests()
 
     # scan_files uses a multiprocessing pool for two or more files. The scanner set
