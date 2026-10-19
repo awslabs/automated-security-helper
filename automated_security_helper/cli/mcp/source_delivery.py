@@ -64,6 +64,7 @@ import signal
 import stat
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import sys
+import threading
 import time
 import unicodedata
 import uuid
