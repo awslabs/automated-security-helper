@@ -571,7 +571,9 @@ def _inside_any(real: PurePath, roots: Sequence[PurePath]) -> bool:
     return any(real == root or root in real.parents for root in roots)
 
 
-def _home_link_targets(homes: Sequence[Path]) -> List[Path]:
+def _home_link_targets(
+    homes: Sequence[Path], *, files: bool = False, ancestors: bool = False
+) -> List[Path]:
     """The real directories that links at the top of a home name outside the homes.
 
     ~/.local can be a link to /persist/me/.local on another disk. The breadth rules
@@ -580,6 +582,13 @@ def _home_link_targets(homes: Sequence[Path]) -> List[Path]:
     every home check, next to the checks of the real path. Left out are links to "/",
     to a home or a directory holding or inside one (measured already), and to, into
     or above a system read path: ~/u -> /usr names no directory of the user's.
+
+    ``files`` also returns the files such links name (~/.netrc kept on another
+    disk), which a backend that hides the directories can hide too. ``ancestors``
+    keeps a directory that holds one of ``homes``: the breadth rules leave it out
+    because it holds a real home, but where ``homes`` are not homes at all but
+    directories a link named (policy hiding walks them), its other entries are the
+    user's as well.
     """
     system = [Path(path) for path in SYSTEM_READ_PATHS]
     system += [Path(os.path.realpath(path)) for path in system]
@@ -593,9 +602,11 @@ def _home_link_targets(homes: Sequence[Path]) -> List[Path]:
             real = Path(os.path.realpath(home / name))
             if (
                 real == Path(real.anchor)
-                or not real.is_dir()
+                or not (real.is_dir() or (files and real.is_file()))
                 or any(
-                    real == other or other in real.parents or real in other.parents
+                    real == other
+                    or other in real.parents
+                    or (not ancestors and real in other.parents)
                     for other in homes
                 )
                 or _inside_any(real, system)
