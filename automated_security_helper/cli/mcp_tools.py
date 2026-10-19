@@ -2668,6 +2668,8 @@ def mcp_set_source_git(
         ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
         SOURCE_DELIVERY_BUSY,
         CLONE_TIMED_OUT,
+        CLONE_TOO_LARGE,
+        CloneTooLargeError,
         GitTimeoutError,
         SourceDeliveryBusyError,
         _refuse_ssh_key_id,
@@ -2742,6 +2744,8 @@ def mcp_set_source_git(
         return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     except GitTimeoutError as e:
         return {"success": False, "error": str(e), "error_type": CLONE_TIMED_OUT}
+    except CloneTooLargeError as e:
+        return {"success": False, "error": str(e), "error_type": CLONE_TOO_LARGE}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 

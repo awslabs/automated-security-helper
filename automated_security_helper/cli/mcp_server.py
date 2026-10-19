@@ -1629,7 +1629,10 @@ async def set_source_git(
         return refusal
 
     try:
-        result = mcp_set_source_git(
+        # Off the event loop: a clone takes as long as the remote makes it, and
+        # every other session's calls share the loop.
+        result = await asyncio.to_thread(
+            mcp_set_source_git,
             url=url,
             ref=ref,
             ssh_key_id=ssh_key_id,
@@ -1691,7 +1694,8 @@ async def set_source_zip_chunk(
 
     try:
         return _with_session(
-            mcp_set_source_zip_chunk(
+            await asyncio.to_thread(
+                mcp_set_source_zip_chunk,
                 upload_id=upload_id,
                 sequence=sequence,
                 data_b64=data_b64,
@@ -1743,7 +1747,8 @@ async def set_source_zip_finalize(
         return refusal
 
     try:
-        result = mcp_set_source_zip_finalize(
+        result = await asyncio.to_thread(
+            mcp_set_source_zip_finalize,
             upload_id=upload_id,
             expected_sha256=expected_sha256,
             session_id=session_id,
@@ -1788,7 +1793,7 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         return refusal
 
     try:
-        result = mcp_clear_source(session_id=session_id)
+        result = await asyncio.to_thread(mcp_clear_source, session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in clear_source: {str(e)}")
         return {
