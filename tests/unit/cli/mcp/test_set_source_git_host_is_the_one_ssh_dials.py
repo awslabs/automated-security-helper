@@ -108,11 +108,14 @@ def test_ssh_dials_the_host_the_allowlist_was_checked_against(
 ) -> None:
     assert shutil.which("git"), "git is required to see what git passes to ssh"
     try:
-        checked = sd.remote_clone_host(url)
+        _, checked, port = sd.remote_clone_endpoint(url)
     except ValueError:
-        checked = None
-    # Allow exactly the host ASH reads, so a refusal can only come from the url.
-    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", checked or "allowed.example")
+        checked, port = None, 22
+    # Allow exactly the host and port ASH reads, so a refusal can only come from
+    # the url.
+    monkeypatch.setenv(
+        "ASH_MCP_GIT_ALLOWED_HOSTS", f"{checked or 'allowed.example'}:{port}"
+    )
 
     result = mcp_set_source_git(url=url, session_id="clone-session")
 
