@@ -309,6 +309,16 @@
 
 ### Behavior changes
 
+- **The workspace scanner rollup reports each scanner's own exit code.** In
+  `ash_aggregated_results.json`, `scanner_results.<scanner>.exit_code` was `0` for every
+  scanner, beside a `status` that could read `ERROR` or `MISSING`. It is now the code the
+  scanner's run recorded; across projects the worse status brings its code, and equal
+  statuses keep the larger. A scanner that recorded no code (it produced no target report,
+  as a `MISSING` or `SKIPPED` scanner does) reads `125`, which says no code was judged,
+  not why: read the entry's `excluded` flag (an operator-excluded scanner) and
+  `dependencies_satisfied` (a scanner whose tool is absent) to tell those apart from an
+  incomplete run.
+
 - **A workspace scan whose report step fails now exits 1 instead of 0 or 2.** When a
   workspace reporter raises, a workspace report file cannot be written, or
   `reports/workspace-reports.json` cannot be written, a run that would exit 0 or 2
