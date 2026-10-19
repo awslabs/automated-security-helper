@@ -550,3 +550,133 @@ def test_an_outside_config_with_an_anchor_on_a_value_still_runs(
     assert result.returncode == 0, result.stdout + result.stderr
     args = _recorded(tmp_path)
     assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+
+
+# ---------------------------------------------------------------------------
+# '..' is applied to the real location, after the part before it is resolved
+# ---------------------------------------------------------------------------
+
+
+def _mount_source(args: List[str], destination: str) -> str:
+    """The ``source=`` of the one --mount whose destination is *destination*."""
+    values = [
+        args[i + 1]
+        for i, arg in enumerate(args[:-1])
+        if arg == "--mount" and f"destination={destination}," in args[i + 1] + ","
+    ]
+    assert len(values) == 1, f"expected one mount at {destination} in {args}"
+    return dict(
+        part.partition("=")[::2] for part in values[0].split(",") if "=" in part
+    )["source"]
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root searches a directory whatever its mode",
+)
+def test_a_config_past_an_unsearchable_directory_is_refused(
+    pwsh, recording_docker, tmp_path
+):
+    """``locked/../ash.yaml`` names ``ash.yaml`` only if ``locked`` can be searched,
+    as the shell wrapper finds it; a directory that cannot is a part the path
+    cannot be placed through, so the config is refused, not read from the lexical
+    parent."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        result = _invoke(
+            pwsh,
+            tmp_path,
+            recording_docker,
+            "-SourceDir src -OutputDir out -Config locked/../ash.yaml",
+        )
+    finally:
+        locked.chmod(0o700)
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+
+
+def test_a_config_past_a_missing_directory_is_refused(pwsh, recording_docker, tmp_path):
+    """A part that does not exist cannot be placed, so ``missing/../ash.yaml`` is
+    not read as ``ash.yaml``."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir out -Config missing/../ash.yaml",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+
+
+def test_dot_dot_after_a_link_names_the_file_beside_the_target(
+    pwsh, recording_docker, tmp_path
+):
+    """``a/../ash.yaml`` with ``a`` a link to ``real/sub`` is ``real/ash.yaml``,
+    where the link leads, not the ``ash.yaml`` beside the link."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "real" / "sub").mkdir(parents=True)
+    (tmp_path / "a").symlink_to(tmp_path / "real" / "sub", target_is_directory=True)
+    (tmp_path / "ash.yaml").write_text("project_name: beside\n", encoding="utf-8")
+    (tmp_path / "real" / "ash.yaml").write_text(
+        "project_name: real\n", encoding="utf-8"
+    )
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir out -Config a/../ash.yaml",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    source = _mount_source(_recorded(tmp_path), "/ash-config/ash.yaml")
+    assert source == str(tmp_path.resolve() / "real" / "ash.yaml")
+
+
+def test_dot_dot_after_a_real_directory_names_its_parent(
+    pwsh, recording_docker, tmp_path
+):
+    """Control: with no link, ``x/../ash.yaml`` is ``ash.yaml`` beside ``x``."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "x").mkdir()
+    (tmp_path / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir out -Config x/../ash.yaml",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    source = _mount_source(_recorded(tmp_path), "/ash-config/ash.yaml")
+    assert source == str(tmp_path.resolve() / "ash.yaml")
+
+
+def test_an_output_directory_that_is_the_source_through_dot_dot_after_a_link_is_refused(
+    pwsh, recording_docker, tmp_path
+):
+    """``L/a/..`` with ``a`` a link to ``s/src/inner`` is ``s/src``, the source,
+    though its lexical form ``L`` is unrelated to it."""
+    (tmp_path / "s" / "src" / "inner").mkdir(parents=True)
+    (tmp_path / "L").mkdir()
+    (tmp_path / "L" / "a").symlink_to(
+        tmp_path / "s" / "src" / "inner", target_is_directory=True
+    )
+
+    result = _invoke(
+        pwsh, tmp_path, recording_docker, "-SourceDir s/src -OutputDir L/a/.."
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+    assert "above it" in _stderr(result)
