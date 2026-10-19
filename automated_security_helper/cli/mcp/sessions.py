@@ -767,9 +767,10 @@ class StdioServerPresence:
     ``<workspace root>/.stdio-servers`` for its lifetime. On exit it drops its
     entry and removes the default workspace only if no other entry is still
     locked; an entry whose lock can be taken belongs to a server that died, and
-    is removed. Registration and the exit check both run under one lock file,
-    so a server starting while another exits is either counted or starts after
-    the removal.
+    is removed, at registration as well as at exit. Registration and the exit
+    check both run under one lock file, so a server starting while another exits
+    is either counted or starts after the removal. A server that cannot lock its
+    own entry is not registered.
 
     Limits: a server on another host sharing the root through a network
     filesystem may not see this process's locks, and a root that cannot be
@@ -796,10 +797,20 @@ class StdioServerPresence:
             registry.mkdir(parents=True, exist_ok=True)
             with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
                 _lock_blocking(guard)
+                # Entries of servers that were killed are dropped here as well as
+                # on exit, so a root that only sees killed servers does not keep
+                # them. Under the guard, as the exit check is.
+                self._another_server_is_live(registry)
                 entry = registry / f"{os.getpid()}-{uuid.uuid4().hex}"
                 handle = open(entry, "a+b")
-                # A file nobody else has opened: the lock is always free.
-                _try_lock(handle)
+                # A file nobody else has opened: the lock is free unless the
+                # filesystem refuses it. Then this server would read as dead to an
+                # exiting sibling, so it is not registered at all.
+                if not _try_lock(handle):
+                    handle.close()
+                    with contextlib.suppress(OSError):
+                        entry.unlink()
+                    raise OSError("could not lock this server's presence entry")
                 self._entry, self._handle = entry, handle
         except (OSError, RuntimeError):
             # No registry: this server is not counted, and on exit it leaves the

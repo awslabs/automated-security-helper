@@ -271,21 +271,18 @@ _session_state: Dict[str, SessionState] = {}
 DEFAULT_SESSION_ID = "__default__"
 
 
-def get_session_state(session_id: Optional[str] = None) -> SessionState:
-    """Return the SessionState bound to ``session_id``, without creating one.
+def get_session_state(session_id: Optional[str] = None) -> Optional[SessionState]:
+    """Return the SessionState bound to ``session_id``, or None if it has none.
 
-    ``None`` resolves to :data:`DEFAULT_SESSION_ID` so callers without an
-    explicit id (stdio transport, in-process tests) still get a stable slot.
+    ``None`` as the id resolves to :data:`DEFAULT_SESSION_ID` so callers without
+    an explicit id (stdio transport, in-process tests) still get a stable slot.
 
-    An id with no binding gets an empty state that is not stored: a lookup must
-    not leave an entry behind, because an entry for an id with no workspace is one
-    the TTL sweep and ``sessions.end_session`` never find. Changes to that empty
-    state are lost; :func:`bind_session_config` is the way to record a binding.
+    A lookup creates nothing: an entry for an id with no workspace is one the TTL
+    sweep and ``sessions.end_session`` never find. :func:`bind_session_config` is
+    the way to record a binding.
     """
-    sid = session_id or DEFAULT_SESSION_ID
     with _session_lock:
-        state = _session_state.get(sid)
-    return state if state is not None else SessionState(session_id=sid)
+        return _session_state.get(session_id or DEFAULT_SESSION_ID)
 
 
 #: Filename a bound config is materialized under, inside the session sandbox's
@@ -740,11 +737,9 @@ def session_client_rules(
 
 
 def session_has_binding(session_id: str) -> bool:
-    """Whether ``session_id`` has bound a profile, without creating any state.
+    """Whether ``session_id`` has bound a profile.
 
-    ``get_session_state`` makes an empty state for an id it has not seen, so it
-    cannot answer this. A state that exists only because something looked at it
-    holds no binding.
+    A state that exists without a profile or a config holds no binding.
     """
     with _session_lock:
         state = _session_state.get(session_id)
