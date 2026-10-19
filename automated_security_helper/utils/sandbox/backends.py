@@ -159,22 +159,35 @@ def _hidden_around(
     with --blacklist: all of it, or, where the policy grants paths inside it, every
     entry beside the way to those paths. A link among the entries is not blacklisted
     itself, since firejail would blacklist the directory it points to; the directory
-    it names is hidden the same way as ``root`` is, unless it is one
-    _home_link_targets leaves out or a home. ``homes`` are the homes ``root`` was
-    reached from; ``seen`` holds the directories already hidden around, so links
-    among directories cannot loop.
+    (or file) it names is hidden the same way as ``root`` is, unless it is one
+    _home_link_targets leaves out or a home. The links followed are those at the top
+    of every directory that is hidden or walked here, whether it is blacklisted whole
+    or kept for a path inside it, and the ones naming a directory above ``root``
+    count too. A directory the policy grants whole is not searched for links: they
+    are inside what the policy itself reads. ``homes`` are the homes ``root`` was
+    reached from; ``seen`` holds the directories already handled, each is handled
+    once, so links among directories cannot loop.
     """
-    seen = {root} if seen is None else seen
+    seen = set() if seen is None else seen
+    if root in seen:
+        return []
+    seen.add(root)
     inside = [p for p in shown if p == root or _is_within(p, root)]
-    if not inside:
-        return [root]
     if root in inside:
         return []
-    try:
-        entries = sorted(root.iterdir())
-    except OSError:
-        return [root]
     hidden: List[Path] = []
+    # Where links are looked for: the top of each directory this call hides or walks,
+    # so that what a link inside it names is found whatever is done with the
+    # directory itself.
+    searched: List[Path] = [root]
+    entries: List[Path] = []
+    if not inside:
+        hidden.append(root)
+    else:
+        try:
+            entries = sorted(root.iterdir())
+        except OSError:
+            hidden.append(root)
     for entry in entries:
         if entry.is_symlink():
             continue
@@ -182,13 +195,13 @@ def _hidden_around(
             hidden += _hidden_around(entry, shown, homes, seen)
         else:
             hidden.append(entry)
-    for target in _home_link_targets([root]):
+            searched.append(entry)
+    for target in _home_link_targets(searched, files=True, ancestors=True):
         if target in seen or any(
             target == home or home in target.parents or target in home.parents
             for home in homes
         ):
             continue
-        seen.add(target)
         hidden += _hidden_around(target, shown, homes, seen)
     return hidden
 
@@ -615,7 +628,7 @@ class FirejailBackend(SandboxBackend):
         homes = [home] + (
             [home_variable] if home_variable not in (home, Path("/")) else []
         )
-        for target in _home_link_targets(homes):
+        for target in _home_link_targets(homes, files=True):
             if _is_within(target, tmp_root):
                 continue
             for hidden in _hidden_around(target, readable + writable, homes):
@@ -968,7 +981,7 @@ class SandboxExecBackend(SandboxBackend):
         # And each directory a link at the top of a home names (~/.local kept on
         # another disk), which is part of that home; the policy's own paths inside
         # it are allowed again after the denies, as they are inside the homes.
-        denied = homes + _home_link_targets(homes)
+        denied = homes + _home_link_targets(homes, files=True)
         # Caches are read-only here too; see _private_caches.
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})"
