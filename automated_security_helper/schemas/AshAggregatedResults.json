@@ -23425,6 +23425,14 @@
           "title": "Scan Incomplete",
           "type": "boolean"
         },
+        "scanner_exit_codes": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "The exit code each scanner's row recorded for this project, read from the same row as its status in ``scanners``. A scanner whose row recorded none reads 125. Rolled up beside the status in the workspace-level scanner results.",
+          "title": "Scanner Exit Codes",
+          "type": "object"
+        },
         "scanners": {
           "additionalProperties": {
             "type": "string"

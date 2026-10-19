@@ -286,6 +286,7 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (
+    SCANNER_EXIT_CODE_UNRECORDED,
     ProjectRunStatus,
     SkippedProjectReason,
     WorkspaceExitCode,
@@ -969,6 +970,7 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=statuses,
+        scanner_exit_codes=_scanner_exit_codes(results),
         incomplete_scanners=incomplete,
         # The unified results carry no per-target reports, so without this the
         # merged summaries and the console could not name what went unscanned.
@@ -1458,6 +1460,26 @@ def _scanner_statuses(results: Any) -> Dict[str, str]:
         value = getattr(status, "value", status)
         statuses[str(name)] = str(value) if value is not None else "UNKNOWN"
     return statuses
+
+
+def _scanner_exit_codes(results: Any) -> Dict[str, int]:
+    """Per-scanner exit code for one project, from the rows the statuses come from.
+
+    A row carries a code only when the scanner produced a target report that said
+    what its tool exited with; otherwise ``exit_code`` was never set and its
+    ``model_fields_set`` does not name it, which is how a recorded 0 is told from the
+    field's default. A row with no recorded integer reads
+    ``SCANNER_EXIT_CODE_UNRECORDED``.
+    """
+    codes: Dict[str, int] = {}
+    for name, info in (getattr(results, "scanner_results", None) or {}).items():
+        recorded = getattr(info, "exit_code", None)
+        was_set = "exit_code" in getattr(info, "model_fields_set", ())
+        if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
+            codes[str(name)] = recorded
+        else:
+            codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
+    return codes
 
 
 #: The tools' own output in a project's output tree, which output-formats.md says
