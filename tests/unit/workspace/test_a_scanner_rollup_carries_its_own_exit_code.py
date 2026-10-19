@@ -253,6 +253,19 @@ def test_a_project_row_set_to_zero_explicitly_gives_zero():
     assert codes == {"tool": 0}
 
 
+def test_the_carrier_is_left_out_of_the_dump_but_the_rollup_still_reads_it(tmp_path):
+    """The codes travel in-process only: no second copy in every project block."""
+    outcome = _outcome("api", {"tool": "FAILED"}, {"tool": 2})
+
+    assert "scanner_exit_codes" not in outcome.model_dump(mode="json")
+    assert "scanner_exit_codes" not in outcome.model_dump()
+    assert outcome.scanner_exit_codes == {"tool": 2}
+
+    rolled = _rollup(tmp_path, ("api", {"tool": "FAILED"}, {"tool": 2}))
+
+    assert rolled["tool"]["exit_code"] == 2
+
+
 def test_the_unified_file_of_a_real_workspace_run_carries_each_scanners_code(tmp_path):
     _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
     FakeOrchestrator.behaviour["api"] = {
