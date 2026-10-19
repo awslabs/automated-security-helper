@@ -124,6 +124,21 @@ def test_a_clone_past_the_size_limit_is_stopped_with_its_process(fake_git) -> No
     assert not (fake_git["workspace"] / SESSION / "source").exists()
 
 
+def test_a_clone_that_finishes_oversized_between_polls_is_refused(
+    fake_git, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The size is also read once the command has exited, not only while it runs."""
+
+    monkeypatch.setattr(sd, "GIT_POLL_SECONDS", 30.0, raising=False)
+    fake_git["install"](size=3 * 1024 * 1024, hang=False)
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "clone_too_large", result
+    assert not (fake_git["workspace"] / SESSION / "source").exists()
+
+
 # ---------------------------------------------------------------------------
 # The delivery tools leave the event loop free.
 # ---------------------------------------------------------------------------
