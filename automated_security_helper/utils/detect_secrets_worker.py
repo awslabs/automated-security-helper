@@ -138,7 +138,12 @@ REFUSE_HTTP_ENV = "ASH_DETECT_SECRETS_REFUSE_HTTP"
 
 
 def refuse_http_requests() -> None:
-    """Make every request sent through ``requests`` fail with ConnectionError."""
+    """Make every request sent through ``requests`` fail with ConnectionError.
+
+    This replaces ``requests.adapters.HTTPAdapter.send`` and nothing else. A plugin
+    or filter that opens its own socket, or uses another HTTP client, is not
+    stopped here; the sandbox's network policy is what bounds those.
+    """
     import requests
     from requests.adapters import HTTPAdapter
 
