@@ -180,8 +180,10 @@ function Invoke-ASH {
         # written by the repository (a workspace scan refuses
         # --config-from-scanned-repository), so a config in the checkout but outside
         # the workspace would be read there as the operator's. A --workspace passed
-        # through is refused before anything is built or mounted.
-        if ("$AshArgs" -match '(^|\s)--workspace(\s|=|$)') {
+        # through is refused before anything is built or mounted. The text is matched
+        # with its quote characters and escape backticks removed, because the command
+        # that runs it is parsed again and reads '"--workspace"' as --workspace.
+        if (("$AshArgs" -replace '["''`]', '') -match '(^|\s)--workspace(\s|=|$)') {
             Stop-AshRefusal 3 "Invoke-ASH scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead."
         }
         # ValidateSet and -eq ignore case, and so does the build: -BuildTarget NON-ROOT
