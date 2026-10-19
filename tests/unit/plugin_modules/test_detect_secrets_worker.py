@@ -307,8 +307,8 @@ runpy.run_module(
 """
 
 
-def _spawn_pool_run(tmp_path, monkeypatch, refuse_env):
-    """Three files, so detect-secrets scans them in a pool; verify is false."""
+def _spawn_pool_run(tmp_path, monkeypatch, refuse_env, verify=False):
+    """Three files, so detect-secrets scans them in a pool."""
     from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
 
     scrub_cloud_credentials(monkeypatch)
@@ -346,7 +346,7 @@ def _spawn_pool_run(tmp_path, monkeypatch, refuse_env):
                     ],
                 },
                 "paths": paths,
-                "verify": False,
+                "verify": verify,
             }
         ),
         encoding="utf-8",
@@ -372,10 +372,22 @@ def test_spawned_pool_processes_send_no_request_either(tmp_path, monkeypatch):
     assert len(scanned) == 3, scanned
 
 
-def test_control_spawned_pool_processes_need_the_variable(tmp_path, monkeypatch):
-    """Control: without the variable only the worker's own process refuses, and the
-    spawned pool processes verify. This is what the variable is for."""
-    proxy, _ = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=False)
+def test_spawned_pool_processes_refuse_without_a_variable_from_the_caller(
+    tmp_path, monkeypatch
+):
+    """A caller that starts the worker directly, with verify false and no
+    ASH_DETECT_SECRETS_REFUSE_HTTP in its environment, still gets a refusal in the
+    spawned pool processes: the worker sets the variable itself before it scans."""
+    proxy, scanned = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=False)
+
+    assert proxy.external_requests() == [], proxy.requests
+    assert len(scanned) == 3, scanned
+
+
+def test_control_spawned_pool_processes_verify_when_the_scan_may(tmp_path, monkeypatch):
+    """Control: with verify true and no variable the spawned pool processes ask the
+    issuer, which shows the two runs above would have sent a request."""
+    proxy, _ = _spawn_pool_run(tmp_path, monkeypatch, refuse_env=False, verify=True)
 
     assert any(ISSUER_HOST in line for line in proxy.external_requests()), (
         proxy.requests
