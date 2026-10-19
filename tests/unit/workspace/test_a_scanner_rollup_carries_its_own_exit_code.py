@@ -25,6 +25,7 @@ The contract these cells pin:
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -66,7 +67,7 @@ def _outcome(
     statuses: Dict[str, str],
     codes: Optional[Dict[str, int]] = None,
 ) -> WorkspaceProjectResult:
-    return WorkspaceProjectResult(
+    outcome = WorkspaceProjectResult(
         project=key,
         relative_path=key,
         display_label=key,
@@ -74,8 +75,9 @@ def _outcome(
         severity_threshold="MEDIUM",
         output_path=f"projects/{key}",
         scanners=statuses,
-        scanner_exit_codes=codes or {},
     )
+    outcome.carry_scanner_exit_codes(codes or {})
+    return outcome
 
 
 def _rollup(tmp_path: Path, *projects) -> Dict[str, dict]:
@@ -253,17 +255,52 @@ def test_a_project_row_set_to_zero_explicitly_gives_zero():
     assert codes == {"tool": 0}
 
 
-def test_the_carrier_is_left_out_of_the_dump_but_the_rollup_still_reads_it(tmp_path):
+def test_the_carrier_is_in_no_dump_of_the_project_result(tmp_path):
     """The codes travel in-process only: no second copy in every project block."""
     outcome = _outcome("api", {"tool": "FAILED"}, {"tool": 2})
 
+    assert outcome.carried_scanner_exit_codes == {"tool": 2}
     assert "scanner_exit_codes" not in outcome.model_dump(mode="json")
     assert "scanner_exit_codes" not in outcome.model_dump()
-    assert outcome.scanner_exit_codes == {"tool": 2}
+    assert "scanner_exit_codes" not in WorkspaceProjectResult.model_fields
 
-    rolled = _rollup(tmp_path, ("api", {"tool": "FAILED"}, {"tool": 2}))
 
-    assert rolled["tool"]["exit_code"] == 2
+def test_the_schema_of_the_project_result_has_no_exit_code_carrier():
+    """Byte-for-byte the schema file is the unit base's: the carrier is not in it."""
+    schema = WorkspaceProjectResult.model_json_schema()
+    shipped = json.loads(
+        (
+            Path(__file__).resolve().parents[3]
+            / "automated_security_helper"
+            / "schemas"
+            / "AshAggregatedResults.json"
+        ).read_text("utf-8")
+    )
+
+    assert "scanner_exit_codes" not in schema["properties"]
+    assert "scanner_exit_codes" not in json.dumps(shipped)
+
+
+def test_passing_the_codes_to_the_constructor_does_not_carry_them():
+    outcome = WorkspaceProjectResult(
+        project="api",
+        relative_path="api",
+        display_label="api",
+        status=ProjectRunStatus.COMPLETED,
+        severity_threshold="MEDIUM",
+        output_path="projects/api",
+        scanners={"tool": "FAILED"},
+        scanner_exit_codes={"tool": 2},
+    )
+
+    assert outcome.carried_scanner_exit_codes == {}
+
+
+def test_a_copied_project_result_still_carries_the_codes(tmp_path):
+    outcome = _outcome("api", {"tool": "FAILED"}, {"tool": 2})
+
+    assert outcome.model_copy().carried_scanner_exit_codes == {"tool": 2}
+    assert copy.deepcopy(outcome).carried_scanner_exit_codes == {"tool": 2}
 
 
 def test_the_unified_file_of_a_real_workspace_run_carries_each_scanners_code(tmp_path):
