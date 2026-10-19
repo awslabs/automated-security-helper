@@ -166,6 +166,7 @@ def test_a_profile_bound_during_the_sweep_stays_bound(
         assert result["error_type"] == sessions.SESSION_WORKSPACE_BUSY, result
         assert mcp_select_profile("strict", session_id=SESSION)["success"] is True
     state = get_session_state(SESSION)
+    assert state is not None
     assert state.profile_name == "strict", "the binding the client was told of is gone"
     assert state.config_path and Path(state.config_path).is_file(), state.config_path
 

@@ -4,7 +4,8 @@
 """Looking up a session's profile state does not create it.
 
 An entry made by a lookup for an id with no workspace is one the TTL sweep and
-``end_session`` never find, so a reader must not leave one behind.
+``end_session`` never find, so a reader must not leave one behind. A lookup of an id
+with no binding returns None, so no caller can write into a state that is not stored.
 """
 
 from __future__ import annotations
@@ -31,15 +32,14 @@ def test_a_lookup_of_an_unknown_id_inserts_nothing() -> None:
     state = profile_registry.get_session_state("never-seen")
 
     assert _known_ids() == set()
-    assert state.session_id == "never-seen"
-    assert state.bound_config is None
-    assert state.profile_name is None
+    assert state is None
 
 
 def test_a_lookup_with_no_id_inserts_nothing() -> None:
-    profile_registry.get_session_state()
+    state = profile_registry.get_session_state()
 
     assert _known_ids() == set()
+    assert state is None
 
 
 def test_a_lookup_returns_the_state_a_binding_made() -> None:
