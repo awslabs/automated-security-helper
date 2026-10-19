@@ -1281,6 +1281,8 @@ def _discovered_config_refusal(
     it finds (``validate_config_input``), before anything reads it, and the
     refusal names it as found. The scan's own resolution refuses it the same
     way (``config_sources.check_discovered_source``).
+
+    A check of the candidates that fails for any other reason is a refusal too.
     """
     from automated_security_helper.cli.mcp.sandbox import (
         config_base_gate,
@@ -1300,6 +1302,19 @@ def _discovered_config_refusal(
         check_discovery_candidates(target, permit)
     except ASHConfigInputNotPermittedError as exc:
         return config_chain_refusal(target, exc)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        # Not left to the scan: this check decides whether a source in the
+        # target may be read at all, so one that cannot finish stops the scan
+        # here, as a refusal the caller can read.
+        _logger.warning(f"Config sources not checked before the scan: {exc}")
+        return MCPResourceError(
+            f"The configuration found in {target.as_posix()} could not be checked "
+            f"against the permitted roots: {type(exc).__name__}",
+            context={
+                "directory_path": str(target),
+                "error_category": ErrorCategory.INVALID_PATH.value,
+            },
+        )
     try:
         # Under the gate again: a source can change after the check above.
         selected = discover_config_source(target, permit=permit).selected
@@ -1460,7 +1475,22 @@ def _client_config_denial(
         ASHConfigPolicyUnreadableError,
     )
 
-    rules = _session_client_rules(session_id)
+    try:
+        rules = _session_client_rules(session_id)
+    except Exception as exc:  # noqa: BLE001 -- rules that cannot be read refuse
+        # The scan reads the same rules and refuses on the same failure
+        # (``_run_scan_async``); refused here too, as a response the caller can
+        # read rather than an exception out of the tool.
+        _logger.warning(f"Session config rules not read before the scan: {exc}")
+        return {
+            "success": False,
+            "operation": operation,
+            "error": (
+                "The config could not be checked against this session's "
+                f"runtime-override policy: {exc}"
+            ),
+            "error_type": CONFIG_POLICY_UNREADABLE,
+        }
     permit_base = config_base_gate(session_id)
     # A named path the client chose is the client's wherever it is, as the scan
     # reads it (resolve_config's untrusted_config).
