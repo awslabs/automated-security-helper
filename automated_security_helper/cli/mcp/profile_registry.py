@@ -737,6 +737,20 @@ def session_client_rules(
     return rules.model_copy(update={"session_id": session_id})
 
 
+def session_has_binding(session_id: str) -> bool:
+    """Whether ``session_id`` has bound a profile, without creating any state.
+
+    ``get_session_state`` makes an empty state for an id it has not seen, so it
+    cannot answer this. A state that exists only because something looked at it
+    holds no binding.
+    """
+    with _session_lock:
+        state = _session_state.get(session_id)
+        return state is not None and (
+            state.profile_name is not None or state.bound_config is not None
+        )
+
+
 def clear_session_state(session_id: Optional[str] = None) -> None:
     """Drop the SessionState for ``session_id`` (or every state if None).
 

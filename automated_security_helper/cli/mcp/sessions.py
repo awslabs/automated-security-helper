@@ -295,19 +295,33 @@ class MCPSession(BaseModel):
         A caller still holding the session from an earlier hand-out would have
         refreshed it, or holds a claim, so a session this returns True for is
         recreated empty by its next ``session_for``.
+
+        What a client bound to the session lives outside this object: a delivered
+        tree in ``source_delivery`` and a selected profile in ``profile_registry``,
+        both keyed by the session id. The ``source_dir``, ``config``,
+        ``profile_name`` and ``patch_ops`` fields of this model are not set by
+        the server, so they say nothing about a binding.
         """
+        from automated_security_helper.cli.mcp.profile_registry import (
+            session_has_binding,
+        )
+        from automated_security_helper.cli.mcp.source_delivery import (
+            get_session_source_dir,
+        )
+
         if self._last_handed_out > cutoff:
             return False
-        if (
-            self.source_dir is not None
-            or self.config is not None
-            or self.profile_name is not None
-            or self.patch_ops is not None
-        ):
+        if get_session_source_dir(self.id) is not None or session_has_binding(self.id):
             return False
         if self._scan_count.is_running() or not self._lock.acquire(blocking=False):
             return False
         try:
+            # _changing and _sweeping cannot be set while the lock is held today:
+            # try_begin_change sets _changing only after taking _lock and end_change
+            # clears it before releasing it, and the one sweeper,
+            # _remove_if_still_stale, takes the change before try_begin_sweep. The
+            # terms stay so that a later caller that sets either without the lock
+            # still keeps its session.
             with self._state_lock:
                 return not (
                     self._claimed_scans
