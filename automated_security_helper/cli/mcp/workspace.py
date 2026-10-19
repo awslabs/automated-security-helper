@@ -190,6 +190,7 @@ from automated_security_helper.utils.output_dir_links import (
     WHY as OUTPUT_LINK_WHY,
 )
 from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
     ignore_output_dir_in_git,
     refuse_linked_output_dir,
 )
@@ -245,6 +246,10 @@ _UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
 _EXIT_CODE_BY_EXCEPTION: Tuple[Tuple[type, WorkspaceExitCode], ...] = (
     (WorkspaceDefinitionError, WorkspaceExitCode.WORKSPACE_ERROR),
     (ASHConfigValidationError, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+    # An output directory reached through a link: 3, as the CLI exits for every
+    # such refusal (OUTPUT_DIR_REFUSED_EXIT_CODE), and not 4, because the
+    # workspace definition is not what is wrong.
+    (OutputDirLinkRefused, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
 )
 
 #: How a project's outcome closes out its registry entry.
@@ -1796,7 +1801,8 @@ async def mcp_scan_workspace(
 
         On failure, ``create_error_response``'s keys plus ``exit_code``: 4 for a
         workspace definition, policy or confinement refusal, 3 for a project whose
-        own config is invalid, 1 for anything else. Both stages are mapped --
+        own config is invalid or an output directory reached through a link, 1 for
+        anything else. Both stages are mapped --
         ``execute_workspace`` raises ``WorkspaceDefinitionError`` too, for an
         enabled reporter that cannot produce a workspace artifact or a project
         that is not a git repository under precommit.
