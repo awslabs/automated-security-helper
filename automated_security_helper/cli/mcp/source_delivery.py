@@ -148,8 +148,8 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
     session = get_default_registry().session_for(session_id)
     if not session.try_begin_change():
         raise SourceDeliveryBusyError(
-            "a scan of this session is running; change the delivered source after "
-            "it finishes"
+            "a scan of this session is running, or its source is being written; "
+            "change the delivered source after it finishes"
         )
     try:
         yield

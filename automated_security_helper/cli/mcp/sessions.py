@@ -198,13 +198,15 @@ class MCPSession(BaseModel):
 
         Returns:
             False while a scan of the session holds :attr:`lock` or is claimed
-            and not yet returned; otherwise True, holding :attr:`lock` until
+            and not yet returned, or while a write
+            (:meth:`try_begin_write`) is in progress, which a change to the
+            tree would race; otherwise True, holding :attr:`lock` until
             :meth:`end_change`.
         """
         if not self._lock.acquire(blocking=False):
             return False
         with self._state_lock:
-            if self._claimed_scans:
+            if self._claimed_scans or self._writes:
                 self._lock.release()
                 return False
             self._changing = True
@@ -225,8 +227,10 @@ class MCPSession(BaseModel):
         for one. The sweep runs on a worker thread and holds the session
         (:meth:`try_begin_sweep`) from its last look at the session's age until
         the removal is done, and a write that comes meanwhile is refused rather
-        than accepted and then removed with the session. Writes do not exclude
-        each other.
+        than accepted and then removed with the session. A change to the tree
+        (clear, clone, extract) is refused while a write is in progress, and a
+        write is refused while a change holds the session, so a removal of the
+        workspace never runs under an append. Writes do not exclude each other.
 
         The hold is this process's: it is on the in-memory session, so it keeps
         this server's sweep off the session. Another server sharing the
@@ -234,11 +238,11 @@ class MCPSession(BaseModel):
         (:class:`ScanPresence`), and does not see a write in progress here.
 
         Returns:
-            False while the sweep holds the session; otherwise True, until
-            :meth:`end_write`.
+            False while the sweep or a change to the tree holds the session;
+            otherwise True, until :meth:`end_write`.
         """
         with self._state_lock:
-            if self._sweeping:
+            if self._sweeping or self._changing:
                 return False
             self._writes += 1
             return True
@@ -543,13 +547,16 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
     if not session.try_begin_write():
         raise SessionWorkspaceBusyError(
             "the server is removing this session's workspace, which nobody used "
-            "for longer than its time to live; send the request again, and an "
-            "upload from its first chunk"
+            "for longer than its time to live, or the session's source is being "
+            "changed; send the request again, and an upload from its first chunk"
         )
     try:
         yield
     finally:
         session.end_write()
+        # A session that ended while this write ran was left in place by
+        # end_session; it is removed now that nothing writes.
+        finish_ended_session(session_id or DEFAULT_SESSION_ID)
 
 
 #: ``error_type`` of a scan refused because its session is at the per-session limit.
