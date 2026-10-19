@@ -817,7 +817,7 @@ class WorkspaceAggregator:
         self._outcomes[outcome.project] = outcome
 
         for scanner, status in (outcome.scanners or {}).items():
-            code = (outcome.scanner_exit_codes or {}).get(
+            code = outcome.carried_scanner_exit_codes.get(
                 scanner, SCANNER_EXIT_CODE_UNRECORDED
             )
             held = self._scanner_status.get(scanner)

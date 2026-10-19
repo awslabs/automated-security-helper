@@ -970,7 +970,6 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=statuses,
-        scanner_exit_codes=_scanner_exit_codes(results),
         incomplete_scanners=incomplete,
         # The unified results carry no per-target reports, so without this the
         # merged summaries and the console could not name what went unscanned.
@@ -994,6 +993,7 @@ def _scan_one_project(
         ceiling_unreachable_findings=unreachable,
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
+    outcome.carry_scanner_exit_codes(_scanner_exit_codes(results))
     return _ProjectRun(
         outcome=outcome,
         run=run,

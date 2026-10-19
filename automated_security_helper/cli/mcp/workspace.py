@@ -1118,13 +1118,9 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
 
 
 #: Declared ``WorkspaceProjectResult`` fields deliberately withheld from the MCP
-#: response. Every other field a project's outcome declares is something a client
+#: response. Empty: every field a project's outcome declares is something a client
 #: reading that outcome needs. An entry added here must say why.
-#:
-#: ``scanner_exit_codes``: the in-process carrier from the project run to the
-#: workspace rollup. It is excluded from every dump of the model, and the rolled-up
-#: ``scanner_results`` entry is where a client reads each scanner's exit code.
-_WITHHELD_PROJECT_FIELDS: FrozenSet[str] = frozenset({"scanner_exit_codes"})
+_WITHHELD_PROJECT_FIELDS: FrozenSet[str] = frozenset()
 
 
 def _project_verdicts(
