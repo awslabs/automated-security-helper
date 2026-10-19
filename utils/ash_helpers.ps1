@@ -571,6 +571,14 @@ function Invoke-ASH {
                 if (($configFlat -cmatch '(^|[\s{,])["'']?extends["'']?\s*[:=]') -or ($configText -cmatch '(?m)"[^"\r\n]*\\[^"\r\n]*"\s*:')) {
                     Stop-AshRefusal 3 "The config file '$Config' is outside the source directory and has an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
                 }
+                # A YAML anchor or alias on a key can spell the name another way (an
+                # alias to an anchored 'extends' used as a key), which the scan above
+                # does not see. A key that starts with one is refused too: at the start
+                # of a line, after '- ' or '? ', or after a '{' or ',' in flow style,
+                # followed by its ':'. An anchor or alias on a value is not a key.
+                if (($configText -match '(?m)^[ \t]*(-[ \t]+)?(\?[ \t]+)?[&*]\S+([ \t]+\S+)?[ \t]*:') -or ($configFlat -match '(^|[{,])\s*[&*][^\s,{}\[\]]+(\s+[^\s:,{}\[\]]+)?\s*:')) {
+                    Stop-AshRefusal 3 "The config file '$Config' is outside the source directory and has a YAML anchor or alias on a key, which can spell an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
+                }
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
                 $configMountArg = '--mount "type=bind,source=$configFull,destination=$configInner,readonly"'
                 # A config elsewhere in the scanned tree was written by the repository
