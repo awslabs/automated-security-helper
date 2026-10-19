@@ -412,6 +412,13 @@ def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
     )
 
 
+def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
+    """``path`` with its keys normalized and its list indices kept."""
+    return tuple(
+        segment if isinstance(segment, int) else _normal(segment) for segment in path
+    )
+
+
 def _bare(written: str) -> str:
     """The reference alone, ``${VAR}`` or ``${VAR:default}``, from ``written``
     (``_reference_match``); the text without its tag when it is none."""
