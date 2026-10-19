@@ -52,6 +52,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Set
@@ -98,6 +99,11 @@ class ScanCount:
         """Uncount a scan :meth:`try_start_scan` counted."""
         with self._lock:
             self._running = max(0, self._running - 1)
+
+    def is_running(self) -> bool:
+        """Whether a counted scan has not returned yet."""
+        with self._lock:
+            return self._running > 0
 
 
 class MCPSession(BaseModel):
@@ -161,6 +167,9 @@ class MCPSession(BaseModel):
     # Scans counted against the per-session limit and not yet returned. See
     # try_start_scan.
     _scan_count: ScanCount = PrivateAttr(default_factory=ScanCount)
+    # time.monotonic() when the registry last handed this session out. See
+    # is_idle_since.
+    _last_handed_out: float = PrivateAttr(default_factory=time.monotonic)
 
     @property
     def lock(self) -> threading.Lock:
@@ -277,6 +286,38 @@ class MCPSession(BaseModel):
         """Uncount a scan :meth:`try_start_scan` counted."""
         self._scan_count.scan_returned()
 
+    def is_idle_since(self, cutoff: float) -> bool:
+        """Whether the registry can forget this session without anyone noticing.
+
+        True when the session was last handed out before ``cutoff`` (a
+        ``time.monotonic()`` reading), holds nothing a client bound to it, and
+        nothing runs or is claimed on it: no scan, no change, no write, no sweep.
+        A caller still holding the session from an earlier hand-out would have
+        refreshed it, or holds a claim, so a session this returns True for is
+        recreated empty by its next ``session_for``.
+        """
+        if self._last_handed_out > cutoff:
+            return False
+        if (
+            self.source_dir is not None
+            or self.config is not None
+            or self.profile_name is not None
+            or self.patch_ops is not None
+        ):
+            return False
+        if self._scan_count.is_running() or not self._lock.acquire(blocking=False):
+            return False
+        try:
+            with self._state_lock:
+                return not (
+                    self._claimed_scans
+                    or self._changing
+                    or self._writes
+                    or self._sweeping
+                )
+        finally:
+            self._lock.release()
+
 
 # Resolve the ``AshConfig`` forward reference. Pydantic v2 refuses to
 # instantiate a model with an unresolved string annotation, so we rebuild at
@@ -287,6 +328,15 @@ from automated_security_helper.config.ash_config import (  # noqa: E402,F401
 )
 
 MCPSession.model_rebuild()
+
+#: Sessions the registry holds before it looks for idle ones to forget. A stateless
+#: server with ``--trust-upstream-session-id`` sees one new id per client, and no
+#: end of session, so without this the map only grows (a session that never
+#: delivered anything has no workspace directory for the TTL sweep to find).
+SESSION_MAP_EVICT_ABOVE = 1024
+
+#: How long a session must have gone unrequested, and idle, to be forgotten.
+IDLE_SESSION_SECONDS = 300.0
 
 
 class MCPSessionRegistry:
@@ -364,11 +414,26 @@ class MCPSessionRegistry:
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
+                existing._last_handed_out = time.monotonic()
                 return existing
+            if len(self._sessions) >= SESSION_MAP_EVICT_ABOVE:
+                self._forget_idle_sessions()
             workspace = session_directory(self._workspace_parent, session_id)
             session = MCPSession(id=session_id, workspace_root=workspace)
             self._sessions[session_id] = session
             return session
+
+    def _forget_idle_sessions(self) -> None:
+        """Drop entries nobody has asked for lately and nothing runs on.
+
+        Called with the registry lock held. Only the map entry goes: the
+        session's directory, if it has one, is the TTL sweep's, and a later
+        :meth:`session_for` of the same id makes a fresh entry.
+        """
+        cutoff = time.monotonic() - IDLE_SESSION_SECONDS
+        idle = [sid for sid, s in self._sessions.items() if s.is_idle_since(cutoff)]
+        for sid in idle:
+            del self._sessions[sid]
 
     def get_or_create(self, session_id: str) -> MCPSession:
         """Return the session for ``session_id`` with its workspace directory.
