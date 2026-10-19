@@ -6214,7 +6214,7 @@ def mcp_set_source_git(
         _validated_clone_depth,
         git_allowed_hosts,
         local_clone_path,
-        remote_clone_host,
+        remote_clone_endpoint,
         set_source_git,
     )
 
@@ -6257,7 +6257,7 @@ def mcp_set_source_git(
         }
 
     try:
-        host = remote_clone_host(url)
+        scheme, host, port = remote_clone_endpoint(url)
     except ValueError as e:
         return {
             "success": False,
@@ -6271,8 +6271,13 @@ def mcp_set_source_git(
                 f"Refusing to clone from {host!r}: it is not in "
                 f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV}, the hosts the operator lets "
                 f"this server clone from. The list is empty unless the operator "
-                f"sets it. Ask the operator to add the host, or deliver the tree "
-                f"with set_source_zip_chunk and set_source_zip_finalize."
+                f"sets it. "
+            )
+        return {
+            "success": False,
+            "error": (
+                where + "Ask the operator to add the host, or deliver the tree "
+                "with set_source_zip_chunk and set_source_zip_finalize."
             ),
             "error_type": "clone_host_not_permitted",
         }
