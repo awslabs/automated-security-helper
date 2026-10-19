@@ -201,7 +201,7 @@ jobs:
 
       - name: Install uv
         id: setup-uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           # Save only from a push; a pull request restores its base branch's entry.
@@ -509,7 +509,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1.329.0
         with:
           ruby-version: "3.3"
 
@@ -809,7 +809,7 @@ jobs:
           echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
 
       - name: Collect ASH output artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success() || failure()
         with:
           name: ash_output
@@ -848,7 +848,7 @@ jobs:
       # check for the first time. That is intended, and the trade-off plus the
       # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        uses: mikepenz/action-junit-report@6ef3fdcfcd5f0b5d14df3e659ef19b8c6820f93d # v6.6.1
         if: >-
           inputs.collect-junit-xml-report
           && (github.event_name != 'pull_request'
@@ -903,7 +903,7 @@ jobs:
       # should set `collect-sarif-report: false` and call upload-ash-sarif.yml in
       # a job of its own, granting security-events: write to that job only.
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif

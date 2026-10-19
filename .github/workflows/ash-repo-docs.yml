@@ -45,7 +45,7 @@ jobs:
       # tag pushes too (a tag ref is not refs/heads/main), so the restore is
       # skipped on a tag push: a tag run reads no cache entry.
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
 
@@ -100,7 +100,7 @@ jobs:
       # It still saves uv's cache on a push to main, for build-docs to restore:
       # what it saves is what its own `uv sync` just resolved from uv.lock.
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
 
