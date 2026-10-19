@@ -278,7 +278,7 @@ dev = [
     { name = "mkdocs-mermaid2-plugin", specifier = ">=1.2,<2.0.0" },
     { name = "mkdocstrings", specifier = ">=1.0,<2.0.0" },
     { name = "mkdocstrings-python", specifier = ">=2.0.9,<3.0.0" },
-    { name = "moto", extras = ["server"], specifier = ">=5.2.3,<6" },
+    { name = "moto", extras = ["server"], specifier = ">=5.2.4,<6" },
     { name = "mypy", specifier = ">=2.4.0,<3.0.0" },
     { name = "pre-commit", specifier = ">=4.3,<5.0.0" },
     { name = "pymdown-extensions", specifier = ">=12.1,<13.0.0" },
@@ -2044,7 +2044,7 @@ wheels = [
 
 [[package]]
 name = "moto"
-version = "5.2.3"
+version = "5.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -2055,9 +2055,9 @@ dependencies = [
     { name = "werkzeug" },
     { name = "xmltodict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/0f/1682c01ca0608c25526afb150246a3c9c1f609caccbd39758de4850e31bc/moto-5.2.3.tar.gz", hash = "sha256:a9e95c3218b6eda18e74571f1ced11cb1bc3151467d562c1da6037b9d19832cb", size = 8785514, upload-time = "2026-08-22T18:46:00.199Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/27/671bc2fbff0f86a8fcd6882ee56de69b5f80f71ba089eb663d10eca28726/moto-5.2.4.tar.gz", hash = "sha256:1a467004562034a09717c3f1ed533337a81ead573ed5d2d40cad648b5ec17e00", size = 9228741, upload-time = "2026-10-11T18:41:16.538Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/80/ee7ace7a49bd525455497fa2ff198111877d6f93b908b657adeb2cf057a4/moto-5.2.3-py3-none-any.whl", hash = "sha256:5ec31b3cdbb383a19d46030157bd82aaaa7a9cc5f564200f995663d347bd4728", size = 6780972, upload-time = "2026-08-22T18:45:55.719Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/00/5729790afc2ee0ac52567c2388452918dfabb383d3afbf613f9136ee5ee2/moto-5.2.4-py3-none-any.whl", hash = "sha256:b75cf0a0063315bab6a4c3606f475ee118f3c329c8d5477a2447e699bdf13155", size = 7195856, upload-time = "2026-10-11T18:41:12.892Z" },
 ]
 
 [package.optional-dependencies]
@@ -2075,7 +2075,6 @@ server = [
     { name = "py-partiql-parser" },
     { name = "pyparsing" },
     { name = "pyyaml" },
-    { name = "setuptools" },
 ]
 
 [[package]]
