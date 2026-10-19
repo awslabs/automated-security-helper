@@ -387,26 +387,72 @@ CLONE_TOO_LARGE = "clone_too_large"
 
 
 class CloneTooLargeError(RuntimeError):
-    """A git command of a delivery wrote more than ``MAX_CLONE_BYTES`` and was stopped."""
+    """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries, or could not be measured."""
+
+
+def _walk_failed(error: OSError) -> None:
+    """``os.walk`` error handler: only a path that is gone is tolerated."""
+
+    if not isinstance(error, FileNotFoundError):
+        raise error
+
+
+def _tree_extent(root: Path) -> Tuple[int, int]:
+    """Bytes of the regular files under ``root`` and the count of its entries.
+
+    Links are not followed. A path that vanishes while the tree is walked (git
+    removes its lock files) is skipped, because what is left is still measured.
+    Any other error, such as a directory or file that cannot be read, is raised:
+    a tree that cannot be measured must not read as an empty one.
+    """
+
+    total = 0
+    entries = 0
+    for dirpath, dirnames, filenames in os.walk(
+        root, followlinks=False, onerror=_walk_failed
+    ):
+        entries += len(dirnames) + len(filenames)
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except FileNotFoundError:
+                continue
+    return total, entries
 
 
 def _tree_bytes(root: Path) -> int:
-    """Bytes of the regular files under ``root``, without following links."""
+    """Bytes of the regular files under ``root``; see :func:`_tree_extent`."""
 
-    total = 0
-    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
-        for name in filenames:
-            with contextlib.suppress(OSError):
-                total += os.lstat(os.path.join(dirpath, name)).st_size
-    return total
+    return _tree_extent(root)[0]
 
 
-def _refuse_oversized(grows_in: Optional[Path]) -> None:
-    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past ``MAX_CLONE_BYTES``."""
+def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past a clone limit.
 
-    if grows_in is not None and _tree_bytes(grows_in) > MAX_CLONE_BYTES:
+    The limits are ``MAX_CLONE_BYTES`` and the zip channel's ``_MAX_FILES``
+    entries. A tree that cannot be read is refused too.
+
+    Args:
+        grows_in: The directory the command writes into, or None.
+        running: True when the command is still running, so that it is about to
+            be stopped; False when it has already exited.
+    """
+
+    if grows_in is None:
+        return
+    suffix = " and was stopped" if running else ""
+    try:
+        size, entries = _tree_extent(grows_in)
+    except OSError as exc:
         raise CloneTooLargeError(
-            f"git wrote more than {MAX_CLONE_BYTES} bytes and was stopped"
+            f"the size of what git wrote could not be read ({exc.strerror or exc}); "
+            f"the delivery was refused"
+        ) from exc
+    if size > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(f"git wrote more than {MAX_CLONE_BYTES} bytes{suffix}")
+    if entries > _MAX_FILES:
+        raise CloneTooLargeError(
+            f"git wrote more than {_MAX_FILES} files and directories{suffix}"
         )
 
 
@@ -474,7 +520,7 @@ def _run_git(
             except subprocess.TimeoutExpired:
                 pass
             # Stopped, with its helpers, by the handler below.
-            _refuse_oversized(grows_in)
+            _refuse_oversized(grows_in, running=True)
         # A command that finished inside one poll interval was not looked at yet.
         _refuse_oversized(grows_in)
     except subprocess.TimeoutExpired:
