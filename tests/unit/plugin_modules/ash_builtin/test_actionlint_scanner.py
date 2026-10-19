@@ -37,8 +37,14 @@ from pathlib import Path
 
 import pytest
 import yaml
+from unittest.mock import MagicMock
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
+from automated_security_helper.interactions.run_ash_scan import (
+    _INCOMPLETE_SCANNER_STATUSES,
+)
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
@@ -630,6 +636,75 @@ def test_no_workflows_does_not_run_actionlint_and_evaluates_nothing(
     # on a fixture that has no workflow.
     assert report is True
     assert scanner.targets_attempted == 0
+
+
+def _executor_row(scanner: ActionlintScanner, source: Path):
+    """The row ScannerExecutor builds for ``scanner`` over ``source``.
+
+    The executor is the real one: it applies the refusal of a SARIF log with no
+    run and the status grading the exit code reads.
+    """
+    executor = ScannerExecutor(
+        plugin_context=scanner.context,
+        progress_display=MagicMock(),
+        scanner_tasks=[],
+    )
+    (row,) = executor._execute_scanner(
+        "actionlint", scanner, [{"path": source, "type": "source"}]
+    )
+    return row
+
+
+def test_a_tree_with_no_workflows_is_skipped_not_incomplete_through_the_executor(
+    tmp_path, monkeypatch, on_path
+):
+    """The composed path: actionlint's empty-tree result, then the executor's refusal.
+
+    Each half is pinned alone (the scanner returns no workflows to lint, the executor
+    refuses a log with no run). A repository with no .github/workflows crosses both,
+    and must not stop ``ash scan`` with an incomplete-scanner exit.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "app.py").write_text("print(1)\n")
+    scanner = _scanner(source, severity_threshold="MEDIUM")
+    fake = _run(scanner, monkeypatch, "", 0)
+
+    row = _executor_row(scanner, source)
+
+    assert fake.calls == []
+    assert row.status == ScannerStatus.SKIPPED, (row.status, row.errors)
+    assert row.status.value not in _INCOMPLETE_SCANNER_STATUSES
+    assert not any("no SARIF run" in str(error) for error in row.errors), row.errors
+
+
+def test_a_tree_with_a_flagged_workflow_still_reports_its_finding_through_the_executor(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo, severity_threshold="MEDIUM")
+    _run(
+        scanner,
+        monkeypatch,
+        (FIXTURES / "actionlint-1.7.12-default.json").read_text(),
+        1,
+    )
+
+    row = _executor_row(scanner, repo)
+
+    assert row.status == ScannerStatus.FAILED, (row.status, row.errors)
+    assert row.finding_count == len(EXPECTED_DEFAULT)
+
+
+def test_an_actionlint_that_failed_still_reads_error_through_the_executor(
+    repo, monkeypatch, on_path
+):
+    scanner = _scanner(repo, severity_threshold="MEDIUM")
+    _run(scanner, monkeypatch, 'could not read "x.yml"', 3)
+
+    row = _executor_row(scanner, repo)
+
+    assert row.status == ScannerStatus.ERROR, (row.status, row.errors)
+    assert row.status.value in _INCOMPLETE_SCANNER_STATUSES
 
 
 def test_without_a_config_an_empty_one_is_passed_from_outside_the_tree(

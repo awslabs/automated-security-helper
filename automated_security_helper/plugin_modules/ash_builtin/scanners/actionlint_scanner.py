@@ -998,6 +998,32 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
             f"{self.__class__.__name__} overrides scan() directly."
         )
 
+    @staticmethod
+    def _empty_report() -> SarifReport:
+        """A one-run report with no results, for a scan set with no workflow files.
+
+        The executor refuses a SARIF log that holds no run, so ``runs=[]`` would
+        grade ERROR and fail the scan as incomplete. ``targets_attempted`` stays 0,
+        which grades the row SKIPPED, a complete status.
+        """
+        return SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {
+                            "driver": {
+                                "name": "actionlint",
+                                "version": PINNED_VERSION,
+                                "informationUri": "https://github.com/rhysd/actionlint",
+                            }
+                        },
+                        "results": [],
+                    }
+                ],
+            }
+        )
+
     def scan(
         self,
         target: Path,
