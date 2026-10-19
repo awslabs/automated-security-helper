@@ -400,7 +400,9 @@ def test_a_chain_of_41_links_to_the_source_directory_is_refused(
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert _recorded(tmp_path) == []
-    assert "40 links" in _stderr(result)
+    stderr = _stderr(result)
+    assert "more than 40 links" in stderr
+    assert "the walk reached 41" in stderr
 
 
 def test_a_chain_of_40_links_to_the_source_directory_still_resolves(
