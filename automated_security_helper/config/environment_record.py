@@ -221,16 +221,28 @@ def _bare(written: str) -> str:
     return match.group(0) if match else text
 
 
-def _recorded_string(text: str, references: Sequence[EnvironmentReference]) -> str:
+def _recorded_string(
+    text: str,
+    references: Sequence[EnvironmentReference],
+    unclaimed: Optional[Sequence[EnvironmentReference]] = None,
+) -> str:
+    """``text`` as the file wrote it, where ``references`` are those at its position.
+
+    A string equal to what a reference resolved to is the reference. Only the
+    ``unclaimed`` references (``_Index.unclaimed``, all of them by default) are
+    also read into a longer string, since a reference some other entry of the
+    document already is does not write this one.
+    """
     for reference in references:
         if text == reference.resolved:
             return reference.written
-    for reference in references:
+    pending = references if unclaimed is None else unclaimed
+    for reference in pending:
         if text.endswith(reference.resolved):
             # A path the load anchored: the file's text after a prefix.
             prefix = text[: len(text) - len(reference.resolved)]
             return prefix + _without_tag(reference.written)
-    for reference in references:
+    for reference in pending:
         if reference.value in text:
             text = text.replace(reference.value, _bare(reference.written))
     return text
@@ -279,9 +291,44 @@ class _Index:
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.mark = mark
         self.whole_only = whole_only
+        #: How many strings of the data are, at each position a reference is at,
+        #: exactly what that reference resolved to (``count_whole``).
+        self.whole: Dict[Tuple[Tuple[PathSegment, ...], str], int] = {}
         for reference in references:
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path), []).append(reference)
+
+    def count_whole(self, item: Any, path: Tuple[PathSegment, ...]) -> None:
+        """Count the strings of ``item`` that are a reference's resolved value whole,
+        by position, before ``record`` reads references into longer strings."""
+        if isinstance(item, dict):
+            for key, value in item.items():
+                spelled = key if isinstance(key, str) else str(key)
+                self.count_whole(value, (*path, _normal(spelled)))
+        elif isinstance(item, (list, tuple)):
+            for value in item:
+                self.count_whole(value, (*path, _ANY_INDEX))
+        elif isinstance(item, str) and path in self.values:
+            self.whole[(path, item)] = self.whole.get((path, item), 0) + 1
+
+    def unclaimed(
+        self, path: Tuple[PathSegment, ...], references: List[EnvironmentReference]
+    ) -> List[EnvironmentReference]:
+        """The references at ``path`` that no string of the data is whole.
+
+        A list can hold ``${ASH_SCOPE}`` and ``vendor2``: positions are matched at
+        any index, so the reference at the first entry would also be read into the
+        second, which only starts with the same text. Each string that is a
+        reference's resolved value whole claims one reference to it; the rest are
+        the ones a longer string at this position may come from.
+        """
+        left: List[EnvironmentReference] = []
+        seen: Dict[str, int] = {}
+        for reference in references:
+            seen[reference.resolved] = seen.get(reference.resolved, 0) + 1
+            if seen[reference.resolved] > self.whole.get((path, reference.resolved), 0):
+                left.append(reference)
+        return left
 
     def record(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
         if isinstance(item, dict):
@@ -301,7 +348,7 @@ class _Index:
         if isinstance(item, str):
             here = self.values.get(path)
             if here:
-                return self._string(item, here)
+                return self._string(item, here, self.unclaimed(path, here))
         return item
 
     def fill(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
@@ -328,15 +375,20 @@ class _Index:
     def _whole(self, reference: EnvironmentReference) -> Any:
         return reference.written if self.mark is None else self.mark(reference.written)
 
-    def _string(self, text: str, references: List[EnvironmentReference]) -> Any:
+    def _string(
+        self,
+        text: str,
+        references: List[EnvironmentReference],
+        unclaimed: List[EnvironmentReference],
+    ) -> Any:
         if self.mark is None:
-            return _recorded_string(text, references)
+            return _recorded_string(text, references, unclaimed)
         for reference in references:
             if text == reference.resolved:
                 return self._whole(reference)
         if self.whole_only:
             return text
-        for reference in references:
+        for reference in unclaimed:
             if reference.value in text:
                 text = text.replace(reference.value, self.mark(reference.written))
         return text
@@ -362,7 +414,10 @@ def record_environment_references(
     """
     if not references:
         return data
-    return _Index(references, mark, whole_only).record(data, _normal_path(at))
+    index = _Index(references, mark, whole_only)
+    start = _normal_path(at)
+    index.count_whole(data, start)
+    return index.record(data, start)
 
 
 def setting_names(
