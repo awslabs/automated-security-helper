@@ -136,10 +136,12 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
     """Hold the session's scan lock for a change to its tree, or refuse.
 
     Refused too for a scan that has started and not yet taken the lock
-    (``MCPSession.try_claim_scan``). Not blocking: a delivery is called on the
-    server's event loop, and waiting there for a scan to finish would stall
-    every other session. A session that ended while the change held the lock is
-    removed once it is released.
+    (``MCPSession.try_claim_scan``), and for a write in progress
+    (``MCPSession.try_begin_write``). Not blocking: a delivery runs on one of the
+    server's few delivery threads, and waiting there for a scan to finish would
+    hold the thread for the scan's length and queue other sessions' deliveries
+    behind it. A session that ended while the change held the lock is removed
+    once it is released.
 
     Takes the in-memory session only: a change that is refused leaves no session
     directory, and each change that writes creates and marks the directory
