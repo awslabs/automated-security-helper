@@ -133,6 +133,7 @@ from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.models.asharp_model import new_report_id
 from automated_security_helper.models.core import merged_honoring
 from automated_security_helper.models.workspace import (
+    SCANNER_EXIT_CODE_UNRECORDED,
     ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
@@ -849,6 +850,7 @@ class WorkspaceAggregator:
         self._scanner_findings: Dict[str, int] = {}
         self._scanner_actionable: Dict[str, int] = {}
         self._scanner_status: Dict[str, Optional[str]] = {}
+        self._scanner_exit_code: Dict[str, int] = {}
         self._unconvertible = 0
 
     def add(
@@ -873,9 +875,22 @@ class WorkspaceAggregator:
         self._outcomes[outcome.project] = outcome
 
         for scanner, status in (outcome.scanners or {}).items():
-            self._scanner_status[scanner] = _worse_status(
-                self._scanner_status.get(scanner), status
+            code = (outcome.scanner_exit_codes or {}).get(
+                scanner, SCANNER_EXIT_CODE_UNRECORDED
             )
+            held = self._scanner_status.get(scanner)
+            worse = _worse_status(held, status)
+            # The code travels with the status it was recorded beside: a strictly
+            # worse status brings its own code, an equal one keeps the larger, a
+            # better one leaves the held code alone. One decision, so the pair
+            # cannot disagree and the order the projects arrive in does not matter.
+            if scanner not in self._scanner_exit_code or worse != held:
+                self._scanner_exit_code[scanner] = code
+            elif status == held:
+                self._scanner_exit_code[scanner] = max(
+                    self._scanner_exit_code[scanner], code
+                )
+            self._scanner_status[scanner] = worse
             self._scanner_findings.setdefault(scanner, 0)
             self._scanner_actionable.setdefault(scanner, 0)
 
@@ -1021,7 +1036,9 @@ class WorkspaceAggregator:
                 "actionable_finding_count": self._scanner_actionable.get(scanner, 0),
                 "dependencies_satisfied": status != "MISSING",
                 "excluded": status == "SKIPPED",
-                "exit_code": 0,
+                "exit_code": self._scanner_exit_code.get(
+                    scanner, SCANNER_EXIT_CODE_UNRECORDED
+                ),
             }
             if status in ("SKIPPED", "MISSING"):
                 named = [
