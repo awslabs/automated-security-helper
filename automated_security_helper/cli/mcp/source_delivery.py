@@ -546,17 +546,36 @@ _HOST_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
 _SSH_AUTHORITY_REFUSED = frozenset("%?#[]")
 
 
+#: The port a clone url without one reaches, by scheme. The scp-like form is ssh
+#: and has no way to name a port.
+_DEFAULT_PORTS = {"https": 443, "ssh": 22}
+
+
 def remote_clone_host(url: str) -> str:
     """Return the host ``url`` makes git connect to, or raise if it is not allowed.
 
+    The host of :func:`remote_clone_endpoint`: lower-cased with any trailing dot
+    removed.
+
+    Raises:
+        ValueError: as :func:`remote_clone_endpoint`.
+    """
+
+    return remote_clone_endpoint(url)[1]
+
+
+def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
+    """Return the ``(scheme, host, port)`` ``url`` makes git connect to.
+
     Accepts ``https://`` and ``ssh://`` URLs and the scp-like ``[user@]host:path``
-    form, the three ways git reaches a remote over https or ssh. The host is
-    returned lower-cased with any trailing dot removed, for comparison against
-    the operator's allowlist.
+    form, the three ways git reaches a remote over https or ssh. The scheme is
+    ``https`` or ``ssh`` (scp-like is ``ssh``), the host is lower-cased with any
+    trailing dot removed, and the port is the one the url names or its scheme's
+    default, for comparison against the operator's allowlist.
 
     Raises:
         ValueError: for a local path or ``file://`` URL, any other scheme, or a
-            host this parser cannot state unambiguously.
+            host or port this parser cannot state unambiguously.
     """
 
     from urllib.parse import urlsplit
@@ -587,33 +606,82 @@ def remote_clone_host(url: str) -> str:
                 f"path; write the host and user plainly."
             )
         try:
-            host = urlsplit(url).hostname or ""
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            named_port = parts.port
         except ValueError:
             raise ValueError(
                 f"refusing a clone url whose host cannot be read: {url!r}"
             ) from None
+        port = _DEFAULT_PORTS[scheme] if named_port is None else named_port
     else:
+        scheme = "ssh"
+        port = _DEFAULT_PORTS[scheme]
         authority = url.split(":", 1)[0]
         host = authority.rsplit("@", 1)[-1]
     host = host.lower().rstrip(".")
     if not _HOST_NAME.fullmatch(host):
         raise ValueError(f"refusing a clone url whose host cannot be read: {url!r}")
-    return host
+    return scheme, host, port
 
 
-#: Hosts ``set_source_git`` may clone from, set by the operator. Comma- or
-#: whitespace-separated host names. Unset or empty means no remote is allowed.
+#: Where ``set_source_git`` may clone from, set by the operator. Comma- or
+#: whitespace-separated ``[scheme://]host[:port]`` entries. A bare host stands for
+#: its scheme's default port (https 443, ssh 22) on either scheme; ``host:port``
+#: names the port, and ``https://`` or ``ssh://`` the scheme. Unset or empty means
+#: no remote is allowed.
 ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
 
 
-def git_allowed_hosts() -> frozenset[str]:
-    """The hosts the operator allows clones from, lower-cased; possibly none."""
+def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
+    """The operator's entries as ``(scheme, host, port)``, None where unnamed.
+
+    An entry this cannot read (another scheme, a port that is not a number up to
+    65535, a host that is not a plain name) allows nothing.
+    """
 
     raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
-    return frozenset(
-        entry.strip().lower().rstrip(".")
-        for entry in raw.replace(",", " ").split()
-        if entry.strip()
+    entries: list[tuple[Optional[str], str, Optional[int]]] = []
+    for text in raw.replace(",", " ").split():
+        scheme: Optional[str] = None
+        rest = text.strip().lower()
+        if "://" in rest:
+            scheme, rest = rest.split("://", 1)
+            if scheme not in _CLONE_SCHEMES:
+                continue
+        host, colon, port_text = rest.partition(":")
+        port: Optional[int] = None
+        if colon:
+            if not (port_text.isascii() and port_text.isdigit()):
+                continue
+            port = int(port_text)
+            if port > 65535:
+                continue
+        host = host.rstrip(".")
+        if _HOST_NAME.fullmatch(host):
+            entries.append((scheme, host, port))
+    return entries
+
+
+def git_allowed_hosts() -> frozenset[str]:
+    """The host names the operator allows clones from, lower-cased; possibly none."""
+
+    return frozenset(host for _, host, _ in _git_allowed_entries())
+
+
+def clone_endpoint_allowed(scheme: str, host: str, port: int) -> bool:
+    """Whether an entry of the operator's list allows ``scheme``, ``host`` and ``port``.
+
+    The three come from :func:`remote_clone_endpoint`. An entry allows a clone when
+    its host is the url's, its scheme (if it names one) is the url's, and its port
+    (the scheme's default when it names none) is the url's.
+    """
+
+    return any(
+        entry_host == host
+        and entry_scheme in (None, scheme)
+        and (_DEFAULT_PORTS[scheme] if entry_port is None else entry_port) == port
+        for entry_scheme, entry_host, entry_port in _git_allowed_entries()
     )
 
 
