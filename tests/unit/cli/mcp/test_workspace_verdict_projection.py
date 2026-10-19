@@ -45,10 +45,12 @@ from automated_security_helper.models.workspace import (
 
 MODULE_UNDER_TEST = "automated_security_helper.cli.mcp.workspace"
 
-#: Declared fields deliberately kept out of the MCP response. Empty on purpose:
-#: see the module docstring. An entry here needs a comment saying why a client
-#: must not see that field.
-PROJECTED_EXCLUSIONS: frozenset[str] = frozenset()
+#: Declared fields deliberately kept out of the MCP response: see the module
+#: docstring. An entry here needs a comment saying why a client must not see that
+#: field. ``scanner_exit_codes`` is the in-process carrier from a project run to
+#: the workspace rollup; it is excluded from every dump of the model, and the
+#: rolled-up ``scanner_results`` entry is where a client reads a scanner's code.
+PROJECTED_EXCLUSIONS: frozenset[str] = frozenset({"scanner_exit_codes"})
 
 #: The one response key that is not a model field. It joins a verdict to the
 #: registry entry the client was handed, which the model knows nothing about.

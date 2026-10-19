@@ -419,6 +419,11 @@ class WorkspaceProjectResult(BaseModel):
         Dict[str, Optional[int]],
         Field(
             default_factory=dict,
+            # Carried in-process from the project run to the workspace rollup
+            # (WorkspaceAggregator.add) and never dumped: the rolled-up
+            # scanner_results entry is the public surface, so this map is not a
+            # second copy of it in every project block.
+            exclude=True,
             description=(
                 "The exit code each scanner's row recorded for this project, read from "
                 "the same row as its status in ``scanners``. A scanner that did not "
