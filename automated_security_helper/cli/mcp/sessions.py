@@ -415,6 +415,15 @@ def _session_holds_a_binding() -> Callable[[str], bool]:
 
     return holds_binding
 
+#: Sessions the registry holds before it looks for idle ones to forget. A stateless
+#: server with ``--trust-upstream-session-id`` sees one new id per client, and no
+#: end of session, so without this the map only grows (a session that never
+#: delivered anything has no workspace directory for the TTL sweep to find).
+SESSION_MAP_EVICT_ABOVE = 1024
+
+#: How long a session must have gone unrequested, and idle, to be forgotten.
+IDLE_SESSION_SECONDS = 300.0
+
 
 class MCPSessionRegistry:
     """Process-local registry of MCP sessions keyed by connection id.
