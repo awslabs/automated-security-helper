@@ -1,0 +1,205 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A cleanup that fails never fails the response it follows.
+
+``SessionBoundary`` removes a session's state when it sees the session end (a
+stateful ``DELETE``, an sse stream finishing, an app shutting down) and runs the
+TTL sweep before it answers a request. Both are housekeeping. If
+``end_session`` or the sweep raises, the client still gets its answer, the
+failure is logged with the session it concerned, and a later sweep removes what
+the failed removal left behind. A failing sweep still moves the next-sweep
+time, so it is not retried on every request.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Dict, List
+
+import anyio
+import pytest
+
+from automated_security_helper.cli.mcp import http_sessions, sessions
+from automated_security_helper.cli.mcp.http_sessions import (
+    MODE_SSE,
+    MODE_STATEFUL,
+    MODE_STATELESS,
+    SessionBoundary,
+)
+from automated_security_helper.cli.mcp.profile_registry import clear_session_state
+
+LONG_AGO = 400 * 24 * 3600
+
+
+class _Log:
+    """Records warnings; any other log call is ignored."""
+
+    def __init__(self) -> None:
+        self.warnings: List[str] = []
+
+    def warning(self, message: str) -> None:
+        self.warnings.append(message)
+
+    def __getattr__(self, name: str) -> Any:
+        return lambda *args, **kwargs: None
+
+
+@pytest.fixture(autouse=True)
+def root(tmp_path, monkeypatch) -> Path:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(workspace))
+    sessions.reset_default_registry_for_tests()
+    yield workspace
+    sessions.reset_default_registry_for_tests()
+    clear_session_state()
+
+
+@pytest.fixture
+def log(monkeypatch) -> _Log:
+    recorder = _Log()
+    monkeypatch.setattr(http_sessions, "_logger", lambda: recorder)
+    return recorder
+
+
+@pytest.fixture
+def failing_end(monkeypatch) -> List[str]:
+    """``end_session`` raises, and records the ids it was asked to end."""
+    asked: List[str] = []
+
+    def end_session(session_id: str) -> bool:
+        asked.append(session_id)
+        raise OSError("simulated removal failure")
+
+    monkeypatch.setattr(sessions, "end_session", end_session)
+    return asked
+
+
+async def _receive() -> Dict[str, Any]:
+    return {"type": "http.request", "body": b"", "more_body": False}
+
+
+def _scope(method: str, path: str, headers=(), query: bytes = b"") -> Dict[str, Any]:
+    return {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "root_path": "",
+        "headers": list(headers),
+        "query_string": query,
+    }
+
+
+def _answering(body: bytes = b""):
+    async def app(scope, receive, send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": body})
+
+    return app
+
+
+def _drive(boundary: SessionBoundary, scope: Dict[str, Any]) -> List[Dict[str, Any]]:
+    sent: List[Dict[str, Any]] = []
+
+    async def send(message: Dict[str, Any]) -> None:
+        sent.append(message)
+
+    async def main() -> None:
+        await boundary(scope, _receive, send)
+
+    anyio.run(main)
+    return sent
+
+
+def _later_sweep_removes(session_id: str, root: Path) -> None:
+    assert (root / session_id).is_dir(), "the failed removal should leave the tree"
+    removed = sessions.sweep_stale_workspaces(24 * 3600, now=time.time() + LONG_AGO)
+    assert removed == [session_id], removed
+    assert not (root / session_id).exists()
+
+
+def test_a_failed_removal_on_delete_still_answers_2xx(root, log, failing_end) -> None:
+    session_id = "sess-delete"
+    sessions.get_default_registry().get_or_create(session_id)
+    boundary = SessionBoundary(_answering(), mode=MODE_STATEFUL, endpoint_path="/mcp")
+    boundary._issued.add(session_id)
+
+    sent = _drive(
+        boundary,
+        _scope("DELETE", "/mcp", headers=[(b"mcp-session-id", session_id.encode())]),
+    )
+
+    assert [m["type"] for m in sent] == ["http.response.start", "http.response.body"]
+    assert sent[0]["status"] == 200
+    assert failing_end == [session_id]
+    assert len(log.warnings) == 1 and session_id in log.warnings[0], log.warnings
+    assert session_id not in boundary._issued
+    _later_sweep_removes(session_id, root)
+
+
+def test_a_failed_removal_at_shutdown_still_reports_shutdown(
+    root, log, failing_end
+) -> None:
+    session_id = "sess-shutdown"
+    sessions.get_default_registry().get_or_create(session_id)
+
+    async def lifespan(scope, receive, send) -> None:
+        await send({"type": "lifespan.shutdown.complete"})
+
+    boundary = SessionBoundary(lifespan, mode=MODE_STATELESS)
+    boundary._issued.add(session_id)
+
+    sent = _drive(boundary, {"type": "lifespan"})
+
+    assert sent == [{"type": "lifespan.shutdown.complete"}]
+    assert failing_end == [session_id]
+    assert len(log.warnings) == 1 and session_id in log.warnings[0], log.warnings
+    _later_sweep_removes(session_id, root)
+
+
+def test_a_failed_removal_when_an_sse_stream_ends_still_finishes_it(
+    root, log, failing_end
+) -> None:
+    session_id = uuid.uuid4().hex
+    sessions.get_default_registry().get_or_create(session_id)
+    event = f"event: endpoint\ndata: /messages/?session_id={session_id}\n\n".encode()
+    boundary = SessionBoundary(_answering(event), mode=MODE_SSE)
+
+    sent = _drive(boundary, _scope("GET", "/sse"))
+
+    assert [m["type"] for m in sent] == ["http.response.start", "http.response.body"]
+    assert sent[0]["status"] == 200
+    assert failing_end == [session_id]
+    assert len(log.warnings) == 1 and session_id in log.warnings[0], log.warnings
+    _later_sweep_removes(session_id, root)
+
+
+def test_a_failing_sweep_does_not_fail_the_request(root, log, monkeypatch) -> None:
+    calls: List[float] = []
+
+    def sweep_stale_workspaces(ttl_seconds: float, now=None):
+        calls.append(ttl_seconds)
+        raise RuntimeError("simulated sweep failure")
+
+    monkeypatch.setattr(sessions, "sweep_stale_workspaces", sweep_stale_workspaces)
+    boundary = SessionBoundary(_answering(), mode=MODE_STATELESS)
+    assert boundary._next_sweep == 0.0
+
+    first = _drive(boundary, _scope("POST", "/mcp"))
+
+    assert first[0]["status"] == 200
+    assert calls == [boundary.session_workspace_ttl]
+    assert len(log.warnings) == 1, log.warnings
+    assert "sweep failed" in log.warnings[0]
+    assert "simulated sweep failure" in log.warnings[0]
+    # The failure moved the next-sweep time, so the next request does not retry.
+    assert boundary._next_sweep - time.monotonic() > 60
+
+    second = _drive(boundary, _scope("POST", "/mcp"))
+
+    assert second[0]["status"] == 200
+    assert calls == [boundary.session_workspace_ttl], "the failed sweep was retried"
+    assert len(log.warnings) == 1, log.warnings
