@@ -305,7 +305,7 @@ async def run_ash_scan(
         try:
             session_id = resolve_caller_session_id(ctx)
         except ValueError as e:
-            await ctx.error(str(e))
+            await _tell_client_error(ctx, str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -317,13 +317,13 @@ async def run_ash_scan(
         # start a scan it can neither follow nor stop, so it starts none.
         refusal = session_identity_refusal(session_id, "run_ash_scan")
         if refusal is not None:
-            await ctx.error(refusal["error"])
+            await _tell_client_error(ctx, refusal["error"])
             return refusal
 
         if source_dir is None:
             resolved = _resolve_omitted_source_dir(session_id)
             if resolved.error is not None:
-                await ctx.error(resolved.error["error"])
+                await _tell_client_error(ctx, resolved.error["error"])
                 return resolved.error
             source_dir = resolved.source_dir
         await ctx.info(f"run_ash_scan tool called in cwd: {Path.cwd()}")
@@ -357,7 +357,7 @@ async def run_ash_scan(
             )
             config_error = config_check.refusal
             if config_error:
-                await ctx.error(str(config_error))
+                await _tell_client_error(ctx, str(config_error))
                 return {
                     "success": False,
                     "error": str(config_error),
@@ -377,7 +377,7 @@ async def run_ash_scan(
         # lists a directory the server invented per connection.
         target = resolve_scan_target(source_dir, session_id=session_id)
         if target.error is not None:
-            await ctx.error(str(target.error))
+            await _tell_client_error(ctx, str(target.error))
             return {
                 "success": False,
                 "error": str(target.error),
@@ -395,7 +395,7 @@ async def run_ash_scan(
         # checked before anything reads or writes through it.
         output_error = validate_output_tree(resolved_target, ".ash", "ash_output")
         if output_error is not None:
-            await ctx.error(str(output_error))
+            await _tell_client_error(ctx, str(output_error))
             return {
                 "success": False,
                 "error": str(output_error),
@@ -435,7 +435,7 @@ async def run_ash_scan(
         if result.get("error_type") == CONFIG_ENV_NOT_RESOLVED:
             # A refusal of the config, reported as itself like the
             # config_input_not_permitted refusal above, not as a failure to start.
-            await ctx.error(str(result["error"]))
+            await _tell_client_error(ctx, str(result["error"]))
             return {
                 "success": False,
                 "error": result["error"],
@@ -443,8 +443,9 @@ async def run_ash_scan(
                 "error_category": result["error_category"],
             }
         if not result.get("success", False) or "scan_id" not in result:
-            await ctx.error(
-                f"Failed to start scan: {result.get('error', 'Unknown error')}"
+            await _tell_client_error(
+                ctx,
+                f"Failed to start scan: {result.get('error', 'Unknown error')}",
             )
             # A refusal is a contract the client branches on, so its own
             # error_type reaches the client rather than a generic start failure.
@@ -512,7 +513,7 @@ async def run_ash_scan(
 
     except Exception as e:
         logger.exception(f"Error in run_ash_scan: {str(e)}")
-        await ctx.error(f"Error running scan: {str(e)}")
+        await _tell_client_error(ctx, f"Error running scan: {str(e)}")
         return {
             "success": False,
             "error": f"Error running scan: {str(e)}",
@@ -565,7 +566,7 @@ async def resolve_ash_workspace(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     try:
@@ -579,11 +580,11 @@ async def resolve_ash_workspace(
             profile=profile,
         )
         if not response.get("success", False):
-            await ctx.error(str(response.get("error", "Unknown error")))
+            await _tell_client_error(ctx, str(response.get("error", "Unknown error")))
         return response
     except Exception as e:
         logger.exception(f"Error in resolve_ash_workspace: {str(e)}")
-        await ctx.error(f"Error resolving workspace: {str(e)}")
+        await _tell_client_error(ctx, f"Error resolving workspace: {str(e)}")
         return {
             "success": False,
             "error": f"Error resolving workspace: {str(e)}",
@@ -672,7 +673,7 @@ async def run_ash_workspace_scan(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     try:
@@ -697,7 +698,7 @@ async def run_ash_workspace_scan(
             profile=profile,
         )
         if not response.get("success", False):
-            await ctx.error(str(response.get("error", "Unknown error")))
+            await _tell_client_error(ctx, str(response.get("error", "Unknown error")))
             return response
 
         await ctx.info(
@@ -707,7 +708,7 @@ async def run_ash_workspace_scan(
         return response
     except Exception as e:
         logger.exception(f"Error in run_ash_workspace_scan: {str(e)}")
-        await ctx.error(f"Error running workspace scan: {str(e)}")
+        await _tell_client_error(ctx, f"Error running workspace scan: {str(e)}")
         return {
             "success": False,
             "error": f"Error running workspace scan: {str(e)}",
@@ -785,13 +786,13 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "get_scan_progress")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -817,7 +818,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         entry = registry.get_scan(scan_id, session_id=session_id)
 
         if not entry:
-            await ctx.error(f"Scan {scan_id} not found in registry")
+            await _tell_client_error(ctx, f"Scan {scan_id} not found in registry")
             return {
                 "success": False,
                 "error": f"Scan {scan_id} not found in registry",
@@ -893,7 +894,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         return progress_info
     except Exception as e:
         logger.exception(f"Error in get_scan_progress: {str(e)}")
-        await ctx.error(f"Error getting scan progress: {str(e)}")
+        await _tell_client_error(ctx, f"Error getting scan progress: {str(e)}")
         return {
             "success": False,
             "error": f"Error getting scan progress: {str(e)}",
@@ -937,7 +938,7 @@ async def get_scan_results(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     try:
@@ -1080,7 +1081,7 @@ async def get_scan_result_paths(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     try:
@@ -1096,7 +1097,7 @@ async def get_scan_result_paths(
         # refusal is not reported as a missing directory.
         target_error = validate_scan_target(output_path, session_id=session_id)
         if target_error:
-            await ctx.error(str(target_error))
+            await _tell_client_error(ctx, str(target_error))
             return {
                 "success": False,
                 "error": str(target_error),
@@ -1209,13 +1210,13 @@ async def list_active_scans(ctx: Context) -> Dict[str, Any]:
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "list_active_scans")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1223,7 +1224,7 @@ async def list_active_scans(ctx: Context) -> Dict[str, Any]:
         return await mcp_list_active_scans(session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in list_active_scans: {str(e)}")
-        await ctx.error(f"Error listing active scans: {str(e)}")
+        await _tell_client_error(ctx, f"Error listing active scans: {str(e)}")
         return {
             "success": False,
             "error": f"Error listing active scans: {str(e)}",
@@ -1245,13 +1246,13 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "cancel_scan")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1259,7 +1260,7 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
         return await mcp_cancel_scan(scan_id=scan_id, session_id=session_id)
     except Exception as e:
         logger.exception(f"Error in cancel_scan: {str(e)}")
-        await ctx.error(f"Error cancelling scan: {str(e)}")
+        await _tell_client_error(ctx, f"Error cancelling scan: {str(e)}")
         return {
             "success": False,
             "error": f"Error cancelling scan: {str(e)}",
@@ -1277,7 +1278,7 @@ async def check_installation(ctx: Context) -> Dict[str, Any]:
         return await mcp_check_installation()
     except Exception as e:
         logger.exception(f"Error in check_installation: {str(e)}")
-        await ctx.error(f"Error checking installation: {str(e)}")
+        await _tell_client_error(ctx, f"Error checking installation: {str(e)}")
         return {
             "success": False,
             "error": f"Error checking installation: {str(e)}",
@@ -1555,6 +1556,21 @@ async def suggest_suppression(
 # ---------------------------------------------------------------------------
 
 
+async def _tell_client_error(ctx: Context, message: str) -> None:
+    """Send ``message`` to the client as an error log, without ever raising.
+
+    The log is a courtesy: the result a tool returns is what the client acts on.
+    A client whose transport has closed makes the send raise, and that must not
+    replace the tool's own result with an exception, in a refusal branch or in an
+    ``except`` arm. ``get_scan_results`` and ``get_scan_result_paths`` guard their
+    send the same way.
+    """
+    try:
+        await ctx.error(message)
+    except Exception:
+        logger.error(f"Failed to send error message to client: {message}")
+
+
 def _session_error(e: ValueError) -> Dict[str, Any]:
     """Shape a rejected session header like the tools' other failures."""
     return {"success": False, "error": str(e), "error_type": "invalid_session_id"}
@@ -1619,13 +1635,13 @@ async def set_source_git(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "set_source_git")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1647,7 +1663,7 @@ async def set_source_git(
     if result.get("success"):
         await ctx.info(f"Source cloned for session {session_id}")
     else:
-        await ctx.error(str(result.get("error", "clone failed")))
+        await _tell_client_error(ctx, str(result.get("error", "clone failed")))
     return _with_session(result, session_id)
 
 
@@ -1680,13 +1696,13 @@ async def set_source_zip_chunk(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "set_source_zip_chunk")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1733,13 +1749,13 @@ async def set_source_zip_finalize(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "set_source_zip_finalize")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1759,7 +1775,7 @@ async def set_source_zip_finalize(
     if result.get("success"):
         await ctx.info(f"Source extracted for session {session_id}")
     else:
-        await ctx.error(str(result.get("error", "finalize failed")))
+        await _tell_client_error(ctx, str(result.get("error", "finalize failed")))
     return _with_session(result, session_id)
 
 
@@ -1778,13 +1794,13 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "clear_source")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1800,7 +1816,7 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
     if result.get("success"):
         await ctx.info(f"Source cleared for session {session_id}")
     else:
-        await ctx.error(str(result.get("error", "clear_source failed")))
+        await _tell_client_error(ctx, str(result.get("error", "clear_source failed")))
     return _with_session(result, session_id)
 
 
@@ -1877,13 +1893,13 @@ async def select_profile(
     try:
         session_id = resolve_caller_session_id(ctx)
     except ValueError as e:
-        await ctx.error(str(e))
+        await _tell_client_error(ctx, str(e))
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
     refusal = session_identity_refusal(session_id, "select_profile")
     if refusal is not None:
-        await ctx.error(refusal["error"])
+        await _tell_client_error(ctx, refusal["error"])
         return refusal
 
     try:
@@ -1907,7 +1923,7 @@ async def select_profile(
             f"({result.get('mode')})"
         )
     else:
-        await ctx.error(str(result.get("error", "select_profile failed")))
+        await _tell_client_error(ctx, str(result.get("error", "select_profile failed")))
     return _with_session(result, session_id)
 
 
