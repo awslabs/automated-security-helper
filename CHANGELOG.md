@@ -313,11 +313,12 @@
   `ash_aggregated_results.json`, `scanner_results.<scanner>.exit_code` was `0` for every
   scanner, beside a `status` that could read `ERROR` or `MISSING`. It is now the code the
   scanner's run recorded; across projects the worse status brings its code, and equal
-  statuses keep the larger. A scanner that recorded no code (it produced no target report,
-  as a `MISSING` or `SKIPPED` scanner does) reads `125`, which says no code was judged,
-  not why: read the entry's `excluded` flag (an operator-excluded scanner) and
-  `dependencies_satisfied` (a scanner whose tool is absent) to tell those apart from an
-  incomplete run.
+  statuses keep the larger. A scanner that did not finish (`MISSING`, `ERROR` or any other
+  status outside `PASSED`, `FAILED` and `SKIPPED`), or a `PASSED` or `FAILED` row with no
+  recorded code, reads `125`, which says no code was judged, not why: read the entry's `dependencies_satisfied` (a scanner
+  whose tool is absent) to tell that apart from an incomplete run. A `SKIPPED` scanner is a
+  complete, operator-chosen outcome; with no recorded code it reads what its own row
+  carries, which is `null`, and `excluded` is `true`.
 
 - **A workspace scan whose report step fails now exits 1 instead of 0 or 2.** When a
   workspace reporter raises, a workspace report file cannot be written, or

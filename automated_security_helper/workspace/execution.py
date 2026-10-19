@@ -1462,21 +1462,27 @@ def _scanner_statuses(results: Any) -> Dict[str, str]:
     return statuses
 
 
-def _scanner_exit_codes(results: Any) -> Dict[str, int]:
+def _scanner_exit_codes(results: Any) -> Dict[str, Optional[int]]:
     """Per-scanner exit code for one project, from the rows the statuses come from.
 
     A row carries a code only when the scanner produced a target report that said
     what its tool exited with; otherwise ``exit_code`` was never set and its
     ``model_fields_set`` does not name it, which is how a recorded 0 is told from the
     field's default. A row with no recorded integer reads
-    ``SCANNER_EXIT_CODE_UNRECORDED``.
+    ``SCANNER_EXIT_CODE_UNRECORDED``, except a SKIPPED one: SKIPPED is a complete,
+    operator-chosen outcome, so its entry reads what the row itself dumps for
+    ``exit_code`` (nothing, which the rollup writes as null) and never claims the
+    run did not finish.
     """
-    codes: Dict[str, int] = {}
+    statuses = _scanner_statuses(results)
+    codes: Dict[str, Optional[int]] = {}
     for name, info in (getattr(results, "scanner_results", None) or {}).items():
         recorded = getattr(info, "exit_code", None)
         was_set = "exit_code" in getattr(info, "model_fields_set", ())
         if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
             codes[str(name)] = recorded
+        elif statuses.get(str(name)) == "SKIPPED":
+            codes[str(name)] = None
         else:
             codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
     return codes

@@ -280,10 +280,12 @@ class ProjectInputNotScanned(BaseModel):
     reason: Annotated[str, Field(..., description="Why the scanner did not scan it.")]
 
 
-#: The code a scanner's rolled-up entry reads when its project's row recorded none: it
-#: produced no target report, so ``exit_code`` was never set on the row. ASH's own
-#: stand-in for a run that did not complete (the incomplete-run member of the judged
-#: codes), never the default 0 of an unset field and never a tool's own exit.
+#: The code a scanner's rolled-up entry reads when its project's row recorded none and
+#: the scanner did not complete: it produced no target report, so ``exit_code`` was
+#: never set on the row. ASH's own stand-in for a run that did not complete (the
+#: incomplete-run member of the judged codes), never the default 0 of an unset field
+#: and never a tool's own exit. A SKIPPED scanner is a complete outcome and does not
+#: read it.
 SCANNER_EXIT_CODE_UNRECORDED = 125
 
 
@@ -414,14 +416,15 @@ class WorkspaceProjectResult(BaseModel):
         ),
     ]
     scanner_exit_codes: Annotated[
-        Dict[str, int],
+        Dict[str, Optional[int]],
         Field(
             default_factory=dict,
             description=(
                 "The exit code each scanner's row recorded for this project, read from "
-                "the same row as its status in ``scanners``. A scanner whose row "
-                "recorded none reads 125. Rolled up beside the status in the "
-                "workspace-level scanner results."
+                "the same row as its status in ``scanners``. A scanner that did not "
+                "finish and whose row recorded none reads 125. A skipped scanner whose "
+                "row recorded none reads what its own row carries (null). Rolled up "
+                "beside the status in the workspace-level scanner results."
             ),
         ),
     ]
