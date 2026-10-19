@@ -14,6 +14,7 @@ filter among the config's own entries, and call the method.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -86,3 +87,60 @@ def test_a_config_verification_filter_stays_only_when_the_operator_names_it(
     assert (VERIFICATION_FILTER in paths) is verification_kept, paths
     assert BASELINE_FILTER in paths, paths
     assert scanner._verification_permitted is verification_kept
+
+
+@pytest.mark.parametrize(
+    ("operator_verifies", "verification_kept"),
+    [(False, False), (True, True)],
+    ids=["operator-does-not-verify", "operator-verifies"],
+)
+def test_the_scanner_entry_applies_the_same_rule_to_a_baseline_scan(
+    tmp_path, monkeypatch, operator_verifies, verification_kept
+):
+    """The same rule, reached through ``_process_config_options``, which is the
+    method the scanner runs when it is built from a config. The scan takes its
+    plugins and filters from a baseline the operator named, and the config's own
+    ``filters_used`` holds a verification filter."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    scanner = _scanner(tmp_path)
+    baseline = tmp_path / "shared" / "team.baseline"
+    baseline.parent.mkdir()
+    baseline.write_text(
+        json.dumps(
+            {
+                "version": "1.5.0",
+                "plugins_used": [{"name": "AWSKeyDetector"}],
+                "filters_used": [{"path": BASELINE_FILTER}],
+                "results": {},
+                "generated_at": "2026-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanner.context.config._untrusted_detect_secrets_settings = (
+        UntrustedDetectSecretsSettings(
+            reason="the repository's config",
+            operator_verifies=operator_verifies,
+            operator_baseline=str(baseline),
+        )
+    )
+    scanner.config.options.baseline_file = baseline
+    settings = scanner.config.options.scan_settings
+    # Building the scanner may already have filled the default plugins in; the
+    # baseline's settings replace only an unconfigured plugin list.
+    settings.version = None
+    settings.plugins_used = []
+    settings.filters_used = [
+        DetectSecretsScanSettingsFiltersUsed(path=VERIFICATION_FILTER, min_level=2)
+    ]
+
+    scanner._process_config_options()
+
+    assert [item.name for item in settings.plugins_used] == ["AWSKeyDetector"], (
+        "the baseline's settings were not the ones used"
+    )
+    paths = [item.path for item in settings.filters_used]
+    assert (VERIFICATION_FILTER in paths) is verification_kept, paths
+    assert BASELINE_FILTER in paths, paths
+    assert scanner._verification_permitted is verification_kept
+    assert scanner.sandbox_requirements.network is verification_kept
