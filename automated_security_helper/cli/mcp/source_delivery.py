@@ -61,6 +61,7 @@ import shutil
 import signal
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
 import sys
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
@@ -372,6 +373,34 @@ class GitTimeoutError(RuntimeError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
 
 
+#: Bytes a clone may grow the session's source directory to, the same limit the
+#: zip channel puts on the extracted tree. A command that passes it is stopped
+#: together with every process it started, and the delivery fails with
+#: :class:`CloneTooLargeError`.
+MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
+
+#: Seconds between looks at the size of the tree a git command is writing.
+GIT_POLL_SECONDS = 0.5
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
+CLONE_TOO_LARGE = "clone_too_large"
+
+
+class CloneTooLargeError(RuntimeError):
+    """A git command of a delivery wrote more than ``MAX_CLONE_BYTES`` and was stopped."""
+
+
+def _tree_bytes(root: Path) -> int:
+    """Bytes of the regular files under ``root``, without following links."""
+
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for name in filenames:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+    return total
+
+
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
     """Kill ``process`` and every process in the group it leads."""
 
@@ -388,15 +417,22 @@ def _stop_process_group(process: "subprocess.Popen[str]") -> None:
 
 
 def _run_git(
-    cmd: List[str], *, env: Dict[str, str]
+    cmd: List[str], *, env: Dict[str, str], grows_in: Optional[Path] = None
 ) -> subprocess.CompletedProcess[str]:
     """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
 
     git runs in a process group of its own, with no stdin, so that on expiry the
     helpers it started (ssh, ``git-remote-https``) are stopped with it.
 
+    Args:
+        cmd: The argv, with git as an absolute path.
+        env: The environment for the child.
+        grows_in: A directory the command writes into. When it passes
+            ``MAX_CLONE_BYTES`` the command is stopped.
+
     Raises:
         GitTimeoutError: when the command runs past the timeout.
+        CloneTooLargeError: when ``grows_in`` passes ``MAX_CLONE_BYTES``.
     """
 
     # An if statement, not a conditional expression: mypy applies a platform
@@ -415,8 +451,24 @@ def _run_git(
         env=env,
         **group,
     )
+    deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
     try:
-        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, GIT_TIMEOUT_SECONDS)
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=min(GIT_POLL_SECONDS, remaining)
+                )
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if grows_in is not None and _tree_bytes(grows_in) > MAX_CLONE_BYTES:
+                # Stopped, with its helpers, by the handler below.
+                raise CloneTooLargeError(
+                    f"git wrote more than {MAX_CLONE_BYTES} bytes and was stopped"
+                )
     except subprocess.TimeoutExpired:
         _stop_process_group(process)
         with contextlib.suppress(subprocess.TimeoutExpired):
@@ -762,7 +814,7 @@ def _clone_into_session(
     env = _git_environment(session_dir)
     try:
         _clone(url, ref, git=git, depth=depth, target=target, env=env)
-    except GitTimeoutError:
+    except (GitTimeoutError, CloneTooLargeError):
         shutil.rmtree(target, ignore_errors=True)
         raise
 
@@ -808,7 +860,7 @@ def _clone(
         str(target),
         program=program,
     )
-    result = _run_git(cmd, env=env)
+    result = _run_git(cmd, env=env, grows_in=target)
     if result.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
@@ -835,6 +887,7 @@ def _clone(
             program=program,
         ),
         env=env,
+        grows_in=target,
     )
     revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
     checkout = _run_git(
@@ -848,6 +901,7 @@ def _clone(
             program=program,
         ),
         env=env,
+        grows_in=target,
     )
     if checkout.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
