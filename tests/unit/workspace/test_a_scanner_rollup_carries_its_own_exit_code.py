@@ -16,7 +16,8 @@ The contract these cells pin:
   row its ``status`` comes from, never from a second rollup;
 - a scanner whose project row recorded no code (it produced no target report, so the
   row's ``exit_code`` stayed unset) reads 125, the incomplete-run member of the
-  contract's judged codes, and never a default 0;
+  contract's judged codes, and never a default 0, unless its status is SKIPPED: that
+  is a complete, operator-chosen outcome, and it reads the value its own row carries;
 - across projects the worse status wins and brings its code; equal statuses keep the
   larger code; the order the projects arrive in does not matter;
 - a recorded 0 beside a non-passing status is kept as recorded.
@@ -88,6 +89,10 @@ def _rollup(tmp_path: Path, *projects) -> Dict[str, dict]:
     return json.loads(path.read_text("utf-8"))["scanner_results"]
 
 
+def _result_with(**rows: ScannerTargetStatusInfo):
+    return SimpleNamespace(scanner_results=dict(rows))
+
+
 @pytest.mark.parametrize(
     ("status", "recorded"),
     [
@@ -105,18 +110,37 @@ def test_a_scanner_rolls_up_the_code_its_run_recorded(tmp_path, status, recorded
     assert rolled["tool"]["exit_code"] == recorded
 
 
-@pytest.mark.parametrize("status", ["MISSING", "SKIPPED", "ERROR", "PASSED"])
+@pytest.mark.parametrize("status", ["MISSING", "ERROR", "PASSED"])
 def test_a_scanner_whose_row_recorded_no_code_reads_125(tmp_path, status):
     rolled = _rollup(tmp_path, ("api", {"tool": status}, {}))
 
     assert rolled["tool"]["exit_code"] == NO_CODE
 
 
-def test_a_skipped_scanner_reads_125_and_is_marked_excluded(tmp_path):
-    """The code alone does not say why: the entry's own flag does."""
-    rolled = _rollup(tmp_path, ("api", {"tool": "SKIPPED"}, {}))
+def test_a_skipped_scanner_with_no_code_reads_the_value_its_own_row_carries(tmp_path):
+    """SKIPPED is a complete, operator-chosen outcome: not 125, not a made-up 0.
 
-    assert rolled["tool"]["exit_code"] == NO_CODE
+    The rolled-up entry and the scanner's own row are both read from the same dump
+    here, so the cell cannot pass by agreeing with a constant.
+    """
+    from automated_security_helper.workspace.execution import _scanner_exit_codes
+
+    row = ScannerTargetStatusInfo(
+        status="SKIPPED", excluded=True, dependencies_satisfied=True
+    )
+    own = row.model_dump(by_alias=True, exclude_unset=True).get("exit_code")
+
+    rolled = _rollup(
+        tmp_path,
+        (
+            "api",
+            {"tool": "SKIPPED"},
+            _scanner_exit_codes(_result_with(tool=row)),
+        ),
+    )
+
+    assert rolled["tool"]["exit_code"] == own
+    assert rolled["tool"]["exit_code"] not in (NO_CODE, 0)
     assert rolled["tool"]["excluded"] is True
 
 
@@ -187,10 +211,6 @@ def test_the_unrecorded_code_of_a_worse_status_is_not_replaced_by_a_better_one(
 
     assert rolled["tool"]["status"] == "MISSING"
     assert rolled["tool"]["exit_code"] == NO_CODE
-
-
-def _result_with(**rows: ScannerTargetStatusInfo):
-    return SimpleNamespace(scanner_results=dict(rows))
 
 
 def test_a_project_row_with_a_recorded_code_gives_that_code():
