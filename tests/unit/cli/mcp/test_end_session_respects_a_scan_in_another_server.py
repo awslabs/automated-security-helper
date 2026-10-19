@@ -118,6 +118,24 @@ def test_ending_a_session_drops_the_entry_a_dead_scan_left(root) -> None:
     assert not holder.exists(), "the dead scan's entry and its directory were kept"
 
 
+def test_a_presence_guard_that_cannot_be_taken_defers_the_removal(
+    root, monkeypatch
+) -> None:
+    """Unable to prove no scan holds the session, end_session removes nothing."""
+    sandbox = _sandbox(root, "unreadable")
+
+    def refused(_root):
+        raise PermissionError("the presence registry cannot be opened")
+
+    monkeypatch.setattr(sessions, "_scan_presence_guard", refused)
+
+    removed_now = sessions.end_session("unreadable")
+
+    assert removed_now is False
+    assert (sandbox / "source" / "app.py").is_file()
+    assert "unreadable" in sessions._ended_while_scanning
+
+
 def test_ending_an_unknown_session_creates_nothing_under_the_root(root) -> None:
     assert sessions.end_session("never-existed") is True
 
