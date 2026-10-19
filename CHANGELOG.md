@@ -309,6 +309,15 @@
 
 ### Behavior changes
 
+- **A workspace scan whose report step fails now exits 1 instead of 0 or 2.** When a
+  workspace reporter raises, a workspace report file cannot be written, or
+  `reports/workspace-reports.json` cannot be written, a run that would exit 0 or 2
+  exits 1 and logs which, ranked as an incomplete project is. Before, the failure
+  was recorded in the manifest and the log only. An invalid project configuration
+  (3) and a workspace where nothing was scanned (4) keep their codes.
+  `workspace.exit_code` in `ash_aggregated_results.json` carries the code the
+  process exits with.
+
 - **An ignore path ending in `/` ignores the directory.** `global_settings.ignore_paths`
   entries are globs matched against a file's path below the source directory, and
   a file's path never ends in `/`, so `vendor/` matched nothing: every file there
