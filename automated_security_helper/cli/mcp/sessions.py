@@ -574,13 +574,53 @@ def end_session(session_id: str) -> bool:
             _ended_while_scanning.add(session_id)
         return False
     try:
-        _remove_session_state(session_id)
+        removed = _remove_unless_a_scan_elsewhere_holds(session_id)
     finally:
         if session is not None:
             session.end_change()
     with _ended_lock:
-        _ended_while_scanning.discard(session_id)
-    return True
+        if removed:
+            _ended_while_scanning.discard(session_id)
+        else:
+            _ended_while_scanning.add(session_id)
+    return removed
+
+
+def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> bool:
+    """Remove the session's state unless a scan in any server sharing the root holds it.
+
+    Run with the session's change held, which covers scans of this process. A scan
+    in another server holds a locked entry under ``<root>/.ash-mcp-scans/<id>/``
+    (:class:`ScanPresence`); removing the tree under it can turn its result into a
+    clean one. Entries of scans that died, and the empty directory that held them,
+    are dropped with the workspace, as the TTL sweep does.
+
+    A session with no workspace directory has nothing a scan could be reading, and
+    no registry is opened for it. If the registry cannot be opened or locked, nothing
+    proves that no scan holds the session, so nothing is removed.
+
+    Returns:
+        True when the state was removed, False when the removal must wait.
+    """
+    try:
+        root = _workspace_root()
+        has_workspace = session_directory(root, session_id).is_dir()
+    except (OSError, RuntimeError, ValueError):
+        has_workspace = False
+    if not has_workspace:
+        _remove_session_state(session_id)
+        return True
+    holder = root / SCAN_PRESENCE_DIR / session_id
+    try:
+        with _scan_presence_guard(root):
+            if _a_scan_holds(holder):
+                return False
+            _remove_session_state(session_id)
+            with contextlib.suppress(OSError):
+                holder.rmdir()
+            return True
+    except OSError:
+        return False
 
 
 def finish_ended_session(session_id: Optional[str]) -> None:
