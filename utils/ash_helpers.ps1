@@ -294,7 +294,10 @@ function Invoke-ASH {
             return $current
         }
         $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-        $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        # Case is ignored on Windows and macOS, whose file systems usually ignore it: a
+        # different spelling of a directory's case is the same directory there. Where
+        # the file system is case-sensitive that only refuses more.
+        $pathComparison = if ($IsWindows -or $IsMacOS -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
         function Test-AshUnder([string]$Path, [string]$Root) {
             $Root = $Root.TrimEnd($separators)
             return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
@@ -387,6 +390,59 @@ function Invoke-ASH {
             }
             return $false
         }
+        # Whether the path as named is inside one of $Trees, judged where each part of
+        # the name really is. The path is walked as Test-AshFollowsLinkInCheckout walks
+        # it, one component at a time with every link followed as it is met, and a part
+        # the name itself gives counts when the directory the walk is in is inside a
+        # tree. The parts a link's target gives do not count: a name that leaves the
+        # tree by the operator's own link and comes back through a target is not named
+        # inside it. So a tree reached through an alias, of the tree or of a directory
+        # above it, is judged as the direct spelling is. A path of more than 40 links
+        # counts as named inside the tree, the side that refuses.
+        function Test-AshNamedInTree([string]$Path, [string[]]$Trees) {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            $root = [System.IO.Path]::GetPathRoot($full)
+            $walked = $root
+            $rest = [System.Collections.Generic.List[object]]::new()
+            foreach ($part in $full.Substring($root.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $rest.Add([pscustomobject]@{ Name = $part; Named = $true })
+            }
+            $hops = 0
+            while ($rest.Count -gt 0) {
+                $entry = $rest[0]
+                $rest.RemoveAt(0)
+                $part = $entry.Name
+                if ($entry.Named) {
+                    $here = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+                    if (@($Trees | Where-Object { Test-AshUnder $here $_ }).Count -gt 0) { return $true }
+                }
+                if ($part -eq '.') { continue }
+                if ($part -eq '..') {
+                    $parent = Split-Path -Parent $walked
+                    $walked = if ($parent) { $parent } else { $root }
+                    continue
+                }
+                $candidate = Join-Path $walked $part
+                $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+                if (-not ($item -and $item.LinkType -in @('SymbolicLink', 'Junction') -and $item.Target)) {
+                    $walked = $candidate
+                    continue
+                }
+                $hops++
+                if ($hops -gt 40) { return $true }
+                $target = [string]@($item.Target)[0]
+                if ([System.IO.Path]::IsPathRooted($target)) {
+                    $walked = [System.IO.Path]::GetPathRoot($target)
+                    $target = $target.Substring($walked.Length)
+                }
+                $given = [System.Collections.Generic.List[object]]::new()
+                foreach ($targetPart in $target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                    $given.Add([pscustomobject]@{ Name = $targetPart; Named = $false })
+                }
+                $rest.InsertRange(0, $given)
+            }
+            return $false
+        }
         $spelledOutput = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path (Get-Location).Path $OutputDir }
         $outputRoot = [System.IO.Path]::GetPathRoot($spelledOutput)
         $walked = [System.Collections.Generic.List[string]]::new()
@@ -475,12 +531,15 @@ function Invoke-ASH {
                 $trees += $checkout
                 $trees += (Get-AshRealPath $checkout)
             }
-            $namedInTree = @($trees | Where-Object { Test-AshUnder $configNamed $_ }).Count -gt 0
             $realInTree = @($trees | Where-Object { Test-AshUnder $configFull $_ }).Count -gt 0
             # A config named inside the scanned tree is used only when its real path,
             # every link on the way followed, is inside the tree too, wherever in the
             # tree it is named: otherwise the repository being scanned would choose
-            # which host file is read. A link that stays inside the tree is followed.
+            # which host file is read. Whether it is named inside the tree is decided
+            # on where the parts of the name really are (Test-AshNamedInTree), not on
+            # how the path to the tree is spelled. A link that stays inside the tree is
+            # followed.
+            $namedInTree = Test-AshNamedInTree $configNamed $trees
             if ($namedInTree -and -not $realInTree) {
                 Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree but is a link, or is reached through one, to '$configFull', which is outside it. ASH does not mount a file the repository being scanned points it at."
             }
