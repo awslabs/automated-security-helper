@@ -143,25 +143,33 @@ def _route_path(scope: Scope) -> str:
     return path
 
 
-def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool:
-    """True when the SDK's session endpoint handles this request's session.
+def _through_the_sdk_session_check(scope: Scope) -> bool:
+    """True when the request names a protocol version the SDK session-checks.
 
-    Two conditions. The request is for the endpoint itself: Starlette answers
-    404 for a path the app has no route for, and that says nothing about a
-    session. And it names a protocol version the SDK sends through its session
-    check: a request that names a version outside the ``initialize`` handshake
+    A request that names a version outside the ``initialize`` handshake
     versions goes to a separate, sessionless path. The same rule as the SDK's,
     from its own list. If the list cannot be read, no request counts, so a 404
-    never ends a session.
+    never ends a session and no header names one.
     """
-    if endpoint_path is None or _route_path(scope) != endpoint_path:
-        return False
     try:
         from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
     except ImportError:
         return False
     version = _header(scope, b"mcp-protocol-version")
     return version is None or version in HANDSHAKE_PROTOCOL_VERSIONS
+
+
+def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool:
+    """True when the SDK's session endpoint handles this request's session.
+
+    Two conditions. The request is for the endpoint itself: Starlette answers
+    404 for a path the app has no route for, and that says nothing about a
+    session. And it names a protocol version the SDK sends through its session
+    check; see :func:`_through_the_sdk_session_check`.
+    """
+    if endpoint_path is None or _route_path(scope) != endpoint_path:
+        return False
+    return _through_the_sdk_session_check(scope)
 
 
 def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
@@ -268,9 +276,10 @@ class SessionBoundary:
             return HttpCaller(SSE, session if session in self._issued else None)
         header = _header(scope, _SESSION_HEADER)
         if self.mode == MODE_STATEFUL:
-            return HttpCaller(
-                STREAMABLE_HTTP, header if header in self._issued else None
-            )
+            # The SDK routes a request naming a newer protocol past its session
+            # check, so an id this app issued names no session there.
+            known = header in self._issued and _through_the_sdk_session_check(scope)
+            return HttpCaller(STREAMABLE_HTTP, header if known else None)
         if self.trust_upstream_session_id and header and header.strip():
             return HttpCaller(STREAMABLE_HTTP, header.strip())
         return HttpCaller(STREAMABLE_HTTP, None)
