@@ -1125,3 +1125,57 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
         return True
     except (_NotWritten, OSError, TypeError, ValueError):
         return False
+
+
+def rewrite_workspace_block(results_path: Path, payload: WorkspaceResults) -> bool:
+    """Replace the ``workspace`` block of a results file ``write`` produced.
+
+    For the one change that comes after the file is written: the report step fails
+    on a run whose projects did not already fail, and the process then exits with a
+    status the block's ``exit_code`` must also carry, so the file never holds a
+    different answer from the exit. Copied the way :func:`stamp_run_record` copies:
+    the block is one header line, replaced; every other line, SARIF runs included,
+    is unchanged and nothing is loaded whole. The copy replaces the file atomically
+    through ``fs_guard.open_for_atomic_write``.
+
+    Returns False, with the file unchanged, when it cannot be read or replaced or
+    is not one ``write`` wrote.
+    """
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        open_for_atomic_write,
+    )
+
+    class _NotWritten(Exception):
+        """Raised inside the copy, which discards the staging file."""
+
+    key = json.dumps("workspace")
+    replacement = f"{key}: {json.dumps(payload.model_dump(mode='json'))},\n"
+    try:
+        path = Path(results_path)
+        with (
+            open(path, "r", encoding="utf-8") as source,
+            open_for_atomic_write(path) as target,
+        ):
+            at_line_start = True
+            while True:
+                piece = source.readline(_STAMP_READ_LIMIT)
+                if not piece:
+                    raise _NotWritten
+                if at_line_start:
+                    if piece.startswith(f"{key}: "):
+                        # The old block is dropped unread beyond its first piece:
+                        # its line can be as long as the project list.
+                        while not piece.endswith("\n"):
+                            piece = source.readline(_STAMP_READ_LIMIT)
+                            if not piece:
+                                raise _NotWritten
+                        target.write(replacement)
+                        break
+                    if piece.startswith('"sarif": '):
+                        raise _NotWritten
+                target.write(piece)
+                at_line_start = piece.endswith("\n")
+            shutil.copyfileobj(source, target)
+        return True
+    except (_NotWritten, OSError, TypeError, ValueError):
+        return False
