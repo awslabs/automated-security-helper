@@ -84,3 +84,55 @@ def test_two_references_to_one_value_claim_two_entries(monkeypatch):
     )
 
     assert recorded == {"ignore_paths": [REFERENCE, "/work/cfg/" + REFERENCE]}
+
+
+def test_a_plain_sibling_equal_to_the_value_does_not_claim_the_reference(monkeypatch):
+    """The first entry is the text "vendor" as the file wrote it; the reference is
+    the second entry, which the load anchored. The first entry is not the
+    reference's own, so it does not use it up and leave the value in the second."""
+    written = {"ignore_paths": ["vendor", REFERENCE]}
+    resolved = {"ignore_paths": ["vendor", "vendor"]}
+    references = _read(monkeypatch, written, resolved)
+    assert [r.path for r in references] == [("ignore_paths", 1)], references
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["vendor", "/work/cfg/vendor"]}, references
+    )
+
+    assert recorded["ignore_paths"][1] == "/work/cfg/" + REFERENCE
+    assert "vendor" not in recorded["ignore_paths"][1]
+
+
+def test_an_overridden_entry_does_not_rewrite_an_unrelated_sibling(monkeypatch):
+    """An override replaced the first entry, so its reference is not held whole
+    anywhere. The second entry ends with the same text and is not the first
+    entry's: it keeps what the file wrote."""
+    written = {"ignore_paths": [REFERENCE, "old/vendor"]}
+    resolved = {"ignore_paths": ["vendor", "old/vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["replaced", "old/vendor"]}, references
+    )
+
+    assert recorded == {"ignore_paths": ["replaced", "old/vendor"]}
+
+
+def test_a_reference_is_claimed_where_it_was_written_not_by_another_list(
+    monkeypatch,
+):
+    """Two lists hold the same text. The first holds it whole, the second anchored
+    by the load: each reference is read where its own list has it."""
+    monkeypatch.setenv("ASH_PROBE_FIRST", "vendor")
+    monkeypatch.setenv("ASH_PROBE_SECOND", "vendor")
+    first, second = "${ASH_PROBE_FIRST}", "${ASH_PROBE_SECOND}"
+    written = {"first": [first], "second": [second]}
+    resolved = {"first": ["vendor"], "second": ["vendor"]}
+    references = environment_references(written, resolved)
+    assert len(references) == 2, references
+
+    recorded = record_environment_references(
+        {"first": ["vendor"], "second": ["/work/cfg/vendor"]}, references
+    )
+
+    assert recorded == {"first": [first], "second": ["/work/cfg/" + second]}
