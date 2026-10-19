@@ -423,6 +423,11 @@ class WorkspaceProjectResult(RecordModel):
         Dict[str, str],
         Field(
             default_factory=dict,
+            # Carried in-process from the project run to the workspace rollup
+            # (WorkspaceAggregator.add) and never dumped: the rolled-up
+            # scanner_results entry is the public surface, so this map is not a
+            # second copy of it in every project block.
+            exclude=True,
             description=(
                 "Why each SKIPPED, MISSING or ERROR scanner gave no result, for "
                 "this project alone: a SKIPPED or MISSING row's skipped_reason or "
