@@ -429,6 +429,61 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
     assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), seen["env"]
 
 
+def _in_process_run_request(tmp_path, verify):
+    src = tmp_path / "src"
+    src.mkdir()
+    return {
+        "root": str(src),
+        "baseline": None,
+        "settings": {"plugins_used": [{"name": "AWSKeyDetector"}]},
+        "paths": [],
+        "verify": verify,
+    }
+
+
+@pytest.mark.parametrize("preset", [None, "0", "1"], ids=["absent", "was-0", "was-1"])
+def test_run_leaves_the_refusal_variable_as_it_found_it(tmp_path, monkeypatch, preset):
+    """run() sets the variable for the pool it starts and puts it back afterwards."""
+    from automated_security_helper.utils import detect_secrets_worker
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+
+    # run() also replaces HTTPAdapter.send for the process; undo that after the test.
+    from requests.adapters import HTTPAdapter
+
+    monkeypatch.setattr(HTTPAdapter, "send", HTTPAdapter.send)
+    if preset is None:
+        monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+    else:
+        monkeypatch.setenv(REFUSE_HTTP_ENV, preset)
+
+    detect_secrets_worker.run(_in_process_run_request(tmp_path, verify=False))
+
+    assert os.environ.get(REFUSE_HTTP_ENV) == preset
+
+
+def test_run_sets_the_refusal_variable_while_the_pool_runs(tmp_path, monkeypatch):
+    """Control for the cell above: during the scan the variable is "1", so the
+    restore is not satisfied by run() never setting it."""
+    from automated_security_helper.utils import detect_secrets_worker
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+    from detect_secrets.core.secrets_collection import SecretsCollection
+    from requests.adapters import HTTPAdapter
+
+    monkeypatch.setattr(HTTPAdapter, "send", HTTPAdapter.send)
+    monkeypatch.delenv(REFUSE_HTTP_ENV, raising=False)
+    seen = {}
+
+    def scan_files(self, *paths):
+        seen["during"] = os.environ.get(REFUSE_HTTP_ENV)
+
+    monkeypatch.setattr(SecretsCollection, "scan_files", scan_files)
+
+    detect_secrets_worker.run(_in_process_run_request(tmp_path, verify=False))
+
+    assert seen["during"] == "1"
+    assert REFUSE_HTTP_ENV not in os.environ
+
+
 def test_importing_the_worker_module_in_ash_refuses_nothing(tmp_path):
     """The variable acts only in the worker's own processes: ASH imports the module
     for its constant, and must keep its own HTTP working whatever its environment."""
