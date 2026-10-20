@@ -27,6 +27,7 @@ from mcp.server.mcpserver import MCPServer, Context
 from pydantic import Field
 
 from automated_security_helper.cli.mcp_tools import (
+    CONFIG_CHECK_FAILED,
     CONFIG_ENV_NOT_RESOLVED,
     REFUSED_CONFIG_EXIT_CODE,
     REFUSED_INTERNAL_EXIT_CODE,
