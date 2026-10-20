@@ -1127,10 +1127,10 @@ def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> Non
         return
     suffix = " and was stopped" if running else ""
     try:
-        size, entries = _tree_extent(grows_in)
+        size, entries = _tree_extent(grows_in, running=running)
     except OSError as exc:
-        raise CloneTooLargeError(
-            f"the size of what git wrote could not be read ({exc.strerror or exc}); "
+        raise CloneTreeUnreadableError(
+            f"the tree git wrote could not be read ({exc.strerror or exc}); "
             f"the delivery was refused"
         ) from exc
     if size > MAX_CLONE_BYTES:
