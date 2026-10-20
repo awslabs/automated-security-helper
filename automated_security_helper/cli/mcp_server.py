@@ -2251,29 +2251,6 @@ async def suggest_suppression(
 # ---------------------------------------------------------------------------
 
 
-async def _tell_client(ctx: Context, level: str, message: str) -> None:
-    """Send ``message`` to the client at ``level``, without ever raising.
-
-    ``level`` is the name of the context's log method: ``debug``, ``info``,
-    ``warning`` or ``error``. Every log a tool sends goes through here.
-
-    The log is a courtesy: the result a tool returns is what the client acts on.
-    A client whose transport has closed makes every send raise, whatever its
-    level, and that must not replace the tool's own result with an exception. It
-    must not turn a success into a failure either: a scan that has started stays
-    reported with its scan_id, so the client can follow and cancel it.
-    """
-    try:
-        await getattr(ctx, level)(message)
-    except Exception:
-        logger.error(f"Failed to send {level} message to client: {message}")
-
-
-async def _tell_client_error(ctx: Context, message: str) -> None:
-    """Send ``message`` to the client as an error log, without ever raising."""
-    await _tell_client(ctx, "error", message)
-
-
 def _session_error(e: ValueError) -> Dict[str, Any]:
     """Shape a rejected session header like the tools' other failures."""
     return {
