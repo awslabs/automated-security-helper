@@ -147,6 +147,11 @@ _DELIVERY_EXECUTOR = ThreadPoolExecutor(
     max_workers=DELIVERY_MAX_WORKERS, thread_name_prefix="ash-mcp-delivery"
 )
 
+#: Runs the other three source-delivery tools: appending a chunk, finalizing an
+#: upload and clearing a session. They take milliseconds to seconds, and have their
+#: own pool at ``ThreadPoolExecutor``'s default size so that no number of clones
+#: queues them.
+_DELIVERY_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="ash-mcp-delivery")
 
 async def _run_on(
     executor: ThreadPoolExecutor, function: Callable[..., Any], kwargs: Dict[str, Any]
