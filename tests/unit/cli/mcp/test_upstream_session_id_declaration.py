@@ -377,6 +377,23 @@ def test_a_stateful_server_gives_an_issued_id_no_identity_on_the_newer_protocol(
     result = tool_payload(response.json())
     assert result.get("success") is False, result
     assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    # The refusal names the cause, a protocol version that is not a handshake
+    # version, so a caller on this server has something it can change.
+    assert "Mcp-Protocol-Version" in result.get("error", ""), result
+    assert "handshake" in result.get("error", ""), result
+
+
+def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+
+    assert refusal is not None
+    assert "newer protocol version" in refusal["error"], refusal
+    assert "Mcp-Protocol-Version" in refusal["error"], refusal
 
 
 def _drive_stateful_boundary(response_headers, request_headers) -> SessionBoundary:
