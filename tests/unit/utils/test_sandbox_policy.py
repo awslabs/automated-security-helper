@@ -1386,6 +1386,95 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         argv = self._firejail(policy)
         assert f"--blacklist={_as_argv('/usr')}" not in argv
 
+    @pytest.fixture
+    def stand_in_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp, so the tests neither depend on nor write the real one."""
+        root = tmp_path / "stand-in-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
+    @pytest.fixture
+    def stand_in_pseudo_fs(self, tmp_path, monkeypatch):
+        """Stand in for /dev/shm and /run: a few entries, not the real ones."""
+        shm = tmp_path / "stand-in-shm"
+        run = tmp_path / "stand-in-run"
+        for root in (shm, run):
+            root.mkdir()
+            (root / "segment").write_text("x")
+        monkeypatch.setattr(
+            backends_module, "_PSEUDO_FS_ROOTS", (shm, run), raising=False
+        )
+        return SimpleNamespace(shm=shm, run=run)
+
+    @staticmethod
+    def _blacklisted(argv):
+        return [a.split("=", 1)[1] for a in argv if a.startswith("--blacklist=")]
+
+    def test_firejail_leaves_tmp_alone_for_a_link_inside_a_hidden_directory(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """~/data -> /persist/other, which holds a link into /tmp: /tmp is covered
+        by --private-tmp, so what the link names there is not blacklisted, however
+        few or many entries it has."""
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        scratch = stand_in_tmp / "scratch"
+        scratch.mkdir()
+        for name in ("a", "b", "c"):
+            (scratch / name).write_text("x")
+        (other / "scratch").symlink_to(scratch)
+        (layout.home / "data").symlink_to(other)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        assert _as_argv(other) in blacklisted
+        under_tmp = [
+            b
+            for b in blacklisted
+            if b == _as_argv(stand_in_tmp) or b.startswith(_as_argv(stand_in_tmp) + "/")
+        ]
+        assert not under_tmp, under_tmp
+
+    def test_firejail_does_not_hide_shared_memory_a_home_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs
+    ):
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / ".run").symlink_to(stand_in_pseudo_fs.run)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        for root in (stand_in_pseudo_fs.shm, stand_in_pseudo_fs.run):
+            hidden = [
+                b
+                for b in blacklisted
+                if b == _as_argv(root) or b.startswith(_as_argv(root) + "/")
+            ]
+            assert not hidden, (root, hidden)
+
+    def test_firejail_keeps_shared_memory_a_nested_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs, tmp_path
+    ):
+        """The control sits beside it: the directory the link is in is still hidden."""
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        (other / "shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / "data").symlink_to(other)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        assert _as_argv(other) in blacklisted
+        assert _as_argv(stand_in_pseudo_fs.shm) not in blacklisted
+
+    def test_sandbox_exec_does_not_deny_shared_memory_a_home_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs, tmp_path
+    ):
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+
+        assert _as_argv(stand_in_pseudo_fs.shm) not in profile
+
 
 class TestHomeElsewhereThanThePasswdEntry:
     """HOME and the passwd entry's home can be two directories; deny reading both.
