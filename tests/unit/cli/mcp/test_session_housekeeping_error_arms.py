@@ -135,6 +135,8 @@ def test_a_state_write_for_an_id_that_names_no_directory_runs_unheld(
         ran.append(True)
 
     assert ran == [True]
+    # No hold was taken: the registry gave the id no session.
+    assert sessions.get_default_registry().get(session_id) is None
 
 
 def test_a_state_write_for_a_real_session_is_held() -> None:
@@ -306,9 +308,14 @@ def test_touching_a_workspace_refreshes_its_last_use(root) -> None:
 def test_touching_a_workspace_for_an_id_that_names_no_directory_is_a_no_op(
     root, session_id
 ) -> None:
+    # An id like ".." would name the root's parent; its timestamp must stay put.
+    before = 1_000_000_000
+    os.utime(root.parent, ns=(before, before))
+
     sessions.touch_session_workspace(session_id)
 
     assert list(root.iterdir()) == []
+    assert root.parent.stat().st_mtime_ns == before
 
 
 @pytest.mark.parametrize("error", [OSError, ValueError, RuntimeError])
