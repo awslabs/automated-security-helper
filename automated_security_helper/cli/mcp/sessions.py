@@ -1592,7 +1592,8 @@ def sweep_stale_workspaces(
       presence registries.
 
     Entries that are not directories, are symlinks, or do not name a single
-    directory are left alone.
+    directory are left alone, and so is a name the session registry refuses
+    (``MCPSessionRegistry.session_for``): the sweep goes on to the next entry.
 
     This is also what removes a session whose end :func:`end_session` deferred
     for a scan in another server: that scan's end is not seen here.
