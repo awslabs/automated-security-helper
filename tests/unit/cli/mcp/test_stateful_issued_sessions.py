@@ -292,6 +292,50 @@ def test_the_version_list_is_read_once_and_not_on_each_request(monkeypatch) -> N
     assert caller is not None and caller.session_id == "issued-id"
 
 
+@pytest.mark.parametrize(
+    ("protocol_header", "ends_the_session"),
+    [
+        pytest.param([], True, id="no-protocol-header"),
+        pytest.param([(b"mcp-protocol-version", b"2025-06-18")], True, id="handshake"),
+        pytest.param([(b"mcp-protocol-version", b"2026-07-28")], False, id="newer"),
+    ],
+)
+def test_a_delete_ends_the_session_only_on_a_handshake_protocol_version(
+    monkeypatch, protocol_header, ends_the_session
+) -> None:
+    ended: list = []
+    monkeypatch.setattr(
+        "automated_security_helper.cli.mcp.sessions.end_session", ended.append
+    )
+    boundary, _seen = _stateful_boundary()
+    boundary._issued.add("issued-id")
+
+    _call(
+        boundary,
+        method="DELETE",
+        headers=[(b"mcp-session-id", b"issued-id"), *protocol_header],
+    )
+
+    assert ended == (["issued-id"] if ends_the_session else [])
+    assert ("issued-id" in boundary._issued) is (not ends_the_session)
+
+
+def test_a_newer_protocol_delete_leaves_the_session_workspace(workspace) -> None:
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        session_id, headers = http.open_session()
+        sandbox = _deliver(http, headers)
+        status = http.end_session({**headers, "Mcp-Protocol-Version": "2026-07-28"})
+        remembered = session_id in _boundary(app)._issued
+        still_on_disk = sandbox.exists()
+
+    assert remembered, f"the session was forgotten (DELETE answered {status})"
+    assert still_on_disk, f"the workspace was removed (DELETE answered {status})"
+
+
 def test_a_stateful_boundary_needs_the_endpoint_path() -> None:
     from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
 

@@ -409,7 +409,8 @@ class SessionBoundary:
 
         An id counts as issued only from a successful response: the SDK also
         sends one on a refused opening request and then discards that session.
-        A session ends here when its ``DELETE`` succeeds, and when the SDK
+        A session ends here when its ``DELETE`` succeeds (a ``DELETE`` that names
+        a newer protocol version names no session, so it ends none), and when the SDK
         answers 404 for it on its own session path, which it does once it has
         discarded the session (its idle timeout, for one). A 404 for another path
         is Starlette's, for a path with no route, and a 404 on the newer
@@ -417,12 +418,13 @@ class SessionBoundary:
         """
 
         header = _header(scope, _SESSION_HEADER)
-        known = header if header in self._issued else None
+        through_check = _through_the_sdk_session_check(scope, self._handshake_versions)
+        # A request naming a newer protocol names no session here, as in
+        # _identify, so its DELETE ends none.
+        known = header if header in self._issued and through_check else None
         deleting = scope.get("method") == "DELETE"
         session_path = _on_the_sdk_session_path(
-            scope,
-            self.endpoint_path,
-            _through_the_sdk_session_check(scope, self._handshake_versions),
+            scope, self.endpoint_path, through_check
         )
 
         async def watched(message: Message) -> None:
