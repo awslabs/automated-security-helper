@@ -186,7 +186,8 @@ def _hidden_around(
     of every directory that is hidden or walked here, whether it is blacklisted whole
     or kept for a path inside it, and the ones naming a directory above ``root``
     count too. A directory the policy grants whole is not searched for links: they
-    are inside what the policy itself reads. Nothing in /tmp is hidden, and no
+    are inside what the policy itself reads, and neither is a path at or below one
+    it grants, so a file inside the scanned tree is not blacklisted. Nothing in /tmp is hidden, and no
     link target in a pseudo-filesystem (``_link_targets``) is followed. ``homes``
     are the homes ``root`` was
     reached from; ``seen`` holds the directories already handled, each is handled
@@ -200,9 +201,10 @@ def _hidden_around(
         # /tmp is covered by --private-tmp and the /tmp whitelists, whichever link
         # led here.
         return []
-    inside = [p for p in shown if p == root or _is_within(p, root)]
-    if root in inside:
+    if any(root == p or _is_within(root, p) for p in shown):
+        # The policy grants this path, or a directory holding it, for the scan.
         return []
+    inside = [p for p in shown if _is_within(p, root)]
     hidden: List[Path] = []
     # Where links are looked for: the top of each directory this call hides or walks,
     # so that what a link inside it names is found whatever is done with the

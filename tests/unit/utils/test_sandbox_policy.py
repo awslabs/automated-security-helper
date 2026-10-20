@@ -1374,6 +1374,61 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         for shown in (code, repo, output):
             assert _as_argv(shown) not in blacklisted, shown
 
+    def test_firejail_leaves_a_file_a_link_names_inside_the_scanned_tree(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """~/.gitconfig -> /persist/dotfiles/gitconfig, with /persist/dotfiles the
+        tree being scanned: the policy grants that tree, and the file in it is
+        read like the rest of it, not blacklisted."""
+        repo = tmp_path / "persist" / "dotfiles"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        config = repo / "gitconfig"
+        config.write_text("[user]\n\tname = me\n")
+        (layout.home / ".gitconfig").symlink_to(config)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        blacklisted = self._blacklisted(self._firejail(policy))
+
+        inside = [
+            b
+            for b in blacklisted
+            if b == _as_argv(repo) or b.startswith(_as_argv(repo) + "/")
+        ]
+        assert not inside, inside
+
+    def test_firejail_still_hides_a_file_a_link_names_beside_the_scanned_tree(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """The control: a file outside the granted tree is hidden as before."""
+        repo = tmp_path / "persist" / "dotfiles"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        netrc = tmp_path / "persist" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (layout.home / ".netrc").symlink_to(netrc)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        blacklisted = self._blacklisted(self._firejail(policy))
+
+        assert _as_argv(netrc) in blacklisted
+
     def test_a_link_to_a_system_directory_is_not_hidden(self, layout, tmp_path):
         (layout.home / "u").symlink_to("/usr")
         policy = _policy(layout, argv0="/usr/bin/true")
