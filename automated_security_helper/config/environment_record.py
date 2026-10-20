@@ -91,6 +91,10 @@ PathSegment = Union[str, int]
 #: A list index in a normalized path: any position matches.
 _ANY_INDEX = "*"
 
+#: A list index a reference's path cannot name, such as the ``-`` of a patch
+#: operation that appends: the entry is found by the shape the load gives it.
+UNKNOWN_INDEX = _ANY_INDEX
+
 
 @dataclass(frozen=True)
 class EnvironmentReference:
@@ -107,12 +111,39 @@ class EnvironmentReference:
     resolved: str
     value: str
     key: bool = False
-    #: How many entries the list the file wrote it in had, when it wrote it as a
-    #: list entry; None otherwise.
+    #: How many entries the innermost list the file wrote it in had, when it
+    #: wrote it in a list (as an entry, or inside a mapping that is one); None
+    #: otherwise.
     length: Optional[int] = None
+    #: Where in ``path`` the index of that list entry sits; set with ``length``.
+    index_at: Optional[int] = None
 
     def at(self, path: Tuple[PathSegment, ...]) -> "EnvironmentReference":
-        return replace(self, path=path)
+        """The reference at an unrelated ``path``: what it says about the list the
+        file wrote it in does not carry over."""
+        return replace(self, path=path, length=None, index_at=None)
+
+    def rebase(
+        self, prefix_len: int, prefix: Tuple[PathSegment, ...]
+    ) -> "EnvironmentReference":
+        """The reference with the first ``prefix_len`` segments of its path
+        replaced by ``prefix``. The list it was written in carries over when its
+        index lies beyond the replaced part."""
+        path = (*prefix, *self.path[prefix_len:])
+        if self.index_at is None or self.index_at < prefix_len:
+            return replace(self, path=path, length=None, index_at=None)
+        return replace(
+            self, path=path, index_at=self.index_at - prefix_len + len(prefix)
+        )
+
+    @property
+    def position_unknown(self) -> bool:
+        """Whether the list index in ``path`` says nothing about where the entry
+        is: the path names an unknown index, or holds an index with no record of
+        the list it was written in."""
+        if UNKNOWN_INDEX in self.path:
+            return True
+        return self.length is None and any(isinstance(s, int) for s in self.path)
 
 
 @dataclass(frozen=True)
@@ -205,10 +236,10 @@ def environment_references(
         for index, (written_item, item) in enumerate(zip(written, resolved)):
             entry = (*path, index)
             for read in environment_references(written_item, item, entry):
-                # An entry that is itself the reference; one deeper in a mapping
-                # inside the entry has no list position of its own to compare.
-                if read.path == entry and not read.key:
-                    read = replace(read, length=len(written))
+                # The innermost list a value was written in gives its length,
+                # whether the entry is the reference or a mapping holding it.
+                if read.length is None and not read.key:
+                    read = replace(read, length=len(written), index_at=len(path))
                 found.append(read)
     else:
         read = _reference(written, resolved, path)
@@ -347,13 +378,13 @@ class _Index:
         length whose entry changed is an entry the load or an override changed,
         not one that moved.
         """
-        if reference.length is None:
+        if reference.length is None or reference.index_at is None:
             return False
         exact = _exact_path(reference.path)
         text = self.strings.get(exact)
         if text is not None and _anchored(text, reference):
             return False
-        return self.lengths.get(exact[:-1]) != reference.length
+        return self.lengths.get(exact[: reference.index_at]) != reference.length
 
     def pending(
         self,
@@ -373,11 +404,22 @@ class _Index:
         other indices, and then only into a string of the shape the load gives
         its entry (``_anchored``): another entry that merely contains the text
         is not that entry.
+
+        A reference whose list index says nothing about where its entry is
+        (``EnvironmentReference.position_unknown``: the append of a ``patch``
+        operation, or a position inside a list the record does not know the
+        length of) has no entry of its own: it is read only into a string of that
+        shape, at any index, and a base entry that merely contains the text is
+        left as the file wrote it.
         """
         return [
             r
             for r in references
-            if (_anchored(text, r) if self._moved(r) else _exact_path(r.path) == exact)
+            if (
+                _anchored(text, r)
+                if r.position_unknown or self._moved(r)
+                else _exact_path(r.path) == exact
+            )
         ]
 
     def record(

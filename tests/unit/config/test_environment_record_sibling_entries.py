@@ -210,3 +210,106 @@ def test_a_sibling_is_left_alone_while_the_references_own_entry_holds_the_value(
     )
 
     assert recorded == {"ignore_paths": ["/work/cfg/" + REFERENCE, "old/vendor"]}
+
+
+def _placed_patch_reference(monkeypatch, pointer, value, resolved_value="vendor"):
+    """The reference a ``patch`` operation writes, at the path the merged
+    configuration holds it."""
+    from automated_security_helper.config.config_sources import _placed_references
+
+    written = {"patch": [{"op": "add", "path": pointer, "value": value}]}
+    resolved = {"patch": [{"op": "add", "path": pointer, "value": resolved_value}]}
+    references = _read(monkeypatch, written, resolved)
+    placed = _placed_references(references, written)
+    assert len(placed) == 1, placed
+    return placed
+
+
+def test_a_patch_appended_entry_is_recorded_and_the_first_entry_is_left(monkeypatch):
+    """The patch appends the reference to a list that already has an entry. The
+    appended entry, anchored by the load, is found at the last index; the entry
+    at index 0 comes from a base and only contains the text."""
+    placed = _placed_patch_reference(monkeypatch, "/ignore_paths/-", REFERENCE)
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["third_party/vendor_libs", "/work/cfg/vendor"]}, placed
+    )
+
+    assert recorded == {
+        "ignore_paths": ["third_party/vendor_libs", "/work/cfg/" + REFERENCE]
+    }
+
+
+def test_a_patch_appended_mapping_entry_is_recorded_and_the_first_is_left(
+    monkeypatch,
+):
+    """The documented suppressions shape: the patch appends a mapping whose
+    ``path`` is the reference."""
+    placed = _placed_patch_reference(
+        monkeypatch,
+        "/global_settings/suppressions/-",
+        {"path": REFERENCE},
+        {"path": "vendor"},
+    )
+
+    recorded = record_environment_references(
+        {
+            "global_settings": {
+                "suppressions": [
+                    {"path": "third_party/vendor_libs"},
+                    {"path": "/work/cfg/vendor"},
+                ]
+            }
+        },
+        placed,
+    )
+
+    assert recorded["global_settings"]["suppressions"] == [
+        {"path": "third_party/vendor_libs"},
+        {"path": "/work/cfg/" + REFERENCE},
+    ]
+
+
+def test_a_reference_in_a_mapping_entry_is_found_when_defaults_shift_its_entry(
+    monkeypatch,
+):
+    """The file wrote one ``suppressions`` mapping; two defaults come before it."""
+    written = {"suppressions": [{"path": REFERENCE}]}
+    resolved = {"suppressions": [{"path": "vendor"}]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {
+            "suppressions": [
+                {"path": "third_party/vendor_libs"},
+                {"path": "default/b"},
+                {"path": "/work/cfg/vendor"},
+            ]
+        },
+        references,
+    )
+
+    assert recorded["suppressions"] == [
+        {"path": "third_party/vendor_libs"},
+        {"path": "default/b"},
+        {"path": "/work/cfg/" + REFERENCE},
+    ]
+
+
+def test_a_reference_at_an_unknown_index_is_read_into_the_anchored_entry(
+    monkeypatch,
+):
+    from automated_security_helper.config import environment_record
+
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    (reference,) = _read(monkeypatch, written, resolved)
+    unknown = reference.at(("ignore_paths", environment_record.UNKNOWN_INDEX))
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["third_party/vendor_libs", "/work/cfg/vendor"]}, [unknown]
+    )
+
+    assert recorded == {
+        "ignore_paths": ["third_party/vendor_libs", "/work/cfg/" + REFERENCE]
+    }
