@@ -60,6 +60,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     Optional,
     Set,
@@ -143,23 +144,44 @@ def _route_path(scope: Scope) -> str:
     return path
 
 
-def _through_the_sdk_session_check(scope: Scope) -> bool:
+def _handshake_protocol_versions() -> FrozenSet[str]:
+    """The protocol versions the SDK sends through its session check.
+
+    Read from the SDK's own list. A stateful :class:`SessionBoundary` reads it
+    once, when it is built.
+
+    Raises:
+        RuntimeError: if the SDK's list cannot be imported. A stateful server
+            without it could identify no session, so every session tool would
+            refuse its caller.
+    """
+    try:
+        from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
+    except ImportError as exc:
+        raise RuntimeError(
+            "a stateful session boundary needs the MCP SDK's list of handshake "
+            "protocol versions (mcp_types.version.HANDSHAKE_PROTOCOL_VERSIONS), "
+            f"and importing it failed: {exc}"
+        ) from exc
+    return frozenset(HANDSHAKE_PROTOCOL_VERSIONS)
+
+
+def _through_the_sdk_session_check(
+    scope: Scope, handshake_versions: FrozenSet[str]
+) -> bool:
     """True when the request names a protocol version the SDK session-checks.
 
     A request that names a version outside the ``initialize`` handshake
     versions goes to a separate, sessionless path. The same rule as the SDK's,
-    from its own list. If the list cannot be read, no request counts, so a 404
-    never ends a session and no header names one.
+    from its own list.
     """
-    try:
-        from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
-    except ImportError:
-        return False
     version = _header(scope, b"mcp-protocol-version")
-    return version is None or version in HANDSHAKE_PROTOCOL_VERSIONS
+    return version is None or version in handshake_versions
 
 
-def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool:
+def _on_the_sdk_session_path(
+    scope: Scope, endpoint_path: Optional[str], through_the_sdk_session_check: bool
+) -> bool:
     """True when the SDK's session endpoint handles this request's session.
 
     Two conditions. The request is for the endpoint itself: Starlette answers
@@ -169,7 +191,7 @@ def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool
     """
     if endpoint_path is None or _route_path(scope) != endpoint_path:
         return False
-    return _through_the_sdk_session_check(scope)
+    return through_the_sdk_session_check
 
 
 def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
@@ -224,6 +246,10 @@ class SessionBoundary:
             streamable endpoint was built at (``streamable_http_path``). Only a
             404 on that path ends a session.
 
+    Raises:
+        RuntimeError: building a stateful boundary, if the SDK's list of
+            handshake protocol versions cannot be imported.
+
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
     session's ``DELETE``, answered only after the removal is complete; the SDK
@@ -261,6 +287,10 @@ class SessionBoundary:
             trust_upstream_session_id and mode == MODE_STATELESS
         )
         self.session_workspace_ttl = session_workspace_ttl
+        # Stateful only: the protocol versions the SDK session-checks, read once.
+        self._handshake_versions: FrozenSet[str] = (
+            _handshake_protocol_versions() if mode == MODE_STATEFUL else frozenset()
+        )
         # Sessions this app issued and has not seen end. Stateful: ids seen on
         # the app's own responses. sse: ids read from the endpoint event of an
         # event stream that is still open.
@@ -278,7 +308,9 @@ class SessionBoundary:
         if self.mode == MODE_STATEFUL:
             # The SDK routes a request naming a newer protocol past its session
             # check, so an id this app issued names no session there.
-            known = header in self._issued and _through_the_sdk_session_check(scope)
+            known = header in self._issued and _through_the_sdk_session_check(
+                scope, self._handshake_versions
+            )
             return HttpCaller(STREAMABLE_HTTP, header if known else None)
         if self.trust_upstream_session_id and header and header.strip():
             return HttpCaller(STREAMABLE_HTTP, header.strip())
@@ -387,7 +419,11 @@ class SessionBoundary:
         header = _header(scope, _SESSION_HEADER)
         known = header if header in self._issued else None
         deleting = scope.get("method") == "DELETE"
-        session_path = _on_the_sdk_session_path(scope, self.endpoint_path)
+        session_path = _on_the_sdk_session_path(
+            scope,
+            self.endpoint_path,
+            _through_the_sdk_session_check(scope, self._handshake_versions),
+        )
 
         async def watched(message: Message) -> None:
             if message.get("type") == "http.response.start":

@@ -13,9 +13,11 @@ unknown method, ends nothing.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -24,7 +26,12 @@ import pytest
 from starlette.testclient import TestClient
 
 from automated_security_helper.cli.mcp import build_streamable_http_app
-from automated_security_helper.cli.mcp.http_sessions import SessionBoundary
+from automated_security_helper.cli.mcp.http_sessions import (
+    MODE_STATEFUL,
+    MODE_STATELESS,
+    SessionBoundary,
+    caller_of,
+)
 from tests.utils.mcp_transport_harness import (
     LOOPBACK_BASE_URL,
     LOOPBACK_PORT,
@@ -208,6 +215,81 @@ def test_a_404_on_the_newer_protocol_path_ends_nothing(workspace) -> None:
     assert response.status_code == 404, response.text[:200]
     assert remembered
     assert still_on_disk
+
+
+def _stateful_boundary(response_headers=(), status: int = 200):
+    """A stateful boundary over an app that answers ``status`` with these headers.
+
+    Returns the boundary and the list of scopes the inner app was called with,
+    so a test decides what the boundary sees without running the SDK.
+    """
+    seen: list = []
+
+    async def inner(scope, receive, send) -> None:
+        seen.append(scope)
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": list(response_headers),
+            }
+        )
+        await send({"type": "http.response.body", "body": b""})
+
+    boundary = SessionBoundary(inner, mode=MODE_STATEFUL, endpoint_path="/mcp")
+    # No workspace sweep: these drive the boundary alone.
+    boundary._next_sweep = float("inf")
+    return boundary, seen
+
+
+def _call(boundary: SessionBoundary, method: str = "POST", headers=()) -> None:
+    """One request to the boundary's endpoint path."""
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(_message) -> None:
+        return None
+
+    scope = {
+        "type": "http",
+        "method": method,
+        "path": "/mcp",
+        "root_path": "",
+        "query_string": b"",
+        "headers": list(headers),
+    }
+    asyncio.run(boundary(scope, receive, send))
+
+
+def test_a_stateful_boundary_cannot_be_built_without_the_sdks_version_list(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "mcp_types.version", None)
+
+    with pytest.raises(RuntimeError, match="mcp_types.version"):
+        _stateful_boundary()
+
+
+def test_a_stateless_boundary_does_not_need_the_sdks_version_list(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "mcp_types.version", None)
+
+    async def app(scope, receive, send):  # pragma: no cover - never called
+        raise AssertionError("called")
+
+    assert SessionBoundary(app, mode=MODE_STATELESS).mode == MODE_STATELESS
+
+
+def test_the_version_list_is_read_once_and_not_on_each_request(monkeypatch) -> None:
+    boundary, seen = _stateful_boundary()
+    boundary._issued.add("issued-id")
+    # An import that fails after the boundary was built changes nothing.
+    monkeypatch.setitem(sys.modules, "mcp_types.version", None)
+
+    _call(boundary, headers=[(b"mcp-session-id", b"issued-id")])
+
+    caller = caller_of(seen[-1])
+    assert caller is not None and caller.session_id == "issued-id"
 
 
 def test_a_stateful_boundary_needs_the_endpoint_path() -> None:
