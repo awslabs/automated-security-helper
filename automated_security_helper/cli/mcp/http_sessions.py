@@ -235,6 +235,25 @@ _SWEEP_INTERVAL_SECONDS = 5 * 60
 
 _LIFESPAN_SHUTDOWN_DONE = ("lifespan.shutdown.complete", "lifespan.shutdown.failed")
 
+_REMOVAL_FAILED_BODY = b"the session could not be removed; send the DELETE again"
+
+
+def _removal_failed_response() -> Tuple[Message, Message]:
+    """The answer to a stateful ``DELETE`` whose session removal failed: a 500.
+
+    Sent in place of the SDK's 2xx. The session is still issued, so the client
+    can send the ``DELETE`` again.
+    """
+    start: Message = {
+        "type": "http.response.start",
+        "status": 500,
+        "headers": [
+            (b"content-type", b"text/plain; charset=utf-8"),
+            (b"content-length", str(len(_REMOVAL_FAILED_BODY)).encode("ascii")),
+        ],
+    }
+    return start, {"type": "http.response.body", "body": _REMOVAL_FAILED_BODY}
+
 
 class SessionBoundary:
     """ASGI middleware that decides each request's session and sees sessions end.
@@ -257,7 +276,10 @@ class SessionBoundary:
 
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
-    session's ``DELETE``, answered only after the removal is complete; the SDK
+    session's ``DELETE``, answered 2xx only after the removal succeeded (when it
+    fails the answer is a 500 and the session stays issued, so the client can send
+    the ``DELETE`` again; a removal that waits for a running scan counts as
+    succeeded, because it completes when that scan returns); the SDK
     answering 404 on its endpoint for a stateful session it discarded (a 404
     for any other path is Starlette's, for a path with no route); an sse event stream
     finishing; and every session this app issued when it shuts down. Sessions
@@ -325,20 +347,26 @@ class SessionBoundary:
 
     # -- session end -------------------------------------------------------------
 
-    async def _end(self, session_id: str) -> None:
+    async def _end(self, session_id: str) -> bool:
+        """End ``session_id``; True when its removal succeeded.
+
+        The id leaves ``_issued`` only then, so a removal that failed can be
+        asked for again: by the client's next ``DELETE``, or at shutdown.
+        """
         import anyio
 
         from automated_security_helper.cli.mcp.sessions import end_session
 
-        self._issued.discard(session_id)
         try:
             # Shielded: an sse stream ends by being cancelled, and the removal
             # has to complete anyway.
             with anyio.CancelScope(shield=True):
                 await anyio.to_thread.run_sync(end_session, session_id)
         except Exception as exc:
-            # Cleanup must not fail the response it follows.
             _logger().warning(f"MCP session {session_id}: could not remove: {exc}")
+            return False
+        self._issued.discard(session_id)
+        return True
 
     async def _sweep_if_due(self) -> None:
         import time
@@ -429,6 +457,10 @@ class SessionBoundary:
         discarded the session (its idle timeout, for one). A 404 for another path
         is Starlette's, for a path with no route, and a 404 on the newer
         protocol's path can mean an unknown method, so neither ends anything.
+
+        A ``DELETE`` the SDK answered 2xx is passed on only once the removal
+        succeeded. If it failed, the client gets a 500 instead, the SDK's answer
+        is dropped, and the id stays in ``_issued`` for the next ``DELETE``.
         """
 
         header = _header(scope, _SESSION_HEADER)
@@ -440,14 +472,24 @@ class SessionBoundary:
             scope, self.endpoint_path, through_check
         )
 
+        refused = False
+
         async def watched(message: Message) -> None:
+            nonlocal refused
+            if refused:
+                return
             if message.get("type") == "http.response.start":
                 status = int(message.get("status", 0))
                 issued = _response_header(message.get("headers"), _SESSION_HEADER)
                 if known and deleting and 200 <= status < 300:
-                    # Before the response leaves: a client that has its DELETE
-                    # answered can rely on the workspace being gone.
-                    await self._end(known)
+                    # Before the response leaves: a DELETE answered 2xx means
+                    # the removal succeeded. When it failed the client is told so
+                    # and the id stays issued, so the DELETE can be sent again.
+                    if not await self._end(known):
+                        refused = True
+                        for answer in _removal_failed_response():
+                            await send(answer)
+                        return
                 elif known and status == 404 and session_path:
                     await self._end(known)
                 elif issued and not header and session_path and 200 <= status < 300:
