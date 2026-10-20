@@ -1711,12 +1711,13 @@ async def set_source_zip_chunk(
         error_type session_workspace_busy while the server removes this
         session's workspace for being unused longer than its time to live
         (send the upload again from its first chunk), and with error_type
-        session_change_in_progress while a change to the session's tree
-        (set_source_git, set_source_zip_finalize or clear_source) holds it:
-        send the same chunk again once that has finished, and only if the
-        answer is an out-of-order chunk was the upload removed with it, so send
-        it again from its first chunk. If this call is cancelled, the chunk
-        finishes server-side and the session reads busy until then.
+        session_change_in_progress while clear_source or the end of the session
+        is removing the session's workspace: send the same chunk again once
+        that has finished, and only if the answer is an out-of-order chunk was
+        the upload removed with it, so send it again from its first chunk. A
+        set_source_git or set_source_zip_finalize in progress does not refuse a
+        chunk. If this call is cancelled, the chunk finishes server-side and
+        the session reads busy until then.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
@@ -1763,8 +1764,8 @@ async def set_source_zip_finalize(
     '..' components, or symlinks are refused before anything is extracted, and
     the archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
     entries. After this returns, call run_ash_scan() with no source_dir. Refused
-    while a scan of this session runs or a chunk is being written
-    (error_type source_delivery_busy). If this call is cancelled, the extraction
+    while a scan of this session runs (error_type source_delivery_busy); chunks
+    of other uploads may be sent meanwhile. If this call is cancelled, the extraction
     finishes or fails server-side and the session reads busy until then.
 
     Args:
@@ -1919,10 +1920,10 @@ async def select_profile(
         override, or YAML that does not validate; with error_type
         session_workspace_busy while the server removes this session's
         workspace for being unused longer than its time to live (select the
-        profile again), or session_change_in_progress while a change to the
-        session's tree (set_source_git, set_source_zip_finalize or
-        clear_source) holds it (select the profile again once that has
-        finished).
+        profile again), or session_change_in_progress while clear_source or
+        the end of the session is removing the session's workspace (select the
+        profile again once that has finished). A set_source_git or
+        set_source_zip_finalize in progress does not refuse it.
     """
     try:
         session_id = resolve_caller_session_id(ctx)

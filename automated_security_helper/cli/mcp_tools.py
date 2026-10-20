@@ -2392,9 +2392,10 @@ def mcp_select_profile(
     Refused with ``error_type`` ``session_workspace_busy`` while the server
     removes the session's workspace for being unused longer than its time to
     live (``sessions.writing_session_state``), and with ``error_type``
-    ``session_change_in_progress`` while a change to the session's tree
-    (``set_source_git``, ``set_source_zip_finalize`` or ``clear_source``) holds
-    it; select the profile again then.
+    ``session_change_in_progress`` while ``clear_source`` or the end of the
+    session is removing the session's workspace; select the profile again then.
+    A ``set_source_git`` or ``set_source_zip_finalize`` in progress does not
+    refuse it.
     """
     from automated_security_helper.cli.mcp.sessions import (
         SessionWorkspaceBusyError,
@@ -2782,9 +2783,10 @@ def mcp_set_source_zip_chunk(
         ``error_type`` ``session_workspace_busy`` while the server removes the
         session's workspace for being unused longer than its time to live
         (send the upload again from its first chunk), and with ``error_type``
-        ``session_change_in_progress`` while a change to the session's tree
-        holds it (send the same chunk again once that has finished; only an
-        out-of-order answer then means the upload was removed with it).
+        ``session_change_in_progress`` while ``clear_source`` or the end of the
+        session is removing the session's workspace (send the same chunk again
+        once that has finished; only an out-of-order answer then means the
+        upload was removed with it).
     """
     from automated_security_helper.cli.mcp.sessions import (
         SessionWorkspaceBusyError,

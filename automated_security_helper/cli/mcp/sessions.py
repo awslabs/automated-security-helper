@@ -104,8 +104,9 @@ class ScanCount:
 #: session, so its state is gone once it is done.
 WRITE_REFUSED_BY_SWEEP = "sweep"
 
-#: Why :meth:`MCPSession.try_begin_write` refused: a change to the session's tree
-#: holds it, and the files of an upload may or may not outlive that change.
+#: Why :meth:`MCPSession.try_begin_write` refused: a change that deletes the
+#: session's directory (``clear_source`` or the end of the session) holds it.
+#: Its removal may or may not have reached the upload's files yet.
 WRITE_REFUSED_BY_CHANGE = "change"
 
 
@@ -163,6 +164,9 @@ class MCPSession(BaseModel):
     _state_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
     _claimed_scans: int = PrivateAttr(default=0)
     _changing: bool = PrivateAttr(default=False)
+    # Whether the change in progress deletes the session's directory, and so
+    # excludes writes. See try_begin_change.
+    _change_removes_workspace: bool = PrivateAttr(default=False)
     # Requests writing the session's state outside a change, and whether the TTL
     # sweep holds the session; both guarded by _state_lock. See try_begin_write.
     _writes: int = PrivateAttr(default=0)
@@ -202,29 +206,41 @@ class MCPSession(BaseModel):
         with self._state_lock:
             self._claimed_scans = max(0, self._claimed_scans - 1)
 
-    def try_begin_change(self) -> bool:
+    def try_begin_change(self, *, removes_workspace: bool = True) -> bool:
         """Take the session for a change to its delivered tree, without waiting.
+
+        Args:
+            removes_workspace: True for a change that deletes the session's
+                directory (``clear_source``, :func:`end_session`, the TTL sweep).
+                It excludes writes (:meth:`try_begin_write`) both ways: it is
+                refused while one is in progress, and refuses one that comes
+                meanwhile, so the removal never runs under an append or a
+                profile binding. False for a change that touches only
+                ``source/`` and its staging sibling (a clone, a finalize): a
+                chunk lands in ``incoming/`` and a profile binding in
+                ``config/`` and ``client-config/``, so neither is excluded.
 
         Returns:
             False while a scan of the session holds :attr:`lock` or is claimed
-            and not yet returned, or while a write
-            (:meth:`try_begin_write`) is in progress, which a change to the
-            tree would race; otherwise True, holding :attr:`lock` until
-            :meth:`end_change`.
+            and not yet returned, or, for a change that removes the workspace,
+            while a write is in progress; otherwise True, holding :attr:`lock`
+            until :meth:`end_change`.
         """
         if not self._lock.acquire(blocking=False):
             return False
         with self._state_lock:
-            if self._claimed_scans or self._writes:
+            if self._claimed_scans or (removes_workspace and self._writes):
                 self._lock.release()
                 return False
             self._changing = True
+            self._change_removes_workspace = removes_workspace
         return True
 
     def end_change(self) -> None:
         """End a change :meth:`try_begin_change` began."""
         with self._state_lock:
             self._changing = False
+            self._change_removes_workspace = False
         self._lock.release()
 
     def try_begin_write(self) -> Optional[str]:
@@ -236,10 +252,13 @@ class MCPSession(BaseModel):
         for one. The sweep runs on a worker thread and holds the session
         (:meth:`try_begin_sweep`) from its last look at the session's age until
         the removal is done, and a write that comes meanwhile is refused rather
-        than accepted and then removed with the session. A change to the tree
-        (clear, clone, extract) is refused while a write is in progress, and a
-        write is refused while a change holds the session, so a removal of the
-        workspace never runs under an append. Writes do not exclude each other.
+        than accepted and then removed with the session. A change that removes
+        the session's directory (clear, end of session; see
+        :meth:`try_begin_change`) is refused while a write is in progress, and
+        a write is refused while such a change holds the session, so a removal
+        of the workspace never runs under an append. A clone or a finalize
+        replaces ``source/`` only, and a write alongside it is not refused.
+        Writes do not exclude each other.
 
         The hold is this process's: it is on the in-memory session, so it keeps
         this server's sweep off the session. Another server sharing the
@@ -249,14 +268,14 @@ class MCPSession(BaseModel):
         Returns:
             None when the write began, until :meth:`end_write`. Otherwise why it
             was refused: :data:`WRITE_REFUSED_BY_SWEEP` while the sweep holds the
-            session, :data:`WRITE_REFUSED_BY_CHANGE` while a change to the tree
-            does. The two ask a client for different things, see
-            :func:`writing_session_state`.
+            session, :data:`WRITE_REFUSED_BY_CHANGE` while a change that removes
+            the session's directory does. The two ask a client for different
+            things, see :func:`writing_session_state`.
         """
         with self._state_lock:
             if self._sweeping:
                 return WRITE_REFUSED_BY_SWEEP
-            if self._changing:
+            if self._changing and self._change_removes_workspace:
                 return WRITE_REFUSED_BY_CHANGE
             self._writes += 1
             return None
@@ -542,12 +561,12 @@ class SessionWorkspaceBusyError(RuntimeError):
 
 
 class SessionChangeInProgressError(SessionWorkspaceBusyError):
-    """A write to a session's state was refused: a change to its tree holds it.
+    """A write to a session's state was refused: a change that deletes its directory holds it.
 
-    The request is sent again as it is once the change is done. A chunk is sent
-    with the same sequence number; only an out-of-order answer then means that
-    the upload was removed by the change, and the upload is sent again from its
-    first chunk.
+    The change is ``clear_source`` or the end of the session. The request is sent
+    again as it is once the change is done. A chunk is sent with the same
+    sequence number; only an out-of-order answer then means that the upload was
+    removed, and the upload is sent again from its first chunk.
     """
 
     error_type = SESSION_CHANGE_IN_PROGRESS
@@ -568,9 +587,10 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
             workspace nobody used for longer than the TTL. Its state is gone once
             the removal is done, so the request is sent again from the start: an
             upload from its first chunk.
-        SessionChangeInProgressError: while a change to the session's tree holds
-            it. The upload's files are not necessarily gone, so the chunk is sent
-            again as it is.
+        SessionChangeInProgressError: while a change that deletes the session's
+            directory (``clear_source``, the end of the session) holds it. The
+            upload's files may not be gone yet, so the chunk is sent again as it
+            is. A clone or a finalize does not refuse a write.
     """
     from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 
@@ -585,11 +605,11 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
     refused = session.try_begin_write()
     if refused == WRITE_REFUSED_BY_CHANGE:
         raise SessionChangeInProgressError(
-            "the session's source is being changed by another request; send this "
-            "request again once that has finished. A chunk of an upload is sent "
-            "again as it is: only if the answer is an out-of-order chunk was the "
-            "upload removed with the change, and then it is sent again from its "
-            "first chunk"
+            "the session's workspace is being cleared or ended by another "
+            "request; send this request again once that has finished. A chunk "
+            "of an upload is sent again as it is: only if the answer is an "
+            "out-of-order chunk was the upload removed, and then it is sent "
+            "again from its first chunk"
         )
     if refused is not None:
         raise SessionWorkspaceBusyError(
