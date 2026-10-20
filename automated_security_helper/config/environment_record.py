@@ -241,6 +241,12 @@ def _bare(written: str) -> str:
     return match.group(0) if match else text
 
 
+def _anchored(text: str, reference: EnvironmentReference) -> bool:
+    """Whether ``text`` is what ``reference`` resolved to, or that after a prefix
+    the load put on it (a relative path anchored at the file's directory)."""
+    return text == reference.resolved or text.endswith(reference.resolved)
+
+
 def _recorded_string(
     text: str,
     references: Sequence[EnvironmentReference],
@@ -336,34 +342,43 @@ class _Index:
         """Whether the entry the file wrote ``reference`` at no longer holds it.
 
         True when the list is not the length the file wrote (defaults put before
-        the entry, a patch) and the entry at the same index does not carry the
-        value any more. A list of the same length whose entry changed is an entry
-        the load or an override changed, not one that moved.
+        the entry, a patch) and the entry at the same index is neither the value
+        nor a path the load anchored on it (``_anchored``). A list of the same
+        length whose entry changed is an entry the load or an override changed,
+        not one that moved.
         """
         if reference.length is None:
             return False
         exact = _exact_path(reference.path)
         text = self.strings.get(exact)
-        if text is not None and (text == reference.resolved or reference.value in text):
+        if text is not None and _anchored(text, reference):
             return False
         return self.lengths.get(exact[:-1]) != reference.length
 
     def pending(
-        self, exact: Tuple[PathSegment, ...], references: List[EnvironmentReference]
+        self,
+        exact: Tuple[PathSegment, ...],
+        references: List[EnvironmentReference],
+        text: str,
     ) -> List[EnvironmentReference]:
-        """The references that may be read into the longer string at ``exact``.
+        """The references that may be read into ``text``, the string at ``exact``.
 
         A list can hold ``${ASH_SCOPE}`` and ``vendor2``, or ``vendor`` and an
-        entry the load changed: a string equal to what any reference at this
-        position resolved to is recorded as it, whatever its index, but a longer
-        string has the reference of its own entry read into it, the one the file
-        wrote at that index. A neighboring entry that happens to start or end
-        with the same text keeps what the file wrote, and does not hide the
-        reference an entry the load changed is read from. Only when the entry at
-        a reference's own index no longer carries its value (the list was
-        lengthened or patched) is it read into a longer string at any index.
+        entry the load changed. The string at a reference's own index has that
+        reference read into it, whole or inside a longer string. A neighboring
+        entry that happens to start or end with the same text keeps what the file
+        wrote, and does not hide the reference an entry the load changed is read
+        from. Only when the entry at a reference's own index no longer carries its
+        value (the list was lengthened or patched) is the reference read at the
+        other indices, and then only into a string of the shape the load gives
+        its entry (``_anchored``): another entry that merely contains the text
+        is not that entry.
         """
-        return [r for r in references if _exact_path(r.path) == exact or self._moved(r)]
+        return [
+            r
+            for r in references
+            if (_anchored(text, r) if self._moved(r) else _exact_path(r.path) == exact)
+        ]
 
     def record(
         self,
@@ -394,7 +409,7 @@ class _Index:
         if isinstance(item, str):
             here = self.values.get(path)
             if here:
-                return self._string(item, here, self.pending(exact, here))
+                return self._string(item, here, self.pending(exact, here, item))
         return item
 
     def fill(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:

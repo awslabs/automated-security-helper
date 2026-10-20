@@ -156,6 +156,46 @@ def test_a_reference_is_still_found_when_defaults_shift_its_entry(monkeypatch):
     }
 
 
+def test_a_neighbor_containing_the_value_is_left_alone_when_defaults_shift(
+    monkeypatch,
+):
+    """A default sits before the entry the file wrote, and it contains the value
+    in the middle. It has the shape of neither the value nor a path anchored on
+    it, so it keeps its text, and the reference is found at the anchored entry."""
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["third_party/vendor_libs", "/work/cfg/vendor"]}, references
+    )
+
+    assert recorded == {
+        "ignore_paths": ["third_party/vendor_libs", "/work/cfg/" + REFERENCE]
+    }
+
+
+def test_a_view_leaves_a_neighbor_containing_the_value_when_defaults_shift(
+    monkeypatch,
+):
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    shown = record_environment_references(
+        {"ignore_paths": ["third_party/vendor_libs", "/work/cfg/vendor"]},
+        references,
+        mark=environment_marker,
+    )
+
+    assert shown == {
+        "ignore_paths": [
+            "third_party/vendor_libs",
+            "/work/cfg/" + environment_marker(REFERENCE),
+        ]
+    }
+
+
 def test_a_sibling_is_left_alone_while_the_references_own_entry_holds_the_value(
     monkeypatch,
 ):
