@@ -29,10 +29,6 @@ from starlette.testclient import TestClient
 from types import SimpleNamespace
 
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
-from automated_security_helper.cli.mcp.http_sessions import (
-    MODE_STATEFUL,
-    SessionBoundary,
-)
 from automated_security_helper.cli.mcp.session_identity import (
     SESSION_IDENTITY_REQUIRED,
 )
