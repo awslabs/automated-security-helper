@@ -909,7 +909,14 @@ def _a_scan_holds(holder: Path) -> bool:
 
 
 def scan_presence_held(session_id: str) -> bool:
-    """True if a running scan of ``session_id`` in any server holds its presence."""
+    """True if a running scan of ``session_id`` in any server holds its presence.
+
+    Fails open: when the presence guard can't be taken (``OSError``) the answer
+    is False, "no scan held". The answer only reports. No code in this package
+    removes or clears anything on it; the sweep takes the guard itself and keeps
+    the session when that fails (:func:`_remove_if_still_stale`). A caller that
+    gates a deletion on this answer must not read False as permission.
+    """
 
     root = _workspace_root()
     try:

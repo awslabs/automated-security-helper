@@ -13,7 +13,8 @@ processes can hold, remove or replace. Each of these arms handles one error:
 * an entry that cannot be opened, or cannot be removed, counts as a live server
   (or a live scan): nothing is deleted on a guess;
 * a scan presence that cannot be registered leaves the scan unregistered;
-* a presence check that fails reports no scan held;
+* a presence check that fails reports no scan held (it only reports: the sweep
+  takes the guard itself and keeps the session when that fails);
 * a child whose mtime cannot be read is ignored when a workspace's last use is
   taken;
 * touching a workspace never raises.
