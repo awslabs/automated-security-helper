@@ -161,7 +161,33 @@ def test_a_scan_is_refused_when_the_candidate_check_fails(delivered: Path) -> No
         result = _scan(delivered)
 
     assert result["success"] is False, result
-    assert result["error_type"] == "config_input_not_permitted", result
+    assert result["error_type"] == "config_check_failed", result
+    assert not started.called
+
+
+def test_run_ash_scan_returns_a_failed_candidate_check_under_its_own_type(
+    delivered: Path,
+) -> None:
+    from automated_security_helper.cli import mcp_server
+    from unittest.mock import AsyncMock, MagicMock
+
+    ctx = MagicMock()
+    ctx.headers = {"mcp-session-id": SESSION}
+    for name in ("info", "debug", "warning", "error", "report_progress"):
+        setattr(ctx, name, AsyncMock())
+
+    with (
+        patch.object(
+            config_sources,
+            "check_discovery_candidates",
+            side_effect=OSError("unreadable"),
+        ),
+        patch.object(mcp_tools, "_run_scan_async") as started,
+    ):
+        result = asyncio.run(mcp_server.run_ash_scan(ctx, source_dir=str(delivered)))
+
+    assert result["success"] is False, result
+    assert result["error_type"] == "config_check_failed", result
     assert not started.called
 
 

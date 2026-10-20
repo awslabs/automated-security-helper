@@ -18,6 +18,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer, Context
 
 from automated_security_helper.cli.mcp_tools import (
+    CONFIG_CHECK_FAILED,
     CONFIG_ENV_NOT_RESOLVED,
     CONFIG_FIELD_DENIED,
     CONFIG_INPUT_NOT_PERMITTED,
@@ -459,6 +460,7 @@ async def run_ash_scan(
             # error_type reaches the client rather than a generic start failure.
             if result.get("error_type") in (
                 CONFIG_FIELD_DENIED,
+                CONFIG_CHECK_FAILED,
                 CONFIG_INPUT_NOT_PERMITTED,
                 CONFIG_POLICY_UNREADABLE,
             ):
