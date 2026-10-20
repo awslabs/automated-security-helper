@@ -206,6 +206,14 @@ class TestUnusableHeaderIsRefused:
 
         assert resolve_caller_session_id(_StandIn()) == "tenant-a"
 
+    def test_a_stand_in_context_with_no_headers_resolves_to_the_default_session(self):
+        """No headers attribute means no explicit header: the default session."""
+
+        class _HeaderlessStandIn:
+            pass
+
+        assert resolve_caller_session_id(_HeaderlessStandIn()) == DEFAULT_SESSION_ID
+
     def test_refusal_names_the_header(self):
         """The error has to say which header was wrong to be actionable."""
         with pytest.raises(ValueError, match=MCP_SESSION_ID_HEADER):
