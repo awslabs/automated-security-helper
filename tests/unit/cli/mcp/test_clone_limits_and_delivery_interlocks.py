@@ -716,5 +716,76 @@ def test_delivery_handlers_use_their_own_bounded_executor(
     asyncio.run(mcp_server.clear_source(ctx))
 
     assert seen["thread"].startswith("ash-mcp-delivery"), seen
-    executor = mcp_server._DELIVERY_EXECUTOR
-    assert executor._max_workers == sd.DELIVERY_MAX_WORKERS
+
+
+def test_a_chunk_append_completes_while_the_clone_pool_is_saturated(
+    workspace,
+) -> None:
+    from automated_security_helper.cli import mcp_server
+    from automated_security_helper.cli.mcp_tools import mcp_set_source_zip_chunk
+
+    gate = threading.Event()
+    started = threading.Semaphore(0)
+    threads: List[str] = []
+
+    def blocked_clone() -> None:
+        threads.append(threading.current_thread().name)
+        started.release()
+        assert gate.wait(20), "the chunk never finished"
+
+    async def scenario() -> Dict[str, Any]:
+        clones = [
+            asyncio.ensure_future(mcp_server._run_clone(blocked_clone))
+            for _ in range(sd.CLONE_MAX_WORKERS)
+        ]
+        loop = asyncio.get_running_loop()
+        for _ in range(sd.CLONE_MAX_WORKERS):
+            took = await loop.run_in_executor(None, started.acquire, True, 10)
+            assert took, "a blocked clone never started"
+        try:
+            return await asyncio.wait_for(
+                mcp_server._run_delivery(
+                    mcp_set_source_zip_chunk,
+                    upload_id="u1",
+                    sequence=0,
+                    data_b64=base64.b64encode(b"abc").decode(),
+                    last=False,
+                    session_id=SESSION,
+                ),
+                timeout=10,
+            )
+        finally:
+            gate.set()
+            await asyncio.gather(*clones)
+
+    chunk = asyncio.run(scenario())
+
+    assert chunk["success"] is True, chunk
+    assert len(threads) == sd.CLONE_MAX_WORKERS
+    assert all(name.startswith("ash-mcp-clone") for name in threads), threads
+    assert (workspace / SESSION / "incoming" / "u1.zip.part").read_bytes() == b"abc"
+
+
+def test_the_clone_tool_runs_on_the_clone_pool(workspace, monkeypatch) -> None:
+    from unittest.mock import MagicMock
+
+    from automated_security_helper.cli import mcp_server
+
+    seen: Dict[str, Any] = {}
+
+    def record(*args: Any, **kwargs: Any) -> dict:
+        seen["thread"] = threading.current_thread().name
+        return {"success": True}
+
+    async def anoop(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    ctx = MagicMock()
+    ctx.headers = {"mcp-session-id": SESSION}
+    for name in ("info", "error", "debug", "warning", "report_progress"):
+        setattr(ctx, name, MagicMock(side_effect=anoop))
+    monkeypatch.setattr(mcp_server, "mcp_set_source_git", record)
+
+    asyncio.run(mcp_server.set_source_git(ctx, url=URL))
+
+    assert seen["thread"].startswith("ash-mcp-clone"), seen

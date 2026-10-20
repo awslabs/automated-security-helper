@@ -123,9 +123,11 @@ class SourceDeliveryBusyError(RuntimeError):
     """
 
 
-#: Worker threads the server runs source deliveries on, across all sessions. A
-#: delivery beyond this many waits for a worker; scans do not share these.
-DELIVERY_MAX_WORKERS = 8
+#: Worker threads the server runs clones (``set_source_git``) on, across all
+#: sessions. A clone beyond this many waits for a worker; scans do not share
+#: these, and neither do the chunk, finalize and clear tools, which have a pool of
+#: their own.
+CLONE_MAX_WORKERS = 8
 
 #: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
 SOURCE_DELIVERY_BUSY = "source_delivery_busy"

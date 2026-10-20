@@ -77,7 +77,7 @@ from automated_security_helper.cli.mcp.session_identity import (
 )
 from automated_security_helper.cli.mcp.sessions import SESSION_SCAN_LIMIT
 from automated_security_helper.cli.mcp.source_delivery import (
-    DELIVERY_MAX_WORKERS,
+    CLONE_MAX_WORKERS,
     SOURCE_DELIVERY_BUSY,
     delivered_session_count,
     get_session_source_dir,
@@ -90,26 +90,50 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 logger = ASH_LOGGER
 
-#: Runs the four source-delivery tools. A scan or any other ``asyncio.to_thread``
-#: caller shares the loop's default executor, so a delivery that waits on a slow
-#: remote would take a worker a scan needs; deliveries get their own, bounded.
-_DELIVERY_EXECUTOR = ThreadPoolExecutor(
-    max_workers=DELIVERY_MAX_WORKERS, thread_name_prefix="ash-mcp-delivery"
+#: Runs ``set_source_git``. A scan or any other ``asyncio.to_thread`` caller shares
+#: the loop's default executor, so a clone that waits on a slow remote would take
+#: a worker a scan needs; clones get their own, bounded. A clone holds a worker for
+#: up to three git commands of 10 minutes each, so this pool is kept apart from
+#: the one the quick deliveries use: sessions are cheap to open, and
+#: ``CLONE_MAX_WORKERS`` cloning sessions fill it without delaying a chunk, a
+#: clear or a finalize of any tenant.
+_CLONE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=CLONE_MAX_WORKERS, thread_name_prefix="ash-mcp-clone"
 )
 
+#: Runs the other three source-delivery tools: appending a chunk, finalizing an
+#: upload and clearing a session. They take milliseconds to seconds, and have their
+#: own pool at ``ThreadPoolExecutor``'s default size so that no number of clones
+#: queues them.
+_DELIVERY_EXECUTOR = ThreadPoolExecutor(thread_name_prefix="ash-mcp-delivery")
 
-async def _run_delivery(function: Callable[..., Any], /, **kwargs: Any) -> Any:
-    """Run a delivery tool's implementation on ``_DELIVERY_EXECUTOR``.
 
-    Keeps the caller's context variables, as ``asyncio.to_thread`` does. Awaiting
-    this and then cancelling does not stop the thread: the delivery finishes or
-    times out server-side, and the session reads busy until then.
+async def _run_on(
+    executor: ThreadPoolExecutor, function: Callable[..., Any], kwargs: Dict[str, Any]
+) -> Any:
+    """Run ``function(**kwargs)`` on ``executor``, keeping the caller's context.
+
+    Context variables are kept as ``asyncio.to_thread`` keeps them. Awaiting this
+    and then cancelling does not stop the thread: the delivery finishes or times
+    out server-side, and the session reads busy until then.
     """
 
     context = contextvars.copy_context()
     return await asyncio.get_running_loop().run_in_executor(
-        _DELIVERY_EXECUTOR, functools.partial(context.run, function, **kwargs)
+        executor, functools.partial(context.run, function, **kwargs)
     )
+
+
+async def _run_clone(function: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Run ``set_source_git``'s implementation on ``_CLONE_EXECUTOR``."""
+
+    return await _run_on(_CLONE_EXECUTOR, function, kwargs)
+
+
+async def _run_delivery(function: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Run a chunk, finalize or clear implementation on ``_DELIVERY_EXECUTOR``."""
+
+    return await _run_on(_DELIVERY_EXECUTOR, function, kwargs)
 
 
 # Backward-compatible private-name aliases (tests import these by name).
@@ -1663,7 +1687,7 @@ async def set_source_git(
     try:
         # Off the event loop: a clone takes as long as the remote makes it, and
         # every other session's calls share the loop.
-        result = await _run_delivery(
+        result = await _run_clone(
             mcp_set_source_git,
             url=url,
             ref=ref,
