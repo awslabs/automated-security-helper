@@ -13,8 +13,8 @@ Three places let an exception leave the tool where the client expects a dict:
   releases them, so a failure between the claim and the ``try`` left the session
   claimed, and ``clear_source`` was refused as busy from then on.
 
-``set_source_git`` also has a refusal for a clone url the url validator passes
-and the host check refuses; the first test calls the tool with such a url.
+The ``delivered`` fixture releases no claim: a test that takes one releases it,
+and the fixture fails a test that leaves one held.
 """
 
 from __future__ import annotations
@@ -75,34 +75,18 @@ def delivered() -> Path:
         "first", hashlib.sha256(data).hexdigest(), session_id=SESSION
     )
     yield source
-    # A claim a failing run left behind would make this refuse.
-    get_default_registry().session_for(SESSION).release_scan()
+    # A test claims only what it takes and releases it itself. A claim still held
+    # here is a leak, and it must fail the test instead of being released.
+    session = get_default_registry().session_for(SESSION)
+    idle = session.try_begin_change()
+    if idle:
+        session.end_change()
     sd.clear_source(SESSION)
+    assert idle, "the test left a scan claim held on the session"
 
 
 def _scan(source: Path) -> Dict[str, Any]:
     return asyncio.run(mcp_tools.mcp_scan_directory(str(source), session_id=SESSION))
-
-
-def test_a_clone_url_the_validator_passes_and_the_host_check_refuses_is_named(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    url = "git://git.example.com/team/repo.git"
-    monkeypatch.setattr(
-        sd, "_run_git", lambda *a, **k: pytest.fail("git ran for a refused url")
-    )
-    # The shape the case needs: the validator and the local-path check let it by,
-    # and only the host check refuses it.
-    assert sd._validate_clone_url(url) == url
-    assert sd.local_clone_path(url) is None
-    with pytest.raises(ValueError):
-        sd.remote_clone_host(url)
-
-    result = mcp_tools.mcp_set_source_git(url=url, session_id=SESSION)
-
-    assert result["success"] is False, result
-    assert result["error_type"] == "clone_url_not_permitted", result
-    assert result["error"], result
 
 
 def test_a_session_rules_lookup_that_fails_refuses_the_denial_check(

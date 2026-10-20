@@ -129,6 +129,26 @@ def test_the_allowlist_matches_the_host_not_a_prefix_or_suffix(
     assert not git
 
 
+def test_a_clone_url_the_validator_passes_and_the_host_check_refuses_is_named(
+    git, monkeypatch
+) -> None:
+    url = "git://git.example.com/team/repo.git"
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "git.example.com")
+    # The shape the case needs: the validator and the local-path check let it by,
+    # and only the host check refuses it.
+    assert sd._validate_clone_url(url) == url
+    assert sd.local_clone_path(url) is None
+    with pytest.raises(ValueError):
+        sd.remote_clone_host(url)
+
+    result = mcp_set_source_git(url=url, session_id="s-1")
+
+    assert result["success"] is False, result
+    assert result["error_type"] == "clone_url_not_permitted", result
+    assert result["error"], result
+    assert not git
+
+
 def test_the_core_function_refuses_what_every_caller_must_not_clone(git) -> None:
     for url in ("http://git.example.com/r.git", "/srv/repo", "file:///srv/repo"):
         with pytest.raises(ValueError):
