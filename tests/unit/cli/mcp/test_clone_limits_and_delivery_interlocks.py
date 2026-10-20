@@ -424,6 +424,73 @@ def test_a_chunk_is_refused_while_a_change_holds_the_session(workspace) -> None:
     assert _chunk("u1", 0, b"abc")["next_sequence"] == 1
 
 
+def _chunk_through_the_tool(sequence: int = 0) -> Dict[str, Any]:
+    from automated_security_helper.cli.mcp_tools import mcp_set_source_zip_chunk
+
+    return mcp_set_source_zip_chunk(
+        upload_id="u1",
+        sequence=sequence,
+        data_b64=base64.b64encode(b"abc").decode(),
+        last=False,
+        session_id=SESSION,
+    )
+
+
+def test_try_begin_write_says_why_it_refused(workspace) -> None:
+    session = sessions.get_default_registry().session_for(SESSION)
+
+    assert session.try_begin_write() is None
+    session.end_write()
+
+    assert session.try_begin_change()
+    try:
+        assert session.try_begin_write() == sessions.WRITE_REFUSED_BY_CHANGE
+    finally:
+        session.end_change()
+
+    assert session.try_begin_sweep()
+    try:
+        assert session.try_begin_write() == sessions.WRITE_REFUSED_BY_SWEEP
+    finally:
+        session.end_sweep()
+
+
+def test_a_chunk_refused_by_a_change_has_its_own_error_type(workspace) -> None:
+    session = sessions.get_default_registry().session_for(SESSION)
+    assert session.try_begin_change()
+    try:
+        with pytest.raises(sessions.SessionChangeInProgressError) as refused:
+            _chunk("u1", 0, b"abc")
+        result = _chunk_through_the_tool()
+    finally:
+        session.end_change()
+
+    assert result["success"] is False, result
+    assert sessions.SESSION_CHANGE_IN_PROGRESS == "session_change_in_progress"
+    assert result["error_type"] == "session_change_in_progress"
+    assert "as it is" in str(refused.value)
+    assert _chunk("u1", 0, b"abc")["next_sequence"] == 1
+
+
+def test_a_chunk_refused_by_the_sweep_keeps_the_restart_advice_and_type(
+    workspace,
+) -> None:
+    session = sessions.get_default_registry().session_for(SESSION)
+    assert session.try_begin_sweep()
+    try:
+        with pytest.raises(sessions.SessionWorkspaceBusyError) as refused:
+            _chunk("u1", 0, b"abc")
+        result = _chunk_through_the_tool()
+    finally:
+        session.end_sweep()
+
+    assert not isinstance(refused.value, sessions.SessionChangeInProgressError)
+    assert sessions.SESSION_WORKSPACE_BUSY == "session_workspace_busy"
+    assert result["error_type"] == "session_workspace_busy"
+    assert "from its first chunk" in str(refused.value)
+    assert "as it is" not in str(refused.value)
+
+
 def test_a_session_ended_during_a_write_is_removed_when_the_write_ends(
     workspace,
 ) -> None:

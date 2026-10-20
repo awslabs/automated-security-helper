@@ -1710,10 +1710,13 @@ async def set_source_zip_chunk(
         and error on an out-of-order, oversize, or malformed chunk, and with
         error_type session_workspace_busy while the server removes this
         session's workspace for being unused longer than its time to live
-        (send the upload again from its first chunk). The same error_type is
-        returned while a change to the session's tree is in progress. If this
-        call is cancelled, the chunk finishes server-side and the session reads
-        busy until then.
+        (send the upload again from its first chunk), and with error_type
+        session_change_in_progress while a change to the session's tree
+        (set_source_git, set_source_zip_finalize or clear_source) holds it:
+        send the same chunk again once that has finished, and only if the
+        answer is an out-of-order chunk was the upload removed with it, so send
+        it again from its first chunk. If this call is cancelled, the chunk
+        finishes server-side and the session reads busy until then.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
@@ -1916,7 +1919,10 @@ async def select_profile(
         override, or YAML that does not validate; with error_type
         session_workspace_busy while the server removes this session's
         workspace for being unused longer than its time to live (select the
-        profile again).
+        profile again), or session_change_in_progress while a change to the
+        session's tree (set_source_git, set_source_zip_finalize or
+        clear_source) holds it (select the profile again once that has
+        finished).
     """
     try:
         session_id = resolve_caller_session_id(ctx)

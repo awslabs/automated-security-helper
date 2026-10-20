@@ -2391,10 +2391,12 @@ def mcp_select_profile(
 
     Refused with ``error_type`` ``session_workspace_busy`` while the server
     removes the session's workspace for being unused longer than its time to
-    live (``sessions.writing_session_state``); select the profile again then.
+    live (``sessions.writing_session_state``), and with ``error_type``
+    ``session_change_in_progress`` while a change to the session's tree
+    (``set_source_git``, ``set_source_zip_finalize`` or ``clear_source``) holds
+    it; select the profile again then.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
         writing_session_state,
     )
@@ -2408,7 +2410,7 @@ def mcp_select_profile(
                 session_id=session_id,
             )
     except SessionWorkspaceBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+        return {"success": False, "error": str(e), "error_type": e.error_type}
 
 
 def _select_profile(
@@ -2779,10 +2781,12 @@ def mcp_set_source_zip_chunk(
         failure (out-of-order, oversize, malformed b64), and with
         ``error_type`` ``session_workspace_busy`` while the server removes the
         session's workspace for being unused longer than its time to live
-        (send the upload again from its first chunk).
+        (send the upload again from its first chunk), and with ``error_type``
+        ``session_change_in_progress`` while a change to the session's tree
+        holds it (send the same chunk again once that has finished; only an
+        out-of-order answer then means the upload was removed with it).
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
     from automated_security_helper.cli.mcp.source_delivery import set_source_zip_chunk
@@ -2796,7 +2800,7 @@ def mcp_set_source_zip_chunk(
             session_id=session_id,
         )
     except SessionWorkspaceBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+        return {"success": False, "error": str(e), "error_type": e.error_type}
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
