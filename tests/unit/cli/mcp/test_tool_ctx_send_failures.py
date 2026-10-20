@@ -323,31 +323,63 @@ def test_a_running_scan_reports_its_scan_id_when_only_the_started_send_fails(
 LOG_LEVELS = frozenset({"debug", "info", "warning", "error"})
 CONTEXT_NAMES = frozenset({"ctx", "context"})
 GUARD = "_tell_client"
+#: The progress monitor's own guard: a send in its arguments is awaited inside
+#: a try block that catches Exception.
+SAFE_SEND = "_safe_send"
+PROGRESS = "report_progress"
+
+
+def _catches_exception(node: ast.Try) -> bool:
+    return any(
+        isinstance(h.type, ast.Name) and h.type.id == "Exception" for h in node.handlers
+    )
 
 
 def _sends_outside_the_guard(source: str) -> List[int]:
-    """Line numbers of log sends on a context that are not inside the guard."""
+    """Line numbers of sends on a context that are not inside a guard.
+
+    A send is a log call (debug, info, warning, error) or report_progress on a
+    context. The guards are the body of ``_tell_client`` and the arguments of
+    ``_safe_send``. A report_progress send may also sit in the body of a try that
+    catches Exception, because it takes progress and a total rather than a
+    message and so has no ``_tell_client`` form. A log call may not: the same
+    shape around a log call hid a bare send before, so it must go through the
+    guard.
+    """
     lines: List[int] = []
 
-    def visit(node: ast.AST, inside_guard: bool) -> None:
+    def visit(node: ast.AST, inside_guard: bool, progress_caught: bool) -> None:
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == GUARD
         ):
             inside_guard = True
         if (
-            not inside_guard
-            and isinstance(node, ast.Call)
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == SAFE_SEND
+        ):
+            inside_guard = True
+        if (
+            isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr in LOG_LEVELS
+            and node.func.attr in LOG_LEVELS | {PROGRESS}
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id in CONTEXT_NAMES
+            and not inside_guard
+            and not (node.func.attr == PROGRESS and progress_caught)
         ):
             lines.append(node.lineno)
+        if isinstance(node, ast.Try) and _catches_exception(node):
+            for child in node.body:
+                visit(child, inside_guard, True)
+            for child in [*node.handlers, *node.orelse, *node.finalbody]:
+                visit(child, inside_guard, progress_caught)
+            return
         for child in ast.iter_child_nodes(node):
-            visit(child, inside_guard)
+            visit(child, inside_guard, progress_caught)
 
-    visit(ast.parse(source), False)
+    visit(ast.parse(source), False, False)
     return lines
 
 
@@ -364,7 +396,33 @@ def test_the_structural_check_flags_a_bare_send_and_passes_a_guarded_one() -> No
     assert _sends_outside_the_guard(source) == [6]
 
 
-@pytest.mark.parametrize("module", [mcp_server, mcp_tools], ids=["server", "tools"])
+def test_the_structural_check_covers_progress_sends_and_the_monitor_guard() -> None:
+    source = (
+        "async def a(ctx):\n"
+        "    await ctx.report_progress(progress=0.0)\n"
+        "async def b(ctx):\n"
+        "    try:\n"
+        "        await ctx.report_progress(progress=0.0)\n"
+        "    except Exception:\n"
+        "        await ctx.report_progress(progress=1.0)\n"
+        "async def c(ctx):\n"
+        "    try:\n"
+        "        await ctx.info('log call in a try is still bare')\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "async def d(ctx):\n"
+        "    await _safe_send(True, lambda: ctx.error('guarded'), 'x')\n"
+        "    await ctx.error('bare')\n"
+    )
+
+    assert _sends_outside_the_guard(source) == [2, 7, 10, 15]
+
+
+@pytest.mark.parametrize(
+    "module",
+    [mcp_server, mcp_tools, progress_monitor],
+    ids=["server", "tools", "progress_monitor"],
+)
 def test_no_client_send_sits_outside_the_guard(module: Any) -> None:
     path = Path(module.__file__)
 
