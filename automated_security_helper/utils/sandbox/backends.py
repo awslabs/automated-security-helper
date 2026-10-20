@@ -39,6 +39,28 @@ PROBE_TIMEOUT_SECONDS = 20
 #: The shared temporary directory firejail's --private-tmp and /tmp whitelists cover.
 _TMP_ROOT = Path("/tmp")  # nosec B108 - compared against, never written
 
+#: Pseudo-filesystems a link must not get hidden by: shared memory that
+#: multiprocessing scanners use, and the runtime directory the system keeps its
+#: sockets in. Neither is a directory of the user's.
+_PSEUDO_FS_ROOTS = (
+    Path("/dev/shm"),  # nosec B108 - compared against, never written
+    Path("/run"),
+)
+
+
+def _link_targets(
+    homes: Sequence[Path], *, files: bool = False, ancestors: bool = False
+) -> List[Path]:
+    """policy._home_link_targets without the targets in a pseudo-filesystem
+    (``_PSEUDO_FS_ROOTS``), or holding one."""
+    roots = [_real(root) for root in _PSEUDO_FS_ROOTS]
+    return [
+        target
+        for target in _home_link_targets(homes, files=files, ancestors=ancestors)
+        if not any(_is_within(target, root) or root in target.parents for root in roots)
+    ]
+
+
 #: The Landlock wrapper, which bwrap and firejail also run inside their sandbox for
 #: its seccomp socket filter alone (``--socket-filter``).
 LANDLOCK_EXEC = Path(__file__).with_name("landlock_exec.py")
@@ -180,7 +202,9 @@ def _hidden_around(
     of every directory that is hidden or walked here, whether it is blacklisted whole
     or kept for a path inside it, and the ones naming a directory above ``root``
     count too. A directory the policy grants whole is not searched for links: they
-    are inside what the policy itself reads. ``homes`` are the homes ``root`` was
+    are inside what the policy itself reads. Nothing in /tmp is hidden, and no
+    link target in a pseudo-filesystem (``_link_targets``) is followed. ``homes``
+    are the homes ``root`` was
     reached from; ``seen`` holds the directories already handled, each is handled
     once, so links among directories cannot loop.
     """
@@ -188,6 +212,10 @@ def _hidden_around(
     if root in seen:
         return []
     seen.add(root)
+    if _is_within(root, _real(_TMP_ROOT)):
+        # /tmp is covered by --private-tmp and the /tmp whitelists, whichever link
+        # led here.
+        return []
     inside = [p for p in shown if p == root or _is_within(p, root)]
     if root in inside:
         return []
@@ -212,7 +240,7 @@ def _hidden_around(
         else:
             hidden.append(entry)
             searched.append(entry)
-    for target in _home_link_targets(searched, files=True, ancestors=True):
+    for target in _link_targets(searched, files=True, ancestors=True):
         if target in seen or any(
             target == home or home in target.parents or target in home.parents
             for home in homes
@@ -670,7 +698,7 @@ class FirejailBackend(SandboxBackend):
         homes = [home] + (
             [home_variable] if home_variable not in (home, Path("/")) else []
         )
-        for target in _home_link_targets(homes, files=True):
+        for target in _link_targets(homes, files=True):
             if _is_within(target, tmp_root):
                 continue
             for hidden in _hidden_around(target, readable + writable, homes):
@@ -1048,7 +1076,7 @@ class SandboxExecBackend(SandboxBackend):
         # And each directory a link at the top of a home names (~/.local kept on
         # another disk), which is part of that home; the policy's own paths inside
         # it are allowed again after the denies, as they are inside the homes.
-        denied = homes + _home_link_targets(homes, files=True)
+        denied = homes + _link_targets(homes, files=True)
         # Caches are read-only here too; see _private_caches.
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})"
