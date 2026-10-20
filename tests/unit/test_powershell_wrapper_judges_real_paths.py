@@ -530,6 +530,17 @@ def test_a_quoted_workspace_flag_is_refused(flag, pwsh, recording_docker, tmp_pa
         pytest.param("k: &a extends\n*a : base.yaml\n", id="alias-as-a-key"),
         pytest.param("{k: &a extends, *a : base.yaml}\n", id="alias-as-a-flow-key"),
         pytest.param("&a extends: base.yaml\n", id="anchor-on-the-key"),
+        pytest.param(
+            "k: &a extends\n? *a\n: base.yaml\n", id="alias-as-an-explicit-key"
+        ),
+        pytest.param(
+            "k: &a extends\n?\n  *a\n: base.yaml\n",
+            id="alias-on-the-line-after-the-explicit-key-marker",
+        ),
+        pytest.param(
+            "{k: &a extends, ? *a : base.yaml}\n",
+            id="alias-as-an-explicit-flow-key",
+        ),
     ],
 )
 def test_an_outside_config_with_an_anchor_or_alias_on_a_key_is_refused(
@@ -549,6 +560,25 @@ def test_an_outside_config_with_an_anchor_or_alias_on_a_key_is_refused(
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert _recorded(tmp_path) == []
+
+
+def test_an_outside_config_with_a_plain_explicit_key_still_runs(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    """Control: an explicit key whose node is a plain scalar is not an alias."""
+    config = tmp_path / "operator" / "ash.yaml"
+    config.write_text("? project_name\n: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        f"-SourceDir repo/svc -OutputDir out -Config '{config}'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
 
 
 def test_an_outside_config_with_an_anchor_on_a_value_still_runs(
