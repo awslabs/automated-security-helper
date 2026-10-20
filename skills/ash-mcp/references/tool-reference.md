@@ -280,7 +280,7 @@ Verify an uploaded zip and extract it as this session's scan target.
 | `upload_id` | string | The identifier used for the preceding chunk calls. |
 | `expected_sha256` | string | Hex sha256 of the complete zip. |
 
-Refused while a scan of this session is running, for the same reason as `set_source_git`: `success: false`, `error_type: SourceDeliveryBusyError`, and `error` set to `Error finalizing source upload: a scan of this session is running; deliver the source after it finishes`. `set_source_zip_chunk` is not refused, so the chunks can be sent while the scan runs and the upload finalized after it ends.
+Refused while a scan of this session is running, for the same reason as `set_source_git`: `success: false`, `error_type: SourceDeliveryBusyError`, and `error` set to `Error finalizing source upload: a scan of this session is running; deliver the source after it finishes`. `set_source_zip_chunk` is not refused while a scan runs or while this call extracts another upload, so the chunks can be sent while the scan runs and the upload finalized after it ends. It is refused (`error_type: session_change_in_progress`) only while `clear_source` or the end of the session is removing the workspace; send the same chunk again then.
 
 ## suggest_suppression
 

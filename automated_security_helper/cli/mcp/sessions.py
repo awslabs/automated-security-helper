@@ -458,8 +458,11 @@ class MCPSessionRegistry:
 _default_registry: Optional[MCPSessionRegistry] = None
 _default_registry_lock = threading.Lock()
 
-#: Sessions that ended while a scan of theirs held the session lock. Their
-#: removal waits for the scan, so a scan's tree is never removed under it.
+#: Sessions that ended while a scan or a write (a chunk, a profile binding) of
+#: theirs held the session. Their removal waits for the scan or the write, so a
+#: tree a scan is reading and a file a request is appending to are never removed
+#: under it. A session is marked here before its removal is tried, and unmarked
+#: once the removal is done.
 _ended_while_scanning: Set[str] = set()
 _ended_lock = threading.Lock()
 
@@ -511,12 +514,15 @@ def end_session(session_id: str) -> bool:
     delivered-source record, its bound profile, and its registry entry. If a
     scan of the session is running, the removal waits until that scan returns
     (:func:`finish_ended_session`), because removing the tree a scan is reading
-    can turn its result into a clean one.
+    can turn its result into a clean one. It waits the same way for a write in
+    progress (a chunk of an upload, a profile binding), which the removal would
+    race.
 
     Idempotent.
 
     Returns:
-        True when everything was removed now, False when it waits for a scan.
+        True when everything was removed now, False when it waits for a scan or
+        a write.
     """
     session = get_default_registry().get(session_id)
     # Pending before the change is tried, and dropped once the removal is done.
@@ -539,7 +545,7 @@ def end_session(session_id: str) -> bool:
 
 
 def finish_ended_session(session_id: Optional[str]) -> None:
-    """Complete the removal of a session that ended while its scan ran."""
+    """Complete the removal of a session that ended while its scan or write ran."""
     if session_id is None:
         return
     with _ended_lock:

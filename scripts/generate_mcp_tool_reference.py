@@ -390,8 +390,11 @@ TOOL_NOTES: dict[str, dict] = {
                 "`set_source_git`: `success: false`, `error_type: SourceDeliveryBusyError`, "
                 "and `error` set to `Error finalizing source upload: a scan of this session "
                 "is running; deliver the source after it finishes`. "
-                "`set_source_zip_chunk` is not refused, so the chunks can be sent while the "
-                "scan runs and the upload finalized after it ends."
+                "`set_source_zip_chunk` is not refused while a scan runs or while this call "
+                "extracts another upload, so the chunks can be sent while the scan runs and "
+                "the upload finalized after it ends. It is refused (`error_type: "
+                "session_change_in_progress`) only while `clear_source` or the end of the "
+                "session is removing the workspace; send the same chunk again then."
             ),
         ],
     },
