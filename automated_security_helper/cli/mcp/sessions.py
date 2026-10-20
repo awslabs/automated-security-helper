@@ -750,8 +750,6 @@ def end_session(session_id: str) -> bool:
     except ValueError:
         session = None
     if session is not None and not session.try_begin_change():
-        with _ended_lock:
-            _ended_while_scanning.add(session_id)
         return False
     try:
         outcome = _remove_unless_a_scan_elsewhere_holds(session_id)
