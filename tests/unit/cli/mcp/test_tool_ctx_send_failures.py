@@ -3,29 +3,30 @@
 
 """A failed log message to the client does not replace a tool's result.
 
-``get_scan_results`` and ``get_scan_result_paths`` send their error log inside a
-guard, so a client whose transport has closed still gets the structured result.
-Every other tool awaited ``ctx.error`` bare in its refusal branches and its
-``except`` arms: the send raised, and the exception left the tool instead of the
-dict the client branches on. These tests give each tool family a context whose
-``error`` raises, drive one refusal or failure path, and check that the tool
-still returns its structured result.
+A client whose transport has closed makes every send to it raise, whatever the
+level. The tools send their logs through one guard, so the dict a tool returns
+is the same whether or not its sends arrive. These tests give each tool family a
+context whose sends all raise, drive one refusal, success or failure path, and
+check that the tool still returns its real result: a refusal stays a refusal, a
+success stays a success, and a scan that has started reports its scan_id.
 """
 
 from __future__ import annotations
 
+import ast
 import asyncio
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from automated_security_helper.cli import mcp_server
+from automated_security_helper.cli import mcp_server, mcp_tools
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
     clear_session_state,
 )
+from automated_security_helper.cli.mcp.scan_target import ScanTargetResolution
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
@@ -55,12 +56,11 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _ctx(session: str = SESSION) -> MagicMock:
-    """A context whose error log cannot be sent."""
+    """A context whose every send fails, as on a closed transport."""
     ctx = MagicMock()
     ctx.headers = {"mcp-session-id": session}
-    for name in ("info", "debug", "warning", "report_progress"):
-        setattr(ctx, name, AsyncMock())
-    ctx.error = AsyncMock(side_effect=RuntimeError("client gone"))
+    for name in ("info", "debug", "warning", "error", "report_progress"):
+        setattr(ctx, name, AsyncMock(side_effect=RuntimeError("client gone")))
     return ctx
 
 
@@ -210,6 +210,167 @@ def test_a_refused_output_directory_is_returned_when_the_log_send_fails(
     assert result["success"] is False, result
     assert result["error_type"] == "scan_target_not_permitted", result
     assert ctx.error.await_count == 1
+
+
+def test_a_refused_scan_target_is_returned_when_every_send_fails(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx()
+    refused = MCPResourceError(
+        "not a permitted directory",
+        context={"error_category": ErrorCategory.INVALID_PATH.value},
+    )
+
+    with patch.object(
+        mcp_server,
+        "resolve_scan_target",
+        return_value=ScanTargetResolution(error=refused),
+    ):
+        result = _call("run_ash_scan", ctx, {"source_dir": str(tmp_path)})
+
+    assert result["success"] is False, result
+    assert result["error_type"] == "scan_target_not_permitted", result
+    assert ctx.error.await_count == 1
+
+
+SUCCEEDING_BACKENDS = [
+    ("resolve_ash_workspace", {"workspace_file": "w"}, "mcp_resolve_workspace"),
+    ("run_ash_workspace_scan", {"workspace_file": "w"}, "mcp_scan_workspace"),
+    ("list_active_scans", {}, "mcp_list_active_scans"),
+    ("cancel_scan", {"scan_id": "s"}, "mcp_cancel_scan"),
+    ("check_installation", {}, "mcp_check_installation"),
+    ("set_source_git", {"url": "https://example.com/r.git"}, "mcp_set_source_git"),
+    (
+        "set_source_zip_finalize",
+        {"upload_id": "u", "expected_sha256": "0" * 64},
+        "mcp_set_source_zip_finalize",
+    ),
+    ("clear_source", {}, "mcp_clear_source"),
+    ("select_profile", {"profile_name": "p"}, "mcp_select_profile"),
+]
+
+
+@pytest.mark.parametrize(
+    "tool, kwargs, backend",
+    SUCCEEDING_BACKENDS,
+    ids=[t for t, _, _ in SUCCEEDING_BACKENDS],
+)
+def test_a_successful_result_is_returned_when_every_send_fails(
+    tool: str, kwargs: Dict[str, Any], backend: str
+) -> None:
+    ctx = _ctx()
+
+    with patch.object(
+        mcp_server,
+        backend,
+        return_value={"success": True, "exit_code": 0, "scan_ids": {}},
+    ):
+        result = _call(tool, ctx, kwargs)
+
+    assert result["success"] is True, result
+
+
+def _start_a_scan(ctx: MagicMock, tmp_path: Path) -> Dict[str, Any]:
+    with (
+        patch.object(
+            mcp_server,
+            "resolve_scan_target",
+            return_value=ScanTargetResolution(resolved=tmp_path),
+        ),
+        patch.object(mcp_server, "validate_output_tree", return_value=None),
+        patch.object(
+            mcp_server,
+            "mcp_scan_directory",
+            return_value={"success": True, "scan_id": "scan-1"},
+        ),
+        patch.object(mcp_server, "monitor_scan_progress", new=AsyncMock()),
+    ):
+        return _call("run_ash_scan", ctx, {"source_dir": str(tmp_path)})
+
+
+def test_a_running_scan_reports_its_scan_id_when_every_send_fails(
+    tmp_path: Path,
+) -> None:
+    result = _start_a_scan(_ctx(), tmp_path)
+
+    assert result["success"] is True, result
+    assert result["scan_id"] == "scan-1", result
+    assert result["status"] == "running", result
+
+
+def test_a_running_scan_reports_its_scan_id_when_only_the_started_send_fails(
+    tmp_path: Path,
+) -> None:
+    ctx = _ctx()
+    for name in ("debug", "warning", "error", "report_progress"):
+        setattr(ctx, name, AsyncMock())
+
+    async def _info(message: str) -> None:
+        if message.startswith("Scan started"):
+            raise RuntimeError("client gone")
+
+    ctx.info = AsyncMock(side_effect=_info)
+
+    result = _start_a_scan(ctx, tmp_path)
+
+    assert result["success"] is True, result
+    assert result["scan_id"] == "scan-1", result
+
+
+LOG_LEVELS = frozenset({"debug", "info", "warning", "error"})
+CONTEXT_NAMES = frozenset({"ctx", "context"})
+GUARD = "_tell_client"
+
+
+def _sends_outside_the_guard(source: str) -> List[int]:
+    """Line numbers of log sends on a context that are not inside the guard."""
+    lines: List[int] = []
+
+    def visit(node: ast.AST, inside_guard: bool) -> None:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == GUARD
+        ):
+            inside_guard = True
+        if (
+            not inside_guard
+            and isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in LOG_LEVELS
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in CONTEXT_NAMES
+        ):
+            lines.append(node.lineno)
+        for child in ast.iter_child_nodes(node):
+            visit(child, inside_guard)
+
+    visit(ast.parse(source), False)
+    return lines
+
+
+def test_the_structural_check_flags_a_bare_send_and_passes_a_guarded_one() -> None:
+    source = (
+        "async def _tell_client(ctx, level, message):\n"
+        "    await ctx.info(message)\n"
+        "async def tool(ctx):\n"
+        "    logger.info('not a client send')\n"
+        "    await _tell_client(ctx, 'info', 'ok')\n"
+        "    await ctx.warning('bare')\n"
+    )
+
+    assert _sends_outside_the_guard(source) == [6]
+
+
+@pytest.mark.parametrize("module", [mcp_server, mcp_tools], ids=["server", "tools"])
+def test_no_client_send_sits_outside_the_guard(module: Any) -> None:
+    path = Path(module.__file__)
+
+    lines = _sends_outside_the_guard(path.read_text(encoding="utf-8"))
+
+    assert not lines, (
+        f"{path.name} sends to the client outside {GUARD} at line(s) "
+        f"{', '.join(str(n) for n in lines)}"
+    )
 
 
 def test_control_a_working_log_send_is_awaited_once_with_the_error() -> None:
