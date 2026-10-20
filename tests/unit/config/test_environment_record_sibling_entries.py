@@ -101,6 +101,47 @@ def test_a_plain_sibling_equal_to_the_value_does_not_claim_the_reference(monkeyp
 
     assert recorded["ignore_paths"][1] == "/work/cfg/" + REFERENCE
     assert "vendor" not in recorded["ignore_paths"][1]
+    # Index 0 is the file's own literal. It is the same text as the value, and
+    # it stays as the file wrote it.
+    assert recorded["ignore_paths"][0] == "vendor"
+
+
+def test_a_plain_sibling_equal_to_the_value_is_left_when_the_reference_is_whole(
+    monkeypatch,
+):
+    """Both entries are the value whole. The reference is the second entry's, so
+    the first, the file's literal, is not recorded as the reference."""
+    written = {"ignore_paths": ["vendor", REFERENCE]}
+    resolved = {"ignore_paths": ["vendor", "vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(resolved, references)
+
+    assert recorded == {"ignore_paths": ["vendor", REFERENCE]}
+
+
+def test_a_view_leaves_a_plain_sibling_equal_to_the_value(monkeypatch):
+    written = {"ignore_paths": ["vendor", REFERENCE]}
+    resolved = {"ignore_paths": ["vendor", "vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    shown = record_environment_references(resolved, references, mark=environment_marker)
+
+    assert shown == {"ignore_paths": ["vendor", environment_marker(REFERENCE)]}
+
+
+def test_a_whole_entry_is_found_when_defaults_shift_its_entry(monkeypatch):
+    """The control: the reference's own entry is gone, so the entry equal to the
+    value is found at the index it moved to."""
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["default/a", "vendor"]}, references
+    )
+
+    assert recorded == {"ignore_paths": ["default/a", REFERENCE]}
 
 
 def test_an_overridden_entry_does_not_rewrite_an_unrelated_sibling(monkeypatch):

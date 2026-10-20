@@ -35,10 +35,11 @@ Where
 Each reference is replaced at its own position: the path of keys at which the
 file wrote it, spelled with ``-`` or ``_`` (the record keys a built-in plugin's
 section by its field name), and moved to where a ``patch`` operation puts its
-value. In a list a string equal to the value is recorded as the reference at any
-index. A string elsewhere that happens to equal the value is left alone, so a
+value. A string equal to the value is recorded as the reference at the reference's
+own index. A string elsewhere that happens to equal the value is left alone, so a
 field the file set to "us-east-1" is not recorded as ``${AWS_REGION}`` because
-that variable holds the same text. At its own position, index included, a string
+that variable holds the same text, and a list entry the file wrote as the same
+text as the value of an entry beside it stays as written. At its own position, index included, a string
 the load changed after reading it (a relative path the load takes from the
 file's directory) has the part read from the environment replaced inside it; a
 neighboring entry that only contains the same text is left as it is. If the entry
@@ -451,7 +452,11 @@ class _Index:
         if isinstance(item, str):
             here = self.values.get(path)
             if here:
-                return self._string(item, here, self.pending(exact, here, item))
+                # A whole string is read against the same references as a longer
+                # one: a plain entry equal to the value, beside the reference's
+                # own entry, is the file's own text and stays as written.
+                candidates = self.pending(exact, here, item)
+                return self._string(item, candidates, candidates)
         return item
 
     def fill(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
