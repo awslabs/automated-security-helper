@@ -1394,12 +1394,16 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         netrc.write_text("machine example login me password x\n")
         (linked.home / ".netrc").symlink_to(netrc)
 
-        at, lines, _allowed = self._sbpl_after_deny(
+        at, lines, allowed = self._sbpl_after_deny(
             _policy(layout, argv0="/usr/bin/true"), tmp_path, netrc
         )
 
         read_everywhere = lines.index('(allow file-read* (subpath "/"))')
         assert read_everywhere < at
+        # No allow after the deny covers the file or a directory above it.
+        real = Path(_as_argv(netrc))
+        covering = [p for p in allowed if Path(p) == real or Path(p) in real.parents]
+        assert not covering, covering
 
     def test_firejail_keeps_a_scanned_tree_kept_in_a_linked_directory(
         self, layout, tmp_path, fake_tmp
