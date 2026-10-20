@@ -134,6 +134,15 @@ CHANGE_REFUSED_BY_CHANGE = "other-change"
 CHANGE_REFUSED_BY_WRITE = "write"
 
 
+#: Why :meth:`MCPSession.try_begin_write` refused: the TTL sweep is removing the
+#: session, so its state is gone once it is done.
+WRITE_REFUSED_BY_SWEEP = "sweep"
+
+#: Why :meth:`MCPSession.try_begin_write` refused: a change to the session's tree
+#: holds it, and the files of an upload may or may not outlive that change.
+WRITE_REFUSED_BY_CHANGE = "change"
+
+
 class MCPSession(BaseModel):
     """Per-connection state for an MCP client.
 
@@ -894,6 +903,31 @@ def finish_ended_session(session_id: Optional[str]) -> None:
 
 #: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
 SESSION_WORKSPACE_BUSY = "session_workspace_busy"
+
+#: ``error_type`` the MCP tools return for :class:`SessionChangeInProgressError`.
+SESSION_CHANGE_IN_PROGRESS = "session_change_in_progress"
+
+
+class SessionWorkspaceBusyError(RuntimeError):
+    """A write to a session's state was refused: the TTL sweep is removing it.
+
+    The session's state is gone once the removal is done, so the request is sent
+    again from the start, an upload from its first chunk.
+    """
+
+    error_type = SESSION_WORKSPACE_BUSY
+
+
+class SessionChangeInProgressError(SessionWorkspaceBusyError):
+    """A write to a session's state was refused: a change to its tree holds it.
+
+    The request is sent again as it is once the change is done. A chunk is sent
+    with the same sequence number; only an out-of-order answer then means that
+    the upload was removed by the change, and the upload is sent again from its
+    first chunk.
+    """
+
+    error_type = SESSION_CHANGE_IN_PROGRESS
 
 
 class SessionWorkspaceBusyError(RuntimeError):
@@ -1867,7 +1901,9 @@ __all__ = [
     "MCPSessionRegistry",
     "PresenceLockError",
     "SESSION_SCAN_LIMIT",
+    "SESSION_CHANGE_IN_PROGRESS",
     "SESSION_WORKSPACE_BUSY",
+    "SessionChangeInProgressError",
     "ScanCount",
     "SessionWorkspaceBusyError",
     "StdioServerPresence",
