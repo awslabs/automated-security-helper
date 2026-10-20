@@ -201,6 +201,11 @@ CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
 CONFIG_FIELD_DENIED = "config_field_denied"
 #: ``error_type`` for a client-delivered config whose policy cannot be established.
 CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
+#: ``error_type`` for a scan refused because the check of the config sources in
+#: its target could not finish (an unreadable entry, a link loop). The config is
+#: not known to be outside the permitted roots, so this is not
+#: ``CONFIG_INPUT_NOT_PERMITTED``.
+CONFIG_CHECK_FAILED = "config_check_failed"
 
 #: ``error_type`` of the refusal of a config file an MCP client delivered that
 #: reads from the environment, which such a file may not
@@ -1095,8 +1100,15 @@ def _plugin_module_refusal(
     )
 
 
+class ConfigCheckFailedError(MCPResourceError):
+    """The check of a scan target's config sources could not finish."""
+
+
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
+
+    A check that could not finish is ``CONFIG_CHECK_FAILED`` instead: it did not
+    find the config outside the roots, so the fix for that refusal does not apply.
 
     No ``context`` key, unlike ``create_error_response``: it would carry the
     resolved path, and the caller's own spelling in ``error`` already identifies
@@ -1307,7 +1319,7 @@ def _discovered_config_refusal(
         # target may be read at all, so one that cannot finish stops the scan
         # here, as a refusal the caller can read.
         _logger.warning(f"Config sources not checked before the scan: {exc}")
-        return MCPResourceError(
+        return ConfigCheckFailedError(
             f"The configuration found in {target.as_posix()} could not be checked "
             f"against the permitted roots: {type(exc).__name__}",
             context={

@@ -426,6 +426,7 @@ can tell the reason apart from a scan that failed to start (`scan_start_failure`
 | `error_type` | Returned by | Meaning |
 |---|---|---|
 | `config_input_not_permitted` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The config path, or a base its `extends` chain names, is outside the directories this session may read a config from |
+| `config_check_failed` | `run_ash_scan` | The check of the config sources in the scan target could not finish (an unreadable entry, a link loop), so the scan was not started. The config was not found outside the permitted roots; check the config files in the target for unreadable entries and link loops |
 | `config_field_denied` | `run_ash_scan`, `get_config` | A config file an MCP client delivered or named sets a field the session's runtime-override policy denies; `error` names each field |
 | `denied_by_runtime_policy` | `validate_config`, as an error `type` | The same, one error per field, with the field in `field` |
 | `config_policy_unreadable` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The session's runtime-override policy cannot be established, for example because the profile it bound is no longer registered |
