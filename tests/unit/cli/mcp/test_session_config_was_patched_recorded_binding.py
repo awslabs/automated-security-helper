@@ -12,9 +12,14 @@ session says so. These cells reach that second answer and its error arms:
 
 * the location answer misses and a patched binding names the file: True;
 * an unpatched binding, or a binding for another file: False;
-* a bound state with no config path, and one whose path cannot be resolved, are
+* a bound state with no config path, and one whose path is a symlink loop, are
   skipped and the search goes on;
-* a file whose own path cannot be resolved is not a patched profile.
+* a file whose own path is a symlink loop is not a patched profile, with the
+  workspace root in place.
+
+The loops are real symlink loops. Resolving one raises ``RuntimeError`` on
+Python 3.12 and earlier and returns normally on 3.13, so on 3.13 these cells
+check the answers and cannot reach the ``except`` arms.
 """
 
 from __future__ import annotations
@@ -106,42 +111,34 @@ def test_a_state_with_no_config_path_is_skipped(tmp_path) -> None:
     assert session_config_was_patched(target) is True
 
 
-def test_a_state_whose_path_cannot_be_resolved_is_skipped(
-    tmp_path, monkeypatch
-) -> None:
+def _symlink_loop(tmp_path: Path) -> Path:
+    """A path that is a symlink loop (a -> b -> a); resolving it can fail."""
+    directory = tmp_path / "looped"
+    directory.mkdir()
+    first = directory / "a"
+    second = directory / "b"
+    first.symlink_to(second)
+    second.symlink_to(first)
+    return first
+
+
+def test_a_state_whose_path_is_a_symlink_loop_is_skipped(tmp_path) -> None:
     target = _outside_file(tmp_path)
-    unresolvable = tmp_path / "BOOM" / "ash.yaml"
-    _bind("unresolvable", unresolvable, patch_ops=PATCH)
+    looped = _symlink_loop(tmp_path)
+    _bind("looped", looped, patch_ops=PATCH)
     _bind("resolvable", target, patch_ops=PATCH)
-    real_resolve = Path.resolve
 
-    def resolve(self, *args, **kwargs):
-        if "BOOM" in self.parts:
-            raise OSError("simulated resolution failure")
-        return real_resolve(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "resolve", resolve)
-
-    # The bad state comes first; the good one after it is still found.
+    # The looped state comes first; the good one after it is still found.
     assert session_config_was_patched(target) is True
     assert session_config_was_patched(_outside_file(tmp_path, "z.yaml")) is False
 
 
-def test_a_file_that_cannot_be_resolved_is_not_a_patched_profile(
-    tmp_path, monkeypatch
-) -> None:
-    unresolvable = tmp_path / "BOOM" / "ash.yaml"
-    _bind("s1", unresolvable, patch_ops=PATCH)
-    # No shared workspace root: the first answer is skipped, so the file's own
-    # resolution is what fails.
-    monkeypatch.setattr(sandbox, "shared_workspace_root", lambda: None)
-    real_resolve = Path.resolve
+def test_a_file_that_is_a_symlink_loop_is_not_a_patched_profile(tmp_path, root) -> None:
+    looped = _symlink_loop(tmp_path)
+    _bind("other", _outside_file(tmp_path), patch_ops=PATCH)
+    # The workspace root is in place, so the location answer runs first and
+    # resolves the same path.
+    assert sandbox.shared_workspace_root() is not None
+    assert root not in looped.parents
 
-    def resolve(self, *args, **kwargs):
-        if "BOOM" in self.parts:
-            raise OSError("simulated resolution failure")
-        return real_resolve(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "resolve", resolve)
-
-    assert session_config_was_patched(unresolvable) is False
+    assert session_config_was_patched(looped) is False
