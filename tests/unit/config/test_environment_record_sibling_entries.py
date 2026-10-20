@@ -266,6 +266,36 @@ def _placed_patch_reference(monkeypatch, pointer, value, resolved_value="vendor"
     return placed
 
 
+def test_a_patch_pointer_places_an_append_as_an_unknown_index_and_a_digit_as_itself(
+    monkeypatch,
+):
+    from automated_security_helper.config import environment_record
+
+    (appended,) = _placed_patch_reference(monkeypatch, "/ignore_paths/-", REFERENCE)
+    (numbered,) = _placed_patch_reference(monkeypatch, "/ignore_paths/2", REFERENCE)
+
+    assert appended.path == ("ignore_paths", environment_record.UNKNOWN_INDEX)
+    assert numbered.path == ("ignore_paths", 2)
+
+
+def test_a_list_in_a_patch_value_keeps_its_length_when_defaults_shift_it(monkeypatch):
+    """``add /ignore_paths`` with a one-entry list as its value: the merged list
+    is longer than the one the file wrote, and its entry is found by shape."""
+    placed = _placed_patch_reference(
+        monkeypatch, "/ignore_paths", [REFERENCE], ["vendor"]
+    )
+    assert placed[0].path == ("ignore_paths", 0), placed
+    assert placed[0].length == 1, placed
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["third_party/vendor_libs", "/work/cfg/vendor"]}, placed
+    )
+
+    assert recorded == {
+        "ignore_paths": ["third_party/vendor_libs", "/work/cfg/" + REFERENCE]
+    }
+
+
 def test_a_patch_appended_entry_is_recorded_and_the_first_entry_is_left(monkeypatch):
     """The patch appends the reference to a list that already has an entry. The
     appended entry, anchored by the load, is found at the last index; the entry
