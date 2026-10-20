@@ -455,10 +455,10 @@ def _config_behind_links(tmp_path: Path, count: int) -> Path:
 def test_a_config_behind_45_links_one_after_another_is_refused(
     pwsh, recording_docker, checkout, tmp_path
 ):
-    """The follow walk gives up after 40 links by treating the config as reached
-    through a link in a checkout. The kernel stops a path at 40 links on Linux, so
-    the config is not found before the walk is reached there; the cell pins that a
-    path this long is refused, whichever check meets it first."""
+    """The path walk follows at most 40 links, counted over the whole walk, and
+    refuses a path with more. The walk meets one link at a time, so it reaches the
+    limit on Linux and macOS before the kernel's own limit does, and the refusal
+    names the count."""
     config = _config_behind_links(tmp_path, 45)
 
     result = _invoke(
@@ -470,6 +470,25 @@ def test_a_config_behind_45_links_one_after_another_is_refused(
 
     assert result.returncode == 3, result.stdout + result.stderr
     assert _recorded(tmp_path) == []
+    stderr = _stderr(result)
+    assert "more than 40 links" in stderr
+    assert "the walk reached 41" in stderr
+
+
+def test_a_chain_of_41_links_to_the_output_directory_is_refused(
+    pwsh, recording_docker, tmp_path
+):
+    """The same limit, counted the same way, for the output directory."""
+    (tmp_path / "src").mkdir()
+    _chain_of_links(tmp_path, 41)
+
+    result = _invoke(pwsh, tmp_path, recording_docker, "-SourceDir src -OutputDir hop0")
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+    stderr = _stderr(result)
+    assert "more than 40 links" in stderr
+    assert "the walk reached 41" in stderr
 
 
 def test_a_config_behind_20_links_one_after_another_is_not_marked(
