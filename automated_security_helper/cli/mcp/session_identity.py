@@ -439,9 +439,14 @@ def session_identity_refusal(
             f"{operation} needs a session, and this call carries none the server "
             f"issued. A stateless streamable-HTTP server issues no session, and an "
             f"Mcp-Session-Id header the server did not issue does not name one. "
-            f"Use a stateful server (without --stateless-http), or, when a "
-            f"platform in front of ASH issues and authenticates Mcp-Session-Id, "
-            f"start the server with --trust-upstream-session-id."
+            f"On a stateful server a session tool also needs a handshake "
+            f"Mcp-Protocol-Version: a request that names a newer protocol version "
+            f"names no session, whatever Mcp-Session-Id it sends, so send the "
+            f"protocol version the initialize handshake negotiated. To serve "
+            f"sessions at all, use a stateful server (without --stateless-http), "
+            f"or, when a platform in front of ASH issues and authenticates "
+            f"Mcp-Session-Id, start a stateless server with "
+            f"--trust-upstream-session-id."
         ),
     }
 
