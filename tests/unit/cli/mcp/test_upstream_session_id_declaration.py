@@ -28,10 +28,6 @@ import typer
 from starlette.testclient import TestClient
 
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
-from automated_security_helper.cli.mcp.http_sessions import (
-    MODE_STATEFUL,
-    SessionBoundary,
-)
 from automated_security_helper.cli.mcp.session_identity import (
     SESSION_IDENTITY_REQUIRED,
 )
@@ -40,6 +36,7 @@ from tests.utils.mcp_transport_harness import (
     LOOPBACK_PORT,
     STREAMABLE_HEADERS,
     StreamableHttpClient,
+    boundary_of,
     tool_payload,
 )
 
@@ -321,16 +318,7 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
     result = tool_payload(response.json())
     assert result.get("success") is False, result
     assert result.get("error_type") == "scan_target_not_permitted", result
-    assert _boundary_of(app)._issued == set()
-
-
-def _boundary_of(app) -> SessionBoundary:
-    """The ``SessionBoundary`` layer of a built app, once it has served a request."""
-    layer = app.middleware_stack
-    while layer is not None and not isinstance(layer, SessionBoundary):
-        layer = getattr(layer, "app", None)
-    assert layer is not None, "the app has no SessionBoundary layer"
-    return layer
+    assert boundary_of(app)._issued == set()
 
 
 def test_a_stateful_server_gives_an_issued_id_no_identity_on_the_newer_protocol() -> (
@@ -394,100 +382,6 @@ def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
     assert refusal is not None
     assert "newer protocol version" in refusal["error"], refusal
     assert "Mcp-Protocol-Version" in refusal["error"], refusal
-
-
-def _drive_stateful_boundary(response_headers, request_headers) -> SessionBoundary:
-    """One request through a stateful boundary whose app answers 200.
-
-    The inner app sends ``response_headers`` on its response, so a test decides
-    what the boundary sees without running the SDK.
-    """
-    import asyncio
-
-    async def inner(scope, receive, send) -> None:
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 200,
-                "headers": response_headers(scope),
-            }
-        )
-        await send({"type": "http.response.body", "body": b""})
-
-    boundary = SessionBoundary(inner, mode=MODE_STATEFUL, endpoint_path="/mcp")
-    # No workspace sweep: this drives the boundary alone.
-    boundary._next_sweep = float("inf")
-
-    async def receive():
-        return {"type": "http.request", "body": b"", "more_body": False}
-
-    async def send(_message) -> None:
-        return None
-
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/mcp",
-        "root_path": "",
-        "query_string": b"",
-        "headers": request_headers,
-    }
-    asyncio.run(boundary(scope, receive, send))
-    return boundary
-
-
-class TestStatefulBoundaryRecordsOnlyIssuedIds:
-    def test_a_2xx_echoing_a_client_chosen_header_is_not_recorded(self) -> None:
-        boundary = _drive_stateful_boundary(
-            lambda scope: [(b"mcp-session-id", b"client-chosen")],
-            [(b"mcp-session-id", b"client-chosen")],
-        )
-
-        assert boundary._issued == set()
-
-    def test_an_id_on_a_response_to_a_request_without_one_is_recorded(self) -> None:
-        boundary = _drive_stateful_boundary(
-            lambda scope: [(b"mcp-session-id", b"server-issued")], []
-        )
-
-        assert boundary._issued == {"server-issued"}
-
-    def test_a_2xx_carrying_another_id_than_the_request_names_is_not_recorded(
-        self,
-    ) -> None:
-        boundary = _drive_stateful_boundary(
-            lambda scope: [(b"mcp-session-id", b"B")], [(b"mcp-session-id", b"A")]
-        )
-
-        assert boundary._issued == set()
-
-    def test_an_id_on_the_newer_protocols_sessionless_path_is_not_recorded(
-        self,
-    ) -> None:
-        boundary = _drive_stateful_boundary(
-            lambda scope: [(b"mcp-session-id", b"fresh")],
-            [(b"mcp-protocol-version", b"2026-07-28")],
-        )
-
-        assert boundary._issued == set()
-
-    def test_the_session_path_is_decided_once_per_request(self, monkeypatch) -> None:
-        from automated_security_helper.cli.mcp import http_sessions
-
-        real = http_sessions._through_the_sdk_session_check
-        calls: list = []
-
-        def counting(scope, handshake_versions):
-            calls.append(scope.get("method"))
-            return real(scope, handshake_versions)
-
-        monkeypatch.setattr(http_sessions, "_through_the_sdk_session_check", counting)
-
-        _drive_stateful_boundary(
-            lambda scope: [(b"mcp-session-id", b"server-issued")], []
-        )
-
-        assert len(calls) == 1
 
 
 def test_the_ash_command_line_forwards_the_declaration(monkeypatch) -> None:

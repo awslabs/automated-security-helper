@@ -20,7 +20,6 @@ import io
 import sys
 import zipfile
 from pathlib import Path
-from typing import Any
 
 import pytest
 from starlette.testclient import TestClient
@@ -37,6 +36,7 @@ from tests.utils.mcp_transport_harness import (
     LOOPBACK_PORT,
     STREAMABLE_HEADERS,
     StreamableHttpClient,
+    boundary_of,
 )
 
 
@@ -46,15 +46,6 @@ def workspace(tmp_path, monkeypatch) -> Path:
     root.mkdir()
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
     return root
-
-
-def _boundary(app: Any) -> SessionBoundary:
-    """The SessionBoundary instance in a built app's middleware stack."""
-    layer = app.middleware_stack
-    while layer is not None and not isinstance(layer, SessionBoundary):
-        layer = getattr(layer, "app", None)
-    assert isinstance(layer, SessionBoundary), "no SessionBoundary in the stack"
-    return layer
 
 
 def _deliver(http: StreamableHttpClient, headers) -> Path:
@@ -94,7 +85,7 @@ def test_refused_opening_requests_record_no_session() -> None:
             ).status_code
             for n in range(20)
         }
-        issued = set(_boundary(app)._issued)
+        issued = set(boundary_of(app)._issued)
 
     assert statuses and all(status >= 400 for status in statuses), statuses
     assert issued == set(), f"{len(issued)} refused requests were recorded as sessions"
@@ -116,7 +107,7 @@ def test_a_session_the_sdk_discarded_is_ended(workspace) -> None:
         mcp.session_manager._server_instances.pop(session_id)
 
         status, _message = http.rpc("tools/list", None, headers)
-        remembered = session_id in _boundary(app)._issued
+        remembered = session_id in boundary_of(app)._issued
         # Read before the client closes: shutdown ends every remembered session.
         still_on_disk = sandbox.exists()
 
@@ -144,7 +135,7 @@ def test_a_404_from_a_path_the_app_has_no_route_for_ends_nothing(
         response = client.request(
             method, path, headers={**STREAMABLE_HEADERS, **headers}
         )
-        remembered = session_id in _boundary(app)._issued
+        remembered = session_id in boundary_of(app)._issued
         still_on_disk = sandbox.is_dir()
         status, _message = http.rpc("tools/list", None, headers)
 
@@ -172,7 +163,7 @@ def test_a_404_on_the_endpoint_under_another_mount_path_still_ends_it(
         mcp.session_manager._server_instances.pop(session_id)
 
         status, _message = http.rpc("tools/list", None, headers)
-        remembered = session_id in _boundary(app)._issued
+        remembered = session_id in boundary_of(app)._issued
         still_on_disk = sandbox.exists()
 
     assert unrouted.status_code == 404 and kept
@@ -209,7 +200,7 @@ def test_a_404_on_the_newer_protocol_path_ends_nothing(workspace) -> None:
                 "Mcp-Method": "no/such-method",
             },
         )
-        remembered = session_id in _boundary(app)._issued
+        remembered = session_id in boundary_of(app)._issued
         still_on_disk = sandbox.is_dir()
 
     assert response.status_code == 404, response.text[:200]
@@ -260,6 +251,61 @@ def _call(boundary: SessionBoundary, method: str = "POST", headers=()) -> None:
         "headers": list(headers),
     }
     asyncio.run(boundary(scope, receive, send))
+
+
+def _drive(response_headers, request_headers) -> SessionBoundary:
+    """One POST through a stateful boundary whose app answers 200."""
+    boundary, _seen = _stateful_boundary(response_headers=response_headers)
+    _call(boundary, headers=request_headers)
+    return boundary
+
+
+class TestStatefulBoundaryRecordsOnlyIssuedIds:
+    def test_a_2xx_echoing_a_client_chosen_header_is_not_recorded(self) -> None:
+        boundary = _drive(
+            [(b"mcp-session-id", b"client-chosen")],
+            [(b"mcp-session-id", b"client-chosen")],
+        )
+
+        assert boundary._issued == set()
+
+    def test_an_id_on_a_response_to_a_request_without_one_is_recorded(self) -> None:
+        boundary = _drive([(b"mcp-session-id", b"server-issued")], [])
+
+        assert boundary._issued == {"server-issued"}
+
+    def test_a_2xx_carrying_another_id_than_the_request_names_is_not_recorded(
+        self,
+    ) -> None:
+        boundary = _drive([(b"mcp-session-id", b"B")], [(b"mcp-session-id", b"A")])
+
+        assert boundary._issued == set()
+
+    def test_an_id_on_the_newer_protocols_sessionless_path_is_not_recorded(
+        self,
+    ) -> None:
+        boundary = _drive(
+            [(b"mcp-session-id", b"fresh")],
+            [(b"mcp-protocol-version", b"2026-07-28")],
+        )
+
+        assert boundary._issued == set()
+
+    def test_the_session_path_is_decided_once_per_request(self, monkeypatch) -> None:
+        from automated_security_helper.cli.mcp import http_sessions
+
+        real = http_sessions._through_the_sdk_session_check
+        calls: list = []
+
+        def counting(scope, handshake_versions):
+            calls.append(scope.get("method"))
+            return real(scope, handshake_versions)
+
+        monkeypatch.setattr(http_sessions, "_through_the_sdk_session_check", counting)
+
+        _drive([(b"mcp-session-id", b"server-issued")], [])
+
+        assert len(calls) == 1
 
 
 def test_a_stateful_boundary_cannot_be_built_without_the_sdks_version_list(
@@ -329,7 +375,7 @@ def test_a_newer_protocol_delete_leaves_the_session_workspace(workspace) -> None
         session_id, headers = http.open_session()
         sandbox = _deliver(http, headers)
         status = http.end_session({**headers, "Mcp-Protocol-Version": "2026-07-28"})
-        remembered = session_id in _boundary(app)._issued
+        remembered = session_id in boundary_of(app)._issued
         still_on_disk = sandbox.exists()
 
     assert remembered, f"the session was forgotten (DELETE answered {status})"
