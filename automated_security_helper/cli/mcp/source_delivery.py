@@ -397,12 +397,26 @@ _GIT_ARGV: Tuple[str, ...] = (GIT_PROGRAM,)
 #: :class:`GitTimeoutError`.
 GIT_TIMEOUT_SECONDS = 600
 
+
+class CloneRefusedError(RuntimeError):
+    """A clone was stopped or refused; the partial tree is removed.
+
+    A subclass names its ``error_type``. ``_clone_into_session`` removes the
+    partial tree for every subclass, and ``mcp_set_source_git`` returns the
+    subclass's ``error_type``, so a new refusal type needs no other change.
+    """
+
+    error_type = "clone_refused"
+
+
 #: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
 CLONE_TIMED_OUT = "clone_timed_out"
 
 
-class GitTimeoutError(RuntimeError):
+class GitTimeoutError(CloneRefusedError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
+
+    error_type = CLONE_TIMED_OUT
 
 
 #: Bytes a clone may grow the session's source directory to, the same limit the
@@ -418,16 +432,20 @@ GIT_POLL_SECONDS = 0.5
 CLONE_TOO_LARGE = "clone_too_large"
 
 
-class CloneTooLargeError(RuntimeError):
+class CloneTooLargeError(CloneRefusedError):
     """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
+
+    error_type = CLONE_TOO_LARGE
 
 
 #: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
 CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
 
 
-class CloneTreeUnreadableError(RuntimeError):
+class CloneTreeUnreadableError(CloneRefusedError):
     """The tree a git command wrote could not be read once the command had exited."""
+
+    error_type = CLONE_TREE_UNREADABLE
 
 
 def _walk_failed(error: OSError) -> None:
@@ -930,7 +948,7 @@ def _clone_into_session(
     env = _git_environment(session_dir)
     try:
         _clone(url, ref, git=git, depth=depth, target=target, env=env)
-    except (GitTimeoutError, CloneTooLargeError, CloneTreeUnreadableError):
+    except CloneRefusedError:
         shutil.rmtree(target, ignore_errors=True)
         raise
 

@@ -2670,12 +2670,7 @@ def mcp_set_source_git(
     from automated_security_helper.cli.mcp.source_delivery import (
         ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
         SOURCE_DELIVERY_BUSY,
-        CLONE_TIMED_OUT,
-        CLONE_TOO_LARGE,
-        CLONE_TREE_UNREADABLE,
-        CloneTooLargeError,
-        CloneTreeUnreadableError,
-        GitTimeoutError,
+        CloneRefusedError,
         SourceDeliveryBusyError,
         _refuse_ssh_key_id,
         _validate_clone_url,
@@ -2747,12 +2742,8 @@ def mcp_set_source_git(
         # A RuntimeError too, so it is caught first: a client retries this one
         # after the scan ends, and branches on error_type to know that.
         return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
-    except GitTimeoutError as e:
-        return {"success": False, "error": str(e), "error_type": CLONE_TIMED_OUT}
-    except CloneTooLargeError as e:
-        return {"success": False, "error": str(e), "error_type": CLONE_TOO_LARGE}
-    except CloneTreeUnreadableError as e:
-        return {"success": False, "error": str(e), "error_type": CLONE_TREE_UNREADABLE}
+    except CloneRefusedError as e:
+        return {"success": False, "error": str(e), "error_type": e.error_type}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
