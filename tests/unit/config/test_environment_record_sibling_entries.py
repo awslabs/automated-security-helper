@@ -404,3 +404,36 @@ def test_a_reference_at_an_unknown_index_is_read_into_the_anchored_entry(
     assert recorded == {
         "ignore_paths": ["third_party/vendor_libs", "/work/cfg/" + REFERENCE]
     }
+
+
+def test_a_mapping_key_named_star_is_matched_by_its_own_name(monkeypatch):
+    """A key spelled ``*`` is a key like any other: the reference the file wrote
+    under it is read into a longer string there, as at any named key."""
+    written = {"options": {"*": REFERENCE, "other": "vendor_libs"}}
+    resolved = {"options": {"*": "vendor", "other": "vendor_libs"}}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"options": {"*": "vendor_libs", "other": "vendor_libs"}}, references
+    )
+
+    assert recorded == {"options": {"*": REFERENCE + "_libs", "other": "vendor_libs"}}
+
+
+def test_an_unknown_index_still_reads_only_into_the_anchored_entry(monkeypatch):
+    """The control for the cell above: a real unknown index is not a key, and a
+    string that merely contains the value there is left as the file wrote it."""
+    from automated_security_helper.config import environment_record
+
+    written = {"ignore_paths": [REFERENCE]}
+    resolved = {"ignore_paths": ["vendor"]}
+    (reference,) = _read(monkeypatch, written, resolved)
+    unknown = reference.at(("ignore_paths", environment_record.UNKNOWN_INDEX))
+
+    recorded = record_environment_references(
+        {"ignore_paths": ["vendor_libs"]}, [unknown]
+    )
+
+    assert recorded == {"ignore_paths": ["vendor_libs"]}
+    assert unknown.position_unknown
+    assert not reference.at(("ignore_paths", "*")).position_unknown

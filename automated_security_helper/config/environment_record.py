@@ -91,10 +91,22 @@ from automated_security_helper.config.ash_config import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 #: One step of a path into a configuration: a mapping key or a list index.
-PathSegment = Union[str, int]
+PathSegment = Union[str, int, "_AnyIndex"]
+
+
+class _AnyIndex:
+    """The marker for "any list position" in a path. An object of its own, never
+    a string, so no mapping key (``"*"`` included) can equal it. Paths are held in
+    memory only, so the marker is never written out."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<any index>"
+
 
 #: A list index in a normalized path: any position matches.
-_ANY_INDEX = "*"
+_ANY_INDEX = _AnyIndex()
 
 #: A list index a reference's path cannot name, such as the ``-`` of a patch
 #: operation that appends: the entry is found by the shape the load gives it.
@@ -254,7 +266,7 @@ def environment_references(
 
 
 def _normal(segment: PathSegment) -> PathSegment:
-    if isinstance(segment, int):
+    if isinstance(segment, (int, _AnyIndex)):
         return _ANY_INDEX
     return segment.replace("-", "_").lower()
 
