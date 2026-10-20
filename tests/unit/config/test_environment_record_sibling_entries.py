@@ -367,6 +367,26 @@ def test_a_reference_in_a_mapping_entry_is_found_when_defaults_shift_its_entry(
     ]
 
 
+def test_a_mapping_entry_beside_the_reference_is_left_while_the_list_has_its_length(
+    monkeypatch,
+):
+    """The reference is inside the first mapping and that entry still holds the
+    value; the second mapping ends with the same text and is the file's own."""
+    written = {"suppressions": [{"path": REFERENCE}, {"path": "old/vendor"}]}
+    resolved = {"suppressions": [{"path": "vendor"}, {"path": "old/vendor"}]}
+    references = _read(monkeypatch, written, resolved)
+
+    recorded = record_environment_references(
+        {"suppressions": [{"path": "/work/cfg/vendor"}, {"path": "old/vendor"}]},
+        references,
+    )
+
+    assert recorded["suppressions"] == [
+        {"path": "/work/cfg/" + REFERENCE},
+        {"path": "old/vendor"},
+    ]
+
+
 def test_a_reference_at_an_unknown_index_is_read_into_the_anchored_entry(
     monkeypatch,
 ):
