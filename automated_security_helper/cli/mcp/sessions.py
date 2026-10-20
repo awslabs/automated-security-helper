@@ -975,7 +975,8 @@ def sweep_stale_workspaces(
       presence registries.
 
     Entries that are not directories, are symlinks, or do not name a single
-    directory are left alone.
+    directory are left alone, and so is a name the session registry refuses
+    (``MCPSessionRegistry.session_for``): the sweep goes on to the next entry.
 
     Returns:
         The session ids whose workspaces were removed.
@@ -1003,8 +1004,13 @@ def sweep_stale_workspaces(
                 continue
         except (OSError, ValueError):
             continue
-        if _remove_if_still_stale(root, session_id, entry, cutoff):
-            removed.append(session_id)
+        try:
+            if _remove_if_still_stale(root, session_id, entry, cutoff):
+                removed.append(session_id)
+        except ValueError:
+            # A name the session registry refuses is left alone, and the rest of
+            # the root is still swept.
+            continue
     return removed
 
 
