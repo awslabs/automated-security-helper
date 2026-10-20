@@ -4,9 +4,10 @@
 """A config that no longer loads leaves the per-session scan limit at its default.
 
 The limit is read from ``ASH_CONFIG`` for every scan, so an operator's file can
-be changed or broken while the server runs. A file that does not load must not
-fail the scan being started, and must not lift the limit: the caller gets the
-default of 2, the same as with no config at all.
+be changed or broken while the server runs. A file that does not load, whether
+it is malformed, missing, or well-formed YAML with a value that fails
+validation, must not fail the scan being started, and must not lift the limit:
+the caller gets the default of 2, the same as with no config at all.
 """
 
 from __future__ import annotations
@@ -56,6 +57,20 @@ def test_a_malformed_config_leaves_the_default_limit(tmp_path, monkeypatch) -> N
     monkeypatch.setenv(
         "ASH_CONFIG", str(_config(tmp_path, "project_name: {unclosed\n"))
     )
+
+    assert sessions.per_session_scan_limit(REMOTE_SESSION) == 2
+
+
+def test_a_config_that_parses_but_fails_validation_leaves_the_default_limit(
+    tmp_path, monkeypatch
+) -> None:
+    config = _config(
+        tmp_path,
+        "project_name: operator\n"
+        "mcp-resource-management:\n"
+        "  max_concurrent_scans_per_session: five\n",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(config))
 
     assert sessions.per_session_scan_limit(REMOTE_SESSION) == 2
 
