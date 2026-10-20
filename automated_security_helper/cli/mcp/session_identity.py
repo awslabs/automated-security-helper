@@ -289,7 +289,11 @@ def resolve_caller_session_id(ctx: object) -> str:
       :data:`UNIDENTIFIED_SESSION_ID`: remote, with no sandbox.
     * Anything that is not a Context the SDK built (an in-process caller's
       stand-in): the ``Mcp-Session-Id`` in its ``headers``, as
-      :func:`resolve_session_id` reads it.
+      :func:`resolve_session_id` reads it, refused when it names a reserved
+      directory, as for an HTTP request. That holds for an explicit header
+      only. A stand-in with no ``headers`` attribute, or with no
+      ``Mcp-Session-Id`` in it, resolves to :data:`DEFAULT_SESSION_ID`, and the
+      local-client check above does not apply to it.
 
     Raises:
         ValueError: if the identity is a header value that could not name one
