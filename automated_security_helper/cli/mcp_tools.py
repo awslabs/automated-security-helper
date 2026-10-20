@@ -5615,7 +5615,6 @@ def mcp_select_profile(
     progress does not refuse it.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
         writing_session_state,
     )
@@ -6363,7 +6362,6 @@ def mcp_set_source_zip_chunk(
         directory could not be created.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
     from automated_security_helper.cli.mcp.source_delivery import (
