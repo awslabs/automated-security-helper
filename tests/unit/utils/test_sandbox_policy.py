@@ -1529,7 +1529,7 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
             root.mkdir()
             (root / "segment").write_text("x")
         monkeypatch.setattr(
-            backends_module, "_PSEUDO_FS_ROOTS", (shm, run), raising=False
+            policy_module, "_PSEUDO_FS_ROOTS", (shm, run), raising=False
         )
         return SimpleNamespace(shm=shm, run=run)
 
@@ -1600,6 +1600,27 @@ class TestTheBackendsHideADirectoryAHomeLinksTo:
         profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
 
         assert _as_argv(stand_in_pseudo_fs.shm) not in profile
+
+    def test_the_breadth_rules_agree_on_a_link_into_shared_memory(
+        self, layout, stand_in_pseudo_fs, tmp_path
+    ):
+        """The breadth checks read the same list of links as the backends: a link
+        into shared memory or the runtime directory names no directory of the
+        user's, so a path at it is not refused as holding part of the home. A link
+        to a directory of the user's beside it still counts."""
+        persist = tmp_path / "persist-data"
+        persist.mkdir()
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / ".run").symlink_to(stand_in_pseudo_fs.run)
+        (layout.home / ".data").symlink_to(persist)
+        homes = [Path(os.path.realpath(layout.home))]
+
+        targets = policy_module._home_link_targets(homes)
+
+        assert targets == [Path(os.path.realpath(persist))]
+        for root in (stand_in_pseudo_fs.shm, stand_in_pseudo_fs.run):
+            assert not policy_module._broader_than_a_tool(root, homes)
+        assert policy_module._broader_than_a_tool(persist, homes)
 
 
 class TestHomeElsewhereThanThePasswdEntry:
