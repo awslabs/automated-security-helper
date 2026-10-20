@@ -411,11 +411,16 @@ function Invoke-ASH {
         Write-Verbose "Resolved SourceDir to: $sourceDirFull"
         # Case is ignored on Windows and macOS, whose file systems usually ignore it: a
         # different spelling of a directory's case is the same directory there. Where
-        # the file system is case-sensitive that only refuses more.
-        $pathComparison = if ($IsWindows -or $IsMacOS -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
-        function Test-AshUnder([string]$Path, [string]$Root) {
+        # the file system is case-sensitive, two spellings that differ in case are two
+        # directories, so a check that decides a path is in a tree can then find it in
+        # one it is not in. That is safe for a check that refuses or marks a config
+        # (it only refuses or marks more). It is not safe for a decision that picks
+        # which file is read, so that one compares the case exactly (the /src
+        # mapping of the config below).
+        $pathComparison = if (Test-AshCaseInsensitiveHost) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        function Test-AshUnder([string]$Path, [string]$Root, [System.StringComparison]$Comparison = $pathComparison) {
             $Root = $Root.TrimEnd($separators)
-            return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
+            return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $Comparison)
         }
         $sourceReal = $sourceWalk.Real
 
@@ -594,7 +599,10 @@ function Invoke-ASH {
             if ($namedInTree -and -not $realInTree) {
                 Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree but is a link, or is reached through one, to '$configFull', which is outside it. ASH does not mount a file the repository being scanned points it at."
             }
-            if (Test-AshUnder $configFull $sourceReal) {
+            # Whether the config is passed as /src/<path> and not mounted on its own is
+            # decided on the exact spelling: a different case on a case-sensitive file
+            # system is another directory, and the operator's file must still be mounted.
+            if (Test-AshUnder $configFull $sourceReal ([System.StringComparison]::Ordinal)) {
                 $configInner = "/src/" + $configFull.Substring($sourceReal.TrimEnd($separators).Length + 1).Replace('\', '/')
             }
             else {
@@ -880,6 +888,18 @@ function Invoke-ASH {
             throw
         }
     }
+}
+
+function Test-AshCaseInsensitiveHost {
+    <#
+    .SYNOPSIS
+    Whether the file systems of this host usually ignore the case of a name.
+
+    .DESCRIPTION
+    Windows and macOS do. The path checks in Invoke-ASH compare case-insensitively
+    where this is true.
+    #>
+    return [bool]($IsWindows -or $IsMacOS -or $PSVersionTable.PSVersion.Major -le 5)
 }
 
 function Stop-AshRefusal {

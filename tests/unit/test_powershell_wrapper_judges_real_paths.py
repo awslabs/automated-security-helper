@@ -823,3 +823,41 @@ def test_a_config_named_through_dot_dot_after_a_real_directory_in_the_tree_runs(
     assert result.returncode == 0, result.stdout + result.stderr
     args = _recorded(tmp_path)
     assert args[args.index("--config") + 1] == "/src/ash.yaml"
+
+
+# ---------------------------------------------------------------------------
+# On a host that ignores case, the /src mapping still compares the exact spelling
+# ---------------------------------------------------------------------------
+
+
+def test_a_config_in_a_directory_that_differs_in_case_is_mounted_on_its_own(
+    pwsh, recording_docker, tmp_path
+):
+    """On macOS the case-insensitive comparison is also used to decide that a path
+    is in a tree, which can only refuse or mark more. Whether the config is handed to
+    the scan as ``/src/<path>`` decides which file is read, so it compares the exact
+    spelling: ``Proj`` is not ``proj`` on a case-sensitive volume, and the operator's
+    file is mounted, not the source's. The host is made to read as case-insensitive
+    by redefining the one function that says so; the file system under the cell is
+    case-sensitive."""
+    (tmp_path / "proj").mkdir()
+    try:
+        (tmp_path / "Proj").mkdir()
+    except FileExistsError:
+        pytest.skip("this file system ignores case, so the two names are one directory")
+    (tmp_path / "Proj" / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir proj -OutputDir out -Config Proj/ash.yaml",
+        before="function Test-AshCaseInsensitiveHost { $true };",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert _mount_source(args, "/ash-config/ash.yaml") == str(
+        tmp_path.resolve() / "Proj" / "ash.yaml"
+    )
