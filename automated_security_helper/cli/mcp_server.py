@@ -1786,7 +1786,7 @@ async def list_active_scans(ctx: Context) -> Dict[str, Any]:
         return refusal
 
     try:
-        await ctx.info("Listing active scans")
+        await _tell_client(ctx, "info", "Listing active scans")
         return await mcp_list_active_scans(session_id=session_id)
     except Exception as e:
         log_unexpected_error(logger, e, "Error in list_active_scans")
@@ -2250,19 +2250,27 @@ async def suggest_suppression(
 # ---------------------------------------------------------------------------
 
 
-async def _tell_client_error(ctx: Context, message: str) -> None:
-    """Send ``message`` to the client as an error log, without ever raising.
+async def _tell_client(ctx: Context, level: str, message: str) -> None:
+    """Send ``message`` to the client at ``level``, without ever raising.
+
+    ``level`` is the name of the context's log method: ``debug``, ``info``,
+    ``warning`` or ``error``. Every log a tool sends goes through here.
 
     The log is a courtesy: the result a tool returns is what the client acts on.
-    A client whose transport has closed makes the send raise, and that must not
-    replace the tool's own result with an exception, in a refusal branch or in an
-    ``except`` arm. ``get_scan_results`` and ``get_scan_result_paths`` guard their
-    send the same way.
+    A client whose transport has closed makes every send raise, whatever its
+    level, and that must not replace the tool's own result with an exception. It
+    must not turn a success into a failure either: a scan that has started stays
+    reported with its scan_id, so the client can follow and cancel it.
     """
     try:
-        await ctx.error(message)
+        await getattr(ctx, level)(message)
     except Exception:
-        logger.error(f"Failed to send error message to client: {message}")
+        logger.error(f"Failed to send {level} message to client: {message}")
+
+
+async def _tell_client_error(ctx: Context, message: str) -> None:
+    """Send ``message`` to the client as an error log, without ever raising."""
+    await _tell_client(ctx, "error", message)
 
 
 def _session_error(e: ValueError) -> Dict[str, Any]:
