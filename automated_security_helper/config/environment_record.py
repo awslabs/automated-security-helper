@@ -119,6 +119,10 @@ _ANY_INDEX = _AnyIndex()
 #: operation that appends: the entry is found by the shape the load gives it.
 UNKNOWN_INDEX = _ANY_INDEX
 
+#: A list index a reference's path cannot name, such as the ``-`` of a patch
+#: operation that appends: the entry is found by the shape the load gives it.
+UNKNOWN_INDEX = _ANY_INDEX
+
 
 @dataclass(frozen=True)
 class EnvironmentReference:
