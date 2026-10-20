@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,6 +28,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     clear_session_state,
 )
 from automated_security_helper.cli.mcp.scan_target import ScanTargetResolution
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.resource_management.error_handling import (
     ErrorCategory,
 )
@@ -371,6 +373,22 @@ def test_no_client_send_sits_outside_the_guard(module: Any) -> None:
         f"{path.name} sends to the client outside {GUARD} at line(s) "
         f"{', '.join(str(n) for n in lines)}"
     )
+
+
+def test_a_failed_send_is_logged_with_the_exception_that_failed_it(caplog) -> None:
+    ctx = _ctx()
+
+    with caplog.at_level(logging.ERROR, logger=ASH_LOGGER.name):
+        asyncio.run(mcp_server._tell_client(ctx, "info", "hello"))
+
+    records = [
+        r
+        for r in caplog.records
+        if "Failed to send info message to client" in r.getMessage()
+    ]
+    assert records, [r.getMessage() for r in caplog.records]
+    assert records[0].exc_info is not None, records[0]
+    assert "client gone" in str(records[0].exc_info[1]), records[0].exc_info
 
 
 def test_control_a_working_log_send_is_awaited_once_with_the_error() -> None:
