@@ -183,6 +183,11 @@ function Invoke-ASH {
         # through is refused before anything is built or mounted. The text is matched
         # with its quote characters and escape backticks removed, because the command
         # that runs it is parsed again and reads '"--workspace"' as --workspace.
+        # This match is best-effort: that second parse can also spell the flag with a
+        # subexpression ('--work$()space'), which is not looked for here. The control
+        # that holds for every spelling is the scan inside, which refuses --workspace
+        # next to the --source-dir /src it is always given, ahead of anything passed
+        # through (see the run command below).
         if (("$AshArgs" -replace '["''`]', '') -match '(^|\s)--workspace(\s|=|$)') {
             Stop-AshRefusal 3 "Invoke-ASH scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead."
         }
