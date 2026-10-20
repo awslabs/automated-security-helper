@@ -519,9 +519,14 @@ def end_session(session_id: str) -> bool:
         True when everything was removed now, False when it waits for a scan.
     """
     session = get_default_registry().get(session_id)
+    # Pending before the change is tried, and dropped once the removal is done.
+    # A scan or a write that ends between a refused try_begin_change and a later
+    # add would run finish_ended_session before the session was pending, and
+    # nothing would remove it after that. With the add first, whichever of the
+    # two finishes second finds the session pending and removes it.
+    with _ended_lock:
+        _ended_while_scanning.add(session_id)
     if session is not None and not session.try_begin_change():
-        with _ended_lock:
-            _ended_while_scanning.add(session_id)
         return False
     try:
         _remove_session_state(session_id)
