@@ -297,12 +297,42 @@ function Invoke-ASH {
             return [System.IO.Path]::GetPathRoot($Real)
         }
 
+        # A relative path is made absolute the way PowerShell makes it for every other
+        # command: from the session's current location, which Set-Location and
+        # Push-Location move and the process's working directory does not follow, with
+        # '~' and a PSDrive name read as PowerShell reads them. The path is spelled as
+        # written, '..' included: PowerShell would drop the part before a '..' without
+        # looking at it, so only the part before the first '..' is handed to it, and
+        # the rest is kept for the walk below to apply.
+        function Resolve-AshSpelling([string]$Path) {
+            $match = [regex]::Match($Path, '(^|[/\\])\.\.([/\\]|$)')
+            $head = $Path
+            $tail = ''
+            if ($match.Success) {
+                $head = $Path.Substring(0, $match.Index)
+                $tail = $Path.Substring($match.Index + $match.Groups[1].Length)
+                if ($match.Index -eq 0 -and $match.Groups[1].Length -gt 0) {
+                    $head = $match.Groups[1].Value
+                }
+                elseif ($head -match '^[A-Za-z]:$') {
+                    $head += '\'
+                }
+            }
+            if ([string]::IsNullOrEmpty($head)) { $head = '.' }
+            try {
+                $base = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($head)
+            }
+            catch {
+                $base = Join-Path $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath $head
+            }
+            if (-not $tail) { return $base }
+            return $base.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + $tail
+        }
         # The one walk every path check below is built on. A path is read one part at
         # a time. A link met on the way is followed where it is met: the parts of its
         # target are read next, in its place, so a link to a directory higher up is
         # followed too. A '..' goes to the parent of the real location reached so far.
-        # A relative path is taken from the process's real working directory. It
-        # returns:
+        # A relative path is made absolute by Resolve-AshSpelling. It returns:
         #   Steps  one entry per part met, in order: Dir (the real directory the part
         #          is in), Part, Candidate (Dir and Part joined), IsLink (the part is
         #          a symbolic link or junction), Named (the part is in the spelling,
@@ -317,7 +347,7 @@ function Invoke-ASH {
         # directory by a name the runner resolves differently. A '..' after a part that
         # does not exist is refused: it cannot be placed.
         function Get-AshWalk([string]$Spelling) {
-            $whole = if ([System.IO.Path]::IsPathRooted($Spelling)) { $Spelling } else { Join-Path ([System.IO.Directory]::GetCurrentDirectory()) $Spelling }
+            $whole = if ([System.IO.Path]::IsPathRooted($Spelling)) { $Spelling } else { Resolve-AshSpelling $Spelling }
             $root = [System.IO.Path]::GetPathRoot($whole)
             $walked = $root
             $named = $root
@@ -509,12 +539,17 @@ function Invoke-ASH {
         $configFromRepository = $false
         $configInCheckout = $false
         if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
-            if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
+            if ([string]::IsNullOrEmpty($Config)) {
+                Stop-AshRefusal 3 "Config file not found: $Config. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
+            }
+            # The path that is checked is the path that is mounted: the existence check,
+            # the read check and the mount all use the walk's absolute spelling.
+            $configWalk = Get-AshWalk $Config
+            $configNamed = $configWalk.Named
+            if (-not (Test-Path -LiteralPath $configNamed -PathType Leaf)) {
                 Stop-AshRefusal 3 "Config file not found: $Config. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
             }
             # The runner mounts with its own rights, which can be wider than this user's.
-            $configWalk = Get-AshWalk $Config
-            $configNamed = $configWalk.Named
             try {
                 [System.IO.File]::OpenRead($configNamed).Close()
             }
