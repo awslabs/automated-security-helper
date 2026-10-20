@@ -295,15 +295,21 @@ def test_an_output_directory_under_an_alias_of_the_source_runs(
     "output, linked",
     [
         pytest.param("src/x/../.ash/out", True, id="collapsed-onto-a-link"),
+        pytest.param("src/.ash/../out2", True, id="through-a-link-to-its-parent"),
         pytest.param("src/.ash/../out2", False, id="collapsed-onto-a-real-directory"),
     ],
 )
 def test_dot_dot_components_in_the_output_path_are_walked_as_written(
     output, linked, pwsh, recording_docker, elsewhere, tmp_path
 ):
+    """A '..' is applied after the part before it has been looked at: a link the
+    repository committed below the source is met before the '..' that leaves it."""
     (tmp_path / "src" / "x").mkdir(parents=True)
+    (elsewhere / "sub").mkdir()
     if linked:
-        (tmp_path / "src" / ".ash").symlink_to(elsewhere, target_is_directory=True)
+        (tmp_path / "src" / ".ash").symlink_to(
+            elsewhere / "sub", target_is_directory=True
+        )
     else:
         (tmp_path / "src" / ".ash").mkdir()
 
@@ -314,7 +320,8 @@ def test_dot_dot_components_in_the_output_path_are_walked_as_written(
     if linked:
         assert result.returncode == 3, result.stdout + result.stderr
         assert _recorded(tmp_path) == []
-        assert list(elsewhere.iterdir()) == []
+        assert [path.name for path in elsewhere.iterdir()] == ["sub"]
+        assert list((elsewhere / "sub").iterdir()) == []
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert (tmp_path / "src" / "out2").is_dir()
@@ -767,3 +774,52 @@ def test_a_tilde_config_is_the_file_in_the_home_directory(
     args = _recorded(tmp_path)
     assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
     assert _mount_source(args, "/ash-config/ash.yaml") == str(home / "ash.yaml")
+
+
+# ---------------------------------------------------------------------------
+# A '..' that leaves a link in the scanned tree is judged at the link
+# ---------------------------------------------------------------------------
+
+
+def test_a_config_named_through_dot_dot_after_a_committed_link_out_is_refused(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    """``svc/lnk/../ash.yaml`` with ``lnk`` a link the repository committed to a
+    directory outside it names a file outside the tree, through a name inside it."""
+    (tmp_path / "operator" / "sub").mkdir()
+    (tmp_path / "operator" / "ash.yaml").write_text(
+        "project_name: p\n", encoding="utf-8"
+    )
+    (checkout / "svc" / "lnk").symlink_to(
+        tmp_path / "operator" / "sub", target_is_directory=True
+    )
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/svc/lnk/../ash.yaml",
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert _recorded(tmp_path) == []
+    assert "link" in result.stderr
+
+
+def test_a_config_named_through_dot_dot_after_a_real_directory_in_the_tree_runs(
+    pwsh, recording_docker, checkout, tmp_path
+):
+    """Control: with no link on the way, the '..' names the file beside the directory."""
+    (checkout / "svc" / "x").mkdir()
+    (checkout / "svc" / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir repo/svc -OutputDir out -Config repo/svc/x/../ash.yaml",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/src/ash.yaml"

@@ -444,10 +444,12 @@ function Invoke-ASH {
         # and any link from below SourceDir down to it, with SourceDir taken at its real
         # path and each part of the output path placed at its real location. Links at
         # or above SourceDir are the operator's own spelling. The path is walked as
-        # written, '..' included, and before the
-        # directory is created, because creating it through a linked .ash already
-        # writes where the link points; so -NoRun, which creates it too, is refused as
-        # well. ./ash and `ash --mode container` apply the same rule.
+        # written, '..' included: every link check reads the walk of the spelling, and
+        # a '..' is never applied before the parts that precede it are looked at, so
+        # 'src/.ash/../out' meets the link at '.ash' and is refused. The walk is made
+        # before the directory is created, because creating it through a linked .ash
+        # already writes where the link points; so -NoRun, which creates it too, is
+        # refused as well. ./ash and `ash --mode container` apply the same rule.
         function Test-AshLink([string]$Path) {
             $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
             return [bool]($item -and $item.LinkType -in @('SymbolicLink', 'Junction'))
@@ -494,7 +496,7 @@ function Invoke-ASH {
         # or of a directory above it. A link outside the source, at or above it, is the
         # operator's own spelling and is followed.
         $linkOnTheWay = $null
-        foreach ($step in (Get-AshWalk $outputNamed).Steps) {
+        foreach ($step in $outputWalk.Steps) {
             if ($step.Named -and (Test-AshUnder $step.Candidate $sourceReal) -and (Test-AshLink $step.Candidate)) {
                 $linkOnTheWay = $step.NamedPath
                 break
@@ -559,7 +561,7 @@ function Invoke-ASH {
             # The config as named, and the real file the runner would mount
             # (Get-AshWalk, above, with $sourceReal).
             $configFull = $configWalk.Real
-            $configSteps = (Get-AshWalk $configNamed).Steps
+            $configSteps = $configWalk.Steps
             Assert-Mountable 'config file' $configFull
             # The scanned tree, as a local scan defines it: the outermost directory at
             # or above SourceDir holding a .git entry, found from SourceDir's name and
@@ -584,7 +586,10 @@ function Invoke-ASH {
             # which host file is read. Whether it is named inside the tree is decided
             # on where the parts of the name really are (Test-AshNamedInTree), not on
             # how the path to the tree is spelled. A link that stays inside the tree is
-            # followed.
+            # followed. Both checks read the walk of the path as written, so a '..'
+            # that leaves a link in the tree or in a checkout is judged at the link:
+            # 'svc/lnk/../ash.yaml' with 'lnk' a link out of the tree is a config named
+            # inside the tree that is really outside it, and is refused.
             $namedInTree = Test-AshNamedInTree $configSteps $trees
             if ($namedInTree -and -not $realInTree) {
                 Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree but is a link, or is reached through one, to '$configFull', which is outside it. ASH does not mount a file the repository being scanned points it at."
