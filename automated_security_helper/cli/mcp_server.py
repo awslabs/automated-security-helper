@@ -1638,8 +1638,11 @@ async def set_source_git(
     Each git command (the clone, and for a ref the fetch and the checkout) has
     10 minutes. One that runs longer is stopped, nothing is kept, and the call
     fails with error_type clone_timed_out. A clone that passes the archive size
-    or entry limits is refused with error_type clone_too_large. If this call is
-    cancelled, the clone finishes or times out on the server and the session
+    or entry limits is refused with error_type clone_too_large, which means the
+    limits only: shrink the request (a smaller repository or a lower depth). A
+    clone whose tree cannot be read once git has exited is refused with
+    error_type clone_tree_unreadable, which is a server-side fault, not a size
+    to reduce. If this call is cancelled, the clone finishes or times out on the server and the session
     reads busy until then.
 
     Returns:

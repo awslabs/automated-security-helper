@@ -131,7 +131,7 @@ def test_an_unreadable_tree_is_refused_not_measured_as_zero(
 
     monkeypatch.setattr(os, "scandir", deny)
 
-    with pytest.raises(sd.CloneTooLargeError):
+    with pytest.raises(sd.CloneTreeUnreadableError):
         sd._refuse_oversized(tree)
 
 
@@ -150,8 +150,178 @@ def test_an_unreadable_entry_is_refused_not_counted_as_zero(
 
     monkeypatch.setattr(os, "lstat", deny)
 
-    with pytest.raises(sd.CloneTooLargeError):
+    with pytest.raises(sd.CloneTreeUnreadableError):
         sd._refuse_oversized(tree)
+
+
+def test_an_unreadable_tree_is_not_reported_as_too_large(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The two refusals tell a client opposite things (shrink the request, or not)."""
+
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    real = os.scandir
+
+    def deny(path: Any = ".") -> Any:
+        if os.fspath(path) == os.fspath(tree):
+            raise PermissionError(13, "Permission denied", os.fspath(path))
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", deny)
+
+    with pytest.raises(sd.CloneTreeUnreadableError) as unreadable:
+        sd._refuse_oversized(tree)
+
+    assert not isinstance(unreadable.value, sd.CloneTooLargeError)
+    assert sd.CLONE_TREE_UNREADABLE != sd.CLONE_TOO_LARGE
+
+
+def test_an_unreadable_tree_is_reported_by_its_own_error_type(
+    fake_git, workspace, monkeypatch
+) -> None:
+    fake_git(count=3)
+    real = os.scandir
+
+    def deny_the_clone_target(path: Any = ".") -> Any:
+        # A descriptor (shutil.rmtree's own scan) is passed through.
+        if isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(
+            os.sep + "source"
+        ):
+            raise PermissionError(13, "Permission denied", os.fspath(path))
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", deny_the_clone_target)
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "clone_tree_unreadable", result
+    assert not (workspace / SESSION / "source").exists()
+
+
+def test_a_path_that_changes_kind_during_a_poll_is_not_an_error(
+    tmp_path: Path,
+) -> None:
+    """A directory the walker listed becomes a file before it is scanned."""
+
+    tree = tmp_path / "tree"
+    (tree / "a").mkdir(parents=True)
+    (tree / "a" / "inner").write_bytes(b"x" * 8)
+    (tree / "keep").write_bytes(b"x" * 16)
+    real = os.scandir
+
+    def swapped(path: Any = ".") -> Any:
+        if os.fspath(path) == os.fspath(tree / "a"):
+            raise NotADirectoryError(20, "Not a directory", os.fspath(path))
+        return real(path)
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(os, "scandir", swapped)
+
+        size, entries = sd._tree_extent(tree, running=True)
+        sd._refuse_oversized(tree, running=True)
+
+        with pytest.raises(NotADirectoryError):
+            sd._tree_extent(tree)
+        with pytest.raises(sd.CloneTreeUnreadableError):
+            sd._refuse_oversized(tree)
+
+    assert size >= 16 and entries >= 2
+
+
+def test_a_directory_that_becomes_a_file_under_a_live_poll_does_not_stop_the_command(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The kind of a path changes between the walker listing it and scanning it,
+    as ``git checkout`` does to a path that is a directory at one ref and a file at
+    another. The error is the operating system's own."""
+
+    tree = tmp_path / "tree"
+    (tree / "a").mkdir(parents=True)
+    (tree / "a" / "inner").write_bytes(b"x" * 8)
+    real = os.scandir
+    swapped: List[str] = []
+
+    def swap_then_scan(path: Any = ".") -> Any:
+        if (
+            isinstance(path, (str, os.PathLike))
+            and os.fspath(path) == os.fspath(tree / "a")
+            and not swapped
+        ):
+            swapped.append("swapped")
+            (tree / "a" / "inner").unlink()
+            (tree / "a").rmdir()
+            (tree / "a").write_text("now a file")
+        return real(path)
+
+    monkeypatch.setattr(os, "scandir", swap_then_scan)
+    monkeypatch.setattr(sd, "GIT_POLL_SECONDS", 0.05)
+
+    result = sd._run_git(
+        [sys.executable, "-c", "import time; time.sleep(0.5)"],
+        env=dict(os.environ),
+        grows_in=tree,
+    )
+
+    assert swapped == ["swapped"], "the poll never reached the directory"
+    assert result.returncode == 0
+
+
+def test_a_checkout_that_turns_a_directory_into_a_file_is_not_refused(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A real repository: a path is a directory at the default branch and a file at
+    the ref, and ``git checkout --detach`` to the ref is not refused by the walker."""
+
+    import shutil
+    import subprocess
+
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    repo = tmp_path / "repo"
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
+
+    def run(*argv: str) -> None:
+        subprocess.run(  # nosec B603 - a fixture repository in tmp_path, no remote
+            [git, "-C", str(repo), *argv],
+            check=True,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    repo.mkdir()
+    run("init", "-q", "-b", "main")
+    (repo / "a").mkdir()
+    (repo / "a" / "inner").write_text("x")
+    run("add", "-A")
+    run("commit", "-q", "-m", "directory")
+    run("rm", "-q", "-r", "a")
+    (repo / "a").write_text("now a file")
+    run("add", "-A")
+    run("commit", "-q", "-m", "file")
+    run("checkout", "-q", "HEAD~1")
+
+    monkeypatch.setattr(sd, "GIT_POLL_SECONDS", 0.01)
+    result = sd._run_git(
+        [git, "-C", str(repo), "checkout", "--detach", "main"],
+        env=env,
+        grows_in=repo,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (repo / "a").is_file()
 
 
 def test_an_entry_that_vanishes_mid_walk_is_still_measured(

@@ -394,7 +394,15 @@ CLONE_TOO_LARGE = "clone_too_large"
 
 
 class CloneTooLargeError(RuntimeError):
-    """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries, or could not be measured."""
+    """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
+
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
+CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+
+
+class CloneTreeUnreadableError(RuntimeError):
+    """The tree a git command wrote could not be read once the command had exited."""
 
 
 def _walk_failed(error: OSError) -> None:
@@ -404,19 +412,34 @@ def _walk_failed(error: OSError) -> None:
         raise error
 
 
-def _tree_extent(root: Path) -> Tuple[int, int]:
+def _walk_failed_during_poll(error: OSError) -> None:
+    """``os.walk`` error handler for a poll of a tree git is still writing."""
+
+
+def _tree_extent(root: Path, *, running: bool = False) -> Tuple[int, int]:
     """Bytes of the regular files under ``root`` and the count of its entries.
 
     Links are not followed. A path that vanishes while the tree is walked (git
     removes its lock files) is skipped, because what is left is still measured.
-    Any other error, such as a directory or file that cannot be read, is raised:
-    a tree that cannot be measured must not read as an empty one.
+
+    Args:
+        root: The directory to measure.
+        running: True for a poll while the command still writes into ``root``.
+            Git then changes the tree under the walk (a directory becomes a file
+            at a checked-out ref), so a path that cannot be read is skipped and
+            the figures are a lower bound, which can miss a limit but never
+            report one that was not passed; the next poll and the check after
+            the command exits look again. False once the command has exited and
+            the tree is still: any error, such as a directory or file that
+            cannot be read, is raised, because a tree that cannot be measured
+            must not read as an empty one.
     """
 
+    onerror = _walk_failed_during_poll if running else _walk_failed
     total = 0
     entries = 0
     for dirpath, dirnames, filenames in os.walk(
-        root, followlinks=False, onerror=_walk_failed
+        root, followlinks=False, onerror=onerror
     ):
         entries += len(dirnames) + len(filenames)
         for name in filenames:
@@ -424,6 +447,9 @@ def _tree_extent(root: Path) -> Tuple[int, int]:
                 total += os.lstat(os.path.join(dirpath, name)).st_size
             except FileNotFoundError:
                 continue
+            except OSError:
+                if not running:
+                    raise
     return total, entries
 
 
@@ -437,7 +463,9 @@ def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> Non
     """Raise :class:`CloneTooLargeError` when ``grows_in`` is past a clone limit.
 
     The limits are ``MAX_CLONE_BYTES`` and the zip channel's ``_MAX_FILES``
-    entries. A tree that cannot be read is refused too.
+    entries. A tree that cannot be read once the command has exited is refused
+    with :class:`CloneTreeUnreadableError`, which is not a limit; while the command
+    runs, a path that cannot be read only leaves that poll's figures short.
 
     Args:
         grows_in: The directory the command writes into, or None.
@@ -449,10 +477,10 @@ def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> Non
         return
     suffix = " and was stopped" if running else ""
     try:
-        size, entries = _tree_extent(grows_in)
+        size, entries = _tree_extent(grows_in, running=running)
     except OSError as exc:
-        raise CloneTooLargeError(
-            f"the size of what git wrote could not be read ({exc.strerror or exc}); "
+        raise CloneTreeUnreadableError(
+            f"the tree git wrote could not be read ({exc.strerror or exc}); "
             f"the delivery was refused"
         ) from exc
     if size > MAX_CLONE_BYTES:
@@ -495,6 +523,8 @@ def _run_git(
     Raises:
         GitTimeoutError: when the command runs past the timeout.
         CloneTooLargeError: when ``grows_in`` passes ``MAX_CLONE_BYTES``.
+        CloneTreeUnreadableError: when ``grows_in`` cannot be read after the
+            command exits.
     """
 
     # An if statement, not a conditional expression: mypy applies a platform
@@ -875,7 +905,7 @@ def _clone_into_session(
     env = _git_environment(session_dir)
     try:
         _clone(url, ref, git=git, depth=depth, target=target, env=env)
-    except (GitTimeoutError, CloneTooLargeError):
+    except (GitTimeoutError, CloneTooLargeError, CloneTreeUnreadableError):
         shutil.rmtree(target, ignore_errors=True)
         raise
 

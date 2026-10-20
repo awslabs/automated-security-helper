@@ -2669,7 +2669,9 @@ def mcp_set_source_git(
         SOURCE_DELIVERY_BUSY,
         CLONE_TIMED_OUT,
         CLONE_TOO_LARGE,
+        CLONE_TREE_UNREADABLE,
         CloneTooLargeError,
+        CloneTreeUnreadableError,
         GitTimeoutError,
         SourceDeliveryBusyError,
         _refuse_ssh_key_id,
@@ -2746,6 +2748,8 @@ def mcp_set_source_git(
         return {"success": False, "error": str(e), "error_type": CLONE_TIMED_OUT}
     except CloneTooLargeError as e:
         return {"success": False, "error": str(e), "error_type": CLONE_TOO_LARGE}
+    except CloneTreeUnreadableError as e:
+        return {"success": False, "error": str(e), "error_type": CLONE_TREE_UNREADABLE}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
