@@ -373,18 +373,17 @@ The session config is unchanged. The client may inspect `ash://schema/runtime-ov
 
 ## Session lifecycle
 
-Per-connection state is held in a process-local `MCPSession` keyed by FastMCP connection id (Track 10.5):
+Per-connection state is held in a process-local `MCPSession` keyed by FastMCP connection id (Track 10.5). The object carries the session's workspace path and the locks and claims that keep a scan, a change to the delivered tree and the TTL sweep from running over one another:
 
 ```
 MCPSession {
   id,
-  source_dir,
-  config,           # resolved AshConfig
-  profile_name,
-  patch_ops,        # JSON-Patch document, if any
   workspace_root,   # ASH_MCP_WORKSPACE_ROOT/<session_id>
+  created_at,
 }
 ```
+
+What a client bound to the session is not stored on that object. Both stores are keyed by the session id and are the source of truth: the delivered source directory is recorded by the source delivery module, and the selected profile, its resolved config and any JSON-Patch document by the profile registry.
 
 Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash-mcp/<session_id>/`). A session's workspace (its delivered tree, uploads in progress and the config `select_profile` materialized) and its bound profile are removed when the session ends:
 

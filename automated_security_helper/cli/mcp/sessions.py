@@ -4,11 +4,15 @@
 """Per-connection MCP session lifecycle and registry.
 
 A *session* is the slice of state the MCP server holds for a single client
-connection — the working source directory, the resolved profile, the patch
-ops a client supplied at bind time, and the workspace scratch directory the
-server uses to materialize that state for a scan. Sessions are NEVER
-serialized (they hold a live ``threading.Lock``) and are NEVER shared across
-clients (the workspace_root is per-connection scratch).
+connection: its workspace scratch directory, and the locks, claims and counts
+that keep a scan, a change to the delivered tree, a write and the TTL sweep from
+running over one another. What a client bound to the session lives in two other
+stores, both keyed by the session id: the delivered source directory in
+``source_delivery`` and the selected profile, its config and its patch ops in
+``profile_registry``. Those stores are the only source of truth for a binding;
+the ``MCPSession`` object holds none of it. Sessions are NEVER serialized (they
+hold a live ``threading.Lock``) and are NEVER shared across clients (the
+workspace_root is per-connection scratch).
 
 The module exposes:
 
@@ -55,7 +59,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -66,9 +70,6 @@ from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
     validated_path_component,
 )
-
-if TYPE_CHECKING:
-    from automated_security_helper.config.ash_config import AshConfig
 
 
 class ScanCount:
@@ -111,13 +112,14 @@ class MCPSession(BaseModel):
 
     Fields:
         id: Stable connection identifier provided by the transport.
-        source_dir: Directory the client asked us to scan, if bound.
-        config: Resolved ``AshConfig`` for this session, if bound.
-        profile_name: Name of the profile that produced ``config``.
-        patch_ops: JSON-Patch ops the client supplied at bind time, if any.
         workspace_root: Per-session scratch directory. The disconnect hook
             rmtrees this path; do NOT place shared state here.
         created_at: UTC timestamp the session was created.
+
+    A client's binding is not a field of this model. The directory it delivered
+    is recorded by ``source_delivery`` (``get_session_source_dir``) and the profile
+    it selected, with that profile's config and patch ops, by ``profile_registry``
+    (``get_session_state``); both are keyed by ``id`` and are the source of truth.
 
     The ``_lock`` private attribute serializes scans within a single session.
     Two threads scanning the *same* session must contend on this lock; two
@@ -128,22 +130,6 @@ class MCPSession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: str = Field(description="Stable per-connection identifier.")
-    source_dir: Optional[Path] = Field(
-        default=None,
-        description="Directory the client asked us to scan, set at bind time.",
-    )
-    config: Optional["AshConfig"] = Field(
-        default=None,
-        description="Resolved AshConfig for this session, set at bind time.",
-    )
-    profile_name: Optional[str] = Field(
-        default=None,
-        description="Name of the profile that produced config.",
-    )
-    patch_ops: Optional[List[Dict[str, Any]]] = Field(
-        default=None,
-        description="JSON-Patch ops the client supplied at bind time.",
-    )
     workspace_root: Path = Field(
         description="Per-session scratch dir; disconnect rmtrees this.",
     )
@@ -298,9 +284,7 @@ class MCPSession(BaseModel):
 
         What a client bound to the session lives outside this object: a delivered
         tree in ``source_delivery`` and a selected profile in ``profile_registry``,
-        both keyed by the session id. The ``source_dir``, ``config``,
-        ``profile_name`` and ``patch_ops`` fields of this model are not set by
-        the server, so they say nothing about a binding.
+        both keyed by the session id.
         """
         from automated_security_helper.cli.mcp.profile_registry import (
             session_has_binding,
@@ -332,16 +316,6 @@ class MCPSession(BaseModel):
         finally:
             self._lock.release()
 
-
-# Resolve the ``AshConfig`` forward reference. Pydantic v2 refuses to
-# instantiate a model with an unresolved string annotation, so we rebuild at
-# import time. The bare ``AshConfig`` name must be available in this
-# module's globals so ``model_rebuild`` can resolve the string form.
-from automated_security_helper.config.ash_config import (  # noqa: E402,F401
-    AshConfig,
-)
-
-MCPSession.model_rebuild()
 
 #: Sessions the registry holds before it looks for idle ones to forget. A stateless
 #: server with ``--trust-upstream-session-id`` sees one new id per client, and no

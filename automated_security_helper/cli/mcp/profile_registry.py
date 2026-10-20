@@ -226,18 +226,17 @@ def clear_profile_registry() -> None:
 # Per-session state
 # ---------------------------------------------------------------------------
 
-# Track 10.5 (#63) owns the full ``MCPSession`` shape (workspace_root,
-# disconnect cleanup, etc.). We define just the surface ``select_profile``
-# needs so its tests can exercise the binding without depending on #63.
+# ``sessions.MCPSession`` owns the session's workspace and locks. What a client
+# bound is stored here, keyed by session id, and is the only record of the
+# selected profile: ``MCPSession`` has no profile, config or patch fields.
 
 
 @dataclass
 class SessionState:
-    """Minimal per-connection state for Track 10.3.
+    """The profile a session selected, with its resolved config.
 
-    Track 10.5 will generalize this into a full ``MCPSession`` with workspace
-    + disconnect handling. Until then we hold only what binding the resolved
-    config requires.
+    This is the source of truth for a session's binding; ``sessions.MCPSession``
+    holds none of it.
 
     ``config_path`` is what makes a binding observable. ``bound_config`` is the
     resolved ``AshConfig``, and for a long time it was the only thing stored --
