@@ -519,6 +519,30 @@ def test_a_quoted_workspace_flag_is_refused(flag, pwsh, recording_docker, tmp_pa
     assert "ash --mode container --workspace" in _stderr(result)
 
 
+def test_a_workspace_flag_spelled_through_a_subexpression_follows_the_source_dir(
+    pwsh, recording_docker, tmp_path
+):
+    """Decision: the match above is best-effort, and the control that holds for every
+    spelling is the scan inside the container, which refuses ``--workspace`` next to
+    ``--source-dir``. That control needs ``--source-dir /src`` to be given ahead of
+    anything passed through, which this cell pins for a flag the match does not see."""
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir out '--work$()space'",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    source_dir = args.index("--source-dir")
+    assert args[source_dir + 1] == "/src"
+    passed_through = [i for i, arg in enumerate(args) if arg.startswith("--work")]
+    assert passed_through and min(passed_through) > source_dir
+
+
 # ---------------------------------------------------------------------------
 # An outside config with a YAML anchor or alias on a key is refused
 # ---------------------------------------------------------------------------
