@@ -297,72 +297,87 @@ function Invoke-ASH {
             return [System.IO.Path]::GetPathRoot($Real)
         }
 
-        # The path with every link on the way followed, which is what the runner
-        # mounts. Component by component, so a link to a directory higher up is
-        # followed too, and a '..' is applied to the real location reached so far;
-        # bounded, so a cycle of links ends. A path that is still a link after 40 links
-        # is refused: taking it as spelled would judge a directory by a name the runner
-        # resolves differently. A '..' after a part that does not exist is refused: it
-        # cannot be placed. A relative path is taken from the process's real working
-        # directory.
-        function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
-            if ($Depth -gt 40) {
-                Stop-AshRefusal 3 "The path '$Path' is reached through more than 40 links (the walk reached $Depth). Invoke-ASH follows at most 40 links to find where a directory or file really is, and does not run on a path it cannot place. Use a path with fewer links."
-            }
-            $whole = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path ([System.IO.Directory]::GetCurrentDirectory()) $Path }
+        # The one walk every path check below is built on. A path is read one part at
+        # a time. A link met on the way is followed where it is met: the parts of its
+        # target are read next, in its place, so a link to a directory higher up is
+        # followed too. A '..' goes to the parent of the real location reached so far.
+        # A relative path is taken from the process's real working directory. It
+        # returns:
+        #   Steps  one entry per part met, in order: Dir (the real directory the part
+        #          is in), Part, Candidate (Dir and Part joined), IsLink (the part is
+        #          a symbolic link or junction), Named (the part is in the spelling,
+        #          not in the target of a link) and NamedPath (the spelling up to and
+        #          including the part).
+        #   Named  the spelling made absolute with every '..' applied to the real
+        #          location before it, and no link followed.
+        #   Real   the path with every link on the way followed, which is what the
+        #          runner mounts.
+        # At most 40 links are followed over the whole walk, so a cycle of links ends:
+        # a path with more is refused, because taking it as spelled would judge a
+        # directory by a name the runner resolves differently. A '..' after a part that
+        # does not exist is refused: it cannot be placed.
+        function Get-AshWalk([string]$Spelling) {
+            $whole = if ([System.IO.Path]::IsPathRooted($Spelling)) { $Spelling } else { Join-Path ([System.IO.Directory]::GetCurrentDirectory()) $Spelling }
             $root = [System.IO.Path]::GetPathRoot($whole)
-            $current = $root
+            $walked = $root
+            $named = $root
             $unplaced = $false
-            foreach ($part in $whole.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            $hops = 0
+            $steps = [System.Collections.Generic.List[object]]::new()
+            $rest = [System.Collections.Generic.List[object]]::new()
+            foreach ($name in $whole.Substring($root.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $rest.Add([pscustomobject]@{ Name = $name; Named = $true })
+            }
+            while ($rest.Count -gt 0) {
+                $entry = $rest[0]
+                $rest.RemoveAt(0)
+                $part = $entry.Name
                 if ($part -eq '.') { continue }
                 if ($part -eq '..') {
                     if ($unplaced) {
-                        Stop-AshRefusal 3 "The path '$Path' goes up with '..' from a part that does not exist, so where it leads cannot be placed. Use a path without that '..'."
+                        Stop-AshRefusal 3 "The path '$Spelling' goes up with '..' from a part that does not exist, so where it leads cannot be placed. Use a path without that '..'."
                     }
-                    $current = Step-AshParent $current $Path
+                    $walked = Step-AshParent $walked $Spelling
+                    if ($entry.Named) { $named = $walked }
                     continue
                 }
-                $current = Join-Path $current $part
-                if ($unplaced) { continue }
-                $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
-                if (-not $item) {
-                    $unplaced = $true
+                $candidate = Join-Path $walked $part
+                if ($entry.Named) { $named = Join-Path $named $part }
+                $item = $null
+                if (-not $unplaced) {
+                    $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+                    if (-not $item) { $unplaced = $true }
+                }
+                $isLink = [bool]($item -and $item.LinkType -in @('SymbolicLink', 'Junction') -and $item.Target)
+                $steps.Add([pscustomobject]@{ Dir = $walked; Part = $part; Candidate = $candidate; IsLink = $isLink; Named = $entry.Named; NamedPath = $named })
+                if (-not $isLink) {
+                    $walked = $candidate
                     continue
                 }
-                if ($item.LinkType -and $item.Target) {
-                    $target = [string]@($item.Target)[0]
-                    if (-not [System.IO.Path]::IsPathRooted($target)) {
-                        $target = Join-Path (Split-Path -Parent $current) $target
-                    }
-                    $current = Get-AshRealPath $target ($Depth + 1)
+                $hops++
+                if ($hops -gt 40) {
+                    Stop-AshRefusal 3 "The path '$Spelling' is reached through more than 40 links (the walk reached $hops). Invoke-ASH follows at most 40 links to find where a directory or file really is, and does not run on a path it cannot place. Use a path with fewer links."
                 }
+                $target = [string]@($item.Target)[0]
+                if ([System.IO.Path]::IsPathRooted($target)) {
+                    $walked = [System.IO.Path]::GetPathRoot($target)
+                    $target = $target.Substring($walked.Length)
+                }
+                $given = [System.Collections.Generic.List[object]]::new()
+                foreach ($targetPart in $target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                    $given.Add([pscustomobject]@{ Name = $targetPart; Named = $false })
+                }
+                $rest.InsertRange(0, $given)
             }
-            return $current
+            return [pscustomobject]@{ Steps = $steps; Named = $named; Real = $walked }
         }
-        # The path as the operator named it, made absolute with every '..' applied to
-        # the real location before it (Get-AshRealPath), and no other link followed. A
-        # path with no '..' comes out as the same absolute spelling it was given.
-        function Get-AshNamedPath([string]$Path) {
-            $whole = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path ([System.IO.Directory]::GetCurrentDirectory()) $Path }
-            $root = [System.IO.Path]::GetPathRoot($whole)
-            $named = $root
-            foreach ($part in $whole.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
-                if ($part -eq '.') { continue }
-                if ($part -eq '..') {
-                    $real = Get-AshRealPath $named
-                    if (-not (Get-Item -LiteralPath $real -Force -ErrorAction SilentlyContinue)) {
-                        Stop-AshRefusal 3 "The path '$Path' goes up with '..' from '$named', which does not exist, so where it leads cannot be placed. Use a path without that '..'."
-                    }
-                    $named = Step-AshParent $real $Path
-                    continue
-                }
-                $named = Join-Path $named $part
-            }
-            return $named
+        function Get-AshRealPath([string]$Path) {
+            return (Get-AshWalk $Path).Real
         }
 
         $null = Get-Item -LiteralPath $SourceDir
-        $sourceDirFull = Get-AshNamedPath $SourceDir
+        $sourceWalk = Get-AshWalk $SourceDir
+        $sourceDirFull = $sourceWalk.Named
         Write-Verbose "Resolved SourceDir to: $sourceDirFull"
         # Case is ignored on Windows and macOS, whose file systems usually ignore it: a
         # different spelling of a directory's case is the same directory there. Where
@@ -372,7 +387,7 @@ function Invoke-ASH {
             $Root = $Root.TrimEnd($separators)
             return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
         }
-        $sourceReal = Get-AshRealPath $sourceDirFull
+        $sourceReal = $sourceWalk.Real
 
         # /out is mounted read-write and /src read-only: an output directory that is
         # the source directory or above it would hold the source tree, writable, at
@@ -380,10 +395,11 @@ function Invoke-ASH {
         # way followed, so a directory is the same one under any spelling: the output
         # through a link to a directory above it, the source through another. One that
         # does not exist yet cannot hold the source, so this runs before it is created.
-        $outputNamed = Get-AshNamedPath $OutputDir
+        $outputWalk = Get-AshWalk $OutputDir
+        $outputNamed = $outputWalk.Named
         if (-not $NoRun -and (Test-Path -LiteralPath $outputNamed -PathType Container)) {
             $existingOutput = $outputNamed
-            $directories = foreach ($real in @($sourceReal, (Get-AshRealPath $existingOutput))) {
+            $directories = foreach ($real in @($sourceReal, $outputWalk.Real)) {
                 $real.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
             }
             if ($directories[0].StartsWith($directories[1], $pathComparison)) {
@@ -416,137 +432,46 @@ function Invoke-ASH {
             }
             return $false
         }
-        # Whether a link the path follows sits inside one of $Trees or any git
-        # checkout. The path is resolved one component at a time, as Get-AshRealPath
-        # resolves it, so a link reached only through another link counts too:
-        # whoever writes the directory a link sits in chooses where it leads
-        # (config/sandbox_grants.links_followed). At most 40 links are followed, so
-        # a cycle of links ends, and a path with more is refused.
-        function Test-AshFollowsLinkInCheckout([string]$Path, [string[]]$Trees) {
-            $full = [System.IO.Path]::GetFullPath($Path)
-            $root = [System.IO.Path]::GetPathRoot($full)
-            $walked = $root
-            $rest = [System.Collections.Generic.List[string]]::new()
-            foreach ($part in $full.Substring($root.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
-                $rest.Add($part)
-            }
-            $hops = 0
-            while ($rest.Count -gt 0) {
-                $part = $rest[0]
-                $rest.RemoveAt(0)
-                if ($part -eq '.') { continue }
-                if ($part -eq '..') {
-                    $parent = Split-Path -Parent $walked
-                    $walked = if ($parent) { $parent } else { $root }
-                    continue
-                }
-                $candidate = Join-Path $walked $part
-                $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
-                if (-not ($item -and $item.LinkType -in @('SymbolicLink', 'Junction') -and $item.Target)) {
-                    $walked = $candidate
-                    continue
-                }
-                $hops++
-                # Past 40 links the path is refused, with the count named, rather than
-                # taken as reached through no link in a checkout.
-                if ($hops -gt 40) {
-                    Stop-AshRefusal 3 "The config file path '$Path' is reached through more than 40 links (the walk reached $hops). Invoke-ASH follows at most 40 links to find where a file really is, and does not run on a path it cannot place. Use a path with fewer links."
-                }
-                $linkDir = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+        # Whether a link the walk met sits inside one of $Trees or any git checkout:
+        # a link reached only through another link counts too, because whoever writes
+        # the directory a link sits in chooses where it leads
+        # (config/sandbox_grants.links_followed).
+        function Test-AshFollowsLinkInCheckout($Steps, [string[]]$Trees) {
+            foreach ($step in $Steps) {
+                if (-not $step.IsLink) { continue }
+                $linkDir = $step.Dir.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
                 if (@($Trees | Where-Object { Test-AshUnder $linkDir $_ }).Count -gt 0) { return $true }
-                if (Test-AshInCheckout $walked) { return $true }
-                $target = [string]@($item.Target)[0]
-                if ([System.IO.Path]::IsPathRooted($target)) {
-                    $walked = [System.IO.Path]::GetPathRoot($target)
-                    $target = $target.Substring($walked.Length)
-                }
-                $rest.InsertRange(0, [string[]]@($target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)))
+                if (Test-AshInCheckout $step.Dir) { return $true }
             }
             return $false
         }
         # Whether the path as named is inside one of $Trees, judged where each part of
-        # the name really is. The path is walked as Test-AshFollowsLinkInCheckout walks
-        # it, one component at a time with every link followed as it is met, and a part
-        # the name itself gives counts when the directory the walk is in is inside a
-        # tree. The parts a link's target gives do not count: a name that leaves the
-        # tree by the operator's own link and comes back through a target is not named
-        # inside it. So a tree reached through an alias, of the tree or of a directory
-        # above it, is judged as the direct spelling is. A path of more than 40 links
-        # is refused, with the count named.
-        function Test-AshNamedInTree([string]$Path, [string[]]$Trees) {
-            $full = [System.IO.Path]::GetFullPath($Path)
-            $root = [System.IO.Path]::GetPathRoot($full)
-            $walked = $root
-            $rest = [System.Collections.Generic.List[object]]::new()
-            foreach ($part in $full.Substring($root.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
-                $rest.Add([pscustomobject]@{ Name = $part; Named = $true })
-            }
-            $hops = 0
-            while ($rest.Count -gt 0) {
-                $entry = $rest[0]
-                $rest.RemoveAt(0)
-                $part = $entry.Name
-                if ($entry.Named) {
-                    $here = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
-                    if (@($Trees | Where-Object { Test-AshUnder $here $_ }).Count -gt 0) { return $true }
-                }
-                if ($part -eq '.') { continue }
-                if ($part -eq '..') {
-                    $parent = Split-Path -Parent $walked
-                    $walked = if ($parent) { $parent } else { $root }
-                    continue
-                }
-                $candidate = Join-Path $walked $part
-                $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
-                if (-not ($item -and $item.LinkType -in @('SymbolicLink', 'Junction') -and $item.Target)) {
-                    $walked = $candidate
-                    continue
-                }
-                $hops++
-                if ($hops -gt 40) {
-                    Stop-AshRefusal 3 "The config file path '$Path' is reached through more than 40 links (the walk reached $hops). Invoke-ASH follows at most 40 links to find where a file really is, and does not run on a path it cannot place. Use a path with fewer links."
-                }
-                $target = [string]@($item.Target)[0]
-                if ([System.IO.Path]::IsPathRooted($target)) {
-                    $walked = [System.IO.Path]::GetPathRoot($target)
-                    $target = $target.Substring($walked.Length)
-                }
-                $given = [System.Collections.Generic.List[object]]::new()
-                foreach ($targetPart in $target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
-                    $given.Add([pscustomobject]@{ Name = $targetPart; Named = $false })
-                }
-                $rest.InsertRange(0, $given)
+        # the name really is: a part the name itself gives counts when the real
+        # directory it is in is inside a tree. The parts a link's target gives do not
+        # count: a name that leaves the tree by the operator's own link and comes back
+        # through a target is not named inside it. So a tree reached through an alias,
+        # of the tree or of a directory above it, is judged as the direct spelling is.
+        function Test-AshNamedInTree($Steps, [string[]]$Trees) {
+            foreach ($step in $Steps) {
+                if (-not $step.Named) { continue }
+                $here = $step.Dir.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+                if (@($Trees | Where-Object { Test-AshUnder $here $_ }).Count -gt 0) { return $true }
             }
             return $false
         }
-        $spelledOutput = $outputNamed
-        $outputRoot = [System.IO.Path]::GetPathRoot($spelledOutput)
-        $walked = [System.Collections.Generic.List[string]]::new()
-        $current = $null
+        # Each part of the output path is placed at its real location, so a link the
+        # repository committed below the source is seen through an alias of the source
+        # or of a directory above it. A link outside the source, at or above it, is the
+        # operator's own spelling and is followed.
         $linkOnTheWay = $null
-        foreach ($part in $spelledOutput.Substring($outputRoot.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
-            if ($part -eq '.') { continue }
-            if ($part -eq '..') {
-                if ($walked.Count -gt 0) { $walked.RemoveAt($walked.Count - 1) }
-                continue
-            }
-            # Where the directory this part sits in really is, every link on the way to
-            # it followed, so the part is placed against the real source directory
-            # whatever spelling the output was given: a link the repository committed
-            # below the source is seen through an alias of the source or of a directory
-            # above it. A link outside the source, at or above it, is the operator's
-            # own spelling and is followed.
-            $parentSpelled = if ($walked.Count -gt 0) { $outputRoot.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + ($walked -join [System.IO.Path]::DirectorySeparatorChar) } else { $outputRoot }
-            $walked.Add($part)
-            $current = $outputRoot.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + ($walked -join [System.IO.Path]::DirectorySeparatorChar)
-            $partReal = Join-Path (Get-AshRealPath $parentSpelled) $part
-            if ((Test-AshUnder $partReal $sourceReal) -and (Test-AshLink $partReal)) {
-                $linkOnTheWay = $current
+        foreach ($step in (Get-AshWalk $outputNamed).Steps) {
+            if ($step.Named -and (Test-AshUnder $step.Candidate $sourceReal) -and (Test-AshLink $step.Candidate)) {
+                $linkOnTheWay = $step.NamedPath
                 break
             }
         }
-        if (-not $linkOnTheWay -and $walked.Count -gt 0 -and (Test-AshLink $current)) {
-            $linkOnTheWay = $current
+        if (-not $linkOnTheWay -and (Test-AshLink $outputNamed)) {
+            $linkOnTheWay = $outputNamed
         }
         if ($linkOnTheWay) {
             Stop-AshRefusal 3 "Refusing the output directory '$OutputDir': the output directory path '$linkOnTheWay' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory."
@@ -588,7 +513,8 @@ function Invoke-ASH {
                 Stop-AshRefusal 3 "Config file not found: $Config. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
             }
             # The runner mounts with its own rights, which can be wider than this user's.
-            $configNamed = Get-AshNamedPath $Config
+            $configWalk = Get-AshWalk $Config
+            $configNamed = $configWalk.Named
             try {
                 [System.IO.File]::OpenRead($configNamed).Close()
             }
@@ -596,8 +522,9 @@ function Invoke-ASH {
                 Stop-AshRefusal 3 "Config file cannot be read: $Config. ASH does not hand the container runner a file it cannot read itself."
             }
             # The config as named, and the real file the runner would mount
-            # (Get-AshRealPath, above, with $sourceReal).
-            $configFull = Get-AshRealPath $configNamed
+            # (Get-AshWalk, above, with $sourceReal).
+            $configFull = $configWalk.Real
+            $configSteps = (Get-AshWalk $configNamed).Steps
             Assert-Mountable 'config file' $configFull
             # The scanned tree, as a local scan defines it: the outermost directory at
             # or above SourceDir holding a .git entry, found from SourceDir's name and
@@ -623,7 +550,7 @@ function Invoke-ASH {
             # on where the parts of the name really are (Test-AshNamedInTree), not on
             # how the path to the tree is spelled. A link that stays inside the tree is
             # followed.
-            $namedInTree = Test-AshNamedInTree $configNamed $trees
+            $namedInTree = Test-AshNamedInTree $configSteps $trees
             if ($namedInTree -and -not $realInTree) {
                 Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree but is a link, or is reached through one, to '$configFull', which is outside it. ASH does not mount a file the repository being scanned points it at."
             }
@@ -663,7 +590,7 @@ function Invoke-ASH {
                 # counts as repository-written too
                 # (config/sandbox_grants.repository_written), so it is marked; the
                 # refusal above stays with the scanned tree.
-                $configInCheckout = (Test-AshInCheckout (Split-Path -Parent $configFull)) -or (Test-AshFollowsLinkInCheckout $configNamed $trees)
+                $configInCheckout = (Test-AshInCheckout (Split-Path -Parent $configFull)) -or (Test-AshFollowsLinkInCheckout $configSteps $trees)
             }
             $ashCmdArgs.Add("--config")
             $ashCmdArgs.Add('"$configInner"')
