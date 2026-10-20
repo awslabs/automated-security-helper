@@ -425,8 +425,43 @@ def test_the_scanner_starts_the_worker_with_the_refusal_unless_it_may_verify(
             verify=verify,
         )
 
-    env = seen["env"] or {}
-    assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), seen["env"]
+    env = seen["env"]
+    assert isinstance(env, dict), env
+    assert (env.get(REFUSE_HTTP_ENV) == "1") is (not verify), env.get(REFUSE_HTTP_ENV)
+
+
+def test_a_verifying_worker_does_not_inherit_the_refusal_from_the_parent(
+    tmp_path, monkeypatch
+):
+    """With the variable set in the parent, the environment handed to a verify=True
+    worker does not carry it."""
+    from automated_security_helper.utils import subprocess_utils
+    from automated_security_helper.utils.detect_secrets_worker import REFUSE_HTTP_ENV
+
+    seen = {}
+
+    def record(command, *args, **kwargs):
+        seen["env"] = kwargs.get("env")
+        return {"returncode": 1, "stdout": "", "stderr": "not run"}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", record)
+    monkeypatch.setenv(REFUSE_HTTP_ENV, "1")
+    scanner = _scanner(tmp_path)
+    scanner._secrets_collection.root = str(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(Exception):
+        scanner._scan_in_worker(
+            baseline=None,
+            scan_paths=[],
+            scan_settings_dict={"plugins_used": [{"name": "AWSKeyDetector"}]},
+            work_dir=work,
+            scan_timeout=None,
+            verify=True,
+        )
+
+    assert isinstance(seen["env"], dict), seen["env"]
+    assert REFUSE_HTTP_ENV not in seen["env"]
 
 
 def _in_process_run_request(tmp_path, verify):
