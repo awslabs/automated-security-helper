@@ -1293,6 +1293,16 @@ function Invoke-ASH {
                     }
                     $unverifiable = $true
                 }
+                $target = [string]@($item.Target)[0]
+                if ([System.IO.Path]::IsPathRooted($target)) {
+                    $walked = [System.IO.Path]::GetPathRoot($target)
+                    $target = $target.Substring($walked.Length)
+                }
+                $given = [System.Collections.Generic.List[object]]::new()
+                foreach ($targetPart in $target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                    $given.Add([pscustomobject]@{ Name = $targetPart; Named = $false })
+                }
+                $rest.InsertRange(0, $given)
             }
             $trusted = Test-AshEntryTrusted $Entry $Undecided
             if ($Undecided.Value -or -not $trusted) {
