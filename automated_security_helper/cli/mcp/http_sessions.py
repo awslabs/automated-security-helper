@@ -300,7 +300,7 @@ class SessionBoundary:
 
     # -- identity --------------------------------------------------------------
 
-    def _identify(self, scope: Scope) -> HttpCaller:
+    def _identify(self, scope: Scope, through_check: bool) -> HttpCaller:
         if self.mode == MODE_SSE:
             session = _canonical_sse_session(_query_value(scope, "session_id"))
             return HttpCaller(SSE, session if session in self._issued else None)
@@ -308,9 +308,7 @@ class SessionBoundary:
         if self.mode == MODE_STATEFUL:
             # The SDK routes a request naming a newer protocol past its session
             # check, so an id this app issued names no session there.
-            known = header in self._issued and _through_the_sdk_session_check(
-                scope, self._handshake_versions
-            )
+            known = header in self._issued and through_check
             return HttpCaller(STREAMABLE_HTTP, header if known else None)
         if self.trust_upstream_session_id and header and header.strip():
             return HttpCaller(STREAMABLE_HTTP, header.strip())
@@ -373,7 +371,12 @@ class SessionBoundary:
             await self.app(scope, receive, send)
             return
 
-        caller = self._identify(scope)
+        # Decided once, so the identity and the end-of-session watch cannot
+        # disagree about whether this request names a session.
+        through_check = self.mode == MODE_STATEFUL and _through_the_sdk_session_check(
+            scope, self._handshake_versions
+        )
+        caller = self._identify(scope, through_check)
         scope[CALLER_SCOPE_KEY] = caller
         if caller.session_id:
             from automated_security_helper.cli.mcp.sessions import (
@@ -389,7 +392,9 @@ class SessionBoundary:
             await self._serve_event_stream(scope, receive, send)
             return
         if self.mode == MODE_STATEFUL:
-            await self.app(scope, receive, self._watch_stateful(scope, send))
+            await self.app(
+                scope, receive, self._watch_stateful(scope, send, through_check)
+            )
             return
         await self.app(scope, receive, send)
 
@@ -404,7 +409,7 @@ class SessionBoundary:
 
         return watched
 
-    def _watch_stateful(self, scope: Scope, send: Send) -> Send:
+    def _watch_stateful(self, scope: Scope, send: Send, through_check: bool) -> Send:
         """Record the ids a stateful app issues, and end the ones it ends.
 
         An id counts as issued only from a successful response: the SDK also
@@ -418,7 +423,6 @@ class SessionBoundary:
         """
 
         header = _header(scope, _SESSION_HEADER)
-        through_check = _through_the_sdk_session_check(scope, self._handshake_versions)
         # A request naming a newer protocol names no session here, as in
         # _identify, so its DELETE ends none.
         known = header if header in self._issued and through_check else None
@@ -437,10 +441,11 @@ class SessionBoundary:
                     await self._end(known)
                 elif known and status == 404 and session_path:
                     await self._end(known)
-                elif issued and issued != header and 200 <= status < 300:
-                    # Only a response to a request that did not carry the value
-                    # is an issue (``initialize``); an echo of the client's own
-                    # header is not.
+                elif issued and not header and session_path and 200 <= status < 300:
+                    # Only a successful response, on the SDK's session path, to a
+                    # request that carried no session header (``initialize``) is
+                    # an issue. A response to a request that named a session, or
+                    # one from the sessionless path, issues nothing.
                     self._issued.add(issued)
             await send(message)
 
