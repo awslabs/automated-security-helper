@@ -59,7 +59,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -272,7 +272,9 @@ class MCPSession(BaseModel):
         """Uncount a scan :meth:`try_start_scan` counted."""
         self._scan_count.scan_returned()
 
-    def is_idle_since(self, cutoff: float) -> bool:
+    def is_idle_since(
+        self, cutoff: float, holds_binding: Callable[[str], bool]
+    ) -> bool:
         """Whether the registry can forget this session without anyone noticing.
 
         True when the session was last handed out before ``cutoff`` (a
@@ -284,18 +286,13 @@ class MCPSession(BaseModel):
 
         What a client bound to the session lives outside this object: a delivered
         tree in ``source_delivery`` and a selected profile in ``profile_registry``,
-        both keyed by the session id.
+        both keyed by the session id. ``holds_binding`` answers for those two
+        stores (:func:`_session_holds_a_binding`); the caller passes it in so that
+        a loop over many sessions imports them once.
         """
-        from automated_security_helper.cli.mcp.profile_registry import (
-            session_has_binding,
-        )
-        from automated_security_helper.cli.mcp.source_delivery import (
-            get_session_source_dir,
-        )
-
         if self._last_handed_out > cutoff:
             return False
-        if get_session_source_dir(self.id) is not None or session_has_binding(self.id):
+        if holds_binding(self.id):
             return False
         if self._scan_count.is_running() or not self._lock.acquire(blocking=False):
             return False
@@ -325,6 +322,28 @@ SESSION_MAP_EVICT_ABOVE = 1024
 
 #: How long a session must have gone unrequested, and idle, to be forgotten.
 IDLE_SESSION_SECONDS = 300.0
+
+
+def _session_holds_a_binding() -> Callable[[str], bool]:
+    """The test ``MCPSession.is_idle_since`` uses for what a client bound.
+
+    Looks up the delivered source directory and the selected profile by session
+    id. Returned as a function so the two imports happen once per caller and not
+    once per session.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_has_binding,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        get_session_source_dir,
+    )
+
+    def holds_binding(session_id: str) -> bool:
+        return get_session_source_dir(session_id) is not None or session_has_binding(
+            session_id
+        )
+
+    return holds_binding
 
 
 class MCPSessionRegistry:
@@ -419,7 +438,12 @@ class MCPSessionRegistry:
         :meth:`session_for` of the same id makes a fresh entry.
         """
         cutoff = time.monotonic() - IDLE_SESSION_SECONDS
-        idle = [sid for sid, s in self._sessions.items() if s.is_idle_since(cutoff)]
+        holds_binding = _session_holds_a_binding()
+        idle = [
+            sid
+            for sid, s in self._sessions.items()
+            if s.is_idle_since(cutoff, holds_binding)
+        ]
         for sid in idle:
             del self._sessions[sid]
 

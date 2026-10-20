@@ -735,16 +735,15 @@ def session_client_rules(
     return rules.model_copy(update={"session_id": session_id})
 
 
-def session_has_binding(session_id: str) -> bool:
+def session_has_binding(session_id: Optional[str] = None) -> bool:
     """Whether ``session_id`` has bound a profile.
 
-    A state that exists without a profile or a config holds no binding.
+    ``None`` is the stdio session (``DEFAULT_SESSION_ID``), as for the other
+    accessors. A state exists only once ``bind_session_config`` created it, with a
+    profile and a config, so a state in the map is a binding.
     """
     with _session_lock:
-        state = _session_state.get(session_id)
-        return state is not None and (
-            state.profile_name is not None or state.bound_config is not None
-        )
+        return (session_id or DEFAULT_SESSION_ID) in _session_state
 
 
 def clear_session_state(session_id: Optional[str] = None) -> None:

@@ -183,3 +183,32 @@ def test_a_forgotten_id_comes_back_as_a_working_session(registry) -> None:
     returned.release_scan()
     with returned.lock:
         pass
+
+
+def test_the_stdio_session_with_a_bound_profile_has_a_binding_by_none_and_by_id(
+    clean_session_state,
+) -> None:
+    default = profile_registry.DEFAULT_SESSION_ID
+    assert not profile_registry.session_has_binding(None)
+
+    profile_registry.bind_session_config(
+        None, config=AshConfig(), profile_name="strict"
+    )
+
+    assert profile_registry.session_has_binding(None)
+    assert profile_registry.session_has_binding(default)
+    assert not profile_registry.session_has_binding("someone-else")
+
+
+def test_is_idle_since_asks_the_binding_test_it_is_given(registry) -> None:
+    session = _unused_for_a_long_time(registry.session_for("quiet"))
+    cutoff = time.monotonic()
+    asked = []
+
+    def holds(session_id: str) -> bool:
+        asked.append(session_id)
+        return True
+
+    assert session.is_idle_since(cutoff, holds) is False
+    assert asked == ["quiet"]
+    assert session.is_idle_since(cutoff, lambda _id: False) is True
