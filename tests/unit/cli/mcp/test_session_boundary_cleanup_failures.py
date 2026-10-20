@@ -1,15 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A cleanup that fails never fails the response it follows.
+"""A cleanup that fails is logged, and fails only the answer that promised it.
 
 ``SessionBoundary`` removes a session's state when it sees the session end (a
 stateful ``DELETE``, an sse stream finishing, an app shutting down) and runs the
-TTL sweep before it answers a request. Both are housekeeping. If
-``end_session`` or the sweep raises, the client still gets its answer, the
+TTL sweep before it answers a request. If ``end_session`` raises while an sse
+stream finishes or the app shuts down, the client still gets its answer, the
 failure is logged with the session it concerned, and a later sweep removes what
-the failed removal left behind. A failing sweep still moves the next-sweep
-time, so it is not retried on every request.
+the failed removal left behind.
+
+A stateful ``DELETE`` is different: it is answered 2xx only after the removal
+succeeded. When the removal fails the answer is a 500 and the session stays
+issued, so the same ``DELETE`` sent again ends it. A failing sweep never fails
+the request that started it, and still moves the next-sweep time, so it is not
+retried on every request.
 """
 
 from __future__ import annotations
@@ -32,6 +37,8 @@ from automated_security_helper.cli.mcp.http_sessions import (
 from automated_security_helper.cli.mcp.profile_registry import clear_session_state
 
 LONG_AGO = 400 * 24 * 3600
+
+_REAL_END_SESSION = sessions.end_session
 
 
 class _Log:
@@ -121,23 +128,57 @@ def _later_sweep_removes(session_id: str, root: Path) -> None:
     assert not (root / session_id).exists()
 
 
-def test_a_failed_removal_on_delete_still_answers_2xx(root, log, failing_end) -> None:
+def _delete(session_id: str) -> Dict[str, Any]:
+    return _scope("DELETE", "/mcp", headers=[(b"mcp-session-id", session_id.encode())])
+
+
+def test_a_failed_removal_on_delete_answers_5xx_and_leaves_the_session_issued(
+    root, log, failing_end
+) -> None:
     session_id = "sess-delete"
     sessions.get_default_registry().get_or_create(session_id)
     boundary = SessionBoundary(_answering(), mode=MODE_STATEFUL, endpoint_path="/mcp")
     boundary._issued.add(session_id)
 
-    sent = _drive(
-        boundary,
-        _scope("DELETE", "/mcp", headers=[(b"mcp-session-id", session_id.encode())]),
-    )
+    sent = _drive(boundary, _delete(session_id))
 
+    # The SDK's 2xx is replaced, and nothing of it follows the 500.
     assert [m["type"] for m in sent] == ["http.response.start", "http.response.body"]
-    assert sent[0]["status"] == 200
+    assert sent[0]["status"] == 500
+    assert sent[1]["body"] == http_sessions._REMOVAL_FAILED_BODY
     assert failing_end == [session_id]
     assert len(log.warnings) == 1 and session_id in log.warnings[0], log.warnings
+    assert session_id in boundary._issued
+    # Inside the 24 h time to live the sweep leaves the tree: only a DELETE sent
+    # again removes it.
+    assert (root / session_id).is_dir()
+    assert sessions.sweep_stale_workspaces(24 * 3600, now=time.time() + 3600) == []
+    assert (root / session_id).is_dir()
+
+
+def test_a_delete_sent_again_after_a_failed_removal_removes_the_workspace(
+    root, log, failing_end, monkeypatch
+) -> None:
+    session_id = "sess-delete-retry"
+    sessions.get_default_registry().get_or_create(session_id)
+    boundary = SessionBoundary(_answering(), mode=MODE_STATEFUL, endpoint_path="/mcp")
+    boundary._issued.add(session_id)
+
+    first = _drive(boundary, _delete(session_id))
+    assert first[0]["status"] == 500
+    assert (root / session_id).is_dir()
+
+    monkeypatch.setattr(sessions, "end_session", _REAL_END_SESSION)
+    second = _drive(boundary, _delete(session_id))
+
+    assert [m["type"] for m in second] == [
+        "http.response.start",
+        "http.response.body",
+    ]
+    assert second[0]["status"] == 200
+    assert failing_end == [session_id], "only the first DELETE met the failure"
+    assert not (root / session_id).exists()
     assert session_id not in boundary._issued
-    _later_sweep_removes(session_id, root)
 
 
 def test_a_failed_removal_at_shutdown_still_reports_shutdown(
