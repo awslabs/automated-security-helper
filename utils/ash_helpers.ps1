@@ -623,8 +623,14 @@ function Invoke-ASH {
                 # alias to an anchored 'extends' used as a key), which the scan above
                 # does not see. A key that starts with one is refused too: at the start
                 # of a line, after '- ' or '? ', or after a '{' or ',' in flow style,
-                # followed by its ':'. An anchor or alias on a value is not a key.
-                if (($configText -match '(?m)^[ \t]*(-[ \t]+)?(\?[ \t]+)?[&*]\S+([ \t]+\S+)?[ \t]*:') -or ($configFlat -match '(^|[{,])\s*[&*][^\s,{}\[\]]+(\s+[^\s:,{}\[\]]+)?\s*:')) {
+                # followed by its ':'. An anchor or alias on a value is not a key. A '? '
+                # explicit key whose node starts with one is refused whether or not its
+                # ':' is on the same line, because the ':' of an explicit key can start
+                # the next line: at the start of a line (after '- ' entries) or after a
+                # '{' or ',' in flow style, with the node on the same line or the next.
+                $aliasAsKey = ($configText -match '(?m)^[ \t]*(-[ \t]+)?(\?[ \t]+)?[&*]\S+([ \t]+\S+)?[ \t]*:') -or ($configFlat -match '(^|[{,])\s*[&*][^\s,{}\[\]]+(\s+[^\s:,{}\[\]]+)?\s*:')
+                $aliasAsExplicitKey = ($configText -match '(?m)^[ \t]*(-[ \t]+)*\?\s+[&*]') -or ($configText -match '[{,]\s*\?\s+[&*]')
+                if ($aliasAsKey -or $aliasAsExplicitKey) {
                     Stop-AshRefusal 3 "The config file '$Config' is outside the source directory and has a YAML anchor or alias on a key, which can spell an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
                 }
                 $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
