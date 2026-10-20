@@ -66,11 +66,22 @@ def recording_docker(tmp_path, pwsh) -> Path:
     return bin_dir
 
 
-def _invoke(pwsh, tmp_path: Path, bin_dir: Path, arguments: str):
+def _invoke(
+    pwsh,
+    tmp_path: Path,
+    bin_dir: Path,
+    arguments: str,
+    before: str = "",
+    home: Path | None = None,
+):
     """Run Invoke-ASH as a CI step does: under ``Stop``, wrapped so a refusal, which
-    throws, ends the step with its code (docs/content/docs/cli-reference.md)."""
+    throws, ends the step with its code (docs/content/docs/cli-reference.md).
+
+    *before* is PowerShell run after the helpers are loaded and before the call, such
+    as a ``Push-Location``; the process working directory stays *tmp_path*. *home*
+    is what ``~`` means to PowerShell."""
     script = (
-        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; {before} "
         f"try {{ Invoke-ASH -OCIRunner docker -NoBuild {arguments} }} "
         "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
         "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
@@ -80,6 +91,8 @@ def _invoke(pwsh, tmp_path: Path, bin_dir: Path, arguments: str):
     env["PATH"] = os.pathsep.join(
         [bin_dir.as_posix(), Path(pwsh).resolve().parent.as_posix()]
     )
+    if home is not None:
+        env["HOME"] = home.as_posix()
     return subprocess.run(  # nosec B603 - fixed interpreter, script built here
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
         cwd=tmp_path,
@@ -680,3 +693,77 @@ def test_an_output_directory_that_is_the_source_through_dot_dot_after_a_link_is_
     assert result.returncode == 3, result.stdout + result.stderr
     assert _recorded(tmp_path) == []
     assert "above it" in _stderr(result)
+
+
+# ---------------------------------------------------------------------------
+# A relative path is resolved from PowerShell's location, for the check and the scan
+# ---------------------------------------------------------------------------
+
+
+def test_a_relative_path_is_taken_from_the_powershell_location(
+    pwsh, recording_docker, tmp_path
+):
+    """Push-Location moves PowerShell's location and not the process's working
+    directory. The directory that exists for PowerShell is the one that is mounted,
+    and the output is created beside it."""
+    project = (tmp_path / "proj").resolve()
+    (project / "sub").mkdir(parents=True)
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir sub -OutputDir out",
+        before=f"Push-Location '{project.as_posix()}';",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert _mount_source(args, "/src") == str(project / "sub")
+    assert _mount_source(args, "/out") == str(project / "out")
+    assert (project / "out").is_dir()
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_tilde_output_directory_is_the_home_directory(
+    pwsh, recording_docker, tmp_path
+):
+    """PowerShell reads ``~`` as the home directory, as it does for every command."""
+    home = (tmp_path / "home").resolve()
+    home.mkdir()
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir ~/ash-out",
+        home=home,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _mount_source(_recorded(tmp_path), "/out") == str(home / "ash-out")
+    assert (home / "ash-out").is_dir()
+    assert not (tmp_path / "~").exists()
+
+
+def test_a_tilde_config_is_the_file_in_the_home_directory(
+    pwsh, recording_docker, tmp_path
+):
+    home = (tmp_path / "home").resolve()
+    home.mkdir()
+    (home / "ash.yaml").write_text("project_name: p\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+
+    result = _invoke(
+        pwsh,
+        tmp_path,
+        recording_docker,
+        "-SourceDir src -OutputDir out -Config ~/ash.yaml",
+        home=home,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    args = _recorded(tmp_path)
+    assert args[args.index("--config") + 1] == "/ash-config/ash.yaml"
+    assert _mount_source(args, "/ash-config/ash.yaml") == str(home / "ash.yaml")
