@@ -103,10 +103,15 @@ class HttpCaller:
         session_id: The session the server issued (or, on a stateless app run
             with ``--trust-upstream-session-id``, the platform's header), or None
             when the request has no session identity.
+        protocol_version_is_cause: True when a stateful app gave the request no
+            identity because it names a protocol version outside the
+            ``initialize`` handshake versions. A caller that reads the refusal
+            can change that; it cannot change the other causes.
     """
 
     transport: str
     session_id: Optional[str]
+    protocol_version_is_cause: bool = False
 
 
 def caller_of(scope: Any) -> Optional[HttpCaller]:
@@ -309,7 +314,11 @@ class SessionBoundary:
             # The SDK routes a request naming a newer protocol past its session
             # check, so an id this app issued names no session there.
             known = header in self._issued and through_check
-            return HttpCaller(STREAMABLE_HTTP, header if known else None)
+            return HttpCaller(
+                STREAMABLE_HTTP,
+                header if known else None,
+                protocol_version_is_cause=not through_check,
+            )
         if self.trust_upstream_session_id and header and header.strip():
             return HttpCaller(STREAMABLE_HTTP, header.strip())
         return HttpCaller(STREAMABLE_HTTP, None)

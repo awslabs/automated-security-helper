@@ -369,19 +369,64 @@ def test_a_stateful_server_gives_an_issued_id_no_identity_on_the_newer_protocol(
     # version, so a caller on this server has something it can change.
     assert "Mcp-Protocol-Version" in result.get("error", ""), result
     assert "handshake" in result.get("error", ""), result
+    assert "newer protocol version" in result.get("error", ""), result
 
 
 def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
     from automated_security_helper.cli.mcp.session_identity import (
+        _PROTOCOL_VERSION_IS_CAUSE,
         UNIDENTIFIED_SESSION_ID,
         session_identity_refusal,
     )
 
-    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+    token = _PROTOCOL_VERSION_IS_CAUSE.set(True)
+    try:
+        refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+    finally:
+        _PROTOCOL_VERSION_IS_CAUSE.reset(token)
 
     assert refusal is not None
     assert "newer protocol version" in refusal["error"], refusal
     assert "Mcp-Protocol-Version" in refusal["error"], refusal
+
+
+def test_a_refusal_the_protocol_version_did_not_cause_does_not_name_it() -> None:
+    """A stateless caller changes nothing by changing its protocol version."""
+    app = build_streamable_http_app(
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        _issued, headers = http.open_session()
+        result = http.call_tool("clear_source", {}, headers)
+
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert "newer protocol version" not in result.get("error", ""), result
+    assert "Mcp-Protocol-Version" not in result.get("error", ""), result
+    assert "--trust-upstream-session-id" in result.get("error", ""), result
+
+
+def test_the_protocol_version_cause_does_not_outlive_the_request_that_set_it() -> None:
+    from automated_security_helper.cli.mcp.session_identity import (
+        _PROTOCOL_VERSION_IS_CAUSE,
+        UNIDENTIFIED_SESSION_ID,
+        resolve_caller_session_id,
+        session_identity_refusal,
+    )
+
+    class _StandIn:
+        headers = {"mcp-session-id": "tenant-a"}
+
+    token = _PROTOCOL_VERSION_IS_CAUSE.set(True)
+    try:
+        # The next resolution in this context is a different request.
+        assert resolve_caller_session_id(_StandIn()) == "tenant-a"
+        refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+    finally:
+        _PROTOCOL_VERSION_IS_CAUSE.reset(token)
+
+    assert refusal is not None
+    assert "newer protocol version" not in refusal["error"], refusal
 
 
 def test_the_ash_command_line_forwards_the_declaration(monkeypatch) -> None:
