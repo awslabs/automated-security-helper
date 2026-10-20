@@ -872,6 +872,16 @@ def _forget_session_in_memory(session_id: str) -> None:
     get_default_registry().forget(session_id)
 
 
+def _forget_session_in_memory(session_id: str) -> None:
+    """Drop the bound profile and the registry entry, leaving the workspace on disk."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_session_state,
+    )
+
+    clear_session_state(session_id)
+    get_default_registry().forget(session_id)
+
+
 def finish_ended_session(session_id: Optional[str]) -> None:
     """Complete the removal of a session that ended while its scan or write ran."""
     if session_id is None:
