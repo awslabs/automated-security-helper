@@ -963,6 +963,44 @@ def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
                 pass
 
 
+def test_a_write_that_ends_between_the_refused_change_and_the_pending_mark(
+    workspace, monkeypatch
+) -> None:
+    """The three steps in the order that used to leave the session behind.
+
+    The end of the session is refused its change because a write is in progress,
+    the write then ends and looks for a pending removal, and only after that does
+    the end of the session mark the removal pending. The end comes from an anyio
+    worker thread (``http_sessions``) and the write from a delivery thread, so the
+    steps can interleave this way; here they are driven in that order.
+    """
+
+    from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
+
+    sandbox = mark_session_workspace(workspace / SESSION)
+    write = sessions.writing_session_state(SESSION)
+    write.__enter__()
+    real = sessions.MCPSession.try_begin_change
+    write_ended: List[str] = []
+
+    def interleaved(self: Any, *args: Any, **kwargs: Any) -> bool:
+        granted = real(self, *args, **kwargs)
+        if not granted and not write_ended:
+            write_ended.append("ended")
+            write.__exit__(None, None, None)
+        return granted
+
+    monkeypatch.setattr(sessions.MCPSession, "try_begin_change", interleaved)
+
+    sessions.end_session(SESSION)
+
+    assert write_ended == ["ended"], "the end of the session was never refused"
+    assert not sandbox.exists(), (
+        "the session was left on disk with nothing to remove it"
+    )
+    assert SESSION not in sessions._ended_while_scanning
+
+
 def test_a_session_ended_during_a_write_is_removed_when_the_write_ends(
     workspace,
 ) -> None:
