@@ -565,6 +565,43 @@ def test_a_request_no_ash_app_stamped_gets_the_mode_less_advice() -> None:
     assert "newer protocol version" not in refusal["error"], refusal
     assert "--trust-upstream-session-id" in refusal["error"], refusal
 
+    def test_a_2xx_carrying_another_id_than_the_request_names_is_not_recorded(
+        self,
+    ) -> None:
+        boundary = _drive_stateful_boundary(
+            lambda scope: [(b"mcp-session-id", b"B")], [(b"mcp-session-id", b"A")]
+        )
+
+        assert boundary._issued == set()
+
+    def test_an_id_on_the_newer_protocols_sessionless_path_is_not_recorded(
+        self,
+    ) -> None:
+        boundary = _drive_stateful_boundary(
+            lambda scope: [(b"mcp-session-id", b"fresh")],
+            [(b"mcp-protocol-version", b"2026-07-28")],
+        )
+
+        assert boundary._issued == set()
+
+    def test_the_session_path_is_decided_once_per_request(self, monkeypatch) -> None:
+        from automated_security_helper.cli.mcp import http_sessions
+
+        real = http_sessions._through_the_sdk_session_check
+        calls: list = []
+
+        def counting(scope, handshake_versions):
+            calls.append(scope.get("method"))
+            return real(scope, handshake_versions)
+
+        monkeypatch.setattr(http_sessions, "_through_the_sdk_session_check", counting)
+
+        _drive_stateful_boundary(
+            lambda scope: [(b"mcp-session-id", b"server-issued")], []
+        )
+
+        assert len(calls) == 1
+
 
 def test_the_ash_command_line_forwards_the_declaration(monkeypatch) -> None:
     """``ash mcp`` exposes the flag and hands it to the server command."""
