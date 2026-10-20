@@ -56,6 +56,19 @@ async def _safe_send(
         return False
 
 
+async def _tell_client(ctx: Context, level: str, message: str) -> None:
+    """Send ``message`` through the server's guard, which never raises.
+
+    The guard lives in ``mcp_server``, which imports this module, so it is
+    imported when called rather than at load.
+    """
+    from automated_security_helper.cli.mcp_server import (
+        _tell_client as guarded_send,
+    )
+
+    await guarded_send(ctx, level, message)
+
+
 def _in_session(session_id: Optional[str]) -> Dict[str, str]:
     """The keyword that reads the scan in the session that started it.
 
@@ -77,14 +90,16 @@ async def _fetch_initial_scan_info(
         scan_id=scan_id, **_in_session(session_id)
     )
     if not registry_info.get("success", False):
-        await ctx.error(
-            f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
+        await _tell_client(
+            ctx,
+            "error",
+            f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}",
         )
         return None
 
     directory_path = registry_info.get("directory_path", "")
     if not directory_path:
-        await ctx.error("Missing directory path in scan registry")
+        await _tell_client(ctx, "error", "Missing directory path in scan registry")
         return None
 
     directory_path_obj = Path(directory_path)
@@ -361,8 +376,10 @@ async def _run_monitor_loop(
         current_time = asyncio.get_event_loop().time()
 
         if current_time - start_time > _MAX_WAIT_SECONDS:
-            await ctx.warning(
-                f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+            await _tell_client(
+                ctx,
+                "warning",
+                f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds",
             )
             return
 

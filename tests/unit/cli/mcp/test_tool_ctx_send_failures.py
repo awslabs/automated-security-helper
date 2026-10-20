@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from automated_security_helper.cli import mcp_server, mcp_tools
+from automated_security_helper.cli.mcp import progress_monitor
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
     clear_session_state,
@@ -400,3 +401,68 @@ def test_control_a_working_log_send_is_awaited_once_with_the_error() -> None:
 
     assert result["error_type"] == "invalid_session_id", result
     assert ctx.error.await_count == 1
+
+
+MONITOR_LOOKUPS = [
+    ("lookup_fails", {"success": False, "error": "not found"}),
+    ("directory_missing", {"success": True, "directory_path": ""}),
+]
+
+
+def _monitor_ctx(failing: str) -> MagicMock:
+    """A context whose progress sends work and whose ``failing`` send raises."""
+    ctx = MagicMock()
+    for name in ("info", "debug", "warning", "error", "report_progress"):
+        setattr(ctx, name, AsyncMock())
+    setattr(ctx, failing, AsyncMock(side_effect=RuntimeError("client gone")))
+    return ctx
+
+
+@pytest.mark.parametrize(
+    "lookup", [row for _, row in MONITOR_LOOKUPS], ids=[i for i, _ in MONITOR_LOOKUPS]
+)
+def test_a_failed_lookup_report_is_one_failed_send_not_a_monitor_failure(
+    lookup: Dict[str, Any],
+) -> None:
+    """The monitor reports a lookup failure once, and a failed send ends there.
+
+    A send that raised used to land in the monitor's own handler, which sent a
+    second error to the same dead client and logged the dead send as a monitor
+    failure.
+    """
+    ctx = _monitor_ctx("error")
+
+    with patch.object(
+        progress_monitor, "mcp_get_scan_progress", AsyncMock(return_value=lookup)
+    ):
+        asyncio.run(progress_monitor.monitor_scan_progress(ctx, "scan-1"))
+
+    assert ctx.error.await_count == 1
+
+
+def test_a_failed_timeout_warning_is_not_a_monitor_failure(tmp_path: Path) -> None:
+    ctx = _monitor_ctx("warning")
+    found = {"success": True, "directory_path": str(tmp_path)}
+
+    with (
+        patch.object(
+            progress_monitor, "mcp_get_scan_progress", AsyncMock(return_value=found)
+        ),
+        patch.object(progress_monitor, "_MAX_WAIT_SECONDS", -1),
+    ):
+        asyncio.run(progress_monitor.monitor_scan_progress(ctx, "scan-1"))
+
+    assert ctx.warning.await_count == 1
+    assert ctx.error.await_count == 0, ctx.error.await_args_list
+
+
+def test_control_a_working_lookup_report_is_awaited_once_with_the_error() -> None:
+    ctx = _monitor_ctx("debug")
+    lookup = {"success": False, "error": "not found"}
+
+    with patch.object(
+        progress_monitor, "mcp_get_scan_progress", AsyncMock(return_value=lookup)
+    ):
+        asyncio.run(progress_monitor.monitor_scan_progress(ctx, "scan-1"))
+
+    ctx.error.assert_awaited_once_with("Failed to get scan info: not found")
