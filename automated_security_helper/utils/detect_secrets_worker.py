@@ -144,7 +144,8 @@ def refuse_http_requests() -> None:
 
     This replaces ``requests.adapters.HTTPAdapter.send`` and nothing else. A plugin
     or filter that opens its own socket, or uses another HTTP client, is not
-    stopped here; the sandbox's network policy is what bounds those.
+    stopped here. Under --sandbox the network policy bounds those; without a
+    sandbox nothing does.
     """
     import requests
     from requests.adapters import HTTPAdapter
