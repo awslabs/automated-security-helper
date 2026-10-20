@@ -550,10 +550,18 @@ def end_session(session_id: str) -> bool:
 
     The session's sandbox (``<workspace root>/<session id>``: the delivered
     tree, uploads in progress, the config ``select_profile`` materialized), its
-    delivered-source record, its bound profile, and its registry entry. If a
-    scan of the session is running, the removal waits until that scan returns
-    (:func:`finish_ended_session`), because removing the tree a scan is reading
-    can turn its result into a clean one.
+    delivered-source record, its bound profile, and its registry entry. Removing
+    the tree a scan is reading can turn its result into a clean one, so a scan
+    that holds the session defers the removal:
+
+    - A scan in this process: the removal waits until that scan returns, and
+      :func:`finish_ended_session` completes it, called as the scan's claim is
+      released.
+    - A scan in another server sharing the workspace root: nothing in this
+      process learns when that scan returns, so :func:`finish_ended_session` is
+      not called for it. The tree, the profile binding and the delivered-source
+      record stay until :func:`sweep_stale_workspaces` finds the workspace older
+      than its TTL with no scan holding it, which is the only collector.
 
     Idempotent. The session is taken with ``session_for`` and not ``get``: the
     registry may have forgotten the id, and a scan can recreate and claim it right
@@ -1171,6 +1179,9 @@ def sweep_stale_workspaces(
 
     Entries that are not directories, are symlinks, or do not name a single
     directory are left alone.
+
+    This is also what removes a session whose end :func:`end_session` deferred
+    for a scan in another server: that scan's end is not seen here.
 
     Returns:
         The session ids whose workspaces were removed.

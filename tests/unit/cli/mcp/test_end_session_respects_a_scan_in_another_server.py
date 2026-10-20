@@ -7,8 +7,10 @@ A scan holds its session's claim in the process that runs it, and a locked entry
 under ``<root>/.ash-mcp-scans/<session id>/`` for every server sharing the root
 (``sessions.ScanPresence``). Ending a session in a server that has no claim of its
 own must still see that entry: removing the tree under a running scan can turn its
-result into a clean one. Whatever removes a session's workspace also drops the
-entries of scans that died and the empty directory that held them.
+result into a clean one. Nothing in this process learns when the scan elsewhere
+returns, so the deferred removal is the TTL sweep's. Whatever removes a session's
+workspace also drops the entries of scans that died and the empty directory that
+held them.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import contextlib
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -94,13 +97,20 @@ def test_ending_a_session_defers_while_a_scan_in_another_server_runs(root) -> No
     assert deferred
 
 
-def test_the_deferred_removal_runs_once_that_scan_is_gone(root) -> None:
+def test_the_ttl_sweep_removes_the_deferred_session_once_that_scan_is_gone(
+    root,
+) -> None:
+    """Nothing in this process learns that the scan elsewhere returned: the sweep
+    is the collector (see ``end_session``)."""
     sandbox = _sandbox(root, "elsewhere")
     with _scan_in_another_process(root, "elsewhere"):
         assert sessions.end_session("elsewhere") is False
+        assert sessions.sweep_stale_workspaces(60.0, now=time.time() + 3600) == []
+        assert sandbox.is_dir(), "the sweep removed the tree under the running scan"
 
-    sessions.finish_ended_session("elsewhere")
+    removed = sessions.sweep_stale_workspaces(60.0, now=time.time() + 3600)
 
+    assert removed == ["elsewhere"]
     assert not sandbox.exists()
     assert not (root / sessions.SCAN_PRESENCE_DIR / "elsewhere").exists()
     assert "elsewhere" not in sessions._ended_while_scanning
