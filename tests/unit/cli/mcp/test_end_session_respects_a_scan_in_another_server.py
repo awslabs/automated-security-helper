@@ -16,16 +16,20 @@ held them.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import List
 
 import pytest
 
-from automated_security_helper.cli.mcp import sessions
+from automated_security_helper.cli.mcp import profile_registry, sessions
 from automated_security_helper.cli.mcp.session_paths import mark_session_workspace
+from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, KillAfter
 
 _HOLDER = """
@@ -128,22 +132,89 @@ def test_ending_a_session_drops_the_entry_a_dead_scan_left(root) -> None:
     assert not holder.exists(), "the dead scan's entry and its directory were kept"
 
 
-def test_a_presence_guard_that_cannot_be_taken_defers_the_removal(
+@pytest.fixture
+def ash_log():
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.WARNING)
+    previous = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous)
+
+
+def test_a_presence_guard_that_cannot_be_taken_clears_the_memory_and_warns(
+    root, monkeypatch, ash_log
+) -> None:
+    """Unable to prove no scan holds the session, end_session leaves the tree on
+    disk for the sweep, and does not keep the session's state in memory for the
+    life of the process."""
+    sandbox = _sandbox(root, "unreadable")
+    profile_registry.bind_session_config(
+        "unreadable", config=AshConfig(), profile_name="strict"
+    )
+    registry = sessions.get_default_registry()
+    registry.session_for("unreadable")
+
+    def refused(_root):
+        raise PermissionError("the presence registry cannot be opened")
+
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(sessions, "_scan_presence_guard", refused)
+            removed_now = sessions.end_session("unreadable")
+
+        assert removed_now is False
+        assert (sandbox / "source" / "app.py").is_file()
+        assert "unreadable" not in registry
+        assert not profile_registry.session_has_binding("unreadable")
+        assert "unreadable" not in sessions._ended_while_scanning
+        warned = [r.getMessage() for r in ash_log if "presence lock" in r.getMessage()]
+        assert len(warned) == 1, warned
+        assert str(root / sessions.SCAN_PRESENCE_DIR / ".lock") in warned[0]
+
+        removed = sessions.sweep_stale_workspaces(60.0, now=time.time() + 3600)
+
+        assert removed == ["unreadable"], "a sweep whose guard succeeds collects it"
+        assert not sandbox.exists()
+    finally:
+        profile_registry.clear_session_state()
+
+
+def test_ending_the_default_session_does_not_open_the_scan_presence_registry(
+    root,
+) -> None:
+    """The reserved ``__default__`` never has a presence entry, so there is
+    nothing for the guard to protect and no lock file to create."""
+    default = mark_session_workspace(root / profile_registry.DEFAULT_SESSION_ID)
+    (default / "source").mkdir()
+
+    assert sessions.end_session(profile_registry.DEFAULT_SESSION_ID) is True
+
+    assert not default.exists()
+    assert not (root / sessions.SCAN_PRESENCE_DIR).exists()
+
+
+def test_a_guard_that_cannot_be_taken_does_not_strand_the_default_workspace(
     root, monkeypatch
 ) -> None:
-    """Unable to prove no scan holds the session, end_session removes nothing."""
-    sandbox = _sandbox(root, "unreadable")
+    default = mark_session_workspace(root / profile_registry.DEFAULT_SESSION_ID)
 
     def refused(_root):
         raise PermissionError("the presence registry cannot be opened")
 
     monkeypatch.setattr(sessions, "_scan_presence_guard", refused)
 
-    removed_now = sessions.end_session("unreadable")
-
-    assert removed_now is False
-    assert (sandbox / "source" / "app.py").is_file()
-    assert "unreadable" in sessions._ended_while_scanning
+    assert sessions.end_session(profile_registry.DEFAULT_SESSION_ID) is True
+    assert not default.exists()
 
 
 def test_ending_an_unknown_session_creates_nothing_under_the_root(root) -> None:
