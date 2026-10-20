@@ -35,18 +35,22 @@ Where
 Each reference is replaced at its own position: the path of keys at which the
 file wrote it, spelled with ``-`` or ``_`` (the record keys a built-in plugin's
 section by its field name), and moved to where a ``patch`` operation puts its
-value. A string equal to the value is recorded as the reference at the reference's
-own index. A string elsewhere that happens to equal the value is left alone, so a
-field the file set to "us-east-1" is not recorded as ``${AWS_REGION}`` because
-that variable holds the same text, and a list entry the file wrote as the same
-text as the value of an entry beside it stays as written. At its own position, index included, a string
-the load changed after reading it (a relative path the load takes from the
-file's directory) has the part read from the environment replaced inside it; a
-neighboring entry that only contains the same text is left as it is. If the entry
-at the reference's own index no longer carries its value because the list is not
-the length the file wrote (defaults before it, a patch), the reference is looked
-for at any index of the list instead. A position the configuration no longer holds the value at, because a later
-file or an override set it, is left as the configuration holds it.
+value. A string equal to the value is recorded as the reference at the
+reference's own index. A string elsewhere that happens to equal the value is left
+alone, so a field the file set to "us-east-1" is not recorded as
+``${AWS_REGION}`` because that variable holds the same text, and a list entry the
+file wrote as the same text as the value of an entry beside it stays as written.
+At its own position, index included, a string the load changed after reading it
+(a relative path the load takes from the file's directory) has the part read from
+the environment replaced inside it; a neighboring entry that only contains the
+same text is left as it is. If the entry at the reference's own index no longer
+carries its value because the list is not the length the file wrote (defaults
+before it, a patch), the reference is looked for at any index of the list
+instead, in a string that is the value or a path anchored on it. A reference whose
+list index the file's layout does not give (the append of a ``patch`` operation)
+is looked for the same way. A position the configuration no longer holds the
+value at, because a later file or an override set it, is left as the
+configuration holds it.
 
 Reading a record
 ----------------
@@ -279,28 +283,24 @@ def _anchored(text: str, reference: EnvironmentReference) -> bool:
     return text == reference.resolved or text.endswith(reference.resolved)
 
 
-def _recorded_string(
-    text: str,
-    references: Sequence[EnvironmentReference],
-    unclaimed: Optional[Sequence[EnvironmentReference]] = None,
-) -> str:
-    """``text`` as the file wrote it, where ``references`` are those at its position.
+def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:
+    """``text`` as the file wrote it, where ``candidates`` are the references that
+    apply at its position (``_Index.pending``).
 
-    A string equal to what a reference resolved to is the reference. Only the
-    ``unclaimed`` references (``_Index.own``, all of them by default) are also
-    read into a longer string: those the file wrote at this very entry, since the
-    reference of a neighboring entry does not write this one.
+    A string equal to what a candidate resolved to is the reference; one that ends
+    with it has the reference in its place; any other string has the value of each
+    candidate replaced by it. A neighboring entry's reference is not a candidate,
+    since it does not write this entry.
     """
-    for reference in references:
+    for reference in candidates:
         if text == reference.resolved:
             return reference.written
-    pending = references if unclaimed is None else unclaimed
-    for reference in pending:
+    for reference in candidates:
         if text.endswith(reference.resolved):
             # A path the load anchored: the file's text after a prefix.
             prefix = text[: len(text) - len(reference.resolved)]
             return prefix + _without_tag(reference.written)
-    for reference in pending:
+    for reference in candidates:
         if reference.value in text:
             text = text.replace(reference.value, _bare(reference.written))
     return text
@@ -456,7 +456,7 @@ class _Index:
                 # one: a plain entry equal to the value, beside the reference's
                 # own entry, is the file's own text and stays as written.
                 candidates = self.pending(exact, here, item)
-                return self._string(item, candidates, candidates)
+                return self._string(item, candidates)
         return item
 
     def fill(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
@@ -483,20 +483,15 @@ class _Index:
     def _whole(self, reference: EnvironmentReference) -> Any:
         return reference.written if self.mark is None else self.mark(reference.written)
 
-    def _string(
-        self,
-        text: str,
-        references: List[EnvironmentReference],
-        unclaimed: List[EnvironmentReference],
-    ) -> Any:
+    def _string(self, text: str, candidates: List[EnvironmentReference]) -> Any:
         if self.mark is None:
-            return _recorded_string(text, references, unclaimed)
-        for reference in references:
+            return _recorded_string(text, candidates)
+        for reference in candidates:
             if text == reference.resolved:
                 return self._whole(reference)
         if self.whole_only:
             return text
-        for reference in unclaimed:
+        for reference in candidates:
             if reference.value in text:
                 text = text.replace(reference.value, self.mark(reference.written))
         return text
