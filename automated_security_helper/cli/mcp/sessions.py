@@ -138,8 +138,9 @@ CHANGE_REFUSED_BY_WRITE = "write"
 #: session, so its state is gone once it is done.
 WRITE_REFUSED_BY_SWEEP = "sweep"
 
-#: Why :meth:`MCPSession.try_begin_write` refused: a change to the session's tree
-#: holds it, and the files of an upload may or may not outlive that change.
+#: Why :meth:`MCPSession.try_begin_write` refused: a change that deletes the
+#: session's directory (``clear_source`` or the end of the session) holds it.
+#: Its removal may or may not have reached the upload's files yet.
 WRITE_REFUSED_BY_CHANGE = "change"
 
 
@@ -262,7 +263,7 @@ class MCPSession(BaseModel):
                 changing = self._changing
             return CHANGE_REFUSED_BY_CHANGE if changing else CHANGE_REFUSED_BY_SCAN
         with self._state_lock:
-            if self._claimed_scans or self._writes:
+            if self._claimed_scans or (removes_workspace and self._writes):
                 self._lock.release()
                 return CHANGE_REFUSED_BY_SCAN
             if removes_workspace and self._writes:
@@ -919,12 +920,12 @@ class SessionWorkspaceBusyError(RuntimeError):
 
 
 class SessionChangeInProgressError(SessionWorkspaceBusyError):
-    """A write to a session's state was refused: a change to its tree holds it.
+    """A write to a session's state was refused: a change that deletes its directory holds it.
 
-    The request is sent again as it is once the change is done. A chunk is sent
-    with the same sequence number; only an out-of-order answer then means that
-    the upload was removed by the change, and the upload is sent again from its
-    first chunk.
+    The change is ``clear_source`` or the end of the session. The request is sent
+    again as it is once the change is done. A chunk is sent with the same
+    sequence number; only an out-of-order answer then means that the upload was
+    removed, and the upload is sent again from its first chunk.
     """
 
     error_type = SESSION_CHANGE_IN_PROGRESS
