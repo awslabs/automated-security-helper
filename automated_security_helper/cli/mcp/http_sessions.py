@@ -208,7 +208,9 @@ def _on_the_sdk_session_path(
     return through_the_sdk_session_check
 
 
-def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool:
+def _on_the_sdk_session_path(
+    scope: Scope, endpoint_path: Optional[str], through_the_sdk_session_check: bool
+) -> bool:
     """True when the SDK's session endpoint handles this request's session.
 
     Two conditions. The request is for the endpoint itself: Starlette answers
@@ -218,7 +220,7 @@ def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool
     """
     if endpoint_path is None or _route_path(scope) != endpoint_path:
         return False
-    return _through_the_sdk_session_check(scope)
+    return through_the_sdk_session_check
 
 
 def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
@@ -284,6 +286,10 @@ class SessionBoundary:
     Raises:
         RuntimeError: building a stateful boundary without ``handshake_versions``,
             if the SDK's list of handshake protocol versions cannot be imported.
+
+    Raises:
+        RuntimeError: building a stateful boundary, if the SDK's list of
+            handshake protocol versions cannot be imported.
 
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
