@@ -19,9 +19,9 @@ processes can hold, remove or replace. Each of these arms handles one error:
   taken;
 * touching a workspace never raises.
 
-The Windows-only arms of the same functions (``msvcrt`` locking and the refusal to
-open a file another process holds) cannot be reached on this platform and have no
-cell here.
+The refusal to open a file another process holds is simulated here, by making
+``open`` raise for one entry. The ``msvcrt`` locking arm of the same functions is
+Windows-only, cannot be reached on this platform, and has no cell.
 """
 
 from __future__ import annotations
