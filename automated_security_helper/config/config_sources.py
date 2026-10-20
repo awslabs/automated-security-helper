@@ -4016,9 +4016,11 @@ def _placed_references(
 
     One under ``extends`` names a base, which is not part of the merged
     configuration, and is left out. One in a ``patch`` operation's ``value`` is
-    moved to the operation's ``path``; a pointer ending in ``-`` (append) is a
-    list position like any other. Any other reference under ``patch`` sets no
-    value, and is left out too.
+    moved to the operation's ``path``. A digit in the pointer is that list index;
+    ``-`` (append) is an index the file cannot name, which the record reads as an
+    unknown index (``UNKNOWN_INDEX``). A list inside the operation's value keeps
+    the length it had there. Any other reference under ``patch`` sets no value,
+    and is left out too.
     """
     placed: List[EnvironmentReference] = []
     for reference in references:
@@ -4041,10 +4043,14 @@ def _placed_references(
             continue
         pointer = ops[index]["path"]
         segments: List[Any] = [
-            0 if segment == "-" or segment.isdigit() else _unescape(segment)
+            UNKNOWN_INDEX
+            if segment == "-"
+            else int(segment)
+            if segment.isdigit()
+            else _unescape(segment)
             for segment in pointer.split("/")[1:]
         ]
-        placed.append(reference.at((*segments, *reference.path[3:])))
+        placed.append(reference.rebase(3, tuple(segments)))
     return placed
 
 
