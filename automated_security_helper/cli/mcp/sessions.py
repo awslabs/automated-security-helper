@@ -767,6 +767,42 @@ STDIO_SERVERS_DIR = ".stdio-servers"
 _STDIO_SERVERS_LOCK = ".lock"
 
 
+class PresenceLockError(Exception):
+    """A stdio server or a scan could not lock its own presence entry.
+
+    Not an ``OSError``: the presence classes treat an ``OSError`` as "no registry
+    on this root" and carry on unregistered, and this is the one failure they
+    refuse to carry on from.
+    """
+
+
+def _lock_own_entry(handle: Any, entry: Path, what: str) -> None:
+    """Lock a presence entry this process just created, or refuse to go on.
+
+    The entry is a new file named for this process, so no other process holds a
+    lock on it; a refusal comes from the filesystem (``flock`` answering ENOLCK on
+    a network mount, say), and asking again gets the same answer, so there is no
+    retry. A server or scan that went on without a locked entry would read as dead
+    to every other server sharing the root, which would remove the workspace under
+    it. The entry is removed and nothing stays registered.
+
+    Raises:
+        PresenceLockError: naming the entry's path.
+    """
+    if _try_lock(handle):
+        return
+    handle.close()
+    with contextlib.suppress(OSError):
+        entry.unlink()
+    raise PresenceLockError(
+        f"could not take the lock on {what} {entry}: the filesystem refused it. "
+        "Without the lock other servers sharing the workspace root would read "
+        "this process as dead and remove the workspace it is using, so it does "
+        "not start. Set ASH_MCP_WORKSPACE_ROOT to a directory on a filesystem "
+        "that supports file locks."
+    )
+
+
 def _try_lock(handle: Any) -> bool:
     """Take an exclusive lock on ``handle`` without waiting; True if taken."""
     try:
@@ -810,11 +846,14 @@ class StdioServerPresence:
     is removed, at registration as well as at exit. Registration and the exit
     check both run under one lock file, so a server starting while another exits
     is either counted or starts after the removal. A server that cannot lock its
-    own entry is not registered.
+    own entry does not start: ``__enter__`` raises :class:`PresenceLockError`
+    naming the entry's path.
 
     Limits: a server on another host sharing the root through a network
-    filesystem may not see this process's locks, and a root that cannot be
-    created leaves the default workspace in place.
+    filesystem may not see this process's locks, and a root where the registry
+    cannot be created or its lock file cannot be locked leaves the default
+    workspace in place (no server can register there, so none is removed
+    under).
     """
 
     def __init__(self) -> None:
@@ -840,21 +879,21 @@ class StdioServerPresence:
                 # Entries of servers that were killed are dropped here as well as
                 # on exit, so a root that only sees killed servers does not keep
                 # them. Under the guard, as the exit check is.
-                self._another_server_is_live(registry)
+                self._drop_dead_entries(registry)
                 entry = registry / f"{os.getpid()}-{uuid.uuid4().hex}"
                 handle = open(entry, "a+b")
-                # A file nobody else has opened: the lock is free unless the
-                # filesystem refuses it. Then this server would read as dead to an
-                # exiting sibling, so it is not registered at all.
-                if not _try_lock(handle):
-                    handle.close()
-                    with contextlib.suppress(OSError):
-                        entry.unlink()
-                    raise OSError("could not lock this server's presence entry")
+                # A file nobody else has opened, so only the filesystem can refuse
+                # the lock, and asking again would get the same answer. The server
+                # then does not start: running unregistered, it would read as dead
+                # to an exiting sibling, which would remove the default workspace
+                # under it. PresenceLockError is not caught below.
+                _lock_own_entry(handle, entry, "this server's presence entry")
                 self._entry, self._handle = entry, handle
         except (OSError, RuntimeError):
             # No registry: this server is not counted, and on exit it leaves the
-            # default workspace alone rather than guess.
+            # default workspace alone rather than guess. Nothing can have
+            # registered there either, as the registry's own lock was refused or
+            # the directory cannot be created.
             self._entry = self._handle = None
         return self
 
@@ -887,7 +926,16 @@ class StdioServerPresence:
             self._entry = None
 
     @staticmethod
+    def _drop_dead_entries(registry: Path) -> None:
+        """Remove the entries of servers that died, keeping the live ones.
+
+        Called under the registry's lock file, for its effect only.
+        """
+        StdioServerPresence._another_server_is_live(registry)
+
+    @staticmethod
     def _another_server_is_live(registry: Path) -> bool:
+        """True if another server's entry is locked; drops entries of dead ones."""
         live = False
         for entry in registry.iterdir():
             if entry.name == _STDIO_SERVERS_LOCK or not entry.is_file():
@@ -957,7 +1005,9 @@ class ScanPresence:
     Nothing is registered for a session with no workspace on disk: nothing of
     the session's is there to protect, and a scan of a directory the operator
     granted creates nothing under the root. A root where the entry can't be
-    created leaves the scan unregistered rather than failing it.
+    created leaves the scan unregistered rather than failing it. A scan whose
+    entry exists but can't be locked does not start: ``__enter__`` raises
+    :class:`PresenceLockError`.
 
     Limits: as ``StdioServerPresence``, a server on another host sharing the root
     through a filesystem that does not share these locks can't see them.
@@ -992,8 +1042,15 @@ class ScanPresence:
                 holder.mkdir(exist_ok=True)
                 entry = holder / f"{os.getpid()}-{uuid.uuid4().hex}"
                 handle = open(entry, "a+b")
-                # A file nobody else has opened: the lock is always free.
-                _try_lock(handle)
+                # A file nobody else has opened, so only the filesystem can refuse
+                # the lock. The scan then does not start, as an unlocked entry
+                # reads as dead to every other server's sweep.
+                try:
+                    _lock_own_entry(handle, entry, "this scan's presence entry")
+                except PresenceLockError:
+                    with contextlib.suppress(OSError):
+                        holder.rmdir()
+                    raise
                 self._entry, self._handle = entry, handle
         except (OSError, ValueError, RuntimeError):
             self._entry = self._handle = None
@@ -1191,6 +1248,7 @@ def _remove_if_still_stale(
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "PresenceLockError",
     "SESSION_SCAN_LIMIT",
     "SESSION_WORKSPACE_BUSY",
     "ScanCount",

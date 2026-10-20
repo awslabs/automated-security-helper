@@ -2049,13 +2049,19 @@ def run_mcp_server():
     ``sessions.StdioServerPresence``. Its one client is the local client, the
     only caller that gets stdio's local trust (``serving_local_client``).
     """
-    from automated_security_helper.cli.mcp.sessions import StdioServerPresence
+    from automated_security_helper.cli.mcp.sessions import (
+        PresenceLockError,
+        StdioServerPresence,
+    )
     from automated_security_helper.utils.subprocess_utils import honor_in_tree_opt_in
 
     honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
     try:
         with StdioServerPresence(), serving_local_client():
             _run_stdio_until_closed()
+    except PresenceLockError:
+        # The server did not start: it could not lock its presence entry.
+        raise
     except Exception as e:
         # Shutdown must not fail on cleanup.
         logger.warning(f"Could not remove the stdio session workspace: {e}")
