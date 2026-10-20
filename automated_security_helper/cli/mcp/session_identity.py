@@ -103,6 +103,13 @@ SESSION_IDENTITY_REQUIRED = "session_identity_required"
 #: Set while the caller is the local client; see :func:`serving_local_client`.
 _LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
 
+#: Set by :func:`resolve_caller_session_id` for the call it resolves: the caller
+#: has no identity because its request names a protocol version outside the
+#: ``initialize`` handshake versions. :func:`session_identity_refusal` reads it.
+_PROTOCOL_VERSION_IS_CAUSE: ContextVar[bool] = ContextVar(
+    "ash_mcp_protocol_version_is_cause", default=False
+)
+
 
 @contextlib.contextmanager
 def serving_local_client() -> Iterator[None]:
@@ -340,6 +347,9 @@ def resolve_caller_session_id(ctx: object) -> str:
         DEFAULT_SESSION_ID,
     )
 
+    # Every resolution states its own cause, so one request's does not reach
+    # the next one's refusal.
+    _PROTOCOL_VERSION_IS_CAUSE.set(False)
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
         return resolve_session_id(getattr(ctx, "headers", None), refuse_reserved=True)
@@ -354,6 +364,9 @@ def resolve_caller_session_id(ctx: object) -> str:
 
     caller = caller_of(getattr(request, "scope", None))
     if caller is None or caller.session_id is None:
+        _PROTOCOL_VERSION_IS_CAUSE.set(
+            caller is not None and caller.protocol_version_is_cause
+        )
         return UNIDENTIFIED_SESSION_ID
     candidate = caller.session_id.strip()
     if not candidate:
@@ -439,13 +452,10 @@ def session_identity_refusal(
             f"{operation} needs a session, and this call carries none the server "
             f"issued. A stateless streamable-HTTP server issues no session, and an "
             f"Mcp-Session-Id header the server did not issue does not name one. "
-            f"On a stateful server a session tool also needs a handshake "
-            f"Mcp-Protocol-Version: a request that names a newer protocol version "
-            f"names no session, whatever Mcp-Session-Id it sends, so send the "
-            f"protocol version the initialize handshake negotiated. To serve "
-            f"sessions at all, use a stateful server (without --stateless-http), "
-            f"or, when a platform in front of ASH issues and authenticates "
-            f"Mcp-Session-Id, start a stateless server with "
+            f"{protocol_sentence}"
+            f"To serve sessions at all, use a stateful server (without "
+            f"--stateless-http), or, when a platform in front of ASH issues and "
+            f"authenticates Mcp-Session-Id, start a stateless server with "
             f"--trust-upstream-session-id."
         ),
     }
