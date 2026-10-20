@@ -201,6 +201,43 @@ def test_an_unreadable_tree_is_reported_by_its_own_error_type(
     assert not (workspace / SESSION / "source").exists()
 
 
+@pytest.mark.parametrize(
+    ("refusal", "error_type"),
+    [
+        (sd.GitTimeoutError, sd.CLONE_TIMED_OUT),
+        (sd.CloneTooLargeError, sd.CLONE_TOO_LARGE),
+        (sd.CloneTreeUnreadableError, sd.CLONE_TREE_UNREADABLE),
+    ],
+)
+def test_every_clone_refusal_is_a_clone_refused_error_with_its_error_type(
+    refusal: type, error_type: str
+) -> None:
+    assert issubclass(refusal, sd.CloneRefusedError)
+    assert issubclass(sd.CloneRefusedError, RuntimeError)
+    assert refusal.error_type == error_type
+
+
+def test_a_new_clone_refusal_type_is_cleaned_up_and_mapped_by_subclassing_alone(
+    workspace, monkeypatch
+) -> None:
+    class ClonePolicyRefusedError(sd.CloneRefusedError):
+        error_type = "clone_policy_refused"
+
+    def refuse_after_writing(url: str, ref: Any, *, target: Path, **_: Any) -> None:
+        (target / "partial").write_text("x")
+        raise ClonePolicyRefusedError("the clone was refused")
+
+    monkeypatch.setattr(sd, "_clone", refuse_after_writing)
+    monkeypatch.setattr(sd, "_git_executable", lambda *a, **k: "git")
+
+    result = mcp_set_source_git(url=URL, session_id=SESSION)
+
+    assert result.get("success") is False, result
+    assert result.get("error_type") == "clone_policy_refused", result
+    assert result.get("error") == "the clone was refused", result
+    assert not (workspace / SESSION / "source").exists()
+
+
 def test_a_path_that_changes_kind_during_a_poll_is_not_an_error(
     tmp_path: Path,
 ) -> None:
