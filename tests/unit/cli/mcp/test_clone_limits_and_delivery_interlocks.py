@@ -859,6 +859,110 @@ def test_a_write_that_ends_between_the_refused_change_and_the_pending_mark(
     assert SESSION not in sessions._ended_while_scanning
 
 
+def _zip_bytes() -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("app/main.py", "print('hello')\n")
+    return buffer.getvalue()
+
+
+def test_a_chunk_is_accepted_while_a_clone_runs_and_both_land(
+    workspace, fake_git, monkeypatch
+) -> None:
+    fake_git(count=1)  # a git on PATH for the executable lookup; the clone is stubbed
+    inside = threading.Event()
+    release = threading.Event()
+
+    def slow_clone(url: str, ref: Any, *, target: Path, **kwargs: Any) -> None:
+        (target / "cloned.txt").write_text("from the clone")
+        inside.set()
+        assert release.wait(10), "the chunk never finished"
+
+    monkeypatch.setattr(sd, "_clone", slow_clone)
+    outcome: Dict[str, Any] = {}
+
+    def clone() -> None:
+        outcome["source"] = sd.set_source_git(URL, session_id=SESSION)
+
+    thread = threading.Thread(target=clone)
+    thread.start()
+    try:
+        assert inside.wait(10), "the clone never started"
+        chunk = _chunk("u1", 0, b"abc")
+    finally:
+        release.set()
+        thread.join(10)
+
+    assert chunk["next_sequence"] == 1
+    assert (outcome["source"] / "cloned.txt").read_text() == "from the clone"
+    assert (workspace / SESSION / "incoming" / "u1.zip.part").read_bytes() == b"abc"
+
+
+def test_a_chunk_of_another_upload_is_accepted_while_a_finalize_runs(
+    workspace, monkeypatch
+) -> None:
+    import hashlib
+
+    data = _zip_bytes()
+    assert _chunk("done", 0, data, last=True)["last"] is True
+    inside = threading.Event()
+    release = threading.Event()
+    real = sd._validate_zip_member
+
+    def held(name: str) -> None:
+        inside.set()
+        assert release.wait(10), "the chunk never finished"
+        real(name)
+
+    monkeypatch.setattr(sd, "_validate_zip_member", held)
+    outcome: Dict[str, Any] = {}
+
+    def finalize() -> None:
+        outcome["source"] = sd.set_source_zip_finalize(
+            "done", hashlib.sha256(data).hexdigest(), session_id=SESSION
+        )
+
+    thread = threading.Thread(target=finalize)
+    thread.start()
+    try:
+        assert inside.wait(10), "the finalize never started"
+        chunk = _chunk("next", 0, b"xyz")
+    finally:
+        release.set()
+        thread.join(10)
+
+    assert chunk["next_sequence"] == 1
+    assert (outcome["source"] / "app" / "main.py").is_file()
+    assert (workspace / SESSION / "incoming" / "next.zip.part").read_bytes() == b"xyz"
+
+
+def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> None:
+    """``select_profile`` writes through ``writing_session_state``, as a chunk does."""
+
+    with sd._no_scan_running(SESSION, removes_workspace=False):
+        with sessions.writing_session_state(SESSION):
+            pass
+
+    with sessions.writing_session_state(SESSION):
+        with sd._no_scan_running(SESSION, removes_workspace=False):
+            pass
+
+
+def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
+    with sd._no_scan_running(SESSION):
+        with pytest.raises(sessions.SessionChangeInProgressError):
+            with sessions.writing_session_state(SESSION):
+                pass
+
+    with sessions.writing_session_state(SESSION):
+        with pytest.raises(sd.SourceDeliveryBusyError):
+            with sd._no_scan_running(SESSION):
+                pass
+
+
 def test_a_session_ended_during_a_write_is_removed_when_the_write_ends(
     workspace,
 ) -> None:
