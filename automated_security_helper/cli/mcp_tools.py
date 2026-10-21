@@ -1572,6 +1572,9 @@ async def mcp_scan_directory(
 
     # No session id is an in-process caller, not a network caller the server
     # could not identify (UNIDENTIFIED_SESSION_ID), so there is nothing to refuse.
+    # A passed-down id has no request behind it here, so the refusal claims no
+    # cause and gives the mode-less advice; the resolver that produced the id
+    # (run_ash_scan) already refused with its own request's context.
     refusal = (
         session_identity_refusal(session_id, "scan_directory")
         if session_id is not None
