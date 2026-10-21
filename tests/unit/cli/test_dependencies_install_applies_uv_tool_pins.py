@@ -17,6 +17,7 @@ fails if any step there installs one of these tools without the pins.
 """
 
 import importlib.util
+import platform
 import re
 import shlex
 from pathlib import Path
@@ -37,6 +38,16 @@ PYTHON_TOOLS = sorted(
     tool for tool, entry in THIRD_PARTY_LICENSES.items() if entry.distribution
 )
 
+# Distributions `ash dependencies install` does not install on this host because
+# their scanner cannot run here: GuardDog on Windows (see
+# GuardDogScanner.unsupported_platform_reason, checked against this set below).
+NOT_INSTALLABLE_HERE = {"guarddog"} if platform.system().lower() == "windows" else set()
+INSTALLED_HERE = [
+    tool
+    for tool in PYTHON_TOOLS
+    if THIRD_PARTY_LICENSES[tool].distribution not in NOT_INSTALLABLE_HERE
+]
+
 
 def _load_installer():
     spec = importlib.util.spec_from_file_location("_install_pinned_tool", SCRIPT)
@@ -46,6 +57,23 @@ def _load_installer():
 
 
 installer = _load_installer()
+
+
+def _dockerfile_community_modules() -> str:
+    """The plugin modules the Dockerfile loads for its `ash dependencies install` runs.
+
+    A community scanner, and any uv tool it installs, is a plugin only once its
+    module is loaded. The image loads the community modules that bring tools of
+    their own through ASH_COMMUNITY_PLUGIN_MODULES, so the recorded install has to
+    load the same ones.
+    """
+    match = re.search(
+        r'^ARG ASH_COMMUNITY_PLUGIN_MODULES="([^"]+)"$',
+        DOCKERFILE.read_text(),
+        re.MULTILINE,
+    )
+    assert match, "the Dockerfile no longer declares ASH_COMMUNITY_PLUGIN_MODULES"
+    return match.group(1)
 
 
 def _dockerfile_run_instructions() -> "list[str]":
@@ -78,7 +106,19 @@ def _uv_tool_install_specs(ran: "list[list[str]]") -> "dict[str, str]":
         ]:
             continue
         start = 3 if argv[0] == "uv" else 4
-        requirement = next(a for a in argv[start:] if not a.startswith("-"))
+        # `--python <request>` (GuardDog pins its interpreter) takes a value; the
+        # requirement is the first argument that is neither an option nor its value.
+        requirement = None
+        skip_value = False
+        for arg in argv[start:]:
+            if skip_value:
+                skip_value = False
+            elif arg in ("--python", "--with"):
+                skip_value = True
+            elif not arg.startswith("-"):
+                requirement = arg
+                break
+        assert requirement, f"no requirement in {argv}"
         name = re.match(r"[A-Za-z0-9_.-]+", requirement).group(0).lower()
         specs[name] = requirement
     return specs
@@ -112,6 +152,8 @@ def recorded_install(tmp_path, monkeypatch):
                 "--bin-path",
                 str(tmp_path / "bin"),
                 *tool_args,
+                "--config-overrides",
+                f"ash_plugin_modules+=[{_dockerfile_community_modules()}]",
                 *extra_args,
             ],
         )
@@ -133,7 +175,12 @@ class TestTheOverridesReachTheInstallCommand:
         specs = recorded_install(
             installer.uv_tool_pins(installer.default_package_root())
         )
-        for tool in PYTHON_TOOLS:
+        for distribution in NOT_INSTALLABLE_HERE:
+            assert distribution not in specs, (
+                f"{distribution} cannot be installed on this platform, so the "
+                f"installer must not try: {specs}"
+            )
+        for tool in INSTALLED_HERE:
             entry = THIRD_PARTY_LICENSES[tool]
             assert entry.distribution in specs, (
                 f"no `uv tool install` was recorded for {entry.distribution}: {specs}"
@@ -158,11 +205,21 @@ class TestTheOverridesReachTheInstallCommand:
         overrides doing anything, and the Dockerfile's reliance on them is untested.
         """
         specs = recorded_install([])
-        for tool in PYTHON_TOOLS:
+        ranged = 0
+        for tool in INSTALLED_HERE:
             entry = THIRD_PARTY_LICENSES[tool]
-            assert not specs[entry.distribution].endswith(
-                "==" + entry.version.lstrip("v")
-            ), specs[entry.distribution]
+            pinned = "==" + entry.version.lstrip("v")
+            requirement = specs[entry.distribution]
+            if "==" in re.sub(r"\[[^\]]*\]", "", requirement):
+                # A scanner whose own default is already an exact pin (GuardDog's
+                # GUARDDOG_DEFAULT_VERSION_CONSTRAINT) needs no override, and that
+                # default must then be the license entry's version.
+                assert requirement.endswith(pinned), requirement
+                continue
+            ranged += 1
+            assert not requirement.endswith(pinned), requirement
+        # The control has to cover at least the tools the image pins only by override.
+        assert ranged >= 3, specs
 
     def test_a_single_override_pins_only_its_tool(self, recorded_install):
         specs = recorded_install(
@@ -209,3 +266,15 @@ class TestTheDockerfileInstallsOnlyThroughThePins:
             i for i in license_steps if all(t in runs[i] for t in PYTHON_TOOLS)
         )
         assert install_steps[0] < python_license_step
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux", "Darwin"])
+def test_the_not_installable_set_is_the_scanners_own_rule(monkeypatch, system):
+    """NOT_INSTALLABLE_HERE restates GuardDog's platform rule; hold the two equal."""
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+        guarddog_scanner,
+    )
+
+    monkeypatch.setattr(guarddog_scanner.platform, "system", lambda: system)
+    reason = guarddog_scanner.GuardDogScanner.unsupported_platform_reason(None)
+    assert (reason is not None) is (system == "Windows")

@@ -1,0 +1,170 @@
+# Write a reporter plugin
+
+This page builds `findings-list`, a reporter plugin that writes `ash.findings.txt`: the number of actionable findings, then one line per finding with its scanner, rule, and location. A reporter receives the aggregated results after every scanner has run and returns the text of its report; ASH writes the file.
+
+Prerequisites:
+
+- ASH installed ([Install ASH](../how-to/install.md));
+- a repository to scan, with your shell in its top directory. To keep the steps short, this page saves the plugin package in an `ash-plugins` directory there; a plugin you keep belongs outside the repositories you scan ([Package a third-party plugin](index.md#package-a-third-party-plugin)).
+
+[Plugins](index.md) explains how ASH loads plugin packages and what a loaded plugin can do.
+
+## 1. Write the plugin
+
+Save this as `ash-plugins/acme_ash_plugins/__init__.py`:
+
+<!-- doctest: save-as=ash-plugins/acme_ash_plugins/__init__.py -->
+```python
+from typing import Literal
+
+from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.plugins.decorators import ash_reporter_plugin
+
+
+class FindingsListOptions(ReporterOptionsBase):
+    include_suppressed: bool = False
+
+
+class FindingsListConfig(ReporterPluginConfigBase):
+    name: Literal["findings-list"] = "findings-list"
+    extension: str = "findings.txt"
+    enabled: bool = True
+    options: FindingsListOptions = FindingsListOptions()
+
+
+@ash_reporter_plugin
+class FindingsListReporter(ReporterPluginBase[FindingsListConfig]):
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = FindingsListConfig()
+        super().model_post_init(context)
+
+    def report(self, model: AshAggregatedResults) -> str:
+        stats = model.metadata.summary_stats
+        lines = [f"{stats.actionable} actionable, {stats.total} total"]
+        for finding in model.to_flat_vulnerabilities():
+            if finding.is_suppressed and not self.config.options.include_suppressed:
+                continue
+            lines.append(
+                f"{finding.scanner}\t{finding.rule_id}\t"
+                f"{finding.file_path}:{finding.line_start}"
+            )
+        return "\n".join(lines) + "\n"
+
+
+ASH_REPORTERS = [FindingsListReporter]
+```
+
+## 2. Check that ASH finds it
+
+```bash
+export PYTHONPATH="$PWD/ash-plugins"
+ash plugin list --ash-plugin-modules acme_ash_plugins
+```
+
+The reporters table has a row for the plugin:
+
+<!-- doctest: output -->
+```text
+│ findings-list   │ True    │ FindingsListRe… │ acme_ash_plug… │               │
+```
+
+## 3. Scan with it
+
+A loaded reporter runs in every scan, beside the built-in ones. This scan uses only detect-secrets, which needs no download:
+
+<!-- doctest: run expect-exit=2 -->
+```bash
+ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+```
+
+In a repository with one hardcoded password, the scan exits with code 2. Read the report:
+
+```bash
+cat .ash/ash_output/reports/ash.findings.txt
+```
+
+It reads:
+
+<!-- doctest: output -->
+```text
+1 actionable, 1 total
+detect-secrets	SECRET-SECRET-KEYWORD	app.py:3
+```
+
+To see the report again from the last scan's results without scanning, use `ash report`, which takes the module through a config override. It prints the report to the terminal and writes no file:
+
+```bash
+ash report --format findings-list --config-overrides 'ash_plugin_modules+=[acme_ash_plugins]'
+```
+
+`ash scan --output-formats` and the `output_formats` config key cannot select this reporter: they accept only the names of the reporters that ship with ASH, and when either names any, only the reporters it names run. `--output-formats` refuses the name of another reporter as a usage error, with exit code 5, and the config key refuses it as an invalid configuration, with exit code 3:
+
+<!-- doctest: run expect-exit=5 -->
+```bash
+ash scan --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline \
+  --output-formats findings-list
+```
+
+The reporter's options go under its name, `findings-list`, in the `reporters` section of an ASH config, where `enabled: false` leaves it out of a scan:
+
+<!-- doctest: config kind=ash -->
+```yaml
+project_name: my-service
+ash_plugin_modules: [acme_ash_plugins]
+reporters:
+  findings-list:
+    enabled: true
+    options:
+      include_suppressed: true
+```
+
+ASH checks that section with `FindingsListOptions` once it has loaded the module, before anything is scanned: an option the class does not declare, or a value of the wrong type, refuses the configuration with exit code 3, as for a scanner plugin ([Write a scanner plugin](write-a-scanner.md#3-scan-with-it)).
+
+## What ASH does with the return value
+
+ASH calls `report(model)` once per scan, in the report phase, and handles what it returns:
+
+| `report()` | Result |
+|---|---|
+| returns a non-empty string | ASH writes it to `.ash/ash_output/reports/ash.<extension>`, replacing any file there |
+| returns `None` | an error is logged and no file is written |
+| returns an empty string | a warning is logged and no file is written |
+| raises an exception | the error is logged and the other reporters still run |
+
+None of these changes the scan's exit code, which is decided by the findings and by whether the scan was complete.
+
+Set `extension` in the config class. It is the end of the file name, so it must be a plain suffix such as `findings.txt`: a value with `/`, `\`, or `..`, from any config, is replaced by the default with a warning, and a reporter with no extension writes `ash.txt`. To write a second file beside the report, call `write_report_file(report_dir, filename, content)` from `automated_security_helper.base.reporter_plugin` with `report_dir` set to `Path(self.context.output_dir) / "reports"`. It writes only inside that directory and does not follow a symbolic link at the file name.
+
+## Read the results model
+
+`model` is an `AshAggregatedResults`, the same data as `.ash/ash_output/ash_aggregated_results.json` ([Output files](../reference/output-files.md)). The parts a reporter usually needs:
+
+- `model.metadata.summary_stats`: `actionable`, `total` (findings not suppressed), and `severity_counts` with `critical`, `high`, `medium`, `low`, `info`, and `suppressed`;
+- `model.to_flat_vulnerabilities()`: one flat record per finding, with `scanner`, `rule_id`, `severity`, `file_path`, `line_start`, `line_end`, `description`, and `is_suppressed`. The flat `severity` is the severity the summary and the gate use ([Set the severity](write-a-scanner.md#set-the-severity));
+- `model.sarif`: the aggregated SARIF, one run with every scanner's results;
+- `model.scanner_results`: the outcome of each scanner, with `status` (PASSED, FAILED, MISSING, SKIPPED, or ERROR) and `finding_count`.
+
+## A reporter that sends findings somewhere
+
+ASH keeps the destination and credential options of its own AWS reporters to the operator ([Configuration trust model](../concepts/trust-model.md#what-each-tier-may-set)). It does not know which options of a third-party reporter are destinations, so a repository's own config can set any option of yours. If your reporter sends results to a URL, bucket, or account, take that destination from a source the scanned repository cannot write, such as an environment variable of the process that runs ASH, and not from the reporter's options:
+
+```python
+import os
+
+
+def endpoint_from_operator():
+    """The endpoint the operator set for this run, or None when there is none."""
+    return os.environ.get("ACME_FINDINGS_ENDPOINT") or None
+```
+
+A repository that names an endpoint in its `.ash/.ash.yaml` then changes nothing. A reporter that makes network calls also runs in the ASH process, outside the scanner sandbox, so it can reach any host ASH can.
+
+## Workspace scans
+
+In a workspace scan (`ash scan --workspace`), ASH asks each reporter what to do with several projects through its `workspace_behaviour` class variable. The default, `ReporterWorkspaceBehaviour.PER_PROJECT`, writes the report once per project, under each project's own output directory, and no workspace-level file. Set `MERGED` only if your reporter handles results with one SARIF run per project. [Scale to large repositories](../how-to/scale-large-repos.md) covers workspace scans.

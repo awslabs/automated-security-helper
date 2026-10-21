@@ -1,0 +1,11 @@
+# The hadolint snapshot fixture: one opt-in scanner, enabled, over
+# tests/test_data/scanners/hadolint/positive. hadolint.sarif is what
+# HadolintScanner returns for that directory: hadolint 2.15.1's captured report
+# (tests/test_data/scanners/hadolint/captured/positive.sarif) after the
+# scanner's severity mapping, with the JSON pass's levels applied.
+scanners:
+  - name: hadolint
+    outcome: ran
+    output: hadolint.sarif
+    version: "2.15.1"
+    duration_seconds: 0.25

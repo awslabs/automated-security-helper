@@ -15,7 +15,38 @@ import argparse
 # Add the project root to the path so we can import our version management
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from automated_security_helper.utils.version_management import get_version
+# Every form in which a command names the ASH ref it installs: the text in front of the
+# `v` of a release tag, and the same form naming a branch instead. `@` covers git URLs
+# (`git+https://...@v`, `uvx --from=git+...@v`) and `uses: ...@v`. The repository name is
+# interpolated for the reason the flake pattern in find_version_references gives.
+#
+# One list for three readers: scripts/docs_versions.py check reads which release a built
+# page pins (release_pins) and requires the main version to name main in every form a
+# release page uses (branch_ref_pattern); scripts/docs_checks.py refuses {{RELEASE}} in
+# any of these forms in a template (release_in_install_ref).
+_REPO_NAME = "automated-security-" + "helper"
+INSTALL_REF_FORMS = (
+    # (name, the text before `v<version>`, the form naming a branch, with {branch})
+    ("@ (git URL, uses:)", r"@", r"@{branch}"),
+    ("--branch", r"--branch ", r"--branch {branch}"),
+    ("rev:", r"rev: ", r"rev: {branch}"),
+    ("refs/tags/ (git ls-remote)", r"refs/tags/", r"refs/heads/{branch}"),
+    (
+        "flake ref",
+        rf"github:[\w.-]+/{_REPO_NAME}/",
+        rf"github:[\w.-]+/{_REPO_NAME}/{{branch}}",
+    ),
+    (
+        "--ash-revision-to-install",
+        r"--ash-revision-to-install ",
+        r"--ash-revision-to-install {branch}",
+    ),
+    ("ash-version:", r"ash-version: ", r"ash-version: {branch}"),
+)
+_RELEASE_PIN = re.compile(
+    "(?:" + "|".join(prefix for _name, prefix, _branch in INSTALL_REF_FORMS) + r")"
+    r"v(\d+\.\d+\.\d+)"
+)
 
 
 class VersionTemplateManager:
@@ -24,19 +55,31 @@ class VersionTemplateManager:
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.template_suffix = ".template"
+        # The ref an install command uses. A release's docs render it as the release,
+        # the docs site's main version as `main` (see render_for_branch).
         self.version_placeholder = "{{VERSION}}"
+        # The current release number, on every build: what `ash --version` prints, the
+        # release this repository's generated files pin, a release named in a table.
+        # Never in an install command, where the main version would then install a
+        # release; scripts/docs_checks.py enforces that with release_in_install_ref.
+        self.release_placeholder = "{{RELEASE}}"
 
         # Files to process (relative to project root)
         self.target_files = [
             "README.md",
-            "docs/content/index.md",
-            "docs/content/faq.md",
-            "docs/content/docs/installation-guide.md",
-            "docs/content/docs/quick-start-guide.md",
-            "docs/content/docs/migration-guide.md",
             "docs/content/docs/advanced-usage.md",
-            "docs/content/tutorials/running-ash-in-ci.md",
-            "docs/content/tutorials/running-ash-locally.md",
+            "docs/content/getting-started/ci.md",
+            "docs/content/getting-started/local.md",
+            "docs/content/getting-started/platform-teams.md",
+            "docs/content/how-to/agent-plugins.md",
+            "docs/content/how-to/ci/github-actions.md",
+            "docs/content/how-to/ci/gitlab-ci.md",
+            "docs/content/how-to/ci/other-ci.md",
+            "docs/content/how-to/install.md",
+            "docs/content/how-to/pre-commit.md",
+            "docs/content/how-to/run-in-a-container.md",
+            "docs/content/how-to/scale-large-repos.md",
+            "docs/content/how-to/suppress-findings.md",
             "examples/streamlit_ui/README.md",
         ]
 
@@ -113,6 +156,72 @@ class VersionTemplateManager:
 
         return patterns
 
+    def render(self, content: str, version: str) -> str:
+        """A template rendered for a release: both placeholders become the version."""
+        return content.replace(self.version_placeholder, version).replace(
+            self.release_placeholder, version
+        )
+
+    def render_for_branch(self, content: str, branch: str, release: str) -> str:
+        """A template rendered for a branch, such as main, instead of a release.
+
+        The docs site's `main` version is built this way (docs/hooks/install_refs.py),
+        so its install commands install main. A placeholder written after a `v`, as in
+        `@v{{VERSION}}`, `--branch v{{VERSION}}` or `rev: v{{VERSION}}`, names a release
+        tag, and the whole tag becomes the branch: `@main`, not `@vmain`. A tag looked up
+        by its full name, `refs/tags/v{{VERSION}}`, becomes the branch's
+        `refs/heads/<branch>`, so the command still names a ref that exists. A bare
+        placeholder becomes the branch name too. The release placeholder becomes
+        release, the current release number: an install of main reports it.
+        """
+        tag = "v" + self.version_placeholder
+        return (
+            content.replace("refs/tags/" + tag, "refs/heads/" + branch)
+            .replace(tag, branch)
+            .replace(self.version_placeholder, branch)
+            .replace(self.release_placeholder, release)
+        )
+
+    def packaged_release(self) -> str:
+        """The current release number: `[tool.commitizen] version` in pyproject.toml.
+
+        That is the field commitizen bumps, and the one the committed pages were
+        rendered for. Read from the file rather than with get_version(), which imports
+        ASH.
+        """
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib
+
+        with (self.project_root / "pyproject.toml").open("rb") as handle:
+            return tomllib.load(handle)["tool"]["commitizen"]["version"]
+
+    @staticmethod
+    def release_pins(text: str) -> set:
+        """The release numbers that install commands in text pin, in any form."""
+        return set(_RELEASE_PIN.findall(text))
+
+    @staticmethod
+    def forms_pinning_a_release(text: str) -> List[str]:
+        """The names of the install-command forms that pin a release in text."""
+        return [
+            name
+            for name, prefix, _branch in INSTALL_REF_FORMS
+            if re.search(prefix + r"v\d+\.\d+\.\d+", text)
+        ]
+
+    @staticmethod
+    def branch_ref_pattern(form: str, branch: str) -> "re.Pattern[str]":
+        """The named install-command form, naming branch instead of a release."""
+        rendering = next(b for name, _p, b in INSTALL_REF_FORMS if name == form)
+        return re.compile(rendering.format(branch=re.escape(branch)) + r"(?![\w.-])")
+
+    def release_in_install_ref(self) -> "re.Pattern[str]":
+        """The release placeholder written as the ref of an install command."""
+        prefixes = "|".join(prefix for _name, prefix, _branch in INSTALL_REF_FORMS)
+        return re.compile(f"(?:{prefixes})v?" + re.escape(self.release_placeholder))
+
     def convert_to_template(self, file_path: Path) -> bool:
         """
         Convert a file to template format by replacing version numbers with placeholders.
@@ -160,91 +269,6 @@ class VersionTemplateManager:
             print(f"Error converting {file_path} to template: {e}")
             return False
 
-    # A block of template text that depends on the version being documented:
-    #
-    #     {{#after 3.7.1}}
-    #     text for a release after 3.7.1
-    #     {{else}}
-    #     text for 3.7.1 and earlier (optional)
-    #     {{/after}}
-    #
-    # Each marker sits on a line of its own and the line is dropped. "After" compares
-    # major.minor.patch, so 3.8.0rc1 is after 3.7.1. It exists for docs that describe
-    # a feature main has and the documented release does not: the docs publish on
-    # every push to main, so without it they would describe the feature as part of
-    # the release, and an example copied from them would not run against it.
-    #
-    # Blocks do not nest, and an unbalanced or malformed marker is an error rather
-    # than text, so a typo cannot publish both branches. A line that holds anything
-    # resembling a marker (`{{#after`, `{{else`, `{{/after`, in any case and with any
-    # spacing, anywhere on the line) must be exactly one of the three markers above,
-    # alone on its line. `convert` cannot recreate a block from a generated doc; edit
-    # the template, never regenerate it with `convert`.
-    _AFTER_OPEN = re.compile(r"\{\{#after (?P<threshold>\d+\.\d+\.\d+)\}\}")
-    _AFTER_ELSE = "{{else}}"
-    _AFTER_CLOSE = "{{/after}}"
-    _MARKER_LIKE = re.compile(r"\{\{\s*(?:#\s*after|/\s*after|else)\b", re.IGNORECASE)
-    # A release or a PEP 440 prerelease, development or post release of one; the
-    # whole string, so "3.8.0junk" or "3.8.0.1" is not read as 3.8.0.
-    _VERSION = re.compile(
-        r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
-        r"(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?"
-    )
-
-    @classmethod
-    def _release(cls, version: str, what: str) -> Tuple[int, int, int]:
-        match = cls._VERSION.fullmatch(version)
-        if not match:
-            raise ValueError(f"{what} {version!r} is not a major.minor.patch version")
-        return (int(match["major"]), int(match["minor"]), int(match["patch"]))
-
-    def render(self, content: str, version: str) -> str:
-        """The template text with its version blocks resolved and the placeholder filled.
-
-        The version is checked only when a block needs it, so a template without one
-        renders for any version string.
-        """
-        release = None
-        out: List[str] = []
-        block = None  # (shown when after, in else branch)
-        for number, line in enumerate(content.splitlines(keepends=True), 1):
-            marker = line.strip()
-            if not self._MARKER_LIKE.search(line):
-                if block is None or block[0] != block[1]:
-                    out.append(line)
-                continue
-            opened = self._AFTER_OPEN.fullmatch(marker)
-            if opened:
-                if block is not None:
-                    raise ValueError(f"line {number}: version blocks do not nest")
-                if release is None:
-                    release = self._release(version, "version")
-                threshold = self._release(opened.group("threshold"), "threshold")
-                block = [release > threshold, False]
-                continue
-            if marker not in (self._AFTER_ELSE, self._AFTER_CLOSE):
-                raise ValueError(
-                    f"line {number}: malformed version block marker {marker!r}; a "
-                    "marker is {{#after X.Y.Z}}, {{else}} or {{/after}}, alone on "
-                    "its line"
-                )
-            if marker == self._AFTER_ELSE:
-                if block is None or block[1]:
-                    raise ValueError(
-                        f"line {number}: {{{{else}}}} outside a version block"
-                    )
-                block[1] = True
-                continue
-            if marker == self._AFTER_CLOSE:
-                if block is None:
-                    raise ValueError(
-                        f"line {number}: {{{{/after}}}} without a version block"
-                    )
-                block = None
-        if block is not None:
-            raise ValueError("a version block is not closed with {{/after}}")
-        return "".join(out).replace(self.version_placeholder, version)
-
     def generate_from_template(self, template_path: Path) -> bool:
         """
         Generate final file from template by replacing placeholders with actual version.
@@ -263,9 +287,12 @@ class VersionTemplateManager:
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # Resolve version blocks and replace the placeholder with the version
-            current_version = get_version()
-            content = self.render(content, current_version)
+            # Imported here rather than at the top, so loading this module (as the
+            # mkdocs hook docs/hooks/install_refs.py does) does not import ASH.
+            from automated_security_helper.utils.version_management import get_version
+
+            # Replace version placeholder with actual version
+            content = self.render(content, get_version())
 
             # Generate output file (remove .template suffix)
             output_path = template_path.with_suffix("")
@@ -280,10 +307,6 @@ class VersionTemplateManager:
             print(f"Generated {output_path} from template")
             return True
 
-        except ValueError:
-            # A malformed version block: stop rather than skip the file and leave a
-            # stale doc behind a success message.
-            raise
         except Exception as e:
             print(f"Error generating from template {template_path}: {e}")
             return False

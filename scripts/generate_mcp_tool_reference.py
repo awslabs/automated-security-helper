@@ -25,16 +25,26 @@ Why this is a hybrid rather than a pure derivation
 The file carries operational knowledge that exists in no docstring and no
 schema. The clearest example:
 
-    **`is_complete` does not flip to `True` for cancelled scans** ... Polling on
-    `is_complete` alone will loop forever on a cancelled scan.
+    **A failed or canceled scan has no results to read.** ... ASH puts the previous
+    scan's results back once the scan has stopped; `output_holds_previous_results`
+    is then `true` and the scanner fields are empty, because those files are not
+    this scan's.
 
-That is a correction TO the server's own docstring. A generator that rendered
-only what the code says about itself would delete it, making the document
-cheaper to maintain and worse to read. So the split is:
+That is guidance no docstring carries in this form. A generator that rendered
+only what the code says about itself would delete it,
+making the document cheaper to maintain and worse to read. The cost is that the
+notes are claims about behavior that nothing re-derives: each was checked against
+the server code (``scan_registry.py``, ``mcp_tools.py``) when written, and a change
+to that behavior needs the note changed by hand. So the split is:
 
 * Derived from the registry, because this is what drifted: which tools exist,
   which resources exist, the counts, and each tool's parameter names, types,
   required/default status.
+* Derived from the tools' return statements (``scripts/_mcp_contract.py``): the
+  ``error_type`` values each tool can return, and the ``type`` of each entry of
+  ``validate_config``'s ``errors``. The pages that tell a client which error a
+  refusal carries are checked against the same values, and so are the example
+  responses, so a renamed literal or key fails the docs checks.
 * Editorial, held in ``TOOL_NOTES`` below: the intro override, the ``Returns:``
   example blocks, and the caveats. Per-parameter ``Notes`` text likewise.
 
@@ -42,6 +52,12 @@ A registered tool with no ``TOOL_NOTES`` entry is not an error -- its intro come
 from the docstring's first line, which is accurate and specific enough to publish
 (measured across all 21). What *is* an error is a ``TOOL_NOTES`` entry naming a
 tool that is not registered, because that is a stale note.
+
+The docs-site page
+------------------
+The same content is also written to docs/content/reference/mcp-tools.md, under the
+reference pages' common banner. Bold is dropped there because the docs' house
+style keeps bold out of running prose; the agent-facing file keeps it.
 
 Usage
 -----
@@ -68,11 +84,12 @@ import inspect
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-TARGET = (
-    REPO_ROOT
-    / "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
+#: The two files this script writes, relative to the docs tree (``--docs-root``).
+TARGET = Path(
+    "ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md"
 )
+REFERENCE_PAGE = Path("docs/content/reference/mcp-tools.md")
+GENERATOR = "scripts/generate_mcp_tool_reference.py"
 
 NUMBER_WORDS = {
     1: "one",
@@ -109,21 +126,40 @@ def _spell(n: int) -> str:
 
 # Editorial content per tool. Every field is optional.
 #   intro     -- replaces the docstring's first line.
-#   params    -- per-parameter Notes column, and an optional default_display that
-#                overrides the schema default when the schema value is uninformative
-#                (e.g. `null` where the real behaviour is "current dir").
+#   params    -- per-parameter Notes column. The Default column is always the
+#                schema's default, because the docs checks compare it with the
+#                schema; what an unset parameter means goes in the notes.
 #   returns   -- a fenced example response block.
 #   caveats   -- paragraphs appended after the returns block, in order.
 TOOL_NOTES: dict[str, dict] = {
     "run_ash_scan": {
         "intro": (
-            "Starts a scan asynchronously. Returns a `scan_id` immediately — the scan "
-            "continues in the background regardless of MCP connection state."
+            "Starts a scan in the server process and returns a `scan_id` at once. The "
+            "scan stops if the server process exits; over stdio, that is when the "
+            "client disconnects."
         ),
         "params": {
-            "source_dir": {"default": "current dir", "notes": "Absolute path to scan"},
+            "source_dir": {
+                "notes": (
+                    "Absolute path to scan. When not set: the tree this session delivered "
+                    "with `set_source_git` or `set_source_zip_finalize`. With none "
+                    "delivered, a call with no session id (stdio) scans the server's "
+                    "working directory, and a call with a session id is refused"
+                )
+            },
             "severity_threshold": {
-                "notes": "Findings below this are filtered out at scan time"
+                "notes": (
+                    "The least severe finding that counts as actionable: `ALL`, `LOW`, "
+                    "`MEDIUM`, `HIGH`, or `CRITICAL`, in any case. It can make the "
+                    "config's `global_settings.severity_threshold` stricter for this "
+                    "scan, never looser: the scan runs at the stricter of the two, so "
+                    "`LOW` over a configured `MEDIUM` applies and `CRITICAL` does not. "
+                    "It tightens a scanner's own `severity_threshold` option the same "
+                    "way, and a scanner without one follows the tightened global "
+                    "threshold. The threshold decides which findings are actionable and "
+                    "whether a scanner reports FAILED. When not set: the config's "
+                    "threshold"
+                )
             },
             "config_path": {
                 "notes": (
@@ -133,12 +169,20 @@ TOOL_NOTES: dict[str, dict] = {
                     "environment, else the built-in defaults"
                 ),
             },
-            "clean_output": {"notes": "Wipe stale reports before starting"},
+            "clean_output": {
+                "notes": (
+                    "Set the previous scan's results in the output directory aside as "
+                    "soon as the scan is registered; with `false`, the scan's own set-up "
+                    "does it a moment later. Either way they are deleted once the scan "
+                    "has results of its own, and put back if it fails or is canceled. "
+                    "A refused call leaves the previous results as they were"
+                )
+            },
         },
         "pre_returns": (
             "Output reports are written to `<source_dir>/.ash/ash_output/` — there is no "
             "parameter to override this. Scanner selection, mode, and other tuning live in "
-            "`.ash/.ash.yaml`, not in tool arguments."
+            "the project's ASH config, not in tool arguments."
         ),
         "returns": """{
   "success": true,
@@ -159,57 +203,26 @@ TOOL_NOTES: dict[str, dict] = {
                 "(`<directory_path>/.ash/ash_output`) rather than constructing it independently."
             ),
             (
-                "**Heads-up:** the server's own docstring and the `important.next_steps` array "
-                "suggest polling `progress['is_complete']`. This is incomplete advice — "
-                "`is_complete` stays `False` for cancelled scans. Always check `status` "
-                "independently. (See `get_scan_progress` below.)"
+                "Poll `get_scan_progress` until `is_complete` is `true`, as the "
+                "`important.next_steps` array says, then read `status`. (See "
+                "`get_scan_progress` below.)"
             ),
             (
-                "**A refused config keeps its own `error_type`.** The scan does not start, "
-                "and the response is `success: false` with one of these `error_type` values "
-                "and the reason in `error`:"
-            ),
-            (
-                "- `config_input_not_permitted`: `config_path`, or a base its `extends` "
-                "chain names, is outside the directories this session may read a config from.\n"
-                "- `config_check_failed`: the check of the config sources in the scan "
-                "target could not finish (an unreadable entry, a link loop), so the scan "
-                "was not started. The config was not found to be outside the permitted "
-                "roots -- that case is `config_input_not_permitted` -- so check the "
-                "config files in the target for unreadable entries and link loops.\n"
-                "- `config_field_denied`: a config file an MCP client delivered or named "
-                "sets a field the session's runtime-override policy denies. `error` names "
-                "each field and why.\n"
-                "- `config_policy_unreadable`: that policy cannot be established, for "
-                "example because the profile the session bound is no longer registered. "
-                "`error` starts with `A config an MCP client delivered cannot be checked:`.\n"
-                "- `config_env_not_resolved`: a file of the config uses an `!ENV` tag, or a "
-                "plain value that starts with a `${VAR}` or `${VAR:default}` reference, "
-                "where none is resolved. For a remote caller that is any file the "
-                "operator did not set aside (outside the directories "
-                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, other than the profile files "
-                "the server writes in the calling session's `config/` directory), the "
-                "scan target's own config included, and every base "
-                "such a file extends; for a stdio caller, a file a client delivered. The "
-                "server's own config, the file `ASH_CONFIG` names outside the MCP "
-                "workspace root and each registered profile, is not refused. `error` "
-                "names the file and the line or key."
-            ),
-            (
-                "The target and source checks have their own `error_type` values too "
-                "(`scan_target_not_permitted`, `output_dir_not_permitted`, "
-                "`no_source_delivered`, `session_source_mismatch`, "
-                "`delivered_source_missing`, `invalid_session_id`). Any other reason the "
-                "scan could not be started returns `error_type: scan_start_failure`, and an "
-                "unexpected error returns the exception's class name. Branch on "
-                "`error_type`, not on the text of `error`."
+                "A scan beyond the operator's `max_concurrent_scans` is refused with "
+                "`error_type` `scan_start_failure` and an `error` that names the limit; "
+                "start it again once a scan finishes or is canceled. A scan of a "
+                "directory whose canceled scan is still stopping is refused the same "
+                "way; retry once it has stopped. A scan still running after the "
+                "operator's `scan_timeout_seconds` is stopped as `cancel_scan` stops "
+                "one, and ends `failed` with an `error_message` that names the limit."
             ),
         ],
     },
     "get_scan_progress": {
         "intro": (
-            "Poll progress every 5 seconds until complete. Keeps the MCP connection alive "
-            "while the scan runs."
+            "Poll progress every 5 seconds until `is_complete` is `true`, then read "
+            "`status`: `completed`, `incomplete`, `failed`, or `cancelled`. The scan "
+            "continues server-side independently of polling."
         ),
         "params": {"scan_id": {"notes": "From `run_ash_scan`"}},
         "returns": """{
@@ -219,11 +232,14 @@ TOOL_NOTES: dict[str, dict] = {
   "start_time": "<iso8601>",
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
-  "severity_threshold": "MEDIUM",
+  "severity_threshold": "<the threshold the scan was judged by once it is completed or incomplete; null before that, and for a failed or cancelled scan>",
+  "requested_severity_threshold": "<run_ash_scan's severity_threshold, upper-cased, or null>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
+  "results_available": bool,
+  "output_holds_previous_results": bool,
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
@@ -233,7 +249,9 @@ TOOL_NOTES: dict[str, dict] = {
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
+  "finished_scanners": int,
   "total_scanners": int,
+  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -245,20 +263,34 @@ TOOL_NOTES: dict[str, dict] = {
         "caveats": [
             (
                 "There is no overall percentage field. To compute progress, use "
-                "`completed_scanners / total_scanners` — but **guard against "
-                "`total_scanners == 0`** during the pre-flight phase (before any scanner has "
-                'registered). Show "initializing" or 0% when `total_scanners` is zero.'
+                "`finished_scanners / total_scanners`: `finished_scanners` counts every "
+                "scanner that has ended, whatever its status, and `completed_scanners` "
+                "only the ones that PASSED. `scanner_status_counts` splits them into "
+                "`passed`, `failed` (FAILED or ERROR), `skipped` (MISSING or SKIPPED), "
+                "`running`, and `pending`. **Guard against `total_scanners == 0`** during "
+                "the pre-flight phase (before any scanner has registered). Show "
+                '"initializing" or 0% when `total_scanners` is zero.'
             ),
             (
                 "There is no top-level `duration` field — derive elapsed time from "
                 "`start_time` and `end_time` (or from current time while running)."
             ),
             (
-                "**`is_complete` does not flip to `True` for cancelled scans** — it returns "
-                "`True` for `completed` and `incomplete`, and for `failed` once a results file "
-                "exists. Always check `status` independently: stop polling when `status` is "
-                "`completed`, `incomplete`, `failed`, or `cancelled`. Polling on "
-                "`is_complete` alone will loop forever on a cancelled scan."
+                "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
+                "`completed`, `incomplete`, `failed`, or `cancelled`. It is decided by the "
+                "scan's state alone, never by a results file on disk, which can be an "
+                "earlier scan's. `results_available` is `true` for `completed` and "
+                "`incomplete`, the scans whose results `get_scan_results` can read."
+            ),
+            (
+                "**A failed or canceled scan has no results to read**, and "
+                "`results_available` is `false`. ASH puts the previous scan's results "
+                "back in `output_directory` once the scan has stopped, a moment after its "
+                "status changes. `output_holds_previous_results` is then `true` and the "
+                "scanner fields are empty, because those files are not this scan's, and "
+                "`get_scan_results` and the other tools that read results from that "
+                "directory refuse it with `error_category` `scan_incomplete`. A first "
+                "scan has nothing to put back, and what it wrote before it stopped stays."
             ),
             (
                 "**`incomplete` is terminal, with partial coverage.** The run finished and its "
@@ -268,7 +300,8 @@ TOOL_NOTES: dict[str, dict] = {
                 "bound. `incomplete_scanners` names each scanner and why, and "
                 "`stale_content_databases` each stale database. The "
                 "findings are real but partial, so read them, and do not report the target as "
-                "clean. `failed` means the run crashed or left no readable results. "
+                "clean. `failed` means the run crashed, left no readable results, or "
+                "ran past the server's `scan_timeout_seconds`. "
                 "`coverage_complete` is `null` while running and for `failed` or `cancelled`; "
                 "with `fail_on_incomplete_scanners: false` a scan is `completed` with "
                 "`coverage_complete: false` when scanners did not run."
@@ -296,15 +329,40 @@ TOOL_NOTES: dict[str, dict] = {
                 )
             },
             "filter_level": {"notes": "`full`, `summary`, `minimal`"},
-            "scanners": {"default": "all", "notes": "Comma-separated subset"},
-            "severities": {
-                "default": "all",
-                "notes": "`critical,high,medium,low,info`",
+            "scanners": {
+                "notes": "Comma-separated subset; not set means every scanner"
             },
-            "actionable_only": {"notes": "Drop suppressed findings"},
+            "severities": {
+                "notes": (
+                    "Comma-separated subset of `critical,high,medium,low,info,suppressed`; "
+                    "not set means every severity"
+                ),
+            },
+            "actionable_only": {
+                "notes": (
+                    "`true` to add `findings` and `findings_count` to a `full` "
+                    "response: one entry for each unsuppressed finding at or above the "
+                    "severity threshold its scanner was judged by, the findings that "
+                    "give an `ash` scan exit code 2. Findings below it are left "
+                    "out. Each entry has `rule_id`, `severity`, `message`, `scanner`, "
+                    "`file_path`, `line_start`, and `line_end`. The list honors "
+                    "`scanners` and `severities`, and a "
+                    "`summary` or `minimal` response has none. It also sets the "
+                    "suppressed counts to zero and `summary_stats.total` to the "
+                    "actionable count"
+                )
+            },
         },
         "caveats": [
-            "Returns full or filtered findings depending on `filter_level`.",
+            (
+                "With `filter_level` `full`, `raw_results` is the aggregated results "
+                "document without its `sarif`, `cyclonedx`, and `ash_config` sections; "
+                "`summary` returns the metadata and the counts by severity and by scanner, "
+                "and `minimal` the status. Individual findings are in the report files: "
+                "`get_scan_result_paths` lists them, and the `flat-json` reporter, which "
+                "is enabled by default, writes `reports/ash.flat.json` under "
+                "`output_dir`."
+            ),
             (
                 "`status` is `completed` or `incomplete`, decided by the same rule as the scan's "
                 "exit code, with `coverage_complete` and `incomplete_scanners` as in "
@@ -332,16 +390,65 @@ TOOL_NOTES: dict[str, dict] = {
         "no_params_sentence": "No parameters. Returns a list of scan summaries.",
     },
     "cancel_scan": {
-        "intro": "Stop a running scan and free resources.",
-        "params": {"scan_id": {"notes": "The scan to stop"}},
-        "caveats": ["Returns confirmation."],
+        "intro": (
+            "Stops a running scan. The scanner tool running at the time is stopped with "
+            "every process it started (SIGTERM, then SIGKILL after 10 seconds). The "
+            "scan halts at its next cancel check, and no further scanner, phase, or "
+            "reporter starts, so a scan canceled before its report phase writes no "
+            "reports. Work that is not waiting on a child process, such as a scanner "
+            "parsing its tool's output, can still finish and write under `scanners/` "
+            "or `converted/`, but `ash_aggregated_results.json` is not written after "
+            "the cancel. When the output directory held a previous scan's results, "
+            "they are put back in place of every result the canceled scan wrote; its "
+            "log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it "
+            "was. With "
+            "no previous results, what the scan wrote before it stopped stays, except "
+            "that a cancel during the report phase removes the reports that phase "
+            "wrote. `reports/ash.unused-suppressions.md`, which its reporter writes on "
+            "its own, stays even then."
+        ),
+        "params": {"scan_id": {"notes": "The scan to cancel"}},
+        "caveats": [
+            (
+                "Returns `success`, `status`, and `message`. The status is `cancelled` "
+                "at once. A running scan stops within about 10 seconds; one still "
+                "waiting for another scan of its session stops when that scan ends. "
+                "Until it has stopped, `run_ash_scan` refuses another scan of the same "
+                "directory as still stopping, and the scan counts against "
+                "`max_concurrent_scans`. A scan that has already ended is not changed, "
+                "and the response has `success: false` and the scan's status. For a "
+                "`run_ash_workspace_scan`, `cancel_scan` takes one project's scan id and "
+                "stops that project, which ends `failed`; the other projects carry on."
+            ),
+        ],
     },
     "check_installation": {
         "intro": (
-            "Verify ASH is installed and the MCP server can spawn it. Run before the first "
-            "scan in a session if you're unsure of the install state."
+            "Reports whether ASH can scan: its version and, for each built-in scanner, "
+            "whether its tool can run. Enabled means enabled in ASH's defaults: the "
+            "call reads no project's config and checks no plugin scanner. It runs each "
+            "scanner's dependency check, which can start the tool, so it takes several "
+            "seconds, and it installs and downloads nothing. The tool of a scanner "
+            "that ASH installs with uv is installed when `uv tool list` lists it, when "
+            "its executable is on `PATH` or in a directory ASH also searches, such as "
+            "`~/.ash/bin`, or when uv can run it from its cache. A scanner whose tool "
+            "is not, when the server is online and has uv, is listed in "
+            "`installs_on_first_scan`, because the first scan installs it with uv, "
+            "which needs network access. Offline, or without uv, it is listed in "
+            "`missing_dependencies`. Offline, semgrep is also missing when it has no "
+            "rules cache."
         ),
-        "no_params_sentence": "No parameters. Returns version string and feature flags.",
+        "no_params_sentence": (
+            "No parameters. Returns `installed` (at least one enabled scanner can run, "
+            "or will once the first scan installs its tool), `ready` (every enabled "
+            "scanner can run or will), `version`, `scanners` (each scanner's `name`, "
+            "`enabled`, `dependencies_satisfied`, `installs_on_first_scan`, and "
+            "`version`), `installs_on_first_scan`, `missing_dependencies` and "
+            "`undetermined_dependencies` (the enabled scanners whose tool is missing "
+            "and that a scan cannot install, or whose check could not run), and "
+            "`ash_command_available` (whether an `ash` executable is on `PATH`, which "
+            "the server does not need)."
+        ),
     },
     "set_source_zip_chunk": {
         "params": {
@@ -360,86 +467,58 @@ TOOL_NOTES: dict[str, dict] = {
                 "against `expected_sha256` before extracting it. A chunked upload that is never "
                 "finalized is not a scan target."
             ),
+            (
+                "Refused with `success: false` and `error_type: session_workspace_busy` "
+                "while the server removes this session's workspace for being unused "
+                "longer than its time to live. The upload is gone with the workspace, so "
+                "send the whole upload again, from chunk 0."
+            ),
+        ],
+    },
+    "select_profile": {
+        "caveats": [
+            (
+                "Refused with `success: false` and `error_type: session_workspace_busy` "
+                "while the server removes this session's workspace for being unused "
+                "longer than its time to live. Select the profile again; any upload in "
+                "progress is gone with the workspace and is sent again from chunk 0."
+            ),
         ],
     },
     "set_source_git": {
         "params": {
-            "url": {
+            "url": {"notes": "Repository URL"},
+            "ref": {
                 "notes": (
-                    "Repository URL: `https://`, `ssh://` or `user@host:path`, on a "
-                    "host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS`"
+                    "Branch, tag, or commit; not set means the remote's default branch"
                 )
             },
-            "ref": {"default": "default branch", "notes": "Branch, tag, or commit"},
             "ssh_key_id": {
-                "default": "none",
-                "notes": "Must be omitted: the server registers no ssh keys",
+                "notes": (
+                    "Leave it out: the server registers no SSH keys, so any value is "
+                    "refused"
+                ),
             },
-            "depth": {"notes": "Clone depth; `0` for a full clone"},
+            "depth": {
+                "notes": (
+                    "Clone depth, a positive whole number of commits; any other value, "
+                    "`0` included, is refused before anything is created"
+                )
+            },
         },
         "caveats": [
             (
-                "Refused while a scan of this session is running, because the clone "
-                "would replace the tree and config files that scan is reading. The "
-                "response is `success: false`, `error_type: source_delivery_busy`, "
-                "and `error` set to `a scan of this session is running; change the "
-                "delivered source after it finishes`. Deliver the source again once "
-                "`get_scan_progress` reports a terminal status."
-            ),
-        ],
-    },
-    "set_source_zip_finalize": {
-        "caveats": [
-            (
-                "Refused while a scan of this session is running, for the same reason as "
-                "`set_source_git`: `success: false`, `error_type: source_delivery_busy`, "
-                "and `error` set to `a scan of this session is running; change the "
-                "delivered source after it finishes`. "
-                "`set_source_zip_chunk` is not refused while a scan runs, so the chunks "
-                "can be sent while the scan runs and the upload finalized after it ends; "
-                "this call holds its upload's lock, so a chunk of the upload being "
-                "finalized waits for it. A chunk is refused (`error_type: "
-                "session_workspace_busy`) only while another request holds the session's "
-                "workspace (its removal, `clear_source`, or the end of the session); send "
-                "the same chunk again then, and start again from the first chunk only if "
-                "the answer is an out-of-order chunk."
-            ),
-        ],
-    },
-    "get_config": {
-        "caveats": [
-            (
-                "A config this session may not read, or one a client delivered that the "
-                "server refuses, returns `success: false` with `error_type` "
-                "`config_input_not_permitted`, `config_field_denied`, "
-                "`config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` "
-                "does for the same file."
-            ),
-        ],
-    },
-    "validate_config": {
-        "caveats": [
-            (
-                "Each error is `{field, message, type}`. A remote caller's "
-                "`config_content` counts as the client's config, and so does a "
-                "`config_path` that a client delivered or that is outside the directories "
-                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, unless it is a profile file the "
-                "server wrote in the calling session's `config/` directory. "
-                "On stdio, `config_content` is the caller's own, because the caller "
-                "started the server. Besides schema and parse errors, `type` can be "
-                "`config_input_not_permitted` (a `config_path` this session may not "
-                "read), `config_policy_unreadable` (the session's runtime-override policy "
-                "cannot be established for the client's config), "
-                "`denied_by_runtime_policy` (a field of the client's config that policy "
-                "denies, named in `field`, with the message `<field> may not be set by a "
-                "config an MCP client delivers: <reason>`), or `config_env_not_resolved`. "
-                "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
-                "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
-                "anywhere in a remote caller's client config, and for a stdio caller "
-                "only in a file a client delivered. A policy check that cannot finish on "
-                "the client's config makes it invalid, with an error of type "
-                "`validation_error` that starts `The config could not be checked against "
-                "this session's runtime-override policy`."
+                "A refusal or a git failure returns `success: false` with an "
+                "`error_type`: `clone_url_not_permitted` (a URL that begins with `-`, "
+                "uses the `ext::` transport, or has a scheme other than `https` or "
+                "`ssh`), `clone_ref_not_permitted` (a ref that begins with `-`), "
+                "`local_clone_source_refused` (a local path or `file://` URL), "
+                "`clone_host_not_permitted` (a host the server's "
+                "`ASH_MCP_GIT_ALLOWED_HOSTS` does not list), `ssh_key_not_registered`, "
+                "`invalid_clone_depth`, `invalid_session_id`, `source_delivery_busy` "
+                "(a scan of the session runs), `clone_timed_out` (a git command ran "
+                "past 10 minutes and was stopped), or `git_clone_failed` or "
+                "`git_checkout_failed`, with git's own message in `error`."
             ),
         ],
     },
@@ -451,14 +530,55 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "list_profiles": {
         "no_params_sentence": (
-            "No parameters. Returns the config profiles registered at server startup "
-            "with `ash mcp --profile NAME=path`. Without `--profile` the list is empty."
+            "No parameters. Returns `profiles`, the name and `path_sha256` (a SHA-256 "
+            "of the file's absolute path) of each profile the operator registered with "
+            "`ash mcp --profile NAME=path/to/ash.yaml`, sorted by name, and `count`. "
+            "A client cannot register one; an empty list means the operator "
+            "registered none."
         ),
+    },
+    "resolve_ash_workspace": {
+        "caveats": [
+            (
+                "A workspace policy file, named or found in the workspace file's "
+                "directory or its `.ash` directory, is used only when it is in a "
+                "directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the "
+                "workspace with exit code 4, or with exit code 3 when a client "
+                "delivered it and it sets a field the server's policy denies."
+            ),
+        ],
+    },
+    "run_ash_workspace_scan": {
+        "caveats": [
+            (
+                "A workspace policy file, named or found in the workspace file's "
+                "directory or its `.ash` directory, is used only when it is in a "
+                "directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names; any other refuses the "
+                "workspace with exit code 4, or with exit code 3 when a client "
+                "delivered it and it sets a field the server's policy denies."
+            ),
+        ],
     },
     "clear_source": {
         "no_params_sentence": (
             "No parameters. Deletes this session's delivered source tree and workspace."
         ),
+    },
+    "validate_config": {
+        "caveats": [
+            (
+                "`config_content` counts as the client's config, and so does a "
+                "`config_path` that a client delivered or that is outside the "
+                "directories `ASH_MCP_ALLOWED_CONFIG_ROOTS` names and its session's "
+                "`config/` directory. Each field such a config may not set under the "
+                "server's runtime-override policy is an error of type "
+                "`denied_by_runtime_policy`, and a policy the server cannot read is one "
+                "error of type `config_policy_unreadable`; for `config_content`, both "
+                "only when a remote client calls. A `${VAR}` or `${VAR:default}` "
+                "reference at the start of a plain value, or an `!ENV` tag, in such a "
+                "config is an error of type `config_env_not_resolved`."
+            ),
+        ],
     },
 }
 
@@ -486,23 +606,23 @@ def _type_name(schema: dict) -> str:
     return str(declared or "any")
 
 
-def _default_display(
-    name: str, schema: dict, required: bool, override: str | None
-) -> str:
-    if override is not None:
-        return override
+def _default_display(schema: dict, required: bool) -> str:
+    """The schema's default as the docs checks read it: a phrase or one JSON span."""
+    import json
+
     if required:
         return "*required*"
     if "default" not in schema:
         return ""
     value = schema["default"]
     if value is None:
-        return "`null`"
-    if isinstance(value, bool):
-        return f"`{str(value).lower()}`"
-    if isinstance(value, str):
-        return f'`"{value}"`'
-    return f"`{value}`"
+        return "not set"
+    return f"`{json.dumps(value)}`"
+
+
+#: The docs checks compare each tool's parameter table with the tool's input schema.
+def _options_marker(tool: str) -> str:
+    return f"<!-- doctest: options of=mcp.{tool} -->"
 
 
 def _docstring_arg_notes(func) -> dict[str, str]:
@@ -544,7 +664,9 @@ def _docstring_arg_notes(func) -> dict[str, str]:
     return {k: v.replace("|", r"\|") for k, v in found.items()}
 
 
-def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
+def _render_tool(
+    name: str, description: str, schema: dict, func, contract=None
+) -> list[str]:
     notes = TOOL_NOTES.get(name, {})
     doc_notes = _docstring_arg_notes(func)
     lines = [f"## {name}", ""]
@@ -565,9 +687,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         # Match the existing convention: a Default column only when at least one
         # parameter has a default worth showing.
         defaults = {
-            key: _default_display(
-                key, spec, key in required, param_notes.get(key, {}).get("default")
-            )
+            key: _default_display(spec, key in required)
             for key, spec in properties.items()
         }
         # The document's existing convention: a Default column appears only when
@@ -575,6 +695,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         # required renders as a three-column table, so "*required*" alone does not
         # earn the column.
         show_default = any(v for v in defaults.values() if v != "*required*")
+        lines.append(_options_marker(name))
         if show_default:
             lines += [
                 "| Param | Type | Default | Notes |",
@@ -601,15 +722,183 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
     for caveat in notes.get("caveats", []):
         lines += [caveat, ""]
 
+    if contract is not None:
+        lines += _error_lines(contract)
+
     return lines
 
 
+def _error_lines(contract) -> list[str]:
+    """What the tool's return statements say a failure carries.
+
+    Read by ``scripts/_mcp_contract.py``, which records ``type(e).__name__`` as
+    "the class name of an exception" rather than as a value.
+    """
+    lines = []
+    for lead, values, class_name in (
+        (
+            "On failure, `error_type` is",
+            contract.error_types,
+            contract.error_class_name,
+        ),
+        (
+            "Each entry of `errors` has a `type` that is",
+            contract.entry_types,
+            contract.entry_class_name,
+        ),
+    ):
+        named = [f"`{value}`" for value in values]
+        if len(named) > 1:
+            listed = f"one of {', '.join(named[:-1])} and {named[-1]}"
+        else:
+            listed = "".join(named)
+        if class_name:
+            other = "the class name of an exception"
+            listed = f"{listed}, or {other}" if listed else other
+        if listed:
+            lines += [f"{lead} {listed}.", ""]
+    return lines
+
+
+def _tool_contracts(tools) -> dict:
+    """Each registered tool's contract, read from the source of the package it documents.
+
+    A registered tool with no ``@mcp.tool`` function the reader finds, or an
+    ``error_type`` it cannot read, stops the run: the page would otherwise list
+    fewer errors than the server returns, with nothing to say so.
+    """
+    import automated_security_helper
+
+    from _mcp_contract import tool_contracts
+
+    package = Path(automated_security_helper.__file__).resolve().parent
+    contracts = tool_contracts(package)
+    registered = {t.name for t in tools}
+    problems = [
+        f"{name} is registered but no @mcp.tool function defines it"
+        for name in sorted(registered - set(contracts))
+    ]
+    for name in sorted(registered & set(contracts)):
+        contract = contracts[name]
+        for site in (*contract.error_types_unread, *contract.entry_types_unread):
+            problems.append(f"{name}: an error type at {site} cannot be read")
+    if problems:
+        raise SystemExit(
+            "ERROR: the MCP tools' error types cannot all be listed:\n  "
+            + "\n  ".join(problems)
+        )
+    return contracts
+
+
 def render() -> str:
+    """The agent-facing tool-reference.md."""
+    header, body = _render_parts()
+    return "\n".join(header + _adapt_markdown(body, strip_bold=False))
+
+
+def render_reference_page() -> str:
+    """docs/content/reference/mcp-tools.md: the same body under the reference banner."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import banner, generated_note
+
+    _header, body = _render_parts()
+    lines = banner(GENERATOR, "the MCP server's registered tools and resources")
+    lines += [
+        "# MCP tools reference",
+        "",
+        generated_note(
+            GENERATOR,
+            "the tools and resources the ASH MCP server registers, with editorial notes "
+            "kept in the generator",
+        ),
+        "",
+    ]
+    return "\n".join(_adapt_markdown(lines + body, strip_bold=True))
+
+
+def _response_marker(tool: str) -> str:
+    """The marker on a response example: the docs checks compare its keys with the
+    keys the tool's return statements build (see the doctest contract's "Config
+    blocks")."""
+    return f"<!-- doctest: config kind=mcp-response of=mcp.{tool} -->"
+
+
+def _adapt_markdown(lines: list[str], strip_bold: bool) -> list[str]:
+    """Make the response examples pass the docs checks, and on the docs site drop bold.
+
+    * A ```json response example that does not parse as JSON (``bool``, ``[...]``
+      placeholders) becomes a ```text block, because the docs checks parse every
+      JSON block. Either way it gets the marker naming the tool whose response it
+      is, under whose ``## <tool>`` heading it sits. Both files get this: the docs
+      checks read the agent-facing file and every copy the transpiler makes of it.
+    * With ``strip_bold``, no bold in running prose (the docs site's house style).
+      Bold that wraps a code span is unwrapped too; ``**`` inside a code span or a
+      fence is left alone. The agent-facing file keeps its bold. Table cells also
+      get ``<`` and ``>`` outside code spans escaped there.
+    """
+    import json
+    import re
+
+    out: list[str] = []
+    tool = None
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        heading = re.match(r"^## ([a-z][a-z0-9_]*)$", line)
+        if heading:
+            tool = heading.group(1)
+        if line.strip() == "```json":
+            end = i + 1
+            while end < len(lines) and lines[end].strip() != "```":
+                end += 1
+            block = lines[i + 1 : end]
+            try:
+                json.loads("\n".join(block))
+                parsed = True
+            except ValueError:
+                parsed = False
+            if out and out[-1] != "":
+                out.append("")
+            if tool is None:
+                raise SystemExit(
+                    "ERROR: a response example is not under a '## <tool>' heading, so "
+                    "the docs checks could not tell which tool's keys it shows."
+                )
+            out += [_response_marker(tool), "```json" if parsed else "```text"]
+            out += block
+            out.append("```")
+            i = end + 1
+            continue
+        if line.startswith("```") or not strip_bold:
+            out.append(line)
+            i += 1
+            continue
+        spans: list[str] = []
+
+        def hide(match):
+            spans.append(match.group(0))
+            return f"\x00{len(spans) - 1}\x00"
+
+        hidden = re.sub(r"`[^`]*`", hide, line)
+        hidden = hidden.replace("**", "")
+        if hidden.startswith("|"):
+            # Notes taken from docstrings say things like "Defaults to <cwd>/...",
+            # which python-markdown would pass through as an HTML tag and the
+            # browser would drop. The agent-facing file is read as text and keeps it.
+            hidden = hidden.replace("<", "&lt;").replace(">", "&gt;")
+        out.append(re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], hidden))
+        i += 1
+    return out
+
+
+def _render_parts() -> tuple[list[str], list[str]]:
     from automated_security_helper.cli import mcp_server
 
     tools = asyncio.run(mcp_server.mcp.list_tools())
     resources = asyncio.run(mcp_server.mcp.list_resources())
 
+    contracts = _tool_contracts(tools)
     stale_notes = sorted(set(TOOL_NOTES) - {t.name for t in tools})
     if stale_notes:
         raise SystemExit(
@@ -643,6 +932,9 @@ def render() -> str:
         "     generator (prose and caveats live in its TOOL_NOTES table) and re-run it,",
         "     then `agentic-plugins build` to propagate to every plugin backend. -->",
         "",
+    ]
+    header_length = len(lines)
+    lines += [
         (
             f"The ASH MCP server exposes {_spell(len(tools))} tools and "
             f"{_spell(len(resources))} resources."
@@ -656,6 +948,7 @@ def render() -> str:
             tool.description or "",
             tool.input_schema or {},
             getattr(mcp_server, tool.name),
+            contracts[tool.name],
         )
 
     lines += ["## Resources", ""]
@@ -671,11 +964,16 @@ def render() -> str:
         "",
         "`CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO` > `SUPPRESSED`",
         "",
-        "`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks).",
+        (
+            "`actionable_only=True` on `get_scan_results` sets the `SUPPRESSED` counts "
+            "(false positives, accepted risks) to zero, and the `findings` list it "
+            "adds holds only the unsuppressed findings at or above each scanner's "
+            "threshold."
+        ),
         "",
     ]
 
-    return "\n".join(lines)
+    return lines[:header_length], lines[header_length:]
 
 
 def main() -> int:
@@ -683,44 +981,86 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Do not write. Exit non-zero with a diff if the file is stale.",
+        help="Do not write. Exit non-zero with a diff if either file is stale.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Write (or with --check, compare) only the docs-site page, at this path "
+            "('-' for stdout), and leave the agent-facing file alone."
+        ),
+    )
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _reference_docs import (
+        add_docs_root_argument,
+        prepare_environment,
+        refuse_check_to_stdout,
+        write_or_check,
+    )
 
-    expected = render()
-    actual = TARGET.read_text(encoding="utf-8") if TARGET.exists() else ""
+    add_docs_root_argument(parser)
+    args = parser.parse_args()
+    refuse_check_to_stdout(parser, args)
+
+    docs_root = Path(args.docs_root).resolve()
+    prepare_environment(docs_root)
+    if args.output:
+        page = render_reference_page()
+        if args.output == "-":
+            sys.stdout.write(page)
+            return 0
+        return write_or_check(Path(args.output), page, args.check, GENERATOR)
+    status = 0
+    for target, expected, after in (
+        (
+            docs_root / TARGET,
+            render(),
+            (
+                "Then propagate: uv run --project "
+                "ash-agent-plugins/agentic-coding/transpiler agentic-plugins build"
+            ),
+        ),
+        (docs_root / REFERENCE_PAGE, render_reference_page(), ""),
+    ):
+        status |= _write_or_check(target, expected, args.check, after, docs_root)
+    return status
+
+
+def _write_or_check(
+    target: Path, expected: str, check: bool, after: str, docs_root: Path
+) -> int:
+    actual = target.read_text(encoding="utf-8") if target.exists() else ""
+    rel = target.relative_to(docs_root)
 
     if expected == actual:
-        if args.check:
-            print(f"{TARGET.relative_to(REPO_ROOT)} is up to date.", file=sys.stderr)
+        if check:
+            print(f"{rel} is up to date.", file=sys.stderr)
         return 0
 
-    if args.check:
+    if check:
         print(
-            f"{TARGET.relative_to(REPO_ROOT)} is stale relative to the MCP registry.\n"
+            f"{rel} is stale relative to the MCP registry.\n"
             f"Regenerate with: uv run python scripts/generate_mcp_tool_reference.py\n"
-            f"Then propagate: uv run --project "
-            f"ash-agent-plugins/agentic-coding/transpiler agentic-plugins build\n",
+            + (f"{after}\n" if after else ""),
             file=sys.stderr,
         )
         sys.stderr.writelines(
             difflib.unified_diff(
                 actual.splitlines(keepends=True),
                 expected.splitlines(keepends=True),
-                fromfile="tool-reference.md (on disk)",
-                tofile="tool-reference.md (regenerated)",
+                fromfile=f"{rel.name} (on disk)",
+                tofile=f"{rel.name} (regenerated)",
                 n=1,
             )
         )
         return 1
 
-    TARGET.write_text(expected, encoding="utf-8")
-    print(f"Wrote {TARGET.relative_to(REPO_ROOT)}", file=sys.stderr)
-    print(
-        "Now run: uv run --project ash-agent-plugins/agentic-coding/transpiler "
-        "agentic-plugins build",
-        file=sys.stderr,
-    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(expected, encoding="utf-8")
+    print(f"Wrote {rel}", file=sys.stderr)
+    if after:
+        print(f"Now run: {after.removeprefix('Then propagate: ')}", file=sys.stderr)
     return 0
 
 

@@ -1,0 +1,77 @@
+# serializer version: 1
+# name: test_guarddog_findings
+  list([
+    dict({
+      'level': 'error',
+      'line': 2,
+      'message': 'Detects base64 decoding followed by code execution. MITRE ATT&CK tactics: defense-evasion',
+      'rule': 'threat-runtime-obfuscation-base64exec',
+      'severity': 'HIGH',
+      'uri': 'action_suspicious/index.js',
+    }),
+    dict({
+      'level': 'error',
+      'line': 4,
+      'message': 'Detects base64 decoding followed by code execution. MITRE ATT&CK tactics: defense-evasion',
+      'rule': 'threat-runtime-obfuscation-base64exec',
+      'severity': 'HIGH',
+      'uri': 'gem_suspicious/lib/ash_guarddog_fixture.rb',
+    }),
+    dict({
+      'level': 'error',
+      'line': 11,
+      'message': 'Detects base64 decoding followed by code execution. MITRE ATT&CK tactics: defense-evasion',
+      'rule': 'threat-runtime-obfuscation-base64exec',
+      'severity': 'HIGH',
+      'uri': 'go_suspicious/main.go',
+    }),
+    dict({
+      'level': 'error',
+      'line': 3,
+      'message': 'Detects base64 decoding followed by code execution. MITRE ATT&CK tactics: defense-evasion',
+      'rule': 'threat-runtime-obfuscation-base64exec',
+      'severity': 'HIGH',
+      'uri': 'npm_suspicious/index.js',
+    }),
+    dict({
+      'level': 'error',
+      'line': 15,
+      'message': 'Detects download-and-execute patterns: fetching a remote file then executing it. MITRE ATT&CK tactics: execution',
+      'rule': 'threat-process-download-exec',
+      'severity': 'HIGH',
+      'uri': 'pypi_suspicious/setup.py',
+    }),
+    dict({
+      'level': 'error',
+      'line': 15,
+      'message': 'Detects base64 decoding followed by code execution. MITRE ATT&CK tactics: defense-evasion',
+      'rule': 'threat-runtime-obfuscation-base64exec',
+      'severity': 'HIGH',
+      'uri': 'pypi_suspicious/setup.py',
+    }),
+    dict({
+      'level': 'error',
+      'line': 16,
+      'message': 'Detects download-and-execute patterns: fetching a remote file then executing it. MITRE ATT&CK tactics: execution',
+      'rule': 'threat-process-download-exec',
+      'severity': 'HIGH',
+      'uri': 'pypi_suspicious/setup.py',
+    }),
+    dict({
+      'level': 'error',
+      'line': 17,
+      'message': 'Detects URLs to suspicious domains often used for exfiltration or C2; correlated with capability capability-network-lolbas. MITRE ATT&CK tactics: exfiltration',
+      'rule': 'threat-network-exfiltration',
+      'severity': 'HIGH',
+      'uri': 'pypi_suspicious/setup.py',
+    }),
+    dict({
+      'level': 'error',
+      'line': 17,
+      'message': 'Detects download-and-execute patterns: fetching a remote file then executing it. MITRE ATT&CK tactics: execution',
+      'rule': 'threat-process-download-exec',
+      'severity': 'HIGH',
+      'uri': 'pypi_suspicious/setup.py',
+    }),
+  ])
+# ---

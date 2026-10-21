@@ -315,16 +315,17 @@ def test_every_windows_ash_invocation_follows_the_promotion(steps):
         f"{PROMOTE_STEP!r}, where MSYS2's Almquist shell outranks it: {offenders}"
     )
     # Control: the steps this is protecting must actually be found by the same
-    # detector, or the test above would pass by matching nothing at all. Both
-    # in-window pwsh steps call `ash`, so the count is two.
+    # detector, or the test above would pass by matching nothing at all. The three
+    # in-window pwsh steps call `ash` (the scan, the plugin-error check and the
+    # community hadolint check), so the count is three.
     callers = [
         step.get("name")
         for step in steps[promote + 1 :]
         if _runs_on_windows_python_local(step)
         and ASH_INVOCATION.search(str(step.get("run", "")))
     ]
-    assert len(callers) == 2, (
-        "expected the two in-window pwsh steps that call `ash` to be detected, "
+    assert len(callers) == 3, (
+        "expected the three in-window pwsh steps that call `ash` to be detected, "
         f"found {callers}. If this is zero the detector stopped matching and the "
         "assertion above is vacuous."
     )

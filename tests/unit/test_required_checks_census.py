@@ -45,6 +45,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -224,6 +225,212 @@ class TestTheGateCoversItsWorkflow:
             UNIFIED_CI.read_text(encoding="utf-8"), GATE_JOB, results
         )
         assert any(p == f"{needs[0]}: skipped" for p in problems), problems
+
+
+#: Jobs that carry the docs gates, and the commands that are the gate in each: lint
+#: runs scripts/verify_docs_freshness.py, integration-test runs the docs examples, and
+#: build-docs runs the strict site build and the versioned-site check. Each must run on
+#: every pull request, be in required-checks' needs, and report its own exit status.
+#: The census above lets a gated job carry `${{ !cancelled() }}` or `${{ always() }}`;
+#: these may carry no job-level `if:` at all, so no edit can turn them off for pull
+#: requests.
+_UNCONDITIONAL_JOBS: dict[str, tuple[str, ...]] = {
+    "lint": ("scripts/verify_docs_freshness.py",),
+    "integration-test": ("tests/integration/docs",),
+    "build-docs": ("mkdocs build", "scripts/docs_versions.py check"),
+}
+#: (job, command) for every docs gate, for the parametrized tests below.
+_GATE_COMMANDS = [
+    (job, command)
+    for job, commands in _UNCONDITIONAL_JOBS.items()
+    for command in commands
+]
+#: The one step-level condition a docs step may carry: it still runs after an earlier
+#: step failed, and only a cancelled run skips it.
+_STEP_CONDITION_ALLOWED = "${{!cancelled()}}"
+#: Shell control operators. One on the line that runs a gate command hands the step's
+#: exit status to another command: `cmd || true` and `cmd; true` always pass.
+_CONTROL_OPERATORS = frozenset({"|", "||", "&", "&&", ";", ";;", "|&"})
+
+
+def _word(command: str) -> str:
+    """``command`` as a whole word, so ``--ignore=tests/integration/docs`` is not it."""
+    return rf"(?:^|\s){re.escape(command)}(?:\s|$)"
+
+
+def _runs(step: dict, command: str) -> bool:
+    """Whether ``command`` is an argument of the step's `run:`."""
+    return re.search(_word(command), str(step.get("run", ""))) is not None
+
+
+def _step_problems(job: str, step: dict, command: str) -> list[str]:
+    """Why a step that runs ``command`` could pass, or be skipped, when it fails."""
+    where = f"{job}: the step running {command}"
+    problems = []
+    condition = re.sub(r"\s+", "", str(step.get("if", "")))
+    if condition not in ("", _STEP_CONDITION_ALLOWED):
+        problems.append(f"{where} has if: {step['if']!r}")
+    if step.get("continue-on-error") not in (None, False):
+        problems.append(f"{where} has continue-on-error: {step['continue-on-error']!r}")
+    shell = step.get("shell")
+    if isinstance(shell, str) and "{0}" in shell and "-e" not in shell.split():
+        problems.append(f"{where} runs under shell {shell!r}, which has no -e")
+    lines = re.sub(r"\\\n", " ", str(step.get("run", ""))).splitlines()
+    for index, line in enumerate(lines):
+        if not re.search(_word(command), line):
+            continue
+        if any(
+            re.match(r"\s*set\s+(\+e\b|\+o\s+errexit\b)", earlier)
+            for earlier in lines[:index]
+        ):
+            problems.append(f"{where} turns errexit off before it")
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        operators = sorted(set(lexer) & _CONTROL_OPERATORS)
+        if operators:
+            problems.append(
+                f"{where} hands its exit status to another command with "
+                f"{' '.join(operators)}"
+            )
+    return problems
+
+
+def _ways_to_skip(text: str) -> list[str]:
+    """Each way a docs gate could be skipped, or pass while its command fails."""
+    jobs = yaml.safe_load(text)["jobs"]
+    gate_needs = jobs.get(GATE_JOB, {}).get("needs") or []
+    gate_needs = [gate_needs] if isinstance(gate_needs, str) else gate_needs
+    problems = []
+    for name, commands in _UNCONDITIONAL_JOBS.items():
+        if name not in jobs:
+            problems.append(f"{name}: the job is gone")
+            continue
+        job = jobs[name]
+        if name not in gate_needs:
+            problems.append(f"{name}: not in {GATE_JOB}'s needs")
+        if "if" in job:
+            problems.append(f"{name}: job-level if: {job['if']!r}")
+        if job.get("continue-on-error") not in (None, False):
+            problems.append(
+                f"{name}: job-level continue-on-error: {job['continue-on-error']!r}"
+            )
+        for command in commands:
+            steps = [s for s in job.get("steps", []) if _runs(s, command)]
+            if not steps:
+                problems.append(f"{name}: no step runs {command}")
+            for step in steps:
+                problems += _step_problems(name, step, command)
+    return problems
+
+
+def _with_gate_step(job: str, command: str, change) -> list[str]:
+    """The census of the real workflow with ``change`` applied to one docs step."""
+    data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+    steps = [s for s in data["jobs"][job]["steps"] if _runs(s, command)]
+    assert steps, f"no step in {job} runs {command}; this fixture is stale"
+    for step in steps:
+        change(step)
+    return _ways_to_skip(yaml.safe_dump(data))
+
+
+class TestTheDocsGatesRunOnEveryPullRequest:
+    def test_the_docs_gates_cannot_be_skipped(self):
+        problems = _ways_to_skip(UNIFIED_CI.read_text(encoding="utf-8"))
+        assert not problems, (
+            "a docs gate in ash-unified-ci.yml can be skipped, or pass while it fails. "
+            "GitHub reports a skipped job as a success, so the required-checks gate "
+            "would pass without it:\n" + "\n".join(f"  - {p}" for p in problems)
+        )
+
+    @pytest.mark.parametrize("job", sorted(_UNCONDITIONAL_JOBS))
+    def test_a_job_level_if_is_caught(self, job):
+        text = UNIFIED_CI.read_text(encoding="utf-8")
+        key = f"\n  {job}:\n"
+        assert text.count(key) == 1, (
+            f"the {job} job's key was not found; fixture is stale"
+        )
+        drifted = text.replace(
+            key, key + "    if: github.event_name != 'pull_request'\n", 1
+        )
+        assert _ways_to_skip(drifted) == [
+            f"{job}: job-level if: \"github.event_name != 'pull_request'\""
+        ]
+
+    @pytest.mark.parametrize("job", sorted(_UNCONDITIONAL_JOBS))
+    def test_continue_on_error_on_a_docs_job_is_caught(self, job):
+        text = UNIFIED_CI.read_text(encoding="utf-8")
+        key = f"\n  {job}:\n"
+        drifted = text.replace(key, key + "    continue-on-error: true\n", 1)
+        assert drifted != text, f"the {job} job's key was not found; fixture is stale"
+        assert _ways_to_skip(drifted) == [f"{job}: job-level continue-on-error: True"]
+
+    @pytest.mark.parametrize("job", sorted(_UNCONDITIONAL_JOBS))
+    def test_a_docs_job_dropped_from_the_gate_is_caught(self, job):
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        data["jobs"][GATE_JOB]["needs"].remove(job)
+        assert _ways_to_skip(yaml.safe_dump(data)) == [
+            f"{job}: not in {GATE_JOB}'s needs"
+        ]
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_a_skippable_docs_step_is_caught(self, job, command):
+        problems = _with_gate_step(
+            job, command, lambda s: s.update({"if": "github.event_name == 'push'"})
+        )
+        assert problems == [
+            f"{job}: the step running {command} has if: \"github.event_name == 'push'\""
+        ]
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_continue_on_error_on_a_docs_step_is_caught(self, job, command):
+        problems = _with_gate_step(
+            job, command, lambda s: s.update({"continue-on-error": True})
+        )
+        assert problems == [
+            f"{job}: the step running {command} has continue-on-error: True"
+        ]
+
+    @pytest.mark.parametrize("suffix", ["|| true", "; true", "| tee docs.log", "&"])
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_an_exit_status_handed_to_another_command_is_caught(
+        self, job, command, suffix
+    ):
+        def append(step):
+            step["run"] = step["run"].rstrip("\n") + f" {suffix}\n"
+
+        problems = _with_gate_step(job, command, append)
+        assert len(problems) == 1, problems
+        assert problems[0].startswith(
+            f"{job}: the step running {command} hands its exit status to another "
+            f"command with {suffix.split()[0]}"
+        ), problems
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_errexit_turned_off_is_caught(self, job, command):
+        def prepend(step):
+            step["run"] = "set +e\n" + step["run"]
+
+        assert _with_gate_step(job, command, prepend) == [
+            f"{job}: the step running {command} turns errexit off before it"
+        ]
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_an_operator_on_another_line_is_not_reported(self, job, command):
+        """The control: `echo start || true` on its own line leaves the gate's status."""
+
+        def prepend(step):
+            step["run"] = "echo start || true\n" + step["run"]
+
+        assert _with_gate_step(job, command, prepend) == []
+
+    @pytest.mark.parametrize("job,command", _GATE_COMMANDS)
+    def test_a_removed_docs_step_is_caught(self, job, command):
+        data = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+        data["jobs"][job]["steps"] = [
+            s for s in data["jobs"][job]["steps"] if not _runs(s, command)
+        ]
+        problems = _ways_to_skip(yaml.safe_dump(data))
+        assert f"{job}: no step runs {command}" in problems, problems
 
 
 class TestTheScriptRefusesToPassVacuously:

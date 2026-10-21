@@ -1,1498 +1,500 @@
-# ASH GenAI Integration Guide
+# ASH GenAI integration guide
 
-## Overview
-
-This document provides comprehensive guidance for GenAI tools (AI assistants, LLMs, code analysis tools) on how to properly interact with ASH (Automated Security Helper) scan results. Following these guidelines ensures efficient processing, accurate analysis, and proper handling of security findings.
-
-## Installing This Guide
-
-### Quick Install
+This file tells an AI agent how to run ASH (Automated Security Helper), read its results,
+and propose suppressions without hiding real problems. Give it to your agent as context,
+for example as a rules file or a steering file. To save a copy in the current directory:
 
 ```bash
-# Download the guide
-ash get-genai-guide -o ash-genai-guide.md
+ash get-genai-guide --output ash-genai-guide.md
 ```
 
-### Installation for AI Coding Tools
+The command writes the guide for the ASH version you have installed, without network access.
+Every installation carries it: a wheel or source distribution, an install from a git URL, a
+clone of the repository, and the container images ASH builds. In a clone, the command copies
+the clone's `docs/content/docs/genai-steering-guide.md`. An installation without a readable
+copy exits with code 1 and names `--from-github`, which downloads the guide from GitHub
+instead, from `main` or from the branch or tag that `--branch` names.
 
-Choose the installation method based on your AI coding tool:
+The rest of this file is written for the agent.
 
-#### Kiro (Recommended: Global Installation)
+## Rules
 
-**Global installation** (available in all Kiro workspaces):
-```bash
-# Create steering directory if it doesn't exist
-mkdir -p ~/.kiro/steering
+- Never report a project as clean unless every selected scanner ran and there are zero
+  actionable findings. A scan that ended `incomplete`, or with exit code 1, did not run every
+  scanner: name the scanners that did not run, and why.
+- Fix before you suppress. Propose a suppression only for a false positive or a risk the user
+  accepts, with a reason the user agrees with, and never to make a scan pass.
+- Do not change what the scan checks to get a passing result: do not disable scanners, raise
+  severity thresholds, set `fail_on_findings: false`, add broad `ignore_paths`, or pass
+  `--ignore-suppressions`, `--no-fail-on-findings`, or `--no-fail-on-incomplete-scanners`,
+  unless the user asks for that change.
+- Do not set `client_supplied` in a config. ASH sets it.
+- Do not add sandbox grants or plugin modules to the repository's config to make a scanner
+  work. They are the operator's settings, and ASH ignores sandbox grants from a config inside
+  the scanned repository.
+- When a scanner is MISSING because its tool is installed only inside the project, install
+  the tool outside the project. Do not pass `--allow-in-tree-tools` or set
+  `ASH_ALLOW_IN_TREE_TOOLS` unless the user asks you to.
+- Do not make `.ash`, `.ash/ash_output`, or any directory under it a symbolic link. ASH refuses
+  to write through one.
+- Do not repeat a detected secret's value in your answers. Refer to the file and line.
+- If a tool, option, or field named here does not exist, the installed ASH is older than this
+  guide. Tell the user, and use what the installed version reports (`ash --help`, the MCP
+  server's tool list).
 
-# Download the guide
-ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
-```
+## Run a scan with the MCP tools
 
-Kiro will automatically load this as steering context for all workspaces. This is the recommended approach as it makes ASH guidance available everywhere.
+When the ASH MCP server is connected, a scan takes three steps:
 
-**Project-specific installation** (only for current project):
-```bash
-# Create project steering directory
-mkdir -p .kiro/steering
+1. Call `run_ash_scan` with `source_dir` set to the absolute path of the project. It returns
+   at once with a `scan_id` and status `running`.
+2. Call `get_scan_progress` with the `scan_id` about every 5 seconds until `is_complete` is
+   true. It is true for every final status: `completed`, `incomplete`, `failed`, or
+   `cancelled`.
+3. When `results_available` is true, which it is for `completed` and `incomplete`, read the
+   results from `output_directory`, an absolute path in the progress response.
 
-# Download the guide
-ash get-genai-guide -o .kiro/steering/ash-integration.md
-```
+| Final status | Meaning | What to do |
+|--------------|---------|------------|
+| `completed` | Every selected scanner ran. | Read the results. |
+| `incomplete` | The scan finished and its results are readable, but a selected scanner did not run or did not finish, or a content database was too old. | Read the results, report `incomplete_scanners` and `stale_content_databases`, and say the coverage is partial. |
+| `failed` | The scan crashed, left no readable results, or ran longer than the server allows. | Report `error_message`. |
+| `cancelled` | The scan was canceled. | Say so. |
 
-**Verification**:
-After installation, you can verify Kiro sees the guide by checking the steering files list in Kiro's UI or by asking: "What steering files do you have loaded?"
+After `failed` or `cancelled`, `results_available` is false, so do not report results for that
+scan. Once ASH has put the previous scan's results back in the output directory,
+`output_holds_previous_results` is true, and the results tools refuse that directory with
+`error_category` `scan_incomplete` until another scan finishes there.
 
-**How Kiro Steering Works**:
-- Files in `~/.kiro/steering/` are automatically loaded as context for all workspaces (global)
-- Files in `.kiro/steering/` are loaded only for the current workspace (project-specific)
-- Steering files are always included in Kiro's context, so you don't need to reference them in prompts
-- Kiro will automatically follow the guidance when working with ASH results
+The examples in this section call each tool as a function that takes the tool's arguments
+and returns its response, a dictionary. A response with `success` false has an `error`
+message instead of the keys below. Adapt the calls to your MCP client:
 
-#### Cline (VS Code Extension)
-
-**Option 1: Project-specific** (recommended):
-```bash
-# Create Cline directory
-mkdir -p .cline
-
-# Download the guide
-ash get-genai-guide -o .cline/ash-guide.md
-```
-
-**Option 2: VS Code workspace**:
-```bash
-# Add to VS Code settings
-mkdir -p .vscode
-ash get-genai-guide -o .vscode/ash-integration-guide.md
-```
-
-Then reference it in your Cline prompts: "Please read the ASH guide at .cline/ash-guide.md before analyzing scan results."
-
-#### Claude Desktop / MCP Clients
-
-**Dedicated documentation folder**:
-```bash
-# Create AI guides folder
-mkdir -p ~/Documents/ai-guides
-
-# Download the guide
-ash get-genai-guide -o ~/Documents/ai-guides/ash-integration.md
-```
-
-**Usage**: In your prompts, reference the guide:
-```
-Please read the ASH integration guide at ~/Documents/ai-guides/ash-integration.md 
-before processing these scan results.
-```
-
-#### Amazon Q CLI
-
-**Project documentation**:
-```bash
-# Add to project docs
-mkdir -p docs/ai-guides
-ash get-genai-guide -o docs/ai-guides/ash-integration.md
-```
-
-**Usage**: Reference in your Q CLI prompts or add to project documentation index.
-
-#### Cursor
-
-**Option 1: Cursor rules directory**:
-```bash
-# Create Cursor directory
-mkdir -p .cursor
-
-# Download the guide
-ash get-genai-guide -o .cursor/ash-guide.md
-```
-
-**Option 2: Project root** (for easy discovery):
-```bash
-# Download to project root with clear name
-ash get-genai-guide -o ASH_INTEGRATION_GUIDE.md
-```
-
-**Usage**: Reference in `.cursorrules` or mention in prompts.
-
-#### Generic / Other Tools
-
-**Project root** (universal approach):
-```bash
-# Download with descriptive name
-ash get-genai-guide -o ASH_GENAI_GUIDE.md
-```
-
-Then reference it in your AI tool's context or prompts.
-
-### Updating the Guide
-
-When ASH is updated, refresh the guide:
-```bash
-# Re-download to the same location (overwrites existing)
-ash get-genai-guide -o ~/.kiro/steering/ash-integration.md
-```
-
-### Verification
-
-After installation, verify the guide is accessible:
-```bash
-# Check file exists
-ls -lh ~/.kiro/steering/ash-integration.md
-
-# View first few lines
-head -n 20 ~/.kiro/steering/ash-integration.md
-```
-
-## Quick Reference
-
-**Before Analyzing Results - Check Tool Availability**:
-```bash
-# Verify jq is available (preferred method)
-command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found, will use Python fallback"
-```
-
-**Default Tool Priority**:
-1. **jq** - Fastest and most efficient (ALWAYS TRY FIRST)
-2. **Python** - Reliable fallback (if jq unavailable)
-3. **grep/awk** - Last resort only (limited functionality)
-
-**Recommended Approach for GenAI Tools**:
-1. **For most use cases**: Use `reports/ash.flat.json` (simpler structure, smaller size)
-2. **For complete data**: Use `ash_aggregated_results.json` (but parse efficiently - see warnings below)
-3. **For dependencies**: Use `reports/ash.cdx.json` (CycloneDX SBOM)
-4. **For CI/CD integration**: Use `reports/ash.junit.xml` or `reports/ash.csv`
-
-**File Locations**:
-- **Primary Results File**: `ash_aggregated_results.json` (complete but large - 1-10MB+)
-- **Simplified Results**: `reports/ash.flat.json` (recommended for most use cases)
-- **Human Reports**: HTML, Markdown, Text (NOT for machine parsing)
-- **Dependencies**: `reports/ash.cdx.json` (CycloneDX SBOM)
-- **Configuration**: `.ash/.ash.yaml` (YAML format with JSON schema)
-- **Suppressions**: Defined in configuration file under `global_settings.suppressions`
-
-**Tool Requirements**:
-- **Preferred**: `jq` (fastest, most efficient for JSON queries - ALWAYS TRY FIRST)
-- **Fallback**: Python 3.x (reliable, widely available)
-- **Last Resort**: `grep`, `awk` (basic text processing, always available)
-
-## Critical Rules for GenAI Tools
-
-### 1. Always Use JSON Formats for Machine Processing
-
-**DO:**
-- Read `ash_aggregated_results.json` for complete scan results (but see file size warnings below)
-- Use `reports/ash.flat.json` for simplified finding structure (recommended for most use cases)
-- Use `reports/ash.sarif` for SARIF-compliant tooling
-- Use `reports/ash.cdx.json` for dependency analysis
-
-**DO NOT:**
-- Parse HTML reports (`reports/ash.html`) - designed for human viewing only
-- Parse Markdown summaries (`reports/ash.summary.md`) - may have formatting inconsistencies
-- Parse Text summaries (`reports/ash.summary.txt`) - lossy representation
-
-### 2. Handle Large Files Efficiently
-
-**CRITICAL**: ASH result files can be very large (1-10MB+). Always:
-- Check file size before loading into memory
-- Use streaming parsers for files >5MB
-- Extract only the data you need
-- Consider using simpler formats (`ash.flat.json`, `ash.csv`)
-- Provide progress indicators for large file operations
-
-**Example - Check before loading**:
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
-import os
-import json
+import time
 
-results_file = "ash_aggregated_results.json"
-file_size_mb = os.path.getsize(results_file) / (1024 * 1024)
+# LOW is stricter than the default MEDIUM, so LOW findings count as actionable too.
+# Leave severity_threshold out to use the config's threshold.
+scan = run_ash_scan(source_dir="/path/to/project", severity_threshold="LOW")
+if scan.get("success") is False:
+    raise RuntimeError(scan["error"])
 
-if file_size_mb > 5:
-    print(f"Large file detected ({file_size_mb:.1f}MB). Using streaming parser...")
-    # Use streaming approach
-else:
-    # Safe to load into memory
-    with open(results_file) as f:
-        data = json.load(f)
-```
-
-### 3. Check Tool Availability
-
-**IMPORTANT**: Always attempt to use `jq` first for maximum efficiency, but never assume it's installed. Always:
-- Check if tools are available before using them
-- Try `jq` first (fastest and most efficient)
-- Provide fallback methods (Python, grep, awk)
-- Use the most reliable method available
-- Document which tools are required vs optional
-
-**Tool Availability Check**:
-```python
-import shutil
-
-# Check for jq (PREFERRED)
-has_jq = shutil.which("jq") is not None
-
-# Check for Python (almost always available)
-has_python = shutil.which("python3") is not None or shutil.which("python") is not None
-
-# Use best available method (PREFER jq)
-if has_jq:
-    # Use jq (PREFERRED - fastest and most efficient)
-    pass
-elif has_python:
-    # Fallback to Python
-    pass
-else:
-    # Last resort: grep/awk
-    pass
-```
-
-### 4. Severity Discrepancies - Source of Truth
-
-**IMPORTANT**: Severity levels may differ between report formats due to underlying scanner behavior.
-
-**Source of Truth**: `ash_aggregated_results.json` contains the canonical severity levels.
-
-**Why This Matters**:
-- Some scanners report different severities in JSON vs text output
-- Markdown/HTML summaries may show "CRITICAL" while JSON shows "HIGH"
-- Always validate severity from `ash_aggregated_results.json` before taking action
-
-**Example**:
-```json
-// ash_aggregated_results.json (SOURCE OF TRUTH)
-{
-  "scanner_results": {
-    "bandit": {
-      "findings": [
-        {
-          "severity": "HIGH",  // ← Use this value
-          "rule_id": "B201"
-        }
-      ]
-    }
-  }
-}
-```
-
-### 5. Understanding Suppressed vs Actionable Findings
-
-**Key Concepts**:
-- **Total Findings**: All findings detected by scanners
-- **Suppressed Findings**: Findings marked as false positives or accepted risks
-- **Actionable Findings**: Total - Suppressed = findings requiring attention
-
-**Always Check**:
-```json
-{
-  "metadata": {
-    "summary_stats": {
-      "total": 156,
-      "actionable": 61,
-      "suppressed": 95
-    }
-  }
-}
-```
-
-## File Structure and Locations
-
-### Output Directory Structure
-
-```
-.ash/ash_output/
-├── ash_aggregated_results.json    # PRIMARY: Complete scan results
-├── ash.log                         # Scan execution log
-├── ash-scan-set-files-list.txt    # List of files scanned
-├── reports/
-│   ├── ash.sarif                  # SARIF format (industry standard)
-│   ├── ash.flat.json              # Simplified JSON structure
-│   ├── ash.cdx.json               # CycloneDX SBOM (dependencies)
-│   ├── ash.csv                    # CSV format (spreadsheet-friendly)
-│   ├── ash.html                   # HTML report (HUMAN ONLY)
-│   ├── ash.summary.md             # Markdown summary (HUMAN ONLY)
-│   ├── ash.summary.txt            # Text summary (HUMAN ONLY)
-│   ├── ash.ocsf.json              # OCSF format
-│   ├── ash.junit.xml              # JUnit XML (CI/CD)
-│   └── ash.gl-sast-report.json    # GitLab SAST format
-└── scanners/
-    ├── bandit/
-    │   └── source/
-    │       └── ASH.ScanResults.json
-    ├── semgrep/
-    │   └── source/
-    │       └── ASH.ScanResults.json
-    └── [other scanners]/
-```
-
-## Working with ash_aggregated_results.json
-
-### Important: File Size Considerations
-
-**WARNING**: The `ash_aggregated_results.json` file can be very large (often 1-10MB, sometimes larger for big codebases).
-
-**Best Practices**:
-1. **DO NOT load the entire file into memory** if you only need specific data
-2. **Use streaming JSON parsers** when possible
-3. **Extract only what you need** using command-line tools or streaming libraries
-4. **Consider using alternative formats** for specific use cases:
-   - `reports/ash.flat.json` - Simplified structure, smaller size
-   - `reports/ash.csv` - Easy to filter and query
-   - `reports/ash.sarif` - Industry standard, well-supported
-
-### Parsing Strategies
-
-**DEFAULT APPROACH**: Always attempt `jq` first for maximum efficiency. Only use Python or grep if `jq` is unavailable.
-
-#### Strategy 1: Using jq (PREFERRED - Check Availability First)
-
-**Recommended: Use jq for all queries** (most Linux/macOS systems have it installed):
-```bash
-# Extract just summary stats
-jq '.metadata.summary_stats' ash_aggregated_results.json
-
-# Get specific scanner results
-jq '.scanner_results.bandit' ash_aggregated_results.json
-```
-
-#### Strategy 2: Using Python (FALLBACK - If jq is NOT available)
-```bash
-# Extract summary stats
-python3 -c "import json; data=json.load(open('ash_aggregated_results.json')); print(json.dumps(data['metadata']['summary_stats'], indent=2))"
-
-# Get actionable count
-python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['metadata']['summary_stats']['actionable'])"
-```
-
-**Alternative: Use grep for simple extractions** (always available):
-```bash
-# Get actionable count (quick and dirty)
-grep -o '"actionable": [0-9]*' ash_aggregated_results.json | grep -o '[0-9]*'
-
-# Check for critical findings
-grep -o '"critical": [0-9]*' ash_aggregated_results.json | head -1
-```
-
-#### Strategy 3: Streaming JSON Parsers (For Large Files)
-
-**Python with ijson** (streaming parser):
-```python
-import ijson
-
-# Stream parse - memory efficient
-with open("ash_aggregated_results.json", "rb") as f:
-    # Extract just summary stats without loading entire file
-    parser = ijson.items(f, "metadata.summary_stats")
-    summary_stats = next(parser)
-    print(f"Actionable findings: {summary_stats['actionable']}")
-```
-
-**Python standard library** (load specific sections):
-```python
-import json
-
-# Load and extract only what you need
-with open("ash_aggregated_results.json") as f:
-    data = json.load(f)
-
-# Immediately extract and discard the rest
-summary = data["metadata"]["summary_stats"]
-del data  # Free memory
-
-print(f"Actionable: {summary['actionable']}")
-print(f"Critical: {summary['critical']}")
-```
-
-#### Strategy 4: Use Simpler Formats
-
-**For most use cases, use the flat JSON format instead**:
-```python
-# reports/ash.flat.json is much smaller and easier to parse
-import json
-
-with open("reports/ash.flat.json") as f:
-    findings = json.load(f)
-
-# Simpler structure, direct access to findings
-for finding in findings:
-    if finding["severity"] in ["CRITICAL", "HIGH"]:
-        print(f"{finding['file_path']}: {finding['message']}")
-```
-
-### Schema Overview
-
-```json
-{
-  "name": "ASH Scan 2026-02-28T10:10:46.211371",
-  "description": "Aggregated security scan results",
-  "metadata": {
-    "report_id": "ASH-20261028",
-    "generated_at": "2026-02-28T15:10:46+00:00",
-    "project_name": "ASH",
-    "tool_version": "3.2.2",
-    "summary_stats": {
-      "total": 156,
-      "actionable": 61,
-      "suppressed": 95,
-      "critical": 0,
-      "high": 0,
-      "medium": 0,
-      "low": 61,
-      "info": 0,
-      "passed": 9,
-      "failed": 0,
-      "missing": 1,
-      "skipped": 0,
-      "duration": 80.615062
-    }
-  },
-  "ash_config": { /* Configuration used for scan */ },
-  "scanner_results": { /* Detailed findings by scanner */ },
-  "converter_results": { /* File conversion results */ },
-  "additional_reports": { /* External reports included */ },
-  "validation_checkpoints": [ /* Scan validation data */ ]
-}
-```
-
-### Key Fields
-
-#### metadata.summary_stats
-- `total`: Total findings detected
-- `actionable`: Findings requiring attention (not suppressed)
-- `suppressed`: Findings marked as false positives/accepted risks
-- `critical`, `high`, `medium`, `low`, `info`: Counts by severity
-- `passed`: Scanners that completed successfully
-- `failed`: Scanners that encountered errors
-- `duration`: Scan duration in seconds
-
-#### scanner_results
-Contains findings organized by scanner name:
-
-```json
-{
-  "scanner_results": {
-    "bandit": {
-      "findings": [
-        {
-          "rule_id": "B201",
-          "severity": "HIGH",
-          "message": "Flask app appears to be run with debug=True",
-          "file_path": "app.py",
-          "line_start": 42,
-          "line_end": 42,
-          "suppressed": false,
-          "suppression_reason": null
-        }
-      ]
-    }
-  }
-}
-```
-
-### Efficient Querying
-
-**IMPORTANT**: Always attempt `jq` first for maximum efficiency. Check availability and provide fallbacks for compatibility.
-
-#### Recommended: Using jq (Check Availability First)
-
-**Get actionable findings count** (preferred method):
-```bash
-jq '.metadata.summary_stats.actionable' ash_aggregated_results.json
-```
-
-**Get all critical/high findings**:
-```bash
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.severity == "CRITICAL" or .severity == "HIGH")' ash_aggregated_results.json
-```
-
-**Get findings by scanner**:
-```bash
-jq '.scanner_results.bandit.findings' ash_aggregated_results.json
-```
-
-**Get non-suppressed findings**:
-```bash
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false)' ash_aggregated_results.json
-```
-
-**Count findings by severity**:
-```bash
-jq '[.scanner_results | to_entries[] | .value.findings[] | .severity] | group_by(.) | map({severity: .[0], count: length})' ash_aggregated_results.json
-```
-
-#### Fallback: Using Python (If jq is unavailable)
-
-**Get actionable findings count**:
-```bash
-python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['metadata']['summary_stats']['actionable'])"
-```
-
-**Get all critical/high findings**:
-```python
-import json
-
-with open("ash_aggregated_results.json") as f:
-    data = json.load(f)
-
-for scanner, results in data["scanner_results"].items():
-    for finding in results.get("findings", []):
-        if finding["severity"] in ["CRITICAL", "HIGH"]:
-            print(
-                f"{scanner}: {finding['file_path']}:{finding['line_start']} - {finding['message']}"
-            )
-```
-
-**Get findings by scanner**:
-```python
-import json
-
-with open("ash_aggregated_results.json") as f:
-    data = json.load(f)
-
-bandit_findings = data["scanner_results"]["bandit"]["findings"]
-print(json.dumps(bandit_findings, indent=2))
-```
-
-**Count findings by severity**:
-```python
-import json
-from collections import Counter
-
-with open("ash_aggregated_results.json") as f:
-    data = json.load(f)
-
-severities = []
-for scanner, results in data["scanner_results"].items():
-    for finding in results.get("findings", []):
-        severities.append(finding["severity"])
-
-counts = Counter(severities)
-for severity, count in counts.items():
-    print(f"{severity}: {count}")
-```
-
-#### Last Resort: Using grep/awk (If neither jq nor Python available)
-
-**Get actionable findings count** (basic but works):
-```bash
-grep -o '"actionable": [0-9]*' ash_aggregated_results.json | head -1 | grep -o '[0-9]*'
-```
-
-**Check for critical findings**:
-```bash
-grep -c '"severity": "CRITICAL"' ash_aggregated_results.json
-```
-
-**List all severity levels found**:
-```bash
-grep -o '"severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
-```
-
-#### Recommended Approach for GenAI Tools
-
-**1. Check tool availability first**:
-```python
-import subprocess
-import shutil
-
-
-def get_actionable_count(results_file):
-    """Get actionable findings count using best available method."""
-
-    # Method 1: Try jq (fastest - PREFERRED)
-    if shutil.which("jq"):
-        try:
-            result = subprocess.run(
-                ["jq", ".metadata.summary_stats.actionable", results_file],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            return int(result.stdout.strip())
-        except Exception:
-            pass
-
-    # Method 2: Use Python (most reliable fallback)
-    try:
-        import json
-
-        with open(results_file) as f:
-            data = json.load(f)
-        return data["metadata"]["summary_stats"]["actionable"]
-    except Exception:
-        pass
-
-    # Method 3: Fallback to grep (always available)
-    try:
-        result = subprocess.run(
-            ["grep", "-o", '"actionable": [0-9]*', results_file],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return int(result.stdout.strip().split(":")[1].strip())
-    except Exception:
-        return None
-```
-
-**2. Use the flat JSON format when possible**:
-```python
-# Simpler, smaller, easier to parse
-with open("reports/ash.flat.json") as f:
-    findings = json.load(f)
-
-actionable = [f for f in findings if not f.get("suppressed", False)]
-critical_high = [f for f in actionable if f["severity"] in ["CRITICAL", "HIGH"]]
-```
-
-## Working with CycloneDX SBOM
-
-### Purpose
-The CycloneDX SBOM (`reports/ash.cdx.json`) provides a complete Software Bill of Materials, including:
-- Direct and transitive dependencies
-- Component versions and licenses
-- Known vulnerabilities (CVEs)
-- Dependency relationships
-
-### Schema Overview
-
-```json
-{
-  "bomFormat": "CycloneDX",
-  "specVersion": "1.4",
-  "version": 1,
-  "metadata": {
-    "timestamp": "2026-02-28T15:12:09+00:00",
-    "tools": [
-      {
-        "vendor": "AWS Labs",
-        "name": "Automated Security Helper",
-        "version": "3.2.2"
-      }
-    ]
-  },
-  "components": [
-    {
-      "type": "library",
-      "name": "requests",
-      "version": "2.31.0",
-      "purl": "pkg:pypi/requests@2.31.0",
-      "licenses": [
-        {
-          "license": {
-            "id": "Apache-2.0"
-          }
-        }
-      ]
-    }
-  ],
-  "dependencies": [
-    {
-      "ref": "pkg:pypi/requests@2.31.0",
-      "dependsOn": [
-        "pkg:pypi/urllib3@2.0.7",
-        "pkg:pypi/certifi@2023.7.22"
-      ]
-    }
-  ],
-  "vulnerabilities": [
-    {
-      "id": "CVE-2023-12345",
-      "source": {
-        "name": "NVD",
-        "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-12345"
-      },
-      "ratings": [
-        {
-          "severity": "high",
-          "score": 7.5,
-          "method": "CVSSv3"
-        }
-      ],
-      "affects": [
-        {
-          "ref": "pkg:pypi/requests@2.31.0"
-        }
-      ]
-    }
-  ]
-}
-```
-
-### Querying Dependencies
-
-**IMPORTANT**: CycloneDX files can also be large. Use efficient parsing methods. Always attempt `jq` first.
-
-#### Recommended: Using jq (Check Availability First)
-
-**List all components** (preferred method):
-```bash
-jq '.components[] | {name: .name, version: .version, type: .type}' ash.cdx.json
-```
-
-**Find components with vulnerabilities**:
-```bash
-jq '.vulnerabilities[] | .affects[].ref' ash.cdx.json | sort -u
-```
-
-**Get high/critical vulnerabilities**:
-```bash
-jq '.vulnerabilities[] | select(.ratings[].severity == "high" or .ratings[].severity == "critical")' ash.cdx.json
-```
-
-**List all licenses**:
-```bash
-jq '[.components[].licenses[]?.license.id] | unique' ash.cdx.json
-```
-
-**Find dependency tree for a component**:
-```bash
-jq --arg pkg "pkg:pypi/requests@2.31.0" '.dependencies[] | select(.ref == $pkg)' ash.cdx.json
-```
-
-#### Fallback: Using Python (If jq is unavailable)
-
-**List all components**:
-```python
-import json
-
-with open("reports/ash.cdx.json") as f:
-    sbom = json.load(f)
-
-for component in sbom.get("components", []):
-    print(f"{component['name']} {component['version']} ({component['type']})")
-```
-
-**Find components with vulnerabilities**:
-```python
-import json
-
-with open("reports/ash.cdx.json") as f:
-    sbom = json.load(f)
-
-vulnerable_refs = set()
-for vuln in sbom.get("vulnerabilities", []):
-    for affect in vuln.get("affects", []):
-        vulnerable_refs.add(affect["ref"])
-
-for ref in sorted(vulnerable_refs):
-    print(ref)
-```
-
-**Get high/critical vulnerabilities**:
-```python
-import json
-
-with open("reports/ash.cdx.json") as f:
-    sbom = json.load(f)
-
-for vuln in sbom.get("vulnerabilities", []):
-    for rating in vuln.get("ratings", []):
-        if rating.get("severity") in ["high", "critical"]:
-            print(
-                f"{vuln['id']}: {rating['severity']} (score: {rating.get('score', 'N/A')})"
-            )
-            for affect in vuln.get("affects", []):
-                print(f"  Affects: {affect['ref']}")
-            break
-```
-
-**List all licenses**:
-```python
-import json
-
-with open("reports/ash.cdx.json") as f:
-    sbom = json.load(f)
-
-licenses = set()
-for component in sbom.get("components", []):
-    for license_info in component.get("licenses", []):
-        if "license" in license_info and "id" in license_info["license"]:
-            licenses.add(license_info["license"]["id"])
-
-for license_id in sorted(licenses):
-    print(license_id)
-```
-
-#### Last Resort: Using grep (If neither jq nor Python available)
-
-**Count total components**:
-```bash
-grep -c '"type": "library"' reports/ash.cdx.json
-```
-
-**Find if specific package exists**:
-```bash
-grep -i "requests" reports/ash.cdx.json
-```
-
-**Count vulnerabilities**:
-```bash
-grep -c '"id": "CVE-' reports/ash.cdx.json
-```
-
-## Configuration File Schema
-
-### Location
-- Default: `.ash/.ash.yaml` in the project root
-- Custom: Specify with `--config` flag or `ASH_CONFIG` environment variable
-
-### Schema Structure
-
-```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
-
-project_name: my-project
-
-fail_on_findings: true  # Exit with code 2 if actionable findings exist
-
-global_settings:
-  severity_threshold: MEDIUM  # CRITICAL, HIGH, MEDIUM, LOW, INFO
-  
-  ignore_paths:
-    - path: 'tests/test_data/**'
-      reason: 'Test data only'
-      expiration: null  # Optional: ISO date string
-  
-  suppressions:
-    - path: 'src/app.py'
-      rule_id: 'B201'
-      line_start: 42
-      line_end: 42
-      reason: 'False positive - debug mode only in development'
-      expiration: '2026-12-31'  # Optional: ISO date string
-
-scanners:
-  bandit:
-    enabled: true
-    options:
-      confidence_level: high  # all, high, medium, low
-      ignore_nosec: false
-      config_file: .ash/bandit.yaml
-  
-  semgrep:
-    enabled: true
-    options:
-      config: auto  # or specific ruleset like 'p/security-audit'
-  
-  checkov:
-    enabled: true
-    options:
-      frameworks:
-        - all
-      severity_threshold: LOW
-
-reporters:
-  markdown:
-    enabled: true
-    options:
-      include_detailed_findings: true
-      max_detailed_findings: 20
-  
-  html:
-    enabled: true
-  
-  sarif:
-    enabled: true
-  
-  cyclonedx:
-    enabled: true
-```
-
-### Key Configuration Sections
-
-#### global_settings.severity_threshold
-Minimum severity level to report. Findings below this threshold are still detected but not counted as actionable.
-
-#### global_settings.suppressions
-Array of suppression rules to mark findings as false positives or accepted risks.
-
-**Suppression Fields**:
-- `path`: File path (supports glob patterns like `tests/**/*.py`)
-- `rule_id`: Scanner-specific rule identifier (e.g., `B201`, `SECRET-SECRET-KEYWORD`)
-- `line_start`: Optional - specific line number
-- `line_end`: Optional - end line for multi-line suppressions
-- `reason`: Required - explanation for suppression
-- `expiration`: Optional - ISO date when suppression expires
-
-#### scanners
-Configuration for each scanner. Common options:
-- `enabled`: Boolean to enable/disable scanner
-- `options`: Scanner-specific configuration
-
-## Creating Suppressions Properly
-
-### When to Suppress
-- False positives (scanner incorrectly flagged safe code)
-- Accepted risks (security team approved the pattern)
-- Test data (not production code)
-- Third-party code (cannot be modified)
-
-### Suppression Best Practices
-
-**1. Always Provide a Reason**:
-```yaml
-suppressions:
-  - path: 'src/utils.py'
-    rule_id: 'B603'
-    reason: 'subprocess.call uses list args (no shell=True), validated inputs only'
-```
-
-**2. Be Specific with Paths**:
-```yaml
-# Good - specific file
-- path: 'src/auth/login.py'
-  rule_id: 'B201'
-
-# Good - specific directory
-- path: 'tests/**/*.py'
-  rule_id: 'B101'
-
-# Avoid - too broad
-- path: '**/*.py'
-  rule_id: 'B201'
-```
-
-**3. Use Line Numbers for Precision**:
-```yaml
-suppressions:
-  - path: 'src/app.py'
-    rule_id: 'B201'
-    line_start: 42
-    line_end: 42
-    reason: 'Debug mode only enabled in development environment'
-```
-
-**4. Set Expiration Dates for Temporary Suppressions**:
-```yaml
-suppressions:
-  - path: 'src/legacy/old_api.py'
-    rule_id: 'B501'
-    reason: 'Legacy code - will be refactored in Q2 2026'
-    expiration: '2026-06-30'
-```
-
-### Suppression Workflow
-
-1. **Identify the Finding**:
-   - Check `ash_aggregated_results.json` for exact details
-   - Note: `rule_id`, `file_path`, `line_start`, `line_end`
-
-2. **Verify It's a False Positive or Accepted Risk**:
-   - Review the code context
-   - Consult security team if needed
-   - Document the decision
-
-3. **Add Suppression to Configuration**:
-   ```yaml
-   global_settings:
-     suppressions:
-       - path: 'path/from/finding'
-         rule_id: 'RULE_ID_FROM_FINDING'
-         line_start: 42  # Optional but recommended
-         reason: 'Clear explanation of why this is suppressed'
-   ```
-
-4. **Re-run Scan to Verify**:
-   ```bash
-   ash --mode local
-   ```
-
-5. **Confirm Suppression Applied**:
-   ```bash
-   jq '.metadata.summary_stats.suppressed' .ash/ash_output/ash_aggregated_results.json
-   ```
-
-## Common Pitfalls and Known Issues
-
-### 1. Severity Inconsistencies
-**Issue**: Markdown summary shows "CRITICAL" but JSON shows "HIGH"
-
-**Solution**: Always use `ash_aggregated_results.json` as source of truth
-
-**Example**:
-```bash
-# Wrong - parsing markdown
-grep "CRITICAL" .ash/ash_output/reports/ash.summary.md
-
-# Correct - querying JSON
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.severity == "CRITICAL")' .ash/ash_output/ash_aggregated_results.json
-```
-
-### 2. Suppression Not Applied
-**Issue**: Suppression added but finding still shows as actionable
-
-**Common Causes**:
-- Path doesn't match exactly (check for leading `./` or trailing `/`)
-- Rule ID typo or case mismatch
-- Line numbers don't match (scanner may report different lines)
-
-**Solution**:
-```bash
-# Check exact path and rule_id from results
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false) | {file_path, rule_id, line_start}' ash_aggregated_results.json
-
-# Verify suppression in config matches exactly
-```
-
-### 3. HTML Report Parsing Failures
-**Issue**: Attempting to parse HTML with regex or string matching
-
-**Solution**: Never parse HTML reports. Use JSON formats:
-- `ash_aggregated_results.json` - complete results
-- `reports/ash.flat.json` - simplified structure
-- `reports/ash.sarif` - SARIF format
-
-### 4. Missing Scanner Results
-**Issue**: Expected scanner results not in output
-
-**Check**:
-```bash
-# Verify scanner was enabled and executed
-jq '.metadata.validation_summary' ash_aggregated_results.json
-
-# Check for scanner errors
-jq '.scanner_results | to_entries[] | select(.value.status == "FAILED")' ash_aggregated_results.json
-```
-
-### 5. Dependency Analysis Confusion
-**Issue**: Trying to extract dependencies from scan findings
-
-**Solution**: Use CycloneDX SBOM:
-```bash
-# Get all dependencies
-jq '.components[] | {name, version, type}' reports/ash.cdx.json
-
-# Get vulnerable dependencies
-jq '.vulnerabilities[] | .affects[].ref' reports/ash.cdx.json
-```
-
-## Integration Patterns
-
-### Pattern 1: CI/CD Pipeline Gate
-
-```python
-import json
-import sys
-
-# Read results
-with open(".ash/ash_output/ash_aggregated_results.json") as f:
-    results = json.load(f)
-
-stats = results["metadata"]["summary_stats"]
-
-# Fail on actionable critical/high findings
-# Note: Use actionable count to exclude suppressed findings (false positives)
-if stats["critical"] > 0:
-    print(f"FAILED: {stats['critical']} critical actionable findings")
-    sys.exit(1)
-
-if stats["high"] > 5:
-    print(f"FAILED: {stats['high']} high actionable findings (threshold: 5)")
-    sys.exit(1)
-
-print(f"PASSED: {stats['actionable']} actionable findings (within threshold)")
-sys.exit(0)
-```
-
-**Using MCP Server:**
-```python
-# Get only actionable findings for CI/CD gate
-result = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    severities="critical,high",
-    filter_level="minimal",
-)
-
-if result["summary_stats"]["critical"] > 0:
-    print("FAILED: Critical actionable findings detected")
-    sys.exit(1)
-```
-
-### Pattern 2: Finding Analysis and Remediation
-
-```python
-import json
-
-# Read results
-with open(".ash/ash_output/ash_aggregated_results.json") as f:
-    results = json.load(f)
-
-# Get all actionable high/critical findings
-actionable_findings = []
-for scanner, data in results["scanner_results"].items():
-    for finding in data.get("findings", []):
-        if not finding["suppressed"] and finding["severity"] in ["HIGH", "CRITICAL"]:
-            actionable_findings.append(
-                {
-                    "scanner": scanner,
-                    "rule_id": finding["rule_id"],
-                    "severity": finding["severity"],
-                    "file": finding["file_path"],
-                    "line": finding["line_start"],
-                    "message": finding["message"],
-                }
-            )
-
-# Sort by severity
-actionable_findings.sort(key=lambda x: 0 if x["severity"] == "CRITICAL" else 1)
-
-# Generate remediation plan
-for finding in actionable_findings:
-    print(f"\n[{finding['severity']}] {finding['file']}:{finding['line']}")
-    print(f"  Rule: {finding['rule_id']} ({finding['scanner']})")
-    print(f"  Issue: {finding['message']}")
-    print(f"  Action: [Suggest remediation based on rule_id]")
-```
-
-**Using MCP Server:**
-```python
-# Get actionable high/critical findings with full details
-results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    severities="critical,high",
-    filter_level="full",
-)
-
-# Process findings from SARIF
-for run in results["raw_results"]["sarif"]["runs"]:
-    for result in run["results"]:
-        # All results here are actionable (suppressed findings already filtered)
-        print(f"[{result['level']}] {result['ruleId']}: {result['message']['text']}")
-```
-
-### Pattern 3: Dependency Vulnerability Report
-
-```python
-import json
-
-# Read CycloneDX SBOM
-with open(".ash/ash_output/reports/ash.cdx.json") as f:
-    sbom = json.load(f)
-
-# Extract vulnerable components
-vulnerable_components = {}
-for vuln in sbom.get("vulnerabilities", []):
-    for affect in vuln.get("affects", []):
-        component_ref = affect["ref"]
-        if component_ref not in vulnerable_components:
-            vulnerable_components[component_ref] = []
-        vulnerable_components[component_ref].append(
-            {
-                "cve": vuln["id"],
-                "severity": vuln["ratings"][0]["severity"],
-                "score": vuln["ratings"][0].get("score", "N/A"),
-            }
-        )
-
-# Generate report
-print("Vulnerable Dependencies:")
-for component, vulns in vulnerable_components.items():
-    print(f"\n{component}")
-    for vuln in vulns:
-        print(f"  - {vuln['cve']} ({vuln['severity']}, CVSS: {vuln['score']})")
-```
-
-## MCP Server Integration
-
-If using ASH via the Model Context Protocol (MCP) server, follow these guidelines:
-
-### Available Tools
-- `run_ash_scan` - Start a security scan
-- `get_scan_progress` - Get current progress and partial results
-- `get_scan_results` - Get scan results with filtering
-- `get_scan_summary` - Get lightweight summary
-- `get_scan_result_paths` - Get file paths for all reports
-- `list_active_scans` - List running scans
-- `cancel_scan` - Cancel a running scan
-
-### Managing Long-Running Scans
-
-**CRITICAL**: ASH scans can take 30-120+ seconds. MCP connections may timeout if you don't keep them alive.
-
-#### ❌ WRONG: Sleep and Wait (Connection Timeout)
-
-```python
-# This will cause connection timeout!
-result = run_ash_scan(source_dir="/path/to/project")
-scan_id = result["scan_id"]
-
-# Sleeping for 60+ seconds causes MCP connection to close
-time.sleep(60)
-
-# This will fail - connection already timed out
-summary = get_scan_summary()  # ERROR: Connection closed
-```
-
-#### ✅ CORRECT: Poll Progress (Keep Connection Alive)
-
-```python
-# 1. Start scan (returns immediately with scan_id)
-result = run_ash_scan(source_dir="/path/to/project")
-scan_id = result["scan_id"]
-
-# 2. Poll progress periodically to keep connection alive
 while True:
-    progress = get_scan_progress(scan_id=scan_id)
-
-    # Check if scan is complete
-    if progress.get("is_complete") or progress.get("status") in [
-        "completed",
-        "failed",
-        "cancelled",
-    ]:
+    progress = get_scan_progress(scan_id=scan["scan_id"])
+    if progress.get("success") is False:
+        raise RuntimeError(progress["error"])
+    if progress["is_complete"]:
         break
-
-    # Wait 5 seconds before next check (keeps connection alive)
     time.sleep(5)
 
-# 3. Get results after completion
-if progress.get("status") == "completed":
-    # Use filtered queries to reduce data transfer
+if progress["results_available"]:
     results = get_scan_results(
-        output_dir=progress["output_directory"],
-        filter_level="summary",
-        actionable_only=True,
-        severities="critical,high",
+        output_dir=progress["output_directory"], actionable_only=True
     )
+    print(progress["status"], results["findings_count"], "actionable findings")
+else:
+    print(progress["status"], progress.get("error_message"))
 ```
 
-#### Best Practice: Progress Monitoring with Status Updates
+What to know about the tools:
 
+- `run_ash_scan` takes no scanner list. The project's ASH config chooses the scanners and
+  the severity thresholds.
+- Its `severity_threshold` argument can make the config's `global_settings.severity_threshold`
+  stricter for that scan, never looser: `LOW` over a configured `MEDIUM` makes LOW findings
+  actionable, and `CRITICAL` over `MEDIUM` changes nothing. It tightens a scanner's own
+  `severity_threshold` option the same way, and a scanner without one follows the tightened
+  global threshold. The threshold decides which findings are actionable and whether a
+  scanner reports FAILED, not which findings are reported. `get_scan_progress` returns the
+  argument as `requested_severity_threshold` and, once the scan has results, the threshold
+  it was judged by as `severity_threshold`.
+- Each scan writes `.ash/ash_output` inside `source_dir`. Once its options and config are
+  accepted, it sets the previous scan's results there aside, and it deletes them once it has
+  results of its own; a scan that fails or is canceled puts them back, and a scan refused
+  for its scanner selection or its config leaves them as they were. Copy `ash_aggregated_results.json` before the next scan
+  if you need it for a comparison.
+- `cancel_scan` stops a running scan: the scanner tool running at the time is stopped, and no
+  further scanner, phase, or reporter starts, so a scan canceled before its report phase
+  writes no reports. A scanner that is already reading its tool's output can still write its
+  own files, but `ash_aggregated_results.json` is not written after the cancel. Previous
+  results that the output directory held are put back in place of the results the scan
+  wrote; the scan's log, `ash.log`, stays, and an `ash.log.jsonl` already there is left as it
+  was. With none to put back, what the scan wrote before it stopped stays, though a cancel
+  during the report phase removes that phase's reports, all but
+  `reports/ash.unused-suppressions.md`. Its status is `cancelled` at once. Until the scan has stopped, `run_ash_scan`
+  refuses another scan of that directory.
+- `get_scan_results` returns counts and per-scanner summaries. With `actionable_only` set, a
+  response at the default `filter_level`, `full`, also has a `findings` list of the
+  actionable findings, without their IDs, and its `findings_count`. Those are the findings
+  that are not suppressed and are at or above the threshold their scanner was judged by, the
+  ones that fail the scan. Findings below it are left out. A `summary` or `minimal` response
+  has no list. Read the IDs, and the suppressed findings, from `reports/ash.flat.json` in the
+  output directory.
+  `get_scan_result_paths` returns the absolute paths of the main reports and of
+  `ash_aggregated_results.json`.
+- The server's operator limits how many scans it holds at once, running or waiting
+  (`max_concurrent_scans`), and how long one may run (`scan_timeout_seconds`). A scan over
+  the first limit is refused with an `error` that names it; start it again when another scan
+  has finished. A scan over the second is stopped and ends `failed`.
+- The server keeps its list of scans in memory. After it restarts, `get_scan_progress`
+  fails with `error_category` `scan_not_found` for older scan IDs; read their results from the
+  output directory.
+
+After a scan, `get_scan_progress` reports `scanner_statuses` for every scanner ASH considered
+and `skipped_scanners` for the ones that did not run. Use them to tell "ran and found nothing"
+from "never ran". `check_installation` reports whether each built-in scanner's tool is
+installed: `ready` is false when a scanner that ASH enables by default cannot run and no scan
+will install its tool, and `missing_dependencies` names those scanners. It does not read the
+project's config, and it installs and downloads nothing. When the tool of a scanner that ASH
+installs with uv is missing, the first scan installs it if the server is online and has uv;
+such a scanner is listed in `installs_on_first_scan` and counts toward `ready`, and otherwise
+it is in `missing_dependencies`. Offline, semgrep is also missing when it has no rules cache.
+
+The [MCP tools reference](https://github.com/awslabs/automated-security-helper/blob/main/docs/content/reference/mcp-tools.md)
+lists every tool and its parameters.
+
+### Stop a scan that runs too long
+
+A canceled scan's status is `cancelled` at once, so the next poll ends the loop, and
+`results_available` is false:
+
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
 import time
 
 
-def run_ash_scan_with_monitoring(source_dir: str) -> dict:
-    """Run ASH scan with proper progress monitoring."""
-
-    # Start scan
-    result = run_ash_scan(source_dir=source_dir)
-    if not result.get("success"):
-        return {"error": result.get("error", "Failed to start scan")}
-
-    scan_id = result["scan_id"]
-    print(f"Scan started: {scan_id}")
-
-    # Monitor progress
-    last_status = None
+def scan_or_cancel(source_dir):
+    scan = run_ash_scan(source_dir=source_dir)
+    if scan.get("success") is False:
+        return {"error": scan["error"]}
+    deadline = time.monotonic() + 20 * 60
+    canceled = False
     while True:
-        progress = get_scan_progress(scan_id=scan_id)
-
-        # Show status updates
-        current_status = progress.get("message", "Running...")
-        if current_status != last_status:
-            print(f"Status: {current_status}")
-            last_status = current_status
-
-        # Check completion
-        if progress.get("is_complete"):
+        progress = get_scan_progress(scan_id=scan["scan_id"])
+        if progress.get("success") is False:
+            return {"error": progress["error"]}
+        if progress["is_complete"]:
             break
-
-        if progress.get("status") in ["failed", "cancelled"]:
-            return {
-                "error": f"Scan {progress['status']}: {progress.get('error', 'Unknown error')}"
-            }
-
-        # Wait before next poll (keeps connection alive)
+        if not canceled and time.monotonic() > deadline:
+            cancel_scan(scan_id=scan["scan_id"])
+            canceled = True
         time.sleep(5)
-
-    # Get filtered results
-    output_dir = progress.get("output_directory", f"{source_dir}/.ash/ash_output")
-    results = get_scan_results(
-        output_dir=output_dir,
-        filter_level="summary",
-        actionable_only=True,
-        severities="critical,high,medium",
+    if not progress["results_available"]:
+        return {"status": progress["status"], "error": progress.get("error_message")}
+    return get_scan_results(
+        output_dir=progress["output_directory"], filter_level="summary"
     )
-
-    return results
 ```
 
-#### Why This Matters
+### Pattern 1: fail a build on critical or high findings
 
-1. **Connection Keepalive**: Polling `get_scan_progress()` every 5 seconds keeps the MCP connection active
-2. **Status Updates**: You can show progress to users instead of appearing frozen
-3. **Early Failure Detection**: Detect scan failures immediately instead of waiting for timeout
-4. **Efficient Data Transfer**: Use filtered queries after completion to get only what you need
+Run from the scanned directory after the scan has ended with results:
 
-#### Recommended Polling Intervals
-
-- **Development/Interactive**: 3-5 seconds (responsive feedback)
-- **CI/CD/Automated**: 10-15 seconds (reduce overhead)
-- **Never**: >30 seconds (risks connection timeout)
-
-### Filtering Results
-
-Use `filter_level` parameter to control response size:
-
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
 ```python
-# Minimal - fast status check (1-2KB)
-status = await get_scan_results(output_dir=".ash/ash_output", filter_level="minimal")
+import sys
+from pathlib import Path
 
-# Summary - dashboard data (5-15KB)
-summary = await get_scan_results(output_dir=".ash/ash_output", filter_level="summary")
-
-# Full - complete results (50KB-2MB)
-results = await get_scan_results(output_dir=".ash/ash_output", filter_level="full")
-```
-
-### Content Filtering
-
-Filter by scanner, severity, or actionable status:
-
-```python
-# Only actionable findings (exclude suppressed)
-actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
-
-# Only critical findings
-critical = await get_scan_results(output_dir=".ash/ash_output", severities="critical")
-
-# Actionable critical findings only
-actionable_critical = await get_scan_results(
-    output_dir=".ash/ash_output", actionable_only=True, severities="critical"
-)
-
-# Specific scanners
-sast_results = await get_scan_results(
-    output_dir=".ash/ash_output", scanners="bandit,semgrep"
-)
-
-# Combined filtering - actionable high-priority SAST findings
-high_priority_sast = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="summary",
-    scanners="bandit,semgrep",
-    severities="critical,high",
+results = get_scan_results(
+    output_dir=str(Path(".ash/ash_output").resolve()),
     actionable_only=True,
+    severities="critical,high",
 )
+if results.get("success") is False:
+    print(results["error"])
+    sys.exit(1)
+if results["findings_count"] > 0:
+    print(f"{results['findings_count']} actionable critical or high findings")
+    sys.exit(1)
 ```
 
-## Scanner-Specific Notes
+The list holds the findings that the scan's own exit code and `summary_stats.actionable`
+count, those at or above each scanner's severity threshold, narrowed here to critical and
+high.
 
-### Bandit (Python SAST)
-- **Rule ID Format**: `B###` (e.g., `B201`, `B603`)
-- **Confidence Levels**: HIGH, MEDIUM, LOW
-- **Common False Positives**: `B101` (assert usage in tests), `B404`/`B603` (subprocess usage)
+### Pattern 2: list the findings to fix
 
-### Semgrep (Multi-language SAST)
-- **Rule ID Format**: `category.subcategory.rule-name` (e.g., `python.lang.security.audit.dangerous-system-call`)
-- **Rulesets**: `p/security-audit`, `p/ci`, `p/owasp-top-ten`
-- **Custom Rules**: Can be added via configuration
+<!-- doctest: illustrative reason="calls the MCP tools, which need a client connected to ash mcp" -->
+```python
+from pathlib import Path
 
-### Checkov (IaC Scanner)
-- **Rule ID Format**: `CKV_###` (e.g., `CKV_AWS_1`)
-- **Frameworks**: Terraform, CloudFormation, Kubernetes, Dockerfile, etc.
-- **Severity**: Determined by rule metadata
+results = get_scan_results(
+    output_dir=str(Path(".ash/ash_output").resolve()),
+    actionable_only=True,
+    severities="critical,high",
+)
+for finding in results["findings"]:
+    print(
+        finding["severity"],
+        finding.get("scanner"),
+        finding.get("rule_id"),
+        f"{finding.get('file_path')}:{finding.get('line_start')}",
+        finding.get("message"),
+    )
+```
 
-### detect-secrets (Secret Detection)
-- **Rule ID Format**: `SECRET-TYPE-PATTERN` (e.g., `SECRET-SECRET-KEYWORD`, `SECRET-BASE64-HIGH-ENTROPY-STRING`)
-- **Common False Positives**: Test data, documentation examples, variable names
-- **Best Practice**: Always verify secrets before suppressing
+The list leaves out suppressed findings. `reports/ash.flat.json` in the output directory has
+every finding, with `is_suppressed`.
 
-### Grype (Vulnerability Scanner)
-- **Rule ID Format**: CVE IDs (e.g., `CVE-2023-12345`)
-- **Data Source**: Multiple vulnerability databases (NVD, GitHub, etc.)
-- **SBOM Integration**: Results included in CycloneDX SBOM
+### When the server is remote
 
-## Performance Optimization
+A server on another host cannot read the user's files. Deliver the source first with
+`set_source_git` or `set_source_zip_chunk` and `set_source_zip_finalize`, then call
+`run_ash_scan` without `source_dir`. A config file inside delivered source is checked against
+the server's policy: if it sets a field the server does not let clients set, such as
+`fail_on_findings`, the scan is refused with `error_type` `config_field_denied` and a message
+naming the field. Remove the field and deliver again. Suppressions and ignore paths in
+delivered source are applied and marked as client-supplied in the results.
 
-### For Large Codebases
+## Run a scan with the command line
 
-1. **Use Specific Scanners**:
-   ```bash
-   ash --scanners bandit,semgrep --exclude-scanners grype,npm-audit
-   ```
+From the project's root directory:
 
-2. **Ignore Unnecessary Paths**:
-   ```yaml
-   global_settings:
-     ignore_paths:
-       - path: 'node_modules/**'
-       - path: 'vendor/**'
-       - path: '.venv/**'
-   ```
-
-3. **Use Parallel Strategy**:
-   ```bash
-   ash --strategy parallel
-   ```
-
-### For CI/CD Pipelines
-
-1. **Use Precommit Mode**:
-   ```bash
-   ash --mode precommit
-   ```
-
-2. **Cache Dependencies**:
-   - Cache `.ash/` directory between runs
-   - Use `--offline` mode when possible
-
-3. **Filter Results Early**:
-   ```python
-   # Use MCP filtering to reduce data transfer and focus on actionable findings
-   summary = await get_scan_results(
-       output_dir=".ash/ash_output",
-       filter_level="minimal",
-       actionable_only=True,
-       severities="critical,high",
-   )
-   ```
-
-## Troubleshooting
-
-### Scan Fails with Missing Scanner
-
-**Check**:
+<!-- doctest: illustrative reason="runs every scanner, which needs the scanner tools and network access" -->
 ```bash
-ash dependencies check
+ash --source-dir . --no-progress
 ```
 
-**Solution**: Install missing dependencies or exclude scanner:
+`ash` and `ash scan` are the same command. The scan runs on this machine and writes its
+output to `.ash/ash_output` under the scanned directory unless you pass `--output-dir`.
+`--scanners` runs only the named scanners and `--exclude-scanners` skips them; use them only
+when the user asks for a narrower scan. This scan runs detect-secrets alone, without network
+access:
+
+<!-- doctest: run expect-exit=2 -->
 ```bash
-ash --exclude-scanners cfn-nag
+ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
-### Results File Not Found
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | No actionable findings, or the config does not fail on findings. |
+| 1 | The scan is incomplete: a scanner was MISSING or ended in ERROR, a converter failed, a rule could not be evaluated, a content database was too old, or ASH itself failed. |
+| 2 | Actionable findings. |
+| 3 | The config is invalid. |
+| 4 | A workspace definition or workspace policy is invalid. |
+| 5 | The command line is wrong: an unknown option or argument, a value ASH does not accept, such as a mistyped scanner name, or options that cannot be combined. No scanner ran. |
 
-**Check**:
+A value ASH does not accept is a usage error, and no scanner runs:
+
+<!-- doctest: run expect-exit=5 -->
 ```bash
-ls -la .ash/ash_output/ash_aggregated_results.json
+ash --source-dir . --scanners detect-secrets --min-severity urgent --offline --no-progress
 ```
 
-**Solution**: Verify scan completed successfully:
+To print a summary of the last scan:
+
 ```bash
-ash --mode local --verbose
+ash report --output-dir .ash/ash_output
 ```
 
-### Suppression Not Working
+## Read the results
 
-**Debug**:
+The output directory, `.ash/ash_output` by default, contains:
+
+| Path | Use it for |
+|------|------------|
+| `reports/ash.flat.json` | Findings, one record each. Start here. |
+| `ash_aggregated_results.json` | Each scanner's status and the scan's totals. |
+| `reports/ash.summary.md` | A readable summary to show the user. |
+| `reports/ash.sarif` | SARIF, for tools that read it. |
+| `reports/ash.unused-suppressions.json` | Suppressions that matched no finding, including expired ones. |
+| `ash.log` | The scan's log, for errors. |
+
+`reports/ash.flat.json` is an object. Its `findings` list holds one record per finding with
+these fields: `id`, `title`, `description`, `severity`, `scanner`, `rule_id`, `file_path`,
+`line_start`, `line_end`, `is_suppressed`, `code_snippet`, and, for suppressed findings,
+`suppression_kind` and `suppression_justification`. Fields with no value are left out, so
+read them with a default. `tags`, `properties`, and `raw_data` hold JSON encoded as strings.
+
+```python
+import json
+from pathlib import Path
+
+report = json.loads(Path(".ash/ash_output/reports/ash.flat.json").read_text())
+for finding in report["findings"]:
+    if finding.get("is_suppressed"):
+        continue
+    print(
+        finding["severity"],
+        finding["scanner"],
+        finding["rule_id"],
+        f"{finding.get('file_path')}:{finding.get('line_start')}",
+        finding["id"],
+    )
+```
+
+In `ash_aggregated_results.json`, `metadata.summary_stats` holds the totals:
+
+- `severity_counts` counts findings by severity (`critical`, `high`, `medium`, `low`,
+  `info`) and counts suppressed findings separately in `suppressed`.
+- `total` is the number of findings that are not suppressed.
+- `actionable` is the number of findings that are not suppressed and are at or above the
+  severity threshold. The threshold comes from `global_settings.severity_threshold` in the
+  config, MEDIUM by default, or from a scanner's own `severity_threshold` option, which
+  replaces it for that scanner.
+- `passed`, `failed`, `missing`, `skipped`, and `error` count scanners by status.
+
+The config sets both:
+
+<!-- doctest: config kind=ash -->
+```yaml
+global_settings:
+  severity_threshold: MEDIUM  # ALL, LOW, MEDIUM, HIGH, CRITICAL
+scanners:
+  bandit:
+    options:
+      severity_threshold: HIGH
+```
+
+```python
+import json
+from pathlib import Path
+
+results = json.loads(Path(".ash/ash_output/ash_aggregated_results.json").read_text())
+stats = results["metadata"]["summary_stats"]
+print("actionable:", stats["actionable"], stats["severity_counts"])
+for name, scanner in results["scanner_results"].items():
+    if scanner["status"] in ("MISSING", "ERROR"):
+        print(name, scanner["status"], scanner.get("missing_reason"))
+```
+
+`scanner_results` has one entry per scanner, with its `status`, `finding_count`,
+`actionable_finding_count`, `suppressed_finding_count`, and `severity_counts`. A MISSING
+scanner also has a `missing_reason`. The statuses are:
+
+| Status | Meaning |
+|--------|---------|
+| PASSED | It ran and found nothing at or above its threshold. |
+| FAILED | It ran and found something at or above its threshold. This is a result, not an error. |
+| MISSING | It had files to scan, but its tool is not installed, or was found only inside the scanned tree. It did not run. |
+| ERROR | It started and failed. |
+| SKIPPED | It did not run: it is disabled or excluded, or there was nothing for it to scan. |
+
+A finding that a scanner reports with no severity of its own, only the SARIF level `error`, as
+detect-secrets does, is CRITICAL in `ash.flat.json`, `ash.summary.md`, `summary_stats`, the
+MCP counts, and the threshold check alike.
+
+## Explain a finding
+
+Take the finding's `id` from `ash.flat.json` and call `explain_finding` with it and
+`results_path` set to the output directory. The answer has the scanner's description, the
+severity and why it is or is not actionable, CWE and CVE identifiers when the scanner gives
+them, and the matched code. Without MCP, use the record in `ash.flat.json` and read the code
+at `file_path` and `line_start`.
+
+An `id` is the scanner, the rule, and 12 hexadecimal digits of a hash of where the finding is:
+its file and lines, or the fingerprints its scanner reports. For example,
+`bandit-B602-e1cb79ce5694`. Findings at different places have different `id`s.
+
+## Suggest a suppression
+
+Call `suggest_suppression` with the finding's `id`, `results_path` set to the
+`ash_aggregated_results.json` file (not the directory), and the user's reason as
+`justification`. It writes nothing and returns one entry as `yaml` and `json`. Its
+`expiration` defaults to 90 days from today. Leave out the `client_supplied` key it includes,
+and put the entry under `global_settings.suppressions` in the project's config:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "app.py"
+      line_start: 3
+      line_end: 3
+      reason: "Test fixture value, not a real credential"
+      expiration: "2027-06-30"
+```
+
+- `path` and `reason` are required. `path` is relative to the scanned directory and may use
+  glob patterns such as `tests/**`. Do not start it with `./`, which matches nothing.
+- `rule_id` matches without regard to case and may use glob patterns.
+- `line_start` and `line_end` tie the suppression to those lines. Leave them out to match the
+  rule anywhere in the path.
+- Write `expiration` as a quoted `YYYY-MM-DD` date. From that date on, the suppression no
+  longer applies and the finding counts again. An expired suppression is listed in
+  `reports/ash.unused-suppressions.json`, with the ones that matched nothing.
+- `ignore_paths` entries also need `path` and `reason`, and drop every finding in the matching
+  files. Prefer a suppression for one rule.
+
+Edit the config file the scan used, or create `.ashrc.yaml` in the scanned directory if it
+has none. ASH uses the first of these it finds in the scanned
+directory: `.ash.yml`, `.ash.yaml`, `.ash.json`, `ash.yml`, `ash.yaml`, `ash.json` (each in the
+directory, then in `.ash/`), then `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`, `.ashrc.json`,
+`ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json` in the directory, then the
+`[tool.ash]` table of `pyproject.toml`. If the config has an `extends` key, its own
+`suppressions` list replaces the base config's list instead of adding to it; keep the base's
+entries by adding yours with a `patch` operation `add` at `/global_settings/suppressions/-`.
+
+Check the edited config before you scan. `ash config validate`, run in the scanned directory,
+checks the config a scan there would use the way the scan loads it: it names each field the
+scan would refuse, such as a suppression without a `reason` or with a misspelled key, and
+exits with code 3 when there is one. `--config` names another file. Over MCP,
+`validate_config` with `config_path` gives the same verdict: `errors` lists what the scan
+would refuse, `warnings` what it accepts but is probably a mistake, and `valid` is true when
+there are no errors.
+
 ```bash
-# Check exact finding details
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false) | {file_path, rule_id, line_start, line_end}' .ash/ash_output/ash_aggregated_results.json
-
-# Verify suppression syntax
-yamllint .ash/.ash.yaml
+cat > .ashrc.yaml <<'EOF'
+global_settings:
+  suppressions:
+    - rule_id: "SECRET-SECRET-KEYWORD"
+      path: "app.py"
+      reason: "Test fixture value, not a real credential"
+      expiration: "2027-06-30"
+EOF
+ash config validate
+ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
-## Additional Resources
+After the next scan, the finding has `is_suppressed` true and the scan's suppressed count
+includes it. Tell the user which suppressions you added and why, so they can review them.
 
-- **ASH Documentation**: https://awslabs.github.io/automated-security-helper/
-- **Configuration Schema**: https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
-- **MCP Tools Reference**: See `docs/content/docs/MCP-TOOLS-REFERENCE.md`
-- **MCP Filtering Guide**: See `docs/content/docs/MCP-FILTERING-GUIDE.md`
-- **GitHub Repository**: https://github.com/awslabs/automated-security-helper
+## Compare two scans
 
-## Version Information
+Copy `ash_aggregated_results.json` before the next scan replaces it. Then call
+`diff_scan_results` with `before_path` and `after_path` set to the two files. It returns
+`new`, `resolved`, and `severity_changed`, each a list of finding records shaped like those in
+`ash.flat.json`. It matches findings by `id`:
 
-This guide is for ASH v3.4.1 and later. For earlier versions, some features may not be available.
+- A finding that was only suppressed between the two scans appears in none of the lists.
+  Compare `is_suppressed` in the two `ash.flat.json` files to see it.
+- An `id` comes from where the finding is. When a finding's lines move, because code above it
+  was added or removed, it gets a new `id` and appears once in `resolved` and once in `new`,
+  unless its scanner reports fingerprints. When two findings share a place, their column and
+  message tell them apart, so a changed message can change those `id`s too. Compare
+  `rule_id`, `file_path`, and the code before you report a finding as new or fixed.
 
----
+## Errors
 
-**Last Updated**: 2026-02-28
-**Document Version**: 1.0.0
+A failed MCP call returns `success` false, an `error` message, and an `error_type`; some also
+return an `error_category`. The names below appear in one of those two fields.
+
+| You see | Do this |
+|---------|---------|
+| Exit code 1, or status `incomplete`, with MISSING scanners | Tell the user. `ash dependencies install` installs the scanner tools for the user that runs ASH. A tool installed only inside the project does not count. |
+| Exit code 3 | Run `ash config validate` in the scanned directory to see each invalid field, and fix it. |
+| Exit code 5 | The command line is wrong. Check the option names and values with `ash --help`. |
+| `scan_target_not_permitted`, or `invalid_path` from a results tool | The MCP server does not allow that directory. Ask the user to add it to the server's `ASH_MCP_ALLOWED_ROOTS`, or deliver the source. |
+| `config_input_not_permitted` | The server does not allow reading that config file. Use the project's own config, or ask the user. |
+| `config_field_denied` | A delivered config sets a field the server does not let clients set. Remove the field it names. |
+| `output_dir_not_permitted` | `.ash` or `.ash/ash_output` in the project is a symbolic link. Ask the user to replace it with a directory. |
+| `no_source_delivered` | Pass `source_dir`, or deliver the source first. |
+| `source_delivery_busy` | A scan of this session is running, or its source is being replaced. Call the tool again once the scan has finished. |
+| `session_workspace_busy` | The server is removing this session's workspace, which nobody used for longer than its time to live. Call `select_profile` again if the session had a profile, and send an upload again from chunk 0. |
+| `clone_host_not_permitted` | The server does not clone from that host. Deliver the source as a zip, or ask the user to add the host to the server's `ASH_MCP_GIT_ALLOWED_HOSTS`. |
+| `clone_url_not_permitted` or `clone_ref_not_permitted` | `set_source_git` takes only an `https` or `ssh` URL, and no URL or ref that begins with `-` or uses the `ext::` transport. Fix the URL or ref. |
+| `local_clone_source_refused` | `set_source_git` never clones a local path or `file://` URL. Pass the directory as `run_ash_scan`'s `source_dir`. |
+| `ssh_key_not_registered` | Call `set_source_git` without `ssh_key_id`; the server registers no SSH keys. |
+| `invalid_clone_depth` | Pass a `depth` of 1 or more, or leave it out for the latest commit. |
+| `git_clone_failed` or `git_checkout_failed` | git ran and failed, and `error` has its message. Check the URL and ref, or deliver the source as a zip. |
+| `clone_timed_out` | A git command ran past 10 minutes and was stopped. Deliver the source as a zip. |
+| `invalid_session_id` | The server refused the session ID the call carries. Tell the user. |
+| `session_identity_required` | The server is stateless and cannot tell which session the call belongs to. Tell the user; the server needs a session to scan, deliver source, or track scans. |
+| `scan_start_failure` | `run_ash_scan` did not start a scan, and `error` says why. If it names `max_concurrent_scans`, start the scan again when another scan has finished. If it says a scan of the directory is still stopping, try again in a few seconds. |
+| `scan_incomplete` with `output_holds_previous_results` true | The last scan of that directory failed or was canceled, and its output directory holds the scan before it. Run the scan again. |
+| `scan_not_found` | The server restarted or the ID is wrong. Read the results from the output directory. |
+
+More detail for people is in the
+[ASH documentation](https://github.com/awslabs/automated-security-helper/blob/main/docs/content/index.md).

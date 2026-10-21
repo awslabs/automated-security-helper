@@ -4,7 +4,7 @@ This guide covers advanced features and usage patterns for ASH v3.
 
 ## Execution Modes
 
-ASH v3 supports three execution modes:
+ASH v3 supports four execution modes:
 
 ### Local Mode
 
@@ -12,9 +12,10 @@ ASH v3 supports three execution modes:
 ash --mode local
 ```
 
-- Runs entirely in the local Python process
-- Only uses Python-based scanners by default
-- Fastest execution but limited scanner coverage
+- Runs the scan in the local Python process
+- Runs every enabled scanner, using the scanner tools installed on this machine; a
+  scanner whose tool is missing is reported `MISSING`
+- `--python-only` limits the scan to the scanners that need nothing but Python
 - Ideal for quick checks during development
 
 ### Tools inside the scanned directory
@@ -54,8 +55,8 @@ for the message and the fixes.
 ash --mode container
 ```
 
-- Runs non-Python scanners in a container
-- Provides full scanner coverage
+- Builds the ASH container image and runs the whole scan inside it
+- Provides full scanner coverage, because the image has every scanner tool installed
 - Requires a container runtime (Docker, Podman, etc.)
 - Ideal for comprehensive scans
 
@@ -65,10 +66,26 @@ ash --mode container
 ash --mode precommit
 ```
 
-- Runs a subset of fast scanners
-- Optimized for pre-commit hooks
-- Includes only Python-based scanners + npm audit
+- A local scan that runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit,
+  plus any scanners named with `--scanners`
+- Simplified output and no progress display
+- Scans the whole source directory, not only staged or changed files; add
+  `--changed-files-only` to report only the findings in changed files (every file
+  is still scanned)
+- In workspace mode it changes only the output; it does not narrow the scanner set
 - Ideal for git hooks and quick CI checks
+
+### Nix Mode
+
+```bash
+ash --mode nix
+```
+
+- Runs the scan inside `nix develop`, whose shell supplies every scanner at a pinned
+  version
+- Always runs offline
+- Linux and macOS; on Windows, run it in WSL2
+- See [Nix mode](installation-guide.md#nix-mode)
 
 ## Custom Plugins
 
@@ -140,7 +157,16 @@ ash build-image --offline --offline-semgrep-rulesets p/ci
 
 # Run in offline mode
 ash --mode container --offline
+
+# On a host without network access, run the image without rebuilding it
+ash --mode container --offline --no-build
 ```
+
+Container mode builds the image before every scan unless given `--no-build`.
+Without `--force`, a build upgrades the OS packages and, offline, downloads the
+databases and rulesets once per UTC day, and is served from the build cache for the
+rest of that day, so the first build on a new day needs network access. With
+`--force`, every build does all of it again.
 
 An offline image's databases are frozen at build time, and ASH fails a scan whose
 database is past its bound: grype's 5 days (120h) after it was built, the offline
@@ -157,9 +183,10 @@ Offline mode is decided when each scanner runs, from these sources in order:
 1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
    environment, or an image built with `ash build-image --offline`. It applies to
    every scanner, and no scanner option turns it off.
-2. A scanner's own `options.offline: true` (checkov, grype, npm-audit, opengrep,
-   semgrep, syft, trivy, trivy-repo). It runs that one scanner offline while the rest of the
-   scan stays online.
+2. A scanner's own `options.offline: true` (checkov, grype, opengrep, semgrep, syft,
+   trivy, trivy-repo). It runs that one scanner offline while the rest of the scan
+   stays online. npm-audit has the option too, and it makes npm-audit `MISSING` (or
+   `SKIPPED` without a lockfile) rather than run it offline; see below.
 
 `options.offline: false` is the default and means "follow ASH's offline mode". It does
 not put a scanner back online during an `--offline` scan; `ash config init` writes
@@ -208,7 +235,8 @@ over the network on their own:
   registry's advisory service: offline `npm audit --offline` reported no advisories for
   a lockfile with known ones, `pnpm audit --offline` sent the dependency list to the
   registry anyway, and `yarn npm audit` has no offline mode. Every lockfile it would
-  have audited is listed as not scanned, with the reason, in
+  have audited (a `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock` or
+  `pnpm-lock.yaml` beside a `package.json`) is listed as not scanned, with the reason, in
   `ash_aggregated_results.json` (the scanner's `inputs_not_scanned`), the console
   summary, and the "Inputs not scanned" section of `ash.summary.md` and
   `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
@@ -304,6 +332,14 @@ ASH v3 includes an interactive TUI for exploring findings:
 ash inspect findings --output-dir /path/to/results
 ```
 
+A finding's detail view shows the code snippet its results hold. For a finding with
+none, it shows the lines around the finding from its file, but only when the results
+are in the scanned directory's `.ash/ash_output` (the default output directory), and
+only from a regular file inside that directory. A hard link inside the tree counts as
+a file in it, as it does for the scanners. A FIFO, a device, a path outside the
+directory, a symlink that leads out of it, or results in any other directory show
+"(source not shown)".
+
 ## Container Customization
 
 ### Using Alternative Container Runtimes
@@ -341,7 +377,7 @@ ash build-image --build-target ci --custom-containerfile ./my-dockerfile
 
 ```bash
 # Complex configuration overrides
-ash --config-overrides 'scanners.semgrep.options.rules=["p/ci", "p/owasp-top-ten"]'
+ash --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
@@ -414,20 +450,60 @@ ASH v3 can be used programmatically in Python:
 
 ```python
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
-from automated_security_helper.core.enums import RunMode, Strategy
+from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
 # Run a scan
 results = run_ash_scan(
     source_dir="/path/to/code",
     output_dir="/path/to/output",
     mode=RunMode.local,
-    strategy=Strategy.parallel,
+    strategy=ExecutionStrategy.PARALLEL,
     scanners=["bandit", "semgrep"],
     config_overrides=["scanners.bandit.enabled=true"],
+    # Return the results even when there are actionable findings
+    fail_on_findings=False,
 )
 
 # Access scan results
-print(f"Found {results.summary_stats.total_findings} findings")
+stats = results.metadata.summary_stats
+print(f"Found {stats.total} findings, {stats.actionable} actionable")
+```
+
+`run_ash_scan` takes keyword arguments from its signature only. An unknown one, such
+as a misspelled `fail_on_finding`, raises `TypeError` naming it; earlier versions
+accepted it and ran the scan without it.
+
+The call returns the aggregated results only when the scan's exit code is 0.
+Otherwise it ends the way `ash scan` does, by raising `SystemExit` with that code
+(see [Exit codes](cli-reference.md#exit-codes)): 2 for actionable findings while
+`fail_on_findings` is on, which is the default, and 1 for an incomplete scan, for
+example a selected scanner whose tool is not installed. That exit 1 is a
+`ScanIncompleteExit`, a `SystemExit` subclass whose `incompleteness` attribute names
+what was incomplete (the scanners and converters that did not run, and any stale
+content databases) and whose `results` attribute holds the results. A run ASH refuses
+or gives up (3 for a config that does not validate or files git tracks where the scan
+writes, 5 for a scanner selection that names nothing, 1 for an error during the scan)
+raises `ScanRefusedExit`, a `SystemExit` subclass whose `message` attribute is the
+text `ash scan` prints for it.
+
+### Logging to your own handler
+
+ASH logs through the `ash` logger. A handler your application puts on it stays
+there when a scan sets up ASH's logging, and it gets ASH's records as written:
+file names and tool output from the scanned repository in them included, such as
+a line that starts with `::` or holds `##vso[`, which a CI runner reads as a
+command. To have your handler write them as ASH's own console and log file do,
+with control characters as escapes and CI command lines broken, give it
+`CommandSafeFormatter`:
+
+```python
+import logging
+
+from automated_security_helper.utils.log import CommandSafeFormatter
+
+handler = logging.StreamHandler()
+handler.setFormatter(CommandSafeFormatter("%(levelname)s %(message)s"))
+logging.getLogger("ash").addHandler(handler)
 ```
 
 ## CI/CD Integration
@@ -509,7 +585,7 @@ ash --debug
 ash --verbose
 
 # Disable progress display
-ash --progress false
+ash --no-progress
 ```
 
 ### Scanner Validation

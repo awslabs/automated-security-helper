@@ -1,0 +1,3 @@
+FROM alpine:3.20
+RUN [ "unterminated
+NOT_AN_INSTRUCTION here

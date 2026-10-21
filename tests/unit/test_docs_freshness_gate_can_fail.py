@@ -42,14 +42,14 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
@@ -73,7 +73,6 @@ def gate():
 
 # Registered check name -> the test here that proves it can fail.
 NON_VACUITY_COVERAGE = {
-    "CLI flags in docs match source": "test_cli_flags_check_can_fail",
     "Reporter list in docs matches code": "test_reporter_check_can_fail_in_both_directions",
     "Scanner list in docs matches code": "test_scanner_check_can_fail",
     "MCP tool names in docs match code": "test_mcp_tool_check_can_fail",
@@ -81,16 +80,35 @@ NON_VACUITY_COVERAGE = {
     "Config file path consistency": "test_config_path_check_can_fail",
     "Suppression field name": "test_suppression_check_can_fail",
     "Plugin options in docs exist and validate": "test_plugin_options_check_can_fail",
+    # Checks 9-16 live in scripts/docs_checks.py, and so do their proofs, in
+    # test_docs_checks_can_fail.py; "<file>::<test>" names a test in that file.
+    "Doc block markers are well formed": "test_docs_checks_can_fail.py::test_marker_check_can_fail",
+    "ASH commands in docs match the CLI": "test_docs_checks_can_fail.py::test_cli_check_can_fail",
+    "ASH environment variables in docs are read by ASH": "test_docs_checks_can_fail.py::test_env_check_can_fail",
+    "Config blocks in docs validate": "test_docs_checks_can_fail.py::test_config_check_can_fail",
+    "Python blocks in docs parse and import": "test_docs_checks_can_fail.py::test_python_check_can_fail",
+    "Links and anchors in docs resolve": "test_docs_checks_can_fail.py::test_links_check_can_fail",
+    "Docs navigation and redirects resolve": "test_docs_checks_can_fail.py::test_nav_check_can_fail",
+    "Docs site build is strict, offline and versioned": "test_docs_checks_can_fail.py::test_site_build_check_can_fail",
+    "Release numbers in templates stay out of install commands": "test_docs_checks_can_fail.py::test_release_placeholder_check_can_fail",
+    "Docs links in the ASH source resolve": "test_docs_checks_can_fail.py::test_code_links_check_can_fail",
+    "Option tables and config paths in docs match the models": "test_docs_checks_can_fail.py::test_option_tables_check_can_fail",
+    "MCP error types and example responses in docs match the tools": "test_docs_mcp_contract.py::test_mcp_contract_check_can_fail",
+    "Install commands in docs name real extras, Pythons and refs": "test_docs_install_commands_can_fail.py::test_install_check_can_fail",
+    "Report file names in docs are files ASH writes": "test_docs_tables_and_output_checks.py::test_report_file_check_can_fail",
+    "Scanner names in docs tables are scanners ASH ships": "test_docs_tables_and_output_checks.py::test_scanner_name_check_can_fail",
+    "Shell variables in docs examples are set in the session that reads them": "test_docs_session_variables_can_fail.py::test_a_variable_set_on_another_fixture_is_reported_where_it_is_read",
+    "Values docs examples pass the scan workflow pass its input check": "test_docs_workflow_inputs_can_fail.py::test_a_multi_line_ash_args_is_reported",
 }
 
 
-def _registered_check_names() -> list[str]:
-    """Read the check list out of main() without executing the gate.
+def _registered_checks() -> list[tuple[str, str]]:
+    """Read the check list out of main() without executing the gate: (label, callable).
 
-    Parsed rather than called: running main() runs all eight checks against the
-    real tree, which is slow and would make this test fail for unrelated doc
-    drift. The names are string literals in a list of tuples, so the syntax tree
-    has them exactly.
+    Parsed rather than called: running main() runs every check against the real
+    tree, which is slow and would make this test fail for unrelated doc drift. The
+    labels are string literals and the callables are names, in a list of tuples, so
+    the syntax tree has them exactly.
     """
     tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
     main_fn = next(
@@ -104,14 +122,19 @@ def _registered_check_names() -> list[str]:
         if not any(isinstance(t, ast.Name) and t.id == "checks" for t in node.targets):
             continue
         assert isinstance(node.value, ast.List)
-        names = []
+        checks = []
         for element in node.value.elts:
             assert isinstance(element, ast.Tuple)
-            label = element.elts[0]
+            label, function = element.elts
             assert isinstance(label, ast.Constant)
-            names.append(label.value)
-        return names
+            assert isinstance(function, ast.Name)
+            checks.append((label.value, function.id))
+        return checks
     raise AssertionError("could not find the `checks` list in main()")
+
+
+def _registered_check_names() -> list[str]:
+    return [label for label, _function in _registered_checks()]
 
 
 def test_every_registered_check_is_covered_here():
@@ -131,9 +154,21 @@ def test_the_coverage_table_names_real_tests():
     """A typo in the table above would silently exempt a check."""
     module = sys.modules[__name__]
     for check, test_name in sorted(NON_VACUITY_COVERAGE.items()):
-        assert hasattr(module, test_name), (
-            f"{check!r} claims to be covered by {test_name!r}, which does not "
-            f"exist in this module"
+        file_name, separator, function = test_name.rpartition("::")
+        if not separator:
+            assert hasattr(module, test_name), (
+                f"{check!r} claims to be covered by {test_name!r}, which does not "
+                f"exist in this module"
+            )
+            continue
+        other = Path(__file__).parent / file_name
+        defined = {
+            node.name
+            for node in ast.parse(other.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.FunctionDef)
+        }
+        assert function in defined, (
+            f"{check!r} claims to be covered by {test_name!r}, which does not exist"
         )
 
 
@@ -187,7 +222,7 @@ def _generator():
 def test_reporter_check_passes_on_the_generated_table():
     """The gate must accept the table the generator writes.
 
-    The reporter-quick-reference block in output-formats.md is written by
+    The built-in reporters table in reference/reporters.md is written by
     scripts/generate_reporter_docs.py from the plugin registry. The gate used to
     build its reporter list from the fields declared on ReporterConfigSegment
     instead, a different source, and the two disagree about any reporter that
@@ -219,7 +254,6 @@ def test_reporter_check_passes_on_the_generated_table():
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     failures = json.loads(result.stdout.strip().splitlines()[-1])
@@ -243,11 +277,11 @@ def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch)
     names = sorted(gate.reporter_names())
 
     def publish(rows):
-        doc = tmp_path / "output-formats.md"
-        lines = ["| Format | File extension |", "|--------|----------------|"]
+        doc = tmp_path / "reporters.md"
+        lines = ["| Reporter | File extension |", "|----------|----------------|"]
         lines += [f"| {r} | `.x` |" for r in rows]
         doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+        monkeypatch.setattr(gate, "REPORTERS_REFERENCE_MD", doc)
         return gate.check_reporters()
 
     assert publish(names) == [], "the complete reporter table was rejected"
@@ -270,11 +304,11 @@ def test_reporter_check_fails_when_a_real_row_is_deleted(gate, tmp_path, monkeyp
     reads, so on its own it cannot tell a working comparison from a list compared
     with itself. Here the doc side is the committed page with one row removed.
     """
-    real = gate.OUTPUT_FORMATS_MD.read_text(encoding="utf-8")
+    real = gate.REPORTERS_REFERENCE_MD.read_text(encoding="utf-8")
     row = next(line for line in real.splitlines() if "(`unused-suppressions`)" in line)
-    doc = tmp_path / "output-formats.md"
+    doc = tmp_path / "reporters.md"
     doc.write_text(real.replace(row + "\n", ""), encoding="utf-8")
-    monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+    monkeypatch.setattr(gate, "REPORTERS_REFERENCE_MD", doc)
 
     failures = gate.check_reporters()
     assert any("'unused-suppressions'" in f and "no row" in f for f in failures), (
@@ -377,17 +411,14 @@ def test_declared_reporter_fields_match_the_builtin_registry(gate):
 
 
 def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
-    """Also pins that the check reads the TEMPLATE, not the generated README."""
-    from automated_security_helper.config.ash_config import ScannerConfigSegment
-
-    names = sorted(gate._segment_names(ScannerConfigSegment))
-    doc = tmp_path / "README.md.template"
+    names = sorted(gate.scanner_names())
+    doc = tmp_path / "scanners.md"
 
     def publish(rows):
-        lines = ["| Scanner | Type |", "|---------|------|"]
-        lines += [f"| {r} | SAST |" for r in rows]
+        lines = ["| Scanner | Tool type |", "|---------|-----------|"]
+        lines += [f"| `{r}` | SAST |" for r in rows]
         doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(gate, "README_TEMPLATE_MD", doc)
+        monkeypatch.setattr(gate, "SCANNERS_REFERENCE_MD", doc)
         return gate.check_scanners()
 
     assert publish(names) == [], "the complete scanner table was rejected"
@@ -395,18 +426,25 @@ def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
     assert publish(names + ["gosec"]), "a row naming a nonexistent scanner was accepted"
 
 
-def test_scanner_check_reads_the_editable_file_not_the_generated_one(gate):
-    """README.md is generated from README.md.template; the gate must name the source.
+def test_scanner_check_passes_on_the_generated_page_and_fails_without_a_real_row(
+    gate, tmp_path, monkeypatch
+):
+    """Against the committed page. The community scanners are rows there and are not
+    fields of ScannerConfigSegment, so the code side must include them: deleting
+    trivy-repo's row must fail, and the page as generated must pass."""
+    assert gate.check_scanners() == []
+    names = gate.scanner_names()
+    assert {"bandit", "trivy-repo"} <= set(names), sorted(names)
 
-    Sending a contributor to README.md means their fix is discarded the next time
-    a release renders the template over it. This asserts the path constant the
-    name checks use, so a change back to the generated file is caught here rather
-    than by someone's edit going missing after a release.
-    """
-    assert gate.README_TEMPLATE_MD.name == "README.md.template"
-    assert gate.README_TEMPLATE_MD.is_file()
-    # The version check is the one legitimate reader of the generated file.
-    assert gate.README_MD.name == "README.md"
+    real = gate.SCANNERS_REFERENCE_MD.read_text(encoding="utf-8")
+    row = next(
+        line for line in real.splitlines() if line.startswith("| [`trivy-repo`]")
+    )
+    doc = tmp_path / "scanners.md"
+    doc.write_text(real.replace(row + "\n", ""), encoding="utf-8")
+    monkeypatch.setattr(gate, "SCANNERS_REFERENCE_MD", doc)
+    failures = gate.check_scanners()
+    assert any("'trivy-repo'" in f and "no row" in f for f in failures), failures
 
 
 def test_mcp_tool_check_can_fail(gate, tmp_path, monkeypatch):
@@ -435,23 +473,40 @@ def test_mcp_tool_check_can_fail(gate, tmp_path, monkeypatch):
         "tool is exactly what the regex this replaced could not see"
     )
 
-    doc = tmp_path / "README.md.template"
+    doc = tmp_path / "mcp-tools.md"
 
-    def publish(rows):
-        lines = ["| Tool | Description |", "|------|-------------|"]
-        lines += [f"| `{r}` | does a thing |" for r in rows]
-        doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        monkeypatch.setattr(gate, "README_TEMPLATE_MD", doc)
+    def publish(sections):
+        body = "# MCP tools reference\n\n"
+        body += "".join(f"## {name}\n\nDoes a thing.\n\n" for name in sections)
+        body += "## Resources\n\n## Severity levels\n"
+        doc.write_text(body, encoding="utf-8")
+        monkeypatch.setattr(gate, "MCP_TOOLS_REFERENCE_MD", doc)
         return gate.check_mcp_tools()
 
-    assert publish(sorted(found)) == [], "the complete tool table was rejected"
+    assert publish(sorted(found)) == [], (
+        "the complete set of tool sections was rejected"
+    )
     # The plain-def tool specifically: undocumenting it must now be caught.
-    assert publish(["async_tool", "bare_decorator_tool"]), (
-        "a plain `def` tool missing from the table was accepted"
+    missing = publish(["async_tool", "bare_decorator_tool"])
+    assert any("'plain_tool'" in f for f in missing), missing
+    ghost = publish(sorted(found) + ["deleted_tool"])
+    assert any("## deleted_tool" in f and "left behind" in f for f in ghost), ghost
+
+
+def test_mcp_tool_check_passes_on_the_generated_page_and_fails_without_a_section(
+    gate, tmp_path, monkeypatch
+):
+    assert gate.check_mcp_tools() == []
+    real = gate.MCP_TOOLS_REFERENCE_MD.read_text(encoding="utf-8")
+    assert "\n## validate_config\n" in real
+    doc = tmp_path / "mcp-tools.md"
+    doc.write_text(
+        real.replace("\n## validate_config\n", "\n### validate_config\n"),
+        encoding="utf-8",
     )
-    assert publish(sorted(found) + ["deleted_tool"]), (
-        "a table row naming a nonexistent tool was accepted"
-    )
+    monkeypatch.setattr(gate, "MCP_TOOLS_REFERENCE_MD", doc)
+    failures = gate.check_mcp_tools()
+    assert any("'validate_config'" in f and "has no" in f for f in failures), failures
 
 
 def test_a_missing_table_fails_closed(gate, tmp_path, monkeypatch):
@@ -464,135 +519,27 @@ def test_a_missing_table_fails_closed(gate, tmp_path, monkeypatch):
     """
     assert gate.table_first_column("no tables here at all", "Format") is None
 
-    doc = tmp_path / "output-formats.md"
-    doc.write_text("# Output formats\n\nProse, no table.\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+    doc = tmp_path / "reporters.md"
+    doc.write_text("# Reporters\n\nProse, no table.\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "REPORTERS_REFERENCE_MD", doc)
     failures = gate.check_reporters()
     assert failures, "a document with no table at all was accepted"
     assert "has no table" in failures[0]
 
     # A header row with no data rows is the same hazard.
     doc.write_text(
-        "| Format | File extension |\n|--------|----------------|\n", encoding="utf-8"
+        "| Reporter | File extension |\n|----------|----------------|\n",
+        encoding="utf-8",
     )
     empty = gate.check_reporters()
     assert empty, "a table with no data rows was accepted"
 
-
-def test_cli_flags_check_can_fail(gate, tmp_path, monkeypatch):
-    """Including a flag declared only inside typer's combined `--on/--off` form.
-
-    The pattern this replaced required the flag to be the entire quoted string,
-    so neither half of `"--python-only/--full"` was ever extracted. That is also
-    why skip_flags was dead: it listed `--no-progress`, which the old pattern
-    could not produce, so the entry could never match anything.
-    """
-    source = tmp_path / "scan.py"
-    source.write_text('opt = typer.Option("--python-only/--full-scan")\n', "utf-8")
-    monkeypatch.setattr(gate, "CLI_SCAN_PY", source)
-
-    docs = tmp_path / "cli-reference.md"
-    docs.write_text("| `--python-only` | does a thing |\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "CLI_REFERENCE_MD", docs)
-
-    failures = gate.check_cli_flags()
-    assert any("--full-scan" in f for f in failures), (
-        f"a flag declared only in combined form was not extracted: {failures}"
-    )
-
-    docs.write_text(
-        "| `--python-only` | does a thing |\n| `--full-scan` | the other half |\n",
-        encoding="utf-8",
-    )
-    assert gate.check_cli_flags() == [], "documenting both halves still failed"
-
-
-def test_cli_flags_check_passes_on_the_real_tree(gate):
-    """The gate run on the committed scan.py and cli-reference.md.
-
-    The lint job runs this check, and nothing in the unit suite did, so a hidden
-    option named config_files_from_scanned_repository failed the gate while the
-    suite was green, the way check_reporters once did (see
-    test_reporter_check_passes_on_the_generated_table).
-    """
-    assert gate.check_cli_flags() == []
-
-
-def test_every_scan_option_is_named_for_its_flag():
-    """Each scan option's parameter name is its flag, so the two cannot drift apart.
-
-    check_cli_flags used to turn every option's parameter name into a flag, so a
-    parameter named unlike its flag made the gate ask cli-reference.md for a flag
-    the CLI does not have: config_files_from_scanned_repository, whose flag is
-    --config-file-from-scanned-repository, asked for
-    --config-files-from-scanned-repository. It now takes an Option's own flags
-    (test_a_parameter_that_names_its_flag_gets_no_flag_from_its_name); this test
-    keeps the names honest for readers too. Hidden options count: they are
-    documented in cli-reference.md like the rest.
-    """
-    import typer
-    from typer.models import OptionInfo
-
-    from automated_security_helper.cli.scan import run_ash_scan_cli_command
-
-    params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
-    misnamed = {}
-    for name, meta in params.items():
-        option = meta.default
-        if not isinstance(option, OptionInfo) or not option.param_decls:
-            continue
-        flags = {
-            flag
-            for decl in option.param_decls
-            for flag in decl.split("/")
-            if flag.startswith("--")
-        }
-        if "--" + name.replace("_", "-") not in flags:
-            misnamed[name] = sorted(flags)
-    assert misnamed == {}
-
-
-def test_a_parameter_that_names_its_flag_gets_no_flag_from_its_name(
-    gate, tmp_path, monkeypatch
-):
-    """typer uses an Option's own flag strings and ignores the parameter's name.
-
-    The check derived `--config-files-from-scanned-repository` from scan.py's
-    parameter of that name (since renamed), whose flag is
-    `--config-file-from-scanned-repository`, and failed on a flag that does not
-    exist. A parameter whose Option names no flag still gets one from its name.
-    """
-    source = tmp_path / "scan.py"
-    source.write_text(
-        "def scan(\n"
-        "    files_from_repo: Annotated[\n"
-        "        Optional[List[str]],\n"
-        "        typer.Option(\n"
-        '            "--file-from-repo",\n'
-        "            hidden=True,\n"
-        "        ),\n"
-        "    ] = None,\n"
-        "    plain_name: Annotated[\n"
-        "        bool,\n"
-        '        typer.Option(help="names no flag"),\n'
-        "    ] = False,\n"
-        "): ...\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(gate, "CLI_SCAN_PY", source)
-    docs = tmp_path / "cli-reference.md"
-    monkeypatch.setattr(gate, "CLI_REFERENCE_MD", docs)
-
-    docs.write_text("`--file-from-repo` and `--plain-name`\n", encoding="utf-8")
-    assert gate.check_cli_flags() == [], (
-        "a flag was derived from the name of a parameter whose Option names its own"
-    )
-
-    docs.write_text("`--file-from-repo`\n", encoding="utf-8")
-    failures = gate.check_cli_flags()
-    assert failures and all("--plain-name" in f for f in failures), (
-        f"a parameter whose Option names no flag lost its derived flag: {failures}"
-    )
+    # And an MCP tools page with no tool sections.
+    page = tmp_path / "mcp-tools.md"
+    page.write_text("# MCP tools reference\n\n## Resources\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "MCP_TOOLS_REFERENCE_MD", page)
+    no_sections = gate.check_mcp_tools()
+    assert no_sections and "has no '## <tool>' sections" in no_sections[0]
 
 
 def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):
@@ -623,11 +570,105 @@ def test_plugin_options_check_can_fail(gate, tmp_path, monkeypatch):
     )
 
 
+_INVENTED_BANDIT_OPTION = (
+    "scanners:\n  bandit:\n    options:\n      severity_level: HIGH\n"
+)
+_DECLARED_BANDIT_OPTION = (
+    "scanners:\n  bandit:\n    options:\n      severity_threshold: HIGH\n"
+)
+
+
+def _one_config_block(tmp_path, monkeypatch, gate, marker: str, body: str) -> None:
+    doc = tmp_path / "page.md"
+    marker_line = f"{marker}\n" if marker else ""
+    doc.write_text(f"# Page\n\n{marker_line}```yaml\n{body}```\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "collect_md_files", lambda: [doc])
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["", "<!-- doctest: config kind=ash -->"],
+    ids=["unmarked", "kind=ash"],
+)
+def test_an_invented_option_fails_both_checks_in_a_config_block(
+    gate, tmp_path, monkeypatch, marker
+):
+    """The planted defect for the exemption below: the block it exempts, unexempted."""
+    _one_config_block(tmp_path, monkeypatch, gate, marker, _INVENTED_BANDIT_OPTION)
+    options = gate.check_plugin_option_keys()
+    assert any("options.severity_level is not a field of" in f for f in options), (
+        options
+    )
+    assert any("severity_level" in f for f in gate.check_doc_config_blocks())
+
+
+def test_an_ash_invalid_block_may_show_an_invented_option(gate, tmp_path, monkeypatch):
+    """A page may show the config ASH refuses, as long as it says so.
+
+    ``config kind=ash-invalid`` is how a page shows an option a plugin does not
+    declare. The options check skips that block, and the config-blocks check holds
+    it to being invalid instead, which the invented key satisfies. Without the skip,
+    the options check reported the very mistake the block exists to show.
+    """
+    marker = '<!-- doctest: config kind=ash-invalid reason="severity_level is not a bandit option" -->'
+    _one_config_block(tmp_path, monkeypatch, gate, marker, _INVENTED_BANDIT_OPTION)
+    assert gate.check_plugin_option_keys() == []
+    assert gate.check_doc_config_blocks() == []
+
+
+def test_an_ash_invalid_block_that_validates_is_still_reported(
+    gate, tmp_path, monkeypatch
+):
+    """The skip above does not let a valid config wear the ash-invalid marker."""
+    _one_config_block(tmp_path, monkeypatch, gate, "", _DECLARED_BANDIT_OPTION)
+    assert gate.check_plugin_option_keys() == [], "the control config is not valid"
+    assert gate.check_doc_config_blocks() == [], "the control config is not valid"
+
+    marker = '<!-- doctest: config kind=ash-invalid reason="claims a refusal" -->'
+    _one_config_block(tmp_path, monkeypatch, gate, marker, _DECLARED_BANDIT_OPTION)
+    failures = gate.check_doc_config_blocks()
+    assert any("ASH accepts this one" in f for f in failures), failures
+
+
 def test_version_check_can_fail(gate, tmp_path, monkeypatch):
-    doc = tmp_path / "index.md"
-    doc.write_text("Install ASH at `@v0.0.1-not-the-version`\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "DOCS_INDEX_MD", doc)
-    assert gate.check_version_consistency(), "an outdated version tag was accepted"
+    assert gate.check_version_consistency() == [], "the committed pins were rejected"
+    doc = tmp_path / "install.md"
+    doc.write_text("Install ASH at `@v0.0.1`\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "INSTALL_MD", doc)
+    failures = gate.check_version_consistency()
+    assert any("install.md" in f and "@v0.0.1" in f for f in failures), failures
+    doc.write_text("Install ASH from the main branch.\n", encoding="utf-8")
+    assert any("does not reference" in f for f in gate.check_version_consistency())
+
+
+def test_version_check_reports_a_stale_pin_beside_the_current_one(
+    gate, tmp_path, monkeypatch
+):
+    """One older pin on a page that also has the current one installs the wrong release.
+
+    The check used to look for older pins only when the current one was missing, so a
+    page with seven current commands and one stale one passed.
+    """
+    version = gate.get_version_from_pyproject()
+    major, minor, _patch = (int(part) for part in version.split("."))
+    stale = f"@v{major}.{minor - 1}.0" if minor else f"@v{major - 1}.0.0"
+    real = gate.INSTALL_MD.read_text(encoding="utf-8")
+    assert f"@v{version}" in real and stale not in real
+
+    doc = tmp_path / "install.md"
+    doc.write_text(
+        real + "\n```bash\nuvx --from "
+        f"git+https://github.com/awslabs/automated-security-helper.git{stale} ash\n```\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "INSTALL_MD", doc)
+    failures = gate.check_version_consistency()
+    assert any("install.md" in f and stale in f for f in failures), failures
+
+    # Control: the real page, copied unchanged, passes.
+    doc.write_text(real, encoding="utf-8")
+    assert gate.check_version_consistency() == []
 
 
 # ---------------------------------------------------------------------------
@@ -654,13 +695,91 @@ def test_the_md_corpus_reaches_past_the_docs_directory(gate):
         "no nested non-docs markdown was collected"
     )
 
-    # Build output and caches must stay out: mkdocs' site/ is a rendered copy of
+    # Build output and caches must stay out: MkDocs output is a rendered copy of
     # docs/, so including it would double every finding.
-    assert not any(f.startswith(("site/", ".venv/", "node_modules/")) for f in files)
+    assert not any(
+        f.startswith(("site/", "public/", ".venv/", "node_modules/")) for f in files
+    )
+    # syrupy's markdown golden files are reporter output, not docs.
+    assert not any("/__snapshots__/" in f for f in files)
+
+
+@pytest.mark.parametrize("parent", [".cache", "site", "venv", "node_modules"])
+def test_a_checkout_under_an_excluded_directory_name_still_collects_its_docs(
+    gate, tmp_path, monkeypatch, parent
+):
+    """The exclusions name directories inside the checkout. A checkout that itself
+    sits under a directory of that name (~/.cache/ash, /srv/site/ash) used to collect
+    nothing, and every check that reads the corpus then passed."""
+    root = tmp_path / parent / "checkout"
+    _make = {
+        "README.md": "# Readme\n",
+        "docs/page.md": "# Page\n",
+        "docs/site/built.md": "# A build output inside the checkout stays out\n",
+        ".venv/lib/x.md": "# So does a virtual environment\n",
+    }
+    for rel, text in _make.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", root)
+    files = {path.relative_to(root).as_posix() for path in gate.collect_md_files()}
+    assert files == {"README.md", "docs/page.md"}
+
+
+def test_dated_notes_stay_out_of_the_corpus_and_their_neighbors_stay_in(gate):
+    """ferret-scan's spec/ notes are a record of one upgrade, kept as written.
+
+    The plugin's README and DEVELOPMENT.md beside them are documentation and must
+    still be checked, so the exclusion is by path, not by the directory name.
+    """
+    files = {
+        path.relative_to(gate.REPO_ROOT).as_posix() for path in gate.collect_md_files()
+    }
+    plugin = "automated_security_helper/plugin_modules/ash_ferret_plugins/"
+    notes = sorted((gate.REPO_ROOT / plugin / "spec").glob("*.md"))
+    assert notes, "the spec notes this test is about are gone; drop the exclusion"
+    assert not any(f.startswith(plugin + "spec/") for f in files)
+    assert {plugin + "README.md", plugin + "DEVELOPMENT.md"} <= files
+
+
+def test_an_empty_corpus_is_a_failure_not_a_pass(gate, tmp_path, monkeypatch):
+    """Zero files makes every corpus check vacuous; it must fail, loudly."""
+    root = tmp_path / "no-docs"
+    (root / "src").mkdir(parents=True)
+    monkeypatch.setattr(gate, "REPO_ROOT", root)
+    with pytest.raises(RuntimeError, match="no markdown"):
+        gate.collect_md_files()
+    with pytest.raises(RuntimeError, match="no markdown"):
+        gate.check_doc_markers()
+
+
+def test_the_md_corpus_excludes_generated_interface_artifacts(
+    gate, tmp_path, monkeypatch
+):
+    """Building a preview must not add copied templates to the source corpus."""
+    source = tmp_path / "docs" / "content"
+    source.mkdir(parents=True)
+    (source / "index.md").write_text("# Current source\n", encoding="utf-8")
+    (source / "index.md.template").write_text("# Current source\n", encoding="utf-8")
+
+    for directory in (
+        tmp_path / "public" / "docs",
+        tmp_path / "docs" / "ui-tests" / ".previews",
+        tmp_path / "docs" / "ui-tests" / "playwright-report",
+    ):
+        directory.mkdir(parents=True)
+        (directory / "index.md.template").write_text(
+            "# Generated copy without a Markdown sibling\n", encoding="utf-8"
+        )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+
+    assert {
+        path.relative_to(tmp_path).as_posix() for path in gate.collect_md_files()
+    } == {"docs/content/index.md", "docs/content/index.md.template"}
 
 
 def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
-    """Ten docs are rendered from a sibling .template; that is the editable file.
+    """Docs rendered from a sibling .template are edited in the template.
 
     Checking only the rendered doc reports drift against a path where a fix does
     not survive. This is the same defect as the name checks reading README.md
@@ -669,18 +788,34 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
     Not hypothetical: the change that widened this corpus initially edited
     docs/content/faq.md and left docs/content/faq.md.template stale, and
     tests/unit/test_version_template_round_trip.py is what caught it.
+
+    The expected templates come from scripts/version_template_manager.py's own
+    target list, so a page that gains or loses a template changes this test's
+    expectation without an edit here.
     """
+    spec = importlib.util.spec_from_file_location(
+        "_ash_version_template_manager",
+        REPO_ROOT / "scripts" / "version_template_manager.py",
+    )
+    assert spec and spec.loader
+    manager_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager_module)
+    targets = manager_module.VersionTemplateManager(REPO_ROOT).target_files
+    expected = {
+        f"{target}.template"
+        for target in targets
+        if (REPO_ROOT / f"{target}.template").is_file()
+    }
+    assert "README.md.template" in expected, sorted(expected)
+    assert len(expected) > 1, sorted(expected)
+
     files = {
         path.relative_to(gate.REPO_ROOT).as_posix() for path in gate.collect_md_files()
     }
-
     templates = {f for f in files if f.endswith(".md.template")}
-    assert templates, (
-        "no .md.template file was collected, so a stale list in a template is "
-        "invisible to every check that walks this corpus"
+    assert expected <= templates, (
+        f"templates the release renders but no check reads: {sorted(expected - templates)}"
     )
-    assert "docs/content/faq.md.template" in templates
-    assert "README.md.template" in templates
 
     # Each collected template's rendered sibling must be collected too, so the
     # two are never checked in isolation from one another.
@@ -690,60 +825,298 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
         )
 
 
-def _git_repo(path: Path) -> Path:
-    path.mkdir()
-    subprocess.run(["git", "init", "-q", str(path)], check=True)
-    return path
+# ---------------------------------------------------------------------------
+# The gate's wiring: each label runs its own check, and a finding fails the gate
+# ---------------------------------------------------------------------------
+#
+# The tests above prove each check can fail when called directly, and for checks 9-18
+# that call is to scripts/docs_checks.py, one layer below what main() runs. The
+# wrappers in between were unguarded: seven of them could return [] with every test
+# here green, and so could a main() that paired a label with another label's
+# callable, or that lost a tuple together with its NON_VACUITY_COVERAGE entry.
+#
+# So each check is driven through main() itself. Its innermost function, the
+# docs_checks one a wrapper calls or the gate function for the first seven, returns a
+# planted finding and every other check returns nothing. main() must exit 1 and print
+# the planted finding under that check's FAIL line and nowhere else. The table below
+# is a third statement of the checks, beside main() and NON_VACUITY_COVERAGE, so
+# deleting a check from both of those still fails here.
+#
+# The count main() must report comes from its own check list, not from this table. A
+# change that registers a check adds a row here in the same commit; until it does,
+# test_the_wiring_table_names_every_registered_check names the check that has no row,
+# and the other tests here stay green because a check with no row is kept silent.
+
+#: Each check's label in main() -> (the module that holds the function the gate ends
+#: up calling, that function's name).
+GATE_WIRING = {
+    "Reporter list in docs matches code": ("gate", "check_reporters"),
+    "Scanner list in docs matches code": ("gate", "check_scanners"),
+    "MCP tool names in docs match code": ("gate", "check_mcp_tools"),
+    "Version consistency": ("gate", "check_version_consistency"),
+    "Config file path consistency": ("gate", "check_config_path"),
+    "Suppression field name": ("gate", "check_suppression_field_name"),
+    "Plugin options in docs exist and validate": ("gate", "check_plugin_option_keys"),
+    "Doc block markers are well formed": ("docs_checks", "check_markers"),
+    "ASH commands in docs match the CLI": ("docs_checks", "check_cli"),
+    "ASH environment variables in docs are read by ASH": (
+        "docs_checks",
+        "check_env_vars",
+    ),
+    "Config blocks in docs validate": ("docs_checks", "check_config_blocks"),
+    "Python blocks in docs parse and import": ("docs_checks", "check_python_blocks"),
+    "Links and anchors in docs resolve": ("docs_checks", "check_links"),
+    "Docs navigation and redirects resolve": ("docs_checks", "check_nav"),
+    "Docs site build is strict, offline and versioned": (
+        "docs_checks",
+        "check_site_build",
+    ),
+    "Release numbers in templates stay out of install commands": (
+        "docs_checks",
+        "check_release_placeholders",
+    ),
+    "Docs links in the ASH source resolve": ("docs_checks", "check_code_links"),
+    "Option tables and config paths in docs match the models": (
+        "docs_checks",
+        "check_option_tables",
+    ),
+    "MCP error types and example responses in docs match the tools": (
+        "docs_checks",
+        "check_mcp_contract",
+    ),
+    "Install commands in docs name real extras, Pythons and refs": (
+        "docs_checks",
+        "check_install_commands",
+    ),
+    "Report file names in docs are files ASH writes": (
+        "docs_checks",
+        "check_report_files",
+    ),
+    "Scanner names in docs tables are scanners ASH ships": (
+        "docs_checks",
+        "check_scanner_names",
+    ),
+    "Shell variables in docs examples are set in the session that reads them": (
+        "docs_checks",
+        "check_session_variables",
+    ),
+    "Values docs examples pass the scan workflow pass its input check": (
+        "docs_checks",
+        "check_workflow_inputs",
+    ),
+}
 
 
-def test_the_md_corpus_is_what_git_counts_as_the_tree(gate, tmp_path, monkeypatch):
-    """Tracked and untracked docs are in; ignored, excluded and deleted ones are not.
+def test_the_wiring_table_names_every_registered_check():
+    registered = set(_registered_check_names())
+    assert registered, "main() registers no checks; nothing is compared"
+    unwired = sorted(registered - set(GATE_WIRING))
+    ghosts = sorted(set(GATE_WIRING) - registered)
+    assert not unwired and not ghosts, (
+        f"checks main() registers with no GATE_WIRING row: {unwired}\n"
+        f"GATE_WIRING rows that name no check main() registers: {ghosts}\n"
+        "A change that adds, renames or removes a check updates GATE_WIRING with it."
+    )
 
-    The list comes from git so that it never enters an ignored directory: the unit
-    tests run this on the real checkout while other workers create and remove
-    directories under the ignored tests/pytest-temp.
+
+def _gate_report(output: str) -> dict[str, tuple[str, list[str]]]:
+    """main()'s per-check lines: label -> (PASS, FAIL or ERROR, the lines printed under it)."""
+    report: dict[str, tuple[str, list[str]]] = {}
+    label = None
+    for line in output.splitlines():
+        if line.startswith(("PASS  ", "FAIL  ", "ERROR ")):
+            label = line[len("PASS  ") :]
+            assert label not in report, f"{label!r} ran twice"
+            report[label] = (line[:5].rstrip(), [])
+        elif line.startswith("        - ") and label is not None:
+            report[label][1].append(line[len("        - ") :])
+        elif not line.startswith("        "):
+            label = None
+    return report
+
+
+def _wire(gate, monkeypatch, tmp_path, planted_label=None, raises=False):
+    """Silence every check, or plant a finding in one; return what each call must get.
+
+    With ``raises``, the planted check raises a RuntimeError carrying the planted
+    message instead of returning it as a finding.
+
+    The gate's corpus is a planted list too, so a wrapper that hands its check anything
+    else (an empty list, another corpus) is caught by the arguments the call records.
     """
-    repo = _git_repo(tmp_path / "repo")
-    (repo / ".gitignore").write_text("tests/pytest-temp/\n", encoding="utf-8")
-    (repo / "docs").mkdir()
-    for name in ("README.md", "docs/guide.md.template", "docs/gone.md"):
-        (repo / name).write_text("x\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    (repo / "docs/gone.md").unlink()
-    (repo / "docs/new.md").write_text("not added yet\n", encoding="utf-8")
-    (repo / "tests/pytest-temp/worker").mkdir(parents=True)
-    (repo / "tests/pytest-temp/worker/scratch.md").write_text("x\n", encoding="utf-8")
-    (repo / "node_modules/pkg").mkdir(parents=True)
-    (repo / "node_modules/pkg/README.md").write_text("x\n", encoding="utf-8")
-    monkeypatch.setattr(gate, "REPO_ROOT", repo)
+    docs_checks = gate._docs_checks()
+    corpus = [tmp_path / "planted.md"]
+    monkeypatch.setattr(gate, "collect_md_files", lambda: list(corpus))
+    calls: dict[str, list[tuple]] = {}
+    expected_args: dict[str, tuple] = {}
+    planted_line = None
+    for label, (layer, name) in GATE_WIRING.items():
+        module = gate if layer == "gate" else docs_checks
+        real = getattr(module, name, None)
+        assert callable(real), f"{layer}.{name} does not exist"
+        if layer == "gate":
+            expected_args[name] = ()
+        elif next(iter(inspect.signature(real).parameters)) == "files":
+            expected_args[name] = (corpus, gate.REPO_ROOT)
+        else:
+            expected_args[name] = (gate.REPO_ROOT,)
+        result: list = []
+        error = None
+        if label == planted_label:
+            message = f"planted for {name} by the wiring test"
+            if raises:
+                planted_line = message
+                error = RuntimeError(message)
+            elif layer == "gate":
+                planted_line = message
+                result = [message]
+            else:
+                finding = docs_checks.Finding("wiring", "planted.md", 7, message)
+                planted_line = str(finding)
+                result = [finding]
 
-    files = {path.relative_to(repo).as_posix() for path in gate.collect_md_files()}
+        def check(*args, _name=name, _result=result, _error=error, **kwargs):
+            # A corpus may arrive as any iterable; it is compared as a list.
+            calls.setdefault(_name, []).append(
+                tuple(list(a) if isinstance(a, (list, tuple)) else a for a in args)
+            )
+            if _error is not None:
+                raise _error
+            return list(_result)
 
-    assert files == {"README.md", "docs/guide.md.template", "docs/new.md"}
+        monkeypatch.setattr(module, name, check)
 
-
-def test_the_md_corpus_refuses_a_tree_git_cannot_read(gate, tmp_path, monkeypatch):
-    """No listing is an error, not an empty corpus every check would pass on."""
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    (plain / "README.md").write_text("x\n", encoding="utf-8")
-    # Stop git searching above tmp_path, so an enclosing repository cannot answer.
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
-    monkeypatch.setattr(gate, "REPO_ROOT", plain)
-
-    with pytest.raises(RuntimeError, match="git ls-files failed"):
-        gate.collect_md_files()
-
-
-def test_the_md_corpus_refuses_to_run_without_git(gate, monkeypatch):
-    monkeypatch.setattr(gate.shutil, "which", lambda name: None)
-
-    with pytest.raises(RuntimeError, match="git is not on PATH"):
-        gate.collect_md_files()
+    # A check main() registers with no row here runs silent, so its missing row is
+    # reported once, by test_the_wiring_table_names_every_registered_check, and not
+    # as a real finding in every test below. The callable is left alone when a wired
+    # check uses it too.
+    registered = dict(_registered_checks())
+    wired = {registered[label] for label in GATE_WIRING if label in registered}
+    for label, function in registered.items():
+        if label not in GATE_WIRING and function not in wired:
+            monkeypatch.setattr(gate, function, lambda *args, **kwargs: [])
+    return planted_line, calls, expected_args
 
 
-def test_an_empty_md_corpus_is_refused(gate, tmp_path, monkeypatch):
-    monkeypatch.setattr(gate, "REPO_ROOT", _git_repo(tmp_path / "repo"))
+def test_the_gate_passes_when_every_check_is_silent(
+    gate, monkeypatch, tmp_path, capsys
+):
+    """Control: with nothing to report, every label passes and the gate exits 0."""
+    _planted, calls, expected_args = _wire(gate, monkeypatch, tmp_path)
+    assert gate.main([]) == 0
+    output = capsys.readouterr().out
+    report = _gate_report(output)
+    registered = _registered_check_names()
+    assert report == {label: ("PASS", []) for label in registered}, output
+    total = len(registered)
+    assert f"Results: {total} passed, 0 failed, {total} total" in output, output
+    wired = {GATE_WIRING[label][1] for label in registered if label in GATE_WIRING}
+    assert calls == {
+        name: [args] for name, args in expected_args.items() if name in wired
+    }, calls
 
-    with pytest.raises(RuntimeError, match="found no markdown"):
-        gate.collect_md_files()
+
+@pytest.mark.parametrize("label", list(GATE_WIRING))
+def test_a_finding_fails_the_gate_under_its_own_label(
+    gate, monkeypatch, tmp_path, capsys, label
+):
+    layer, name = GATE_WIRING[label]
+    planted_line, calls, expected_args = _wire(gate, monkeypatch, tmp_path, label)
+
+    assert gate.main([]) == 1, f"a finding from {layer}.{name} did not fail the gate"
+    output = capsys.readouterr().out
+    report = _gate_report(output)
+    assert report.get(label) == ("FAIL", [planted_line]), (
+        f"{label!r} did not print its own finding: main() pairs it with another "
+        f"callable, its wrapper drops what {name} returns, or it is gone\n{output}"
+    )
+    registered = _registered_check_names()
+    others = {other: report.get(other) for other in registered if other != label}
+    assert others == {other: ("PASS", []) for other in others}, output
+    total = len(registered)
+    assert f"Results: {total - 1} passed, 1 failed, {total} total" in output, output
+    # Once, on the gate's corpus and root.
+    assert calls.get(name) == [expected_args[name]], (
+        f"{name} was called {calls.get(name)}, not once with {expected_args[name]}"
+    )
+
+
+# A check that raises did not run. main() reports it under its own label as ERROR,
+# with the exception, counts it apart from failures and exits 2, so neither a reader
+# of the output nor a comparison of two runs can take it for a check that ran. The
+# case that matters most is a check that lists files with git (docs_checks.listed_files)
+# run where git cannot list them: an extract of the tree (git archive) has all the
+# files and no repository. Two runs on extracts once compared clean while two checks
+# had not run on either side, because each side printed the same exception as an
+# ordinary finding.
+
+
+@pytest.mark.parametrize("label", list(GATE_WIRING))
+def test_a_check_that_raises_fails_the_gate_under_its_own_label(
+    gate, monkeypatch, tmp_path, capsys, label
+):
+    layer, name = GATE_WIRING[label]
+    planted_line, calls, expected_args = _wire(
+        gate, monkeypatch, tmp_path, label, raises=True
+    )
+
+    assert gate.main([]) == 2, (
+        f"{layer}.{name} raising did not fail the gate as not run"
+    )
+    output = capsys.readouterr().out
+    report = _gate_report(output)
+    assert report.get(label) == (
+        "ERROR",
+        [f"the check did not run: RuntimeError: {planted_line}"],
+    ), f"{label!r} did not report that it did not run\n{output}"
+    registered = _registered_check_names()
+    others = {other: report.get(other) for other in registered if other != label}
+    assert others == {other: ("PASS", []) for other in others}, output
+    total = len(registered)
+    assert (
+        f"Results: {total - 1} passed, 0 failed, 1 did not run, {total} total" in output
+    ), output
+    assert calls.get(name) == [expected_args[name]], calls.get(name)
+
+
+#: The checks that list a tree's files with git, so cannot run on an extract.
+GIT_LISTING_CHECKS = (
+    "Docs navigation and redirects resolve",
+    "Docs site build is strict, offline and versioned",
+)
+
+
+def test_the_gate_on_an_extract_fails_the_checks_that_list_files_with_git(
+    gate, monkeypatch, tmp_path, capsys
+):
+    """The gate run on an extract of this checkout, its files without a repository,
+    fails, and names each check that lists files with git as one that did not run.
+
+    The extract is a copy of the files git lists here. If tmp_path sits inside an
+    ignored directory of a checkout, git names the extract as ignored instead of
+    failing to find a repository; either way the check cannot list it.
+    """
+    extract = tmp_path / "extract"
+    for path in gate._docs_checks().listed_files(REPO_ROOT):
+        target = extract / path.relative_to(REPO_ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    for label, function in _registered_checks():
+        if label not in GIT_LISTING_CHECKS:
+            monkeypatch.setattr(gate, function, lambda *args, **kwargs: [])
+    # --docs-root repoints the gate's module-level paths; put them back afterward.
+    for name in (*gate._DOCS_PATHS, *gate._CODE_PATHS, "PYPROJECT_TOML", "REPO_ROOT"):
+        monkeypatch.setattr(gate, name, getattr(gate, name))
+
+    assert gate.main(["--docs-root", str(extract)]) == 2
+    output = capsys.readouterr().out
+    report = _gate_report(output)
+    for label in GIT_LISTING_CHECKS:
+        status, lines = report.get(label, (None, []))
+        assert status == "ERROR", f"{label!r} on an extract was {status}\n{output}"
+        assert any(
+            "git cannot list" in line or "is ignored by the checkout" in line
+            for line in lines
+        ), f"{label!r} did not say git could not list the extract\n{output}"
+    others = [label for label in report if label not in GIT_LISTING_CHECKS]
+    assert others and all(report[label] == ("PASS", []) for label in others), output

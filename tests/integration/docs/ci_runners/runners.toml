@@ -1,0 +1,116 @@
+# Pinned tools, images and Jenkins cores for running the CI pages' examples with their CI
+# systems' local runners. Resolved 2026-10-12.
+#
+# Tools: every url is https, and every sha256 is the hash of a download of that url,
+# compared with the publisher's own checksum where one exists (the source note says which).
+# The install step refuses a file whose sha256 differs and leaves nothing extracted or on
+# PATH. Each tool is installed in its own directory, and `executable` is the program to
+# run, relative to that directory; the install step makes it executable, because the
+# jenkinsfile-runner zip stores its launcher script without an execute bit.
+#
+# Images: every ref is name@sha256:<digest>, read from the registry's v2 API with an
+# anonymous pull token, and the registry served that digest when it was read. A digest
+# that is an image index covers several platforms; the runners here are linux/amd64. The
+# sizes in the source notes are the compressed layer bytes of the linux/amd64 manifest;
+# unpacked images take more disk. `license` is the license the registry or the image's
+# labels state, or "unknown" where neither names one.
+#
+# Jenkins: jenkinsfile-runner's release zip holds the launcher only, so each core pins its
+# own WAR and its own plugin closure.
+
+[tools.act]
+version = "0.2.89"
+url = "https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz"
+sha256 = "0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0"
+license = "MIT"
+source = "https://github.com/nektos/act/releases/tag/v0.2.89; equal to the release's checksums.txt and to the GitHub asset digest"
+executable = "act"
+
+[tools.gitlab-ci-local]
+version = "4.76.1"
+url = "https://github.com/firecow/gitlab-ci-local/releases/download/4.76.1/gitlab-ci-local-linux-amd64.tar.gz"
+sha256 = "c4a857c578924df96bffdf2d0f0270fdb0a4cb396a114401e2ae52e96bbe6da4"
+license = "MIT"
+source = "https://github.com/firecow/gitlab-ci-local/releases/tag/4.76.1; equal to the GitHub asset digest (the release publishes no checksums file); a detached PGP signature, gitlab-ci-local-linux-amd64.tar.gz.asc, is published beside it"
+executable = "gitlab-ci-local"
+
+[tools.jenkinsfile-runner]
+version = "1.0-beta-32"
+url = "https://github.com/jenkinsci/jenkinsfile-runner/releases/download/1.0-beta-32/jenkinsfile-runner-1.0-beta-32.zip"
+sha256 = "958b959d3bb51843b36c0f8f3783717dc5c800ada86f866e72698132e3a4f304"
+license = "MIT"
+source = "https://github.com/jenkinsci/jenkinsfile-runner/releases/tag/1.0-beta-32; the GitHub asset has no digest; equal to the .sha256 that repo.jenkins-ci.org publishes for io.jenkins.jenkinsfile-runner:jenkinsfile-runner:1.0-beta-32:zip, whose .sha1 and .md5 also match; the two downloads are byte-identical"
+executable = "bin/jenkinsfile-runner"
+
+[tools.codebuild-build-sh]
+version = "a07b8a37906d4de35cf0c1aa6fa94dc1151114e6"
+url = "https://raw.githubusercontent.com/aws/aws-codebuild-docker-images/a07b8a37906d4de35cf0c1aa6fa94dc1151114e6/local_builds/codebuild_build.sh"
+sha256 = "0e10dda810a2418bd7ba5df013a6143e1d71fc549a73071db5d71429d645930d"
+license = "Apache-2.0"
+source = "https://github.com/aws/aws-codebuild-docker-images/blob/master/local_builds/codebuild_build.sh; the commit is the file's last change on master, and the file on master has the same sha256; license from local_builds/LICENSE.txt at that commit"
+executable = "codebuild_build.sh"
+
+[tools.circleci-cli-local-execute]
+version = "0.1.47860"
+url = "https://github.com/CircleCI-Public/circleci-cli/releases/download/v0.1.47860/circleci-cli_0.1.47860_linux_amd64.tar.gz"
+sha256 = "37000f009dcbe607c1d4a1af534b339aed928078225095bce7e487fb2ab32a6d"
+license = "MIT"
+source = "https://github.com/CircleCI-Public/circleci-cli/releases/tag/v0.1.47860; the last release with `local execute`; equal to circleci-cli_0.1.47860_checksums.txt and to the GitHub asset digest"
+executable = "circleci-v0"
+
+[tools.circleci-cli]
+version = "1.5.0"
+url = "https://github.com/CircleCI-Public/circleci-cli/releases/download/v1.5.0/circleci-cli_1.5.0_linux_amd64.tar.gz"
+sha256 = "b9bd70c0fbd3f5738ae950e93a11d464f160cf39364b186cea6a94ed21ba682e"
+license = "MIT"
+source = "https://github.com/CircleCI-Public/circleci-cli/releases/tag/v1.5.0; for config validate and config process; equal to circleci-cli_1.5.0_checksums.txt and to the GitHub asset digest"
+executable = "circleci"
+
+[images.codebuild-local-agent]
+ref = "public.ecr.aws/codebuild/local-builds@sha256:ccb19bdd7af94e4dc761e4c58c267e9455c28ec68d938086b4dc1cf8fe6b0940"
+license = "unknown"
+source = "the x86_64 agent digest in the CodeBuild local agent docs; the repository serves it, and the latest tag resolves to it; a single linux/amd64 manifest, 1.31 GB compressed"
+
+[images.codebuild-standard-5]
+ref = "public.ecr.aws/codebuild/amazonlinux-x86_64-standard@sha256:f735b49dc761ba5fa7fc298e98d0a676efbe1d00e4af66defd2a9f225d98970d"
+license = "unknown"
+source = "the 5.0 tag; a single linux/amd64 manifest, 56 layers, 6.31 GB compressed; the tag is rebuilt upstream, so this digest is older than the tag after the next rebuild"
+
+[images.python-3-12]
+ref = "public.ecr.aws/docker/library/python@sha256:42dc0ee40d7707e2f2ee506a1cbe52e09ab11c207c5b429342638f83177601fe"
+license = "unknown"
+source = "the 3.12 tag, ECR Public's copy of the Docker Official Image; an index of 8 platforms; linux/amd64 is sha256:3d361d7fea344d55ac7a0f51ed7faa99213808ccc96fc9b9170adb95b6570b96, 0.41 GB compressed; the gallery text points to Python's license and says the image holds other software under other licenses"
+
+[images.python-3-12-slim-bookworm]
+ref = "public.ecr.aws/docker/library/python@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+license = "unknown"
+source = "the Dockerfile's ARG BASE_IMAGE_DIGEST, for building the image with --build-arg BASE_IMAGE=<this ref>; must equal that ARG; an index of 5 platforms; linux/amd64 is sha256:1aaa65a85fda306ffb8b910824d4e93bdce61e212c7e87168123ea3073b41a1a, 0.05 GB compressed"
+
+[images.debian-bookworm-slim]
+ref = "public.ecr.aws/docker/library/debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"
+license = "unknown"
+source = "the bookworm-slim tag, ECR Public's copy of the Docker Official Image, base of the gitlab-ci-local helper image built in the job; an index of 5 platforms; linux/amd64 is sha256:a4672c0cb26fbdde88e38fa2dfb6c681942306680e41e4378b28770b6e79ee91, 0.03 GB compressed"
+
+[images.cimg-python-3-12-node]
+ref = "docker.io/cimg/python@sha256:bb0489b08cc5f7c57666e41d93a70e805d01d5782d58d220ce633b40120f9d50"
+license = "MIT"
+source = "the 3.12-node tag on Docker Hub, which has no ECR Public copy; Docker Hub states MIT for the image's source repository; an index of linux/amd64 and linux/arm64; linux/amd64 is sha256:9c85e00cfc5de00d1d6d5a86ac42c42ee97ecf334f1c256d6d74ba8f5077be11, 0.96 GB compressed"
+
+[images.circleci-picard]
+ref = "docker.io/circleci/picard@sha256:008ba7f4223f1e26c11df9575283491b620074fa96da6961e0dcde47fb757014"
+license = "unknown"
+source = "fixed in circleci-cli v0.1.47860 local/local.go; Docker Hub, no ECR Public copy; still served; a single linux/amd64 manifest, 0.05 GB compressed, label version 1.0.105680-924e1373"
+
+[jenkins.cores.lts]
+core_version = "2.580.1"
+war_url = "https://get.jenkins.io/war-stable/2.580.1/jenkins.war"
+war_sha256 = "393bf2476352dd726519fd1f92ce66eac7d23c0936e6967420b717060c4c40d0"
+java = "21"
+plugins = "jenkins/plugins-lts.toml"
+
+[jenkins.cores.bundled]
+core_version = "2.375.4"
+war_url = "https://get.jenkins.io/war-stable/2.375.4/jenkins.war"
+war_sha256 = "9a82a8cf68eb143e2f3e14cb8eb591de1a4b6596259fce9e4c15b4b24a0d4125"
+java = "11"
+plugins = "jenkins/plugins-bundled.toml"

@@ -6,37 +6,23 @@ agent: 'agent'
 
 # Scan
 
-Run a full ASH security scan on the current working directory and report a prioritized findings summary.
+Run an ASH security scan on the current project and report what it finds, most severe first.
 
-## Workflow
+## Steps
 
-1. **Verify installation** — call `check_installation`. If it fails, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`) and stop.
-
-2. **Determine source directory** — use `pwd` to get the absolute path. If the user provides an argument, use that instead. For monorepos, confirm with the user whether they want the full repo or a subdirectory before scanning.
-
-3. **Start the scan** — call `run_ash_scan` with:
-   - `source_dir` = absolute path
-   - `severity_threshold="MEDIUM"` (configurable via user prompt)
-   - `clean_output=True`
-
-   Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ash scan --mode container`).
-
-4. **Poll progress every 5 seconds** — loop on `get_scan_progress(scan_id=<id>)` until `status` is one of `completed`, `failed`, or `cancelled`. Don't rely on `is_complete` alone — it stays `False` for cancelled scans. Show the user a brief status update on each poll: which scanners are running, and `completed_scanners / total_scanners` as the progress fraction (treat `total_scanners == 0` as "initializing").
-
-5. **Fetch summary results** — call `get_scan_results` with:
-   - `output_dir` = `<source_dir>/.ash/ash_output`
-   - `filter_level="summary"`
-   - `severities="critical,high,medium"`
-   - `actionable_only=True`
-
-6. **Report to user** — render a markdown summary:
-   - Total findings by severity (CRITICAL/HIGH/MEDIUM)
-   - Top 3-5 most severe findings with file:line references
-   - Scanner-level breakdown (which scanners ran, which fired)
-   - Path to the HTML report (from `get_scan_result_paths`) so the user can open it
+1. Use the absolute path of the current working directory as the source directory, or the path the user gives. In a monorepo, ask whether to scan the whole repository or one directory.
+2. Call `run_ash_scan` with `source_dir` set to that path, and keep the `scan_id` it returns.
+3. Call `get_scan_progress` with the `scan_id` about every 5 seconds until `is_complete` is true, then read `status`: `completed`, `incomplete`, `failed`, or `cancelled`. Tell the user the status as it changes. For `failed`, report `error_message` and stop. For `cancelled`, say so and stop.
+4. Call `get_scan_summary` with `output_dir` set to `output_directory` from the progress response, for the counts by severity and by scanner.
+5. Call `get_scan_result_paths` with the same `output_dir`, and read the findings from the `flat_json` report it names. Leave out the records with `is_suppressed` true.
+6. Report to the user:
+   - the final status, and for `incomplete`, each scanner in `incomplete_scanners` with its `reason`, and that the coverage is partial
+   - the number of actionable findings, by severity
+   - the most severe findings, each with its severity, scanner, `rule_id`, and file and line
+   - the paths of `ash.html` and `ash.summary.md` from `get_scan_result_paths`
 
 ## Notes
 
-- The scan runs in the background regardless of MCP connection state. If the user cancels mid-scan, call `cancel_scan` to free server resources.
-- Default scan time is 30-120 seconds; longer for large monorepos.
-- For deeper investigation of a specific finding, use the full ASH MCP skill workflow.
+- If there are no ASH tools, the MCP server is not running. The plugin starts it with `uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`, which needs uv, and network access to GitHub the first time.
+- The MCP server always scans in local mode. For a container scan, the user runs `ash scan --mode container`.
+- Do not repeat the value of a detected secret. Refer to its file and line.

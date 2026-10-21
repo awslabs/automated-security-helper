@@ -6,7 +6,7 @@ This document outlines the naming conventions for test files in the ASH project.
 
 The test directory structure mirrors the main codebase structure:
 
-```
+```text
 tests/
 ├── unit/                  # Unit tests for individual components
 │   ├── base/              # Tests for base classes and interfaces
@@ -17,9 +17,11 @@ tests/
 │   ├── cli/               # CLI integration tests
 │   ├── scanners/          # Scanner integration tests
 │   └── ...                # Other integration test directories
-├── fixtures/              # Common test fixtures
+├── snapshot/              # Snapshot tests of ASH output
+├── infrastructure/        # CDK stack for testing offline mode in an isolated VPC
 ├── utils/                 # Test utilities
-└── test_data/             # Test data files
+├── test_data/             # Test data files
+└── conftest.py            # Fixtures shared by every test
 ```
 
 ## File Naming
@@ -28,7 +30,7 @@ tests/
 
 Unit test files should follow this naming pattern:
 
-```
+```text
 test_<module_name>.py
 ```
 
@@ -40,7 +42,7 @@ For example:
 
 Integration test files should follow this naming pattern:
 
-```
+```text
 test_<feature_or_component>_integration.py
 ```
 
@@ -52,7 +54,7 @@ For example:
 
 Test classes should follow this naming pattern:
 
-```python
+```text
 class Test<ComponentName>:
     """Tests for <component description>."""
 ```
@@ -65,7 +67,7 @@ For example:
 
 Test methods should follow this naming pattern:
 
-```python
+```text
 def test_<functionality_being_tested>(_<parameters>):
     """Test <description of what is being tested>."""
 ```
@@ -76,25 +78,25 @@ For example:
 
 ## Fixtures
 
-Fixture files should be named according to their domain:
+pytest loads fixtures from `conftest.py` files without an import, so fixtures go in a
+`conftest.py` next to the tests that use them:
 
-```
-<domain>_fixtures.py
+```text
+conftest.py
 ```
 
 For example:
-- `config_fixtures.py` for configuration-related fixtures
-- `scanner_fixtures.py` for scanner-related fixtures
+- `tests/conftest.py` for fixtures every test can use
+- `tests/integration/cli/conftest.py` for fixtures of the CLI integration tests
 
 ## Utility Files
 
 Utility files should be named according to their purpose:
 
-```
+```text
 <purpose>.py
 ```
 
 For example:
-- `assertions.py` for custom assertion helpers
 - `mocks.py` for mock utilities
 - `helpers.py` for general test helpers
