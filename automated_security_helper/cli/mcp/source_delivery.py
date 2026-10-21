@@ -129,6 +129,16 @@ class SourceDeliveryBusyError(RuntimeError):
 #: their own.
 CLONE_MAX_WORKERS = 8
 
+#: Worker threads the server runs the other three delivery tools on (a chunk, a
+#: finalize, a clear), across all sessions. Explicit rather than
+#: ``ThreadPoolExecutor``'s default, which depends on the host's CPU count: the
+#: default is 5-6 workers on a 1-2 vCPU container, and before Python 3.13
+#: ``os.cpu_count`` ignores cgroup CPU quotas, so a big host gets 32 whatever
+#: its container's quota. A finalize (a sha256 and an extraction) or a clear
+#: (an ``rmtree``) can hold a worker for seconds, so the size bounds how many
+#: of those one tenant's calls can queue another's chunk behind.
+DELIVERY_MAX_WORKERS = 8
+
 #: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
 SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 
