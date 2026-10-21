@@ -247,6 +247,36 @@ def test_forgetting_a_session_drops_its_delivered_source_record(
         source_delivery._drop_session_source_dir("unreadable")
 
 
+def test_a_permanently_refused_guard_keeps_the_tree_and_the_sweep_warns_once(
+    root, monkeypatch, ash_log
+) -> None:
+    """On a filesystem that refuses the lock for good, every sweep is refused
+    the same way, so nothing removes the tree; the end_session warning says so
+    plainly, and the sweep says it once per process, not once per pass."""
+    sandbox = _sandbox(root, "refused")
+    monkeypatch.setattr(sessions, "_sweep_guard_warned", False)
+
+    def refused(_root):
+        raise PermissionError("the presence registry cannot be opened")
+
+    monkeypatch.setattr(sessions, "_scan_presence_guard", refused)
+
+    assert sessions.end_session("refused") is False
+    ended = [r.getMessage() for r in ash_log if "scan presence lock" in r.getMessage()]
+    assert len(ended) == 1, ended
+    assert (
+        "nothing removes it until the root's filesystem supports file locks" in ended[0]
+    ), ended[0]
+
+    assert sessions.sweep_stale_workspaces(60.0, now=time.time() + 3600) == []
+    assert sessions.sweep_stale_workspaces(60.0, now=time.time() + 3600) == []
+
+    assert (sandbox / "source" / "app.py").is_file(), "nothing can remove the tree"
+    swept = [r.getMessage() for r in ash_log if "TTL sweep" in r.getMessage()]
+    assert len(swept) == 1, swept
+    assert "No session workspace on this root is removed" in swept[0]
+
+
 def test_ending_the_default_session_does_not_open_the_scan_presence_registry(
     root,
 ) -> None:

@@ -567,7 +567,9 @@ def end_session(session_id: str) -> bool:
     If the scan presence lock can't be taken (a filesystem that refuses file
     locks), nothing proves that no scan elsewhere holds the session: the tree
     stays on disk, and the bound profile, the delivered-source record and the
-    registry entry are cleared now, with one warning naming the lock.
+    registry entry are cleared now, with one warning naming the lock. The TTL
+    sweep needs the same lock, so nothing removes the tree until the root's
+    filesystem supports file locks.
 
     Returns:
         True when everything was removed now, False when it waits for a scan or
@@ -611,10 +613,12 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
     creates nothing under ``.ash-mcp-scans``.
 
     If the presence lock cannot be taken, nothing proves that no scan holds the
-    session, so the tree on disk stays for a later sweep whose lock succeeds. The
-    server's own memory of the session (its bound profile and registry entry) is
-    cleared now, and one warning names the lock path, so a root whose filesystem
-    refuses the lock does not build up state for the life of the process.
+    session, so the tree stays on disk. The TTL sweep needs the same lock, so
+    on a root whose filesystem refuses it outright nothing removes the tree
+    until the filesystem supports file locks; the sweep warns once about that.
+    The server's own memory of the session (its bound profile, delivered-source
+    record and registry entry) is cleared now, and one warning names the lock
+    path, so such a root does not build up state for the life of the process.
 
     Returns:
         True when the state was removed, False when the removal must wait for a
@@ -643,8 +647,10 @@ def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
                 from automated_security_helper.utils.log import ASH_LOGGER
 
                 ASH_LOGGER.warning(
-                    "Could not take the scan presence lock %s (%s), so the "
-                    "workspace of session %r stays on disk for a later sweep.",
+                    "Could not take the scan presence lock %s (%s). The "
+                    "workspace of session %r stays on disk, and nothing "
+                    "removes it until the root's filesystem supports file "
+                    "locks: the TTL sweep needs this same lock.",
                     root / SCAN_PRESENCE_DIR / _SCAN_PRESENCE_LOCK,
                     exc,
                     session_id,
@@ -1226,10 +1232,38 @@ def _is_stale_workspace(entry: Path, cutoff: float) -> bool:
     return _last_used(entry) < cutoff
 
 
+#: Whether this process already warned that the sweep's presence guard was
+#: refused. On a root whose filesystem refuses the lock every sweep is refused
+#: the same way, so one warning tells the operator; one per sweep per session
+#: would repeat for the life of the process.
+_sweep_guard_warned = False
+
+
+def _warn_once_sweep_guard_refused(root: Path, exc: OSError) -> None:
+    """Log one warning per process when the sweep's presence guard is refused."""
+    global _sweep_guard_warned
+    if _sweep_guard_warned:
+        return
+    _sweep_guard_warned = True
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    ASH_LOGGER.warning(
+        "The TTL sweep could not take the scan presence lock %s (%s). No "
+        "session workspace on this root is removed until its filesystem "
+        "supports file locks.",
+        root / SCAN_PRESENCE_DIR / _SCAN_PRESENCE_LOCK,
+        exc,
+    )
+
+
 def _remove_if_still_stale(
     root: Path, session_id: str, sandbox: Path, cutoff: float
 ) -> bool:
-    """Remove a stale session's state, unless anything holds it now."""
+    """Remove a stale session's state, unless anything holds it now.
+
+    A presence guard the filesystem refuses skips the removal and warns once
+    per process (:func:`_warn_once_sweep_guard_refused`).
+    """
 
     session = get_default_registry().session_for(session_id)
     if session.try_begin_change() is not None:
@@ -1242,7 +1276,12 @@ def _remove_if_still_stale(
         try:
             if not _is_stale_workspace(sandbox, cutoff):
                 return False
-            with _scan_presence_guard(root):
+            with contextlib.ExitStack() as stack:
+                try:
+                    stack.enter_context(_scan_presence_guard(root))
+                except OSError as exc:
+                    _warn_once_sweep_guard_refused(root, exc)
+                    return False
                 if _a_scan_holds(root / SCAN_PRESENCE_DIR / session_id):
                     return False
                 _remove_session_state(session_id)
