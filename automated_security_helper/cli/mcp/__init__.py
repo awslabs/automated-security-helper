@@ -1786,6 +1786,14 @@ def mcp_command(
         _logger.error(error_text(e))
         _stderr.print(f"[red]{escape_markup(error_text(e))}[/red]", highlight=False)
         raise typer.Exit(3)
+    except PresenceLockError as e:
+        # The error's own message carries the fix (set ASH_MCP_WORKSPACE_ROOT),
+        # so print it alone: a traceback and a "check system resources" hint
+        # would bury it. Exit 3, as for the other operator-configuration errors.
+        _logger.error(str(e))
+        if not quiet:
+            _stderr.print(f"[red]{escape(str(e))}[/red]", highlight=False)
+        raise typer.Exit(3)
     except Exception as e:
         # Also what run_mcp_server raises when the stdio server fails while it
         # serves. The line naming the error is printed even with --quiet, which
