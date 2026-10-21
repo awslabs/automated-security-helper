@@ -510,8 +510,11 @@ def test_a_deep_copied_records_sentinel_still_redacts():
 
 def test_a_neighbor_ending_in_the_value_stays_as_written():
     """An appended reference resolves to "vendorish". A neighbor that merely
-    ends with the same characters is not the entry, so it keeps the text the
-    file wrote."""
+    ends with the same characters ("libvendorish") is not the entry, so it
+    keeps the text the file wrote. A neighbor whose prefix ends with ``/``
+    (the shape the load gives a relative path it anchors) is still admitted
+    by design, and the positions collected at fill time narrow where anchored
+    matching applies at all."""
     reference = EnvironmentReference(
         path=("ignore_paths", UNKNOWN_INDEX),
         written=REFERENCE,
@@ -520,10 +523,10 @@ def test_a_neighbor_ending_in_the_value_stays_as_written():
     )
 
     recorded = record_environment_references(
-        {"ignore_paths": ["ASH-SHAPE-A-7731", "old/vendorish"]}, [reference]
+        {"ignore_paths": ["ASH-SHAPE-A-7731", "libvendorish"]}, [reference]
     )
 
-    assert recorded["ignore_paths"][1] == "old/vendorish"
+    assert recorded["ignore_paths"][1] == "libvendorish"
 
 
 def test_a_digit_pointer_records_at_its_own_index_only(monkeypatch):
