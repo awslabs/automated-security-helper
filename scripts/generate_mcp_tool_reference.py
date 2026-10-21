@@ -176,6 +176,11 @@ TOOL_NOTES: dict[str, dict] = {
             (
                 "- `config_input_not_permitted`: `config_path`, or a base its `extends` "
                 "chain names, is outside the directories this session may read a config from.\n"
+                "- `config_check_failed`: the check of the config sources in the scan "
+                "target could not finish (an unreadable entry, a link loop), so the scan "
+                "was not started. The config was not found to be outside the permitted "
+                "roots -- that case is `config_input_not_permitted` -- so check the "
+                "config files in the target for unreadable entries and link loops.\n"
                 "- `config_field_denied`: a config file an MCP client delivered or named "
                 "sets a field the session's runtime-override policy denies. `error` names "
                 "each field and why.\n"
