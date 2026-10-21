@@ -2400,7 +2400,6 @@ def mcp_select_profile(
     progress does not refuse it.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
         writing_session_state,
     )
@@ -2414,7 +2413,7 @@ def mcp_select_profile(
                 session_id=session_id,
             )
     except SessionWorkspaceBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+        return {"success": False, "error": str(e), "error_type": e.error_type}
 
 
 def _select_profile(
@@ -2674,6 +2673,10 @@ def mcp_set_source_git(
         ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
         SOURCE_DELIVERY_BUSY,
         CLONE_TIMED_OUT,
+        CLONE_TOO_LARGE,
+        CLONE_TREE_UNREADABLE,
+        CloneTooLargeError,
+        CloneTreeUnreadableError,
         GitTimeoutError,
         SourceDeliveryBusyError,
         _refuse_ssh_key_id,
@@ -2760,6 +2763,10 @@ def mcp_set_source_git(
         return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     except GitTimeoutError as e:
         return {"success": False, "error": str(e), "error_type": CLONE_TIMED_OUT}
+    except CloneTooLargeError as e:
+        return {"success": False, "error": str(e), "error_type": CLONE_TOO_LARGE}
+    except CloneTreeUnreadableError as e:
+        return {"success": False, "error": str(e), "error_type": CLONE_TREE_UNREADABLE}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
@@ -2795,7 +2802,6 @@ def mcp_set_source_zip_chunk(
         upload was removed, and the upload restarts from its first chunk.
     """
     from automated_security_helper.cli.mcp.sessions import (
-        SESSION_WORKSPACE_BUSY,
         SessionWorkspaceBusyError,
     )
     from automated_security_helper.cli.mcp.source_delivery import set_source_zip_chunk
@@ -2809,7 +2815,7 @@ def mcp_set_source_zip_chunk(
             session_id=session_id,
         )
     except SessionWorkspaceBusyError as e:
-        return {"success": False, "error": str(e), "error_type": SESSION_WORKSPACE_BUSY}
+        return {"success": False, "error": str(e), "error_type": e.error_type}
     except ValueError as e:
         return {"success": False, "error": str(e)}
 

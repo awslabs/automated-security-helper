@@ -131,6 +131,16 @@ CHANGE_REFUSED_BY_CHANGE = "other-change"
 CHANGE_REFUSED_BY_WRITE = "write"
 
 
+#: Why :meth:`MCPSession.try_begin_write` refused: the TTL sweep is removing the
+#: session, so its state is gone once it is done.
+WRITE_REFUSED_BY_SWEEP = "sweep"
+
+#: Why :meth:`MCPSession.try_begin_write` refused: a change that deletes the
+#: session's directory (``clear_source`` or the end of the session) holds it.
+#: Its removal may or may not have reached the upload's files yet.
+WRITE_REFUSED_BY_CHANGE = "change"
+
+
 class MCPSession(BaseModel):
     """Per-connection state for an MCP client.
 
@@ -250,7 +260,7 @@ class MCPSession(BaseModel):
                 changing = self._changing
             return CHANGE_REFUSED_BY_CHANGE if changing else CHANGE_REFUSED_BY_SCAN
         with self._state_lock:
-            if self._claimed_scans:
+            if self._claimed_scans or (removes_workspace and self._writes):
                 self._lock.release()
                 return CHANGE_REFUSED_BY_SCAN
             if removes_workspace and self._writes:
