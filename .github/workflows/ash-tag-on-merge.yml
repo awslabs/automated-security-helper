@@ -199,18 +199,20 @@ jobs:
           #
           # The remote is read in its own assignment so that a failing `git ls-remote`
           # stops the step under `bash -e`: inside a pipeline its status is lost to the
-          # last command, and an empty list would read as "no newer release". For a
-          # stable VERSION the list must contain VERSION itself, because the release
-          # step above created that tag; a list without it is not a list to compare.
+          # last command, and an empty list would read as "no newer release". Whatever
+          # its shape, VERSION must find its own tag in the listing, because the
+          # release step above created refs/tags/v${VERSION}; the check runs on the
+          # unfiltered listing, before the stable filter, so an incomplete list stops
+          # prerelease runs too.
           REMOTE_REFS=$(git ls-remote --tags --refs origin "refs/tags/v${MAJOR}.*")
-          STABLE_TAGS=$(printf '%s\n' "$REMOTE_REFS" \
-            | sed 's|.*refs/tags/v||' \
-            | grep -E "^${MAJOR}\.[0-9]+\.[0-9]+$" || true)
-          if [[ "$VERSION" == "$CORE" ]] \
-            && ! printf '%s\n' "$STABLE_TAGS" | grep -qxF "$VERSION"; then
+          if ! printf '%s\n' "$REMOTE_REFS" | sed 's|.*refs/tags/||' \
+            | grep -qxF "v${VERSION}"; then
             echo "::error::The remote lists no tag v${VERSION}, although this run's release step created it. Refusing to compare against an incomplete tag list. The release itself was created; move ${FLOATING} by hand if needed."
             exit 1
           fi
+          STABLE_TAGS=$(printf '%s\n' "$REMOTE_REFS" \
+            | sed 's|.*refs/tags/v||' \
+            | grep -E "^${MAJOR}\.[0-9]+\.[0-9]+$" || true)
           NEWEST=$(printf '%s\n' "$STABLE_TAGS" | sort -V | tail -n1)
           OLDER=false
           if [[ -n "$NEWEST" ]]; then
