@@ -711,6 +711,82 @@ def test_a_chunk_of_another_upload_is_accepted_while_a_finalize_runs(
     assert (workspace / SESSION / "incoming" / "next.zip.part").read_bytes() == b"xyz"
 
 
+def _zip_with(name: str) -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(f"app/{name}.txt", name)
+    return buffer.getvalue()
+
+
+def test_a_finalize_extracts_the_bytes_it_hashed_when_the_path_is_renamed_over(
+    workspace, tmp_path: Path, monkeypatch
+) -> None:
+    """The checksum and the extraction read one open handle.
+
+    The injected rename below is the move a retry chunk's ``last=True``
+    promotion performs on ``incoming/<id>.zip``. Whatever lands at the path
+    between the hash and the extract, the tree that is extracted is the one
+    whose sha256 was checked.
+    """
+    import hashlib
+
+    hashed = _zip_with("hashed")
+    other = tmp_path / "other.zip"
+    other.write_bytes(_zip_with("swapped"))
+    assert _chunk("race", 0, hashed, last=True)["last"] is True
+
+    state: Dict[str, Any] = {}
+    real_open = Path.open
+
+    def swap_after_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        fh = real_open(self, *args, **kwargs)
+        if self.name == "race.zip" and args[:1] == ("rb",) and "swapped" not in state:
+            state["swapped"] = True
+            os.replace(other, self)
+        return fh
+
+    monkeypatch.setattr(Path, "open", swap_after_open)
+
+    source = sd.set_source_zip_finalize(
+        "race", hashlib.sha256(hashed).hexdigest(), session_id=SESSION
+    )
+
+    assert state.get("swapped") is True, "the injected rename never ran"
+    assert (source / "app" / "hashed.txt").is_file(), (
+        "the extracted tree is not the one whose sha256 was checked"
+    )
+    assert not (source / "app" / "swapped.txt").exists(), (
+        "bytes whose sha256 was never checked were extracted"
+    )
+
+
+def test_a_finalize_holds_its_uploads_lock_while_it_works(
+    workspace, monkeypatch
+) -> None:
+    """A chunk of the same upload takes the same lock, so it waits, never races."""
+    import hashlib
+
+    data = _zip_with("locked")
+    assert _chunk("u-lock", 0, data, last=True)["last"] is True
+    seen: Dict[str, Any] = {}
+    real = sd._validate_zip_member
+
+    def observe(name: str) -> None:
+        seen["held"] = sd._upload_lock(SESSION, "u-lock").locked()
+        real(name)
+
+    monkeypatch.setattr(sd, "_validate_zip_member", observe)
+
+    sd.set_source_zip_finalize(
+        "u-lock", hashlib.sha256(data).hexdigest(), session_id=SESSION
+    )
+
+    assert seen.get("held") is True, "finalize ran without the upload's lock"
+
+
 def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> None:
     """``select_profile`` writes through ``writing_session_state``, as a chunk does."""
 
