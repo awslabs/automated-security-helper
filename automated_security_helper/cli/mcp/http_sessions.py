@@ -103,15 +103,24 @@ class HttpCaller:
         session_id: The session the server issued (or, on a stateless app run
             with ``--trust-upstream-session-id``, the platform's header), or None
             when the request has no session identity.
-        protocol_version_is_cause: True when a stateful app gave the request no
-            identity because it names a protocol version outside the
-            ``initialize`` handshake versions. A caller that reads the refusal
-            can change that; it cannot change the other causes.
+        protocol_version_is_cause: True when a stateful app issued the session
+            the request names and the request's protocol version, outside the
+            ``initialize`` handshake versions, is the one reason it carries no
+            identity. That is the one refusal a caller fixes by sending a
+            handshake version; a request with no session header, or with an id
+            the app never issued, gains nothing from a version change, so it
+            never carries the flag.
+        server_mode: The mode of the :class:`SessionBoundary` that stamped the
+            request (:data:`MODE_SSE`, :data:`MODE_STATEFUL` or
+            :data:`MODE_STATELESS`), so a refusal can give advice that holds on
+            the server the request actually reached. None on a stamp built
+            outside a boundary.
     """
 
     transport: str
     session_id: Optional[str]
     protocol_version_is_cause: bool = False
+    server_mode: Optional[str] = None
 
 
 def caller_of(scope: Any) -> Optional[HttpCaller]:
@@ -324,7 +333,11 @@ class SessionBoundary:
     def _identify(self, scope: Scope, through_check: bool) -> HttpCaller:
         if self.mode == MODE_SSE:
             session = _canonical_sse_session(_query_value(scope, "session_id"))
-            return HttpCaller(SSE, session if session in self._issued else None)
+            return HttpCaller(
+                SSE,
+                session if session in self._issued else None,
+                server_mode=self.mode,
+            )
         header = _header(scope, _SESSION_HEADER)
         if self.mode == MODE_STATEFUL:
             # The SDK routes a request naming a newer protocol past its session
@@ -333,11 +346,16 @@ class SessionBoundary:
             return HttpCaller(
                 STREAMABLE_HTTP,
                 header if known else None,
-                protocol_version_is_cause=not through_check,
+                # Only an issued id refused for its version alone: that is the
+                # one refusal a handshake version fixes. A request with no
+                # session header, or an id this app never issued, gains nothing
+                # from a version change, so the hint would misdirect it.
+                protocol_version_is_cause=header in self._issued and not through_check,
+                server_mode=self.mode,
             )
         if self.trust_upstream_session_id and header and header.strip():
-            return HttpCaller(STREAMABLE_HTTP, header.strip())
-        return HttpCaller(STREAMABLE_HTTP, None)
+            return HttpCaller(STREAMABLE_HTTP, header.strip(), server_mode=self.mode)
+        return HttpCaller(STREAMABLE_HTTP, None, server_mode=self.mode)
 
     # -- session end -------------------------------------------------------------
 
