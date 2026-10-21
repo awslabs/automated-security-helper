@@ -940,24 +940,26 @@ class ValidationCheckpointer:
             "Processing queue validation errors and ensuring scan continuity"
         )
 
-        if validation_checkpoint.has_issues():
-            missing_scanners = validation_checkpoint.get_missing_scanners()
-
-            if missing_scanners:
-                self.logger.warning(
-                    f"Found {len(missing_scanners)} scanners missing from queue"
+        # Not gated on has_issues(): that counts discrepancies and errors, and the
+        # checkpoint validate_task_queue builds carries neither for a scanner that was
+        # enabled but never queued. Behind that gate, such a scanner got no failure
+        # reason from here at all.
+        missing_scanners = validation_checkpoint.get_missing_scanners()
+        if missing_scanners:
+            self.logger.warning(
+                f"Found {len(missing_scanners)} scanners missing from queue"
+            )
+            for scanner_name in missing_scanners:
+                self._tracker.update_scanner_state(
+                    scanner_name,
+                    failure_reason="Scanner was expected to be queued but was not found in task queue",
                 )
-                for scanner_name in missing_scanners:
-                    self._tracker.update_scanner_state(
-                        scanner_name,
-                        failure_reason="Scanner was expected to be queued but was not found in task queue",
-                    )
-                    self.logger.debug(
-                        f"Updated failure reason for missing scanner: {scanner_name}"
-                    )
+                self.logger.debug(
+                    f"Updated failure reason for missing scanner: {scanner_name}"
+                )
 
-            for error in validation_checkpoint.errors:
-                self.logger.error(f"Queue validation error: {error}")
+        for error in validation_checkpoint.errors:
+            self.logger.error(f"Queue validation error: {error}")
 
         self.logger.verbose("Queue validation error handling completed")
 
@@ -1019,10 +1021,26 @@ class ValidationCheckpointer:
         else:
             status = ScannerStatus.MISSING
 
+        # The reason the state tracker holds goes on the row, so a backfilled
+        # SKIPPED or MISSING row says why like every other one.
+        recorded = status_info.get("failure_reason")
+        recorded = recorded if isinstance(recorded, str) and recorded else None
+        missing_reason = None
+        skipped_reason = None
+        if status == ScannerStatus.MISSING:
+            missing_reason = (
+                recorded
+                or "it was registered but left no result; ash.log has the cause"
+            )
+        elif status == ScannerStatus.SKIPPED:
+            skipped_reason = recorded or "it was registered but not run"
+
         return ScannerTargetStatusInfo(
             status=status,
             dependencies_satisfied=status_info["dependencies_satisfied"],
             excluded=status_info["excluded"],
+            missing_reason=missing_reason,
+            skipped_reason=skipped_reason,
         )
 
 
@@ -1144,26 +1162,3 @@ class ScannerValidationManager:
     def _get_scanner_state_summary(self) -> Dict[str, List[str]]:
         """Backward-compat alias for ScannerStateTracker.get_scanner_state_summary()."""
         return self._state_tracker.get_scanner_state_summary()
-
-    def retry_scanner_registration(self, missing_scanners: List[str]) -> List[str]:
-        """Placeholder stub — always returns empty list.
-
-        This method previously attempted scanner re-registration but the logic
-        was never implemented. The external caller in scan_phase.py handles an
-        empty return gracefully. Kept for backward compatibility.
-
-        Args:
-            missing_scanners: List of scanner names that are missing from the task queue
-
-        Returns:
-            Empty list (no scanners are ever successfully re-registered)
-        """
-        self.logger.verbose(
-            f"retry_scanner_registration called for {len(missing_scanners)} scanners — placeholder, returning []"
-        )
-        for scanner_name in missing_scanners:
-            self._state_tracker.update_scanner_state(
-                scanner_name,
-                failure_reason="Scanner was missing from task queue, retry attempted",
-            )
-        return []

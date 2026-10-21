@@ -1,21 +1,39 @@
 """ScanResultProcessor — owns result merging and post-scan validation for ScanPhase."""
 
 import json
-import traceback
 from typing import Any
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
-from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+    text_without_values,
+    traceback_text,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.severity_ladder import resolve_missing_levels
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.undecodable_text import recorded
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     exclude_output_dir_results,
     normalize_sarif_result_severities,
     sanitize_sarif_paths,
 )
+
+
+def _declared_tool_version(sarif_report: Any) -> str | None:
+    """The version a scanner's own SARIF run gives its driver, if any."""
+    for run in getattr(sarif_report, "runs", None) or []:
+        driver = getattr(getattr(run, "tool", None), "driver", None)
+        version = getattr(driver, "version", None) or getattr(
+            driver, "semanticVersion", None
+        )
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    return None
 
 
 class ScanResultProcessor:
@@ -50,6 +68,12 @@ class ScanResultProcessor:
             CycloneDXReport,
         )
 
+        # A container is a plain model the scan fills in after it is built, and a
+        # scanner's own report can key a dict by a file name that is not UTF-8
+        # (detect-secrets' output is keyed so). The dump below UTF-8-encodes dict
+        # keys, so the merge reads the container with every name in the record form
+        # (utils/undecodable_text.py); the scanner's object is left as it is.
+        results = recorded(results)
         scanner_name = results.scanner_name
         if scanner_name not in aggregated_results.additional_reports:
             aggregated_results.additional_reports[scanner_name] = {}
@@ -84,6 +108,9 @@ class ScanResultProcessor:
         )
 
         if isinstance(results.raw_results, SarifReport):
+            # First, before anything round-trips the report: once dumped and
+            # re-validated, a level the scanner never stated looks stated.
+            resolve_missing_levels(results.raw_results)
             ASH_LOGGER.verbose(
                 f"{scanner_name}: Processing as SARIF report with "
                 f"{len(results.raw_results.runs[0].results) if results.raw_results.runs and results.raw_results.runs[0].results else 0} results"
@@ -117,13 +144,32 @@ class ScanResultProcessor:
                 and "scanner_version" in results.metadata
             ):
                 scanner_version = results.metadata["scanner_version"]
-            # tool_version is not a field on SarifReport; skip that path
+            # Otherwise the version the scanner's run declares: the scanner put
+            # its own tool_version there, or the tool's native SARIF did. Nothing
+            # writes metadata["scanner_version"], so this is where a scanner's
+            # version comes from, and ASH's own version never stands in for it. A
+            # scanner that did not say gets no version at all.
+            if not scanner_version:
+                scanner_version = _declared_tool_version(sanitized_sarif)
 
             invocation_details: dict = {}
             if hasattr(results, "metadata") and results.metadata:
+                environment_values = config_environment_values(
+                    getattr(self.plugin_context, "config", None)
+                )
                 for key in ("command_line", "working_directory", "arguments"):
                     if key in results.metadata:
-                        invocation_details[key] = results.metadata[key]
+                        value = results.metadata[key]
+                        if key == "command_line" and isinstance(value, str):
+                            value = text_without_values(value, environment_values)
+                        elif key == "arguments" and isinstance(value, (list, tuple)):
+                            value = [
+                                text_without_values(item, environment_values)
+                                if isinstance(item, str)
+                                else item
+                                for item in value
+                            ]
+                        invocation_details[key] = value
                 if "exit_code" in results.metadata or hasattr(results, "exit_code"):
                     invocation_details["exit_code"] = results.metadata.get(
                         "exit_code", results.exit_code
@@ -148,7 +194,7 @@ class ScanResultProcessor:
 
             sanitized_sarif.attach_scanner_details(
                 scanner_name=results.scanner_name,
-                scanner_version=scanner_version or get_ash_version(),
+                scanner_version=scanner_version,
                 invocation_details=invocation_details or {},
             )
 
@@ -220,8 +266,10 @@ class ScanResultProcessor:
                         f"Execution completion discrepancy: scanner {scanner_name} missing"
                     )
         except Exception as e:
-            ASH_LOGGER.warning(f"validate_completion encountered an error: {e}")
-            ASH_LOGGER.debug(traceback.format_exc())
+            ASH_LOGGER.warning(
+                f"validate_completion encountered an error: {error_text(e)}"
+            )
+            ASH_LOGGER.debug(traceback_text())
 
     def validate_result_completeness(
         self, aggregated_results: AshAggregatedResults
@@ -238,9 +286,9 @@ class ScanResultProcessor:
                     )
         except Exception as e:
             ASH_LOGGER.warning(
-                f"validate_result_completeness encountered an error: {e}"
+                f"validate_result_completeness encountered an error: {error_text(e)}"
             )
-            ASH_LOGGER.debug(traceback.format_exc())
+            ASH_LOGGER.debug(traceback_text())
 
     def validate_metrics(self, aggregated_results: AshAggregatedResults) -> None:
         """Log warnings if scanner_results totals don't match summary_stats."""
@@ -261,5 +309,7 @@ class ScanResultProcessor:
                     f"summary_stats total={summary_total}"
                 )
         except Exception as e:
-            ASH_LOGGER.warning(f"validate_metrics encountered an error: {e}")
-            ASH_LOGGER.debug(traceback.format_exc())
+            ASH_LOGGER.warning(
+                f"validate_metrics encountered an error: {error_text(e)}"
+            )
+            ASH_LOGGER.debug(traceback_text())

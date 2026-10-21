@@ -11,6 +11,7 @@ import pytest
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.phases.scan_phase import ScanPhase
+from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
 )
@@ -245,11 +246,6 @@ class TestExecutePhaseLoop:
         scanner_b = _make_scanner_class("beta", enabled=True)
         scan_phase.plugins = [scanner_a, scanner_b]
 
-        # Mock the execution to prevent actual scanning
-        scan_phase._execute_scanners_sequential = MagicMock(
-            return_value=mock_aggregated_results
-        )
-
         result = scan_phase._execute_phase(
             aggregated_results=mock_aggregated_results,
             enabled_scanners=["alpha"],
@@ -269,10 +265,6 @@ class TestExecutePhaseLoop:
             "shellscan", enabled=True, python_only=False
         )
         scan_phase.plugins = [py_scanner, shell_scanner]
-
-        scan_phase._execute_scanners_sequential = MagicMock(
-            return_value=mock_aggregated_results
-        )
 
         result = scan_phase._execute_phase(
             aggregated_results=mock_aggregated_results,
@@ -306,6 +298,38 @@ class TestErrorHandling:
                 parallel=False,
             )
 
+    def test_a_failure_is_shown_as_given_in_the_progress_display(
+        self, scan_phase, mock_aggregated_results, monkeypatch
+    ):
+        """The phase's summary row quotes the error's text.
+
+        The progress bar's TextColumn reads a task description as markup, so an
+        error naming a path under a directory called "[/x]" raised MarkupError the
+        next time the display drew, and "[bold]" in it vanished.
+        """
+        from rich.console import Console
+
+        from automated_security_helper.core.progress import LiveProgressDisplay
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        monkeypatch.setattr(ASH_LOGGER, "handlers", list(ASH_LOGGER.handlers))
+        display = LiveProgressDisplay(show_progress=True, color_system=None)
+        scan_phase.progress_display = display
+        text = "audit of pkgs/[/x]/package-lock.json failed: [bold]boom"
+        scan_phase.validation_manager.validate_scanner_enablement.side_effect = (
+            RuntimeError(text)
+        )
+
+        with pytest.raises(RuntimeError):
+            scan_phase._execute_phase(
+                aggregated_results=mock_aggregated_results, parallel=False
+            )
+
+        console = Console(record=True, width=400, color_system=None)
+        console.print(display.progress)
+        rendered = console.export_text()
+        assert f"Error: {text}" in rendered, rendered
+
     def test_scanner_instantiation_failure_continues(
         self, scan_phase, mock_aggregated_results
     ):
@@ -316,10 +340,6 @@ class TestErrorHandling:
 
         good_cls = _make_scanner_class("good_scanner", enabled=True)
         scan_phase.plugins = [bad_cls, good_cls]
-
-        scan_phase._execute_scanners_sequential = MagicMock(
-            return_value=mock_aggregated_results
-        )
 
         # Should not raise, just log the error and continue
         result = scan_phase._execute_phase(
@@ -334,19 +354,18 @@ class TestErrorHandling:
         scanner_plugin.__class__.__name__ = "exploder"
         scanner_plugin.config.name = "exploder"
 
-        # Initialize state that _execute_scanner expects
         scan_phase._completed_scanners = []
 
-        # Make _execute_scanner raise
-        scan_phase._execute_scanner = MagicMock(
-            side_effect=RuntimeError("scanner crash")
-        )
-
-        results = scan_phase._safe_execute_scanner(
-            scanner_name="exploder",
-            scanner_plugin=scanner_plugin,
-            scan_targets=[{"path": Path("/tmp"), "type": "source"}],  # nosec B108
-        )
+        with patch.object(
+            ScannerExecutor,
+            "_execute_scanner",
+            side_effect=RuntimeError("scanner crash"),
+        ):
+            results = scan_phase._safe_execute_scanner(
+                scanner_name="exploder",
+                scanner_plugin=scanner_plugin,
+                scan_targets=[{"path": Path("/tmp"), "type": "source"}],  # nosec B108
+            )
 
         assert len(results) == 1
         assert results[0].status == ScannerStatus.FAILED
@@ -376,7 +395,7 @@ class TestErrorHandling:
 
         call_order = []
 
-        def side_effect_fn(scanner_name, scanner_plugin, scan_targets):
+        def side_effect_fn(executor_self, scanner_name, scanner_plugin, scan_targets):
             call_order.append(scanner_name)
             if scanner_name == "failing_scanner":
                 raise RuntimeError("fail")
@@ -384,14 +403,22 @@ class TestErrorHandling:
                 ScanResultsContainer(
                     scanner_name=scanner_name, status=ScannerStatus.PASSED
                 )
-            ]
+            ], True
 
-        scan_phase._safe_execute_scanner = side_effect_fn
-        scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
-
-        scan_phase._execute_scanners_sequential(
-            aggregated_results=mock_aggregated_results
+        scan_phase._result_processor = MagicMock()
+        scan_phase._result_processor.process_container.return_value = (
+            mock_aggregated_results
         )
+
+        with patch.object(
+            ScannerExecutor,
+            "_safe_execute_scanner",
+            autospec=True,
+            side_effect=side_effect_fn,
+        ):
+            scan_phase._execute_scanners_sequential(
+                aggregated_results=mock_aggregated_results
+            )
 
         # Both scanners should have been attempted
         assert len(call_order) == 2
@@ -427,16 +454,22 @@ class TestProgressTracking:
             ("scanner_a", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
             ("scanner_b", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
-        scan_phase._safe_execute_scanner = MagicMock(
-            return_value=[
-                ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
-            ]
+        scan_phase._result_processor = MagicMock()
+        scan_phase._result_processor.process_container.return_value = (
+            mock_aggregated_results
         )
-        scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
-        scan_phase._execute_scanners_sequential(
-            aggregated_results=mock_aggregated_results
-        )
+        with patch.object(
+            ScannerExecutor,
+            "_safe_execute_scanner",
+            return_value=(
+                [ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)],
+                True,
+            ),
+        ):
+            scan_phase._execute_scanners_sequential(
+                aggregated_results=mock_aggregated_results
+            )
 
         # add_task called once per scanner
         assert mock_progress_display.add_task.call_count >= 2
@@ -452,7 +485,7 @@ class TestProgressTracking:
             parallel=False,
         )
 
-        # The final update_progress should mention 0 scanners executed (no plugins)
+        # The phase's own row reaches 100% (no plugins, so 0 scanners executed)
         calls = [str(c) for c in scan_phase.progress_display.update_task.call_args_list]
         # Check that 100% progress was reached
         final_calls = [c for c in calls if "100" in c]
@@ -636,15 +669,15 @@ class TestParallelExecution:
             ("solo", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._max_workers = 4
-        scan_phase._execute_scanners_sequential = MagicMock(
-            return_value=mock_aggregated_results
-        )
 
-        scan_phase._execute_scanners_parallel(
-            aggregated_results=mock_aggregated_results
-        )
+        with patch.object(
+            ScannerExecutor, "run_sequential", return_value=mock_aggregated_results
+        ) as mock_seq:
+            scan_phase._execute_scanners_parallel(
+                aggregated_results=mock_aggregated_results
+            )
 
-        scan_phase._execute_scanners_sequential.assert_called_once()
+        mock_seq.assert_called_once()
 
     def test_parallel_submits_multiple_scanners(
         self, scan_phase, mock_aggregated_results
@@ -657,16 +690,13 @@ class TestParallelExecution:
         ]
         scan_phase._max_workers = 2
 
-        # Make _safe_execute_scanner return passing results
-        scan_phase._safe_execute_scanner = MagicMock(
-            return_value=[
-                ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
-            ]
+        scan_phase._result_processor = MagicMock()
+        scan_phase._result_processor.process_container.return_value = (
+            mock_aggregated_results
         )
-        scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
         with patch(
-            "automated_security_helper.core.phases.scan_phase.ThreadPoolExecutor"
+            "automated_security_helper.core.phases.scanner_executor.ThreadPoolExecutor"
         ) as MockPool:
             mock_executor = MagicMock()
             MockPool.return_value.__enter__ = MagicMock(return_value=mock_executor)
@@ -674,17 +704,16 @@ class TestParallelExecution:
 
             # Mock futures
             mock_future = MagicMock()
-            mock_future.result.return_value = [
-                ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
-            ]
-            mock_future.scanner_info = {
-                "name": "scanner_1",
-                "task_key": "scanner_1_task",
-            }
+            mock_future.result.return_value = (
+                [ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)],
+                True,
+            )
+            mock_future.scanner_name = "scanner_1"
+            mock_future.scanner_task_key = "scanner_1_task"
             mock_executor.submit.return_value = mock_future
 
             with patch(
-                "automated_security_helper.core.phases.scan_phase.as_completed",
+                "automated_security_helper.core.phases.scanner_executor.as_completed",
                 return_value=[mock_future, mock_future, mock_future],
             ):
                 scan_phase._execute_scanners_parallel(
@@ -703,10 +732,13 @@ class TestParallelExecution:
             ("good_scan", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._max_workers = 2
-        scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
+        scan_phase._result_processor = MagicMock()
+        scan_phase._result_processor.process_container.return_value = (
+            mock_aggregated_results
+        )
 
         with patch(
-            "automated_security_helper.core.phases.scan_phase.ThreadPoolExecutor"
+            "automated_security_helper.core.phases.scanner_executor.ThreadPoolExecutor"
         ) as MockPool:
             mock_executor = MagicMock()
             MockPool.return_value.__enter__ = MagicMock(return_value=mock_executor)
@@ -714,34 +746,33 @@ class TestParallelExecution:
 
             failing_future = MagicMock()
             failing_future.result.side_effect = RuntimeError("thread crash")
-            failing_future.scanner_info = {
-                "name": "crash_scan",
-                "task_key": "crash_scan_task",
-            }
+            failing_future.scanner_name = "crash_scan"
+            failing_future.scanner_task_key = "crash_scan_task"
 
             passing_future = MagicMock()
-            passing_future.result.return_value = [
-                ScanResultsContainer(
-                    scanner_name="good_scan", status=ScannerStatus.PASSED
-                )
-            ]
-            passing_future.scanner_info = {
-                "name": "good_scan",
-                "task_key": "good_scan_task",
-            }
+            passing_future.result.return_value = (
+                [
+                    ScanResultsContainer(
+                        scanner_name="good_scan", status=ScannerStatus.PASSED
+                    )
+                ],
+                True,
+            )
+            passing_future.scanner_name = "good_scan"
+            passing_future.scanner_task_key = "good_scan_task"
 
             mock_executor.submit.side_effect = [failing_future, passing_future]
 
             with patch(
-                "automated_security_helper.core.phases.scan_phase.as_completed",
+                "automated_security_helper.core.phases.scanner_executor.as_completed",
                 return_value=[failing_future, passing_future],
             ):
                 scan_phase._execute_scanners_parallel(
                     aggregated_results=mock_aggregated_results
                 )
 
-            # _process_results should have been called for both failure and success
-            assert scan_phase._process_results.call_count >= 2
+            # Results are processed for both the failure and the success
+            assert scan_phase._result_processor.process_container.call_count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -897,15 +928,20 @@ class TestSequentialExecution:
         scan_phase._scanner_tasks = [
             ("none_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
-        scan_phase._safe_execute_scanner = MagicMock(return_value=None)
-        scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
-
-        scan_phase._execute_scanners_sequential(
-            aggregated_results=mock_aggregated_results
+        scan_phase._result_processor = MagicMock()
+        scan_phase._result_processor.process_container.return_value = (
+            mock_aggregated_results
         )
 
-        # _process_results should have been called with a FAILED container
-        call_args = scan_phase._process_results.call_args
+        with patch.object(
+            ScannerExecutor, "_safe_execute_scanner", return_value=(None, False)
+        ):
+            scan_phase._execute_scanners_sequential(
+                aggregated_results=mock_aggregated_results
+            )
+
+        # The processor received a FAILED container
+        call_args = scan_phase._result_processor.process_container.call_args
         container = (
             call_args[1]["results"] if "results" in call_args[1] else call_args[0][0]
         )
@@ -923,7 +959,7 @@ class TestSequentialExecution:
 
         call_order = []
 
-        def mock_safe_exec(scanner_name, scanner_plugin, scan_targets):
+        def mock_safe_exec(executor_self, scanner_name, scanner_plugin, scan_targets):
             call_order.append(scanner_name)
             if scanner_name == "s2":
                 raise RuntimeError("s2 failed")
@@ -931,14 +967,22 @@ class TestSequentialExecution:
                 ScanResultsContainer(
                     scanner_name=scanner_name, status=ScannerStatus.PASSED
                 )
-            ]
+            ], True
 
-        scan_phase._safe_execute_scanner = mock_safe_exec
-        scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
-
-        scan_phase._execute_scanners_sequential(
-            aggregated_results=mock_aggregated_results
+        scan_phase._result_processor = MagicMock()
+        scan_phase._result_processor.process_container.return_value = (
+            mock_aggregated_results
         )
+
+        with patch.object(
+            ScannerExecutor,
+            "_safe_execute_scanner",
+            autospec=True,
+            side_effect=mock_safe_exec,
+        ):
+            scan_phase._execute_scanners_sequential(
+                aggregated_results=mock_aggregated_results
+            )
 
         # All three scanners should have been attempted
         assert call_order == ["s1", "s2", "s3"]
@@ -994,9 +1038,6 @@ class TestWorkDirHandling:
 
         scanner_cls = _make_scanner_class("tf_scan", enabled=True)
         scan_phase.plugins = [scanner_cls]
-        scan_phase._execute_scanners_sequential = MagicMock(
-            return_value=mock_aggregated_results
-        )
 
         scan_phase._execute_phase(
             aggregated_results=mock_aggregated_results,

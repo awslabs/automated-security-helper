@@ -487,7 +487,13 @@ runs:
         ash --version
         OFFLINE_FLAG=""
         if [ "${ASH_TEST_OFFLINE}" = "true" ]; then
-          OFFLINE_FLAG="--offline"
+          # npm-audit asks the registry, so offline it reports MISSING for every
+          # project with a lockfile beside a package.json, and deploy/cdk and
+          # deploy/cdk-constructs are two; the scan then exits 1 as incomplete.
+          # Excluded here as docs/content/faq.md advises for an offline scan
+          # ("How do I run ASH in an offline/air-gapped environment?"). The
+          # online legs still run it. Unquoted below on purpose: three words.
+          OFFLINE_FLAG="--offline --exclude-scanners npm-audit"
         fi
         # Teed so the cache report below can count the build steps the layer cache
         # served. pipefail (bash's default here) keeps ash's exit status.
@@ -687,6 +693,9 @@ runs:
     # 1, so a refusal's 3 would arrive as 1. The custom shell also drops the
     # `$ErrorActionPreference = 'stop'` the built-in one puts first and the
     # `exit $LASTEXITCODE` it puts last, so the script sets both itself.
+    # No matrix cell runs the community config through PowerShell, so this block is
+    # checked by a test instead: tests/unit/test_powershell_wrapper_matches_ash.py
+    # runs this block as written.
     - name: Validate ASH using PowerShell
       if: inputs.method == 'powershell'
       shell: pwsh -File {0}

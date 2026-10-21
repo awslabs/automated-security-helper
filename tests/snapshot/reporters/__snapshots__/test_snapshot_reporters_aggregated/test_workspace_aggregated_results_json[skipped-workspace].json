@@ -2,7 +2,7 @@
   "name": "ASH Workspace Scan: workspace",
   "description": "Automated Security Helper - aggregated workspace report. One SARIF run per project; see the 'workspace' block for attribution and per-project verdicts.",
   "metadata": {
-    "report_id": "ASH-WORKSPACE-snapshot-with-skipped",
+    "report_id": "ASH-WORKSPACE-snapshot-with-skipped-20260115120042-000000000003",
     "project_name": "workspace",
     "tool_version": "<ASH_VERSION>",
     "description": "Automated Security Helper workspace-mode aggregated report"
@@ -30,10 +30,18 @@
           "npm-audit": "MISSING",
           "bandit": "FAILED"
         },
+        "scanner_reasons": {
+          "npm-audit": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message"
+        },
         "incomplete_scanners": [
           "npm-audit"
         ],
         "inputs_not_scanned": [],
+        "incomplete_scanner_details": {
+          "npm-audit": "MISSING"
+        },
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": true,
@@ -61,8 +69,12 @@
           "checkov": "FAILED",
           "semgrep": "PASSED"
         },
+        "scanner_reasons": {},
         "incomplete_scanners": [],
         "inputs_not_scanned": [],
+        "incomplete_scanner_details": {},
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": false,
@@ -87,8 +99,12 @@
         "output_path": "projects/docs",
         "sarif_run_index": null,
         "scanners": {},
+        "scanner_reasons": {},
         "incomplete_scanners": [],
         "inputs_not_scanned": [],
+        "incomplete_scanner_details": {},
+        "partial_coverage_scanners": [],
+        "stale_content_databases": [],
         "no_scanner_ran": false,
         "incomplete_converters": {},
         "scan_incomplete": false,
@@ -120,7 +136,7 @@
       "actionable_finding_count": 1,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 125
+      "exit_code": 0
     },
     "checkov": {
       "status": "FAILED",
@@ -128,7 +144,7 @@
       "actionable_finding_count": 1,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 125
+      "exit_code": 0
     },
     "npm-audit": {
       "status": "MISSING",
@@ -136,7 +152,8 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": false,
       "excluded": false,
-      "exit_code": 125
+      "exit_code": 0,
+      "missing_reason": "api: its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message"
     },
     "semgrep": {
       "status": "PASSED",
@@ -144,7 +161,7 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 125
+      "exit_code": 0
     }
   },
   "converter_results": {},

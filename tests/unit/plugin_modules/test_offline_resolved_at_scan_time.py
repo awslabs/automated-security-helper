@@ -321,8 +321,15 @@ def test_grype_online_db_bound_is_set_online(online, test_plugin_context):
 
 
 def _scanner_options_with_offline() -> set:
-    """Every scanner options class shipped in plugin_modules that has an ``offline`` field."""
+    """Every scanner options class shipped in plugin_modules that declares ``offline``.
+
+    Declares it itself: ``ScannerOptionsBase`` also declares it, because
+    ``_scanner_offline`` reads it for every scanner, so every class has the field.
+    A scanner that declares its own is one whose tool can go online, and that is
+    what needs a case below.
+    """
     import importlib
+    import inspect
     import pkgutil
 
     import automated_security_helper.plugin_modules as plugin_modules
@@ -338,7 +345,7 @@ def _scanner_options_with_offline() -> set:
         cls = stack.pop()
         stack.extend(cls.__subclasses__())
         if cls.__module__.startswith(plugin_modules.__name__) and (
-            "offline" in cls.model_fields
+            "offline" in inspect.get_annotations(cls)
         ):
             found.add(cls)
     return found
@@ -365,7 +372,9 @@ def test_offline_option_default_is_a_plain_false():
     longer changes behavior; it would make config dumps and the generated schema
     depend on the environment they were produced in.
     """
-    for options_cls in _scanner_options_with_offline():
+    from automated_security_helper.base.options import ScannerOptionsBase
+
+    for options_cls in _scanner_options_with_offline() | {ScannerOptionsBase}:
         field = options_cls.model_fields["offline"]
         assert field.default_factory is None, options_cls.__qualname__
         assert field.default is False, options_cls.__qualname__

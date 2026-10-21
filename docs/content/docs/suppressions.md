@@ -17,11 +17,11 @@ Key differences:
 | Visibility  | Files not scanned at all     | Findings still visible but marked as suppressed |
 | Granularity | File-level only              | Rule ID, file path, line number, package, symbol |
 | Tracking    | No tracking of ignored files | Suppressed findings are tracked and reported    |
-| Expiration  | No expiration mechanism      | Can set expiration dates                        |
+| Expiration  | Optional `expiration` date   | Optional `expiration` date                      |
 
 ## Configuring Suppressions
 
-Suppressions are defined in the `.ash.yaml` configuration file under the `global_settings` section:
+Suppressions are defined in the ASH configuration file (`.ashrc.yaml`, or the config file your project already has) under the `global_settings` section:
 
 ```yaml
 global_settings:
@@ -54,10 +54,39 @@ Each suppression rule can include the following properties:
 | `package_path`    | No  | Only suppress findings about the package copy installed at this path |
 | `symbol`          | No  | Only suppress findings inside the function or class with this qualified name |
 
+A key that is not in this table refuses the configuration (exit code 3; exit code 4
+in a workspace policy file), and the error suggests the key that was probably meant:
+`ruleId: B101` fails with `Unknown key 'ruleId' (did you mean 'rule_id'?)`. The same
+goes for an ignore path, whose keys are `path`, `reason` and `expiration`.
+
 ### Matching Rules
 
 - **Rule ID**: Must match exactly the rule ID reported by the scanner
-- **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`). To suppress the findings in a directory, write `build/**/*`, which covers every file below `build` and not a file named `build` (`build/**` covers that file too): unlike an ignore path, a suppression path ending in `/` (`build/`) matches no file, and ASH warns after the scan about each such suppression that matched nothing, naming the `build/**/*` form. An ignore path ending in `/` does name the directory; see [Global settings](configuration-guide.md#global-settings).
+- **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`), relative to
+  the scanned directory and matched case-sensitively on every platform, so
+  `tests/**` does not match `Tests/x.py`. To suppress the findings in a
+  directory, write `vendor/**/*`, which covers every file below `vendor` and not a
+  file named `vendor` (`vendor/**` covers that file too, because a trailing `**` can
+  match nothing at all). A suppression path ending in `/` keeps its literal meaning,
+  so `vendor/` matches no file, and ASH warns after the scan about each such
+  suppression that matched nothing, naming the `vendor/**/*` form; an ignore path
+  ending in `/` does name the
+  directory's files (see [Global Settings](configuration-guide.md#global-settings)).
+  A path is compared as it is given: a leading `./` is not dropped, so `./src/a.py`
+  matches no finding, and `./`, `.\`, `.` and an empty path match no file. A
+  finding's location is read as the file it names, so one a scanner reports as
+  `./src/a.py`, `src/./a.py` or `src//a.py` is matched as `src/a.py`; a `..` in it
+  is kept. A `file://` location is read as its path, and one with another
+  scheme, such as `https://host/x`, is compared as written, so no pattern for a
+  file in the tree matches it. A bare
+  `vendor`, with no slash and no glob, names only the path
+  `vendor` itself and matches nothing inside the directory; `ash config lint`
+  points this out. A path that starts with `/`, or with a drive such as `C:\`,
+  matches nothing, since paths are matched relative to the scanned directory:
+  write `vendor/**/*`, not `/vendor/**/*` or the directory's absolute path. `ash
+  config lint` and `ash config validate` warn about one, name the relative spelling
+  when there is one, and in an `extends` chain name the file that holds it. The
+  same rules apply to the `path` of an ignore path, apart from the trailing `/`.
 - **Line Range**: If specified, only findings within this line range will be suppressed
 - **Package fields**: If specified, only findings about that package copy will be suppressed. See [Suppressing one package copy](#suppressing-one-package-copy).
 - **Symbol**: If specified, only findings inside that function, method or class will be suppressed, wherever it sits in the file. See [Suppressing by symbol](#suppressing-by-symbol).
@@ -82,8 +111,19 @@ The package fields narrow a suppression to one copy:
   `deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion`. Glob, with
   `**` support like `path`. ASH reports it with forward slashes and no drive
   letter on every platform, so one entry works on Windows, Linux and macOS.
-  `path` and `package_path` treat `\` as a separator, so a pattern written with
-  backslashes compares the same way everywhere.
+  `path` and `package_path` treat `\` as a separator in the pattern, so a
+  pattern written with backslashes compares the same way everywhere. A `\` in a
+  file's own path is part of its name, as it is on Linux and macOS, so
+  `tests/**` does not match a file named `tests\other.py`. The patterns `./`,
+  `.\`, `.` and an empty path match no file.
+  A file whose name is not valid UTF-8 is reported with each such byte written
+  as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches
+  it written that way, since the `\` of a `\udcNN` escape is part of the name and
+  not a separator, or with `?` for that `\` (`secr?udce9t.py`), or as a glob
+  such as `secr*t.py`. An ignore path matches such a file the same way when ASH
+  lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text
+  reads as the same name, so in a tree that holds both files, both are reported
+  under that name and a path that matches one matches both.
 
 Every package field you set has to match. A finding that doesn't report a field
 you set is not suppressed, so when a scanner can't tell which copy a finding
@@ -408,11 +448,33 @@ ASH's own output directory is not an ignore path. Findings located there, outsid
 
 ## Expiring Suppressions
 
-When a suppression has an expiration date:
+Suppressions and ignore paths both take an optional `expiration`, and it works the
+same way on each, and on the scanner options that take the same entries (bandit
+`excluded_paths`, checkov `skip_path`, syft `exclude`):
 
-1. The suppression will only be applied until that date
-2. When the date is reached, the suppression will no longer be applied
-3. ASH will warn you when suppressions are about to expire within 30 days
+1. The date is `YYYY-MM-DD`, written as a quoted string (`'2027-06-30'`). Any other
+   format refuses the configuration, and the scan exits with code 3.
+2. The entry applies until that date, read on the local clock of the host running
+   the scan; in container mode that clock is UTC, because the ASH image sets
+   `TZ=UTC`. On the expiration date itself the entry no longer applies: an expired
+   suppression's findings count again, and the files an expired ignore path excluded
+   are scanned again. (A `content_db_staleness_overrides` entry is different: it
+   stops applying at 00:00 UTC on its date, whatever the host's time zone.)
+3. For the 30 days before the date, every scan logs a warning that names the entry.
+   From the date on, one warning at the start of each scan lists every ignore path
+   and suppression that has expired, so a scan whose result changed says why.
+   `ash config lint` reports expired entries, and malformed dates, by the same rule.
+
+```yaml
+global_settings:
+  ignore_paths:
+    - path: 'vendor/legacy-sdk/**'
+      reason: 'Vendored copy, removed by the SDK upgrade'
+      expiration: '2027-06-30'
+```
+
+An expired entry stays in the configuration file, and in the `ash_config` section of
+`ash_aggregated_results.json`; only its effect stops. Remove it or move its date.
 
 This helps ensure that temporary exceptions don't become permanent security gaps.
 
@@ -503,7 +565,7 @@ ash --mode local
 cat .ash/ash_output/reports/ash.unused-suppressions.md
 
 # 3. Edit configuration to remove unused suppressions
-vim .ash/.ash.yaml
+vim .ashrc.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
 
 # 4. Re-run scan to verify
 ash --mode local
@@ -511,7 +573,7 @@ ash --mode local
 
 ### Configuration Options
 
-The unused suppressions reporter is enabled by default. To customize its behavior, add to your `.ash/.ash.yaml`:
+The unused suppressions reporter is enabled by default. To customize its behavior, add to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 reporters:

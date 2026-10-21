@@ -51,6 +51,7 @@ from automated_security_helper.workspace.execution import (
     _project_config_with_policy,
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
+from tests.utils.helpers import mark_git_checkout
 
 REMEDY = (
     "move the file outside every git checkout, or pass the setting with "
@@ -121,7 +122,7 @@ def _merge(*parts: dict) -> dict:
 
 def _tree(w: Path) -> None:
     """W/repo, a checkout, with the workspace W/repo/ws of two projects."""
-    (w / "repo" / ".git").mkdir(parents=True)
+    mark_git_checkout(w / "repo")
     ws = w / "repo" / "ws"
     (ws / "bare").mkdir(parents=True)
     (ws / "bare" / "a.py").write_text("x = 1\n", encoding="utf-8")
@@ -136,14 +137,14 @@ def _tree(w: Path) -> None:
 
 def _config(layout: str, w: Path) -> Path:
     if layout == "root-outside-every-checkout-with-a-base-in-one":
-        (w / "ops" / "vendor" / ".git").mkdir(parents=True)
+        mark_git_checkout(w / "ops" / "vendor")
         _write(w / "ops" / "vendor" / "base.yaml", {"project_name": "base", **CHOSEN})
         return _write(
             w / "ops" / "ash.yaml",
             {"project_name": "operator", "extends": "vendor/base.yaml", **OWN},
         )
     if layout == "root-in-another-checkout":
-        (w / "ops" / ".git").mkdir(parents=True)
+        mark_git_checkout(w / "ops")
         return _write(
             w / "ops" / "ash.yaml", _merge({"project_name": "o"}, CHOSEN, OWN)
         )
@@ -286,7 +287,9 @@ def _scan_inside(cmd: List[str], fs: Path, monkeypatch) -> dict:
             fs / fields["destination"].lstrip("/"),
         )
         if source.is_dir():
-            shutil.copytree(source, destination, dirs_exist_ok=True)
+            # symlinks=True keeps links as links, so a base that links out of
+            # a mount is as absent inside the copy as inside the container.
+            shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True)
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(source, destination)
@@ -298,7 +301,20 @@ def _scan_inside(cmd: List[str], fs: Path, monkeypatch) -> dict:
                 return str(fs / arg.lstrip("/"))
         return arg
 
-    args = [inside(arg) for arg in cmd[cmd.index("ash") + 1 :]]
+    handed = cmd[cmd.index("ash") + 1 :]
+    # Every absolute path handed to the scan inside names a container mount.
+    # A host path on the command line would resolve here, on the host the
+    # harness runs on, and parity would then measure the wrong boundary.
+    outside = [
+        arg
+        for arg in handed
+        if arg.startswith("/")
+        and not any(
+            arg == root or arg.startswith(root + "/") for root in CONTAINER_ROOTS
+        )
+    ]
+    assert outside == [], f"host paths handed to the scan inside: {outside}"
+    args = [inside(arg) for arg in handed]
     results: dict = {}
 
     def run_ash_scan(**kwargs):
@@ -413,7 +429,7 @@ def _expect(layout: str, result: Tuple[Dict[str, object], List[str]]) -> None:
 
 def _tool_path_layout(w: Path) -> Tuple[Path, Path]:
     """A config in another checkout (W/ops) that names a tool file in that checkout."""
-    (w / "ops" / ".git").mkdir(parents=True)
+    mark_git_checkout(w / "ops")
     rules = w / "ops" / "rules.yaml"
     rules.write_text("", encoding="utf-8")
     config = _write(
@@ -482,7 +498,7 @@ def _env_config(layout: str, w: Path) -> Path:
     if layout == "env-outside-every-checkout":
         return _write(w / "env" / "ash-env.yaml", ENV_GRANT)
     if layout == "env-in-another-checkout":
-        (w / "envco" / ".git").mkdir(parents=True)
+        mark_git_checkout(w / "envco")
         return _write(w / "envco" / "ash-env.yaml", ENV_GRANT)
     if layout == "env-in-the-scanned-checkout":
         return _write(w / "repo" / "ci" / "ash-env.yaml", ENV_GRANT)

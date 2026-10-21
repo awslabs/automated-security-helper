@@ -56,7 +56,7 @@
     "true",
     "false"
    ],
-   "Description": "Scan only files the pull request changed (ASH's --changed-files-only --base-ref against the destination commit). Off by default: with it on, findings in files the pull request did not change stop counting, and so do findings in any file whose name git prints quoted (non-ASCII, quote, backslash or control characters), so such a pull request can pass."
+   "Description": "Scan only files the pull request changed (ASH's --changed-files-only --base-ref against the destination commit). Every file is still cloned and scanned, so scanners keep whole-repository context such as lockfiles and the scan takes as long as a full one; findings in other files are dropped from the verdict and the comment. Off by default: with it on, findings in files the pull request did not change stop counting, and so do findings in any file whose name git prints quoted (non-ASCII, quote, backslash or control characters), so such a pull request can pass."
   },
   "MinSeverity": {
    "Type": "String",

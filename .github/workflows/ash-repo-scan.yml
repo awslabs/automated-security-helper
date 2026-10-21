@@ -135,6 +135,9 @@ jobs:
     permissions:
       contents: read # Required for the checkout in the called workflow
       security-events: write # Required to upload SARIF results to code scanning
+    with:
+      # The exact artifact the scan job uploaded, in whichever attempt it ran.
+      artifact-id: ${{ needs.ash.outputs.artifact-id }}
 
   # WHY THIS JOB EXISTS
   #

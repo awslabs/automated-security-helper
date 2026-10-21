@@ -103,8 +103,12 @@ For air-gapped environments, pre-populate the Grype database cache and run in of
 grype db update
 # Copy ~/.cache/grype to the air-gapped host
 
-ash --mode container --offline
+ash --mode container --offline --no-build
 ```
+
+`--no-build` runs the image already on the host. Without it container mode rebuilds
+the image first, and the first build on a new UTC day upgrades the OS packages and
+downloads the databases again, which needs network access.
 
 In local mode, ASH reads grype's database from `GRYPE_DB_CACHE_DIR` when it is set,
 else from `$XDG_CACHE_HOME/grype/db` when `XDG_CACHE_HOME` is an absolute path, else

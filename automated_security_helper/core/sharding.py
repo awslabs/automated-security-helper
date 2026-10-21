@@ -95,11 +95,18 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
+
+from automated_security_helper.utils.undecodable_text import StrippedRecordModel
 
 from automated_security_helper.core.exceptions import (
     ShardCoverageError,
     ShardSelectionError,
+)
+from automated_security_helper.utils.terminal_text import (
+    NAMED_HASH_COMMAND,
+    controls_shown,
+    hash_command_broken,
 )
 
 __all__ = [
@@ -108,12 +115,33 @@ __all__ = [
     "ShardSelectionError",
     "partition_scanners",
     "scanners_to_exclude",
+    "shown_shard_text",
     "validate_shard_selection",
     "verify_shard_coverage",
 ]
 
 
-class ShardAssignment(BaseModel):
+def shown_shard_text(value: object) -> str:
+    """*value* as a refusal or a warning about shard results shows it.
+
+    For what a shard or the operator chose: scanner names, statuses, paths. Any job
+    in the matrix wrote the shard results, so a name can hold an ESC sequence the
+    terminal would act on, or a newline followed by a line GitHub Actions reads as
+    a workflow command. Each character utils/terminal_text.py shows rather than
+    prints (controls, format characters, the line and paragraph separators, a lone
+    surrogate, and the private-use and unassigned code points) is written as its
+    escape there, ``\\xNN``, ``\\uNNNN`` or ``\\UNNNNNNNN``, newline, tab and
+    carriage return included, so the value cannot
+    start a line of its own; a backslash run that would read as an escape is
+    doubled, one to one. The first "#" of a "##name[" command is written as
+    ``\\x23``. A "::" in the value is left alone: GitHub reads one only at the start
+    of a line, which the value no longer reaches.
+    """
+    text = controls_shown(str(value), keep_layout=False)
+    return NAMED_HASH_COMMAND.sub(hash_command_broken, text)
+
+
+class ShardAssignment(StrippedRecordModel):
     """What one shard was actually asked to run.
 
     Recorded on each shard's results so ``ash merge`` can verify coverage from the
@@ -179,13 +207,36 @@ class ShardAssignment(BaseModel):
         default=None,
         description=(
             "The subset of assigned_scanners this shard actually intended to run, "
-            "after the --scanners allowlist, --exclude-scanners and each scanner's "
-            "own enabled flag. A third field rather than a narrowing of "
+            "after the --scanners allowlist, --exclude-scanners, --python-only and "
+            "each scanner's own enabled flag. A third field rather than a narrowing of "
             "assigned_scanners, because that field's breadth is load-bearing for "
             "two existing readers -- see the class docstring. Intent and not "
             "outcome: a scanner whose tool is absent stays here, because 'nobody "
             "asked for it' and 'nobody could run it' route to different people. "
             "None on results written before this field existed."
+        ),
+    )
+    intended_scanners: list[str] | None = Field(
+        default=None,
+        description=(
+            "Every candidate scanner this executor's selection asks for, whichever "
+            "shard owns it: candidate_scanners after the --scanners allowlist, "
+            "--exclude-scanners, --python-only and each scanner's own enabled "
+            "flag. Unlike selected_scanners, which covers assigned_scanners only, "
+            "it covers every candidate. It lets ash merge tell a scanner no job "
+            "asked for, which is the operator's choice, from one some job asked "
+            "for and its owner did not, which is a coverage hole. None on results "
+            "written before this field existed."
+        ),
+    )
+    python_only: bool | None = Field(
+        default=None,
+        description=(
+            "Whether this shard ran with --python-only. ash merge reads it to tell "
+            "a sharded --python-only scan, where every shard leaves the non-Python "
+            "scanners out, from a matrix whose jobs disagree on the flag, where a "
+            "scanner one shard left out ran nowhere. None on results written before "
+            "this field existed."
         ),
     )
 
@@ -389,7 +440,8 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
         for scanner in _normalized(assignment.assigned_scanners):
             if scanner in claimed:
                 overlaps.append(
-                    f"{scanner} (shards {claimed[scanner]} and {assignment.shard_index})"
+                    f"{shown_shard_text(scanner)} "
+                    f"(shards {claimed[scanner]} and {assignment.shard_index})"
                 )
             else:
                 claimed[scanner] = assignment.shard_index
@@ -448,8 +500,8 @@ def _verify_selection_within_assignment(
             holder = owner.get(scanner)
             if holder is not None and holder != assignment.shard_index:
                 trespasses.append(
-                    f"{scanner} (selected by shard {assignment.shard_index}, "
-                    f"assigned to shard {holder})"
+                    f"{shown_shard_text(scanner)} (selected by shard "
+                    f"{assignment.shard_index}, assigned to shard {holder})"
                 )
 
     if trespasses:
@@ -509,7 +561,8 @@ def _verify_candidate_agreement(
     candidate_sets = {tuple(_normalized(a.candidate_scanners)) for a in with_candidates}
     if len(candidate_sets) > 1:
         detail = "; ".join(
-            f"shard {a.shard_index}: {', '.join(_normalized(a.candidate_scanners))}"
+            f"shard {a.shard_index}: "
+            f"{', '.join(map(shown_shard_text, _normalized(a.candidate_scanners)))}"
             for a in sorted(with_candidates, key=lambda a: a.shard_index)
         )
         raise ShardCoverageError(
@@ -526,16 +579,16 @@ def _verify_candidate_agreement(
     if uncovered:
         raise ShardCoverageError(
             f"These scanners were candidates on every shard but assigned to none: "
-            f"{', '.join(uncovered)}. The partition did not cover the set it was "
-            f"taken from, so no shard ran them and the merged report would not "
-            f"say so."
+            f"{', '.join(map(shown_shard_text, uncovered))}. The partition did not "
+            f"cover the set it was taken from, so no shard ran them and the merged "
+            f"report would not say so."
         )
 
     unexpected = sorted(set(claimed) - candidates)
     if unexpected:
         raise ShardCoverageError(
             f"These scanners were assigned to a shard but are not in the candidate "
-            f"set: {', '.join(unexpected)}. An assignment that names a scanner the "
-            f"executor did not resolve cannot have been produced by partitioning "
-            f"that set, so the provenance does not describe this run."
+            f"set: {', '.join(map(shown_shard_text, unexpected))}. An assignment that "
+            f"names a scanner the executor did not resolve cannot have been produced "
+            f"by partitioning that set, so the provenance does not describe this run."
         )

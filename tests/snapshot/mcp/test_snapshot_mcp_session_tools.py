@@ -85,7 +85,7 @@ def fake_git(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
-        if behavior["returncode"] == 0 and cmd[:2] == ["git", "clone"]:
+        if behavior["returncode"] == 0 and cmd[0] == "git" and "clone" in cmd:
             target = Path(cmd[-1])
             target.mkdir(parents=True, exist_ok=True)
             (target / "README.md").write_text("# cloned\n", encoding="utf-8")
@@ -93,7 +93,7 @@ def fake_git(monkeypatch):
             cmd, behavior["returncode"], "", behavior["stderr"]
         )
 
-    monkeypatch.setattr(source_delivery, "_run_git", fake_run)
+    monkeypatch.setattr(source_delivery, "run_ended_with_the_server", fake_run)
     behavior["calls"] = calls
     return behavior
 

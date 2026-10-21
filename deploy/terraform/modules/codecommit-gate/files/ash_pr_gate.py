@@ -11,7 +11,11 @@ The verdict is `ash scan`'s exit code, not a judgment made here:
 *   **2 -> findings** - actionable findings at or above it.
 *   **anything else -> error** - the scan did not complete, so nothing is known
     either way. ASH returns 1 from ``_compute_exit_code`` when it produced no
-    results at all.
+    results at all. 5 is a usage error: ASH releases after 3.7.1 refuse an option
+    or value they do not accept with it, and since every option this gate passes
+    is its own, the comment points at ASH_SCAN_EXTRA_ARGS. 3.7.0 and 3.7.1 exit 2
+    for the usage errors they report, which this gate cannot tell from findings;
+    both revoke, so the mistake is in the comment's wording, never in the approval.
 
 Severity counts are read from the results file too, but only to render the comment
 table. They are deliberately not compared against a threshold here. ASH routes
@@ -65,6 +69,17 @@ DEFAULT_MIN_SEVERITY = "low"
 #: Exit codes `ash scan` uses, via _compute_exit_code.
 EXIT_CLEAN = 0
 EXIT_FINDINGS = 2
+#: ASH refused its own command line. ASH releases after 3.7.1; 3.7.0 and 3.7.1 exit 2.
+EXIT_USAGE_ERROR = 5
+
+#: Said on the pull request for EXIT_USAGE_ERROR. The gate's own options are fixed,
+#: so the token ASH refused is almost always one an operator added.
+USAGE_ERROR_HINT = (
+    "ASH refused its command line (exit 5, a usage error), so nothing was scanned. "
+    "This gate's own options are fixed, so the likeliest cause is a token in "
+    "ASH_SCAN_EXTRA_ARGS (the module's `ash_scan_extra_args`) that this ASH does not "
+    "accept; the log tail names it. Every pull request reports this until it is removed."
+)
 
 #: The PostCommentForPullRequest API reference documents no maximum for the
 #: content field, so this is defensive rather than a documented constraint: a
@@ -193,9 +208,10 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #:
 #: Every spelling ASH accepts is listed, enumerated from the real click command rather
 #: than derived by hand, because a near-miss reads like a closed hole and is not one.
-#: `ash scan` sets ignore_unknown_options, so a token this set does not name is
-#: collected into ctx.args instead of being refused, and `click` does not accept
-#: abbreviated long options -- verified against click 8.3.3 and typer 0.27.2, where
+#: On ASH 3.7.0 and 3.7.1 `ash scan` sets ignore_unknown_options, so a token this set
+#: does not name is collected into ctx.args and dropped; releases after 3.7.1 refuse
+#: it as a usage error (exit 5), which this gate reports as an error. Neither accepts abbreviated
+#: long options -- verified against click 8.3.3 and typer 0.27.2, where
 #: --no-fail-on-incomplete leaves the parameter at its default. The --opt=value form
 #: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
 #: options that take a value, --min-severity among them.
@@ -842,6 +858,7 @@ def build_comment(
     source_commit: str,
     log_tail: str,
     max_chars: int,
+    error_hint: str = "",
 ) -> str:
     lines = ["## ASH security scan", ""]
 
@@ -854,6 +871,8 @@ def build_comment(
                 "unknown and check the Lambda logs."
             ),
         ]
+        if error_hint:
+            lines += ["", error_hint]
         if log_tail:
             lines += [
                 "",
@@ -945,10 +964,16 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
     # ASH's exit code is the verdict. Note the counts read above are not consulted:
     # comparing them against min_severity here would be a second implementation of
     # a judgment ASH already made, free to drift from it.
+    error_hint = ""
     if scan_exit == EXIT_CLEAN:
         outcome = "pass"
     elif scan_exit == EXIT_FINDINGS:
         outcome = "findings"
+    elif scan_exit == EXIT_USAGE_ERROR:
+        # Still an error, and still a REVOKE below; named so the comment says where
+        # the refused token came from.
+        outcome = "error"
+        error_hint = USAGE_ERROR_HINT
     else:
         outcome = "error"
 
@@ -960,6 +985,7 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
         parsed["source_commit"],
         log_tail,
         max_chars,
+        error_hint=error_hint,
     )
 
     codecommit.post_comment_for_pull_request(

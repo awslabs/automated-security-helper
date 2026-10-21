@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import typer
 
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ASHValidationError, ScannerError
 from automated_security_helper.cli.mcp import (
@@ -163,10 +164,10 @@ class TestMcpCommand:
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=KeyboardInterrupt,
     )
-    def test_keyboard_interrupt_exits_0(self, _mock_run, _mock_deps, typer_ctx):
+    def test_keyboard_interrupt_exits_130(self, _mock_run, _mock_deps, typer_ctx):
         with pytest.raises(typer.Exit) as exc_info:
             mcp_command(typer_ctx, quiet=True)
-        assert exc_info.value.exit_code == 0
+        assert exc_info.value.exit_code == 130
 
     @patch(
         "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
@@ -178,8 +179,24 @@ class TestMcpCommand:
     def test_keyboard_interrupt_not_quiet(self, _mock_run, _mock_deps, typer_ctx):
         with pytest.raises(typer.Exit) as exc_info:
             mcp_command(typer_ctx, quiet=False)
-        assert exc_info.value.exit_code == 0
+        assert exc_info.value.exit_code == 130
 
+    @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
+    @patch(
+        "automated_security_helper.cli.mcp._run_uvicorn", side_effect=KeyboardInterrupt
+    )
+    def test_keyboard_interrupt_over_http_exits_130(
+        self, _mock_uvicorn, _mock_deps, typer_ctx, transport
+    ):
+        """uvicorn raises SIGINT again after its graceful stop: 130, as over stdio."""
+        with pytest.raises(typer.Exit) as exc_info:
+            mcp_command(typer_ctx, quiet=True, transport=transport)
+        assert exc_info.value.exit_code == 130
+
+    @pytest.mark.parametrize("quiet", [True, False], ids=["quiet", "not-quiet"])
     @patch(
         "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
     )
@@ -187,35 +204,20 @@ class TestMcpCommand:
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=ScannerError("scanner broke"),
     )
-    def test_scanner_error_exits_2(self, _mock_run, _mock_deps, typer_ctx):
-        with pytest.raises(typer.Exit) as exc_info:
-            mcp_command(typer_ctx, quiet=True)
-        assert exc_info.value.exit_code == 2
+    def test_a_scanner_error_from_the_server_is_a_server_failure(
+        self, _mock_run, _mock_deps, typer_ctx, quiet
+    ):
+        """Exit 1, like any failure of the server itself; there is no exit 2 arm.
 
-    @patch(
-        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
-    )
-    @patch(
-        "automated_security_helper.cli.mcp_server.run_mcp_server",
-        side_effect=ScannerError("scanner broke"),
-    )
-    def test_scanner_error_not_quiet(self, _mock_run, _mock_deps, typer_ctx):
+        A scan's ScannerError ends that scan as failed and never reaches
+        mcp_command (tests/integration/cli/test_mcp_stdio_shutdown.py drives a
+        failed scan through a real `ash mcp`, which exits 0).
+        """
         with pytest.raises(typer.Exit) as exc_info:
-            mcp_command(typer_ctx, quiet=False)
-        assert exc_info.value.exit_code == 2
+            mcp_command(typer_ctx, quiet=quiet)
+        assert exc_info.value.exit_code == 1
 
-    @patch(
-        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
-    )
-    @patch(
-        "automated_security_helper.cli.mcp_server.run_mcp_server",
-        side_effect=ASHValidationError("bad config"),
-    )
-    def test_validation_error_exits_3(self, _mock_run, _mock_deps, typer_ctx):
-        with pytest.raises(typer.Exit) as exc_info:
-            mcp_command(typer_ctx, quiet=True)
-        assert exc_info.value.exit_code == 3
-
+    @pytest.mark.parametrize("quiet", [True, False], ids=["quiet", "not-quiet"])
     @patch(
         "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
     )
@@ -223,10 +225,21 @@ class TestMcpCommand:
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=ASHValidationError("bad config"),
     )
-    def test_validation_error_not_quiet(self, _mock_run, _mock_deps, typer_ctx):
+    def test_a_validation_error_from_the_server_is_a_server_failure(
+        self, _mock_run, _mock_deps, typer_ctx, quiet
+    ):
+        """Exit 1, like any failure of the server itself; the exit 3 is for options.
+
+        The option checks raise ASHValidationError before the server starts and
+        exit 3 there (test_quiet_with_verbose_raises_exit_3). Once it serves, a
+        config that fails to load is read inside a request handler or a scan,
+        which report it to the client (tests/integration/cli/
+        test_mcp_stdio_shutdown.py drives an invalid ASH_CONFIG through a real
+        `ash mcp`, which exits 0).
+        """
         with pytest.raises(typer.Exit) as exc_info:
-            mcp_command(typer_ctx, quiet=False)
-        assert exc_info.value.exit_code == 3
+            mcp_command(typer_ctx, quiet=quiet)
+        assert exc_info.value.exit_code == 1
 
     @patch(
         "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
@@ -256,11 +269,13 @@ class TestMcpCommand:
         "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
     )
     @patch("automated_security_helper.cli.mcp_server.run_mcp_server")
-    def test_quiet_with_verbose_raises_exit_3(self, _mock_run, _mock_deps, typer_ctx):
-        """Options validation failure (quiet + verbose) raises Exit(3)."""
+    def test_quiet_with_verbose_raises_the_usage_exit(
+        self, _mock_run, _mock_deps, typer_ctx
+    ):
+        """Options validation failure (quiet + verbose) is a usage error."""
         with pytest.raises(typer.Exit) as exc_info:
             mcp_command(typer_ctx, verbose=True, quiet=True)
-        assert exc_info.value.exit_code == 3
+        assert exc_info.value.exit_code == ASH_EXIT_USAGE_ERROR
 
     @patch(
         "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True

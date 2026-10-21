@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>$project | ASH security scan</title>
+  <style>$report_css</style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to report</a>
+  <header class="app-header">
+    <a class="brand" href="#main" aria-label="ASH report overview">
+      <span>ASH<small>Automated Security Helper</small></span>
+    </a>
+    <span class="header-context">Security scan report</span>
+    <div class="header-actions">
+      <button type="button" id="theme-toggle" class="quiet-button js-only" aria-label="Switch to light theme">Light theme</button>
+      <button type="button" id="print-report" class="quiet-button js-only">Print report</button>
+    </div>
+  </header>
+  <main id="main" class="report" tabindex="-1">
+    <section class="overview" aria-labelledby="report-title">
+      <h1 id="report-title">$project</h1>
+      <p class="report-context">Scanned $scan_time <span aria-hidden="true">·</span> ASH $tool_version</p>
+      <div class="outcome outcome--$tone">
+        <div class="outcome__inner">
+        <div class="outcome-mark" aria-hidden="true">$outcome_symbol</div>
+        <div><h2>$outcome_title</h2><p>$outcome_description</p><p class="next-step"><strong>Next:</strong> $next_step</p></div>
+        </div>
+      </div>
+      <div class="metric-grid">
+        <div><dl><dt>Actionable findings</dt><dd class="metric-accent">$actionable<span class="metric-description">At or above scanner thresholds</span></dd></dl></div>
+        <div><dl><dt>Below threshold</dt><dd>$below_threshold<span class="metric-description">Active findings for context</span></dd></dl></div>
+        <div><dl><dt>Suppressed</dt><dd>$suppressed<span class="metric-description">Excluded from actionable counts</span></dd></dl></div>
+        <div><dl><dt>Scanners completed</dt><dd>$completed<span> / $scanners</span><span class="metric-description">$skipped disabled · $unavailable unavailable</span></dd></dl></div>
+      </div>
+      <div class="severity-strip" aria-label="Active findings by severity">$severity_counts</div>
+      $coverage_notices
+    </section>
+    <nav class="section-nav" aria-label="Report sections">
+      <a href="#findings">Findings <span>$finding_count</span></a>
+      <a href="#scanner-results">Scanner results</a>
+      $workspace_nav
+      <a href="#scan-metadata">Scan metadata</a>
+    </nav>
+    $workspace_section
+    <section id="findings" aria-labelledby="findings-title" class="report-section">
+      <div class="section-heading"><h2 id="findings-title">Findings</h2><p>Sorted by severity</p></div>
+      <div class="finding-controls js-only">
+        <div class="search-control"><label for="finding-search">Search findings</label><input id="finding-search" type="search" placeholder="Rule, file, message, or scanner…" autocomplete="off"></div>
+        <div><label for="finding-scope">Show</label><select id="finding-scope"><option value="actionable">Actionable</option><option value="active">All active</option><option value="suppressed">Suppressed</option><option value="all">All findings</option></select></div>
+        <div><label for="finding-severity">Severity</label><select id="finding-severity"><option value="all">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option><option value="unknown">Unknown</option></select></div>
+        <div><label for="finding-scanner">Scanner</label><select id="finding-scanner"><option value="all">All scanners</option>$scanner_options</select></div>
+        <button type="button" id="reset-filters" class="quiet-button">Reset</button>
+      </div>
+      <p id="finding-count" class="result-count" role="status" aria-live="polite">$finding_count findings in this report</p>
+      <div id="empty-findings" class="empty-state" hidden><h3>No findings match this view</h3><p>Try another severity or scanner, or reset the filters.</p><button type="button" class="primary-button" id="empty-reset">Show all findings</button></div>
+      <div class="findings-list">$finding_cards</div>
+      <noscript><p class="notice">All findings are visible. Enable JavaScript to search and filter this report.</p></noscript>
+    </section>
+    <section id="scanner-results" aria-labelledby="scanner-title" class="report-section">
+      <div class="section-heading"><h2 id="scanner-title">Scanner results</h2><p>Per-scanner thresholds</p></div>
+      <div class="table-scroll" role="region" aria-label="Scanner results table" tabindex="0">$scanner_results_table</div>
+      <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> is disabled. <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
+      $hotspots_section
+    </section>
+    <section id="scan-metadata" aria-labelledby="metadata-title" class="report-section">
+      <div class="section-heading"><h2 id="metadata-title">Scan metadata</h2><p>Generated $report_time</p></div>
+      <details class="reference"><summary>View complete scan metadata</summary>$metadata_section</details>
+    </section>
+  </main>
+  <footer class="app-footer"><span>$footer_credit</span><span>Offline HTML report</span></footer>
+  <span id="copy-status" class="sr-only" role="status" aria-live="polite"></span>
+  <script>$report_script</script>
+</body>
+</html>

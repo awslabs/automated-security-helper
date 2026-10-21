@@ -313,7 +313,7 @@ class TestRunAshNix:
             return subprocess.CompletedProcess(cmd, 0)
 
         monkeypatch.setattr(
-            "automated_security_helper.interactions.run_ash_nix.subprocess.run",
+            "automated_security_helper.interactions.run_ash_nix._enter_shell",
             fake_run,
         )
 

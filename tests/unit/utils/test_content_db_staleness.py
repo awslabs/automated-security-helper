@@ -64,6 +64,34 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import content_db_staleness as staleness
 
+
+def test_a_probes_stderr_excerpt_hides_a_value_straddling_its_cut(monkeypatch):
+    """A status probe's stderr is redacted BEFORE the 300-character cut.
+
+    The 292 filler characters put the cut inside the value: cut first, the
+    error would keep the fragment ``EDGE-SEC``, which the downstream
+    whole-spelling redaction cannot match.
+    """
+    from types import SimpleNamespace
+
+    value = "EDGE-SECRET-3317"
+
+    def _probe(command, **kwargs):
+        return SimpleNamespace(
+            returncode=1, stdout="", stderr="s" * 292 + value + " tail"
+        )
+
+    monkeypatch.setattr(staleness, "spawn_run", _probe)
+
+    with pytest.raises(ValueError) as raised:
+        staleness._run_json(["grype", "db", "status", "-o", "json"], {}, [value])
+
+    message = str(raised.value)
+    assert "printed nothing" in message, message
+    assert value not in message, message
+    assert "EDGE-SEC" not in message, message
+
+
 UTC = timezone.utc
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _MODULE = "automated_security_helper.interactions.run_ash_scan"

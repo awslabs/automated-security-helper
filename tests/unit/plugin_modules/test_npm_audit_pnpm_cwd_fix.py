@@ -28,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
+from tests.utils.npm_audit_reports import NPM_CLEAN, PNPM_CLEAN
 
 
 def _yarn_1_clean(command):
@@ -74,7 +75,7 @@ def test_pnpm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
 
     def fake_run(command, **kwargs):
         seen.append(_cwd_contents(kwargs.get("cwd")))
-        return {"stdout": '{"vulnerabilities":{}}', "returncode": 0}
+        return {"stdout": PNPM_CLEAN, "returncode": 0}
 
     with (
         patch(
@@ -112,7 +113,7 @@ def test_npm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
 
     def fake_run(command, **kwargs):
         seen.append(_cwd_contents(kwargs.get("cwd")))
-        return {"stdout": '{"vulnerabilities":{}}', "returncode": 0}
+        return {"stdout": NPM_CLEAN, "returncode": 0}
 
     with (
         patch(

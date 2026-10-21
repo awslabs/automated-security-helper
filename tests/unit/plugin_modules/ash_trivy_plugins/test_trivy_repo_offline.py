@@ -114,8 +114,10 @@ class TestTrivySubprocessEnvPassthrough:
                 with patch.object(scanner, "_post_scan"):
                     scanner.scan(target=source_dir, target_type="source")
 
-        assert "TRIVY_OFFLINE_TEST" in captured_env
-        assert len(captured_env) > 1  # merged with os.environ
+        # By names: a failure would print the whole environment.
+        names = set(captured_env)
+        assert "TRIVY_OFFLINE_TEST" in names
+        assert len(names) > 1  # merged with os.environ
 
 
 # ---------------------------------------------------------------------------

@@ -76,6 +76,25 @@ expose are masked in every snippet and message before any reporter runs (see
   (the default), no prompt holds a snippet, and the "Raw JSON" blocks in
   `reports/ash.bedrock.summary.md` are written without the result's snippets.
 
+### Which findings are sent to Bedrock
+
+With `actionable_only: true` (the default), the reporter sends Bedrock only
+findings that are not suppressed and whose severity is at or above the threshold
+of the scanner that reported them (`scanners.<name>.options.severity_threshold`,
+else `global_settings.severity_threshold`). Severity is read the way every other
+report reads it: `issue_severity` when the scanner set one, else the SARIF level
+(`error` CRITICAL, `warning` MEDIUM, `note` LOW, `none` INFO). With the default
+MEDIUM threshold, LOW and INFO findings are not sent. In a single-directory scan
+these are the findings the exit-code gate counts. In workspace mode they can
+differ: a project's verdict uses one threshold for all of its scanners (its
+`gate_threshold`, which a workspace `max_severity_threshold` can tighten) and can
+leave out scanners the workspace policy added, while this filter uses each
+scanner's own threshold from the project's configuration.
+
+Set `actionable_only: false` to send every finding, suppressed ones included.
+The Finding Details section at the end of the report is written locally from
+the scan results, not by the model, and lists every finding either way.
+
 ### Environment Variables
 
 ```bash

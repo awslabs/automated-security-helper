@@ -183,23 +183,26 @@ def _unlevelled_report() -> SarifReport:
     )
 
 
-def test_result_with_no_level_key_resolves_to_critical_not_info():
+def test_result_with_no_level_key_resolves_to_the_missing_level_not_info():
     """SARIF makes ``level`` optional; omitting it must not erase the severity.
 
-    The field default is ``error``, so the fallback owes this result CRITICAL.
-    Resolving it to "info" instead puts the finding below every threshold above
-    INFO, which turns a real finding into a passing scan.
+    The field default is MISSING_SARIF_LEVEL, SARIF's own ``warning`` (3.27.10),
+    so the fallback owes this result MEDIUM, as the gate and every report read
+    it. Resolving it to "info" instead puts the finding below every threshold
+    above INFO, which turns a real finding into a passing scan. (The default was
+    ``error``, CRITICAL, while the gate read the same result as LOW.)
     """
     result = _unlevelled_report().runs[0].results[0]
 
-    assert _resolve_result_severity(result) == "critical"
+    assert _resolve_result_severity(result) == "medium"
 
 
-def test_metrics_path_counts_an_unlevelled_result_as_critical():
+def test_metrics_path_counts_an_unlevelled_result_as_medium():
     """The per-scanner counter is what ``determine_status`` reads for the gate."""
     counts = get_severity_metrics_from_sarif(_unlevelled_report(), MagicMock())
 
-    assert counts.critical == 1
+    assert counts.medium == 1
+    assert counts.critical == 0
     assert counts.info == 0
 
 

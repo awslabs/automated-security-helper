@@ -61,6 +61,7 @@ from automated_security_helper.utils.cdk_nag_wrapper import (
     _normalize_rule_level,
     run_cdk_nag_against_cfn_template,
 )
+from tests.utils.env_assertions import environ_names
 
 STACK_NAME = "ASHCDKNagScanner"
 
@@ -568,6 +569,35 @@ def test_non_empty_validation_report_produces_non_empty_findings(
     # The template model is handed back so the caller can resolve resources.
     assert "MyDataBucket" in response.template.Resources
     assert response.template.Resources["MyDataBucket"].Type == "AWS::S3::Bucket"
+
+
+@pytest.mark.parametrize("run_from", ["parent", "template_dir", "elsewhere"])
+def test_the_result_uris_name_the_template_wherever_ash_runs(
+    cdk_doubles, tmp_path, outdir, monkeypatch, run_from
+):
+    """The URIs were relative to the working directory, so ASH run from an ancestor
+    of the source directory reported ``proj/t.yaml``, which the path sanitizer then
+    read as relative to the source directory. They name the template absolutely now,
+    and the sanitizer makes that relative to the source directory."""
+    template = tmp_path / "proj" / "infra" / "t.yaml"
+    template.parent.mkdir(parents=True)
+    template.write_text(TEMPLATE_YAML, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    cwd = {
+        "parent": tmp_path,
+        "template_dir": template.parent,
+        "elsewhere": elsewhere,
+    }[run_from]
+    monkeypatch.chdir(cwd)
+    cdk_doubles.report_text = _one_violation_report()
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    finding = response.results["AwsSolutions"][0]
+    location_uri = finding.locations[0].physicalLocation.root.artifactLocation.uri
+    assert location_uri == template.as_posix(), location_uri
+    assert finding.analysisTarget.uri == template.as_posix()
 
 
 def test_the_parser_reads_violating_constructs_not_violating_resources(
@@ -1311,10 +1341,10 @@ def test_jsii_env_vars_are_restored_after_the_call(
     assert os.environ["JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION"] == "0", (
         "a pre-existing value must be restored, not left at the wrapper's '1'"
     )
-    assert "NODE_NO_WARNINGS" not in os.environ, (
+    assert "NODE_NO_WARNINGS" not in environ_names(), (
         "a var that did not exist before the call must be removed again"
     )
-    assert "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION" not in os.environ
+    assert "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION" not in environ_names()
 
 
 def test_env_vars_are_restored_even_when_a_bad_pack_name_raises(
@@ -1327,12 +1357,10 @@ def test_env_vars_are_restored_even_when_a_bad_pack_name_raises(
     """
     monkeypatch.delenv("NODE_NO_WARNINGS", raising=False)
 
-    import os
-
     with pytest.raises(KeyError):
         _run(template_file, outdir, nag_packs=["NotANagPack"])
 
-    assert "NODE_NO_WARNINGS" not in os.environ
+    assert "NODE_NO_WARNINGS" not in environ_names()
 
 
 def test_stderr_is_restored_even_when_the_call_raises(
@@ -2492,3 +2520,60 @@ def test_a_node_found_only_in_the_tree_is_refused(
         _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"], scan_root=tree)
 
     assert jsii_node_during_the_call == []
+
+
+def test_a_template_suppression_is_logged_as_given(
+    cdk_doubles, tmp_path, outdir, monkeypatch
+):
+    """The suppression's log line styles the reason, so it logs with MARKUP and
+    escapes the four values it quotes, all from the template. Each such site is
+    tested under the real console handler.
+
+    Through the console handler get_logger builds: an unescaped "[/x]" in the
+    rule, the template path or the reason raised MarkupError or dropped text, and
+    a dropped extra=MARKUP printed the [yellow] tags.
+    """
+    import io
+    import logging
+
+    from automated_security_helper.utils.console import ash_console
+    from automated_security_helper.utils.log import ConsoleHandler
+
+    rule, reason = "AwsSolutions-[/x]S1", "accepted [/x] by review"
+    folder = tmp_path / "cfn[" / "x]"
+    folder.mkdir(parents=True)
+    template = folder / "template.yaml"
+    template.write_text(
+        "Resources:\n"
+        "  MyDataBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Metadata:\n"
+        "      cdk_nag:\n"
+        "        rules_to_suppress:\n"
+        f'          - id: "{rule}"\n'
+        f'            reason: "{reason}"\n'
+        "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=rule)
+    buffer = io.StringIO()
+    handler = ConsoleHandler(
+        console=ash_console(file=buffer, width=400, color_system=None),
+        markup=False,
+        show_time=False,
+        show_path=False,
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    monkeypatch.setattr(cdk_nag_wrapper.ASH_LOGGER, "handlers", [handler])
+    monkeypatch.setattr(cdk_nag_wrapper.ASH_LOGGER, "level", 5)
+
+    response = _run(template, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    finding = _only_finding(response)
+    assert finding.suppressions, finding
+    shown = " ".join(buffer.getvalue().split())
+    assert f"Suppressing rule '{rule}' on resource 'MyDataBucket'" in shown, shown
+    assert "cfn[/x]/template.yaml" in shown, shown
+    assert f"template's own cdk_nag metadata: {reason}" in shown, shown
+    assert "[yellow]" not in shown and "\\[" not in shown, shown

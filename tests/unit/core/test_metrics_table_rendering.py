@@ -182,6 +182,111 @@ def test_narrow_threshold_cell_truncates_other_levels_to_four_characters(
     assert cells == ["CRIT (c)", "LOW (s)"]
 
 
+def test_narrow_threshold_cell_never_cuts_a_reference_mid_reference(narrow_console):
+    """An env-read threshold is shown as ``${VARIABLE}``; four characters of it
+    would read ``${AS``, which names nothing. It gets a fixed short token."""
+    table = _build(
+        [
+            _metrics(
+                threshold="${ASH_SOME_THRESHOLD}",
+                threshold_source="config",
+                threshold_from_env=True,
+            ),
+            _metrics(threshold="HIGH", threshold_source="config"),
+        ],
+        narrow_console,
+    )
+
+    cells = [c.plain for c in _cells(table, ("Thresh",))]
+    assert cells == ["ENV (c)", "HIGH (c)"], cells
+
+
+def test_narrow_threshold_cell_names_a_reloaded_reference_without_cutting_it(
+    narrow_console,
+):
+    """A results record read back by ``ash merge`` or ``ash report`` holds the
+    threshold as plain ``${VARIABLE}`` text, with no provenance flag. It is
+    still shaped like a reference, so the cell prints a fixed token for it, not
+    the first four characters."""
+    table = _build(
+        [
+            _metrics(threshold="${ASH_SOME_THRESHOLD}", threshold_source="config"),
+            _metrics(threshold="${HOME}", threshold_source="config"),
+        ],
+        narrow_console,
+    )
+
+    cells = [c.plain for c in _cells(table, ("Thresh",))]
+    assert cells == ["REF (c)", "REF (c)"], cells
+
+
+@pytest.mark.parametrize("from_env", [True, False], ids=["env-read", "reloaded"])
+def test_the_help_text_explains_the_token_the_narrow_cell_prints(
+    narrow_console, from_env
+):
+    """A reader of the narrow table sees ``ENV (c)`` or ``REF (c)`` and nothing
+    else says what it stands for, unless the help panel does."""
+    table = _build(
+        [
+            _metrics(
+                threshold="${ASH_SOME_THRESHOLD}",
+                threshold_source="config",
+                threshold_from_env=from_env,
+            )
+        ],
+        narrow_console,
+    )
+    token = _cells(table, ("Thresh",))[0].plain.split()[0]
+
+    explained = [
+        line
+        for line in metrics_table_module.METRICS_HELP_TEXT.splitlines()
+        if line.strip().startswith(f"- {token} =")
+    ]
+    assert len(explained) == 1, (token, explained)
+    assert "reference" in explained[0], explained
+
+
+def test_the_env_help_line_says_what_the_wide_table_and_reports_show():
+    """ "show it" left open whether the value or the reference is shown."""
+    line = next(
+        line
+        for line in metrics_table_module.METRICS_HELP_TEXT.splitlines()
+        if line.strip().startswith("- ENV =")
+    )
+    assert line.endswith("show the reference instead"), line
+
+
+def test_the_ref_help_line_names_every_way_a_reference_text_reaches_the_cell():
+    """``REF (c)`` also prints in a live scan, for a quoted reference and for a
+    name the resolver refuses, so the line may not say it comes only from a
+    results file."""
+    line = next(
+        line
+        for line in metrics_table_module.METRICS_HELP_TEXT.splitlines()
+        if line.strip().startswith("- REF =")
+    )
+    assert "did not read" in line, line
+    for way in ("results file", "quoted", "refuses to read"):
+        assert way in line, (way, line)
+
+
+def test_narrow_threshold_cell_does_not_claim_an_env_read_for_a_reference_text(
+    narrow_console,
+):
+    """The ENV token states where the value came from, so it follows the row's
+    provenance and not the text's shape: a ``${...}`` threshold the resolver
+    left as written (a refused name, a quoted reference) was never read from
+    the environment."""
+    table = _build(
+        [_metrics(threshold="${HOME}", threshold_source="config")],
+        narrow_console,
+    )
+
+    cells = [c.plain for c in _cells(table, ("Thresh",))]
+    assert "ENV" not in cells[0], cells
+
+
 # ---------------------------------------------------------------------------
 # Status rendering
 # ---------------------------------------------------------------------------
@@ -328,7 +433,7 @@ def test_caption_is_omitted_when_a_directory_is_missing(wide_console, tmp_path):
 def console_class():
     """An autospec'd Console class patched into the module under test."""
     cls = create_autospec(Console)
-    with patch.object(metrics_table_module, "Console", cls):
+    with patch.object(metrics_table_module, "ash_console", cls):
         yield cls
 
 

@@ -98,7 +98,13 @@ The verdict is `ash scan`'s exit code, mapped directly:
 |---|---|---|
 | 0 | `pass` | No actionable findings at or above `min_severity` |
 | 2 | `findings` | Actionable findings, plus the severity table |
+| 5 | `error` | A usage error: ASH refused its command line, most likely a token in `ash_scan_extra_args` |
 | anything else | `error` | Explicitly **not** a pass, with the exit code and log tail |
+
+Exit 5 comes from ASH releases after 3.7.1, which refuse an option or value they do
+not accept. ASH 3.7.0 and 3.7.1 ignore an unknown option and exit 2 for the usage
+errors they do report, so on those releases such an error reads as `findings`; both
+outcomes revoke.
 
 **The handler does not compare severities to reach that verdict.** It hands
 `--min-severity` to ASH and reports what ASH decided. `ash scan` routes its exit
@@ -198,7 +204,7 @@ fetch what it needs.
 | `lambda_ephemeral_storage_mb` | — | `number` | `4096` | `/tmp` holds the clone and the output. |
 | `lambda_architecture` | — | `string` | `"x86_64"` | Must match the base image. |
 | `reserved_concurrent_executions` | — | `number` | `-1` | Worth setting on a busy repository. |
-| `ash_scan_extra_args` | — | `string` | `""` | Options the gate owns are refused, `--changed-files-only` and `--base-ref` among them; see limitations. |
+| `ash_scan_extra_args` | — | `string` | `""` | Options the gate owns are refused, `--changed-files-only` and `--base-ref` among them; see limitations. An option ASH does not accept makes every scan exit 5 (ASH releases after 3.7.1). |
 | `max_comment_chars` | — | `number` | `10000` | Defensive; the API documents no limit. |
 | `image_tag` | — | `string` | `"latest"` | |
 | `ecr_image_tag_mutability` | — | `string` | `"MUTABLE"` | Needed for the chained rebuild. |
@@ -233,6 +239,16 @@ not adjustable.** The clone plus the scan has to fit:
    and ASH is CPU-bound.
 3. For repositories where that is not enough, use the `codepipeline-executor`
    module instead. CodeBuild's action timeout is measured in hours, not minutes.
+
+**The scan cannot be narrowed from `ash_scan_extra_args`.** This gate can approve
+a pull request, so the handler decides every option that changes what is scanned
+or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
+`--changed-files-only` and `--base-ref` (they drop findings outside the diff before
+the exit code is computed), the scanner selection, the shard options, `--config`
+and `--config-overrides`, `--phases`, `--use-existing`, and the options it passes
+itself. `GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list. A
+refused option is not dropped: the scan reports an error outcome on every pull
+request, and any approval the gate gave is revoked, until the option is removed.
 
 **The clone is not shallow.** CodeCommit does not reliably permit fetching an
 arbitrary commit SHA directly, so the pull request's source branch is cloned in

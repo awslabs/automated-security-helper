@@ -7,9 +7,7 @@
       Refusing to merge: both contains 2 results files:
         both/x/ash_aggregated_results.json
         both/y/ash_aggregated_results.json
-      Pass one --results per shard rather than a parent directory. Merging everything found beneath a
-      directory would make the merged set depend on whatever else is in the tree, including a previous
-      merged report.
+      Pass one --results per shard rather than a parent directory. Merging everything found beneath a directory would make the merged set depend on whatever else is in the tree, including a previous merged report.
   
     ''',
   })
@@ -19,24 +17,18 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: No ash_aggregated_results.json found in empty. Checked
-      ash_aggregated_results.json, ash_output/ash_aggregated_results.json,
-      .ash/ash_output/ash_aggregated_results.json and then recursively. Check that the shard's CI job
-      succeeded and uploaded its output directory.
+      Refusing to merge: No ash_aggregated_results.json found in empty. Checked ash_aggregated_results.json, ash_output/ash_aggregated_results.json, .ash/ash_output/ash_aggregated_results.json and then recursively; symlinks beneath it are not followed. Check that the shard's CI job succeeded and uploaded its output directory.
   
     ''',
   })
 # ---
 # name: TestResultsPathRefusals.test_invalid_output_format
   dict({
-    'exit_code': 2,
+    'exit_code': 5,
     'stderr': '''
       Usage: ash merge [OPTIONS]
       Try 'ash merge --help' for help.
-      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
-      │ Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json,      │
-      │ yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom            │
-      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+      Error: Invalid value: 'pdf' is not a valid format. Valid formats are: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom, github-ghas, gitlab-sast, gitlab-cyclonedx, unused-suppressions, aws-security-hub, bedrock-summary-reporter, cloudwatch-logs, s3
   
     ''',
     'stdout': '',
@@ -44,13 +36,11 @@
 # ---
 # name: TestResultsPathRefusals.test_no_results_option
   dict({
-    'exit_code': 2,
+    'exit_code': 5,
     'stderr': '''
       Usage: ash merge [OPTIONS]
       Try 'ash merge --help' for help.
-      ╭─ Error ──────────────────────────────────────────────────────────────────────────────────────────╮
-      │ Missing option '--results'.                                                                      │
-      ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+      Error: Missing option '--results'.
   
     ''',
     'stdout': '',
@@ -58,11 +48,10 @@
 # ---
 # name: TestResultsPathRefusals.test_path_does_not_exist
   dict({
-    'exit_code': 1,
+    'exit_code': 5,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: --results path does not exist: shard-missing. Refusing to merge, because skipping
-      an unreadable shard would produce a partial report that reads as complete.
+      Refusing to merge: --results path does not exist: shard-missing. Refusing to merge, because skipping an unreadable shard would produce a partial report that reads as complete.
   
     ''',
   })
@@ -72,10 +61,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: Could not read shard results from shard0.json: 1 validation error for
-      AshAggregatedResults
-        Invalid JSON: key must be a string at line 1 column 3
-          For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
+      Refusing to merge: Could not read shard results from shard0.json: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 3
   
     ''',
   })
@@ -83,17 +69,14 @@
 # name: test_merge_of_an_incomplete_union_exits_1
   dict({
     'exit_code': 1,
-    'stderr': '''
-      Scan incomplete: grype (MISSING)
-  
-    ''',
+    'stderr': '',
     'stdout': '''
+      [<LOG_TIME>] ERROR    Scan incomplete: grype (MISSING)
       
       === ASH Merge: 2 of 2 shards recombined ===
       Merged results: merged/ash_aggregated_results.json
       Scanners: 3 | Findings: 0 | Actionable: 0 | Suppressed: 0
-      ERROR (1) Exiting because 1 scanner(s) in the merged scan did not evaluate everything they were
-      given
+      ERROR (1) Exiting because 1 scanner(s) in the merged scan did not evaluate everything they were given
         grype: MISSING
   
     ''',
@@ -104,9 +87,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: These scanners were assigned to a shard but are not in the candidate set:
-      semgrep. An assignment that names a scanner the executor did not resolve cannot have been produced
-      by partitioning that set, so the provenance does not describe this run.
+      Refusing to merge: These scanners were assigned to a shard but are not in the candidate set: semgrep. An assignment that names a scanner the executor did not resolve cannot have been produced by partitioning that set, so the provenance does not describe this run.
   
     ''',
   })
@@ -116,9 +97,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: These scanners were candidates on every shard but assigned to none: grype. The
-      partition did not cover the set it was taken from, so no shard ran them and the merged report would
-      not say so.
+      Refusing to merge: These scanners were candidates on every shard but assigned to none: grype. The partition did not cover the set it was taken from, so no shard ran them and the merged report would not say so.
   
     ''',
   })
@@ -128,10 +107,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: Shards [1] record no candidate scanner set while the others do. These results
-      were produced by different versions of ASH, so they are not known to have partitioned the same
-      scanner set -- and the shards without the record are the ones that could be hiding a gap. Re-run the
-      whole matrix on one version.
+      Refusing to merge: Shards [1] record no candidate scanner set while the others do. These results were produced by different versions of ASH, so they are not known to have partitioned the same scanner set -- and the shards without the record are the ones that could be hiding a gap. Re-run the whole matrix on one version.
   
     ''',
   })
@@ -141,10 +117,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: The shards partitioned different scanner sets: shard 0: bandit, semgrep; shard 1:
-      bandit, grype, semgrep. Each partition is internally valid, so nothing else here can see this: one
-      executor was missing a plugin module, or --python-only or a config override was applied to some jobs
-      and not others. Merging would report a scan that never covered the scanners the smaller set omitted.
+      Refusing to merge: The shards partitioned different scanner sets: shard 0: bandit, semgrep; shard 1: bandit, grype, semgrep. Each partition is internally valid, so nothing else here can see this: one executor was missing a plugin module, or --python-only or a config override was applied to some jobs and not others. Merging would report a scan that never covered the scanners the smaller set omitted.
   
     ''',
   })
@@ -154,8 +127,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: Shard indices [0] appear more than once. Merging a shard twice would double-count
-      every finding it reported, because merging does not deduplicate.
+      Refusing to merge: Shard indices [0] appear more than once. Merging a shard twice would double-count every finding it reported, because merging does not deduplicate.
   
     ''',
   })
@@ -175,9 +147,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: Missing shard results for indices [1] of 2. Those scanners did not run, or their
-      results were never collected -- check whether the matching CI jobs succeeded and uploaded their
-      artifacts. Refusing to merge a partial scan into a report that would read as complete.
+      Refusing to merge: Missing shard results for indices [1] of 2. Those scanners did not run, or their results were never collected -- check whether the matching CI jobs succeeded and uploaded their artifacts. Refusing to merge a partial scan into a report that would read as complete.
   
     ''',
   })
@@ -187,8 +157,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: The same scanner was assigned to more than one shard: bandit (shards 0 and 1).
-      Its findings would be counted once per shard.
+      Refusing to merge: The same scanner was assigned to more than one shard: bandit (shards 0 and 1). Its findings would be counted once per shard.
   
     ''',
   })
@@ -198,9 +167,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: The shard that owned these scanners recorded no result for them: semgrep (owned
-      by shard 1). Another shard's skip marker is the only trace left, and adopting it would report a
-      scanner that never ran as deliberately skipped. Check whether that shard's scan phase completed.
+      Refusing to merge: The shard that owned these scanners recorded no result for them: semgrep (owned by shard 1). Another shard's skip marker is the only trace left, and adopting it would report a scanner that never ran as deliberately skipped. Check whether that shard's scan phase completed.
   
     ''',
   })
@@ -210,14 +177,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: These scanners appear in shard results but no shard was assigned them: trivy
-      (PASSED, seen in shard0/ash_aggregated_results.json). No shard ran them, so merging would report
-      them as deliberately skipped rather than never attempted. The status of each is named above because
-      the cause differs: the executors resolved different scanner sets (one missing a plugin module, or
-      --python-only or a config override applied to some jobs and not others), or a scanner was excluded
-      by every shard's partition. A scanner that failed to construct, or whose plugin module failed to
-      import, is recorded ERROR or MISSING instead and is reported through --fail-on-incomplete-scanners
-      rather than refused here.
+      Refusing to merge: These scanners appear in shard results but no shard was assigned them: trivy (PASSED, seen in shard0/ash_aggregated_results.json). No shard ran them, so merging would report them as deliberately skipped rather than never attempted. The status of each is named above because the cause differs: the executors resolved different scanner sets (one missing a plugin module, or --python-only or a config override applied to some jobs and not others), or a scanner was excluded by every shard's partition. A scanner that failed to construct, or whose plugin module failed to import, is recorded ERROR or MISSING instead and is reported through --fail-on-incomplete-scanners rather than refused here.
   
     ''',
   })
@@ -229,9 +189,7 @@
     'stdout': '''
       Refusing to merge: These shards completed none of the scanners they owned:
         shard 1 of 2: semgrep (MISSING)
-      Their scanners contributed no findings because they did not run, not because there was nothing to
-      find, so merging would report a partial scan as a whole one. Check whether those CI jobs had the
-      scanners' tools available. Pass --no-fail-on-incomplete-scanners to merge anyway.
+      Their scanners contributed no findings because they did not run, not because there was nothing to find, so merging would report a partial scan as a whole one. Check whether those CI jobs had the scanners' tools available. Pass --no-fail-on-incomplete-scanners to merge anyway.
   
     ''',
   })
@@ -241,9 +199,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: Shard results disagree about the total shard count: saw [2, 3]. These results
-      come from different runs, or the shard count changed while the pipeline was in flight; merging them
-      would produce a report missing whole scanners.
+      Refusing to merge: Shard results disagree about the total shard count: saw [2, 3]. These results come from different runs, or the shard count changed while the pipeline was in flight; merging them would produce a report missing whole scanners.
   
     ''',
   })
@@ -253,11 +209,7 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      Refusing to merge: These shards intended to run a scanner assigned to another shard: semgrep
-      (selected by shard 0, assigned to shard 1). A shard only runs what it was assigned, so the exclusion
-      that implements the split did not take effect on that executor -- the scanner ran on both shards and
-      its findings would be counted once per shard. The assignments themselves are disjoint, so no other
-      check here can see this.
+      Refusing to merge: These shards intended to run a scanner assigned to another shard: semgrep (selected by shard 0, assigned to shard 1). A shard only runs what it was assigned, so the exclusion that implements the split did not take effect on that executor -- the scanner ran on both shards and its findings would be counted once per shard. The assignments themselves are disjoint, so no other check here can see this.
   
     ''',
   })
@@ -269,9 +221,7 @@
     'stdout': '''
       Refusing to merge: No shard provenance found in 1 results file(s):
         shard0/ash_aggregated_results.json
-      Only a scan run with --shard-index and --shard-count records which scanners it owned, and without
-      that record there is no way to tell a complete set of shards from a partial one. Refusing to guess:
-      an unstamped file could equally be a whole unsharded scan or one shard of many.
+      Only a scan run with --shard-index and --shard-count records which scanners it owned, and without that record there is no way to tell a complete set of shards from a partial one. Refusing to guess: an unstamped file could equally be a whole unsharded scan or one shard of many.
   
     ''',
   })

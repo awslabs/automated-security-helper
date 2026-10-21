@@ -4,10 +4,18 @@ import logging
 import re
 import shlex
 from automated_security_helper.base.options import ScannerOptionsBase
-from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.base.plugin_base import (
+    PluginBase,
+    read_log_bounded,
+    shown_excerpt,
+)
 from automated_security_helper.base.plugin_config import (
     PluginConfigBase,
     config_validated_by_declared_model,
+)
+from automated_security_helper.base.uv_tool_mixin import (
+    guarded_values,
+    guarded_values_read,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -19,12 +27,23 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.error_text import (
+    error_text,
+    shown_tool_stderr,
+    text_without_values,
+    traceback_text,
+)
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, delivers
 from automated_security_helper.utils.subprocess_utils import (
+    COULD_NOT_STOP_ENDING,
     SPAWN_FAILURE_RETURNCODE,
+    WAS_KILLED_ENDING,
     exit_status,
     find_executable,
+    flagged_returncode,
     in_tree_refusal,
+    is_exit_code,
+    path_independent_dirs,
 )
 
 from pydantic import Field, PrivateAttr, ValidatorFunctionWrapHandler, field_validator
@@ -32,10 +51,13 @@ from typing import (
     Annotated,
     Any,
     ClassVar,
+    Dict,
     Generic,
+    Iterable,
     List,
     Literal,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TypeVar,
@@ -111,7 +133,218 @@ def _error_notifications(results_file: Path) -> str:
     return joined
 
 
+# The per-flag codes a codeless flagged response judges by live beside the
+# flags themselves: subprocess_utils.flagged_returncode, shared with
+# plugin_base's two response-dict readers so the three cannot drift.
+
+
+def _changed_window(joined: str, redacted: str, margin: int) -> Tuple[int, int]:
+    """The offsets in *joined* between which *redacted* differs from it.
+
+    The common prefix and the common suffix of the two lines lie outside every
+    redacted span, except that a span's replacement can share its first or
+    last characters with the text it replaced, so the window is widened by
+    *margin* (the replacement's length) on each side.
+    """
+    shortest = min(len(joined), len(redacted))
+    prefix = 0
+    while prefix < shortest and joined[prefix] == redacted[prefix]:
+        prefix += 1
+    suffix = 0
+    while suffix < shortest - prefix and joined[-1 - suffix] == redacted[-1 - suffix]:
+        suffix += 1
+    return max(prefix - margin, 0), min(len(joined) - suffix + margin, len(joined))
+
+
+def _arguments_in_joined_redactions(
+    arguments: List[str],
+    values: Iterable[str],
+    redacted: Optional[str] = None,
+) -> List[bool]:
+    """Which of *arguments* take part in a redaction only their joined text makes.
+
+    *arguments* are already redacted one at a time. Redacting the joined
+    command line again hides a value that spans two entries, or that matches
+    only in the quoting ``shlex.join`` adds.
+
+    An entry takes part when it lies inside a redacted span. That is tested
+    on the line itself: the entry's quoted text is swapped for a filler no
+    value can match, the line is redacted again, and the filler is swapped
+    back. An entry inside a span is always reported; one beside a cut marker
+    that starts a span may be reported too. Spans that overlap are merged
+    into one marker, so counting markers would miss the entries at the two
+    ends of a chain; this test does not. When the second pass changed the
+    line but no entry can be named, every entry is reported, so nothing the
+    pass hid stays bare.
+
+    *redacted* is the joined line already redacted, for a caller that has
+    computed it (``shlex.join`` of *arguments* through ``text_without_values``);
+    without it the line is redacted here. Only the entries that overlap the
+    part of the line the redaction changed are probed: an entry wholly before
+    the first changed character or after the last cannot be inside a span.
+    """
+    from automated_security_helper.config.config_validator import REDACTED
+
+    values = list(values)
+    pieces = [shlex.quote(argument) for argument in arguments]
+    joined = " ".join(pieces)
+    if redacted is None:
+        redacted = text_without_values(joined, values)
+    if redacted == joined:
+        return [False] * len(arguments)
+    window_start, window_end = _changed_window(joined, redacted, len(REDACTED))
+    covered = []
+    start = 0
+    for index, piece in enumerate(pieces):
+        end = start + len(piece)
+        overlaps = end > window_start and start < window_end
+        start = end + 1
+        if not overlaps:
+            covered.append(False)
+            continue
+        filler = "\x01" * max(len(piece), 1)
+        probe = " ".join(filler if i == index else p for i, p in enumerate(pieces))
+        restored = text_without_values(probe, values).replace(filler, piece, 1)
+        covered.append(restored != redacted)
+    return covered if any(covered) else [True] * len(arguments)
+
+
+def redacted_command_record(
+    final_args: Sequence[str], values: Iterable[str]
+) -> Tuple[str, List[str]]:
+    """The recorded ``(command_line, arguments)`` for a command and its values.
+
+    Each argument is redacted before the join: ``shlex.join`` respells an
+    argument that holds a single quote, and a value would then no longer match
+    in the joined text. The joined text is redacted again, so a value a scanner
+    split across two arguments, which no single argument holds, is hidden as
+    well. An argument that takes part in a redaction the joined text made is
+    hidden in the argument list too: the list would otherwise hold the bare
+    halves of a split value. The list leaves out the command itself.
+    """
+    from automated_security_helper.config.config_validator import REDACTED
+
+    values = list(values)
+    per_argument = [text_without_values(str(a), values) for a in final_args]
+    command_line = text_without_values(shlex.join(per_argument), values)
+    crossing = _arguments_in_joined_redactions(
+        per_argument, values, redacted=command_line
+    )
+    arguments = [
+        REDACTED if hidden else text
+        for text, hidden in zip(per_argument[1:], crossing[1:])
+    ]
+    return command_line, arguments
+
+
+def values_hook_failure_line(class_name: str, failure: str, argument_count: int) -> str:
+    """The warning for a scan whose values hook gave no usable answer.
+
+    Nothing can be redacted then, so the records hold only the command's name;
+    the line says so without naming any argument.
+    """
+    return (
+        f"{class_name}: the values hook {failure}, so the recorded command "
+        f"line holds only the command name and {max(argument_count, 0)} "
+        "argument(s) were not recorded."
+    )
+
+
+def plugin_missing_dependency_reason(
+    plugin_instance: Any,
+    values: Iterable[str] = (),
+    *,
+    when_it_raises: str = "recording the generic reason",
+) -> Optional[str]:
+    """What the plugin's own ``missing_dependency_reason()`` says, or None.
+
+    The one reader of that hook: the scan's MISSING row
+    (``scan_phase._missing_dependency_reason``), the executor's reason for a
+    scan that found its dependencies unavailable
+    (``scanner_executor._missing_reason_after_scan``) and ``ash dependencies
+    install``'s check-refused line all ask it, so they quote the same text. A
+    scanner plugin is not required to inherit ``ScannerPluginBase``, and a test
+    double answers every method with a Mock, so only a non-empty string is a
+    reason; a hook that raises gives none, and its exception is logged at
+    DEBUG, with ``when_it_raises`` saying what the caller does instead.
+
+    Returned as the plugin gave it: each caller redacts it with ``values`` and
+    writes the home directory as ``~`` where the text leaves ash.log.
+    """
+    explain = getattr(plugin_instance, "missing_dependency_reason", None)
+    if not callable(explain):
+        return None
+    try:
+        reason = explain()
+    except Exception as e:
+        # error_text with the caller's environment values: the hook's
+        # exception can name a configured value.
+        ASH_LOGGER.debug(
+            f"{type(plugin_instance).__name__}.missing_dependency_reason() "
+            f"raised {type(e).__name__}: {error_text(e, values)}; "
+            f"{when_it_raises}",
+            extra=NO_MARKUP,
+        )
+        return None
+    return reason if isinstance(reason, str) and reason else None
+
+
+def plugin_explains_its_own_refusal(plugin_instance: Any, reason: str) -> bool:
+    """Whether *reason*, the text ``missing_dependency_reason()`` gave, is the
+    plugin's own words: its check recorded one (``dependency_unavailable_reason``,
+    which a sandbox refusal also fills), or its hook gave text other than the
+    base hook's generic answer.
+
+    False for that generic answer (its command not found on PATH, or a check
+    that failed without saying why), whether the plugin keeps
+    ``ScannerPluginBase``'s hook or an override of it falls back to
+    ``super()``: the text says whose words it is, not the class the method is
+    defined on. A plugin that does not inherit ``ScannerPluginBase`` has no
+    generic answer, so its hook's text is its own.
+    """
+    recorded = getattr(plugin_instance, "dependency_unavailable_reason", None)
+    if isinstance(recorded, str) and recorded:
+        return True
+    if not isinstance(plugin_instance, ScannerPluginBase):
+        return True
+    try:
+        generic = _generic_missing_dependency_reason(plugin_instance)
+    except Exception:  # noqa: BLE001 -- the base hook's own answer raised too
+        return True
+    return reason != generic
+
+
+def _generic_missing_dependency_reason(plugin: "ScannerPluginBase") -> str:
+    """The base ``missing_dependency_reason()``'s answer for a scanner that
+    recorded no reason: its command not found on PATH, or a check that failed
+    without saying why. Generic: it names no cause the plugin knows, and
+    :func:`plugin_explains_its_own_refusal` tells it apart by this text."""
+    name = getattr(plugin.config, "name", None) or plugin.__class__.__name__
+    if (
+        isinstance(plugin.command, str)
+        and plugin.command
+        and find_executable(plugin.command) is None
+    ):
+        searched = ", ".join(
+            directory.as_posix() for directory in path_independent_dirs()
+        )
+        return (
+            f"its tool {plugin.command} was not found on PATH"
+            + (f" or in {searched}" if searched else "")
+            + "; install it with `ash dependencies install` or exclude "
+            f"{name} with --exclude-scanners"
+        )
+    return (
+        f"its dependency check failed ({type(plugin).__name__}."
+        "validate_plugin_dependencies() returned False); ash.log has the "
+        "scanner's own message"
+    )
+
+
 class ScannerPluginConfigBase(PluginConfigBase):
+    SECTION_SEGMENT: ClassVar[str] = "scanners"
+    GENERIC_SECTION: ClassVar[bool] = True
+
     options: Annotated[ScannerOptionsBase, Field(description="Scanner options")] = (
         ScannerOptionsBase()
     )
@@ -170,6 +403,32 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     tool_type: ScannerToolType = ScannerToolType.UNKNOWN
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.UNKNOWN
+
+    #: Whether this scanner needs nothing but Python: its tool is a Python package
+    #: ASH runs through uv or imports. ``--python-only`` runs exactly the scanners for
+    #: which ``is_python_only()`` is True. None, the default, derives the answer; see
+    #: ``is_python_only``. Every scanner ASH ships states it.
+    python_only: ClassVar[Optional[bool]] = None
+    #: The ``skipped_reason`` for a target this scanner's ``scan()`` attempted none of.
+    #: None, the default, asks ``nothing_to_scan_reason()``. A scanner whose hook is
+    #: expensive (cfn-nag and cdk-nag parse every candidate in both trees) states the
+    #: reason here instead: scan() has just looked at every candidate of that target.
+    nothing_scanned_reason: ClassVar[Optional[str]] = None
+    #: Whether this scanner's ``validate_plugin_dependencies`` can start its tool
+    #: where a PATH lookup does not find it: the check runs a library in-process,
+    #: or resolves the tool its own way. ``ash dependencies install`` asks the check
+    #: only for a scanner that sets this True, and judges every other one by the
+    #: PATH lookup (and a scanner run through ``uv tool run`` by uv's tool list).
+    #: Leave it False when the check is the base class's PATH lookup: asking it
+    #: again could only agree, or report a tool present that nothing can start.
+    resolves_tool_off_path: ClassVar[bool] = False
+    #: The same reason for the target scan() just looked at, when it differs from the
+    #: class's: cfn-nag and cdk-nag set it when they passed over a candidate they could
+    #: not parse, and reset it at the top of each scan(). Read before the class value.
+    _nothing_scanned_reason: Optional[str] = PrivateAttr(default=None)
+    #: Files this scanner asked ASH to own (``_neutral_tool_file``), by path, with
+    #: the text each holds. Written when the arguments are resolved.
+    _neutral_files: Dict[str, str] = PrivateAttr(default_factory=dict)
 
     command: Annotated[
         str | None,
@@ -343,7 +602,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         restores it: the field is read only here and in the plugin modules, never by
         the phases. ``ScanPhase`` reads the sibling ``unsupported_platform_reason``,
         which is a different question, so this method's return value is the only
-        route a recorded reason has to a caller.
+        route a recorded reason has to the decision. ``missing_dependency_reason``
+        reads the field too, but only to word the MISSING row once this method has
+        returned False; it never makes a scanner MISSING.
 
         For the grep family the gap is closed at the other end instead.
         ``GrepScannerBase`` declares this method final and pushes customisation into
@@ -363,6 +624,59 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             if refusal is not None:
                 self.dependency_unavailable_reason = refusal
         return found is not None
+
+    def is_python_only(self) -> bool:
+        """Whether this scanner needs nothing but Python; see ``python_only``.
+
+        The class's ``python_only`` when it states one. Otherwise True only when the
+        scanner runs its tool through uv and the install-based check of
+        ``PluginBase.is_python_only`` holds. That base check alone answered True for
+        any scanner that declared no dependencies, so a scanner that runs a native
+        tool and said nothing about it counted as Python-only: snyk-code, ferret-scan
+        and cdk-nag (which needs Node.js) all ran under ``--python-only``. A scanner
+        whose tool is not run through uv has to say it is Python-only.
+        """
+        declared = type(self).python_only
+        if declared is not None:
+            return declared
+        return bool(self.use_uv_tool) and super().is_python_only()
+
+    def nothing_to_scan_reason(self) -> str | None:
+        """Why this scanner has nothing to scan in this run, or None.
+
+        For a scanner that picks its own input out of the scan set -- cdk-nag and
+        cfn-nag their CloudFormation templates, npm-audit its lockfiles -- and can
+        do that without its tool. ``ScanPhase`` asks this when the dependency check
+        has failed: a reason makes the scanner SKIPPED instead of MISSING, because
+        an absent tool cost this scan nothing. The executor also asks it for the
+        reason of a scanner that ran and evaluated no target.
+
+        Return a reason only from the same selection ``scan()`` makes, over both
+        the source tree and the converted tree, and only when it selects nothing.
+        A reason returned for a tree that does hold input would hide a MISSING
+        scanner from the completeness gate. None, the default, means "cannot tell",
+        and keeps MISSING.
+        """
+        return None
+
+    def missing_dependency_reason(self) -> str:
+        """Why ``validate_plugin_dependencies`` said no, for the MISSING row.
+
+        Asked only after the check returned False, and only to explain it: what this
+        returns never decides whether the scanner runs. A scanner whose check fails
+        for a reason other than its command being absent (cdk-nag needs node and the
+        CDK packages, not its ``python`` command) overrides this to name it.
+
+        In order: the reason the scanner recorded in
+        ``dependency_unavailable_reason``, then its command not being found, then a
+        message that the check failed without saying why.
+        """
+        if (
+            isinstance(self.dependency_unavailable_reason, str)
+            and self.dependency_unavailable_reason
+        ):
+            return self.dependency_unavailable_reason
+        return _generic_missing_dependency_reason(self)
 
     def content_databases_in_use(self) -> list:
         """The declared content databases this scanner's last scan read.
@@ -396,6 +710,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             probe_env,
         )
 
+        # _values_to_redact is an overridable hook that can raise, and this
+        # builder deliberately lets it: the one caller (content_db_staleness
+        # .assess_scanner, which never raises) catches anything raised
+        # here and records an unmeasurable verdict for each declared
+        # database, so no probe runs and no probe text is shown. Guarding
+        # here with ``values=()`` would be worse -- the probe would run and
+        # its excerpts would print unredacted. A hook that gave no usable
+        # answer is refused the same way as one that raised.
+        read = guarded_values_read(self)
+        if read.values is None:
+            raise RuntimeError(f"the plugin's values hook {read.failure()}")
         cache = self._content_db_cache_dir
         cwd = cwd_outside_scanned_tree(
             self.context.source_dir,
@@ -408,6 +733,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             executable=find_executable(self.command) if self.command else None,
             cache_dir=cache.as_posix() if cache is not None else None,
             cwd=cwd.as_posix(),
+            values=read.values,
         )
 
     def _process_config_options(self) -> None:
@@ -421,6 +747,34 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         `self.args.extra_args` is processed. Use this method to populate additional
         argument key/value pairs where needed.
         """
+
+    def _neutral_tool_file(self, name: str, content: str) -> str:
+        """The path of a file ASH owns, to hand a tool in place of one it would
+        discover from the scanned tree.
+
+        A tool run from the source directory reads its own config file by name
+        from there when it is given none (``.syft.yaml``, ``.grype.yaml``,
+        ``.bandit``), so a scan that refuses the configured file and passes
+        nothing leaves the choice to the repository. The file lives in the
+        results directory and sets nothing. The path is returned now and the
+        file is written when the arguments are resolved, so building a scanner
+        writes nothing.
+        """
+        if self.results_dir is None:
+            raise ScannerError(f"{self.__class__.__name__} has no results directory")
+        path = (Path(self.results_dir).absolute() / name).as_posix()
+        self._neutral_files[path] = content
+        return path
+
+    def _write_neutral_files(self) -> None:
+        """Write the files ``_neutral_tool_file`` named."""
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+        for path, content in self._neutral_files.items():
+            written = Path(path)
+            written.parent.mkdir(parents=True, exist_ok=True)
+            with open_for_write(written) as handle:
+                handle.write(content)
 
     def _resolve_arguments(
         self, target: str | Path, results_file: str | Path | None = None
@@ -436,6 +790,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         # # Process configuration options to populate extra_args
         # self._process_config_options()
+        self._write_neutral_files()
 
         args = [
             self.command,
@@ -510,6 +865,48 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             target_type=target_type,
             level=logging.DEBUG,
         )
+        # Redacted: the whole config is dumped, a configured option can come
+        # from the environment, and under --debug the console shows DEBUG
+        # lines (file logs stay at INFO; the console level is what rises).
+        # Dumped as written first: a short number prints bare in a dump
+        # (scan_timeout=67), which redaction leaves. The dumps and the work
+        # behind them (model_dump, the as-written rewrite, the redaction) run
+        # only when a DEBUG line would reach a handler (utils.log.delivers):
+        # _pre_scan runs on every scan of every scanner. _plugin_log logs
+        # through _log, which skips the logger's own level, so the question is
+        # the handlers' levels -- the CLI's logger sits at TRACE with its file
+        # handlers at INFO, and a DEBUG handler under an INFO logger still gets
+        # the dumps.
+        dumps_enabled = delivers(ASH_LOGGER, logging.DEBUG)
+        dump_values: tuple = ()
+        if dumps_enabled:
+            # The ONE guarded read of the overridable values hook for the two
+            # dumps (_values_to_redact's guarding rule): they are best-effort
+            # DEBUG records, so a raising hook skips them -- never an empty
+            # value set, which would print what the values would have hidden
+            # -- and the scan itself goes on. An override that answers None,
+            # or anything that is not a value set at all, is the same broken
+            # answer as a raise: the normalizer reads such an answer as no
+            # values, which is right for the redaction READS elsewhere but
+            # here would be the license to print the dumps in clear, so the
+            # gate takes the conservative arm instead. The read is
+            # guarded_values: an empty value set means no values, a bare
+            # string is one value, never its characters, and an iterable
+            # that raises mid-iteration skips the dumps.
+            guarded = guarded_values(self)
+            if guarded is None:
+                dumps_enabled = False
+            else:
+                dump_values = guarded
+        if dumps_enabled:
+            self._plugin_log(
+                text_without_values(
+                    f"self.config: {self._config_as_written(self.config.model_dump(by_alias=True))}",
+                    dump_values,
+                ),
+                target_type=target_type,
+                level=logging.DEBUG,
+            )
         if config is not None:
             if hasattr(config, "model_dump") and callable(config.model_dump):
                 config = config.model_dump(by_alias=True)
@@ -519,10 +916,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             target_type=target_type,
             level=logging.DEBUG,
         )
+        if dumps_enabled:
+            self._plugin_log(
+                text_without_values(
+                    f"config: {self._config_as_written(config)}",
+                    dump_values,
+                ),
+                target_type=target_type,
+                level=logging.DEBUG,
+            )
 
         if not Path(target).exists():
+            # Text, not markup: the executor logs this and the scan prints it.
             raise ScannerError(
-                f"([yellow]{self.config.name or self.__class__.__name__}[/yellow] @ [magenta]{target_type}[/magenta]) Target {target} does not exist!"
+                f"({self.config.name or self.__class__.__name__} @ {target_type}) "
+                f"Target {target} does not exist!"
             )
 
         # Ensure all required directories exist
@@ -583,16 +991,97 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return False
         return self.exit_code in success_codes
 
+    def _sarif_execution_successful(self) -> bool:
+        """SARIF ``executionSuccessful`` under the graded rule: the counter rule
+        ``ScanResultsContainer.scan_succeeded`` states, with the recorded stop
+        causes and the exit code added on top (the container holds counters
+        only, so it reads neither; whenever it is False this is False too).
+        A recorded failure or a
+        recorded stop cause (``scan_kept_flag`` or ``scan_post_run_error``)
+        means False whatever the attempt count; a run that attempted nothing
+        and recorded no stop cause reports True whatever it skipped; one that
+        attempted any is successful only when every attempted target was
+        evaluated, so the flag cannot say success while the rendered status
+        says ERROR about the same run. A run that recorded a code none of the
+        scanner's accepted ones is unsuccessful too; one that recorded no
+        aggregate code at all (per-target runs record theirs elsewhere) is
+        judged by its counters alone -- and a run where nothing accepted ever
+        ran shows up in those counters as failed targets.
+
+        The counters are the per-scanner ``targets_attempted`` and
+        ``targets_failed`` the status derivation reads; a scanner without
+        them has made no claim, which reads as attempted-nothing here.
+
+        The recorded causes are read before the exit-code band. A run a flag
+        judged (``scan_kept_flag``: timed out, cancelled, rejected, signaled;
+        ``scan_post_run_error``: output ASH could not record) carries the
+        flag's own conventional code on ``exit_code`` -- recorded so the 0
+        default cannot read as an accepted run -- and a scanner whose
+        accepted band is wide would read that judged code back as the tool's
+        own verdict: cfn_nag accepts any non-negative violation count, which
+        admits every judged code. The flag is the judgment, so no band is
+        consulted for it. A never-started run (``spawn_failed``) is covered
+        by its code instead: 127 is refused by the base and every override.
+        """
+        failed = getattr(self, "targets_failed", 0) or 0
+        if failed:
+            # Read first, as the container does: a recorded failure is
+            # failure whatever the attempt count holds (None, 0 or more).
+            return False
+        if self.scan_kept_flag is not None or self.scan_post_run_error is not None:
+            # Read before the attempt count: a scan stopped before it counted
+            # a target has None or 0 attempted, and its recorded cause is
+            # still the judgment (the status derivation reads the same flag).
+            return False
+        attempted = getattr(self, "targets_attempted", None)
+        if not attempted:
+            return True
+        if attempted < 0:
+            return False
+        return self.exit_code is None or self._sarif_exit_code_accepted()
+
+    def _sarif_exit_code_accepted(self) -> bool:
+        """Whether the aggregate code says the tool ran to completion, for
+        the SARIF flag above. The base reads the scanner's accepted set
+        (``_exit_code_accepted``). A scanner whose tool encodes its FINDINGS
+        in the exit status -- cfn_nag's violation count, yarn audit's
+        severity bitmask -- overrides this with the band its own exit-code
+        judgment accepts, because such a code says nothing about completion
+        that the target counters have not already graded, and reading it
+        against a fixed set marked clean runs with findings unsuccessful.
+
+        The band is only ever consulted for a code the tool returned: a run
+        whose code is a flag's judgment never reaches it, because the caller
+        reads the recorded cause first. A wide band can therefore stay wide
+        without re-accepting a judged 124, 130 or 125 as the tool's own."""
+        return self._exit_code_accepted()
+
     def _record_target_exit_code(self, response: Any) -> None:
         """Make ``exit_code`` the code of the run that scanned this target.
 
         ``_process_command_response`` keeps the largest code any run of this plugin
         returned, and the sets are not ordered: with grype's ``{0, 2}`` a 2 from one
         target would accept a 1 from the next. A response without a code (a test
-        double, the runner's own failure) leaves the value as it is.
+        double, the runner's own failure) leaves the value as it is. A negative
+        code, a signal death, is recorded as the shell reports it
+        (``exit_status``: 128 + N), which no accepted set admits.
+
+        A flagged response without a code -- a timed-out run whose stop
+        failed carries ``returncode: None`` because the tool never finished
+        and may still be running, and a cancelled, rejected, post-run-failed
+        or never-spawned run can carry none either -- keeps that ``None`` on
+        the response: no printer may invent a code the tool never returned.
+        The attribute, which is what judging code reads, records the flag's
+        own conventional code so the 0 default cannot read as an accepted
+        run. The flags are checked in the runner's own precedence order.
         """
         code = response.get("returncode") if isinstance(response, dict) else None
-        if isinstance(code, int) and not isinstance(code, bool):
+        if not is_exit_code(code):
+            # None, a bool or any other non-int is no code of the run's: a
+            # flagged response still grades by its flag's own code, and an
+            # unflagged one leaves the value as it is (a test double).
+            code = flagged_returncode(response)
+        if is_exit_code(code):
             self.exit_code = exit_status(code)
 
     def _refuse_rejected_exit_code(self, results_file: Optional["Path"] = None) -> None:
@@ -653,7 +1142,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         for migrated scanners. Without this, the un-migrated scanners
         (ferret/snyk/trivy) populate per-result details inside their own
         ``scan()`` while migrated scanners would only have the run-level
-        ``invocations[0]`` — see DA r7 #3.
+        ``invocations[0]``, which an earlier review flagged.
 
         No-op when sarif_report.runs is empty (avoids IndexError on empty reports).
         """
@@ -663,11 +1152,31 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return
         working_dir = ArtifactLocation(uri=get_shortest_name(input=target))  # type: ignore[call-arg]
         extras = self._invocation_extras(sarif_report, final_args, target)
-        command_line = shlex.join(str(a) for a in final_args) if final_args else ""
+        # The values hook is overridable and is read once, guarded, for both
+        # records. When it raised or gave no usable answer nothing can be
+        # redacted, so the records carry only the command's name.
+        values_read = guarded_values_read(self)
+        redact_values = values_read.values
+        if redact_values is None:
+            command_line = str(self.command or "")
+            recorded_arguments: List[str] = []
+            # The arguments are left out of the records; say so, without
+            # naming any of them.
+            ASH_LOGGER.warning(
+                values_hook_failure_line(
+                    self.__class__.__name__,
+                    values_read.failure(),
+                    len(final_args) - 1,
+                )
+            )
+        else:
+            command_line, recorded_arguments = redacted_command_record(
+                final_args, redact_values
+            )
         sarif_report.runs[0].invocations = [
             Invocation(  # type: ignore[call-arg]
                 commandLine=command_line,
-                arguments=final_args[1:],
+                arguments=recorded_arguments,
                 startTimeUtc=self.start_time,
                 endTimeUtc=self.end_time,
                 executionSuccessful=self._exit_code_accepted(success_codes),
@@ -680,7 +1189,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # Mirror the un-migrated scanner pattern: attach per-result and
         # tool-driver scanner_details so downstream consumers (and the
         # ScanResultProcessor's own attach pass) see the same shape they
-        # saw before the template-method refactor (DA r7 #3).
+        # saw before the template-method refactor (an earlier review finding).
         from automated_security_helper.utils.sarif_utils import (
             attach_scanner_details as _attach_scanner_details,
         )
@@ -690,13 +1199,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             if self.config is not None and getattr(self.config, "name", None)
             else self.__class__.__name__
         )
+        # Normally already run by the dependency check; a no-op then.
+        self.resolve_deferred_tool_version()
         _attach_scanner_details(
             sarif_report=sarif_report,
             scanner_name=scanner_name,
             scanner_version=getattr(self, "tool_version", None),
             invocation_details={
                 "command_line": command_line,
-                "arguments": final_args[1:] if final_args else [],
+                "arguments": recorded_arguments,
                 "working_directory": get_shortest_name(input=target),
                 "exit_code": self.exit_code,
                 "start_time": self.start_time.isoformat()
@@ -786,33 +1297,44 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             "or override scan() directly."
         )
 
-    def _output_dir_inside(self, target: "Path") -> Optional["Path"]:
-        """ASH's output directory relative to ``target``, when it sits inside it.
+    def _ash_output_dirs_inside(self, target: "Path") -> List["Path"]:
+        """Every ASH output directory inside ``target``, relative to it.
 
         ASH writes its output under the source tree by default, so a scanner that
-        walks the whole target reads ASH's previous reports back in.
-        ``scan_set`` and detect-secrets drop those files by testing each one
-        against the output directory; a scanner that hands a directory to its
-        tool cannot do that and has to tell the tool to skip it instead, which
-        needs this path.
+        walks the whole target reads ASH's previous reports back in. ``scan_set``
+        and detect-secrets drop those files by testing each one; a scanner that
+        hands a directory to its tool cannot, and tells the tool to skip each of
+        these with the tool's own option instead. They are the directories
+        ``utils/scan_output_dirs.py`` names: this run's output directory, and the
+        default ``.ash/ash_output`` an earlier run can have left in the tree; for
+        one holding committed files the scan set includes, ASH's own directories
+        in it instead (``output_dirs_to_exclude``). What reaches the tool anyway is
+        dropped from its SARIF after the scan, and stays in output that is not
+        SARIF, such as syft's SBOM.
 
-        None when the output directory is the target, outside it, or contains it.
-        The last is the converted target, ``work_dir``, which lives under
+        Empty for the converted target, ``work_dir``, which lives under
         ``output_dir``: excluding the output directory there would exclude
         everything the converters produced.
-
-        ``absolute()`` on both sides and not ``resolve()``, as in detect-secrets:
-        the tool sees the target path as given, symlinked prefix and all, and a
-        containment test that resolves only one side answers a different question.
         """
-        output_dir = getattr(self.context, "output_dir", None)
-        if output_dir is None:
-            return None
-        output_abs = Path(output_dir).absolute()
-        target_abs = Path(target).absolute()
-        if output_abs == target_abs or not output_abs.is_relative_to(target_abs):
-            return None
-        return output_abs.relative_to(target_abs)
+        from automated_security_helper.utils.scan_output_dirs import (
+            output_dirs_inside,
+            output_dirs_to_exclude,
+            scan_set_of,
+        )
+
+        context = getattr(self, "context", None)
+        if context is None:
+            return []
+        try:
+            dirs = output_dirs_to_exclude(
+                context.source_dir,
+                getattr(context, "output_dir", None),
+                scanned_files=scan_set_of(context),
+                workspace_output_dir=getattr(context, "workspace_output_dir", None),
+            )
+        except (OSError, TypeError, ValueError):
+            return []
+        return output_dirs_inside(dirs, target)
 
     def _subprocess_cwd(self, results_dir: Path) -> Path | None:
         """The working directory for the tool's scan subprocess.
@@ -857,6 +1379,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         override this method directly and leave _execute_scan unimplemented, and
         start it with the same ``exit_code`` reset as this one.
         """
+        # The reset the attribute's declaration promises: a scan that never
+        # reaches its tool reports no exit code, not the 0 the field starts
+        # at or the previous target's code.
+        self.exit_code = None
         if global_ignore_paths is None:
             global_ignore_paths = []
 
@@ -929,12 +1455,27 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # The cause is a timeout and the message should say so, along with the
             # knob to change it.
             if isinstance(response, dict) and response.get("timed_out"):
+                # The limit through the shared token (_timeout_limit_token),
+                # redacted here: this error's text is recorded as it is
+                # raised, and the token is what keeps an environment-derived
+                # number out of it. "Was killed" only when the stop worked:
+                # _run_subprocess recorded a stop that failed on
+                # scan_could_not_stop, and a message saying the tool is gone
+                # would be the one wrong thing to tell the operator then.
+                limit = self._timeout_limit_token(effective_timeout)
+                if self.scan_could_not_stop is not None:
+                    ending = f"{COULD_NOT_STOP_ENDING}. It produced no"
+                else:
+                    ending = f"{WAS_KILLED_ENDING}, so it produced no"
                 raise ScannerError(
-                    f"{self.__class__.__name__} timed out after "
-                    f"{effective_timeout}s and was killed, so it produced no "
-                    f"results file. Raise scanners.{getattr(self.config, 'name', '<scanner>')}"
-                    ".options.scan_timeout if this target legitimately needs "
-                    "longer, or set it to null to leave this scanner unbounded."
+                    text_without_values(
+                        f"{self.__class__.__name__} timed out after "
+                        f"{limit}{ending} "
+                        f"results file. Raise scanners.{getattr(self.config, 'name', '<scanner>')}"
+                        ".options.scan_timeout if this target legitimately needs "
+                        "longer, or set it to null to leave this scanner unbounded.",
+                        self._values_to_redact(),
+                    )
                 )
 
             # Likewise "could not start" rather than the missing results file. The
@@ -944,6 +1485,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 raise ScannerError(
                     f"{self.__class__.__name__} could not start its tool, so it "
                     f"produced no results file: {response.get('stderr') or response.get('error')}"
+                )
+
+            # And for a tool that ran when ASH could not record its output: its
+            # results file may be complete, but the run is not graded on it.
+            if isinstance(response, dict) and response.get("post_run_error"):
+                raise ScannerError(
+                    f"{self.__class__.__name__} ran, but ASH could not record the "
+                    f"scanner's output: {response.get('error')}"
+                )
+
+            # And for a tool a signal ASH did not send ended: it never finished, so
+            # whatever results file it left is not the whole scan.
+            if isinstance(response, dict) and response.get("signaled"):
+                raise ScannerError(
+                    f"{self.__class__.__name__} did not finish: {response.get('error')}"
                 )
 
             # Before the results file is read: a failed tool's file decides nothing.
@@ -962,7 +1518,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     error_msg += f"Stderr: {' '.join(self.errors)}"
                 else:
                     error_msg += "No stderr output captured."
-                ASH_LOGGER.warning(error_msg)
+                # Redacted: the tool's stderr can name a path or option the
+                # config read from the environment, and ash.log keeps this line.
+                ASH_LOGGER.warning(
+                    text_without_values(error_msg, self._values_to_redact())
+                )
                 return self._handle_empty_results()
 
             try:
@@ -972,7 +1532,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 # verdict on its zero findings, which is how a clean scan reads.
                 raise ScannerError(
                     f"its results file is not SARIF ASH can read, so its findings "
-                    f"could not be graded: {e}"
+                    f"could not be graded: {error_text(e)}"
                 )
             if not sarif_report.runs:
                 # Every field of a SARIF log is optional, so `{}` validates. No run
@@ -990,6 +1550,34 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             raise ScannerError(
                 self._describe_scan_failure(e, results_file, tool_started=tool_started)
             )
+
+    def _config_as_written(self, dumped: Any) -> Any:
+        """``dumped``, a dump of this scanner's config, as its section was written.
+
+        Each value the scan config read from the environment is shown as the
+        reference its file wrote, as a results file records the config
+        (config_validator.record_of_config), the plugin's own model having
+        typed it or not. Anything else, and a dump that is not a mapping, is
+        returned as it is.
+        """
+        # Imported here: the config package imports base at start-up.
+        from automated_security_helper.config.config_validator import (
+            record_of_config,
+        )
+
+        scan_config = getattr(getattr(self, "context", None), "config", None)
+        name = getattr(self.config, "name", None)
+        if scan_config is None or not isinstance(name, str):
+            return dumped
+        if not isinstance(dumped, dict):
+            return dumped
+        record = record_of_config(scan_config, {"scanners": {name: dumped}})
+        sections = record.get("scanners") if isinstance(record, dict) else None
+        if not isinstance(sections, dict) or len(sections) != 1:
+            return dumped
+        # One section; its key is the record's, which a key the file read from
+        # the environment renames.
+        return next(iter(sections.values()))
 
     def _describe_scan_failure(
         self,
@@ -1043,21 +1631,34 @@ class ScannerPluginBase(PluginBase, Generic[T]):
           arguments. There is no exit code or stderr to describe, so the message
           is the failure and that the tool was not started.
         """
-        detail = f"{self.__class__.__name__} scan failed: {exc}"
+        detail = f"{self.__class__.__name__} scan failed: {error_text(exc)}"
         if not tool_started:
             tool = getattr(getattr(self, "config", None), "name", None)
             return f"{detail} ({tool or 'its tool'} was not started)"
 
-        accepted = self._exit_code_accepted()
-        verdict = (
-            "an accepted exit code for this scanner"
-            if accepted
-            else f"not an accepted exit code; success_exit_codes="
-            f"{sorted(self.success_exit_codes)}"
-        )
-        detail += f" (exit code {self.exit_code}: {verdict})"
+        if self.scan_could_not_stop is not None:
+            # The attribute holds the timeout's judging code, but the tool
+            # never returned one: it may still be running. Printing a number
+            # here would claim an exit that never happened.
+            detail += " (no exit code: ASH could not stop the tool)"
+        elif self.exit_code is None:
+            detail += " (the scan reported no exit code: its tool never ran)"
+        else:
+            accepted = self._exit_code_accepted()
+            verdict = (
+                "an accepted exit code for this scanner"
+                if accepted
+                else f"not an accepted exit code; success_exit_codes="
+                f"{sorted(self.success_exit_codes)}"
+            )
+            detail += f" (exit code {self.exit_code}: {verdict})"
 
         stderr_text = "\n".join(self.errors).strip()
+        # The errors lines were redacted at insertion, so this cut cannot
+        # split a live value; the log-excerpt branch below does its own
+        # bounded cut inside the shared helper.
+        if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
+            stderr_text = stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
         log_path = None
         if results_file is not None:
             log_path = (
@@ -1065,12 +1666,84 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
 
         if not stderr_text and log_path is not None:
+            # The log keeps the tool's text verbatim, so a quoted env-read
+            # value sits in it in clear. The whole pipeline -- the bounded
+            # read with its edge trim, redaction BEFORE the cut, the cut,
+            # and the continuation marker when the read stopped before the
+            # log's end -- is the shared helpers' (plugin_base
+            # read_log_bounded and shown_excerpt): a site cutting on its own
+            # re-created the split-value leak one bound at a time. Under the
+            # default stderr_preference="write" this read is the ONLY route
+            # a uv run's resolver text reaches the failure message, so a uv
+            # run's log gets the full uv layer with the run's own inputs
+            # (through _uv_run_inputs_for_records: a raising inputs hook
+            # keeps the excerpt with the plain value layer, the one policy
+            # every record site applies) while any other tool's log gets the
+            # neutral layer, since the respelling premise is uv's.
+            # _values_to_redact is still an overridable hook that can raise,
+            # and a raise must not replace the scan's real error with its
+            # own: then the excerpt is DROPPED and the message names the log
+            # path -- never the raw log, which would print the env-read
+            # values the redaction hides.
+            trim_inputs: Tuple[str, ...] = ()
+            guarded = guarded_values(self)
+            if guarded is None:
+                # The hook raised or gave no usable answer BEFORE the log was
+                # read, so nothing here knows whether stderr was captured:
+                # the text claims only what it can.
+                detail += f". Stderr could not be shown; see {log_path.as_posix()}"
+                return detail
+            values: Tuple[str, ...] = guarded
             try:
-                stderr_text = log_path.read_text(
-                    encoding="utf-8", errors="replace"
-                ).strip()
-            except OSError:
-                stderr_text = ""
+                if getattr(self, "use_uv_tool", False):
+                    from automated_security_helper.utils.uv_tool_runner import (
+                        shown_uv_output,
+                    )
+
+                    inputs = self._uv_run_inputs_for_records()
+                    # The read-edge trim also drops a tail that is a proper
+                    # prefix of an input's spelling: the shower hides a uv
+                    # run's inputs WHOLE, so a cut just after a glued
+                    # extra's value ("bandit[sarifqz4b") is the same edge
+                    # piece a value split leaves.
+                    trim_inputs = inputs
+
+                    def _show(raw: str) -> str:
+                        return shown_uv_output(
+                            raw,
+                            values,
+                            plugin_inputs=inputs,
+                            tool_name=self.command,
+                            limit=None,
+                        )
+                else:
+
+                    def _show(raw: str) -> str:
+                        return shown_tool_stderr(raw, values)
+
+            except Exception:  # noqa: BLE001 -- a raising inputs hook drops the excerpt
+                # Raised BEFORE the log was read, so nothing here knows
+                # whether stderr was captured: the text claims only what it
+                # can.
+                detail += f". Stderr could not be shown; see {log_path.as_posix()}"
+                return detail
+            try:
+                raw_log, read_cut = read_log_bounded(
+                    log_path, _STDERR_EXCERPT_LIMIT * 32, values, trim_inputs
+                )
+            except Exception:  # noqa: BLE001 -- reading the log is best-effort
+                raw_log, read_cut = "", False
+            if raw_log or read_cut:
+                try:
+                    stderr_text = shown_excerpt(
+                        raw_log, read_cut, log_path, _STDERR_EXCERPT_LIMIT, _show
+                    )
+                except Exception:  # noqa: BLE001 -- see the comment above
+                    detail += (
+                        ". Stderr was captured but could not be shown; "
+                        f"see {log_path.as_posix()}"
+                    )
+                    return detail
 
         if stderr_text:
             stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)
@@ -1176,11 +1849,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
         except Exception as e:
             # Include stack trace for debugging
-            import traceback
+            stack_trace = traceback_text()
 
-            stack_trace = traceback.format_exc()
-
-            error_msg = f"{self.__class__.__name__} scanner failed: {str(e)}"
+            error_msg = f"{self.__class__.__name__} scanner failed: {error_text(e)}"
             ASH_LOGGER.error(error_msg)
             ASH_LOGGER.debug(f"Stack trace for scanner failure:\n{stack_trace}")
 
@@ -1190,7 +1861,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # Return structured error response
             return {
                 "scanner": self.__class__.__name__,
-                "error": str(e),
+                "error": error_text(e),
                 "status": "failed",
                 "findings": [],
                 "errors": [error_msg, *self.errors],

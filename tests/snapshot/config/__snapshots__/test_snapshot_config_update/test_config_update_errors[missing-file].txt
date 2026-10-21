@@ -1,3 +1,3 @@
 $ ash config update missing.yaml --set a=b
-Config file not found. Use 'ash config init' to create one.
-[exit code: 1]
+❌ Config file not found: missing.yaml
+[exit code: 3]

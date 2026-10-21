@@ -264,45 +264,56 @@ class TestValidateConfig:
         config = tmp_path / "ash.yaml"
         config.write_text("project_name: demo\n")
 
+        from automated_security_helper.config.config_validator import ConfigCheck
+
         with patch(
             "automated_security_helper.config.config_validator."
-            "ConfigValidator.validate_config_file",
-            return_value=(False, [raw_error]),
+            "ConfigValidator.check_config_file",
+            return_value=ConfigCheck(errors=[raw_error], warnings=[raw_error]),
         ):
             result = mcp_validate_config(config_path=str(config))
 
         assert result["valid"] is False
-        assert len(result["errors"]) == 1
-        assert result["errors"][0]["type"] == expected_type
-        assert result["errors"][0]["field"] == expected_field
-        assert result["errors"][0]["message"] == raw_error
+        # Errors and warnings are typed by the same rules.
+        for listed in (result["errors"], result["warnings"]):
+            assert len(listed) == 1
+            assert listed[0]["type"] == expected_type
+            assert listed[0]["field"] == expected_field
+            assert listed[0]["message"] == raw_error
 
     def test_a_valid_config_reports_no_errors(self, tmp_path):
         config = tmp_path / "ash.yaml"
         config.write_text("project_name: demo\n")
 
+        from automated_security_helper.config.config_validator import ConfigCheck
+
         with patch(
             "automated_security_helper.config.config_validator."
-            "ConfigValidator.validate_config_file",
-            return_value=(True, []),
+            "ConfigValidator.check_config_file",
+            return_value=ConfigCheck(),
         ):
             result = mcp_validate_config(config_path=str(config))
 
         assert result["valid"] is True
         assert result["errors"] == []
+        assert result["warnings"] == []
 
     def test_inline_content_is_validated_through_a_temporary_file(self):
         seen = {}
 
-        def _capture(path, source_dir=None, permit_base=None, refuse_env=None):
+        from automated_security_helper.config.config_validator import ConfigCheck
+
+        def _capture(
+            path, source_dir=None, permit_base=None, refuse_env=None, **kwargs
+        ):
             seen["suffix"] = path.suffix
             seen["text"] = path.read_text()
             seen["refuse_env"] = refuse_env
-            return (True, [])
+            return ConfigCheck()
 
         with patch(
             "automated_security_helper.config.config_validator."
-            "ConfigValidator.validate_config_file",
+            "ConfigValidator.check_config_file",
             side_effect=_capture,
         ):
             result = mcp_validate_config(config_content="project_name: inline\n")
@@ -512,11 +523,11 @@ class TestListScanners:
             #
             # It used to reach ash_plugin_manager.plugin_modules("scanner"), and patching that
             # is why this helper returned an empty list: the tool no longer goes through it.
-            # The move was deliberate -- plugin_modules memoises its resolved classes into
-            # _resolved_plugins and never invalidates, so the first resolve in a process fixes
-            # the answer for every later caller, and a server was measured reporting 10
-            # scanners while the registry held 13. Patching the seam the tool actually uses
-            # keeps this suite testing the tool rather than a path it abandoned.
+            # The move was deliberate -- plugin_modules memoised its resolved classes keyed
+            # only on the plugin kind, so the first resolve in a process fixed the answer for
+            # every later caller, and a server was measured reporting 10 scanners while the
+            # registry held 13. Patching the seam the tool actually uses keeps this suite
+            # testing the tool rather than a path it abandoned.
             patch(
                 "automated_security_helper.cli.mcp_tools._loaded_scanner_classes",
                 return_value=scanner_classes,

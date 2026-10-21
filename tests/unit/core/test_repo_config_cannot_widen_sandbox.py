@@ -23,6 +23,7 @@ from automated_security_helper.utils.sandbox.policy import (
     SandboxRequirements,
     build_scanner_policy,
 )
+from tests.utils.helpers import mark_git_checkout
 
 REPO_CONFIG = """project_name: scanned
 sandbox:
@@ -784,7 +785,7 @@ def test_an_operator_config_inside_the_workspace_is_refused(tmp_path):
 
 def test_a_config_elsewhere_in_the_scanned_repository_is_inside(tmp_path):
     repository = tmp_path / "checkout"
-    (repository / ".git").mkdir(parents=True)
+    mark_git_checkout(repository)
     (repository / ".ash").mkdir()
     (repository / ".ash" / "ci.yaml").write_text(REPO_CONFIG)
     service = repository / "services" / "api"
@@ -864,7 +865,7 @@ def test_an_operator_config_inside_a_checkout_still_sets_the_mode_floor(
     # A .git above both the operator's ASH_CONFIG and the scanned tree makes the
     # operator's file "in the tree". Its grants are dropped, but its mode holds.
     top = tmp_path / layout
-    (top / ".git").mkdir(parents=True)
+    mark_git_checkout(top)
     operator = top / "ash" / "operator.yaml"
     operator.parent.mkdir()
     operator.write_text(TRUSTED_BWRAP)
@@ -881,7 +882,7 @@ def test_an_operator_config_inside_a_checkout_still_sets_the_mode_floor(
 
 def test_the_sandbox_flag_still_turns_off_an_operator_floor(tmp_path, monkeypatch):
     top = tmp_path / "checkout"
-    (top / ".git").mkdir(parents=True)
+    mark_git_checkout(top)
     operator = top / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP)
     target = top / "thirdparty"
@@ -929,7 +930,7 @@ def test_a_workspace_operator_config_inside_the_checkout_is_refused(tmp_path):
     )
 
     top = tmp_path / "checkout"
-    (top / ".git").mkdir(parents=True)
+    mark_git_checkout(top)
     operator = top / "operator.yaml"
     operator.write_text(TRUSTED_BWRAP)
     project = _workspace_project(top / "workspace", REPO_OFF, operator)
@@ -1013,7 +1014,7 @@ def test_a_git_file_below_the_checkout_does_not_move_the_superproject_outside(
     tmp_path,
 ):
     superproject = tmp_path / "super"
-    (superproject / ".git").mkdir(parents=True)
+    mark_git_checkout(superproject)
     (superproject / ".ash").mkdir()
     (superproject / ".ash" / "ci.yaml").write_text(REPO_CONFIG)
     submodule = superproject / "src"
@@ -1042,7 +1043,7 @@ def test_a_scan_root_symlinked_out_of_the_checkout_still_counts_the_checkout(
     tmp_path,
 ):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / "ci.yaml").write_text(REPO_CONFIG)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -1055,7 +1056,7 @@ def test_a_scan_root_symlinked_out_of_the_checkout_still_counts_the_checkout(
 
 def test_a_scan_root_symlinked_into_a_checkout_counts_that_checkout(tmp_path):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / "ci.yaml").write_text(REPO_CONFIG)
     (checkout / "api").mkdir()
     link = tmp_path / "api-link"
@@ -1110,7 +1111,7 @@ def test_withholding_a_settings_derived_need_is_logged(tmp_path, monkeypatch, ca
 
 def _vendor_link_out(tmp_path: Path):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     ci = checkout / ".ash" / "ci.yaml"
     ci.write_text(REPO_CONFIG)
@@ -1159,7 +1160,7 @@ def test_ash_config_in_a_checkout_found_only_through_the_resolved_root(
     tmp_path, monkeypatch
 ):
     checkout = tmp_path / "checkout"
-    (checkout / ".git").mkdir(parents=True)
+    mark_git_checkout(checkout)
     (checkout / ".ash").mkdir()
     rogue = checkout / ".ash" / "rogue.yaml"
     rogue.write_text(REPO_CONFIG)

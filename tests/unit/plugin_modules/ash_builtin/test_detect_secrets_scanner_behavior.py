@@ -39,7 +39,8 @@ from tests.utils.detect_secrets_worker import (
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.constants import ASH_REPO_URL, ASH_WORK_DIR_NAME
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -55,6 +56,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanSettingsFiltersUsed,
     DetectSecretsScanSettingsPluginsUsed,
 )
+
+# The scanner's dependency check asked uv for detect-secrets' version (``uv tool run
+# detect-secrets --version``), so every scan here started the tool wherever uv could
+# reach it. The scan itself runs in ASH's worker, so the probes answer without a
+# process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
 
 # Assembled at runtime so this file contains no contiguous key-shaped literal.
 # The value is AWS's own documentation placeholder. FLY002 is suppressed on
@@ -270,8 +277,8 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 def test_baseline_is_discovered_in_the_source_directory(
     plugin_context, tmp_path, monkeypatch, baseline_name
 ):
-    """Both default baseline locations are found in the source directory, whatever
-    ASH's working directory is."""
+    """Both default baseline locations are found, relative to the scanned
+    tree and not to the directory the process runs in."""
     monkeypatch.chdir(tmp_path)
     baseline = plugin_context.source_dir / baseline_name
     baseline.parent.mkdir(parents=True, exist_ok=True)
@@ -281,7 +288,11 @@ def test_baseline_is_discovered_in_the_source_directory(
         context=plugin_context, config=DetectSecretsScannerConfig()
     )
 
-    assert Path(scanner.config.options.baseline_file) == baseline
+    # The discovered file is what the scan reads; no option was written, so
+    # the option stays unset.
+    assert scanner.config.options.baseline_file is None
+    assert scanner._baseline_in_use() is True
+    assert scanner._baseline_file_path() == baseline.resolve()
 
 
 def test_a_baseline_in_the_working_directory_is_not_the_scans(
@@ -341,6 +352,33 @@ def test_explicitly_configured_baseline_wins_over_the_defaults(
     )
 
     assert Path(scanner.config.options.baseline_file) == chosen
+
+
+def test_a_found_configured_baseline_leaves_the_option_as_written(
+    plugin_context, tmp_path, monkeypatch
+):
+    """A relative baseline_file is taken from the scanned tree, and the scan
+    reads that file, while the option keeps the spelling the operator wrote
+    so every dump of the configuration still shows it."""
+    monkeypatch.chdir(tmp_path)
+    (plugin_context.source_dir / "custom.baseline").write_text(
+        json.dumps(baseline_document(plugins=[{"name": "StandIn"}])),
+        encoding="utf-8",
+    )
+    options = DetectSecretsScannerConfigOptions(baseline_file="custom.baseline")
+    written = options.baseline_file
+
+    scanner = DetectSecretsScanner(
+        context=plugin_context,
+        config=DetectSecretsScannerConfig(options=options),
+    )
+
+    assert scanner.config.options.baseline_file == written
+    assert str(scanner.config.options.baseline_file) == "custom.baseline"
+    assert scanner._baseline_in_use() is True
+    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+        "StandIn"
+    ]
 
 
 def test_no_baseline_anywhere_leaves_baseline_file_unset(
@@ -476,10 +514,101 @@ def test_missing_configured_baseline_warns_and_falls_back(
         )
 
     assert any(
-        "Failed to read baseline file settings" in record.message
+        "does not exist" in record.message and "absent.baseline" in record.message
         for record in caplog.records
-    )
+    ), f"expected a missing-baseline warning; got {[r.message for r in caplog.records]}"
+    messages = [record.message for record in caplog.records]
+    assert sum("does not exist" in m for m in messages) == 1, messages
+    # The settings load never opened the missing file: no read failure, no
+    # [Errno 2], and the scan will run without a baseline.
+    assert not any("Failed to read baseline" in m for m in messages), messages
+    assert not any("Errno 2" in m for m in messages), messages
+    assert not scanner._baseline_in_use()
+    # The config model keeps the option as written, for every dump of it.
+    assert scanner.config.options.baseline_file == tmp_path / "absent.baseline"
     assert len(scanner.config.options.scan_settings.plugins_used) > 10
+
+
+@pytest.mark.parametrize(
+    "first_pass, flag, other_flag",
+    [
+        ("missing", "_configured_baseline_missing", "_configured_baseline_refused"),
+        ("refused", "_configured_baseline_refused", "_configured_baseline_missing"),
+    ],
+)
+def test_processing_options_again_forgets_an_earlier_baseline_decision(
+    tmp_path, monkeypatch, first_pass, flag, other_flag
+):
+    """The decision not to use a configured baseline belongs to one pass over
+    the options. A scanner that went through a pass with a missing or a refused
+    baseline and is then pointed at a valid one must use that one: a decision
+    left over from the earlier pass would keep the new baseline from ever being
+    read."""
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "repo"
+    (source / ".ash").mkdir(parents=True)
+    output = tmp_path / "out"
+    work = output / ASH_WORK_DIR_NAME
+    work.mkdir(parents=True)
+    baseline_document_with_marker = json.dumps(
+        baseline_document(plugins=[{"name": "StandIn"}])
+    )
+    if first_pass == "missing":
+        first_baseline = tmp_path / "gone" / "absent.baseline"
+    else:
+        # A work product derived from the scanned repository, named by the
+        # repository's own configuration, is refused.
+        first_baseline = work / "derived.baseline"
+        first_baseline.write_text(baseline_document_with_marker, encoding="utf-8")
+    (source / ".ash" / ".ash.yaml").write_text(
+        "project_name: scanned\n"
+        "scanners:\n"
+        "  detect-secrets:\n"
+        "    options:\n"
+        f"      baseline_file: {first_baseline.as_posix()}\n",
+        encoding="utf-8",
+    )
+    config = resolve_config(source_dir=source)
+    scanner = DetectSecretsScanner(
+        config=config.get_plugin_config("scanner", "detect-secrets"),
+        context=PluginContext(
+            source_dir=source, output_dir=output, work_dir=work, config=config
+        ),
+    )
+
+    # First pass: the decision is recorded, and the marker plugin is not loaded.
+    assert getattr(scanner, flag) is True
+    assert getattr(scanner, other_flag) is False
+    assert not scanner._baseline_in_use()
+    assert "StandIn" not in [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+
+    # Second pass on the same instance, now pointed at a valid baseline and
+    # with the scan settings back at their defaults, as a first pass leaves
+    # them for the baseline to fill.
+    valid_baseline = tmp_path / "valid.baseline"
+    valid_baseline.write_text(baseline_document_with_marker, encoding="utf-8")
+    scanner.config.options.baseline_file = valid_baseline
+    scanner.config.options.scan_settings.plugins_used = []
+    scanner.config.options.scan_settings.filters_used = []
+    asked = []
+    original = scanner._baseline_file_path
+
+    def _spy():
+        asked.append(True)
+        return original()
+
+    monkeypatch.setattr(scanner, "_baseline_file_path", _spy)
+    scanner._process_config_options()
+
+    assert getattr(scanner, flag) is False
+    assert getattr(scanner, other_flag) is False
+    assert scanner._baseline_in_use() is True
+    assert asked, "the valid baseline was never consulted"
+    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+        "StandIn"
+    ]
 
 
 # ---------------------------------------------------------------------------

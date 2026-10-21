@@ -288,7 +288,8 @@ def package_manager_child(
         roots: The trees a copied file has to resolve inside (``input_refusal``);
             ``scan_root`` when not given, else the package directory.
         yarn_major: The major version when known; None for the version probe,
-            which then gets only ``YARN_IGNORE_PATH``.
+            which then gets ``YARN_IGNORE_PATH`` and ``YARN_RC_FILENAME`` naming
+            no file, on every path, but no ``--no-default-rc``.
         ignore_suppressions: ``--ignore-suppressions`` is in effect.
     """
     package_dir = Path(package_dir)
@@ -297,6 +298,13 @@ def package_manager_child(
     sandboxed = _sandboxed()
     env = snapshot_environ()
     env["YARN_IGNORE_PATH"] = "1"
+    if binary == "yarn" and yarn_major is None:
+        # The version probe does not know which yarn it starts. yarn 1 keeps an
+        # unknown variable as a setting nothing reads (measured: 1.22.22 loads
+        # YARN_* names as config keys), and yarn 2+ reads no settings file when
+        # none has this name. ``--no-default-rc`` is left out: yarn 2+ would not
+        # accept it.
+        env["YARN_RC_FILENAME"] = NO_YARNRC
     in_place_yarn = binary == "yarn" and (
         sandboxed or _within(Path(tempfile.gettempdir()), scan_root)
     )

@@ -134,7 +134,6 @@ Tests are categorized using pytest markers to allow selective execution:
 - `@pytest.mark.reporter`: Tests related to reporter functionality
 - `@pytest.mark.config`: Tests related to configuration functionality
 - `@pytest.mark.model`: Tests related to data models
-- `@pytest.mark.serial`: Tests that should not run in parallel
 
 Example:
 ```python

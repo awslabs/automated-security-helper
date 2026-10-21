@@ -1,6 +1,7 @@
 {
   "$defs": {
     "AshSuppression": {
+      "additionalProperties": false,
       "description": "Represents a finding suppression rule.",
       "properties": {
         "client_supplied": {
@@ -19,7 +20,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expiration"
         },
         "line_end": {
@@ -132,6 +133,7 @@
       "type": "object"
     },
     "IgnorePathWithReason": {
+      "additionalProperties": false,
       "description": "Represents a path exclusion entry.",
       "properties": {
         "client_supplied": {
@@ -150,7 +152,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expiration"
         },
         "path": {

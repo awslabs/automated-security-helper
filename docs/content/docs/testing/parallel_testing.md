@@ -137,12 +137,10 @@ exists at run time, and is safe, is listed in that file's `_EXEMPT` with the rea
 
 ## Marking Tests as Non-Parallel
 
-Some tests may not be suitable for parallel execution. Mark these tests with the `pytest.mark.serial` decorator:
+There is no marker that takes a test out of the parallel run. pytest-xdist schedules every test the same way, so a test that cannot share the machine with others has to isolate what it touches instead, as described above. To run a test in a single process while debugging it, pass `-n 0`:
 
-```python
-@pytest.mark.serial
-def test_that_must_run_serially():
-    # This test will not run in parallel with other tests
+```bash
+uv run pytest tests/unit/core/test_progress.py -n 0
 ```
 
 ## Troubleshooting Parallel Test Issues

@@ -1,30 +1,48 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Record every write a test process makes under the real user's ``~/.ash`` or XDG dirs.
+"""Record every write a test process makes under the real user's ``~/.ash``.
 
-tests/conftest.py gives each session a private HOME, and points XDG_CONFIG_HOME,
-XDG_DATA_HOME and XDG_STATE_HOME inside it, so anything that finds those directories
-through the environment -- install receipts, the default ASH_BIN_PATH, uv's tool
-environments -- lands in a directory the session removes. What that cannot stop is
-code that finds them some other way: ``pwd.getpwuid()``, ``expanduser("~user")``, a
-path computed before the session moved them, or a literal. That is the class this
-watches for. An audit hook records each write under the guarded roots, except under
-the excluded paths (the interpreter's own installation, the shared caches, the
-checkout), and tests/conftest.py fails the test it happened in.
+tests/conftest.py gives the run and each test a home of their own, so anything that
+finds the home through ``$HOME`` or ``Path.home()`` -- install receipts, the default
+ASH_BIN_PATH -- lands in a temporary directory. What a moved HOME cannot stop is code
+that finds the home some other way: ``pwd.getpwuid()``, ``expanduser("~user")``, a path
+computed before the run moved HOME, or a literal. That is the class this watches for.
+An audit hook records each write under the guarded roots, ``~/.ash`` of the passwd
+home and of the home the run started with, except under the excluded paths a caller
+names (the interpreter's own installation, the shared caches, the checkout), refuses
+it, and tests/conftest.py fails the test it happened in.
 
-Recorded rather than raised. The receipt writer catches ``OSError`` on purpose
-(receipts are best-effort), so an exception raised from here would be swallowed and
-the test would pass.
+Refused, so nothing lands: a fixture binary and its receipt left in the real ~/.ash are
+what a later real run would trust. Recorded first, because the refusal alone is not
+enough: the receipt writer catches ``OSError`` on purpose (receipts are best-effort),
+so the PermissionError raised here can be swallowed, and the record is what fails the
+test.
+
+A path is compared as written and with its links resolved, both case-folded where the
+platform folds case, so a write through a link into ~/.ash is caught. tests/conftest.py
+also drains the record at the end of the session and fails it, for writes after the
+last test's teardown or in the xdist controller; an xdist worker sends its own to the
+controller, which reports them.
 
 Limits, stated so nobody reads a green run as covering them: audit hooks do not reach
-child processes, a write through a file descriptor opened relative to a directory fd
-(``dir_fd``) is not resolved, and only the events listed in ``_PATH_ARGS`` are seen.
+child processes (tests/conftest.py checks those where they start, in
+``subprocess.Popen``: an installer, or any Python or ASH child, needs a home of its
+own); a write through a file descriptor opened relative to a directory fd (``dir_fd``)
+is not resolved, nor is a call given a file descriptor where a path goes (``os.chmod``
+of a directory fd changes its mode unseen); os.mkfifo and os.mknod raise no audit
+event; a file sqlite3.connect creates, and an AF_UNIX socket's bind, are not seen
+either; a hard link made before the run, from outside into ~/.ash, is written through
+by a path outside the roots; a write after the session ends (config cleanup, an atexit
+handler) or in an xdist worker that crashed is refused but never reported; and only the
+events listed in ``_PATH_ARGS`` are seen. A hard link
+made during the run out of ~/.ash is refused (``os.link`` checks both of its ends).
 """
 
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import sys
 import threading
@@ -45,12 +63,15 @@ _PATH_ARGS = {
     "os.chmod": (0,),
     "os.chown": (0,),
     "os.symlink": (1,),
-    "os.link": (1,),
+    # Both ends: a hard link out of a root is the same file under another name.
+    "os.link": (0, 1),
     "os.truncate": (0,),
     "os.utime": (0,),
     "shutil.copyfile": (1,),
     "shutil.copytree": (1,),
     "shutil.rmtree": (0,),
+    "os.setxattr": (0,),
+    "os.removexattr": (0,),
 }
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 
@@ -72,9 +93,12 @@ def passwd_home() -> Optional[Path]:
         return None
 
 
-def both_spellings(path: Path) -> List[str]:
-    """``path`` as given (made absolute) and resolved, so a symlinked home matches."""
-    return sorted({os.path.abspath(path), os.path.realpath(path)})
+def _spellings(path: Path) -> List[str]:
+    """``path`` as written and resolved, case-folded where the platform folds case."""
+    return [
+        os.path.normcase(os.path.abspath(path)),
+        os.path.normcase(os.path.realpath(path)),
+    ]
 
 
 def guarded_roots(homes: Iterable[Optional[Path]]) -> List[str]:
@@ -83,7 +107,7 @@ def guarded_roots(homes: Iterable[Optional[Path]]) -> List[str]:
     for home in homes:
         if home is None or not str(home):
             continue
-        roots.update(both_spellings(Path(home) / ".ash"))
+        roots.update(_spellings(Path(home) / ".ash"))
     return sorted(roots)
 
 
@@ -91,15 +115,32 @@ def _within(path: str, roots: Iterable[str]) -> bool:
     return any(path == root or path.startswith(root + os.sep) for root in roots)
 
 
+def is_guarded(path: object) -> bool:
+    """Whether a write to ``path`` would be refused."""
+    return _under_a_root(path) is not None
+
+
+def watched_roots() -> List[str]:
+    """The roots being watched now."""
+    with _lock:
+        return list(_roots)
+
+
 def _under_a_root(raw: object) -> Optional[str]:
+    """``raw`` as written, if it or its resolved path is under a guarded root."""
     if not isinstance(raw, (str, bytes, os.PathLike)):
         return None
     try:
-        path = os.path.abspath(os.fsdecode(raw))
-    except (TypeError, ValueError):
+        written = os.path.abspath(os.fsdecode(raw))
+        spellings = _spellings(Path(written))
+    except (TypeError, ValueError, OSError):
         return None
-    if _within(path, _roots) and not _within(path, _excluded):
-        return path
+    if any(_within(path, _excluded) for path in spellings):
+        return None
+    for root in _roots:
+        for path in spellings:
+            if path == root or path.startswith(root + os.sep):
+                return written
     return None
 
 
@@ -123,6 +164,7 @@ def _hook(event: str, args: tuple) -> None:
     if getattr(_inside, "active", False):
         return
     _inside.active = True
+    refused = None
     try:
         for index in indexes:
             if index < len(args):
@@ -130,8 +172,15 @@ def _hook(event: str, args: tuple) -> None:
                 if hit is not None:
                     with _lock:
                         _writes.append((event, hit))
+                    refused = refused or hit
     finally:
         _inside.active = False
+    if refused is not None:
+        raise PermissionError(
+            errno.EACCES,
+            "write under the real ~/.ash refused by the test guard",
+            refused,
+        )
 
 
 def install(roots: Iterable[str], exclude: Iterable[str] = ()) -> None:
@@ -166,18 +215,19 @@ def watching(root: Path, exclude: Iterable[Path] = ()) -> Iterator[None]:
 
     For the guard's own controls.
     """
+    extra = _spellings(Path(root))
     with _lock:
-        added = [r for r in both_spellings(root) if r not in _roots]
+        added = [r for r in dict.fromkeys(extra) if r not in _roots]
         _roots.extend(added)
         skipped = [
-            p for path in exclude for p in both_spellings(path) if p not in _excluded
+            p for path in exclude for p in _spellings(Path(path)) if p not in _excluded
         ]
-        _excluded.extend(skipped)
+        _excluded.extend(dict.fromkeys(skipped))
     try:
         yield
     finally:
         with _lock:
             for r in added:
                 _roots.remove(r)
-            for p in skipped:
+            for p in dict.fromkeys(skipped):
                 _excluded.remove(p)

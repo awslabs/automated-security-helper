@@ -14,6 +14,7 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverter,
     JupyterConverterConfig,
 )
+from tests.unit.converters.nbconvert_routes import use_stand_in_nbconvert
 
 
 class TestArchiveConverter:
@@ -524,13 +525,15 @@ class TestJupyterConverter:
         def mock_scan_set(*args, **kwargs):
             return [str(sample_notebook)]
 
-        # Mock subprocess.run to simulate successful nbconvert execution
-        def mock_subprocess_run(*args, **kwargs):
+        # Stands in for the direct nbconvert run (run_ended_with_the_server), which
+        # succeeds
+        def nbconvert_double(*args, **kwargs):
             # Create the expected output file
             if (
                 len(args) > 0
                 and isinstance(args[0], list)
-                and Path(args[0][0]).stem == "jupyter-nbconvert"
+                and args[0]
+                and "nbconvert" in Path(args[0][0]).name
             ):
                 # Extract output path from command
                 cmd = args[0]
@@ -567,15 +570,14 @@ class TestJupyterConverter:
         # The converter module's own `spawn_run` name, not the standard library's
         # subprocess module that every other caller in the process shares.
         monkeypatch.setattr(
-            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.spawn_run",
-            mock_subprocess_run,
+            "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter.run_ended_with_the_server",
+            nbconvert_double,
         )
 
         # Mock the validate method to return True (skip UV tool validation for test)
         monkeypatch.setattr(converter, "validate", lambda: True)
-        monkeypatch.setattr(
-            converter, "use_uv_tool", False
-        )  # Use direct execution for test
+        # The direct route, run by a verified copy the double stands in for.
+        use_stand_in_nbconvert(monkeypatch, converter)
 
         results = converter.convert()
         assert len(results) == 1

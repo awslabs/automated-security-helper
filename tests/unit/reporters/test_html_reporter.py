@@ -18,6 +18,22 @@ from automated_security_helper.schemas.sarif_schema_model import (
 class TestHTMLReporter:
     """Test cases for HTMLReporter."""
 
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("2026-01-15T12:00:00Z", "15 Jan 2026 at 12:00 UTC"),
+            ("2026-02-03T08:05:00+05:30", "3 Feb 2026 at 08:05 UTC+05:30"),
+            ("2026-02-03T08:05:00", "3 Feb 2026 at 08:05"),
+            ("N/A", "N/A"),
+            (
+                "<script>alert('time')</script>",
+                "&lt;script&gt;alert(&#x27;time&#x27;)&lt;/script&gt;",
+            ),
+        ],
+    )
+    def test_timestamp_is_readable_without_guessing_a_timezone(self, value, expected):
+        assert HtmlReporter._format_timestamp(value) == expected
+
     def test_html_reporter_with_sarif_results(
         self, sample_ash_model: AshAggregatedResults, test_plugin_context
     ):
@@ -64,7 +80,7 @@ class TestHTMLReporter:
 
         # Check that the HTML contains the expected elements
         assert "<!DOCTYPE html>" in html_output
-        assert "<html>" in html_output
+        assert '<html lang="en"' in html_output
         assert "TEST001" in html_output
         assert "TEST002" in html_output
         assert "Test error message" in html_output

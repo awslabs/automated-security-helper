@@ -38,7 +38,8 @@ the whole checked-out tree of the pull request. Narrowing the scan through
 and it reserves `--base-ref`, because with them findings outside the diff stop
 counting, and so does every finding in a file whose name git prints quoted, which
 can turn a failing pull request into a pass. A deployment passing either one ends
-every pull request in outcome `error`. For a repository that does not fit, raise
+every pull request in outcome `error`, so this example leaves `ash_scan_extra_args`
+unset. For a repository that does not fit, raise
 `lambda_memory_mb` (Lambda scales CPU with memory) or use the
 `codepipeline-executor` module.
 

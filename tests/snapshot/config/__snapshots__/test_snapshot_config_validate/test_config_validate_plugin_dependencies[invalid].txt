@@ -1,11 +1,14 @@
 $ ash config validate-plugin-dependencies invalid.yaml
-[<LOG_TIME>] ERROR    Configuration validation failed: 1 validation error for AshConfig
-                      build.build_mode
-                        Input should be 'ONLINE' or 'OFFLINE'
-                          For further information visit
-                      https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/literal_error
-Config file '<TMP>/demo-project/invalid.yaml' is not valid: Configuration validation failed for 'invalid.yaml': 1 validation error for AshConfig
-build.build_mode
-  Input should be 'ONLINE' or 'OFFLINE' [type=literal_error]
-    For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/literal_error. Run 'ash config lint' to identify and fix issues.
-[exit code: 1]
+[<LOG_TIME>] ERROR    Configuration validation failed: Invalid value at 'build.build_mode': Input
+                      should be 'ONLINE' or 'OFFLINE'; Invalid value at 'converters.archive': Value
+                      error, Converter 'archive' contains internal-only field 'install_timeout' -
+                      this should not be in user configs.; Invalid value at 'scanners.bandit': Value
+                      error, Scanner 'bandit' contains internal-only field 'tool_version' - this
+                      should not be in user configs; if you meant a version constraint, put it under
+                      options.
+Config file '<TMP>/demo-project/invalid.yaml' is not valid.
+Invalid configuration in invalid.yaml:
+  Invalid value at 'build.build_mode': Input should be 'ONLINE' or 'OFFLINE'
+  Invalid value at 'converters.archive': Value error, Converter 'archive' contains internal-only field 'install_timeout' - this should not be in user configs.
+  Invalid value at 'scanners.bandit': Value error, Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs; if you meant a version constraint, put it under options.
+[exit code: 3]

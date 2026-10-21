@@ -4,7 +4,7 @@
 """What Nix mode prints around the ``nix develop`` call, and what it exits with.
 
 The real CLI runs in-process. Only the lookup of the ``nix`` executable and the one
-``subprocess.run`` that would enter the shell are replaced, so the flake reference
+call that would enter the shell (``run_ash_nix._enter_shell``) are replaced, so the flake reference
 ASH resolves, the command it builds from the caller's argv, the messages and the
 exit code are ASH's own. The fake records the command, which is part of each
 snapshot: it is what an operator sees with ``--debug``, and a flag lost on the way
@@ -13,6 +13,7 @@ into the shell would show up there.
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - only CompletedProcess is used, to fake the shell's result
 import sys
 from pathlib import Path
@@ -60,13 +61,15 @@ class FakeNixShell:
         if self.results_json is not None:
             out = Path("out")
             out.mkdir(exist_ok=True)
+            # surrogateescape: a lone surrogate such as "\udcff" is written as the
+            # byte it stands for, so a test can leave a file that is not UTF-8.
             results_json = (
                 completed_by(self.results_json, (env or {}).get("ASH_OUTER_RUN_ID"))
                 if self.marks_completion
                 else self.results_json
             )
             out.joinpath("ash_aggregated_results.json").write_text(
-                results_json, encoding="utf-8"
+                results_json, encoding="utf-8", errors="surrogateescape"
             )
         return subprocess.CompletedProcess(args=cmd, returncode=self.returncode)
 
@@ -197,6 +200,41 @@ def test_results_the_inner_run_did_not_mark_completed(
 def test_unparseable_results(scan, snapshot, nix_shell):
     nix_shell.results_json = "{not json"
     assert _seen(scan(SCAN), nix_shell) == snapshot
+
+
+#: A key or value of a results file, with what a terminal or a CI runner obeys.
+SECRET = "wJalrXUtnFEMIK7MDENG"
+HOSTILE = SECRET + "\x1b[31m\n::error title=scan::" + SECRET
+
+
+@pytest.mark.parametrize(
+    "results_json, reason",
+    [
+        pytest.param('{"T": ' + SECRET, "Invalid JSON", id="not-json"),
+        pytest.param(
+            json.dumps({"scanner_results": {HOSTILE: 5}}),
+            "Invalid value at 'scanner_results.<key>'",
+            id="key",
+        ),
+        # Written with surrogateescape: the file holds the byte 0xff.
+        pytest.param('{"name": "ok\udcff"}', "not UTF-8 at byte offset", id="not-utf8"),
+    ],
+)
+def test_unparseable_results_are_not_quoted(scan, nix_shell, results_json, reason):
+    """The results file holds finding data. pydantic's text quotes it
+    (input_value='...'), its locations name the file's keys, and a decode error
+    prints the byte; Rich read the quoting part as a tag and dropped it, and once
+    log messages print as text it reached the console. A decode error escaped
+    the parse handler as a traceback."""
+    nix_shell.results_json = results_json
+    result = scan(SCAN)
+
+    shown = result["stdout"] + result["stderr"]
+    assert result["exit_code"] == 1, shown
+    assert "Failed to parse results file" in shown, shown
+    assert reason in shown, shown
+    assert SECRET not in shown, shown
+    assert "\x1b[31m" not in shown and "\n::" not in shown, repr(shown)
 
 
 def test_equals_form_of_mode_is_rewritten(scan, snapshot, nix_shell):

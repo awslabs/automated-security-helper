@@ -152,6 +152,23 @@ class TestCwdDefaults:
         assert container_stubs["build"], "the build helper should still have run"
         assert container_stubs["run_command"] == []
 
+    def test_building_without_running_does_not_check_the_run_mounts(
+        self, container_stubs, tmp_path, monkeypatch
+    ):
+        """A build mounts nothing, so a path only a run would mount refuses
+        nothing when run=False: the directory check belongs to the run phase,
+        which checks it again for a caller that reaches it directly."""
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        output = tmp_path / "out,dir"
+
+        result = run_ash_container(
+            source_dir=tmp_path, output_dir=str(output), build=True, run=False
+        )
+
+        assert result.returncode == 0
+        assert container_stubs["build"], "the build was refused over a run mount"
+        assert container_stubs["run_command"] == []
+
 
 # ---------------------------------------------------------------------------
 # Refusals -- each returns a non-zero CompletedProcess rather than raising

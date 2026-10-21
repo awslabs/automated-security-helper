@@ -1,10 +1,10 @@
 
  Usage: ash build-image [OPTIONS]
 
- Builds the ASH container image then runs a scan with it.
+ Builds the ASH container image, then scans the current directory with it unless --no-run is given.
 
- Any additional arguments passed will be forwarded to ASH inside the container image when starting
- the scan.
+ It takes only the options below. To scan with scan options, run `ash scan --mode container`, which
+ builds the image the same way and accepts every scan option.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --no-build                                                              Skip building the ASH    │

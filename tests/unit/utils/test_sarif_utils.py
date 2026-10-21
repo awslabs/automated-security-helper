@@ -43,15 +43,14 @@ def test_sanitize_uri(test_source_dir):
     assert not sanitized.startswith("file://")
     assert "src/file.py" in sanitized
 
-    # Test with backslashes - this is where Windows conversion happens
+    # Windows separators for a file under the source directory become "/" on
+    # every platform. A backslash that is part of a POSIX file name is kept;
+    # tests/unit/utils/test_sarif_uri_backslash.py covers that side.
+    (source_dir_path / "src").mkdir(exist_ok=True)
+    (source_dir_path / "src" / "file.py").write_text("x = 1\n")
     uri = "src\\file.py"
     sanitized = _sanitize_uri(uri, source_dir_path, source_dir_str)
-    # Test the parts that should be consistent across platforms
-    assert "src" in sanitized
-    assert "file.py" in sanitized
-    # Test that backslashes are converted (this works on all platforms)
-    assert "\\" not in sanitized
-    assert "/" in sanitized
+    assert sanitized == "src/file.py"
 
     # Test with empty URI
     uri = ""
@@ -70,8 +69,9 @@ def test_path_matches_pattern():
     # Wildcards
     assert path_matches_pattern("src/file.py", "src/*.py") is True
 
-    # Backslash normalization
-    assert path_matches_pattern("src\\file.py", "src/**") is True
+    # A backslash is a separator in the pattern; in the path it is part of a name
+    assert path_matches_pattern("src/file.py", "src\\**") is True
+    assert path_matches_pattern("src\\file.py", "src/**") is False
 
     # Non-matching path
     assert path_matches_pattern("src/file.py", "tests") is False

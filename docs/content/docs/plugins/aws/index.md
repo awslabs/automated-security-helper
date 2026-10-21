@@ -9,14 +9,14 @@ AWS plugins provide:
 - **Cloud-native integration** with AWS security and monitoring services
 - **Scalable storage and processing** for large-scale security operations
 - **AI-powered analysis** using Amazon Bedrock foundation models
-- **Compliance reporting** through AWS Security Hub integration
+- **Findings in AWS Security Hub**, next to the findings of other security services
 - **Real-time monitoring** with CloudWatch Logs streaming
 
 ## Available Plugins
 
 | Plugin                                                      | Purpose                      | Key Features                                                  | Use Cases                                             |
 |-------------------------------------------------------------|------------------------------|---------------------------------------------------------------|-------------------------------------------------------|
-| **[Security Hub Reporter](security-hub-reporter.md)**       | AWS Security Hub integration | ASFF format, batch processing, compliance mapping             | Centralized security monitoring, compliance reporting |
+| **[Security Hub Reporter](security-hub-reporter.md)**       | AWS Security Hub integration | ASFF findings via BatchImportFindings, stable finding Ids     | Centralized security monitoring                       |
 | **[Bedrock Summary Reporter](bedrock-summary-reporter.md)** | AI-powered summaries         | Executive summaries, technical analysis, multiple models      | Management reporting, risk assessment                 |
 | **[CloudWatch Logs Reporter](cloudwatch-logs-reporter.md)** | Real-time logging            | Structured logging, metric filters, alarms                    | Real-time monitoring, automated alerting              |
 | **[S3 Reporter](s3-reporter.md)**                           | Cloud storage for reports    | Multiple formats, lifecycle management, analytics integration | Long-term archival, data analytics                    |
@@ -77,6 +77,8 @@ reporters.<name>.enabled=true`.
 - A reporter plugin that sends findings off the host declares
   `sends_off_host = True` on its class. ASH then runs it only when its section of
   the config sets `enabled: true`, whatever its own default is.
+- A run uses only ASH's built-in reporters and those of the plugin modules it
+  names (`ash_plugin_modules`), even in a process where another run loaded more.
 
 ## Settings only the operator can set
 
@@ -151,8 +153,9 @@ See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mc
        enabled: true
        options:
          aws_region: "us-east-1"
+         findings_scope: "my-org/my-service"
 
-     s3-reporter:
+     s3:
        enabled: true
        options:
          bucket_name: "my-security-reports"
@@ -172,11 +175,14 @@ config file outside the scanned tree:
 
 ```yaml
 # Enterprise configuration
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_aws_plugins
 reporters:
   aws-security-hub:
     enabled: true
     options:
       aws_region: "us-east-1"
+      findings_scope: "my-org/my-service"
 
   bedrock-summary-reporter:
     enabled: true
@@ -196,7 +202,6 @@ reporters:
     options:
       bucket_name: "enterprise-security-reports"
       key_prefix: "ash-scans"
-      storage_class: "STANDARD_IA"
       aws_region: "us-east-1"
 ```
 
@@ -212,7 +217,7 @@ reporters:
 
 | Plugin                   | Required Services      | Optional Services              |
 |--------------------------|------------------------|--------------------------------|
-| Security Hub Reporter    | AWS Security Hub       | AWS Config, AWS Inspector      |
+| Security Hub Reporter    | AWS Security Hub       | -                              |
 | Bedrock Summary Reporter | Amazon Bedrock         | -                              |
 | CloudWatch Logs Reporter | Amazon CloudWatch Logs | CloudWatch Alarms, EventBridge |
 | S3 Reporter              | Amazon S3              | Amazon Athena, QuickSight      |
@@ -229,7 +234,7 @@ Create an IAM policy for ASH AWS plugins:
       "Effect": "Allow",
       "Action": [
         "securityhub:BatchImportFindings",
-        "securityhub:GetFindings",
+        "securityhub:DescribeHub",
         "bedrock:InvokeModel",
         "logs:CreateLogGroup",
         "logs:CreateLogStream",
@@ -239,10 +244,18 @@ Create an IAM policy for ASH AWS plugins:
         "s3:ListBucket"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "SecurityHubArchiveResolvedFindings",
+      "Effect": "Allow",
+      "Action": "securityhub:GetFindings",
+      "Resource": "*"
     }
   ]
 }
 ```
+
+The second statement is needed only when the Security Hub reporter runs with `archive_resolved_findings: true`.
 
 ## Authentication Methods
 
@@ -268,7 +281,8 @@ For EC2, ECS, Lambda, or other AWS services:
 ### 4. AWS Profiles
 ```bash
 export AWS_PROFILE="security-scanning"
-ash /path/to/code --reporters aws-security-hub
+# With aws-security-hub enabled in the ASH configuration
+ash --source-dir /path/to/code
 ```
 
 ## Integration Patterns
@@ -297,8 +311,26 @@ jobs:
         aws-region: us-east-1
 
     - name: Run ASH Security Scan
+      env:
+        # Security Hub imports only from the default branch: every scan of the
+        # repository updates the same findings, so a pull request or a feature
+        # branch would overwrite, and with archiving on archive, what the
+        # default branch reported.
+        IMPORT_TO_SECURITY_HUB: ${{ github.event_name == 'push' && github.ref_name == github.event.repository.default_branch }}
+        # The repository's findings in Security Hub. Set here, by the job that
+        # holds the credentials, and not in the repository's .ash config.
+        FINDINGS_SCOPE: ${{ github.repository }}
       run: |
-        ash . --reporters aws-security-hub,bedrock-summary-reporter,s3-reporter
+        # The other reporters are enabled in .ash/.ash.yaml
+        if [ "$IMPORT_TO_SECURITY_HUB" = "true" ]; then
+          ash --source-dir . \
+            --config-overrides 'reporters.aws-security-hub.enabled=true' \
+            --config-overrides "reporters.aws-security-hub.options.findings_scope=$FINDINGS_SCOPE"
+        else
+          # Off whatever .ash/.ash.yaml says: a pull request can change that file.
+          ash --source-dir . \
+            --config-overrides 'reporters.aws-security-hub.enabled=false'
+        fi
 
     - name: Post AI Summary to PR
       if: github.event_name == 'pull_request'
@@ -327,13 +359,40 @@ pipeline {
     }
 
     stages {
-        stage('Security Scan') {
+        // A multibranch pipeline, where `branch` matches BRANCH_NAME. Only the
+        // default branch imports into Security Hub: every scan of the repository
+        // updates the same findings, so another branch would overwrite them.
+        // /etc/ash/aws-reporters.yml loads the AWS plugins (ash_plugin_modules:
+        // [automated_security_helper.plugin_modules.ash_aws_plugins]) and sets
+        // the Security Hub Region.
+        stage('Security Scan (imports to Security Hub)') {
+            when { branch 'main' }
             steps {
                 withAWS(role: 'arn:aws:iam::123456789012:role/Jenkins-ASH') {
+                    // The config file is on the agent, outside the checked-out
+                    // workspace, and the scope is one name for this repository.
                     sh '''
-                        ash . \
-                          --reporters aws-security-hub,s3-reporter,cloudwatch-logs \
-                          --config jenkins-ash-config.yml
+                        ash --source-dir . \
+                          --config /etc/ash/aws-reporters.yml \
+                          --config-overrides 'reporters.aws-security-hub.enabled=true' \
+                          --config-overrides 'reporters.aws-security-hub.options.findings_scope=my-org/my-service'
+                    '''
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            when { not { branch 'main' } }
+            steps {
+                // The `when` above and the override below are what keep this
+                // stage from importing; to enforce it, give branch builds a role
+                // without securityhub:BatchImportFindings.
+                withAWS(role: 'arn:aws:iam::123456789012:role/Jenkins-ASH') {
+                    // Off whatever the checked-out configuration says.
+                    sh '''
+                        ash --source-dir . \
+                          --config /etc/ash/aws-reporters.yml \
+                          --config-overrides 'reporters.aws-security-hub.enabled=false'
                     '''
                 }
             }
@@ -380,16 +439,24 @@ def lambda_handler(event, context):
         # Extract and scan
         subprocess.run(["unzip", "/tmp/code.zip", "-d", "/tmp/code"])
 
+        # One findings_scope per repository, so two repositories never share
+        # finding Ids in Security Hub. Here the object key names the repository,
+        # for example "repos/my-service.zip". Set by this function, not by the
+        # scanned code's own .ash config.
+        findings_scope = Path(key).stem
+
         # Run ASH with AWS reporters
         result = subprocess.run(
             [
                 "ash",
                 "scan",
+                "--source-dir",
                 "/tmp/code",
-                "--reporters",
-                "aws-security-hub,cloudwatch-logs",
+                # The reporters are enabled in the config file.
                 "--config",
                 "/opt/ash-lambda-config.yml",
+                "--config-overrides",
+                f"reporters.aws-security-hub.options.findings_scope={findings_scope}",
             ],
             capture_output=True,
             text=True,
@@ -486,7 +553,7 @@ Automate responses to security findings:
 
 | Plugin                   | Primary Cost Factors    | Estimated Monthly Cost* |
 |--------------------------|-------------------------|-------------------------|
-| Security Hub Reporter    | $0.0003 per finding     | $10-50                  |
+| Security Hub Reporter    | Finding ingestion events, see AWS Security Hub pricing | -   |
 | Bedrock Summary Reporter | Model invocation tokens | $5-100                  |
 | CloudWatch Logs Reporter | Log ingestion (GB)      | $5-25                   |
 | S3 Reporter              | Storage and requests    | $1-10                   |
@@ -543,10 +610,8 @@ aws bedrock list-foundation-models --region us-east-1
 Enable comprehensive debugging:
 
 ```bash
-# Enable debug logging for all AWS plugins
-ash /path/to/code \
-  --reporters aws-security-hub,bedrock-summary-reporter,cloudwatch-logs,s3-reporter \
-  --log-level DEBUG
+# Debug logging for every enabled reporter, the AWS ones included
+ash --source-dir /path/to/code --log-level DEBUG
 ```
 
 ## Best Practices
@@ -605,17 +670,20 @@ reporters:
     output_file: "report.html"
 
 # After: AWS-integrated reporting
+ash_plugin_modules:
+  - automated_security_helper.plugin_modules.ash_aws_plugins
 reporters:
   aws-security-hub:
     enabled: true
     options:
       aws_region: "us-east-1"
+      findings_scope: "my-org/my-service"
 
   s3-reporter:
     enabled: true
     options:
       bucket_name: "security-reports"
-      formats: ["sarif", "html"]
+      file_format: "json"  # json or yaml
 
   bedrock-summary-reporter:
     enabled: true

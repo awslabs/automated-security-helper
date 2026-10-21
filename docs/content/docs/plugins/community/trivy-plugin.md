@@ -80,7 +80,7 @@ trivy version
 
 ### Basic Configuration
 
-Add the Trivy plugin to your `.ash/.ash.yaml` configuration:
+Add the Trivy plugin to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```
 ash_plugin_modules:
@@ -154,7 +154,7 @@ ash --target /path/to/project --scanners trivy-repo
 ### Vulnerability-Only Scan
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   trivy-repo:
     enabled: true
@@ -171,7 +171,7 @@ ash --scanners trivy-repo
 ### Comprehensive Security Scan
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   trivy-repo:
     enabled: true
@@ -184,7 +184,7 @@ scanners:
 ### Integration with Other Scanners
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   # Combine Trivy with other ASH scanners
   trivy-repo:
@@ -227,7 +227,7 @@ ASH decides the scan's exit code from the findings. See
 ### Example Output Configuration
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 reporters:
   sarif:
     enabled: true
@@ -952,7 +952,7 @@ with open('.security-baseline/baseline-suppressions.yaml', 'w') as f:
     yaml.dump({'global_settings': {'suppressions': suppressions}}, f, default_flow_style=False)
 
 print(f"Generated {len(suppressions)} baseline suppressions")
-print("Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into .ash/.ash.yaml")
+print("Review .security-baseline/baseline-suppressions.yaml and merge approved suppressions into your ASH config file (.ashrc.yaml in a new project)")
 EOF
 ```
 
@@ -1375,7 +1375,7 @@ trivy version
 ash --version
 
 # Configuration
-cat .ash/.ash.yaml
+cat .ashrc.yaml  # your ASH config file; `ash config validate` prints which one a scan uses
 
 # Recent logs
 tail -50 .ash/ash_output/scanners/trivy-repo/*/ash.log
@@ -1554,7 +1554,7 @@ to scan with an older one and have the reports say so.
 #### Rule-Based Suppressions
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 global_settings:
   suppressions:
     # Suppress specific CVEs
@@ -1581,13 +1581,32 @@ global_settings:
 #### Dynamic Suppressions
 
 ```bash
-# Generate suppressions from previous scan
-ash --scanners trivy-repo --reporters json > results.json
-python scripts/generate_suppressions.py results.json > suppressions.yaml
+# Scan, then turn each finding not already suppressed into a suppression entry
+ash scan --scanners trivy-repo --output-formats sarif
+jq '[.runs[].results[]
+     | select((.suppressions // []) | length == 0)
+     | {rule_id: .ruleId,
+        path: .locations[0].physicalLocation.artifactLocation.uri,
+        reason: "Baseline finding: review it before the suppression expires",
+        expiration: (now + 90 * 86400 | strftime("%Y-%m-%d"))}]
+    | unique' .ash/ash_output/reports/ash.sarif > suppressions.json
 
-# Apply generated suppressions
-cat suppressions.yaml >> .ash/.ash.yaml
+# Review suppressions.json, then append the entries to global_settings.suppressions
+# in your ASH config file, 200 at a time: on Linux one command-line argument holds
+# at most 128 KiB, and a single --set with a few hundred entries is refused with
+# "Argument list too long".
+jq -c '. as $all | range(0; length; 200) | $all[.:. + 200]' suppressions.json |
+  while read -r part; do
+    ash config update --set "global_settings.suppressions+=$part"
+  done
 ```
+
+Appending YAML to the config file (`cat suppressions.yaml >> .ashrc.yaml`) does
+not work: it adds a second top-level `global_settings`, YAML keeps only the last
+one, and every other global setting in the file is dropped. `ash config update`
+keeps them, and writes each entry with only the fields it sets. It rewrites the
+whole file, without its comments, and refuses a file that reads environment
+variables (`!ENV` or `${VAR:default}`); add the entries to such a file by hand.
 
 ### Multi-Environment Configuration
 
@@ -1673,7 +1692,7 @@ touch .last_scan
 #### Resource Management
 
 ```yaml
-# .ash/.ash.yaml - Optimized for large repositories
+# ASH config file (.ashrc.yaml in a new project) - Optimized for large repositories
 scanners:
   trivy-repo:
     enabled: true

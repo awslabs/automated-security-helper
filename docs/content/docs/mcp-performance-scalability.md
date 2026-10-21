@@ -2,6 +2,14 @@
 
 This guide covers performance optimization and scalability considerations for the ASH MCP server.
 
+!!! warning "Most of the settings on this page have no effect"
+    The MCP server enforces two keys of `mcp-resource-management`: `max_concurrent_scans` and
+    `scan_timeout_seconds`, and it reads them only from the operator's config (the file
+    `ASH_CONFIG` names for the `ash mcp` process), not from a repository's `.ash/.ash.yaml` as the
+    examples below show. Every other key of the section, and the health checks, resource logging
+    and monitoring this page describes, is accepted and does nothing. See
+    [Server limits](mcp-server-guide.md#server-limits) for what applies.
+
 ## Overview
 
 The ASH MCP server in v3 includes comprehensive resource management designed to handle concurrent operations efficiently while preventing memory leaks and resource exhaustion. This guide helps you optimize performance for your specific use case.
@@ -29,7 +37,7 @@ The tuning described here applies to both transports the server supports. For th
 ### Basic Performance Configuration
 
 ```yaml
-# .ash/.ash.yaml - Optimized for performance
+# ASH config file (.ashrc.yaml in a new project) - Optimized for performance
 mcp-resource-management:
   # Concurrent operations - adjust based on system resources
   max_concurrent_scans: 5              # Higher for powerful systems
@@ -50,7 +58,7 @@ mcp-resource-management:
 For powerful systems with ample resources:
 
 ```yaml
-# .ash/.ash.yaml - High-performance setup
+# ASH config file (.ashrc.yaml in a new project) - High-performance setup
 mcp-resource-management:
   # Maximize concurrent operations
   max_concurrent_scans: 8
@@ -76,7 +84,7 @@ mcp-resource-management:
 For systems with limited resources:
 
 ```yaml
-# .ash/.ash.yaml - Resource-constrained setup
+# ASH config file (.ashrc.yaml in a new project) - Resource-constrained setup
 mcp-resource-management:
   # Conservative limits
   max_concurrent_scans: 2

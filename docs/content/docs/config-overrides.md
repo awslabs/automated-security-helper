@@ -87,7 +87,7 @@ ASH provides several ways to manage your configuration:
 
 ### Configuration File
 
-ASH uses YAML configuration files by default. The standard location is `.ash/.ash.yaml` in your project directory. You can also use JSON format with `.ash/.ash.json`.
+ASH uses YAML configuration files by default. `ash config init` creates `.ashrc.yaml` in your project directory; an existing `.ash/.ash.yaml` keeps working. You can also use JSON (`.ashrc.json`) or TOML (`.ashrc.toml`, or a `[tool.ash]` table in `pyproject.toml`). The [Configuration Guide](configuration-guide.md#configuration-file-location) lists every name ASH looks for, in order.
 
 A basic configuration file looks like this:
 
@@ -131,7 +131,7 @@ Create a new configuration file:
 ash config init
 ```
 
-This creates a default configuration file at `.ash/.ash.yaml`.
+This creates a default configuration file, `.ashrc.yaml`, in the current directory.
 
 #### View Current Configuration
 
@@ -205,22 +205,27 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 - Configuration overrides are applied after loading the configuration file
 - Overrides work with both default and explicit configurations
 - An override that cannot be parsed, or that produces a configuration failing
-  validation, stops the run with exit code 3 (`invalid config`). Nothing is
-  scanned, because continuing would mean scanning with settings you did not
-  choose. Note that a top-level key ASH does not recognise is still ignored
+  validation, stops the run with exit code 3
+  (`invalid config or refused input`). Nothing is scanned, because continuing
+  would mean scanning with settings you did not choose. Note that a top-level key ASH does not recognise is still ignored
   rather than rejected, for compatibility with configuration files written
   against other ASH versions.
 - For complex values, use valid JSON syntax
 - Environment variables can be referenced in YAML configuration files using
-  `!ENV ${VAR_NAME:default_value}` syntax. `VAR_NAME` must begin with `ASH_`, or
-  be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or `AWS_PROFILE`. A reference to
-  any other name is left in the configuration exactly as written and a warning
-  names it; ASH does not read the variable. The names are matched exactly, so
-  write them in upper case. An `ASH_` name that ends in `_KEY`, `_TOKEN`,
-  `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS` or `_HEADER_VALUE`, in
-  any case, and `ASH_MCP_AUTH_HEADER_VALUE`, is left as written the same way:
-  a configuration file does not read a variable named for a credential. The
-  warning names the variable, never its value.
+  `!ENV ${VAR_NAME}` or `!ENV ${VAR_NAME:default_value}` syntax. `VAR_NAME` must
+  begin with `ASH_`, or be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or
+  `AWS_PROFILE`. A reference to any other name is left in the configuration
+  exactly as written and a warning names it; ASH does not read the variable. The
+  names are matched exactly, so write them in upper case. An `ASH_` name that
+  ends in `_KEY`, `_TOKEN`, `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS`
+  or `_HEADER_VALUE`, in any case, and `ASH_MCP_AUTH_HEADER_VALUE`, is left as
+  written the same way: a configuration file does not read a variable named for
+  a credential. The warning names the variable, never its value.
+
+  In YAML, an unquoted value that starts with `${` is resolved with or without the
+  `!ENV` tag; a quoted one (`'${VAR_NAME}'`) only with it. In a TOML file every
+  string value that starts with `${` is resolved. A JSON configuration file is
+  never interpolated.
 
   ASH reads the configuration file it finds in the directory it is scanning, so
   which variables that file may name is ASH's decision rather than the file's.
@@ -230,9 +235,18 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   A reference with no default, `${VAR_NAME}`, reads the variable too. When the
   variable is not set, the configuration is refused with exit code 3 and the
   error names the variable, since there is no value to use; write
-  `${VAR_NAME:None}`, or another default, for a variable that may be unset. This
-  holds in YAML, TOML and `pyproject.toml` alike. A reference must also be the
-  whole value, not part of a longer string.
+  `${VAR_NAME:None}`, or another default, for a variable that may be unset. A
+  variable that is set to an empty string resolves to nothing either way. This
+  holds in YAML, TOML and `pyproject.toml` alike.
+
+  Write one reference per value, at its start. A reference runs to the last `}`
+  in the value, so text after it is kept only if it contains no `}`:
+  `${ASH_REPORT_PREFIX:scans}/ash` resolves to the variable, or `scans`, followed
+  by `/ash`. When the text after it does contain a `}`, it is read as part of the
+  reference. With a default, as in `${ASH_PREFIX:scans}/{run}`, the default becomes
+  `scans}/{run`, and the whole value is replaced by the variable when it is set;
+  without one, as in `${ASH_PREFIX}/{run}`, the value is left as written. A
+  reference after other text is not resolved, and neither is a second reference.
 
   The scan, and the reports it renders, use the value. What ASH writes of the
   configuration holds the reference as the file wrote it instead: the

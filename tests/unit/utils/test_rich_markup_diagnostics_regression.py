@@ -29,17 +29,23 @@ Rich's tag pattern is ``\\[([a-z#/@][^[]*?)]``, so ``[0]``, ``[B404]`` and
 are all inert. Only the four leading characters above matter, which is why the
 fixtures below use real strings from a real failure rather than invented ones.
 
-The fix is deliberately two different mechanisms, because escaping is wrong for
-the messages that carry no markup:
+The fix is at the sink, with an opt-in for the few messages that style
+themselves:
 
-* Data-only messages pass ``extra=NO_MARKUP``, which sets ``markup`` on the
-  record. ``RichHandler.render_message`` reads
-  ``getattr(record, "markup", self.markup)``, so markup is off for that one
-  record and the message string is never rewritten -- the JSONL and tabular file
-  logs stay byte-exact. Escaping the string instead would put a literal
-  backslash into those files, which ``test_file_log_is_not_rewritten`` guards.
-* Messages that do style part of themselves escape only the untrusted value, so
-  the styling still renders.
+* The console handler is built with ``markup=False`` (utils/log.py), so every
+  record is text unless it passes ``extra=MARKUP``. ``RichHandler.render_message``
+  reads ``getattr(record, "markup", self.markup)``. ``extra=NO_MARKUP`` still
+  works and changes nothing. The message string is never rewritten, so the JSONL
+  and tabular file logs stay byte-exact, which ``test_file_log_is_not_rewritten``
+  guards.
+* Messages that do style part of themselves pass ``extra=MARKUP`` and escape
+  only the untrusted value, so the styling still renders; the file handlers
+  write such a record as the text it shows.
+
+The fixture below builds the handlers get_logger builds (ConsoleHandler, the
+tabular TextFileFormatter), not a RichHandler with markup on, so these tests
+exercise the production sink. TestEachMarkupSiteUnderTheRealSink logs through
+each extra=MARKUP site with "[/x]" in its path, rule and reason.
 """
 
 import io
@@ -48,10 +54,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from rich.console import Console
-from rich.logging import RichHandler
 
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.console import ash_console
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    ConsoleHandler,
+    TextFileFormatter,
+)
 
 
 # The exact line podman/buildah writes to stderr while building the ASH image.
@@ -90,12 +99,12 @@ def rich_capture(tmp_path):
     the file handler from running.
     """
     console_buffer = io.StringIO()
-    rich_handler = RichHandler(
+    rich_handler = ConsoleHandler(
         # color_system=None keeps assertions on plain text; with colors on, Rich
         # interleaves escape sequences inside a word and a substring check on the
         # payload fails even when the payload survived.
-        console=Console(file=console_buffer, width=250, color_system=None),
-        markup=True,
+        console=ash_console(file=console_buffer, width=250, color_system=None),
+        markup=False,
         show_time=False,
         show_path=False,
     )
@@ -103,7 +112,7 @@ def rich_capture(tmp_path):
 
     log_file = tmp_path / "ash.log"
     file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    file_handler.setFormatter(TextFileFormatter("%(message)s"))
 
     saved_handlers = list(ASH_LOGGER.handlers)
     saved_level = ASH_LOGGER.level
@@ -118,7 +127,7 @@ def rich_capture(tmp_path):
 
 
 def _completed(returncode=1, stdout="", stderr=""):
-    """A CompletedProcess stand-in for a patched ``subprocess.run``."""
+    """A CompletedProcess stand-in for a patched plain runner (``_run_plain``)."""
     import subprocess
 
     return subprocess.CompletedProcess(
@@ -135,8 +144,8 @@ class TestClosingTagInSubprocessOutput:
         console_buffer, _ = rich_capture
 
         with patch.object(
-            subprocess_utils.subprocess,
-            "run",
+            subprocess_utils,
+            "_run_plain",
             return_value=_completed(stderr=BUILDAH_SHELL_WARNING),
         ):
             # Before the fix this raises MarkupError out of the logging call
@@ -157,7 +166,7 @@ class TestClosingTagInSubprocessOutput:
         # sites rather than the stderr ones.
         args = ["semgrep", "--config", "/rules/[/legacy]/all.yml"]
         with patch.object(
-            subprocess_utils.subprocess, "run", return_value=_completed(returncode=0)
+            subprocess_utils, "_run_plain", return_value=_completed(returncode=0)
         ):
             subprocess_utils.run_command(args)
 
@@ -174,7 +183,7 @@ class TestOpeningTagIsNotSilentlyDropped:
 
         args = ["semgrep", "--exclude", OPEN_TAG_PAYLOAD, "--config", "p/ci"]
         with patch.object(
-            subprocess_utils.subprocess, "run", return_value=_completed(returncode=0)
+            subprocess_utils, "_run_plain", return_value=_completed(returncode=0)
         ):
             subprocess_utils.run_command(args)
 
@@ -191,8 +200,8 @@ class TestOpeningTagIsNotSilentlyDropped:
 
         stderr = f"error: cannot read {OPEN_TAG_PAYLOAD}/pkg: permission denied"
         with patch.object(
-            subprocess_utils.subprocess,
-            "run",
+            subprocess_utils,
+            "_run_plain",
             return_value=_completed(stderr=stderr),
         ):
             subprocess_utils.run_command(["npm", "audit"])
@@ -213,8 +222,8 @@ class TestFileLogIsNotRewritten:
         _, log_file = rich_capture
 
         with patch.object(
-            subprocess_utils.subprocess,
-            "run",
+            subprocess_utils,
+            "_run_plain",
             return_value=_completed(stderr=BUILDAH_SHELL_WARNING),
         ):
             subprocess_utils.run_command(["podman", "build", "."])
@@ -271,3 +280,156 @@ class TestIntentionalStylingStillWorks:
         # The styling tag must have been consumed as markup, not printed.
         assert "[yellow]" not in output
         assert "accepted risk" in output
+
+
+def _assert_logged_as_text(console_buffer, log_file, expected: str) -> None:
+    """The console shows *expected* styled, the file writes it plain; neither shows
+    a tag or an escape."""
+    shown = " ".join(console_buffer.getvalue().split())
+    written = Path(log_file).read_text(encoding="utf-8")
+    assert " ".join(expected.split()) in shown, shown
+    assert expected in written, written
+    for output in (shown, written):
+        assert "[yellow]" not in output, output
+        assert "\\[" not in output, output
+
+
+class TestEachMarkupSiteUnderTheRealSink:
+    """Each extra=MARKUP log call, with "[/x]" in what it quotes, under the real sink.
+
+    Dropping a site's extra=MARKUP prints its [yellow] tags; dropping one of its
+    escape_markup calls raises MarkupError or drops text. Both fail here.
+    """
+
+    def test_a_config_suppression(self, rich_capture):
+        from automated_security_helper.models.core import AshSuppression
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
+        from automated_security_helper.schemas.sarif_schema_model import (
+            Message,
+            Result,
+        )
+        from automated_security_helper.utils.sarif_utils import (
+            _apply_config_suppression,
+        )
+
+        console_buffer, log_file = rich_capture
+        rule, path, reason = "B[/x]108", "src/[/x]/foo.py", "accepted [/x] risk"
+        result = Result(ruleId=rule, message=Message(text="msg"))
+        # The suppression's rule id is a glob, where "[/x]" is a character class.
+        suppression = AshSuppression(rule_id="B*", path=path, reason=reason)
+        flat = FlatVulnerability(
+            id="abc",
+            title="t",
+            description="d",
+            severity="MEDIUM",
+            scanner="test",
+            scanner_type="SAST",
+            rule_id=rule,
+            file_path=path,
+        )
+
+        assert _apply_config_suppression(result, [suppression], flat, set()) is True
+        _assert_logged_as_text(
+            console_buffer,
+            log_file,
+            f"Suppressing rule '{rule}' on location '{path}' based on suppression "
+            f"rule: {reason}",
+        )
+
+    def test_an_inline_suppression(self, rich_capture, tmp_path):
+        from automated_security_helper.schemas.sarif_schema_model import (
+            Message,
+            Result,
+        )
+        from automated_security_helper.utils.sarif_utils import (
+            _apply_inline_suppression,
+        )
+
+        console_buffer, log_file = rich_capture
+        source = tmp_path / "source"
+        (source / "pkg[" / "x]").mkdir(parents=True)
+        uri = "pkg[/x]/app.py"
+        (source / uri).write_text(
+            "value = 1  # ash-ignore: B108 accepted [/x] risk\n", encoding="utf-8"
+        )
+        result = Result(ruleId="B108", message=Message(text="msg"))
+
+        assert _apply_inline_suppression(result, uri, source, 1, {}) is True
+        _assert_logged_as_text(
+            console_buffer,
+            log_file,
+            f"Suppressing rule 'B108' at line 1 in '{uri}' via inline comment: "
+            "accepted [/x] risk",
+        )
+
+    def test_an_ignore_path(self, rich_capture, tmp_path):
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.models.core import IgnorePathWithReason
+        from automated_security_helper.schemas.sarif_schema_model import (
+            ArtifactLocation,
+            Location,
+            Message,
+            PhysicalLocation2,
+            Region,
+            Result,
+            Run,
+            SarifReport,
+            Tool,
+            ToolComponent,
+        )
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+        )
+
+        console_buffer, log_file = rich_capture
+        uri, rule, reason = "vendor[/x]/lib.py", "RULE[/x]-1", "vendored [/x] code"
+        sarif = SarifReport(
+            version="2.1.0",
+            runs=[
+                Run(
+                    tool=Tool(driver=ToolComponent(name="Test Scanner", version="1")),
+                    results=[
+                        Result(
+                            ruleId=rule,
+                            message=Message(text="finding"),
+                            locations=[
+                                Location(
+                                    physicalLocation=PhysicalLocation2(
+                                        artifactLocation=ArtifactLocation(uri=uri),
+                                        region=Region(startLine=1, endLine=1),
+                                    )
+                                )
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        (tmp_path / "source").mkdir()
+        (tmp_path / "output").mkdir()
+        config = AshConfig(
+            project_name="p",
+            global_settings={
+                "ignore_paths": [
+                    IgnorePathWithReason(path="vendor[/x]/**", reason=reason)
+                ]
+            },
+        )
+        context = PluginContext(
+            source_dir=tmp_path / "source",
+            output_dir=tmp_path / "output",
+            config=config,
+        )
+
+        filtered = apply_suppressions_to_sarif(sarif, context)
+
+        assert filtered.runs[0].results == [], filtered.runs[0].results
+        _assert_logged_as_text(
+            console_buffer,
+            log_file,
+            f"Ignoring finding on rule '{rule}' file location '{uri}' based on "
+            f"ignore_path match with global reason: {reason}",
+        )

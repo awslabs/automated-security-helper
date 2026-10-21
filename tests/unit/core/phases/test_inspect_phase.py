@@ -26,10 +26,7 @@ def mock_plugin_context(tmp_path):
 @pytest.fixture
 def inspect_phase(mock_plugin_context):
     """Create an InspectPhase instance with mocked dependencies."""
-    phase = InspectPhase(plugin_context=mock_plugin_context)
-    phase.initialize_progress = MagicMock()
-    phase.update_progress = MagicMock()
-    return phase
+    return InspectPhase(plugin_context=mock_plugin_context)
 
 
 class TestInspectPhase:
@@ -78,18 +75,3 @@ class TestInspectPhase:
 
         # Should not raise; returns model
         assert result is model
-        # Progress should still reach 100
-        inspect_phase.update_progress.assert_called_with(
-            100, "Inspection phase complete"
-        )
-
-    @patch("automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields")
-    def test_progress_updates_on_success(self, mock_analyze, inspect_phase):
-        """Progress updates are called in sequence during success."""
-        model = AshAggregatedResults()
-
-        inspect_phase._execute_phase(aggregated_results=model)
-
-        calls = inspect_phase.update_progress.call_args_list
-        percentages = [c[0][0] for c in calls]
-        assert percentages == [10, 30, 90, 100]

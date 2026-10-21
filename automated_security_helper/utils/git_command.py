@@ -43,6 +43,11 @@ GIT_SAFETY_OPTIONS: tuple[str, ...] = (
 def git_argv(*args: str, program: Union[str, Sequence[str]] = GIT_PROGRAM) -> list[str]:
     """``[*program, *GIT_SAFETY_OPTIONS, *args]``: a git command for ``subprocess``.
 
+    The options go before the subcommand, where git reads them and where they
+    outrank the repository's config: ``-c core.fsmonitor=false``, so refreshing
+    the index starts no fsmonitor command, and ``-c core.hooksPath=/dev/null``, so
+    git finds no hook to run. Nothing else in *args* is changed or checked.
+
     ``program`` is the git to run: the bare name, or the absolute path a caller
     resolved so that Windows does not look for git in the working directory first.
     A sequence is the program followed by what must come before the options, such

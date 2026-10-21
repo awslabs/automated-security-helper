@@ -40,7 +40,7 @@ output "merged_results_location_template" {
 
 output "min_severity" {
   description = "Threshold passed to `ash merge --min-severity`. ASH evaluates it; this module does not."
-  value       = var.min_severity
+  value       = lower(var.min_severity)
 }
 
 output "fail_on_findings" {

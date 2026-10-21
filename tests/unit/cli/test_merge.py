@@ -26,6 +26,7 @@ between a partial merge and a false clean bill of health.
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -43,6 +44,7 @@ from automated_security_helper.cli.merge import (
     SHARD_PROVENANCE_KEY,
     _completed,
     _merged_exit_code,
+    _shown_lines,
     apply_aggregated_suppressions,
     load_shard_results,
     merge_shard_results,
@@ -50,11 +52,13 @@ from automated_security_helper.cli.merge import (
     resolve_results_file,
     stamp_shard_assignment,
 )
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.exceptions import ShardCoverageError
 from automated_security_helper.core.sharding import (
     ShardAssignment,
     partition_scanners,
+    shown_shard_text,
 )
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
@@ -108,6 +112,9 @@ FINDINGS: Dict[str, List[Tuple[str, str]]] = {
 #: ends up in extensions once merging starts -- so the union has to cope with the
 #: same component arriving from several shards with different rules.
 SHARED_COMPONENT = ("ash-core", "ASH core rules", "test")
+
+#: The logger the merge's disclosures are written to.
+ASH_LOGGER_NAME = "ash"
 
 
 @pytest.fixture
@@ -1076,6 +1083,195 @@ class TestMergedProvenance:
         assert stats.duration == 62.0
 
 
+#: A marker a shard does not record at all, as results from an older ASH lack it.
+_ABSENT = object()
+
+
+class TestScanMarkersAcrossShards:
+    """scan_source and changed_files_only describe the whole merged scan.
+
+    The merged report is a deep copy of shard 0, so every other shard's values
+    were dropped unread. aws-security-hub archives a stored finding only under
+    the recorded scan_source and only when changed_files_only is an explicit
+    False, so a shard that scanned another directory, or was filtered to changed
+    files, had the findings it left out read as fixed by a collector with
+    archiving on.
+    """
+
+    @staticmethod
+    def _merged(sources, markers):
+        shards = build_shards(len(sources))
+        for shard, source, marker in zip(shards, sources, markers):
+            if source is not _ABSENT:
+                shard.metadata.scan_source = source
+            if marker is not _ABSENT:
+                shard.metadata.changed_files_only = marker
+        return merge_shard_results(as_loaded(shards))
+
+    def test_agreeing_shards_keep_both_through_a_json_round_trip(self):
+        merged = self._merged([".", ".", "."], [False, False, False])
+
+        reloaded = AshAggregatedResults.model_validate_json(merged.model_dump_json())
+
+        assert reloaded.metadata.scan_source == "."
+        assert reloaded.metadata.changed_files_only is False
+
+    def test_disagreeing_scan_sources_merge_to_none_with_a_warning(self, capture):
+        merged = self._merged(["services/api", ".", "."], [False, False, False])
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+        warnings = [
+            record.getMessage()
+            for record in capture.records
+            if record.levelname == "WARNING" and "scan_source" in record.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert "'services/api'" in warnings[0] and "'.'" in warnings[0]
+
+    def test_a_shard_that_records_no_scan_source_counts_as_disagreeing(self):
+        merged = self._merged([".", ".", _ABSENT], [False, False, False])
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+
+    @pytest.mark.parametrize("odd", [["services/api"], {"source": "."}, 7])
+    def test_a_scan_source_that_is_not_a_string_counts_as_none(self, odd):
+        """metadata keeps unknown keys as given (extra="allow"), so a results file
+        can carry a list or a mapping there. Unhashable, it made the comparison
+        raise TypeError, which ash merge did not catch: exit 1, with a traceback."""
+        merged = self._merged([".", odd, "."], [False, False, False])
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+
+    def test_one_non_string_scan_source_alone_is_not_kept_either(self):
+        merged = self._merged([["."], ["."], ["."]], [False, False, False])
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+
+    @pytest.mark.parametrize(
+        "sources",
+        [[["."], ["."], ["."]], [7, 7, 7], [["."], 7, None], [None, ["x"], None]],
+        ids=["all-lists", "all-ints", "mixed", "one-list-among-none"],
+    )
+    def test_a_scan_source_dropped_for_not_being_a_string_is_warned_about(
+        self, sources, capture
+    ):
+        merged = self._merged(sources, [False, False, False])
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+        assert any(
+            record.levelname == "WARNING" and "scan_source" in record.getMessage()
+            for record in capture.records
+        )
+
+    def test_no_warning_when_no_shard_records_a_scan_source(self, capture):
+        self._merged([_ABSENT, _ABSENT, _ABSENT], [False, False, False])
+
+        assert not any("scan_source" in r.getMessage() for r in capture.records)
+
+    def test_the_warning_stays_short_for_a_huge_value(self, capture):
+        """The values are named in the WARNING, and a results file can carry
+        anything there: a 100,000-element list made a 500,151-character line."""
+        merged = self._merged(
+            [list(range(100_000)), ".", "x" * 100_000], [False, False, False]
+        )
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+        [warning] = [
+            r.getMessage() for r in capture.records if "scan_source" in r.getMessage()
+        ]
+        assert len(warning) < 2_000
+
+    def test_the_warning_names_five_values_and_counts_the_rest(self, capture):
+        """Seven shards, seven directories: the first five in sorted order are
+        named, and the other two are counted."""
+        sources = [f"services/s{index}" for index in range(7)]
+        merged = self._merged(sources, [False] * 7)
+
+        assert getattr(merged.metadata, "scan_source", None) is None
+        [warning] = [
+            r.getMessage() for r in capture.records if "scan_source" in r.getMessage()
+        ]
+        for named in sources[:5]:
+            assert repr(named) in warning
+        for unnamed in sources[5:]:
+            assert repr(unnamed) not in warning
+        assert "and 2 more" in warning
+
+    def test_the_warning_shows_each_recorded_value_once(self, capture):
+        """The values were named by their repr, which writes ESC as the text \\x1b,
+        and the log sinks then showed that text again: "sx\\\\x1b[31my" reached the
+        console and ash.log, and "C:\\x64" four backslashes deep. Checked as both
+        sinks write the record (console_text, and ash.log's TextFileFormatter)."""
+        from automated_security_helper.utils.log import TextFileFormatter, console_text
+
+        self._merged(["sx\x1b[31my", "other", "C:\\x64", "n\n::error::x"], [False] * 4)
+
+        [record] = [r for r in capture.records if "scan_source" in r.getMessage()]
+        for printed in (
+            console_text(record, record.getMessage()),
+            TextFileFormatter("%(message)s").format(record),
+        ):
+            # ESC as one escape; a backslash that reads as one doubled once; a
+            # newline as an escape, so the warning stays one line.
+            assert "'sx\\x1b[31my'" in printed, printed
+            assert "'C:\\\\x64'" in printed, printed
+            assert "'n\\x0a::error::x'" in printed, printed
+            assert "\\\\\\\\" not in printed and "\\\\x1b" not in printed, printed
+            assert "\x1b" not in printed and "\n" not in printed, repr(printed)
+        assert getattr(record, "markup", True) is False
+
+    def test_a_value_that_is_not_text_is_named_by_its_kind(self, capture):
+        """A list's repr quoted the repr of each item, ESC included, so it was shown
+        twice like any repr; it is no directory, so its kind and size say enough."""
+        self._merged([["a\x1bb", "c"], {"k": "v"}, 7], [False, False, False])
+
+        [warning] = [
+            r.getMessage() for r in capture.records if "scan_source" in r.getMessage()
+        ]
+        assert "a list of 2 items" in warning, warning
+        assert "a dict of 1 item" in warning, warning
+        assert "7" in warning and "a\x1bb" not in warning, repr(warning)
+
+    def test_one_shard_filtered_to_changed_files_makes_the_merge_filtered(self):
+        merged = self._merged([".", ".", "."], [False, True, False])
+
+        assert merged.metadata.changed_files_only is True
+
+    def test_a_shard_without_the_marker_leaves_the_merge_without_one(self):
+        """Not False: nothing says that shard's results were unfiltered."""
+        merged = self._merged([".", ".", "."], [False, False, _ABSENT])
+
+        assert getattr(merged.metadata, "changed_files_only", None) is None
+
+    def test_a_collector_archives_nothing_from_disagreeing_shards(self, tmp_path):
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+            SecurityHubReporter,
+            SecurityHubReporterConfig,
+            SecurityHubReporterConfigOptions,
+        )
+
+        merged = self._merged(["services/api", ".", "."], [False, False, False])
+        reporter = SecurityHubReporter(
+            context=PluginContext(
+                source_dir=tmp_path, output_dir=tmp_path / "out", config=AshConfig()
+            ),
+            config=SecurityHubReporterConfig(
+                enabled=True,
+                options=SecurityHubReporterConfigOptions(
+                    aws_region="us-east-1",
+                    findings_scope="merge-fixture",
+                    archive_resolved_findings=True,
+                ),
+            ),
+        )
+
+        completed, skipped = reporter._archive_scope(merged)
+
+        assert completed is None
+        assert "scan_source" in skipped
+
+
 class TestResolveResultsFile:
     def test_a_file_is_used_as_given(self, tmp_path):
         paths = write_shards(tmp_path, build_shards(1), as_dirs=False)
@@ -1117,6 +1313,115 @@ class TestResolveResultsFile:
 
         with pytest.raises(ShardCoverageError, match=r"contains 3 results files"):
             resolve_results_file(tmp_path)
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+    def test_a_named_pipe_found_beneath_a_directory_is_not_a_results_file(
+        self, tmp_path
+    ):
+        """An artifact archive can carry a FIFO by that name; opening it would
+        block: `ash merge --results <dir>` with only a FIFO at
+        <dir>/sub/ash_aggregated_results.json would wait on it forever, so it is
+        refused unopened.
+        """
+        (tmp_path / "artifact" / "sub").mkdir(parents=True)
+        os.mkfifo(tmp_path / "artifact" / "sub" / RESULTS_FILE_NAME)
+
+        with pytest.raises(
+            ShardCoverageError, match=r"No ash_aggregated_results.json found"
+        ):
+            resolve_results_file(tmp_path / "artifact")
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs named pipes")
+    def test_a_named_pipe_beside_the_results_file_is_not_counted(self, tmp_path):
+        (tmp_path / "artifact" / "a").mkdir(parents=True)
+        (tmp_path / "artifact" / "b").mkdir()
+        (tmp_path / "artifact" / "a" / RESULTS_FILE_NAME).write_text(
+            build_shard(0, 1, SCANNERS).model_dump_json(), encoding="utf-8"
+        )
+        os.mkfifo(tmp_path / "artifact" / "b" / RESULTS_FILE_NAME)
+
+        resolved = resolve_results_file(tmp_path / "artifact")
+
+        assert resolved == tmp_path / "artifact" / "a" / RESULTS_FILE_NAME
+
+    def test_a_symlink_found_beneath_a_directory_is_not_followed(self, tmp_path):
+        """A link to a file outside the tree was read; one to a procfs file could block.
+
+        An --results path given directly is still followed: the operator named it.
+        """
+        outside = tmp_path / "outside.json"
+        outside.write_text(
+            build_shard(0, 1, SCANNERS).model_dump_json(), encoding="utf-8"
+        )
+        (tmp_path / "artifact" / "sub").mkdir(parents=True)
+        (tmp_path / "artifact" / "sub" / RESULTS_FILE_NAME).symlink_to(outside)
+
+        with pytest.raises(
+            ShardCoverageError, match=r"No ash_aggregated_results.json found"
+        ):
+            resolve_results_file(tmp_path / "artifact")
+
+        assert resolve_results_file(outside) == outside
+
+    @pytest.mark.parametrize(
+        "link, points_at",
+        [
+            pytest.param(RESULTS_FILE_NAME, "file", id="the-results-file"),
+            pytest.param(
+                f"ash_output/{RESULTS_FILE_NAME}", "file", id="ash_output-file"
+            ),
+            pytest.param(
+                f".ash/ash_output/{RESULTS_FILE_NAME}", "file", id="dot-ash-file"
+            ),
+            pytest.param("ash_output", "directory", id="ash_output-directory"),
+            pytest.param(".ash", "directory", id="dot-ash-directory"),
+            pytest.param(".ash/ash_output", "directory", id="dot-ash-ash_output"),
+        ],
+    )
+    def test_a_well_known_location_reached_through_a_link_is_not_taken(
+        self, tmp_path, link, points_at
+    ):
+        """The well-known locations are checked first, and a link at any of them
+        is not followed.
+
+        A link at any of them, to a results file outside the tree or to
+        /proc/self/environ, and a linked ash_output or .ash/ash_output directory,
+        is refused, and nothing it points at is opened.
+        """
+        outside = tmp_path / "outside"
+        (outside / "ash_output").mkdir(parents=True)
+        results = build_shard(0, 1, SCANNERS).model_dump_json()
+        (outside / RESULTS_FILE_NAME).write_text(results, encoding="utf-8")
+        (outside / "ash_output" / RESULTS_FILE_NAME).write_text(
+            results, encoding="utf-8"
+        )
+        artifact = tmp_path / "artifact"
+        location = artifact / link
+        location.parent.mkdir(parents=True, exist_ok=True)
+        location.symlink_to(
+            outside / RESULTS_FILE_NAME if points_at == "file" else outside
+        )
+
+        with pytest.raises(
+            ShardCoverageError, match=r"No ash_aggregated_results.json found"
+        ) as excinfo:
+            resolve_results_file(artifact)
+        # The file is there through the link, so the refusal says why it was passed.
+        assert "symlinks beneath it are not followed" in str(excinfo.value)
+
+    def test_a_results_directory_named_through_a_link_is_followed(self, tmp_path):
+        """The control: the --results value itself is the operator's, link or not."""
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / RESULTS_FILE_NAME).write_text(
+            build_shard(0, 1, SCANNERS).model_dump_json(), encoding="utf-8"
+        )
+        (tmp_path / "named").symlink_to(real)
+
+        assert (
+            resolve_results_file(tmp_path / "named")
+            == tmp_path / "named" / RESULTS_FILE_NAME
+        )
 
     def test_unreadable_results_are_refused(self, tmp_path):
         broken = tmp_path / RESULTS_FILE_NAME
@@ -1418,6 +1723,59 @@ class TestSuppressionsAcrossShards:
         assert finding_keys(merged) == finding_keys(build_unsharded())
 
 
+class TestMergedReportId:
+    """A merged sharded scan has one ``report_id``, of its own, for the union.
+
+    Each shard is its own ``ash scan`` process and mints its own id. The merged
+    report derives its own from all the shard ids, so it shares no id with a
+    document that holds a fraction of its findings. The id is the same for the
+    same shards in any order, so a re-run merge
+    is byte-identical, and different from every shard's.
+    """
+
+    REPORT_ID = re.compile(r"^ASH-\d{14}-[0-9a-f]{12}$")
+
+    def test_the_merged_id_is_none_of_the_shard_ids(self):
+        shards = build_shards(3)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert self.REPORT_ID.match(merged.metadata.report_id)
+        assert merged.metadata.report_id not in {
+            shard.metadata.report_id for shard in shards
+        }
+
+    def test_shard_order_does_not_change_the_id(self):
+        shards = build_shards(3)
+
+        forward = merge_shard_results(as_loaded(shards))
+        backward = merge_shard_results(as_loaded(list(reversed(shards))))
+
+        assert forward.metadata.report_id == backward.metadata.report_id
+
+    def test_merging_the_same_shards_again_gives_the_same_id(self):
+        shards = build_shards(3)
+
+        first = merge_shard_results(as_loaded(shards))
+        second = merge_shard_results(as_loaded(shards))
+
+        assert first.metadata.report_id == second.metadata.report_id
+
+    def test_another_sharded_scan_gets_another_id(self):
+        one = merge_shard_results(as_loaded(build_shards(3)))
+        other = merge_shard_results(as_loaded(build_shards(3)))
+
+        assert one.metadata.report_id != other.metadata.report_id
+
+    def test_the_shards_are_not_modified(self):
+        shards = build_shards(2)
+        before = [shard.metadata.report_id for shard in shards]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert [shard.metadata.report_id for shard in shards] == before
+
+
 class TestMergeCli:
     """End-to-end, through the registered command and the real ReportPhase.
 
@@ -1470,7 +1828,7 @@ class TestMergeCli:
         # differs from its extension -- "markdown" against "summary.md" -- selects
         # nothing. That mismatch is ReportPhase's, shared with `ash scan`, and is
         # not something merging can or should paper over; asserting on it here
-        # would pin another command's quirk into this lane's tests.
+        # would pin another command's quirk into this file's tests.
         args += ["--output-dir", str(output_dir), "--output-formats", "sarif,csv"]
 
         result = self._invoke(args)
@@ -1493,6 +1851,421 @@ class TestMergeCli:
             merged_file.read_text(encoding="utf-8")
         )
         assert finding_keys(reloaded) == finding_keys(build_unsharded())
+
+    def test_a_stale_ash_sarif_in_a_reused_output_dir_does_not_decide(self, tmp_path):
+        """The verdict is the union's, not an earlier run's leftover ash.sarif.
+
+        The merged shards hold only LOW findings, below the MEDIUM threshold. The
+        reused output directory holds an ash.sarif from an earlier run with the
+        fixture's full set of findings, and this merge writes only csv, so it
+        does not replace that file. The exit-code gate read it anyway and failed
+        the merge with exit 2.
+        """
+        shards = build_shards(3)
+        for model in shards:
+            for result in model.sarif.runs[0].results:
+                result.level = "note"
+                result.properties.issue_severity = "LOW"
+            populate_metrics_from_unified_source(aggregated_results=model)
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        output_dir = tmp_path / "merged"
+        (output_dir / "reports").mkdir(parents=True)
+        stale = _sarif_for(SCANNERS)
+        (output_dir / "reports" / "ash.sarif").write_text(
+            stale.model_dump_json(by_alias=True, exclude_none=True), encoding="utf-8"
+        )
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "csv"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 0, result.output
+        # The earlier file is still there, unread.
+        assert (output_dir / "reports" / "ash.sarif").read_text(
+            encoding="utf-8"
+        ) == stale.model_dump_json(by_alias=True, exclude_none=True)
+
+    def test_the_shards_recorded_security_hub_scope_and_archiving_are_dropped(
+        self, tmp_path, monkeypatch
+    ):
+        """A shard records the config its scan resolved, which a file in that
+        shard's scanned repository could have set. findings_scope and
+        archive_resolved_findings decide which findings in this host's account
+        are updated and archived, so the reporters do not get them from there;
+        the rest of the section, and the merged results file, keep what the
+        shards recorded."""
+        from automated_security_helper.cli import merge as merge_module
+        from automated_security_helper.config.ash_config import AshConfig
+
+        recorded = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "aws-security-hub": {
+                        "enabled": True,
+                        "options": {
+                            "aws_region": "us-east-1",
+                            "findings_scope": "shard-scope",
+                            "archive_resolved_findings": True,
+                        },
+                    }
+                }
+            }
+        )
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config = recorded
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        output_dir = tmp_path / "merged"
+
+        seen = []
+        real = merge_module.ReportPhase
+
+        class Recording(real):
+            def __init__(self, *args, plugin_context, **kwargs):
+                seen.append(
+                    plugin_context.config.get_plugin_config(
+                        plugin_type="reporter", plugin_name="aws-security-hub"
+                    )
+                )
+                super().__init__(*args, plugin_context=plugin_context, **kwargs)
+
+        monkeypatch.setattr(merge_module, "ReportPhase", Recording)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "csv"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code in (0, 2), result.output
+        [section] = seen
+        assert section["options"] == {"aws_region": "us-east-1"}
+        assert section["enabled"] is True
+        written = json.loads((output_dir / RESULTS_FILE_NAME).read_text("utf-8"))
+        assert written["ash_config"]["reporters"]["aws-security-hub"]["options"][
+            "findings_scope"
+        ] == ("shard-scope")
+
+    def test_the_operators_config_sends_the_merged_findings_with_its_scope(
+        self, tmp_path
+    ):
+        """The positive half of the test above: with the operator's own --config
+        turning Security Hub on, ash merge imports the merged findings under the
+        operator's findings_scope, and the shards' recorded scope and archiving
+        go unused. Security Hub and STS are stubbed, and GetFindings is never
+        answered, so archiving from the shards fails the stubber."""
+        import json as json_module
+        from unittest.mock import MagicMock, patch
+
+        import botocore.session
+        from botocore.stub import Stubber
+
+        from automated_security_helper.cli.main import app
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.plugin_modules.ash_aws_plugins import (
+            security_hub_reporter as securityhub_module,
+        )
+
+        recorded = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "aws-security-hub": {
+                        "enabled": True,
+                        "options": {
+                            "aws_region": "us-east-1",
+                            "findings_scope": "shard-scope",
+                            "archive_resolved_findings": True,
+                        },
+                    }
+                }
+            }
+        )
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config = recorded
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        operator = tmp_path / "operator" / "ash.yaml"
+        operator.parent.mkdir()
+        operator.write_text(
+            "reporters:\n"
+            "  aws-security-hub:\n"
+            "    enabled: true\n"
+            "    options:\n"
+            "      aws_region: us-east-1\n"
+            "      findings_scope: operator-scope\n",
+            encoding="utf-8",
+        )
+        session = botocore.session.get_session()
+        securityhub = session.create_client(
+            "securityhub",
+            region_name="us-east-1",
+            aws_access_key_id="x",
+            aws_secret_access_key="x",
+        )
+        sts = session.create_client(
+            "sts",
+            region_name="us-east-1",
+            aws_access_key_id="x",
+            aws_secret_access_key="x",
+        )
+        sent: List[dict] = []
+        securityhub.meta.events.register(
+            "provide-client-params.securityhub.BatchImportFindings",
+            lambda params, **_: sent.extend(
+                json_module.loads(json_module.dumps(params))["Findings"]
+            ),
+        )
+        # The dependency check calls DescribeHub, and GetCallerIdentity with no
+        # account_id set; the import asks STS again before it sends.
+        securityhub_stub = Stubber(securityhub)
+        securityhub_stub.add_response(
+            "describe_hub",
+            {"HubArn": "arn:aws:securityhub:us-east-1:123456789012:hub/default"},
+        )
+        for _ in range(10):
+            securityhub_stub.add_response(
+                "batch_import_findings",
+                {"FailedCount": 0, "SuccessCount": 1, "FailedFindings": []},
+            )
+        sts_stub = Stubber(sts)
+        for _ in range(2):
+            sts_stub.add_response(
+                "get_caller_identity",
+                {
+                    "Account": "123456789012",
+                    "Arn": "arn:aws:iam::123456789012:user/ci",
+                    "UserId": "AIDAEXAMPLE",
+                },
+            )
+        clients = {"securityhub": securityhub, "sts": sts}
+
+        class Session:
+            def __init__(self, **_):
+                pass
+
+            def client(self, service_name, **_):
+                return clients[service_name]
+
+        manager = MagicMock()
+        manager.plugin_modules.return_value = [securityhub_module.SecurityHubReporter]
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(tmp_path / "merged"), "--config", str(operator)]
+
+        with (
+            securityhub_stub,
+            sts_stub,
+            patch("automated_security_helper.cli.merge.ash_plugin_manager", manager),
+            patch("automated_security_helper.cli.merge.load_plugins"),
+            patch.object(securityhub_module.boto3, "Session", Session),
+        ):
+            result = CliRunner().invoke(app, ["merge", *args])
+
+        assert result.exit_code in (0, 2), result.output
+        assert sent, result.output
+        assert {f["ProductFields"]["ash/target"] for f in sent} == {"operator-scope"}
+
+    def test_dropping_the_recorded_options_says_so_once(self, capture):
+        """The warning, from the helper itself: merge_command reconfigures the
+        logger, so capture does not see what it logs."""
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.operator_only_options import (
+            drop_recorded_operator_only_options,
+        )
+
+        recorded = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "aws-security-hub": {
+                        "options": {
+                            "findings_scope": "shard-scope",
+                            "archive_resolved_findings": True,
+                        }
+                    }
+                }
+            }
+        )
+
+        confined = drop_recorded_operator_only_options(recorded)
+
+        assert confined.get_plugin_config("reporter", "aws-security-hub") == {
+            "options": {}
+        }
+        assert recorded.get_plugin_config("reporter", "aws-security-hub")[
+            "options"
+        ] == {"findings_scope": "shard-scope", "archive_resolved_findings": True}
+        [warning] = [
+            record.getMessage()
+            for record in capture.records
+            if ".options.findings_scope" in record.getMessage()
+        ]
+        assert "reporters.aws-security-hub.options.archive_resolved_findings" in (
+            warning
+        )
+        # The remedy on this branch, where ash merge takes the operator's --config.
+        assert "operator's own --config" in warning
+
+    def test_a_recorded_section_key_is_logged_as_text_not_markup(self, capture):
+        """A shard records whatever key its scan read. "aws-security-hub[/]"
+        is a closing Rich tag, which ended ash merge with a MarkupError."""
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.operator_only_options import (
+            drop_recorded_operator_only_options,
+        )
+
+        recorded = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "aws-security-hub[/]": {
+                        "options": {"archive_resolved_findings": True}
+                    }
+                }
+            }
+        )
+
+        drop_recorded_operator_only_options(recorded)
+
+        [record] = [
+            r
+            for r in capture.records
+            if ".options.archive_resolved_findings" in r.getMessage()
+        ]
+        assert getattr(record, "markup", True) is False
+        assert "reporters.aws-security-hub[/].options" in record.getMessage()
+
+    def test_a_recorded_section_under_the_underscore_spelling_is_dropped_too(
+        self, capture
+    ):
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.operator_only_options import (
+            drop_recorded_operator_only_options,
+        )
+
+        recorded = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "aws_security_hub": {
+                        "options": {
+                            "findings_scope": "shard-scope",
+                            "archive_resolved_findings": True,
+                        }
+                    }
+                }
+            }
+        )
+
+        confined = drop_recorded_operator_only_options(recorded)
+
+        assert confined.get_plugin_config("reporter", "aws-security-hub") == {
+            "options": {}
+        }
+
+    def test_a_recorded_config_without_those_options_merges_quietly(self, capture):
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.operator_only_options import (
+            drop_recorded_operator_only_options,
+        )
+
+        recorded = AshConfig.model_validate(
+            {"reporters": {"aws-security-hub": {"options": {"max_retries": 5}}}}
+        )
+
+        confined = drop_recorded_operator_only_options(recorded)
+
+        assert confined.get_plugin_config("reporter", "aws-security-hub") == {
+            "options": {"max_retries": 5}
+        }
+        assert [r for r in capture.records if "Ignoring" in r.getMessage()] == []
+
+    @pytest.mark.parametrize(
+        "formats, written",
+        [("csv", False), ("csv,sarif", True)],
+        ids=["sarif-not-written", "sarif-written"],
+    )
+    def test_the_gate_is_told_whether_this_merge_wrote_ash_sarif(
+        self, tmp_path, monkeypatch, formats, written
+    ):
+        """Over an earlier ash.sarif, the gate is told when the merge rewrote it.
+
+        The exit code alone cannot show it here: the file this merge writes and
+        the union agree. The spy sits on the gate itself, so the flag is checked
+        where it is read, through _merged_exit_code's forwarding of it (which
+        imports _compute_exit_code when it runs, so the patch reaches it).
+        """
+        from automated_security_helper.interactions import run_ash_scan
+
+        told = []
+        real = run_ash_scan._compute_exit_code
+
+        def spy(*args, **kwargs):
+            told.append(kwargs.get("report_sarif_written_this_run"))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(run_ash_scan, "_compute_exit_code", spy)
+        shards = build_shards(3)
+        for model in shards:
+            for result in model.sarif.runs[0].results:
+                result.level = "note"
+                result.properties.issue_severity = "LOW"
+            populate_metrics_from_unified_source(aggregated_results=model)
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        output_dir = tmp_path / "merged"
+        (output_dir / "reports").mkdir(parents=True)
+        (output_dir / "reports" / "ash.sarif").write_text(
+            _sarif_for(SCANNERS).model_dump_json(by_alias=True, exclude_none=True),
+            encoding="utf-8",
+        )
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", formats]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 0, result.output
+        assert told == [written]
+
+    def test_the_scans_output_formats_are_the_default(self, tmp_path):
+        """With no --output-formats, the shards' own config chooses the reports.
+
+        The option's help has always said so, but ``AshConfig`` dropped
+        ``output_formats``, so the merge wrote every report regardless.
+        """
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config.output_formats = ["sarif"]
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        output_dir = tmp_path / "merged"
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir)]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        assert sorted(p.name for p in (output_dir / "reports").iterdir()) == [
+            "ash.sarif"
+        ]
+
+    def test_the_flag_replaces_the_scans_output_formats(self, tmp_path):
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config.output_formats = ["sarif"]
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        output_dir = tmp_path / "merged"
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "csv"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        assert sorted(p.name for p in (output_dir / "reports").iterdir()) == ["ash.csv"]
 
     def test_merge_refuses_a_partial_set_with_exit_one(self, tmp_path):
         shards = build_shards(5)
@@ -1954,6 +2727,599 @@ class TestRequireScannerCompletionResolution:
         )
 
 
+#: A shard-chosen name or path that would drive a terminal or a CI log: ESC
+#: sequences, and a newline that starts a GitHub Actions workflow command.
+_HOSTILE_NAME = "x\x1b[31m\n::error title=merge::orphan"
+
+
+#: A control character a terminal acts on: C0 other than the newline, DEL and C1.
+_RAW_CONTROL = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
+
+#: The command forms a CI runner finds anywhere in a line: GitHub Actions' legacy
+#: "##[name]" and Azure Pipelines' "##vso[". Both runners search with IndexOf.
+_NAMED_HASH_COMMAND = re.compile(r"##[A-Za-z]*\[")
+
+
+def _assert_shown_not_obeyed(text: str) -> None:
+    assert not _RAW_CONTROL.search(text), repr(text)
+    # GitHub Actions reads a line that starts with "::" after whitespace as a
+    # workflow command. A bare "##", a Markdown heading's, is none.
+    lines = re.split(r"[\r\n]", text)
+    assert not [line for line in lines if line.lstrip().startswith("::")], repr(text)
+    assert not _NAMED_HASH_COMMAND.search(text), repr(text)
+
+
+class TestShardChosenTextIsShownNotObeyed:
+    """Every merge refusal and warning shows shard-chosen text with its controls escaped.
+
+    A shard set whose scanner_results holds a key with ESC and "\\n::error ..."
+    puts no ESC and no workflow-command line on stdout, through the
+    unclaimed-scanner refusal or the never-attempted warning, and neither does a
+    --results directory name, through the unreadable-shard refusal or the
+    "contains 2 results files" listing.
+    """
+
+    def _invoke(self, args):
+        from unittest.mock import MagicMock, patch
+
+        from automated_security_helper.cli.main import app
+
+        manager = MagicMock()
+        manager.plugin_modules.return_value = []
+        with (
+            patch("automated_security_helper.cli.merge.ash_plugin_manager", manager),
+            patch("automated_security_helper.cli.merge.load_plugins"),
+        ):
+            return CliRunner().invoke(app, ["merge", *args])
+
+    def _orphaned(self, tmp_path, status: ScannerStatus) -> List[str]:
+        shards = build_shards(3)
+        for model in shards:
+            model.scanner_results[_HOSTILE_NAME] = ScannerStatusInfo(
+                status=status, excluded=False, dependencies_satisfied=True
+            )
+        return write_shards(tmp_path / "artifacts", shards)
+
+    def _results_args(self, paths) -> List[str]:
+        return [arg for path in paths for arg in ("--results", path)]
+
+    def test_the_unclaimed_scanner_refusal(self, tmp_path):
+        paths = self._orphaned(tmp_path, ScannerStatus.PASSED)
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), *self._results_args(paths)]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "no shard was assigned" in " ".join(result.output.split()), result.output
+        # Shown where the refusal is built: printed only through _shown_lines, the
+        # newline would still break the line and the colon after it be written out.
+        assert "\\x0a::error" in result.output, result.output
+        _assert_shown_not_obeyed(result.output)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("x\n##[error]v1", id="legacy-command-after-a-newline"),
+            pytest.param(
+                "x ##vso[task.complete result=Failed]v1", id="azure-pipelines-command"
+            ),
+        ],
+    )
+    def test_a_refusal_core_sharding_builds(self, tmp_path, name):
+        """The overlap refusal is core/sharding.py's, not merge.py's, and it shows
+        the name with its controls written out.
+
+        A name such as "x\\n##[error]v1" assigned on two shards is shown with its
+        line break written out, so no line starts "##[error]", and "##vso[" is
+        broken wherever it appears in a line, since Azure Pipelines finds it
+        anywhere in one.
+        """
+        shards = build_shards(3)
+        for model in shards[:2]:
+            read_shard_assignment(model).assigned_scanners.append(name)
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), *self._results_args(paths)]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "more than one shard" in " ".join(result.output.split()), result.output
+        _assert_shown_not_obeyed(result.output)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param(_HOSTILE_NAME, id="esc-and-newline"),
+            pytest.param("x\x1b]8;;http://e.example/\x07y\x1b]8;;\x07", id="osc8"),
+            pytest.param("x\x9b31my", id="c1-csi"),
+            pytest.param("x\x85::error::nel", id="next-line"),
+            # No control character at all: only the line guard catches this one,
+            # since the name itself starts the list line.
+            pytest.param("::error::lead", id="leading-workflow-command"),
+        ],
+    )
+    def test_an_incomplete_scanner_named_after_the_merge(
+        self, tmp_path, caplog, monkeypatch, name
+    ):
+        """The exit-1 summary and the "Scan incomplete" line named the scanner raw.
+
+        The scanner is owned and recorded ERROR by its shard, so the merge goes
+        through and only the verdict names it. The "Scan incomplete" record is taken
+        from ASH's logger (_scan_log).
+        """
+        self._scan_log(caplog, monkeypatch)
+        shards = build_shards(3)
+        for model in shards:
+            read_shard_assignment(model).candidate_scanners.append(name)
+        read_shard_assignment(shards[0]).assigned_scanners.append(name)
+        _incomplete_entries(shards[0], name, ScannerStatus.ERROR)
+        for model in shards[1:]:
+            _skipped_entries(model, name)
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            [
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--fail-on-incomplete-scanners",
+                *self._results_args(paths),
+            ]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "did not evaluate everything" in " ".join(result.output.split()), (
+            result.output
+        )
+        _assert_shown_not_obeyed(result.output)
+        # Shown at the site, in one piece: printed only through _shown_lines, a
+        # newline in the name would still break the line in two.
+        shown = _shown_lines(shown_shard_text(name))
+        assert shown in " ".join(result.output.split()), result.output
+        # Once: the list's printer showed each line again and doubled each
+        # escape's backslash.
+        assert not _SHOWN_TWICE.search(result.output), result.output
+        records = [r for r in caplog.records if "Scan incomplete" in r.getMessage()]
+        assert records, [r.getMessage() for r in caplog.records]
+        _assert_shown_not_obeyed(records[0].getMessage())
+        # Text, not markup, for a name that reads as a tag.
+        assert getattr(records[0], "markup", True) is False
+
+    @staticmethod
+    def _scan_log(caplog, monkeypatch):
+        """ASH's logger's records, into caplog, where the exit code's reasons go.
+
+        ash merge sets up ASH's logger, which drops its handlers, caplog's among
+        them, so a filter on the logger, which it keeps, hands each record to
+        caplog's handler. Let through to the root logger instead, pytest's live
+        logging swaps sys.stdout mid-invoke and closes the buffer CliRunner reads.
+        """
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        class _ToCaplog(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                caplog.handler.handle(record)
+                return True
+
+        monkeypatch.setattr(ASH_LOGGER, "filters", [*ASH_LOGGER.filters, _ToCaplog()])
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param(_HOSTILE_NAME, id="esc-and-newline"),
+            pytest.param("x\n##[error]v1", id="legacy-command"),
+        ],
+    )
+    def test_a_shard_set_whose_every_scanner_was_skipped(
+        self, tmp_path, caplog, monkeypatch, name
+    ):
+        """_completed counts SKIPPED as complete, so the merge goes through.
+
+        Only the verdict's "Scan ran no scanners" line then named the scanners, raw.
+        """
+        self._scan_log(caplog, monkeypatch)
+        shards = build_shards(3)
+        for model in shards:
+            model.sarif.runs[0].results = []
+            for scanner in SCANNERS:
+                _skipped_entries(model, scanner)
+            read_shard_assignment(model).candidate_scanners.append(name)
+            _skipped_entries(model, name)
+        read_shard_assignment(shards[0]).assigned_scanners.append(name)
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), *self._results_args(paths)]
+        )
+
+        assert result.exit_code == 1, result.output
+        _assert_shown_not_obeyed(result.output)
+        records = [r for r in caplog.records if "ran no scanners" in r.getMessage()]
+        assert records, [r.getMessage() for r in caplog.records]
+        _assert_shown_not_obeyed(records[0].getMessage())
+        assert shown_shard_text(name) in records[0].getMessage()
+        assert getattr(records[0], "markup", True) is False
+
+    def test_a_failed_converter_carried_over_by_the_merge(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """The merge carries converter_results over, failure text included."""
+        from automated_security_helper.models.asharp_model import ConverterStatusInfo
+
+        self._scan_log(caplog, monkeypatch)
+        failure = "boom\x1b[31m\n##[error]r\n::error title=merge::orphan"
+        shards = build_shards(3)
+        shards[0].converter_results["archive"] = ConverterStatusInfo(failure=failure)
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), *self._results_args(paths)]
+        )
+
+        assert result.exit_code == 1, result.output
+        _assert_shown_not_obeyed(result.output)
+        records = [
+            r for r in caplog.records if "Conversion incomplete" in r.getMessage()
+        ]
+        assert records, [r.getMessage() for r in caplog.records]
+        _assert_shown_not_obeyed(records[0].getMessage())
+        assert shown_shard_text(failure) in records[0].getMessage()
+        assert getattr(records[0], "markup", True) is False
+
+    def test_a_name_that_wraps_cannot_start_a_line_with_a_command(self, tmp_path):
+        """Off a terminal Rich wrapped at 80 columns after the name had been shown.
+
+        So a mid-name "::" could still land at the start of a line: a 70-letter word
+        and the command after it did not fit on one line of the unclaimed-scanner
+        refusal, the line check then broke the new line's "::", and the name was not
+        shown whole. Escaping every "::" here would show an ARN as
+        "arn:aws:iam:\\x3a..."; the console, which does not wrap text off a
+        terminal, is what closes it. The never-attempted warning wraps the same way,
+        but in the log handler's message column, whose width moves with the
+        handler's columns, so it is measured on a real merge rather than pinned here.
+        """
+        name = "a" * 70 + " ::error::wrapped"
+        shards = build_shards(3)
+        for model in shards:
+            model.scanner_results[name] = ScannerStatusInfo(
+                status=ScannerStatus.PASSED,
+                excluded=False,
+                dependencies_satisfied=True,
+            )
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), *self._results_args(paths)]
+        )
+
+        assert "::error::wrapped" in result.output, result.output
+        lines = re.split(r"[\r\n]", result.output)
+        assert not [line for line in lines if line.lstrip().startswith("::")], (
+            result.output
+        )
+
+    @pytest.mark.parametrize(
+        "warning", ["never-attempted", "no-shard-selected", "selection-hole"]
+    )
+    def test_a_markup_name_in_a_warning_is_text(self, tmp_path, warning):
+        """The warnings were logged with markup on, so the name was read as markup.
+
+        "[/x]" raised MarkupError and exit 1 replaced the merge's verdict of 2; on a
+        terminal "[link=...]" planted a hyperlink.
+        """
+        name = "[/x]"
+        shards = build_shards(3)
+        if warning == "never-attempted":
+            for model in shards:
+                model.scanner_results[name] = ScannerStatusInfo(
+                    status=ScannerStatus.ERROR,
+                    excluded=False,
+                    dependencies_satisfied=True,
+                )
+        else:
+            for index, model in enumerate(shards):
+                assignment = read_shard_assignment(model)
+                assignment.candidate_scanners.append(name)
+                assignment.selected_scanners = partition_scanners(SCANNERS, index, 3)
+                if warning == "selection-hole":
+                    # Shard 1's selection asked for the name shard 0 owns.
+                    assignment.intended_scanners = list(
+                        assignment.selected_scanners
+                    ) + ([name] if index == 1 else [])
+                _skipped_entries(model, name)
+            read_shard_assignment(shards[0]).assigned_scanners.append(name)
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            [
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--no-fail-on-incomplete-scanners",
+                *self._results_args(paths),
+            ]
+        )
+
+        assert result.exception is None or isinstance(result.exception, SystemExit), (
+            repr(result.exception)
+        )
+        assert result.exit_code == 2, result.output
+        assert name in result.output, result.output
+
+    def test_the_selection_hole_warning_is_logged_as_text(self, capture):
+        """The third warning: a scanner one shard's selection asked for ran on no shard.
+
+        The other two say they are text (NO_MARKUP); this one did not, so where a
+        handler reads a record as markup unless told otherwise, a scanner named
+        "[/x]" raised MarkupError and "[link=...]" planted a hyperlink.
+        """
+        name = "[/x]"
+        shards = build_shards(3)
+        for index, model in enumerate(shards):
+            assignment = read_shard_assignment(model)
+            assignment.candidate_scanners.append(name)
+            assignment.selected_scanners = partition_scanners(SCANNERS, index, 3)
+            # Every shard records what its selection asked for, and shard 1's
+            # asked for the name, which shard 0 owns and did not select.
+            assignment.intended_scanners = list(assignment.selected_scanners) + (
+                [name] if index == 1 else []
+            )
+            _skipped_entries(model, name)
+        read_shard_assignment(shards[0]).assigned_scanners.append(name)
+
+        merge_shard_results(as_loaded(shards))
+
+        records = [
+            r for r in capture.records if "ran on no shard although" in r.getMessage()
+        ]
+        assert len(records) == 1, [r.getMessage() for r in capture.records]
+        assert f"{name} (assigned to shard 0" in records[0].getMessage()
+        assert getattr(records[0], "markup", True) is False
+
+    def test_the_never_attempted_warning(self, capture):
+        """Logged, not raised, so it is checked where the merge logs it.
+
+        And as the console's sink writes it (console_text): the name was shown
+        before it was put in the message, and the sink showed the message again,
+        so the console read "x\\\\x1b[31m\\\\x0a" where "x\\x1b[31m\\x0a" was meant.
+        """
+        from automated_security_helper.utils.log import console_text
+
+        shards = build_shards(3)
+        for model in shards:
+            model.scanner_results[_HOSTILE_NAME] = ScannerStatusInfo(
+                status=ScannerStatus.ERROR, excluded=False, dependencies_satisfied=True
+            )
+
+        merge_shard_results(as_loaded(shards))
+
+        records = [
+            record
+            for record in capture.records
+            if "no shard was assigned" in record.getMessage()
+        ]
+        assert len(records) == 1, [record.getMessage() for record in capture.records]
+        message = records[0].getMessage()
+        assert "\x1b" not in message and "\n" not in message, repr(message)
+        assert "\\x0a::error" in message, message
+        printed = console_text(records[0], message)
+        assert "x\\x1b[31m\\x0a::error title=merge::orphan (" in printed, printed
+        assert "\\\\" not in printed, printed
+        _assert_shown_not_obeyed(printed)
+        assert getattr(records[0], "markup", True) is False
+
+    @pytest.mark.skipif(os.name == "nt", reason="the directory names hold a newline")
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("evil\n::error title=merge::pwned", id="newline"),
+            pytest.param("evil\x1b]8;;x\x07y", id="osc8"),
+        ],
+    )
+    def test_an_unreadable_shard_under_a_hostile_directory(self, tmp_path, name):
+        shard_dir = tmp_path / name
+        shard_dir.mkdir()
+        (shard_dir / RESULTS_FILE_NAME).write_text("{ not json", encoding="utf-8")
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), "--results", str(shard_dir)]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "Could not read shard results" in " ".join(result.output.split())
+        _assert_shown_not_obeyed(result.output)
+
+    @pytest.mark.skipif(os.name == "nt", reason="the directory names hold a newline")
+    def test_the_several_results_files_listing(self, tmp_path):
+        parent = tmp_path / "artifacts"
+        for name in ("a", "evil\n::error title=merge::pwned"):
+            (parent / name).mkdir(parents=True)
+            (parent / name / RESULTS_FILE_NAME).write_text("{}", encoding="utf-8")
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), "--results", str(parent)]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "contains 2 results files" in result.output, result.output
+        _assert_shown_not_obeyed(result.output)
+
+    def test_a_missing_results_path(self, tmp_path):
+        result = self._invoke(
+            [
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--results",
+                str(tmp_path / "no\x1b[2Jpe\n::error::x"),
+            ]
+        )
+
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        _assert_shown_not_obeyed(result.output)
+
+    def test_the_scan_source_warning_shows_each_value_once(self, tmp_path):
+        """A real ash merge: the shards' scan_source values were named by their
+        repr and the console showed that again, so stdout read "sx\\\\x1b[31my"
+        and "C:\\\\\\\\x64"."""
+        shards = build_shards(3)
+        for shard, source in zip(shards, ["sx\x1b[31my", "other", "C:\\x64"]):
+            shard.metadata.scan_source = source
+        paths = write_shards(tmp_path / "artifacts", shards)
+
+        result = self._invoke(
+            ["--output-dir", str(tmp_path / "out"), *self._results_args(paths)]
+        )
+
+        output = " ".join(result.output.split())
+        assert "different scanned directories" in output, result.output
+        # ESC as one escape; "C:\x64", whose backslash reads as one, doubled once.
+        assert "'sx\\x1b[31my'" in output, result.output
+        assert "'C:\\\\x64'" in output, result.output
+        assert "\\\\x1b" not in output and "\\\\\\\\" not in output, result.output
+        _assert_shown_not_obeyed(result.output)
+
+    def _refusal_cell(self, tmp_path, site):
+        """Arguments, expected exit code and the shard-chosen value for *site*."""
+        out = ["--output-dir", str(tmp_path / "out")]
+        hostile_dir = tmp_path / "evil\x1b[31m\n::error title=merge::pwned"
+        if site == "missing-results-path":
+            return (
+                [*out, "--results", str(hostile_dir)],
+                ASH_EXIT_USAGE_ERROR,
+                (str(hostile_dir)),
+            )
+        if site == "no-results-file-in":
+            hostile_dir.mkdir()
+            return [*out, "--results", str(hostile_dir)], 1, str(hostile_dir)
+        if site == "several-results-files":
+            for child in ("a", "b"):
+                (hostile_dir / child).mkdir(parents=True)
+                (hostile_dir / child / RESULTS_FILE_NAME).write_text(
+                    "{}", encoding="utf-8"
+                )
+            return [*out, "--results", str(hostile_dir)], 1, str(hostile_dir)
+        if site == "unreadable-shard":
+            hostile_dir.mkdir()
+            (hostile_dir / RESULTS_FILE_NAME).write_text("{ not", encoding="utf-8")
+            return [*out, "--results", str(hostile_dir)], 1, str(hostile_dir)
+        if site == "no-shard-provenance":
+            shards = [build_shard(0, 1, SCANNERS, stamp=False)]
+            paths = write_shards(hostile_dir, shards, as_dirs=False)
+            return [*out, "--results", paths[0]], 1, paths[0]
+        shards = build_shards(3)
+        if site == "unclaimed-scanner":
+            for model in shards:
+                model.scanner_results[_HOSTILE_NAME] = ScannerStatusInfo(
+                    status=ScannerStatus.PASSED,
+                    excluded=False,
+                    dependencies_satisfied=True,
+                )
+        elif site == "owner-recorded-nothing":
+            for model in shards:
+                read_shard_assignment(model).candidate_scanners.append(_HOSTILE_NAME)
+            read_shard_assignment(shards[0]).assigned_scanners.append(_HOSTILE_NAME)
+            for model in shards[1:]:
+                _skipped_entries(model, _HOSTILE_NAME)
+        elif site == "assigned-to-two-shards":
+            for model in shards[:2]:
+                read_shard_assignment(model).assigned_scanners.append(_HOSTILE_NAME)
+        paths = write_shards(tmp_path / "artifacts", shards)
+        return [*out, *self._results_args(paths)], 1, _HOSTILE_NAME
+
+    @pytest.mark.skipif(os.name == "nt", reason="the directory names hold a newline")
+    @pytest.mark.parametrize(
+        "site",
+        [
+            "missing-results-path",
+            "no-results-file-in",
+            "several-results-files",
+            "unreadable-shard",
+            "no-shard-provenance",
+            "unclaimed-scanner",
+            "owner-recorded-nothing",
+            "assigned-to-two-shards",
+        ],
+    )
+    def test_a_refusal_shows_shard_text_once(self, tmp_path, site):
+        """Each refusal shows the value it quotes once, on its own line.
+
+        The site shows the value, and _shown_lines, the printer's second guard,
+        showed each line again, doubling the backslash of every escape the site
+        wrote: "x\\x1b[31m" printed as "x\\\\x1b[31m".
+        """
+        args, exit_code, value = self._refusal_cell(tmp_path, site)
+
+        result = self._invoke(args)
+
+        assert result.exit_code == exit_code, result.output
+        assert shown_shard_text(value) in result.output, result.output
+        assert not _SHOWN_TWICE.search(result.output), result.output
+        _assert_shown_not_obeyed(result.output)
+
+
+#: An escape whose backslash was doubled: text shown a second time.
+_SHOWN_TWICE = re.compile(r"\\\\[xuU][0-9A-Fa-f]")
+
+
+class TestShownLines:
+    """A whole refusal as merge prints it: its own line breaks kept, nothing obeyed.
+
+    For the refusals core/sharding.py builds as well as merge.py's own, so it is the
+    second guard behind the one at each site, and tested on its own here.
+    """
+
+    @pytest.mark.parametrize(
+        "message, shown",
+        [
+            pytest.param("a\n::error::x", "a\n\\x3a:error::x", id="workflow-command"),
+            pytest.param("a\n  ::error::x", "a\n  \\x3a:error::x", id="indented"),
+            pytest.param("::x", "\\x3a:x", id="first-line"),
+            # A bare "##", a Markdown heading's, is no command to any runner.
+            pytest.param("a\n## x", "a\n## x", id="line-start-heading-left"),
+            pytest.param("a\n##[error]x", "a\n\\x23#[error]x", id="legacy-command"),
+            pytest.param(
+                "a ##vso[task.complete]x",
+                "a \\x23#vso[task.complete]x",
+                id="azure-pipelines-mid-line",
+            ),
+            # GitHub Actions' legacy runner finds "##[" anywhere in a line.
+            pytest.param(
+                "Refusing: a ##[warning]x",
+                "Refusing: a \\x23#[warning]x",
+                id="legacy-command-mid-line",
+            ),
+            # A tab lays the message out, as a newline does, and is kept.
+            pytest.param("a\x1bb\nc\rd\te", "a\\x1bb\nc\\x0dd\te", id="controls"),
+            pytest.param("a\U0000202eb", "a\\u202eb", id="bidirectional-override"),
+            pytest.param("Refusing: a::b, c", "Refusing: a::b, c", id="plain"),
+        ],
+    )
+    def test_a_message_is_shown(self, message, shown):
+        assert _shown_lines(message) == shown
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(_HOSTILE_NAME, id="esc-and-newline"),
+            pytest.param("x\n##[error]v1", id="legacy-command"),
+            pytest.param("C:\\x64\\Lib", id="text-that-reads-as-an-escape"),
+            pytest.param("a\U0000202eb\U00002028c", id="format-and-separator"),
+        ],
+    )
+    def test_a_value_shown_already_is_not_shown_again(self, value):
+        """The sites show each value; this second guard must not show it again.
+
+        It ran shown_shard_text over each line, which doubles a backslash run
+        before text that reads as an escape, and so the escapes the site wrote:
+        "x\\x1b" printed as "x\\\\x1b", in every refusal and the exit-1 list.
+        """
+        shown = shown_shard_text(value)
+
+        assert _shown_lines(f"Refusing: {shown}.") == f"Refusing: {shown}."
+
+
 class TestScannersNoShardIntendedToRunAreNamed:
     """A scanner assigned to a shard, selected by none, ran nowhere -- say so.
 
@@ -2009,6 +3375,26 @@ class TestScannersNoShardIntendedToRunAreNamed:
         assert notices, [r.getMessage() for r in capture.records]
         assert dropped in notices[0]
 
+    def test_a_hostile_name_is_shown(self, capture):
+        """The notice named the scanner raw: OLD printed ESC and an ::error line here."""
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        for model in shards:
+            read_shard_assignment(model).candidate_scanners.append(_HOSTILE_NAME)
+            _skipped_entries(model, _HOSTILE_NAME)
+        read_shard_assignment(shards[0]).assigned_scanners.append(_HOSTILE_NAME)
+        selections = {
+            index: partition_scanners(SCANNERS, index, 3) for index in range(3)
+        }
+
+        merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        notices = self._notices(capture)
+        assert notices, [r.getMessage() for r in capture.records]
+        assert "x\\x1b[31m\\x0a::error" in notices[0], notices[0]
+        assert "\x1b" not in notices[0] and "\n" not in notices[0], repr(notices[0])
+
     def test_a_fully_selected_set_is_quiet(self, capture):
         """The control. A notice on every merge is noise, and noise gets filtered."""
         from automated_security_helper.cli.merge import merge_shard_results
@@ -2053,6 +3439,562 @@ class TestScannersNoShardIntendedToRunAreNamed:
         merged = merge_shard_results(as_loaded(self._select(shards, selections)))
 
         assert finding_keys(merged) == finding_keys(build_unsharded())
+
+
+class TestNoShardSelectedNamesAreShownOnce:
+    """Each list the no-shard-selected disclosure prints shows a shard's names once.
+
+    Any job of the matrix wrote the names. The --python-only INFO line, the
+    sentence naming which shards ran --python-only, the VERBOSE line and the
+    selection-hole warning named them raw, and the INFO and VERBOSE lines were
+    logged without NO_MARKUP. The warning that did show its names showed them
+    before the console's sink showed the whole message again, so each escape
+    reached the console with its backslash doubled. Each line is checked as the
+    console's sink writes it (utils/log.py's console_text, which ash.log's
+    formatter calls too): the escape once, nothing raw, one line.
+    """
+
+    #: _HOSTILE_NAME as the console shows it once.
+    _SHOWN = "x\\x1b[31m\\x0a::error title=merge::orphan"
+
+    @staticmethod
+    def _shards(name, *, flags=(None, None, None), intended=None, reason=False):
+        """Three shards; shard 0 owns *name* and none selects it.
+
+        *flags* is each shard's recorded --python-only. *intended*, when given, is
+        the set of shard indices whose selection asked for *name*: every shard then
+        records intended_scanners. *reason* records the owner's skip as
+        --python-only's.
+        """
+        from automated_security_helper.core.constants import (
+            PYTHON_ONLY_SKIPPED_REASON,
+        )
+
+        shards = build_shards(3)
+        for index, model in enumerate(shards):
+            assignment = read_shard_assignment(model)
+            assignment.candidate_scanners.append(name)
+            assignment.selected_scanners = partition_scanners(SCANNERS, index, 3)
+            assignment.python_only = flags[index]
+            if intended is not None:
+                assignment.intended_scanners = list(assignment.selected_scanners) + (
+                    [name] if index in intended else []
+                )
+            _skipped_entries(model, name)
+        read_shard_assignment(shards[0]).assigned_scanners.append(name)
+        if reason:
+            shards[0].scanner_results[name].skipped_reason = PYTHON_ONLY_SKIPPED_REASON
+        return shards
+
+    @pytest.mark.parametrize(
+        "shape, needle, times",
+        [
+            pytest.param(
+                {"flags": (True, True, True), "reason": True},
+                "left out by --python-only on the shard",
+                1,
+                id="python-only-info",
+            ),
+            pytest.param(
+                {"flags": (True, False, False), "reason": True},
+                "The shards disagree on --python-only",
+                2,
+                id="disagreement-with-the-flag",
+            ),
+            pytest.param(
+                {"reason": True},
+                "No shard recorded whether it ran with --python-only",
+                2,
+                id="disagreement-none-recorded",
+            ),
+            pytest.param(
+                {"flags": (False, None, None), "reason": True},
+                "recorded running without --python-only",
+                2,
+                id="disagreement-recorded-without",
+            ),
+            pytest.param(
+                {"intended": set()},
+                "were selected by no shard's",
+                1,
+                id="asked-for-by-no-shard-verbose",
+            ),
+            pytest.param(
+                {"intended": {1}},
+                "ran on no shard although",
+                1,
+                id="selection-hole",
+            ),
+            pytest.param(
+                {"intended": {1}, "flags": (True, False, False), "reason": True},
+                "ran on no shard although",
+                2,
+                id="selection-hole-with-a-disagreement",
+            ),
+            pytest.param(
+                {}, "no shard intended to run", 1, id="shards-before-intended"
+            ),
+        ],
+    )
+    def test_the_line_shows_each_name_once(self, capture, shape, needle, times):
+        from automated_security_helper.cli.merge import merge_shard_results
+        from automated_security_helper.utils.log import VERBOSE_LEVEL, console_text
+
+        capture.set_level(VERBOSE_LEVEL, logger=ASH_LOGGER_NAME)
+
+        merge_shard_results(as_loaded(self._shards(_HOSTILE_NAME, **shape)))
+
+        records = [r for r in capture.records if needle in r.getMessage()]
+        assert len(records) == 1, [r.getMessage() for r in capture.records]
+        record = records[0]
+        printed = console_text(record, record.getMessage())
+        assert printed.count(self._SHOWN) == times, printed
+        # Shown once: no message here holds a backslash of its own.
+        assert "\\\\" not in printed, printed
+        assert "\n" not in printed, repr(printed)
+        _assert_shown_not_obeyed(printed)
+        # Text, not markup, for a name that reads as a tag.
+        assert getattr(record, "markup", True) is False
+
+
+class TestPythonOnlyShardsNameTheFlagThatLeftScannersOut:
+    """A sharded ``--python-only`` scan leaves every non-Python scanner unselected.
+
+    Each shard is assigned scanners from every registered scanner, so the shard
+    that owns grype, syft or npm-audit records it SKIPPED with "not a Python-only
+    scanner, and --python-only is set", and no shard selected it.
+
+    The merge leaves a scanner its owning shard recorded as left out by
+    --python-only out of the "assigned to a shard but no shard intended to run them"
+    warning, which would send the operator to check --scanners and
+    --exclude-scanners that nobody passed, and names the flag, at INFO, since the
+    merged report already carries the reason on the scanner's row. A scanner no
+    shard selected for any other reason is warned about.
+
+    The shards are produced by the real ``ScanPhase`` over every shipped scanner,
+    with the scanner executor replaced and the queued scanners recorded as having
+    run.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_uv_tool_probe(self, monkeypatch):
+        """The shipped bandit, checkov and semgrep probe their version with uv.
+
+        That writes under HOME and the XDG cache dir, and checkov's update check
+        reaches PyPI; the merge does not depend on the version.
+        """
+        from automated_security_helper.base.uv_tool_mixin import UVToolMixin
+
+        monkeypatch.setattr(UVToolMixin, "_get_uv_tool_version", lambda *_a, **_k: None)
+
+    @pytest.fixture(autouse=True)
+    def no_tool_starts(self, tmp_path_factory, monkeypatch):
+        """Recording stand-ins first on PATH; no test in this class may start a tool.
+
+        Building the shipped scanners probed ``opengrep --version`` on the host's
+        opengrep, twice per shard set; the probes are answered as on a host
+        without the tools (``stub_tool_probes``).
+        """
+        from tests.utils.tool_guard import (
+            install_tool_guard,
+            reset_tool_lookup_caches,
+            stub_tool_probes,
+        )
+
+        guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+        stub_tool_probes(monkeypatch)
+        yield guard
+        reset_tool_lookup_caches()
+        assert guard.started == [], f"the test started tools: {guard.started}"
+
+    def test_building_the_shards_runs_no_tool(
+        self, tmp_path, monkeypatch, no_tool_starts
+    ):
+        from automated_security_helper.utils import uv_tool_runner
+
+        asked: list = []
+
+        class _Runner:
+            def is_uv_available(self):
+                return True
+
+            def get_tool_version(self, tool_name, package_name=None):
+                asked.append(tool_name)
+
+        monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: _Runner())
+
+        self._shard(tmp_path, 0, 2, python_based_plugins_only=True)
+
+        assert asked == [], f"the version probe asked uv to run {asked}"
+        assert no_tool_starts.started == [], (
+            f"building the shards started tools: {no_tool_starts.started}"
+        )
+
+    @staticmethod
+    def _shard(tmp_path, index, count, **phase_kwargs):
+        from unittest.mock import MagicMock, patch
+
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+        from automated_security_helper.config.default_config import (
+            get_default_config,
+        )
+        from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+        from automated_security_helper.core.phases.scan_phase import ScanPhase
+        from automated_security_helper.plugin_modules import (
+            ash_builtin,
+            ash_ferret_plugins,
+            ash_snyk_plugins,
+            ash_trivy_plugins,
+        )
+
+        shipped = [
+            *ash_builtin.ASH_SCANNERS,
+            *ash_snyk_plugins.ASH_SCANNERS,
+            *ash_ferret_plugins.ASH_SCANNERS,
+            *ash_trivy_plugins.ASH_SCANNERS,
+        ]
+        root = tmp_path / f"shard-{index}"
+        source = root / "source"
+        source.mkdir(parents=True)
+        (source / "app.py").write_text("x = 1\n", encoding="utf-8")
+        output = root / "output"
+        (output / ASH_WORK_DIR_NAME).mkdir(parents=True)
+        context = PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / ASH_WORK_DIR_NAME,
+            config=get_default_config(),
+        )
+        aggregated = AshAggregatedResults()
+        aggregated.ash_config = context.config
+        phase = ScanPhase(
+            plugin_context=context,
+            plugins=shipped,
+            progress_display=MagicMock(),
+            asharp_model=aggregated,
+        )
+        phase.validation_manager = MagicMock()
+        with patch(
+            "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
+        ) as executor:
+            for scanner_class in {ScannerPluginBase, *shipped}:
+                patch.object(
+                    scanner_class, "validate_plugin_dependencies", return_value=True
+                ).start()
+            double = MagicMock()
+            double.completed_scanners = []
+            double.run_parallel.return_value = aggregated
+            double.run_sequential.return_value = aggregated
+            executor.return_value = double
+            try:
+                results = phase._execute_phase(
+                    aggregated_results=aggregated,
+                    shard_index=index,
+                    shard_count=count,
+                    **phase_kwargs,
+                )
+            finally:
+                patch.stopall()
+            queued = [name for name, _, _ in executor.call_args.kwargs["scanner_tasks"]]
+        for name in queued:
+            results.scanner_results[name] = ScannerTargetStatusInfo(
+                status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+            )
+            results.additional_reports[name] = {
+                "source": {"scanner_name": name, "status": "PASSED"}
+            }
+        # What the execution engine does with the assignment after the scan phase.
+        results.metadata.shard = phase._shard_assignment
+        return populate_metrics_from_unified_source(aggregated_results=results)
+
+    @staticmethod
+    def _messages(capture, needle):
+        return [
+            record.getMessage()
+            for record in capture.records
+            if needle in record.getMessage()
+        ]
+
+    NOT_PYTHON_ONLY = [
+        "cdk-nag",
+        "cfn-nag",
+        "ferret-scan",
+        "grype",
+        "npm-audit",
+        "opengrep",
+        "snyk-code",
+        "syft",
+        "trivy-repo",
+    ]
+
+    def test_the_scanners_python_only_left_out_are_not_a_hole(self, capture, tmp_path):
+        import logging
+
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        capture.set_level(logging.INFO, logger=ASH_LOGGER_NAME)
+        shards = [
+            self._shard(tmp_path, index, 2, python_based_plugins_only=True)
+            for index in range(2)
+        ]
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        holes = self._messages(capture, "no shard intended to run")
+        assert holes == [], (
+            "every job ran with --python-only; advising --scanners and "
+            f"--exclude-scanners names a cause nobody had: {holes}"
+        )
+        (named,) = self._messages(capture, "left out by --python-only")
+        for scanner in self.NOT_PYTHON_ONLY:
+            assert scanner in named, named
+            row = merged.scanner_results[scanner]
+            assert row.status == ScannerStatus.SKIPPED, (scanner, row)
+            assert "--python-only" in (row.skipped_reason or ""), (scanner, row)
+
+    def test_a_scanner_one_shard_left_out_for_another_reason_is_named(
+        self, capture, tmp_path
+    ):
+        """bandit's owner excluded it and the other shard did not: a hole."""
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        probe = self._shard(tmp_path / "probe", 0, 2, python_based_plugins_only=True)
+        owner = 0 if "bandit" in probe.metadata.shard.assigned_scanners else 1
+        shards = [
+            self._shard(
+                tmp_path,
+                index,
+                2,
+                python_based_plugins_only=True,
+                excluded_scanners=["bandit"] if index == owner else [],
+            )
+            for index in range(2)
+        ]
+
+        merge_shard_results(as_loaded(shards))
+
+        (hole,) = self._messages(capture, "ran on no shard although")
+        assert "bandit" in hole, hole
+        for scanner in self.NOT_PYTHON_ONLY:
+            assert f"{scanner} (" not in hole, (scanner, hole)
+
+    def test_a_scanner_every_shard_excluded_is_not_a_hole(self, capture, tmp_path):
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = [
+            self._shard(
+                tmp_path,
+                index,
+                2,
+                python_based_plugins_only=True,
+                excluded_scanners=["bandit"],
+            )
+            for index in range(2)
+        ]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert self._messages(capture, "ran on no shard although") == []
+        assert self._messages(capture, "no shard intended to run") == []
+
+    def test_shards_that_disagree_on_python_only_warn(self, capture, tmp_path):
+        """Only shard 0 ran --python-only, so the scanners it left out ran nowhere.
+
+        grype is shard 0's, and shard 0 recorded it SKIPPED for --python-only; shard
+        1 ran its own scanners in full. Nothing ran grype, and the matrix gave its
+        jobs different selections, which is what the warning is for.
+        """
+        import logging
+
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        capture.set_level(logging.INFO, logger=ASH_LOGGER_NAME)
+        shards = [
+            self._shard(tmp_path, 0, 2, python_based_plugins_only=True),
+            self._shard(tmp_path, 1, 2),
+        ]
+        owner = {
+            scanner
+            for scanner in self.NOT_PYTHON_ONLY
+            if scanner in read_shard_assignment(shards[0]).assigned_scanners
+        }
+        assert "grype" in owner, owner
+
+        merge_shard_results(as_loaded(shards))
+
+        # Both shards record intended_scanners, and shard 1's selection asked for
+        # every scanner, so this is the "a shard's selection asked for them" warning.
+        (hole,) = self._messages(capture, "ran on no shard although")
+        record = next(
+            r for r in capture.records if "ran on no shard although" in r.getMessage()
+        )
+        assert record.levelno == logging.WARNING, record.levelname
+        for scanner in sorted(owner):
+            assert f"{scanner} (" in hole, (scanner, hole)
+        assert "--python-only" in hole, hole
+        assert self._messages(capture, "left out by --python-only") == []
+
+    def test_a_scanner_a_shard_asked_for_is_never_named_at_info(
+        self, capture, tmp_path
+    ):
+        """INFO is for a scanner no job asked for. Every shard ran --python-only, but
+        shard 1 recorded grype among what its selection asked for, so grype running
+        nowhere is a hole, whatever its owner's skip reason says."""
+        import logging
+
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        capture.set_level(logging.INFO, logger=ASH_LOGGER_NAME)
+        shards = [
+            self._shard(tmp_path, index, 2, python_based_plugins_only=True)
+            for index in range(2)
+        ]
+        owner = (
+            0 if "grype" in read_shard_assignment(shards[0]).assigned_scanners else 1
+        )
+        asker = 1 - owner
+        assignment = shards[asker].metadata.shard
+        assignment.intended_scanners = sorted(
+            set(assignment.intended_scanners or []) | {"grype"}
+        )
+
+        merge_shard_results(as_loaded(shards))
+
+        (named,) = self._messages(capture, "left out by --python-only")
+        assert "grype" not in named, named
+        (hole,) = self._messages(capture, "ran on no shard although")
+        assert "grype (" in hole, hole
+
+    def test_shards_that_recorded_no_flag_are_not_called_a_disagreement(
+        self, capture, tmp_path
+    ):
+        """Every shard ran --python-only but none recorded the flag.
+
+        The warning listed an empty set of shards "with it" against all of them
+        "without", a disagreement nothing in the shard results shows. The shards
+        record no selection either (results written before both fields), so the
+        merge cannot tell a scanner no job asked for from one it did.
+        """
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = [
+            self._shard(tmp_path, index, 2, python_based_plugins_only=True)
+            for index in range(2)
+        ]
+        for shard in shards:
+            read_shard_assignment(shard).python_only = None
+            read_shard_assignment(shard).intended_scanners = None
+
+        merge_shard_results(as_loaded(shards))
+
+        (hole,) = self._messages(capture, "no shard intended to run")
+        assert "ran with it and" not in hole, hole
+        assert "No shard recorded whether it ran with --python-only" in hole, hole
+
+    # What the warning says of --python-only when no shard recorded True, by
+    # what shard 0 (ran --python-only, owns grype) and shard 1 (ran in full)
+    # recorded. {owner} is the scanners shard 0 recorded left out by the flag.
+    _NOTHING_RECORDED = (
+        "No shard recorded whether it ran with --python-only, and the shards "
+        "that own {owner} recorded them left out by it."
+    )
+    _OWNER_RECORDED_NOTHING = (
+        "Shard(s) 1 recorded running without --python-only and shard(s) 0 "
+        "recorded nothing, but the shards that own {owner} recorded them left "
+        "out by it, so they ran nowhere."
+    )
+    _BOTH_RECORDED_FALSE = (
+        "Shard(s) 0, 1 recorded running without --python-only, but the shards "
+        "that own {owner} recorded them left out by it, so they ran nowhere."
+    )
+
+    def _mixed_matrix(self, tmp_path, owner_flag, other_flag):
+        """Shard 0 ran --python-only, shard 1 in full; then their recorded flags."""
+        shards = [
+            self._shard(tmp_path, 0, 2, python_based_plugins_only=True),
+            self._shard(tmp_path, 1, 2),
+        ]
+        assert read_shard_assignment(shards[1]).python_only is False
+        read_shard_assignment(shards[0]).python_only = owner_flag
+        read_shard_assignment(shards[1]).python_only = other_flag
+        owner = sorted(
+            scanner
+            for scanner in self.NOT_PYTHON_ONLY
+            if scanner in read_shard_assignment(shards[0]).assigned_scanners
+        )
+        assert "grype" in owner, owner
+        return shards, owner
+
+    @pytest.mark.parametrize(
+        ("owner_flag", "other_flag", "expected"),
+        [
+            (None, None, _NOTHING_RECORDED),
+            (None, False, _OWNER_RECORDED_NOTHING),
+            (False, False, _BOTH_RECORDED_FALSE),
+        ],
+        ids=["none-recorded", "owner-recorded-nothing", "owner-recorded-false"],
+    )
+    def test_a_shard_that_recorded_no_python_only_is_named_as_recording_it(
+        self, capture, tmp_path, owner_flag, other_flag, expected
+    ):
+        """No shard recorded python_only True, and none recorded its selection.
+
+        Shard 0 ran --python-only and recorded grype left out by it, but its own
+        flag reads None (or False). "No shard recorded whether it ran with
+        --python-only" was false whenever a shard recorded False: that shard
+        recorded that it ran without the flag. With no intended_scanners either,
+        this is the "no shard intended to run" warning.
+        """
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards, owner = self._mixed_matrix(tmp_path, owner_flag, other_flag)
+        for shard in shards:
+            read_shard_assignment(shard).intended_scanners = None
+
+        merge_shard_results(as_loaded(shards))
+
+        (hole,) = self._messages(capture, "no shard intended to run")
+        assert "ran with it and" not in hole, hole
+        nothing_recorded = owner_flag is None and other_flag is None
+        assert ("No shard recorded whether" in hole) == nothing_recorded, hole
+        assert expected.format(owner=", ".join(owner)) in hole, hole
+
+    @pytest.mark.parametrize(
+        ("owner_flag", "expected"),
+        [(None, _OWNER_RECORDED_NOTHING), (False, _BOTH_RECORDED_FALSE)],
+        ids=["owner-recorded-nothing", "owner-recorded-false"],
+    )
+    def test_a_hole_a_selection_asked_for_names_what_each_shard_recorded(
+        self, capture, tmp_path, owner_flag, expected
+    ):
+        """The same matrix with intended_scanners kept: shard 1 ran in full, so its
+        selection asked for grype, and the warning is the "a shard's selection
+        asked for them" one. Its --python-only sentence names the same records.
+        """
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards, owner = self._mixed_matrix(tmp_path, owner_flag, False)
+        asked = {
+            scanner.lower()
+            for scanner in read_shard_assignment(shards[1]).intended_scanners or []
+        }
+        assert set(owner) <= asked, (owner, asked)
+
+        merge_shard_results(as_loaded(shards))
+
+        (hole,) = self._messages(capture, "ran on no shard although")
+        assert "No shard recorded whether" not in hole, hole
+        assert "ran with it and" not in hole, hole
+        assert expected.format(owner=", ".join(owner)) in hole, hole
+
+    def test_the_shard_records_whether_it_ran_python_only(self, tmp_path):
+        assert (
+            read_shard_assignment(
+                self._shard(tmp_path, 0, 2, python_based_plugins_only=True)
+            ).python_only
+            is True
+        )
+        assert read_shard_assignment(self._shard(tmp_path, 1, 2)).python_only is False
 
 
 class TestCompletedClassifiesUnknownStatusesAsIncomplete:
@@ -2188,8 +4130,14 @@ class TestShardContributionIsRefused:
         owned = list(read_shard_assignment(shards[1]).assigned_scanners)
         assert owned, "fixture must give shard 1 scanners to lose targets on"
         for scanner in owned:
-            # Lost some, not all: determine_status leaves the status alone, which
-            # is precisely the state that used to be invisible to both checks.
+            # Lost some, not all, with the entry's recorded status left as the
+            # fixture built it (PASSED): the artifact an ASH from before the
+            # fail-closed status rule wrote, which the merge still loads. A
+            # current scan grades a partial loss by the per-tree gate-first rule:
+            # surviving findings that fail the severity gate grade FAILED, clean
+            # survivors grade ERROR. The ERROR shape has its own cells
+            # (test_an_errored_shard_that_audited_some_targets_is_merged and its
+            # full-loss control).
             shards[1].additional_reports[scanner]["source"]["targets_attempted"] = 10
             shards[1].additional_reports[scanner]["source"]["targets_failed"] = 4
 
@@ -2206,6 +4154,137 @@ class TestShardContributionIsRefused:
                 f"partial and this test is not vacuous; the exit-code gate has to "
                 f"see it even though shard verification correctly did not"
             )
+
+    def test_an_errored_shard_that_audited_some_targets_is_merged(self):
+        """ERROR with 0 < failed < attempted means the scanner ran.
+
+        The scanner audited the targets it could and graded ERROR over the ones
+        it lost, so the shard contributed real findings and the merge proceeds.
+        Refusing it as "completed none" would discard the audited targets'
+        findings. The shortfall is not forgotten: the exit-code gate on the
+        merged product still names it and exits 1, which the second half pins.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        shards = build_shards(3)
+        expected = finding_keys(build_shards(3)[1])
+        owned = _make_shard_contribute_nothing(shards[1], status=ScannerStatus.ERROR)
+        assert owned, "fixture must give shard 1 scanners to run partially"
+        assert expected, "fixture must give shard 1 findings to keep"
+        # The shard audited some targets, so it carries the findings from them.
+        shards[1].sarif = _sarif_for(owned)
+        for scanner in owned:
+            shards[1].additional_reports[scanner]["None"]["targets_attempted"] = 10
+            shards[1].additional_reports[scanner]["None"]["targets_failed"] = 4
+
+        merged = merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+        survived = finding_keys(merged)
+        for key in expected:
+            assert key in survived, (
+                f"{key} came from a shard that audited 6 of 10 targets; merging "
+                f"the shard exists to keep it"
+            )
+        listed = dict(incomplete_scanners(merged))
+        for scanner in owned:
+            assert scanner in listed, (
+                f"{scanner} lost 4 of 10 targets; the merge keeping the shard "
+                f"must not hide the shortfall from the exit-code gate"
+            )
+
+    def test_an_errored_shard_whose_every_target_failed_is_refused(self):
+        # The counts prove nothing ran to completion: every attempted target
+        # failed, so nothing distinguishes this shard's yield from one whose
+        # scanner never started, and the refusal stands as it does for an ERROR
+        # entry with no counts at all (test_an_errored_shard_is_refused_too).
+        shards = build_shards(3)
+        owned = _make_shard_contribute_nothing(shards[0], status=ScannerStatus.ERROR)
+        for scanner in owned:
+            shards[0].additional_reports[scanner]["None"]["targets_attempted"] = 10
+            shards[0].additional_reports[scanner]["None"]["targets_failed"] = 10
+
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+    def test_an_errored_shard_whose_counts_show_zero_failures_is_refused(self):
+        # The other boundary of 0 < failed < attempted: ERROR with targets
+        # attempted and zero failures makes no partial-coverage claim either.
+        # The audited-some arm exists to keep the findings of a scanner that
+        # graded ERROR over LOSING targets; counts that lost nothing explain
+        # no ERROR, so they prove no partial run and the refusal stands as it
+        # does for an entry with no counts at all.
+        shards = build_shards(3)
+        owned = _make_shard_contribute_nothing(shards[0], status=ScannerStatus.ERROR)
+        for scanner in owned:
+            shards[0].additional_reports[scanner]["None"]["targets_attempted"] = 10
+            shards[0].additional_reports[scanner]["None"]["targets_failed"] = 0
+
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+    def test_a_missing_shard_with_partial_counts_is_refused(self):
+        # The partial-audit read widens only an ERROR entry. A MISSING entry never
+        # started, so counts beside it (a producer bug or a hand-edited artifact)
+        # prove nothing ran, and the refusal stands.
+        shards = build_shards(3)
+        owned = _make_shard_contribute_nothing(shards[0], status=ScannerStatus.MISSING)
+        for scanner in owned:
+            shards[0].additional_reports[scanner]["None"]["targets_attempted"] = 10
+            shards[0].additional_reports[scanner]["None"]["targets_failed"] = 4
+
+        with pytest.raises(ShardCoverageError, match=r"completed none"):
+            merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+    @staticmethod
+    def _entry_with_counts(status, attempted=10, failed=4):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            scanner_results={"bandit": SimpleNamespace(status=status)},
+            additional_reports={
+                "bandit": {
+                    "source": {
+                        "targets_attempted": attempted,
+                        "targets_failed": failed,
+                    }
+                }
+            },
+        )
+
+    @pytest.mark.parametrize(
+        "status",
+        [
+            ScannerStatus.MISSING,
+            ScannerStatus.MISSING.value,
+            "PARTIALLY_COMPLETED",
+            "",
+            None,
+        ],
+    )
+    def test_partial_counts_beside_a_status_other_than_error_are_not_a_run(
+        self, status
+    ):
+        from automated_security_helper.cli.merge import _ran_partially
+
+        assert _ran_partially(self._entry_with_counts(status), "bandit") is False, (
+            f"{status!r} beside 10/4 counts is not an ERROR over a partial audit; "
+            "an unfamiliar status from another ASH version is no evidence that "
+            "the scanner ran"
+        )
+
+    @pytest.mark.parametrize("status", [ScannerStatus.ERROR, ScannerStatus.ERROR.value])
+    def test_an_error_entry_with_partial_counts_is_a_run(self, status):
+        from automated_security_helper.cli.merge import _ran_partially
+
+        assert _ran_partially(self._entry_with_counts(status), "bandit") is True
+
+    def test_an_error_entry_whose_every_target_failed_is_not_a_run(self):
+        from automated_security_helper.cli.merge import _ran_partially
+
+        entry = self._entry_with_counts(ScannerStatus.ERROR, attempted=10, failed=10)
+        assert _ran_partially(entry, "bandit") is False
 
     def test_a_scanner_absent_from_its_owners_results_is_refused(self):
         # The case a status-based check structurally cannot see: the owning shard

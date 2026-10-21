@@ -2,11 +2,21 @@
 
 from abc import abstractmethod
 from pathlib import Path
-from typing import Annotated, Any, BinaryIO, Generic, List, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    BinaryIO,
+    ClassVar,
+    Generic,
+    List,
+    Literal,
+    TypeVar,
+)
 from typing_extensions import Self
 
 from pydantic import (
     Field,
+    PrivateAttr,
     ValidatorFunctionWrapHandler,
     field_validator,
     model_validator,
@@ -23,16 +33,20 @@ from automated_security_helper.models.asharp_model import (
     FailedInputInfo,
     RefusedInputInfo,
 )
-from automated_security_helper.utils.converter_refusals import inert_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
     relative_display,
 )
+from automated_security_helper.utils.terminal_text import shown_on_one_line
+from automated_security_helper.utils.undecodable_text import text_of_undecodable
 
 
 class ConverterPluginConfigBase(PluginConfigBase):
+    SECTION_SEGMENT: ClassVar[str] = "converters"
+    GENERIC_SECTION: ClassVar[bool] = True
+
     options: Annotated[ConverterOptionsBase, Field(description="Converter options")] = (
         ConverterOptionsBase()
     )
@@ -48,6 +62,9 @@ class ConverterPluginBase(PluginBase, Generic[T]):
 
     config: T | ConverterPluginConfigBase | None = None
     dependencies_satisfied: bool = True
+    # Why the dependency check failed, when the converter knows more than that its tool
+    # is absent: for example, that the copy on PATH does not satisfy its tool_version.
+    dependency_unavailable_reason: str | None = None
     # Inputs this converter declined to read during convert(). ConvertPhase copies them
     # into the converter's results row, which is what keeps a refused input visible in
     # the scan result rather than only in the log.
@@ -55,6 +72,16 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     # Inputs convert() set out to convert and could not. Copied into the row the same
     # way; the completeness gate counts them as lost coverage.
     failed_inputs: List[FailedInputInfo] = Field(default_factory=list)
+    #: The written-form ids of the suppressions that accepted this run's failed
+    #: inputs, recorded by record_failed_input as each acceptance is granted;
+    #: ConvertPhase unions them into used_suppressions. Each id is recorded at
+    #: the match, on the record itself (``accepted_by``) and in this list,
+    #: because a re-match of the record later could answer differently: an
+    #: expiring entry no longer matches the second time, and the next entry
+    #: that matches the path is not the one that granted. ConvertPhase
+    #: re-derives the entry from the record's path only for a record that
+    #: carries no id.
+    _accepted_suppression_ids: List[str] = PrivateAttr(default_factory=list)
 
     @field_validator("config", mode="wrap")
     @classmethod
@@ -131,53 +158,89 @@ class ConverterPluginBase(PluginBase, Generic[T]):
     ) -> None:
         """Warn once about a refused input and keep it for the results row.
 
+        A name read from the tree or an archive can hold bytes that are not UTF-8,
+        which os.listdir and tarfile read as lone surrogates: no text a log or a
+        model can hold. So the warning is shown here, once, with
+        utils/terminal_text.py's shown_on_one_line, which writes a surrogate as its
+        escape (``\\udce9``). Each field of the record is the text as given, with
+        only its lone surrogates written as escapes (utils/undecodable_text.py):
+        whatever prints the record shows it for its own sink.
+
         Args:
             refusal: What :meth:`open_source_file` raised, or an equivalent built for
                 an archive member.
-            member: The archive member's name, when the refusal is of a member.
+            member: The archive member's name, when the refusal is of a member, as
+                read from the archive.
             limit: The name of the extraction-limit option the input exceeded, when
                 that is why it was refused. Such a refusal leaves the scan
                 incomplete; see ``RefusedInputInfo.limit``.
             unlisted_members: The record stands for this many more members of the
                 archive, refused for the same reason and not listed one by one.
         """
-        # The names come from the scanned tree, so they are logged as data, with
-        # control characters escaped (utils/converter_refusals.inert_text).
-        path = inert_text(refusal.path)
-        reason = inert_text(refusal.reason)
+        # NO_MARKUP: the name is the tree's, and a "[/x]" in it read as markup
+        # raises inside the handler, losing the line.
         if unlisted_members is not None:
             ASH_LOGGER.warning(
-                f"Skipped {unlisted_members} more members of archive "
-                f"'{path}', not listed one by one: {reason}",
+                shown_on_one_line(
+                    f"Skipped {unlisted_members} more members of archive "
+                    f"'{refusal.path}', not listed one by one: {refusal.reason}"
+                ),
                 extra=NO_MARKUP,
             )
         elif member is None:
             ASH_LOGGER.warning(
-                f"Skipped converter input '{path}': {reason}",
+                shown_on_one_line(
+                    f"Skipped converter input '{refusal.path}': {refusal.reason}"
+                ),
                 extra=NO_MARKUP,
             )
         else:
             ASH_LOGGER.warning(
-                f"Skipped member '{inert_text(member)}' of archive '{path}': {reason}",
+                shown_on_one_line(
+                    f"Skipped member '{member}' of archive '{refusal.path}': "
+                    f"{refusal.reason}"
+                ),
                 extra=NO_MARKUP,
             )
         self.refused_inputs.append(
             RefusedInputInfo(
-                path=refusal.path,
-                member=member,
-                reason=refusal.reason,
+                path=text_of_undecodable(refusal.path),
+                member=None if member is None else text_of_undecodable(member),
+                reason=text_of_undecodable(refusal.reason),
                 limit=limit,
                 unlisted_members=unlisted_members,
             )
         )
 
-    def record_failed_input(self, path: Path | str, reason: str) -> None:
+    def record_failed_input(
+        self, path: Path | str, reason: str, kind: Literal["input", "tool"] = "tool"
+    ) -> None:
         """Log an input that could not be converted and keep it for the results row.
+
+        The path is recorded relative to the scanned tree, as a refused input's
+        is, and the error is shown once here, on one line, as
+        :meth:`record_refused_input` shows its warning.
+
+        ``kind`` is "input" when the file is not one this converter could hand
+        to its tool, decided before the tool runs, and "tool" for everything
+        after that. An input error is accepted by a
+        ``global_settings.suppressions`` entry with rule_id
+        "ash-unconverted-input" whose path matches
+        (utils/suppression_matcher.accepting_unconverted_input): the record
+        keeps ``accepted`` True and the suppression's reason, and the
+        completeness gate leaves it out. A tool failure never consults the
+        suppressions.
 
         Args:
             path: The input, as the scan set gave it.
             reason: Why conversion failed, without the input's content.
+            kind: "input" or "tool", as above.
         """
+        from automated_security_helper.utils.suppression_matcher import (
+            accepting_unconverted_input,
+            written_suppression_reasons,
+        )
+
         # Recording a failure must not itself fail: with no context, the path as
         # given is the best name there is.
         display = (
@@ -185,13 +248,94 @@ class ConverterPluginBase(PluginBase, Generic[T]):
             if self.context is not None
             else Path(path).as_posix()
         )
-        # The path comes from the scanned tree: logged as data, control characters
-        # escaped, as record_refused_input does.
-        ASH_LOGGER.error(
-            f"Could not convert '{inert_text(display)}': {inert_text(reason)}",
-            extra=NO_MARKUP,
+        config = getattr(self.context, "config", None)
+        global_settings = getattr(config, "global_settings", None)
+        # --ignore-suppressions runs the scan as if no suppression existed, and
+        # this acceptance is a suppression (scan_result_processor reads the same
+        # flag for finding suppressions).
+        accepting = (
+            accepting_unconverted_input(
+                display, getattr(global_settings, "suppressions", None)
+            )
+            if kind == "input"
+            and not getattr(self.context, "ignore_suppressions", False)
+            else None
         )
-        self.failed_inputs.append(FailedInputInfo(path=display, reason=reason))
+        # A reason read from the environment is quoted by its reference, as
+        # every quote of a suppression's reason is (written_suppression_reasons):
+        # the log line and the record both reach the results and the reports.
+        accepted_reason = (
+            None
+            if accepting is None
+            else written_suppression_reasons(config).get(
+                id(accepting), accepting.reason
+            )
+        )
+        accepted_id = None
+        if accepting is not None:
+            from automated_security_helper.utils.suppression_matcher import (
+                recorded_suppressions,
+                written_suppression_id,
+            )
+
+            # The acceptance is registered from here (see the private list's
+            # comment): the entry marked used is exactly the entry that
+            # matched, by its written form's id, kept on the record itself
+            # (``accepted_by``) and in the private list. Registering is
+            # bookkeeping, and recording a failure must not itself fail: a
+            # failure here is logged and the id left unregistered, and the
+            # record below lands either way, with no id, so the phase
+            # re-derives its entry from its path. The cost is one entry the
+            # unused-suppressions report may offer for this run; without the
+            # guard the record was lost, and the jupyter loop re-recorded the
+            # input as a gating tool failure.
+            try:
+                accepted_id = written_suppression_id(
+                    accepting, recorded_suppressions(config)
+                )
+                self._accepted_suppression_ids.append(accepted_id)
+            except Exception as error:
+                accepted_id = None
+                ASH_LOGGER.debug(
+                    "could not register an accepted input's suppression as "
+                    f"used: {type(error).__name__}"
+                )
+        # NO_MARKUP, as for a refused input: the name is the tree's. An accepted
+        # input does not gate, so its line is informational.
+        if accepting is None:
+            ASH_LOGGER.error(
+                shown_on_one_line(f"Could not convert '{display}': {reason}"),
+                extra=NO_MARKUP,
+            )
+        else:
+            ASH_LOGGER.info(
+                shown_on_one_line(
+                    f"Could not convert '{display}': {reason} (accepted by a "
+                    f"suppression: {accepted_reason})"
+                ),
+                extra=NO_MARKUP,
+            )
+        self.failed_inputs.append(
+            FailedInputInfo(
+                path=text_of_undecodable(display),
+                reason=text_of_undecodable(reason),
+                kind=kind,
+                accepted=accepting is not None,
+                accepted_reason=(
+                    None
+                    if accepted_reason is None
+                    else text_of_undecodable(accepted_reason)
+                ),
+                # Omitted rather than passed as None, so a record without an
+                # id dumps as it did before the field existed
+                # (``to_simple_dict`` dumps with ``exclude_unset``).
+                **(
+                    {}
+                    if accepted_id is None
+                    else {"accepted_by": text_of_undecodable(accepted_id)}
+                ),
+            )
+        )
 
     def candidate_input_count(self) -> int | None:
         """How many files this converter WOULD convert, or None if it cannot say.
@@ -219,9 +363,21 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         return None
 
     @abstractmethod
-    def convert(self, target: Path | str) -> List[Path]:
-        """Execute the converter on the target prior to scans.
+    def convert(self) -> List[Path]:
+        """Convert this converter's inputs before the scanners run.
 
-        Returns the list of Path objects emitted by the `convert()` operation that
-        correspond to scannable files emitted to the work_dir.
+        ``ConvertPhase`` calls this once per scan with no arguments, and always has.
+        The converter finds its own inputs under ``self.context.source_dir``: the
+        built-ins take the scan set (``utils.get_scan_set.scan_set``, which applies
+        ``.gitignore`` and ``.ignore`` files) and skip the config's
+        ``global_settings.ignore_paths``. It reads each input through
+        :meth:`open_source_file` and writes its output under ``self.results_dir``.
+
+        Returns the paths written, which the scanners receive as the ``converted``
+        target. Return an empty list when there was nothing to convert.
+
+        This declared ``convert(self, target)`` until the declaration was made to
+        match the call. A converter written to that form, or any ``convert()`` that
+        requires an argument, is refused: its row records a failure that names it
+        and says to declare ``convert(self)``.
         """

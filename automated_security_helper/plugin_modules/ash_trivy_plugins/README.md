@@ -40,13 +40,14 @@ trivy --version
 
 ### Basic Configuration
 
-Add to your `.ash/.ash.yaml`:
+Add to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "MEDIUM"
+    options:
+      severity_threshold: "MEDIUM"
 ```
 
 ### Run Trivy Scan
@@ -85,8 +86,8 @@ Available scanner types:
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "HIGH"
     options:
+      severity_threshold: "HIGH"
       scanners: ["vuln", "secret"]
       license_full: true          # Deep license scanning (default: true)
       ignore_unfixed: true        # Only show fixed vulnerabilities (default: true)
@@ -128,8 +129,8 @@ scanners:
 scanners:
   trivy-repo:
     enabled: true
-    severity_threshold: "LOW"
     options:
+      severity_threshold: "LOW"
       scanners: ["secret"]
 ```
 

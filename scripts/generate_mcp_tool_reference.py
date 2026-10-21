@@ -25,10 +25,10 @@ Why this is a hybrid rather than a pure derivation
 The file carries operational knowledge that exists in no docstring and no
 schema. The clearest example:
 
-    **`is_complete` does not flip to `True` for cancelled scans** ... Polling on
-    `is_complete` alone will loop forever on a cancelled scan.
+    **`incomplete` is terminal, with partial coverage.** ... `incomplete_scanners`
+    names each scanner and why.
 
-That is a correction TO the server's own docstring. A generator that rendered
+That is guidance the docstrings do not carry in this form. A generator that rendered
 only what the code says about itself would delete it, making the document
 cheaper to maintain and worse to read. So the split is:
 
@@ -123,7 +123,12 @@ TOOL_NOTES: dict[str, dict] = {
         "params": {
             "source_dir": {"default": "current dir", "notes": "Absolute path to scan"},
             "severity_threshold": {
-                "notes": "Findings below this are filtered out at scan time"
+                "default": "the config's",
+                "notes": (
+                    "Least severe finding that counts as actionable, any case; it can make "
+                    "the config's `global_settings.severity_threshold` stricter for this "
+                    "scan, never looser"
+                ),
             },
             "config_path": {
                 "notes": (
@@ -159,10 +164,9 @@ TOOL_NOTES: dict[str, dict] = {
                 "(`<directory_path>/.ash/ash_output`) rather than constructing it independently."
             ),
             (
-                "**Heads-up:** the server's own docstring and the `important.next_steps` array "
-                "suggest polling `progress['is_complete']`. This is incomplete advice — "
-                "`is_complete` stays `False` for cancelled scans. Always check `status` "
-                "independently. (See `get_scan_progress` below.)"
+                "Poll `get_scan_progress` until `is_complete` is `true`, then read `status`. "
+                "`is_complete` is `true` for every ending, including `failed` and "
+                "`cancelled`. (See `get_scan_progress` below.)"
             ),
             (
                 "**A refused config keeps its own `error_type`.** The scan does not start, "
@@ -219,21 +223,25 @@ TOOL_NOTES: dict[str, dict] = {
   "start_time": "<iso8601>",
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
-  "severity_threshold": "MEDIUM",
+  "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
+  "results_available": bool,
+  "output_holds_previous_results": bool,
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
   ],
   "no_scanner_ran": bool,
-  "incomplete_converters": [{ "converter": "...", "reason": "..." }],
+  "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
+  "finished_scanners": int,
   "total_scanners": int,
+  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -245,7 +253,8 @@ TOOL_NOTES: dict[str, dict] = {
         "caveats": [
             (
                 "There is no overall percentage field. To compute progress, use "
-                "`completed_scanners / total_scanners` — but **guard against "
+                "`finished_scanners / total_scanners`, which counts every scanner that "
+                "ended; `completed_scanners` counts those that PASSED only — but **guard against "
                 "`total_scanners == 0`** during the pre-flight phase (before any scanner has "
                 'registered). Show "initializing" or 0% when `total_scanners` is zero.'
             ),
@@ -254,16 +263,24 @@ TOOL_NOTES: dict[str, dict] = {
                 "`start_time` and `end_time` (or from current time while running)."
             ),
             (
-                "**`is_complete` does not flip to `True` for cancelled scans** — it returns "
-                "`True` for `completed` and `incomplete`, and for `failed` once a results file "
-                "exists. Always check `status` independently: stop polling when `status` is "
-                "`completed`, `incomplete`, `failed`, or `cancelled`. Polling on "
-                "`is_complete` alone will loop forever on a cancelled scan."
+                "**`is_complete` is `true` once the scan has ended**, whatever the ending: "
+                "`completed`, `incomplete`, `failed` or `cancelled`. It is decided by the "
+                "scan's state alone, never by a results file on disk, which can be a previous "
+                "scan's. `results_available` is `true` for `completed` and `incomplete`, the "
+                "scans whose results `get_scan_results` can read."
+            ),
+            (
+                "**A failed or cancelled scan leaves the previous scan's results in place.** "
+                "ASH puts them back in `output_directory`, and `output_holds_previous_results` "
+                "is then `true` and the scanner fields are empty, because those files are not "
+                "this scan's. `get_scan_results` on that directory reads the previous scan's "
+                "results."
             ),
             (
                 "**`incomplete` is terminal, with partial coverage.** The run finished and its "
                 "results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost "
-                "targets), no scanner reached a verdict, a converter did not run, a rule "
+                "targets), no scanner reached a verdict, a converter did not run or could "
+                "not convert some of its inputs, a rule "
                 "could not be evaluated, or a content database was past its declared age "
                 "bound. `incomplete_scanners` names each scanner and why, and "
                 "`stale_content_databases` each stale database. The "
@@ -301,7 +318,15 @@ TOOL_NOTES: dict[str, dict] = {
                 "default": "all",
                 "notes": "`critical,high,medium,low,info`",
             },
-            "actionable_only": {"notes": "Drop suppressed findings"},
+            "actionable_only": {
+                "notes": (
+                    "Keep only the actionable findings, the ones behind exit code 2: "
+                    "unsuppressed and at or above the severity threshold the scan was "
+                    "judged by (a scanner's own where its config sets one). Drop the "
+                    "rest and add `findings`, a flat list of them that honors "
+                    "`scanners` and `severities` (`full` level only)"
+                )
+            },
         },
         "caveats": [
             "Returns full or filtered findings depending on `filter_level`.",
@@ -332,16 +357,38 @@ TOOL_NOTES: dict[str, dict] = {
         "no_params_sentence": "No parameters. Returns a list of scan summaries.",
     },
     "cancel_scan": {
-        "intro": "Stop a running scan and free resources.",
+        "intro": (
+            "Stop a running scan. The scanner running at the time is stopped, no further "
+            "scanner starts, and no reports or results file are written after the cancel."
+        ),
         "params": {"scan_id": {"notes": "The scan to stop"}},
-        "caveats": ["Returns confirmation."],
+        "caveats": [
+            (
+                "Returns `success: true` and `status: cancelled`. A scan that already "
+                "finished cannot be cancelled: `success` is `false` and `status` is the "
+                "status it finished with."
+            ),
+            (
+                "The status is `cancelled` at once, while the scan takes up to about 10 "
+                "seconds to stop and put the previous results back. Until then a new "
+                "`run_ash_scan` of the same directory is refused as still stopping; retry "
+                "after a few seconds."
+            ),
+        ],
     },
     "check_installation": {
         "intro": (
-            "Verify ASH is installed and the MCP server can spawn it. Run before the first "
-            "scan in a session if you're unsure of the install state."
+            "Report whether ASH can scan: its version, and for each built-in scanner whether "
+            "its tool is available. Run before the first scan in a session if you're unsure "
+            "of the install state. Each scanner's check may run its tool, so the call takes "
+            "seconds."
         ),
-        "no_params_sentence": "No parameters. Returns version string and feature flags.",
+        "no_params_sentence": (
+            "No parameters. Returns `installed` (at least one enabled scanner can run), "
+            "`ready` (all of them can), `version`, `scanners` (name, enabled, "
+            "`dependencies_satisfied`, version) and the enabled scanners in "
+            "`missing_dependencies` and `undetermined_dependencies`."
+        ),
     },
     "set_source_zip_chunk": {
         "params": {
@@ -359,6 +406,10 @@ TOOL_NOTES: dict[str, dict] = {
                 "Pair with `set_source_zip_finalize`, which verifies the reassembled archive "
                 "against `expected_sha256` before extracting it. A chunked upload that is never "
                 "finalized is not a scan target."
+            ),
+            (
+                "When the session's workspace directory cannot be created, both upload tools "
+                "return `success: false` with `error_type` `session_workspace_unavailable`."
             ),
         ],
     },
@@ -385,6 +436,16 @@ TOOL_NOTES: dict[str, dict] = {
                 "and `error` set to `a scan of this session is running; change the "
                 "delivered source after it finishes`. Deliver the source again once "
                 "`get_scan_progress` reports a terminal status."
+            ),
+            (
+                "A refusal or a git failure returns `success: false` with an `error_type`: "
+                "`clone_url_not_permitted` (a url beginning with `-` or using the `ext::` "
+                "transport), `clone_ref_not_permitted` (a ref beginning with `-`), "
+                "`invalid_clone_depth`, `invalid_session_id`, `scan_target_not_permitted` (a "
+                "local path or `file://` url outside the scan roots), `git_clone_failed` or "
+                "`git_checkout_failed` (git's own message is in `error`), or "
+                "`session_workspace_unavailable` (the session's workspace directory could not "
+                "be created)."
             ),
         ],
     },
@@ -451,8 +512,9 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "list_profiles": {
         "no_params_sentence": (
-            "No parameters. Returns the config profiles registered at server startup "
-            "with `ash mcp --profile NAME=path`. Without `--profile` the list is empty."
+            "No parameters. Returns the config profiles the operator registered at server "
+            "startup, each with `ash mcp --profile NAME=path/to/ash.yaml` (repeatable). A "
+            "client cannot register one; an empty list means the operator registered none."
         ),
     },
     "clear_source": {
@@ -671,7 +733,11 @@ def render() -> str:
         "",
         "`CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO` > `SUPPRESSED`",
         "",
-        "`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks).",
+        (
+            "`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted "
+            "risks) and findings below the scan's severity threshold, which are reported "
+            "but do not fail the scan."
+        ),
         "",
     ]
 

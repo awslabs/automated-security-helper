@@ -44,6 +44,11 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.undecodable_text import (
+    path_in_record_form,
+    text_of_undecodable,
+    undecodable_of_text,
+)
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     open_in_scanned_tree,
@@ -188,17 +193,24 @@ def scan_relative_path(uri: str, root: PurePath) -> Optional[str]:
     if not uri:
         return None
     flavor = PureWindowsPath if isinstance(root, PureWindowsPath) else PurePosixPath
-    candidate = flavor(uri)
+    # A URI holds a file name that is not UTF-8 in its record form (each lone
+    # surrogate as \udcNN, utils/undecodable_text.py), and the root may hold the
+    # surrogate, so both sides are compared in the record form.
+    candidate = flavor(text_of_undecodable(uri))
     rel: Optional[PurePath] = None
     if candidate.is_absolute():
         with suppress(ValueError):
-            rel = candidate.relative_to(flavor(root))
+            rel = candidate.relative_to(flavor(text_of_undecodable(str(root))))
         if rel is None and isinstance(root, Path):
             # Lexical comparison fails when the two sides are spelled
             # differently for one directory: /tmp vs /private/tmp on macOS, an
-            # 8.3 short name on Windows. Resolving puts them in one namespace.
+            # 8.3 short name on Windows. Resolving puts them in one namespace,
+            # the URI by the name its file has on disk.
             with suppress(ValueError, OSError):
-                rel = Path(uri).resolve().relative_to(root.resolve())
+                resolved = Path(undecodable_of_text(uri)).resolve()
+                rel = path_in_record_form(resolved).relative_to(
+                    path_in_record_form(root.resolve())
+                )
         if rel is None and not candidate.drive:
             # POSIX "/deploy/..." from grype: rooted, but relative to the scan
             # root. A drive-qualified path outside the root is never this.

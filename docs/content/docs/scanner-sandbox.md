@@ -10,7 +10,7 @@ ash scan --sandbox auto            # best sandbox this machine has
 ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
 ```
 
-or in `.ash/.ash.yaml`:
+or in your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 sandbox:
@@ -35,9 +35,37 @@ configuration, whose mode is `off`.
 | `landlock` | Linux 6.2+ (Landlock ABI 3) | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. Below ABI 3 it counts as unavailable. |
 | `sandbox-exec` | macOS | ships with macOS | Apple marks `sandbox-exec` deprecated. See risks. |
 
-Container mode (`--mode container`) ignores the setting: the container is the boundary,
-and the image does not need bubblewrap. Nix mode composes with it: the inner scan that
-runs inside `nix develop` applies the sandbox to each scanner.
+Container mode (`--mode container`) does not apply the setting: it never sandboxes the
+scanners inside the image, and the container is the boundary. So `--sandbox` with any
+mode but `off` is refused there, with exit 5 (a usage error), before the image is built
+or run. When `sandbox.mode` in a config file or a `--config-overrides` value asks for a
+sandbox, container mode prints a warning on stderr that it is not applied (whatever
+`--quiet` or `--log-level` say), gives the scan inside
+`sandbox.mode=off` as its last override, and runs the scan, so one config file can serve
+local and container runs.
+
+Running `ash scan --sandbox <mode>` yourself inside the image, as in
+`docker run <image> ash scan --sandbox landlock`, is your own opt-in: the scan there is
+a local one, and it applies the mode. The wrappers below never pass a mode other than
+`off`. When the
+backend cannot run in the image, each scanner is recorded MISSING with the reason, and
+none runs unsandboxed.
+
+`./ash`, `invoke-ash` and `Invoke-ASH`, which always run the container, refuse
+`--sandbox` the same way (`Invoke-ASH` by throwing with `$LASTEXITCODE` set to 5). It is
+the one refusal of theirs that exits 5, a usage error, as `ash` itself gives for it; the
+others refuse a value the wrapper cannot use and exit 3. They also
+give the scan inside `--sandbox off`, which it applies after every `--config-overrides`
+value and above a `--cli-json-input` document's `sandbox`. Only `scan`, which also runs
+when no command is named, takes `--sandbox`; another command is given nothing. They do
+not read the config
+file, so they print no warning about a mode set there. Nor do they pass `ASH_CONFIG` to
+the scan in the container; when it is set they warn that it is not applied. Pass a config
+with `--config` (`-Config` to `Invoke-ASH`) instead, as a path relative to the source
+directory, which is all the scan in the container sees.
+
+Use `--mode local` to sandbox each scanner. Nix mode composes with it: the inner scan
+that runs inside `nix develop` applies the sandbox to each scanner.
 
 ASH finds `bwrap` and `firejail`, and the `readlink` and `true` its probes run, the way
 it finds scanners: on absolute `PATH` entries and in ASH's own bin directory, never
@@ -377,6 +405,10 @@ outside any checkout, such as an extracted archive, a config file inside that
 directory can't grant either, whether it is reached by the directory's own name, its
 resolved path, or the shell's working directory (`$PWD`).
 
+An in-tree `network_scanners` list still takes network away: a scanner it doesn't
+name gets none, so a repository can keep its own scan offline with
+`network_scanners: []`.
+
 When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
 a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the four
 settings are taken from the files that can: in workspace mode the operator's
@@ -528,13 +560,22 @@ Out of scope:
   work directory in ASH's process. The tools a converter starts are not ASH code and
   are sandboxed; see [Converters](#converters). `git` runs only for
   `--changed-files-only` and workspace planning, never inside a scanner.
-- Links in the scanned tree. ASH's scan set leaves out a link to a file whose target
-  is outside the source directory, and warns about each one (see
-  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)),
-  so the scanners and converters that read the scan set are not given it.
-  bandit, semgrep, opengrep, checkov, grype and syft walk the source directory
-  themselves, and snyk-code passes it to the Snyk CLI as it is; what each of those
-  does with such a link is the tool's own behavior.
+- Links in the scanned tree. ASH's scan set leaves out a link to a file whose
+  target, with every link on the way resolved, is outside the source directory, and
+  warns about each one, as `Not scanning 'vendor/config.py': link leaves the scanned
+  tree`, naming only the link (see
+  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)).
+  So the scanners and converters that read the scan set
+  are not given it, and npm-audit does not audit a package whose files link out of
+  the tree. The scanners that walk the directory they scan themselves are told to
+  skip each such link in their own exclusion option: bandit's `--exclude`, one
+  checkov `--skip-path` each, ferret-scan's `--exclude`, grype's and syft's
+  `--exclude`, and trivy-repo's `--skip-files`. Where a link's path cannot be put in
+  that option alone (a comma, a glob character or a line break, or a path another
+  file's path holds, for bandit; values checkov's terraform module finder cannot
+  compile into its one regex for checkov; a comma, or a path another file's path
+  holds, for ferret-scan), that scanner is not run on the directory, and the scan
+  fails naming the link. snyk-code tests a copy of the scan set.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see

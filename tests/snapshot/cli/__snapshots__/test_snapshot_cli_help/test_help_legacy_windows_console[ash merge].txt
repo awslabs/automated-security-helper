@@ -29,41 +29,8 @@
 │                                                                           scan's own            │
 │                                                                           configuration asks    │
 │                                                                           for.                  │
-│    --config              -c                          <str>                The operator's config │
-│                                                                           file. Its values      │
-│                                                                           replace the shards'   │
-│                                                                           for the settings a    │
-│                                                                           shard's recorded      │
-│                                                                           config cannot choose, │
-│                                                                           such as where         │
-│                                                                           reporters send        │
-│                                                                           findings and which    │
-│                                                                           off-host reporters    │
-│                                                                           run. Its              │
-│                                                                           ash_plugin_modules    │
-│                                                                           are the plugin        │
-│                                                                           modules the merge     │
-│                                                                           loads, with any       │
-│                                                                           --config-overrides    │
-│                                                                           adds; a module only   │
-│                                                                           the shards recorded   │
-│                                                                           is not loaded. It     │
-│                                                                           adds no reporter      │
-│                                                                           section the shards    │
-│                                                                           did not record; use   │
-│                                                                           --config-overrides    │
-│                                                                           for that.             │
-│                                                                           [env var: ASH_CONFIG] │
-│    --config-overrides                                <str>                Configuration         │
-│                                                                           overrides as          │
-│                                                                           key-value pairs       │
-│                                                                           (e.g.,                │
-│                                                                           'reporters.s3.enable… │
-│                                                                           applied over the      │
-│                                                                           shards' recorded      │
-│                                                                           config.               │
-│    --min-severity                                    <str>                Minimum severity that │
-│                                                                           counts as actionable  │
+│    --min-severity                                    <critical|high|medi  Minimum severity that │
+│                                                      um|low|none>         counts as actionable  │
 │                                                                           for the exit code.    │
 │                                                                           [default: low]        │
 │    --ignore-suppressio…                                                   Ignore all            │
@@ -89,24 +56,40 @@
 │                                                                           it owned, and exit 1  │
 │                                                                           when any scanner in   │
 │                                                                           the union is ERROR or │
-│                                                                           MISSING, or when      │
-│                                                                           every one is SKIPPED, │
-│                                                                           such as when no       │
-│                                                                           selected scanner had  │
-│                                                                           a file to scan.       │
-│                                                                           Without it, a shard   │
-│                                                                           whose scanners never  │
-│                                                                           ran contributes no    │
-│                                                                           findings and the      │
+│                                                                           MISSING. On by        │
+│                                                                           default: unset, it    │
+│                                                                           takes the scan        │
+│                                                                           configuration's value │
+│                                                                           and then on.          │
+│                                                                           --no-fail-on-incompl… │
+│                                                                           turns it off and      │
+│                                                                           merges a partial      │
+│                                                                           union anyway, so a    │
+│                                                                           shard whose scanners  │
+│                                                                           never ran contributes │
+│                                                                           no findings and the   │
 │                                                                           merged report reads   │
 │                                                                           as a complete, clean  │
-│                                                                           scan. Defaults to the │
-│                                                                           scan configuration's  │
-│                                                                           value, then to true;  │
-│                                                                           pass                  │
-│                                                                           --no-fail-on-incompl… │
-│                                                                           to merge a partial    │
-│                                                                           union anyway.         │
+│                                                                           scan.                 │
+│    --config              -c                          <str>                The operator's        │
+│                                                                           configuration file.   │
+│                                                                           Only this file can    │
+│                                                                           turn on a reporter    │
+│                                                                           that sends findings   │
+│                                                                           off the host (the AWS │
+│                                                                           reporters): the       │
+│                                                                           configuration the     │
+│                                                                           shards recorded is    │
+│                                                                           ignored for them, in  │
+│                                                                           both directions. Its  │
+│                                                                           ash_plugin_modules    │
+│                                                                           are the plugin        │
+│                                                                           modules the merge     │
+│                                                                           loads; a module only  │
+│                                                                           the shards recorded   │
+│                                                                           is not loaded.        │
+│                                                                           Everything else comes │
+│                                                                           from the shards.      │
 │    --log-level                                       <QUIET|SIMPLE|ERROR  Set the log level.    │
 │                                                      |INFO|VERBOSE|DEBUG  [default: INFO]       │
 │                                                      |TRACE>                                    │

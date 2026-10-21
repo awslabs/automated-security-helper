@@ -45,6 +45,10 @@ The verdict is `ash merge`'s exit code, propagated unchanged:
 | 0 | No actionable findings at or above `min_severity` |
 | 1 | Refused to merge — shard coverage incomplete, so findings are **unknown** |
 | 2 | Actionable findings at or above `min_severity` |
+| 5 | Usage error — ASH refused the merge command line, so nothing was merged |
+
+Exit 5 comes from ASH releases after 3.7.1. ASH 3.7.0 and 3.7.1 have no `ash
+merge`, and report that as exit 2.
 
 **Nothing in this module re-derives that judgment**, and that is deliberate. ASH
 routes the merged verdict through `_compute_exit_code`, the same function
@@ -230,7 +234,7 @@ makes sense if the shards agreed on what to scan. Both projects therefore receiv
 the same `base_config_ssm_parameter_name`. Overriding the configuration per shard
 would make the merged verdict meaningless.
 
-**`ash merge` and the shard CLI flags are a cross-lane dependency.** At the commit
+**`ash merge` and the shard CLI flags are a dependency on work landing elsewhere.** At the commit
 this module was written against, `automated_security_helper/core/sharding.py` and
 the scan-phase shard selection exist, but `--shard-index` / `--shard-count` are
 not yet wired onto `ash scan`, and there is no `ash merge` command or `--results`

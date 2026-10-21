@@ -38,6 +38,14 @@ from automated_security_helper.interactions.run_ash_container import (
 )
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.utils.helpers import stand_in_host_ids
+
+
+@pytest.fixture(autouse=True)
+def _host_ids(monkeypatch):
+    """Container mode reads the host's uid and gid; answered without running id."""
+    stand_in_host_ids(monkeypatch)
+
 
 _SCRUBBED_ENV = (
     "CI",
@@ -232,8 +240,9 @@ class TestTheConfigIsReadableInsideTheContainer:
 
         assert _mounts(cmd)[_flag(cmd, "--config")]["source"] == str(config)
 
-    def test_without_a_config_nothing_extra_is_mounted(self, tree):
+    def test_without_a_config_nothing_extra_is_mounted(self, tree, monkeypatch):
         """Control."""
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
         cmd = _assemble(tree["source"], tree["output"])
 
         assert "--config" not in cmd

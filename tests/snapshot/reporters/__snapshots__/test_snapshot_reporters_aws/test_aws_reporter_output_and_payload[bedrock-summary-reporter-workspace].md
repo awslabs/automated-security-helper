@@ -1,25 +1,43 @@
-# Security Scan Summary Report
+# ASH security scan analysis
 
-## Table of Contents
+> [!WARNING]
+> **Scan incomplete**
+>
+> 3 actionable findings. Some inputs or scanners were not evaluated.
+>
+> **3 actionable** · 0 below threshold · 0 suppressed · 3/4 scanners completed
+>
+> Next action: Review findings, resolve coverage gaps, and scan again.
 
-1. [Executive Summary](#executive-summary)
-2. [Findings by Severity](#findings-by-severity)
-   - [Warning Level Findings](#warning-level-findings)
+Project: workspace
+
+**Scanners needing attention:** npm-audit. Check their dependencies and execution logs.
+
+## Generated analysis
+
+Generated with Amazon Bedrock. Verify suggestions against the source findings.
+
+## Contents
+
+1. [Executive summary](#executive-summary)
+2. [Findings by severity](#findings-by-severity)
+   - [High findings](#high-findings)
+   - [Medium findings](#medium-findings)
 3. [Recommendations](#recommendations)
-4. [Risk Assessment](#risk-assessment)
-5. [Finding Details](#finding-details)
+4. [Risk assessment](#risk-assessment)
+5. [Finding details](#finding-details)
 
-## Executive Summary
+## Executive summary
 
 [stubbed model response 1]
 
-## Findings by Severity
+## Findings by severity
 
-### Warning Level Findings
+### High findings
 
 [stubbed model response 2]
 
-### None Level Findings
+### Medium findings
 
 [stubbed model response 3]
 
@@ -27,33 +45,31 @@
 
 [stubbed model response 4]
 
-## Risk Assessment
+## Risk assessment
 
 [stubbed model response 5]
 
-## Finding Details
+## Finding details
 
-This section contains detailed information about each finding referenced in the report.
+### Finding index
 
-### Finding Index Reference
-
-| Index | Rule ID | Severity | File | Line Range | Description |
+| Index | Rule ID | Severity | File | Line range | Description |
 |-------|---------|----------|------|------------|-------------|
-| 1 | Unknown | None | app.py | 7 | subprocess call with shell=True identified, sec... |
-| 2 | Unknown | None | main.tf | 1-4 | S3 Bucket has an ACL defined which allows publi... |
-| 3 | Unknown | Warning | main.tf | 2 | Bucket name is hardcoded; derive it from a vari... |
+| 1 | B602 | HIGH | app.py | 7 | subprocess call with shell=True identified, sec... |
+| 2 | CKV\_AWS\_20 | HIGH | main.tf | 1-4 | S3 Bucket has an ACL defined which allows publi... |
+| 3 | terraform.aws.best-practice.s3-bucket-name-hardcoded | MEDIUM | main.tf | 2 | Bucket name is hardcoded; derive it from a vari... |
 
 
-### Full Finding Details
+### Evidence
 
 <details>
-<summary>Click to expand full finding details</summary>
+<summary>1. HIGH · B602</summary>
 
-#### Finding 1: Unknown (None)
+#### Finding 1: B602 (HIGH)
 
-**Location**: app.py (lines 7-7)
+Location: app.py (lines 7-7)
 
-**Description**: subprocess call with shell=True identified, security issue.
+subprocess call with shell=True identified, security issue.
 
 <details>
 <summary>Raw JSON</summary>
@@ -61,6 +77,7 @@ This section contains detailed information about each finding referenced in the 
 ```json
 {
   "ruleId": "B602",
+  "level": "error",
   "message": {
     "text": "subprocess call with shell=True identified, security issue."
   },
@@ -99,16 +116,22 @@ This section contains detailed information about each finding referenced in the 
     "workspace_project": "api",
     "workspace_uri": "api/app.py"
   },
-  "index": 1
+  "index": 1,
+  "severity": "HIGH"
 }
 ```
 </details>
 
-#### Finding 2: Unknown (None)
+</details>
 
-**Location**: main.tf (lines 1-4)
+<details>
+<summary>2. HIGH · CKV_AWS_20</summary>
 
-**Description**: S3 Bucket has an ACL defined which allows public READ access.
+#### Finding 2: CKV\_AWS\_20 (HIGH)
+
+Location: main.tf (lines 1-4)
+
+S3 Bucket has an ACL defined which allows public READ access.
 
 <details>
 <summary>Raw JSON</summary>
@@ -116,6 +139,7 @@ This section contains detailed information about each finding referenced in the 
 ```json
 {
   "ruleId": "CKV_AWS_20",
+  "level": "error",
   "message": {
     "text": "S3 Bucket has an ACL defined which allows public READ access."
   },
@@ -153,16 +177,22 @@ This section contains detailed information about each finding referenced in the 
     "workspace_project": "web",
     "workspace_uri": "web/main.tf"
   },
-  "index": 2
+  "index": 2,
+  "severity": "HIGH"
 }
 ```
 </details>
 
-#### Finding 3: Unknown (Warning)
+</details>
 
-**Location**: main.tf (lines 2-2)
+<details>
+<summary>3. MEDIUM · terraform.aws.best-practice.s3-bucket-name-hardcoded</summary>
 
-**Description**: Bucket name is hardcoded; derive it from a variable.
+#### Finding 3: terraform.aws.best-practice.s3-bucket-name-hardcoded (MEDIUM)
+
+Location: main.tf (lines 2-2)
+
+Bucket name is hardcoded; derive it from a variable.
 
 <details>
 <summary>Raw JSON</summary>
@@ -170,7 +200,6 @@ This section contains detailed information about each finding referenced in the 
 ```json
 {
   "ruleId": "terraform.aws.best-practice.s3-bucket-name-hardcoded",
-  "level": "warning",
   "message": {
     "text": "Bucket name is hardcoded; derive it from a variable."
   },
@@ -208,9 +237,15 @@ This section contains detailed information about each finding referenced in the 
     "workspace_project": "web",
     "workspace_uri": "web/main.tf"
   },
-  "index": 3
+  "level": "warning",
+  "index": 3,
+  "severity": "MEDIUM"
 }
 ```
 </details>
 
 </details>
+
+
+
+Build with <3 at Amazon Web Services

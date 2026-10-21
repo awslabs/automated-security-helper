@@ -42,7 +42,7 @@ Flags:
 - `--stateless-http` — handle each request on its own instead of binding it to a server-held session, for a load balancer or a platform such as AgentCore. A stateless server issues no session; see [Session identity](#session-identity).
 - `--trust-upstream-session-id` — stateless only: a platform in front of ASH issues and authenticates `Mcp-Session-Id`, so the header names the caller's session. See [Session identity](#session-identity).
 - `--session-workspace-ttl SECONDS` — how long a session workspace may go unused before the server removes it (default 86400). See [Session lifecycle](#session-lifecycle).
-- `--profile NAME=path/to/ash.yaml` — register a config profile under `NAME`. Repeatable. The YAML is loaded and validated through `AshConfig.from_file` at startup; bad profiles fail fast and the server refuses to start. See [Config profiles](#config-profiles).
+- `--profile NAME=path/to/ash.yaml` — register a config profile under `NAME`. Repeatable. The YAML is loaded and validated through `AshConfig.from_file` at startup, with its `extends` chain (bases must stay in the profile's directory); bad profiles fail fast and the server refuses to start, including one whose file or any of whose bases has an unknown top-level field. See [Config profiles](#config-profiles).
 
 The server logs the bound address and the registered profile names on startup. It does not log header values or profile contents.
 
@@ -92,7 +92,7 @@ profiles = await mcp__ash__list_profiles()
 # -> {"profiles": [{"name": "default", "path_sha256": "..."}], "count": 1}
 ```
 
-Path hashes let clients detect that the operator rotated a profile file underneath them; the paths and the profile contents themselves are never returned. An empty list means the operator registered no profiles, not that the call failed.
+`path_sha256` is a SHA-256 of the profile file's absolute path, not of its contents, so it changes when the operator registers the name with a different file, and not when the file at the same path is edited. Either change takes a restart: the server reads each profile once, at startup. The paths and the profile contents themselves are never returned. An empty list means the operator registered no profiles, not that the call failed.
 
 ### Selecting a profile
 
@@ -121,6 +121,8 @@ Sessions do not share a binding, and re-binding replaces the previous one for th
 #### Before v3.4
 
 `select_profile` was implemented but not registered, and no client could invoke it. Three things were missing rather than one: there was no `--profile` flag, so the registry was always empty and `list_profiles` always returned `{"profiles": [], "count": 0}`; the tool was never passed to `@mcp.tool()`; and nothing read the binding, because the scan entry point takes a config path and a bound `AshConfig` had nowhere to go. All three are closed. If you worked around this with `config_path` on every call, that keeps working unchanged.
+
+`ash mcp --profile NAME=path` registers the profile: the `ash mcp` entry point declares every option of the command it delegates to, `--profile` included.
 
 ## Source delivery
 
@@ -295,10 +297,11 @@ The allowlist defines:
 Additional invariants enforced by `apply_runtime_patch`:
 
 - `move` and `copy` ops are rejected outright (they sidestep target-path checks).
+- A profile that names a key with a variable (`${VAR}`, or `${VAR:default}` whether or not the variable is set) where ASH has built-in keys, such as a `reporters`, `scanners` or `converters` section, a built-in plugin's options or a list entry such as a suppression, is not patched at all: every op, `override_yaml` and workspace `config_overrides` against it is refused with one text, whatever the variable holds. A section named for a built-in merges with the built-in's, so any other answer would tell a client whether the variable names one. This is decided from the profile as written. Write the section's name as text to let clients patch the profile. Where ASH has no keys of its own, as in the options of a plugin ASH does not ship, an op may go through only a key the profile writes as text, and no `test` op may compare that mapping, what holds it, or anything in it.
 - No op may reach the reporters section of a reporter that isn't one of ASH's built-in reporters, whatever `allowed_paths` says. That covers the AWS reporters (`s3`, `aws-security-hub`, `cloudwatch-logs`, `bedrock-summary-reporter`, whose sections are also always-denied entries) and any reporter a plugin module brings. Such a reporter can send the findings off the host, to wherever its section says, with the server's credentials, so only the operator's own configuration sets that section.
   - Every spelling ASH reads as such a section counts, and so does every op type: a `test` would tell a client where the operator sends findings.
   - An `add` or `replace` of all of `/reporters`, or of the whole document, is refused when its value has such a section. A `test` or `remove` of `/reporters`, or a `test` of the whole document, is refused outright.
-  - The one exception is a client's `enabled: false` of an AWS reporter, on its own. It's accepted and takes no effect, and a warning names it.
+  - The one exception is a client's `enabled: false` of an AWS reporter, on its own (or adding its section with only `enabled: false` where the profile has none). It's accepted and takes no effect: the server logs a warning naming the op and keeps the operator's setting, for `patch_ops`, `override_yaml` and a workspace scan's `config_overrides` alike. `enabled: false` together with anything else in that section is refused.
   - A client can still change a built-in reporter's section, such as `/reporters/markdown/enabled`, where the allowlist permits it.
 - Patch documents larger than **64 KiB** are rejected.
 - Any rejection raises `RuntimePatchDeniedError` with the offending op and the rule that fired; nothing is applied.

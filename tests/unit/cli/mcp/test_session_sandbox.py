@@ -70,6 +70,7 @@ from automated_security_helper.cli.mcp.sandbox import (
     set_server_transport,
     transport_is_networked,
     validate_config_input,
+    validate_discovered_config,
 )
 from automated_security_helper.cli.mcp.scan_target import (
     _denied_root_values,
@@ -593,3 +594,52 @@ def test_a_session_id_that_could_traverse_is_refused():
     for bad in ("../session-b", "a/b", "..", "."):
         with pytest.raises(ValueError):
             session_sandbox(bad)
+
+
+def test_a_discovery_failure_is_logged_by_its_type_alone(tmp_path, monkeypatch):
+    """A parser's message can quote the config file's text, so the line logged
+    when discovery fails carries the error's type and nothing it said."""
+    import logging
+
+    from automated_security_helper.config import config_sources
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    canary = "sandbox-canary-91c4e7"
+
+    def _refuse(source_dir):
+        raise ValueError(f"quoted: {canary}")
+
+    monkeypatch.setattr(config_sources, "discover_config_source", _refuse)
+
+    messages: list = []
+    kept_records: list = []
+    # The whole formatted record, as a file handler would write it: a message
+    # check alone would miss the canary riding an exc_info traceback.
+    formatter = logging.Formatter()
+
+    class _Keep(logging.Handler):
+        def emit(self, record):
+            kept_records.append(record)
+            messages.append(formatter.format(record))
+
+    keep = _Keep(level=logging.DEBUG)
+    old_level = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(keep)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        refusal = validate_discovered_config(tmp_path, session_id="session-a")
+    finally:
+        ASH_LOGGER.removeHandler(keep)
+        ASH_LOGGER.setLevel(old_level)
+
+    assert refusal is None
+    logged = [m for m in messages if "config discovery not done here" in m]
+    assert logged and all("ValueError" in m for m in logged), messages
+    assert all(canary not in m for m in messages), messages
+    assert all(
+        # Falsy, not None: exc_info=False also writes no traceback, and is
+        # what this checks for.
+        not record.exc_info and not record.stack_info
+        for record in kept_records
+        if "config discovery not done here" in record.getMessage()
+    ), messages

@@ -44,6 +44,8 @@ from types import ModuleType
 import pytest
 from typer.testing import CliRunner
 
+from tests.utils.windows_console import windows_logging_kept_in_the_test
+
 
 @dataclass(frozen=True)
 class Host:
@@ -131,6 +133,10 @@ def pin_host(monkeypatch: pytest.MonkeyPatch, host: Host) -> Callable[[], None]:
     simulated_enabled = not host.is_windows
     monkeypatch.setattr(platform, "system", lambda: host.system)
     monkeypatch.setattr(platform, "machine", lambda: host.machine)
+    if host.is_windows:
+        # On a CI runner, get_logger then sets the process locale and
+        # PYTHONIOENCODING, which outlived the simulated host (see the helper).
+        windows_logging_kept_in_the_test(monkeypatch)
     if simulated_enabled == real_enabled:
         return lambda: None
     _set_import_time_defaults(simulated_enabled)
@@ -234,9 +240,12 @@ class _FrozenLogClock:
 def pinned_console() -> Iterator[None]:
     """Make every rich console a CLI run builds render the same on every OS.
 
-    - rich.print and rich.get_console share one lazily-built Console. It is dropped so
-      the next one reads the pinned COLUMNS/NO_COLOR/TERM, not whatever terminal an
-      earlier import saw.
+    - rich.print and rich.get_console share one global Console. A new one replaces it
+      for the run, built last, so it reads the pinned COLUMNS/NO_COLOR/TERM and
+      terminal size, not whatever terminal an earlier import saw. It is built as
+      utils/console.py builds rich's global console (``new_global_console``): a run
+      prints through the console ASH uses, which checks each line and does not wrap
+      text off a terminal, not one rich builds without either.
     - ASH's log console passes ``_environ={}``, so it never reads COLUMNS and asks the
       process's real stdin/stdout/stderr for a size instead: 80 columns under xdist,
       the developer's terminal width under ``-n0``. The terminal is pinned to the same
@@ -275,10 +284,13 @@ def pinned_console() -> Iterator[None]:
             ]
             if len(kept) != len(logger.handlers):
                 mp.setattr(logger, "handlers", kept)
-        mp.setattr(rich, "_console", None)
         mp.setattr(rich.console, "detect_legacy_windows", lambda: False)
         mp.setattr(os, "get_terminal_size", lambda *_: os.terminal_size((100, 50)))
         mp.setattr(logging, "time", _FrozenLogClock(time))
+        # Last, so it is built in the environment pinned above.
+        from automated_security_helper.utils.console import new_global_console
+
+        mp.setattr(rich, "_console", new_global_console())
         yield
 
 

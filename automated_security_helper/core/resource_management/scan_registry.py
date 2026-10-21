@@ -16,13 +16,17 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from threading import Lock
-from typing import Dict, List, Optional, Any
+from threading import Event, Lock
+
+from automated_security_helper.core.cancellation import CancelEvent
+from automated_security_helper.core.constants import ASH_EXIT_CODES
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    ScanProgress,
     assess_coverage,
     coverage_has_gap,
     create_scan_progress_from_files,
@@ -30,6 +34,7 @@ from automated_security_helper.core.resource_management.scan_tracking import (
     summarize_scanner_statuses,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.redacted_model import value_tuple
 
 
 def _canonical_directory(directory_path: str) -> Path:
@@ -82,11 +87,24 @@ class MCScanStatus(Enum):
     CANCELLED = "cancelled"
 
 
-#: Terminal statuses whose run finished and left results to read. ``is_complete``
-#: in a progress response is true for these: it answers "is the run over and are
-#: there results", which is what every documented poll loop waits on.
-#: ``coverage_complete`` is the separate answer to "did it cover everything".
+#: Terminal statuses whose run finished and left results to read: the
+#: ``results_available`` of a progress response. ``coverage_complete`` is the
+#: separate answer to "did it cover everything".
 FINISHED_WITH_RESULTS = frozenset({MCScanStatus.COMPLETED, MCScanStatus.INCOMPLETE})
+
+#: Every status a scan ends in. ``is_complete`` in a progress response is true for
+#: these: it answers "has the scan ended", which is what the server tells clients
+#: to poll on. ``results_available`` answers "are there results", true for
+#: FINISHED_WITH_RESULTS only.
+ENDED = frozenset(
+    {
+        MCScanStatus.COMPLETED,
+        MCScanStatus.INCOMPLETE,
+        MCScanStatus.FAILED,
+        MCScanStatus.CANCELLED,
+    }
+)
+
 
 #: The session a scan belongs to when its registrar named none: stdio's single
 #: client and in-process callers. The same value as
@@ -119,9 +137,12 @@ class ScanRegistryEntry:
         scan_id: str,
         directory_path: str,
         output_directory: str,
-        severity_threshold: str = "MEDIUM",
+        severity_threshold: Optional[str] = "MEDIUM",
         config_path: Optional[str] = None,
         session_id: Optional[str] = None,
+        slot: Optional[str] = None,
+        requested_severity_threshold: Optional[str] = None,
+        environment_values: Tuple[str, ...] = (),
     ):
         """
         Initialize a scan registry entry.
@@ -130,27 +151,73 @@ class ScanRegistryEntry:
             scan_id: Unique identifier for the scan
             directory_path: Path to the directory being scanned
             output_directory: Path to the output directory for scan results
-            severity_threshold: Minimum severity threshold for findings
+            severity_threshold: The threshold the scan's findings are judged by,
+                when that is known up front (a workspace project's own). None
+                otherwise; the runner records the value the scan used when it
+                finishes with results.
+            requested_severity_threshold: The threshold the client asked for,
+                if any. Kept apart from ``severity_threshold``: the scan runs at
+                the stricter of it and its config's, so the request is not the
+                threshold that applies, and reporting it as such said CRITICAL
+                for a scan judged at MEDIUM.
             config_path: Optional path to ASH configuration file
             session_id: The MCP session that started the scan. Only that session
                 sees the entry through a session-scoped lookup. Not part of
                 ``to_dict``: the owner is never reported, not even to itself.
+            slot: The max_concurrent_scans slot the scan holds, when it shares one
+                with other entries: the projects of one workspace scan. None for
+                a scan that holds a slot of its own.
+            environment_values: The values the run's configuration read from the
+                environment. The registry redacts every error message it applies
+                with them, so a failure arm that closes the entry with a bare
+                exception's text is backstopped at the one sink the arms share.
+                They exist to be hidden: ``to_dict`` is an explicit allowlist
+                and never includes them.
         """
         self.scan_id = scan_id
         self.session_id = _owner(session_id)
+        self.slot = slot
+        self.environment_values = tuple(environment_values)
         self.directory_path = directory_path
         self.output_directory = output_directory
         self.start_time = datetime.now()
         self.end_time: Optional[datetime] = None
         self.status = MCScanStatus.PENDING
         self.severity_threshold = severity_threshold
+        self.requested_severity_threshold = requested_severity_threshold
         self.config_path = config_path
         self.process_id: Optional[int] = None
         self.error_message: Optional[str] = None
+        # The code the CLI exits with for how the scan ended, when the runner
+        # knows it: a scan ASH refused or gave up records the code it exited
+        # with. None otherwise; an MCP scan runs without the findings gate, so a
+        # scan that finished has no CLI verdict to record.
+        self.exit_code: Optional[int] = None
         self.warnings: List[str] = []
         # What the runner recorded about coverage when it closed the entry: the
         # ScanIncompleteness.to_payload() shape. None until a runner records one.
         self.coverage: Optional[Dict[str, Any]] = None
+        # Set when the scan is cancelled. The runner runs the scan inside
+        # core.cancellation.cancel_scope(cancel_event), so setting it stops the
+        # scan at its next check, its running scanner's child process included.
+        # An in-process scan has no process to signal, so this is the only way a
+        # cancel reaches it.
+        self.cancel_event = CancelEvent()
+        # Set by the runner when the scan ended and the previous scan's results
+        # were put back in its output directory (core/previous_results.py). The
+        # files there are then not this scan's, and its progress does not read
+        # them as its own.
+        self.output_holds_previous_results = False
+        # Whether an in-process runner (mcp_tools._run_scan_async, or the
+        # workspace thread of cli/mcp/workspace.py for a workspace project)
+        # drives this scan, and whether it has finished: its scan thread has
+        # stopped and has settled the output directory. A cancel or the timeout closes the entry
+        # at once, while that thread may run for seconds more, stopping its
+        # scanner's child process and putting the previous results back; a new
+        # scan of the directory in that window would have its output removed by
+        # that restore. See occupies_its_directory.
+        self.has_runner = False
+        self.runner_done = Event()
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -167,6 +234,7 @@ class ScanRegistryEntry:
             "end_time": self.end_time.isoformat() if self.end_time else None,
             "status": self.status.value,
             "severity_threshold": self.severity_threshold,
+            "requested_severity_threshold": self.requested_severity_threshold,
             "config_path": self.config_path,
             "process_id": self.process_id,
             "error_message": self.error_message,
@@ -206,9 +274,10 @@ class ScanRegistryEntry:
         self.error_message = error_message
 
     def mark_cancelled(self) -> None:
-        """Mark the scan as cancelled."""
+        """Mark the scan as cancelled, and tell its runner to stop it."""
         self.status = MCScanStatus.CANCELLED
         self.end_time = datetime.now()
+        self.cancel_event.set()
 
     def add_warning(self, warning: str) -> None:
         """
@@ -228,11 +297,28 @@ class ScanRegistryEntry:
         """
         return self.status in [MCScanStatus.PENDING, MCScanStatus.RUNNING]
 
+    def occupies_its_directory(self) -> bool:
+        """Whether the scan may still run, or write, in its directory.
+
+        True while it is active, and after it was closed for as long as its
+        runner has not finished. register_scan refuses another scan of the
+        directory, and counts the scan against max_concurrent_scans, while this
+        holds.
+        """
+        return self.is_active() or (self.has_runner and not self.runner_done.is_set())
+
+
+def _slot_of(entry: "ScanRegistryEntry") -> Tuple[str, str]:
+    """The max_concurrent_scans slot an entry holds: its shared slot, or its own."""
+    if entry.slot is not None:
+        return ("shared", entry.slot)
+    return ("own", entry.scan_id)
+
 
 class ScanRegistry:
     """Thread-safe registry for tracking active scans."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the scan registry."""
         self._registry: Dict[str, ScanRegistryEntry] = {}
         self._registry_lock = Lock()
@@ -242,22 +328,55 @@ class ScanRegistry:
         self,
         directory_path: str,
         output_directory: str,
-        severity_threshold: str = "MEDIUM",
+        severity_threshold: Optional[str] = "MEDIUM",
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
+        max_active: Optional[int] = None,
         session_id: Optional[str] = None,
+        slot: Optional[str] = None,
+        requested_severity_threshold: Optional[str] = None,
+        environment_values: Iterable[str] = (),
     ) -> str:
         """
         Register a new scan in the registry.
 
         Args:
             directory_path: Path to the directory being scanned
-            output_directory: Path to the output directory for scan results
-            severity_threshold: Minimum severity threshold for findings
+            output_directory: Path to the output directory for scan results. It
+                need not exist yet, and must not be anything but a directory if
+                it does: a caller creates it once the scan is registered, so a
+                refused scan leaves nothing on disk, and gives the scan back if
+                that fails.
+            severity_threshold: The threshold the scan's findings are judged by,
+                when it is known before the scan runs; None when it comes from a
+                config the scan resolves (``finish_scan`` records it then).
+            requested_severity_threshold: What the client asked for, when that
+                is not the threshold that applies; see ScanRegistryEntry.
             config_path: Optional path to ASH configuration file
             scan_id: Optional scan ID to use (generated if not provided)
+            max_active: Refuse the scan when this many already occupy their
+                directories (pending, running, or cancelled and still stopping;
+                see ScanRegistryEntry.occupies_its_directory): the operator's
+                ``max_concurrent_scans``. Counted and registered under one lock,
+                so two requests at once cannot both take the last slot. None for
+                no limit; the caller passes None for a configured 0.
             session_id: The MCP session starting the scan; None records it under
                 :data:`DEFAULT_SCAN_SESSION`.
+            slot: Names the max_concurrent_scans slot this scan shares with
+                others: a workspace scan registers each of its projects under one
+                slot, so the whole workspace counts as one scan. A scan joining a
+                slot already held needs no free one; the first scan of a slot is
+                refused like any other when none is free. Counted per slot, a
+                workspace with more projects than the limit could never start.
+                None for a scan that holds a slot of its own.
+            environment_values: The values the run's configuration read from the
+                environment (the scan's own config's and the operator chain's).
+                Attached to the entry so the registry redacts every error
+                message it applies with them -- the failure arms share this one
+                sink, so an arm closing the entry with a bare exception's text
+                no longer decides whether a value leaks. Never part of the
+                entry's dictionary. A lone string counts as one value
+                (``value_tuple``), not as its characters.
 
         Returns:
             Scan ID for the registered scan
@@ -266,24 +385,30 @@ class ScanRegistry:
             MCPResourceError: If the scan cannot be registered
         """
         from automated_security_helper.core.resource_management.error_handling import (
-            validate_directory_path,
+            source_directory_error,
+            validate_output_directory_path,
             validate_severity_threshold,
             validate_config_path,
             ErrorCategory,
         )
 
         # Validate input parameters before acquiring lock
-        dir_error = validate_directory_path(directory_path)
+        dir_error = source_directory_error(directory_path)
         if dir_error:
             raise dir_error
 
-        output_dir_error = validate_directory_path(output_directory)
+        # May not exist yet: the caller creates it once this has given it the
+        # scan, so a refused scan leaves nothing on disk.
+        output_dir_error = validate_output_directory_path(output_directory)
         if output_dir_error:
             raise output_dir_error
 
-        severity_error = validate_severity_threshold(severity_threshold)
-        if severity_error:
-            raise severity_error
+        # None: the caller named no threshold and the scan keeps its config's.
+        for threshold in (severity_threshold, requested_severity_threshold):
+            if threshold is not None:
+                severity_error = validate_severity_threshold(threshold)
+                if severity_error:
+                    raise severity_error
 
         if config_path:
             config_error = validate_config_path(config_path)
@@ -318,6 +443,34 @@ class ScanRegistry:
                     },
                 )
 
+            # The limit is server-wide, so the count is of every session's scans,
+            # and the refusal names the limit only: the count would tell any
+            # session how many scans the others are running. Refused here, before
+            # the entry exists, a scan never holds a slot it would have to give
+            # back.
+            if max_active is not None:
+                held = {
+                    _slot_of(e)
+                    for e in self._registry.values()
+                    if e.occupies_its_directory()
+                }
+                joining = slot is not None and ("shared", slot) in held
+                if not joining and len(held) >= max_active:
+                    raise MCPResourceError(
+                        f"The MCP server is at its max_concurrent_scans limit of "
+                        f"{max_active}",
+                        context={
+                            "directory_path": directory_path,
+                            "max_concurrent_scans": max_active,
+                            "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                            "suggestions": [
+                                "Wait for a running scan to finish, then retry",
+                                "Cancel a scan that is no longer needed",
+                                "The operator sets max_concurrent_scans in ASH_CONFIG",
+                            ],
+                        },
+                    )
+
             # Check if there's already an active scan for this directory.
             #
             # Compared canonically, because two spellings of one directory are
@@ -326,27 +479,48 @@ class ScanRegistry:
             # str(Path) never ends in a separator, so a trailing one only ever
             # arrives from outside.
             #
-            # is_active() stays in the condition. The rule is about concurrent
-            # scans, not about a directory ever having been scanned: without it,
-            # the first scan of a directory would permanently block every later
-            # one.
+            # occupies_its_directory() stays in the condition. The rule is about
+            # concurrent scans, not about a directory ever having been scanned:
+            # without it, the first scan of a directory would permanently block
+            # every later one. It is more than is_active(): a cancelled scan still
+            # stopping counts, because its restore of the previous results would
+            # remove what a new scan had written.
             #
-            # The refusal names the running scan's id only to the session that
-            # owns it. Another session is told the directory is busy, which it
-            # needs to know, and nothing that would let it address that scan.
+            # The refusal names the running scan's id, and how a stopping scan
+            # ended, only to the session that owns it. Another session is told
+            # the directory is busy, which it needs to know, and nothing that
+            # would let it address that scan or learn its outcome.
             requested = _canonical_directory(directory_path)
             for entry in self._registry.values():
                 if (
                     _canonical_directory(entry.directory_path) == requested
-                    and entry.is_active()
+                    and entry.occupies_its_directory()
                 ):
-                    context: Dict[str, Any] = {"directory_path": directory_path}
-                    if entry.session_id == _owner(session_id):
-                        context["scan_id"] = entry.scan_id
+                    owned = entry.session_id == _owner(session_id)
+                    named: Dict[str, Any] = {"directory_path": directory_path}
+                    if owned:
+                        named["scan_id"] = entry.scan_id
+                    if not entry.is_active():
+                        ending = f" ({entry.status.value})" if owned else ""
+                        raise MCPResourceError(
+                            f"Directory {directory_path} has a scan that is still "
+                            f"stopping{ending}",
+                            context={
+                                **named,
+                                "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
+                                "suggestions": [
+                                    (
+                                        "Retry in a few seconds: the scan stops its "
+                                        "scanner and puts the previous results back "
+                                        "before the directory is free"
+                                    ),
+                                ],
+                            },
+                        )
                     raise MCPResourceError(
                         f"Directory {directory_path} already has an active scan",
                         context={
-                            **context,
+                            **named,
                             "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                             "suggestions": [
                                 "Wait for the existing scan to complete",
@@ -365,6 +539,9 @@ class ScanRegistry:
                     severity_threshold=severity_threshold,
                     config_path=config_path,
                     session_id=session_id,
+                    slot=slot,
+                    requested_severity_threshold=requested_severity_threshold,
+                    environment_values=value_tuple(environment_values),
                 )
                 self._registry[scan_id] = entry
                 self._logger.info(
@@ -481,7 +658,23 @@ class ScanRegistry:
         status: MCScanStatus,
         error_message: Optional[str],
     ) -> None:
-        """Move ``entry`` to ``status``. The caller holds ``_registry_lock``."""
+        """Move ``entry`` to ``status``. The caller holds ``_registry_lock``.
+
+        The error message is redacted with the entry's registered environment
+        values before it is recorded. The arms that close a scan each redact
+        the text they build, and one that closes with a bare exception's text
+        forgets to -- so the one sink they all reach does it too. Idempotent
+        over already-redacted text: a needle that was replaced is not there to
+        match again.
+        """
+        if error_message and entry.environment_values:
+            # Imported here: utils.error_text defers its config imports, and
+            # the registry is imported while the config package loads.
+            from automated_security_helper.utils.error_text import (
+                text_without_values,
+            )
+
+            error_message = text_without_values(error_message, entry.environment_values)
         if status == MCScanStatus.RUNNING:
             entry.mark_running()
         elif status == MCScanStatus.COMPLETED:
@@ -501,6 +694,8 @@ class ScanRegistry:
         status: MCScanStatus,
         error_message: Optional[str] = None,
         coverage: Optional[Dict[str, Any]] = None,
+        severity_threshold: Optional[str] = None,
+        exit_code: Optional[int] = None,
     ) -> bool:
         """Close a scan as its runner, unless something already closed it.
 
@@ -509,6 +704,14 @@ class ScanRegistry:
         refused with ``ValueError``: the status exists to point a client at the
         gap, so a status with no gap attached would tell them to look and give
         them nothing to look at.
+
+        ``exit_code`` is the code ASH exited with, for a scan it ended with an
+        exit; progress reports it with its meaning.
+
+        ``severity_threshold`` is the threshold the scan's findings were judged
+        by, read from the config it resolved. It replaces the registered value,
+        which is None for a scan that named no threshold, so progress reports
+        the threshold that applied rather than one the client did not choose.
 
         For the code that ran the scan, when the run returns. ``update_scan_status``
         overwrites whatever is there, so a runner finishing after ``cancel_scan``
@@ -531,6 +734,10 @@ class ScanRegistry:
                 return False
             if coverage is not None:
                 entry.coverage = coverage
+            if severity_threshold is not None:
+                entry.severity_threshold = severity_threshold
+            if exit_code is not None:
+                entry.exit_code = exit_code
             self._apply_status(scan_id, entry, status, error_message)
             return True
 
@@ -593,13 +800,10 @@ class ScanRegistry:
                 # Scan is already completed, failed, or cancelled
                 return False
 
-            # Try to terminate the process if we have a process ID
-            if entry.process_id is None:
-                self._logger.warning(
-                    f"Scan {scan_id} has no process ID (thread-based scan); "
-                    "cannot send termination signal"
-                )
-            elif entry.process_id:
+            # An in-process scan has no process ID. mark_cancelled below sets its
+            # cancel event, which stops it; a scan with a process of its own is
+            # also signalled.
+            if entry.process_id:
                 try:
                     os.kill(entry.process_id, signal.SIGTERM)
                     self._logger.info(
@@ -626,9 +830,11 @@ class ScanRegistry:
                         context={"scan_id": scan_id, "process_id": entry.process_id},
                     )
 
-            # Mark the scan as cancelled
+            # Mark the scan as cancelled, which also sets its cancel event
             entry.mark_cancelled()
-            self._logger.info(f"Cancelled scan {scan_id}")
+            self._logger.info(
+                f"Cancelled scan {scan_id}; it stops at its next cancellation check"
+            )
             return True
 
     def cleanup_scan(self, scan_id: str) -> bool:
@@ -796,7 +1002,16 @@ class ScanRegistry:
                 # file. Marking the entry completed because the file merely existed
                 # is how a file that did not parse came back as a completed scan
                 # with no scanners.
-                scan_progress = create_scan_progress_from_files(scan_id, output_dir)
+                #
+                # After a scan that ended without results and had the previous
+                # scan's results put back, the directory holds those: complete,
+                # parseable, and not this scan's. Nothing is read from it then.
+                previous_only = entry.output_holds_previous_results
+                scan_progress = (
+                    ScanProgress(scan_id=scan_id)
+                    if previous_only
+                    else create_scan_progress_from_files(scan_id, output_dir)
+                )
                 results_path = output_dir / "ash_aggregated_results.json"
 
                 if entry.status == MCScanStatus.RUNNING:
@@ -860,7 +1075,11 @@ class ScanRegistry:
                 # a failed or cancelled one, because whether that covered everything
                 # is not a question with an answer.
                 coverage = entry.coverage
-                if coverage is None and entry.status in FINISHED_WITH_RESULTS:
+                if (
+                    coverage is None
+                    and entry.status in FINISHED_WITH_RESULTS
+                    and not previous_only
+                ):
                     model = load_aggregated_results_model(output_dir)
                     if model is not None:
                         _, coverage = assess_coverage(model)
@@ -880,7 +1099,11 @@ class ScanRegistry:
                 # mcp_tools.mcp_get_scan_progress and
                 # scan_management.check_scan_progress both hand this payload
                 # straight back to their callers.
-                status_summary = summarize_scanner_statuses(output_dir)
+                status_summary = (
+                    {"scanner_statuses": {}, "skipped_scanners": []}
+                    if previous_only
+                    else summarize_scanner_statuses(output_dir)
+                )
 
                 # Combine registry entry information with progress info
                 result = {
@@ -897,20 +1120,37 @@ class ScanRegistry:
                     "end_time": entry.end_time.isoformat() if entry.end_time else None,
                     "status": entry.status.value,
                     "severity_threshold": entry.severity_threshold,
+                    "requested_severity_threshold": (
+                        entry.requested_severity_threshold
+                    ),
                     "config_path": entry.config_path,
                     "warnings": entry.warnings,
                     "error_message": entry.error_message,
-                    # "The run is over and its results are readable." True for
-                    # incomplete as well as completed: every documented poll loop
-                    # stops on this, and a loop that kept polling a finished
-                    # incomplete scan would never end. coverage_complete is where
-                    # the gap is reported.
-                    "is_complete": entry.status in FINISHED_WITH_RESULTS
-                    or scan_progress.is_complete,
+                    # The CLI's code for a scan ASH ended with an exit, so a client
+                    # can branch on why it failed as a script branches on the
+                    # CLI's status. None for any other ending.
+                    "exit_code": entry.exit_code,
+                    "exit_code_meaning": (
+                        None
+                        if entry.exit_code is None
+                        else ASH_EXIT_CODES.get(entry.exit_code, "unknown exit code")
+                    ),
+                    # "The scan has ended", from the entry alone. The server tells
+                    # clients to poll until this is true, so it has to be true for
+                    # every ending, a cancelled scan and one that failed before
+                    # writing results included, and it never depends on a results
+                    # file, which can be a previous scan's. Which ending it was is
+                    # `status`; whether there are results is `results_available`;
+                    # whether they cover everything is `coverage_complete`.
+                    "is_complete": entry.status in ENDED,
+                    "results_available": entry.status in FINISHED_WITH_RESULTS,
+                    "output_holds_previous_results": previous_only,
                     "coverage_complete": coverage_complete,
                     **(coverage if coverage is not None else _empty_coverage()),
                     "completed_scanners": scan_progress.completed_scanners,
+                    "finished_scanners": scan_progress.finished_scanners,
                     "total_scanners": scan_progress.total_scanners,
+                    "scanner_status_counts": scan_progress.scanner_status_counts,
                     "total_findings": scan_progress.total_findings,
                     "severity_counts": scan_progress.severity_counts,
                     "scanners": progress_dict.get("scanners", {}),

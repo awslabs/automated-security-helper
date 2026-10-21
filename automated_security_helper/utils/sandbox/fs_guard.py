@@ -283,7 +283,9 @@ def _guard_root(path: Path, root: Optional[Union[str, Path]]) -> Optional[Path]:
     return named
 
 
-def _sweep_tree(root: Path) -> int:
+def _sweep_tree(
+    root: Path, values: Iterable[str] = (), values_unread: bool = False
+) -> int:
     """Remove non-regular, non-directory entries under ``root``.
 
     os.fwalk descends through directory file descriptors and never follows a
@@ -313,7 +315,29 @@ def _sweep_tree(root: Path) -> int:
                 os.unlink(name, dir_fd=dir_fd)
                 removed += 1
             except OSError as e:
-                ASH_LOGGER.warning(f"Could not remove {name} under {root}: {e}")
+                if values_unread:
+                    # The values to hide could not be read, so nothing here
+                    # can be redacted: no entry name, root or OS error.
+                    ASH_LOGGER.warning(
+                        "Could not remove an entry a scanner left in its results "
+                        "directory; it is not named because the plugin's "
+                        "redaction values could not be read"
+                    )
+                    if name in dirnames:
+                        dirnames.remove(name)
+                    continue
+                # The entry's name and the root are paths a tool or an option
+                # chose, so either can hold an env-read value: redacted with
+                # the sweep's values, and the scope's, before it is logged.
+                from automated_security_helper.utils.sandbox.scope import (
+                    scope_shown_text,
+                )
+
+                ASH_LOGGER.warning(
+                    scope_shown_text(
+                        f"Could not remove {name} under {root}: {e}", tuple(values)
+                    )
+                )
             if name in dirnames:
                 dirnames.remove(name)
     return removed
@@ -350,9 +374,22 @@ def refuse_links_below(root: Union[str, Path]) -> None:
                 raise OutputHardLinkRefused(Path(dirpath) / name, status.st_nlink)
 
 
-def sweep_writable(roots: Iterable[Union[str, Path]]) -> int:
-    """Remove symlinks and special files under ``roots``; return how many."""
+def sweep_writable(
+    roots: Iterable[Union[str, Path]],
+    values: Iterable[str] = (),
+    *,
+    values_unread: bool = False,
+) -> int:
+    """Remove symlinks and special files under ``roots``; return how many.
+
+    ``values`` are the caller's env-read values: a removal failure's warning
+    names the entry and the root, and either can hold one. ``values_unread``
+    says the caller could not read them (the plugin's hook raised or gave no
+    value set): ``values`` is then empty without meaning "none", and the
+    warning is value-free instead.
+    """
     removed = 0
+    values = tuple(values)
     for root in roots:
         root = Path(root)
         try:
@@ -362,7 +399,7 @@ def sweep_writable(roots: Iterable[Union[str, Path]]) -> int:
                 continue
         except OSError:
             continue
-        removed += _sweep_tree(root)
+        removed += _sweep_tree(root, values, values_unread)
     if removed:
         ASH_LOGGER.warning(
             f"Scanner sandbox: removed {removed} symlink(s) or special file(s) a "
@@ -471,6 +508,89 @@ def _open_dir_beneath(root: Path, relative_parts: Tuple[str, ...], target: Path)
     except BaseException:
         os.close(fd)
         raise
+
+
+def unlink_beneath(root: Union[str, Path], relative_parts: Tuple[str, ...]) -> bool:
+    """Remove ``root/relative_parts`` without following a link below ``root``.
+
+    For removing a file ASH itself writes beneath ``root``, with the refusal
+    open_for_write applies on the write: a directory component that is missing,
+    not a directory, or a symlink ends the walk and nothing is removed, so a
+    planted link cannot lead the removal outside ``root``. A missing file is
+    fine; a symlink at the final name is removed as the link it is. A directory
+    at the final name raises IsADirectoryError, on every platform, for the
+    caller to decide about.
+
+    Returns False when a directory component was refused (a symlink, or not a
+    directory), so whatever sits at the name through it was left in place for
+    the caller to report; True otherwise, removed or with nothing there.
+
+    Unlike _open_dir_beneath this never creates a missing component: a cleanup
+    has nothing to remove where the path does not exist.
+    """
+    root = Path(root)
+    *dirs, name = relative_parts
+    if not hasattr(os, "fwalk"):
+        # Windows, where no sandbox backend exists: the same refusals from
+        # lstat checks, between which a component can in principle change.
+        current = root
+        for part in dirs:
+            current = current / part
+            if not current.is_symlink() and not current.exists():
+                return True
+            if current.is_symlink() or not current.is_dir():
+                return False
+        target = current / name
+        try:
+            if target.is_symlink():
+                target.unlink()
+            elif target.is_dir():
+                raise IsADirectoryError(
+                    errno.EISDIR, os.strerror(errno.EISDIR), str(target)
+                )
+            else:
+                target.unlink()
+        except FileNotFoundError:
+            return True
+        except PermissionError as e:
+            if target.is_dir():
+                raise IsADirectoryError(
+                    errno.EISDIR, os.strerror(errno.EISDIR), str(target)
+                ) from e
+            raise
+        return True
+    _REFUSED = (errno.ELOOP, errno.EMLINK, errno.ENOTDIR)
+    try:
+        fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    except FileNotFoundError:
+        return True
+    try:
+        for part in dirs:
+            try:
+                child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=fd)
+            except FileNotFoundError:
+                return True
+            except OSError as e:
+                if e.errno in _REFUSED:
+                    return False
+                raise
+            previous, fd = fd, child
+            os.close(previous)
+        try:
+            os.unlink(name, dir_fd=fd)
+        except FileNotFoundError:
+            return True
+        except PermissionError as e:
+            # macOS unlinks a directory with EPERM where Linux says EISDIR;
+            # give the caller the one exception for both.
+            if stat.S_ISDIR(os.lstat(name, dir_fd=fd).st_mode):
+                raise IsADirectoryError(
+                    errno.EISDIR, os.strerror(errno.EISDIR), name
+                ) from e
+            raise
+        return True
+    finally:
+        os.close(fd)
 
 
 def _refuse_link_at(name: str, dir_fd: int, target: Path) -> None:
@@ -740,3 +860,87 @@ def open_for_write(
     finally:
         os.close(dir_fd)
     return os.fdopen(fd, open_mode, **text)
+
+
+def open_for_write_bytes(path: Union[str, Path], mode: int = 0o666) -> IO[bytes]:
+    """:func:`open_for_write`, for bytes: the same rule, opened in binary mode."""
+    return open_for_write(path, binary=True, mode=mode)
+
+
+_READ_FLAGS = os.O_RDONLY | _NOFOLLOW | _NONBLOCK | _BINARY
+#: The most bytes read_bytes_at_most asks a read for at once.
+_READ_CHUNK = 1 << 20
+
+
+def _guarded_read_fd(path: Path) -> int:
+    """A read descriptor for ``path`` under the reader's guard.
+
+    Below a writable root no symlink is followed at any component, as
+    open_for_write does for the write; elsewhere the last component is still
+    not followed. O_NONBLOCK keeps a FIFO at the name from blocking the open;
+    the regular-file check is the caller's, made on the opened descriptor.
+    """
+    root = _writable_root_for(path) if hasattr(os, "fwalk") else None
+    if root is None or path == root:
+        return os.open(path, _READ_FLAGS)
+    relative = path.relative_to(root).parts
+    dir_fd = os.open(root, os.O_RDONLY | _DIRECTORY)
+    try:
+        for part in relative[:-1]:
+            child = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = child
+        return os.open(relative[-1], _READ_FLAGS, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def open_for_read(path: Union[str, Path]) -> IO[bytes]:
+    """A binary reader for the regular file at ``path``, under the guard.
+
+    The same open semantics as :func:`read_bytes_at_most`, for a caller that
+    reads in its own chunks (plugin_base.log_says): no symlink is followed as
+    that function's docstring says, a FIFO at the name cannot block the open,
+    and anything but a regular file is refused with OSError. The caller owns
+    closing the returned handle.
+    """
+    path = Path(os.path.abspath(path))
+    fd = _guarded_read_fd(path)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, f"not a regular file: {path}")
+    except BaseException:
+        os.close(fd)
+        raise
+    return os.fdopen(fd, "rb")
+
+
+def read_bytes_at_most(path: Union[str, Path], limit: int) -> bytes:
+    """Up to ``limit`` bytes of the regular file at ``path``.
+
+    For reading back a file ASH wrote under a scanner's results directory: a
+    process the sandboxed scanner left running may have replaced it, or a
+    directory above it, with a link to one of the host's files since. Below a
+    writable root no symlink is followed at any component, as open_for_write
+    does for the write; elsewhere the last component is still not followed.
+    Anything but a regular file is refused with OSError, and O_NONBLOCK keeps a
+    FIFO at the name from blocking the open.
+    """
+    path = Path(os.path.abspath(path))
+    fd = _guarded_read_fd(path)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(errno.EINVAL, f"not a regular file: {path}")
+        # In chunks: BufferedReader.read(n) allocates n bytes before it reads,
+        # so one read of a large limit cost that much memory for any file,
+        # a MemoryError under an address-space limit. The chunks hold what
+        # the file has, up to the limit, however it grows meanwhile.
+        chunks = []
+        remaining = limit
+        while remaining > 0:
+            chunk = handle.read(min(remaining, _READ_CHUNK))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)

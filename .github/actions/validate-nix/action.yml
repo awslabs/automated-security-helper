@@ -82,9 +82,11 @@ runs:
         # the flake under review in any case, not a previously released one.
         ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
       # ASH's documented exit codes: 0 success, 1 error during execution, 2 actionable
-      # findings with fail_on_findings. This fixture is built to produce findings, so 2 is
-      # the expected success case and gating on zero would fail precisely when the scan
-      # worked.
+      # findings with fail_on_findings, 3 invalid config or refused input, 4 workspace
+      # error, 5 usage error. This fixture is built to produce findings, so 2 is the
+      # expected success case and gating on zero would fail precisely when the scan
+      # worked. Every other code fails the step, 5 included: a usage error means the
+      # scan never ran.
       #
       # Distinguishing 2 from 1 rather than using `|| true`: an earlier version swallowed
       # every status, so when the scan died on a bad flake reference the job carried on and

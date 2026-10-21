@@ -1,4 +1,5 @@
 {
+  "additionalProperties": false,
   "description": "Represents a finding suppression rule.",
   "properties": {
     "path": {
@@ -21,7 +22,7 @@
         }
       ],
       "default": null,
-      "description": "(Optional) Expiration date (YYYY-MM-DD)",
+      "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
       "title": "Expiration"
     },
     "client_supplied": {

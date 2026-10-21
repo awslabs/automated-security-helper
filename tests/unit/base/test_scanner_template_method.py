@@ -289,11 +289,18 @@ class TestTemplateScanInjectsInvocation:
             return ["stub-tool"], sarif_file, None
 
         scanner = _make_scanner(plugin_context, scanner_config, execute_impl)
-        scanner.exit_code = 0
+
+        # scan() resets exit_code to None at its top (a scan that never
+        # reached its tool reports no code), so the invocation's code has to
+        # come from the run itself: the stand-in records it the way a real
+        # _run_subprocess response does.
+        def run_and_record(**kwargs):
+            scanner.exit_code = 0
+            return {"returncode": 0, "stdout": "", "stderr": ""}
 
         with patch.object(scanner, "_pre_scan", return_value=True):
             scanner.dependencies_satisfied = True
-            with patch.object(scanner, "_run_subprocess"):
+            with patch.object(scanner, "_run_subprocess", side_effect=run_and_record):
                 result = scanner.scan(target=target, target_type="source")
 
         assert isinstance(result, SarifReport)
@@ -360,7 +367,7 @@ class TestTemplateScanCallsPostScan:
 
 class TestInjectInvocationHelper:
     def test_attaches_per_result_scanner_details(self, plugin_context, scanner_config):
-        """DA r7 #3 — migrated scanners must populate per-result scanner_details.
+        """Migrated scanners must populate per-result scanner_details.
 
         Before this fix, the template-method path only injected
         runs[0].invocations[0]; per-result properties.scanner_details and
@@ -419,7 +426,7 @@ class TestInjectInvocationHelper:
         assert first_result.properties is not None
         per_result_sd = getattr(first_result.properties, "scanner_details", None)
         assert per_result_sd is not None, (
-            "result.properties.scanner_details missing — DA r7 #3 regression"
+            "result.properties.scanner_details missing on the template-method path"
         )
         per_result_invocation = per_result_sd.get("tool_invocation")
         assert per_result_invocation is not None

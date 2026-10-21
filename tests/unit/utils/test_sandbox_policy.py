@@ -74,7 +74,13 @@ def layout(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(home))
     # uv's directories follow these before $HOME, so a value from the environment
     # running the tests would move them away from the ones planted under home.
-    for variable in ("XDG_DATA_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR"):
+    for variable in (
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "UV_TOOL_DIR",
+        "UV_PYTHON_INSTALL_DIR",
+        "UV_CACHE_DIR",
+    ):
         monkeypatch.delenv(variable, raising=False)
     source = tmp_path / "src"
     source.mkdir()
@@ -258,6 +264,43 @@ class TestExecutable:
         etc = Path(os.path.realpath("/etc"))
         assert etc in _resolved(policy.read_only)
         assert etc not in _resolved(policy.executable)
+
+    def test_a_relative_ash_bin_path_is_not_a_tool_path(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """ASH_BIN_PATH=bin, run from the repository, named the repository's bin/.
+
+        _existing made it absolute against the cwd, so a bin/ the repository
+        committed became a read-only and executable path, and the sandbox-exec
+        profile gave it back last, after the deny on the scanned tree. Tool lookup
+        does not search a relative ASH_BIN_PATH, and neither does the sandbox.
+        """
+        planted = layout.source / "bin"
+        planted.mkdir()
+        monkeypatch.chdir(layout.source)
+        monkeypatch.setenv("ASH_BIN_PATH", "bin")
+        policy = _policy(layout)
+        real = Path(os.path.realpath(planted))
+        assert real not in _resolved(policy.executable)
+        assert real not in _resolved(policy.read_only)
+        profile = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = [
+            line
+            for line in profile.splitlines()
+            if line.startswith("(allow process-exec")
+        ]
+        assert not any(_as_argv(planted) in line for line in allowed), allowed
+
+    def test_an_absolute_ash_bin_path_is_a_tool_path(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """Positive control: the bin directory, named absolutely, is executable."""
+        bin_dir = tmp_path / "ash-bin"
+        bin_dir.mkdir()
+        monkeypatch.chdir(layout.source)
+        monkeypatch.setenv("ASH_BIN_PATH", str(bin_dir))
+        policy = _policy(layout)
+        assert Path(os.path.realpath(bin_dir)) in _resolved(policy.executable)
 
     def test_nothing_writable_or_cached_is_executable(
         self, layout, monkeypatch, tmp_path
@@ -2116,6 +2159,41 @@ class TestSandboxExecLeavesTheRealCacheUnwritten:
             assert f'"{home}"' not in line and f'"{home}/' not in line, line
 
 
+class TestBackendProbesKeepHome:
+    """A probe child gets HOME, so it never falls back to the passwd home.
+
+    The probes ran with only PATH. Without HOME, Path.home() and anything that
+    expands ``~`` in the child resolve the passwd entry's home, whatever HOME the
+    operator set: measured, `env -i python3 -c 'print(Path.home())'` printed the
+    real home.
+    """
+
+    def test_a_probe_child_resolves_the_operators_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "operator-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        result = backends_module._probe_process(
+            [sys.executable, "-I", "-c", "from pathlib import Path; print(Path.home())"]
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == str(home)
+
+    def test_the_landlock_probe_passes_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "operator-home"
+        monkeypatch.setenv("HOME", str(home))
+        envs = []
+
+        def run(argv, **kwargs):
+            envs.append(kwargs.get("env"))
+            return backends_module.subprocess.CompletedProcess(argv, 0, "1\n", "")
+
+        monkeypatch.setattr(backends_module.subprocess, "run", run)
+        backends_module.LandlockBackend()._probe()
+        assert envs, "the probe started nothing"
+        assert all(env is not None and env.get("HOME") == str(home) for env in envs)
+
+
 class TestWritableWinsOverReadOnly:
     """A read-only bind inside the writable results directory must not cover it.
 
@@ -3169,3 +3247,541 @@ class TestAToolGivenAStagedCopy:
             denied |= _subpaths(line)
         assert _as_argv(layout.source) not in denied
         assert _as_argv(layout.output) not in denied
+
+
+def _uv_plugin(pin="1.8"):
+    """A uv-run scanner double: its pinned spec reveals a short env-read pin
+    the plain value layer cannot match (below the whole-word band)."""
+    return SimpleNamespace(
+        config=SimpleNamespace(name="uvscanner"),
+        results_dir=None,
+        use_uv_tool=True,
+        _uv_run_inputs=lambda: (f"bandit=={pin}", "sarif-tools"),
+        _values_to_redact=lambda: (pin,),
+    )
+
+
+def test_the_scope_factory_carries_a_uv_plugins_run_inputs(tmp_path, monkeypatch):
+    """The scope's plugin inputs come from the FACTORY reading the plugin, so
+    every record made under the scope hides a spec that holds an env-read
+    value. A non-uv plugin contributes none, even with the method present."""
+    monkeypatch.setattr(
+        scope_module, "resolve_backend", lambda mode: SimpleNamespace(name="fake")
+    )
+    scope = scanner_sandbox_scope(_uv_plugin(), _context(tmp_path), tmp_path)
+    assert scope is not None
+    assert scope.plugin_inputs == ("bandit==1.8", "sarif-tools")
+    assert scope.environment_values == ("1.8",)
+
+    plugin = _uv_plugin()
+    plugin.use_uv_tool = False
+    scope = scanner_sandbox_scope(plugin, _context(tmp_path), tmp_path)
+    assert scope is not None
+    assert scope.plugin_inputs == ()
+
+
+def test_the_scope_factory_carries_the_plugins_public_command(tmp_path, monkeypatch):
+    """The scope's record tool name is the plugin's COMMAND, read by the
+    factory -- the same public anchor the report lines and the install
+    records pass -- not its config name. A scanner whose config name differs
+    from its command otherwise had the command replaced in the scope's
+    records and kept on the report lines, numbering the placeholders apart:
+    under the scope, a record quoting the command keeps it visible while the
+    pinned spec is hidden."""
+    monkeypatch.setattr(
+        scope_module, "resolve_backend", lambda mode: SimpleNamespace(name="fake")
+    )
+    plugin = _uv_plugin()
+    plugin.command = "bandit-cmd"
+    plugin._uv_run_inputs = lambda: ("bandit-cmd==1.8", "sarif-tools")
+    scope = scanner_sandbox_scope(plugin, _context(tmp_path), tmp_path)
+    assert scope is not None
+    assert scope.command == "bandit-cmd"
+
+    with sandbox_scope(scope):
+        shown = scope_module.scope_shown_text(
+            "Running command: uv tool run --from bandit-cmd==1.8 bandit-cmd -r src"
+        )
+
+    assert "bandit-cmd==1.8" not in shown, shown
+    assert "1.8" not in shown, shown
+    assert "bandit-cmd -r src" in shown, shown
+
+
+def test_the_record_context_hides_a_short_pin_with_the_sandbox_off():
+    """Under the default sandbox mode "off" no scope exists, so the process
+    runner's own records fell back to the plain value layer and a short pin
+    ("1.8", below the whole-word band) printed in ash.log while every report
+    line hid it. The dispatch's record-only context carries the run's input
+    set to those records whatever the sandbox mode; outside both, the plain
+    layer still applies."""
+    assert scope_module.active_scope() is None
+
+    line = "Running command: uv tool run --from stub-tool==1.8 stub-tool -r src"
+    with scope_module.uv_record_inputs(("1.8",), ("stub-tool==1.8",), "stub-tool"):
+        shown = scope_module.scope_shown_text(line)
+    assert "stub-tool==1.8" not in shown, shown
+    assert "1.8" not in shown, shown
+    assert "stub-tool -r src" in shown, shown
+
+    # Outside the context (and any scope) the plain value layer applies:
+    # the short pin is below its whole-word band, so the line is unchanged.
+    assert scope_module.scope_shown_text(line) == line
+
+
+def test_the_uv_dispatch_sets_the_record_context_around_the_run(tmp_path):
+    """_try_uv_tool_execution wraps run_tool in the record-only context, so
+    every record the runner makes while the child runs -- with the sandbox
+    off -- hides the run's plugin-built inputs. The fake runner stands where
+    the real one calls scope_shown_text for its own log lines."""
+    from unittest.mock import patch as mock_patch
+
+    from automated_security_helper.base.uv_tool_mixin import UVToolMixin
+
+    seen: list = []
+
+    class _Runner:
+        def uv_availability(self):
+            return True, None
+
+        def run_tool(self, **kwargs):
+            seen.append(
+                scope_module.scope_shown_text(
+                    "Running command: uv tool run --from stub-tool==1.8 "
+                    "stub-tool -r src"
+                )
+            )
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    fake = SimpleNamespace(
+        command="stub-tool",
+        use_uv_tool=True,
+        _values_to_redact=lambda: ("1.8",),
+        _uv_run_inputs_for_records=lambda: ("stub-tool==1.8",),
+        _get_tool_package_extras=lambda: None,
+        _get_tool_version_constraint=lambda: "==1.8",
+        _plugin_log=lambda *a, **k: None,
+        _uv_run_failure=None,
+        _uv_response=lambda result, results_dir: result,
+    )
+
+    with mock_patch(
+        "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+        return_value=_Runner(),
+    ):
+        result = UVToolMixin._try_uv_tool_execution(
+            fake, ["stub-tool", "-r", "src"], tmp_path
+        )
+
+    assert result is not None and result.get("returncode") == 0, result
+    assert seen, "the fake runner never logged"
+    assert "stub-tool==1.8" not in seen[0], seen[0]
+    assert "1.8" not in seen[0], seen[0]
+    # The context is scoped to the run: after the dispatch it is gone.
+    assert scope_module.scope_shown_text("stub-tool==1.8") == "stub-tool==1.8"
+
+
+def test_the_sandbox_debug_line_hides_a_spec_that_pins_an_env_read_value(
+    tmp_path, monkeypatch, caplog
+):
+    """prepare_spawn's record quotes the planned argv; for a uv run it gets
+    the run's own inputs, so a spec pinning a short env-read value is hidden
+    by origin while an input holding no value stays shown."""
+    import logging
+
+    class _Planner:
+        name = "fake"
+
+        def plan(self, argv, env, policy):
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: _Planner())
+    scope = scanner_sandbox_scope(_uv_plugin(), _context(tmp_path), tmp_path)
+    assert scope is not None
+
+    with caplog.at_level(logging.DEBUG, logger="ash"):
+        with sandbox_scope(scope):
+            prepare_spawn(
+                ["uv", "tool", "run", "--with", "sarif-tools", "bandit==1.8"],
+                {"PATH": os.environ.get("PATH", "")},
+                None,
+            )
+
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Scanner sandbox" in record.getMessage()
+    ]
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert not any("bandit==1.8" in line for line in lines), lines
+    assert any("sarif-tools" in line for line in lines), lines
+
+
+def test_the_runners_own_records_hide_a_pinning_spec_inside_a_uv_scope(
+    tmp_path, monkeypatch
+):
+    """subprocess_utils' own command records route through the uv layer when
+    the active scope carries a uv run's inputs: a spec pinning a short
+    env-read value is hidden there too, and an input holding no value stays
+    shown. The plain value layer alone cannot match the short pin, which is
+    what made the routing load-bearing."""
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.setattr(
+        scope_module, "resolve_backend", lambda mode: SimpleNamespace(name="fake")
+    )
+    scope = scanner_sandbox_scope(_uv_plugin(), _context(tmp_path), tmp_path)
+    assert scope is not None
+    text = "Running command: uv tool run --with sarif-tools bandit==1.8"
+
+    with sandbox_scope(scope):
+        inside = subprocess_utils._logged_without(text, ("1.8",))
+
+    assert "bandit==1.8" not in inside, inside
+    assert "sarif-tools" in inside, inside
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a POSIX special file")
+def test_a_sweep_failure_warning_hides_an_env_read_value(tmp_path, monkeypatch, caplog):
+    """The could-not-remove warning names the entry, the root and the OS
+    error, and any of them can hold an env-read value (a tool names files
+    after options it was given). The record is redacted with the sweep's
+    values before it is logged."""
+    import logging
+
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    value = "SWEEPSECRET-7731"
+    root = tmp_path / "results"
+    root.mkdir()
+    os.mkfifo(root / f"fifo-{value}")
+
+    def _refuse(*args, **kwargs):
+        raise OSError(f"refused: fifo-{value}")
+
+    monkeypatch.setattr(fs_guard.os, "unlink", _refuse)
+
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        fs_guard.sweep_writable([root], (value,))
+
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Could not remove" in record.getMessage()
+    ]
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert not any(value in line for line in lines), lines
+
+
+def _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, hook):
+    """Build a scope for a plugin whose values hook is ``hook``, plan a spawn
+    inside it, and run the plan's sweep over a results directory that holds a
+    special file named after the value, whose removal fails. Returns the
+    sweep's could-not-remove notes and the results directory.
+
+    The sweep runs from the plan's cleanup, so the scope's values are its
+    only redaction source."""
+    import logging
+
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    class _Planner:
+        name = "fake"
+
+        def plan(self, argv, env, policy):
+            return SpawnPlan(argv=list(argv), env=dict(env))
+
+    monkeypatch.setattr(scope_module, "resolve_backend", lambda mode: _Planner())
+    plugin = SimpleNamespace(
+        config=SimpleNamespace(name="sweeper"),
+        results_dir=None,
+        _values_to_redact=hook,
+    )
+    scope = scanner_sandbox_scope(plugin, _context(tmp_path), tmp_path)
+    assert scope is not None
+    results = scope.results_dir
+    results.mkdir(parents=True)
+    os.mkfifo(results / f"fifo-{_SWEEP_VALUE}")
+
+    def _refuse(*args, **kwargs):
+        raise OSError(f"refused: fifo-{_SWEEP_VALUE}")
+
+    monkeypatch.setattr(fs_guard.os, "unlink", _refuse)
+
+    with sandbox_scope(scope):
+        plan = prepare_spawn(["/usr/bin/true"], {"PATH": "/usr/bin"}, None)
+    assert plan is not None
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        plan.cleanup[0]()
+
+    notes = [
+        record.getMessage()
+        for record in caplog.records
+        if "Could not remove" in record.getMessage()
+    ]
+    assert notes, [record.getMessage() for record in caplog.records]
+    return notes, results
+
+
+_SWEEP_VALUE = "tool-qz4b9secret"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a POSIX special file")
+def test_a_bare_string_values_answer_is_hidden_whole_from_the_sweep_note(
+    tmp_path, monkeypatch, caplog
+):
+    """The scope reads the plugin's values hook when it is built. A bare
+    string the hook answers is ONE value, not its characters: split, each
+    character is below every redaction band, and the sweep, whose only
+    redaction is the scope's values, quoted the entry whole."""
+    notes, _ = _sweep_notes_after_a_spawn(
+        tmp_path, monkeypatch, caplog, lambda: _SWEEP_VALUE
+    )
+
+    assert not any(_SWEEP_VALUE in note for note in notes), notes
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs a POSIX special file")
+def test_a_raising_values_hook_makes_the_sweep_note_value_free(
+    tmp_path, monkeypatch, caplog
+):
+    """A hook that raised when the scope was built leaves no values to hide
+    with. That is not "no values": the sweep names no entry, root or OS error,
+    rather than quoting them with an empty value set."""
+
+    def raising():
+        raise RuntimeError(f"the hook broke on {_SWEEP_VALUE}")
+
+    notes, results = _sweep_notes_after_a_spawn(tmp_path, monkeypatch, caplog, raising)
+
+    assert not any(_SWEEP_VALUE in note for note in notes), notes
+    assert not any("fifo-" in note or str(results) in note for note in notes), notes
+
+
+def test_a_cleanup_failure_record_hides_the_scopes_env_values(
+    tmp_path, monkeypatch, caplog
+):
+    """run_cleanup's best-effort record quotes the exception, which can name
+    a path an option chose. Inside a scanner's scope the record is redacted
+    with the scope's env-read values."""
+    import logging
+
+    value = "CLEANSECRET-9917"
+
+    def _fails():
+        raise OSError(f"could not remove /work/{value}/x")
+
+    monkeypatch.setattr(
+        scope_module, "resolve_backend", lambda mode: SimpleNamespace(name="fake")
+    )
+    plugin = SimpleNamespace(
+        config=SimpleNamespace(name="cleaner"),
+        results_dir=None,
+        _values_to_redact=lambda: (value,),
+    )
+    scope = scanner_sandbox_scope(plugin, _context(tmp_path), tmp_path)
+    assert scope is not None
+    plan = SpawnPlan(argv=[], env={}, cleanup=[_fails])
+
+    with caplog.at_level(logging.DEBUG, logger="ash"):
+        with sandbox_scope(scope):
+            plan.run_cleanup()
+
+    lines = [
+        record.getMessage()
+        for record in caplog.records
+        if "Sandbox cleanup failed" in record.getMessage()
+    ]
+    assert lines, [record.getMessage() for record in caplog.records]
+    assert not any(value in line for line in lines), lines
+
+
+def test_scope_records_keep_the_plugins_public_command_visible(tmp_path):
+    """scope_shown_text passed the scope's scanner_name as the public tool
+    name while every report line passes the plugin's command: a plugin whose
+    config name differs from its command had the command replaced in sandbox
+    records ("<argument 2 not shown>") and kept on report lines, numbering
+    the placeholders differently. The scope carries the command next to its
+    inputs, so one name is public on both."""
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+
+    scope = scope_module.SandboxScope(
+        backend=object(),  # type: ignore[arg-type] -- unused by the record path
+        scanner_name="nice-name",
+        requirements=SandboxRequirements(),
+        source_dir=tmp_path,
+        output_dir=tmp_path / "out",
+        results_dir=tmp_path / "out" / "scanners" / "nice-name",
+        scan_target=None,
+        offline=True,
+        environment_values=("9.9",),
+        plugin_inputs=("bandit==9.9",),
+        command="bandit",
+    )
+    token = scope_module._ACTIVE.set(scope)
+    try:
+        shown = scope_module.scope_shown_text("bandit exited 1 running bandit==9.9")
+    finally:
+        scope_module._ACTIVE.reset(token)
+
+    assert "bandit exited 1" in shown, shown
+    assert "bandit==9.9" not in shown, shown
+    assert "9.9" not in shown, shown
+
+
+def _scope_with(tmp_path, **overrides):
+    from automated_security_helper.utils.sandbox import scope as scope_module
+    from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+
+    fields = {
+        "backend": object(),  # unused by the record path
+        "scanner_name": "nice-name",
+        "requirements": SandboxRequirements(),
+        "source_dir": tmp_path,
+        "output_dir": tmp_path / "out",
+        "results_dir": tmp_path / "out" / "scanners" / "nice-name",
+        "scan_target": None,
+        "offline": True,
+        "environment_values": (),
+        "plugin_inputs": (),
+        "command": "",
+    }
+    fields.update(overrides)
+    return scope_module.SandboxScope(**fields)
+
+
+def test_the_scopes_and_the_records_hidden_sets_are_unioned(tmp_path):
+    """A scope that carries its own inputs made the record context invisible:
+    the dispatch-time values and inputs of the run the record is FROM were
+    dropped whenever the active scope had any inputs of its own, so a glued
+    value in the record's set printed. The two sources union -- hiding
+    another run's set hides more, never less."""
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    scope = _scope_with(
+        tmp_path,
+        environment_values=("9.9",),
+        plugin_inputs=("bandit==9.9",),
+        command="bandit",
+    )
+    token = scope_module._ACTIVE.set(scope)
+    try:
+        with scope_module.uv_record_inputs(
+            ("1.77rc9",), ("sarif-tools[extraqz4b]==1.77rc9",), "bandit"
+        ):
+            shown = scope_module.scope_shown_text(
+                "bandit exited 1: bandit==9.9 could not use "
+                "sarif-tools[extraqz4b] at 1.77rc9"
+            )
+    finally:
+        scope_module._ACTIVE.reset(token)
+
+    assert "bandit exited 1" in shown, shown
+    assert "bandit==9.9" not in shown, shown
+    assert "9.9" not in shown, shown
+    assert "extraqz4b" not in shown, shown
+    assert "1.77rc9" not in shown, shown
+
+
+def test_a_records_command_outranks_the_scopes_config_name(tmp_path):
+    """The record context carries the plugin's public command; a scope built
+    before construction carries only the config name. Preferring the config
+    name over the record's command put the command among the hidden input's
+    name tokens, so the tool's own name was replaced in its records while
+    every report line kept it."""
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    scope = _scope_with(tmp_path)
+    token = scope_module._ACTIVE.set(scope)
+    try:
+        with scope_module.uv_record_inputs(
+            ("1.77rc9",), ("stub-tool==1.77rc9",), "stub-tool"
+        ):
+            shown = scope_module.scope_shown_text(
+                "stub-tool exited 1 installing stub-tool==1.77rc9"
+            )
+    finally:
+        scope_module._ACTIVE.reset(token)
+
+    assert shown.startswith("stub-tool exited 1"), shown
+    assert "1.77rc9" not in shown, shown
+
+
+def test_a_raising_redaction_returns_a_value_free_note(monkeypatch):
+    """scope_shown_text never raises: its callers record from inside except
+    blocks, where a raise becomes the frame's own failure. The note carries
+    no text from the record."""
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    def raising():
+        raise RuntimeError("the redactor broke")
+
+    monkeypatch.setattr(scope_module, "active_scope", raising)
+
+    shown = scope_module.scope_shown_text("saw EDGESECRET-9912", ("EDGESECRET-9912",))
+
+    assert shown == "(this text could not be shown)"
+    assert "EDGESECRET-9912" not in shown
+
+
+def test_a_raising_redaction_does_not_stop_the_symlink_sweep(tmp_path, monkeypatch):
+    """fs_guard's sweep records a removal failure from inside its except
+    block. A raise from the redaction there stopped the os.fwalk sweep
+    partway: symlinks after that point stayed, and the error escaped
+    sweep_writable into the executor's post-scan sweep."""
+    from automated_security_helper.utils.sandbox import fs_guard
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    root = tmp_path / "writable"
+    root.mkdir()
+    (root / "aaa-link").symlink_to(tmp_path)
+    (root / "zzz-link").symlink_to(tmp_path)
+
+    real_unlink = os.unlink
+
+    def failing_unlink(name, *args, **kwargs):
+        if "aaa-link" in str(name):
+            raise OSError("the first removal fails")
+        return real_unlink(name, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", failing_unlink)
+
+    def raising():
+        raise RuntimeError("the redactor broke")
+
+    monkeypatch.setattr(scope_module, "active_scope", raising)
+
+    removed = fs_guard.sweep_writable([root], ("EDGESECRET-9912",))
+
+    assert removed == 1, "the sweep must go on past the recorded failure"
+    # os.path.lexists, not Path.exists(follow_symlinks=False): the keyword
+    # arrived in Python 3.12 and CI's 3.10 leg raises TypeError on it.
+    assert not os.path.lexists(root / "zzz-link"), (
+        "the symlink after the failed one must still be removed"
+    )
+
+
+def test_a_raising_redaction_does_not_skip_the_remaining_cleanup(monkeypatch):
+    """A sandbox plan's cleanup records a failed step from inside its except
+    block. A raise from the redaction there skipped every remaining step,
+    the private-dir removal included."""
+    from automated_security_helper.utils.sandbox import backends
+    from automated_security_helper.utils.sandbox import scope as scope_module
+
+    def raising():
+        raise RuntimeError("the redactor broke")
+
+    monkeypatch.setattr(scope_module, "active_scope", raising)
+
+    ran: list = []
+
+    def broken_step():
+        raise OSError("the first cleanup step fails")
+
+    plan = backends.SpawnPlan(
+        argv=[], env={}, cleanup=[broken_step, lambda: ran.append("second")]
+    )
+    plan.run_cleanup()
+
+    assert ran == ["second"], "the remaining cleanup steps must still run"

@@ -9,7 +9,7 @@ Run a full ASH security scan on the current working directory and report a prior
 
 ## Workflow
 
-1. **Verify installation** — call `check_installation`. If it fails, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`) and stop.
+1. **Verify installation** — call `check_installation`. If it fails or `installed` is false, surface the install command (`uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp`) and stop. If `ready` is false, tell the user which scanners in `missing_dependencies` will not run (their tools are not installed on the server's host; `ash dependencies install` installs the ones ASH can) and continue. Scanners in `installs_on_first_scan` do run: the first scan installs their tools, which needs network access and takes longer.
 
 2. **Determine source directory** — use `pwd` to get the absolute path. If the user provides an argument, use that instead. For monorepos, confirm with the user whether they want the full repo or a subdirectory before scanning.
 
@@ -20,7 +20,7 @@ Run a full ASH security scan on the current working directory and report a prior
 
    Store the returned `scan_id`. Reports land in `<source_dir>/.ash/ash_output/`. The MCP server always runs scans in local mode; for container scans the user needs to invoke the ASH CLI directly (`ash scan --mode container`).
 
-4. **Poll progress every 5 seconds** — loop on `get_scan_progress(scan_id=<id>)` until `status` is one of `completed`, `failed`, or `cancelled`. Don't rely on `is_complete` alone — it stays `False` for cancelled scans. Show the user a brief status update on each poll: which scanners are running, and `completed_scanners / total_scanners` as the progress fraction (treat `total_scanners == 0` as "initializing").
+4. **Poll progress every 5 seconds** — loop on `get_scan_progress(scan_id=<id>)` until `is_complete` is `true`, which it is for every ending (`completed`, `incomplete`, `failed`, `cancelled`); then read `status`. Show the user a brief status update on each poll: which scanners are running, and `finished_scanners / total_scanners` as the progress fraction (treat `total_scanners == 0` as "initializing").
 
 5. **Fetch summary results** — call `get_scan_results` with:
    - `output_dir` = `<source_dir>/.ash/ash_output`

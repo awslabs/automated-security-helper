@@ -129,12 +129,18 @@ def test_caller_grants_security_events_to_sarif_job_only(caller):
 
 def test_upload_reads_what_the_scan_writes(scan, upload):
     (artifact_step,) = _steps_using(scan["jobs"]["ash"], UPLOAD_ARTIFACT_ACTION)
-    (download_step,) = [
+    downloads = [
         s
         for job in upload["jobs"].values()
         for s in _steps_using(job, DOWNLOAD_ARTIFACT_ACTION)
     ]
-    assert download_step["with"]["name"] == artifact_step["with"]["name"]
+    # One download by the name, one by the ID the scan job hands out
+    # (tests/unit/test_scan_artifact_handoff.py); each runs when the other does not.
+    (by_name,) = [s for s in downloads if "name" in s["with"]]
+    (by_id,) = [s for s in downloads if "artifact-ids" in s["with"]]
+    assert len(downloads) == 2
+    assert by_name["with"]["name"] == artifact_step["with"]["name"]
+    assert by_id["with"]["artifact-ids"] == "${{ inputs.artifact-id }}"
     # The artifact root is the scan's output-dir, so the report sits at the same
     # relative path the scan workflow's own upload step reads. The step uploads two
     # paths under output-dir (reports/ and ash_aggregated_results.json), and with
@@ -170,7 +176,8 @@ def test_upload_reads_what_the_scan_writes(scan, upload):
         for job in upload["jobs"].values()
         for s in _steps_using(job, UPLOAD_SARIF_ACTION)
     ]
-    assert (
-        upload_sarif_step["with"]["sarif_file"]
-        == f"{download_step['with']['path']}/{relative}"
-    )
+    for download_step in downloads:
+        assert (
+            upload_sarif_step["with"]["sarif_file"]
+            == f"{download_step['with']['path']}/{relative}"
+        ), download_step["name"]

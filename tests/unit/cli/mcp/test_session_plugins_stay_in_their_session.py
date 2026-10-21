@@ -55,6 +55,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+from tests.utils.tool_guard import (
+    CHILD_TOOL_PROBE_STUBS,
+    install_tool_guard,
+    reset_tool_lookup_caches,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 AWS_PLUGINS = "automated_security_helper.plugin_modules.ash_aws_plugins"
@@ -126,8 +133,11 @@ SESSION_A_PACKAGE = textwrap.dedent(
     """
 )
 
+# Each child's probes are answered first (CHILD_TOOL_PROBE_STUBS): list_scanners ran
+# every scanner's dependency check with the uv installed with ASH, which started
+# checkov and semgrep and left their files and uv's in the test's HOME.
 #: argv: work dir, test package dir, tree to import, "api" or "mcp".
-DRIVER = textwrap.dedent(
+DRIVER = CHILD_TOOL_PROBE_STUBS + textwrap.dedent(
     """
     import asyncio, builtins, json, sys
     from pathlib import Path
@@ -380,25 +390,36 @@ def two_sessions(request, tmp_path_factory):
         SESSION_A_PACKAGE, encoding="utf-8"
     )
 
-    completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
-        [
-            sys.executable,
-            "-I",
-            "-c",
-            DRIVER,
-            str(work),
-            str(packages),
-            str(REPO_ROOT),
-            request.param,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=900,
-        env=_child_env(tmp_path),
-        cwd=tmp_path,
-    )
+    # Module-scoped, so the child runs before any test's tool guard
+    # (tests/unit/conftest.py) is in: it gets one of its own, with the same check.
+    with pytest.MonkeyPatch.context() as patch:
+        guard = install_tool_guard(
+            patch,
+            tmp_path / "guard-bin",
+            own_directories=(tmp_path_factory.getbasetemp(),),
+        )
+        completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                DRIVER,
+                str(work),
+                str(packages),
+                str(REPO_ROOT),
+                request.param,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900,
+            env=_child_env(tmp_path),
+            cwd=tmp_path,
+        )
+        started = guard.tool_starts
+    reset_tool_lookup_caches()
+    assert started == [], f"the two sessions' child started a tool: {started}"
     lines = [
         line for line in completed.stdout.splitlines() if line.startswith("OUTCOME ")
     ]
@@ -468,3 +489,82 @@ def test_session_b_is_not_offered_session_as_scanner(two_sessions):
 
 def test_no_container_runtime_was_called(two_sessions):
     assert two_sessions["container_runtime_calls"] == []
+
+
+LIST_THEN_SCAN = CHILD_TOOL_PROBE_STUBS + textwrap.dedent(
+    """
+    import json, sys
+    from pathlib import Path
+
+    work = Path(sys.argv[1])
+    from automated_security_helper.core import execution_engine
+
+    engines = []
+    original_init = execution_engine.ScanExecutionEngine.__init__
+
+
+    def recording_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        engines.append(sorted(c.__name__ for c in self.plugins["scanner"]))
+
+
+    execution_engine.ScanExecutionEngine.__init__ = recording_init
+
+    from automated_security_helper.cli.mcp_tools import mcp_list_scanners
+    from automated_security_helper.core.enums import AshLogLevel, RunMode
+    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+
+    listed = sorted(entry["name"] for entry in mcp_list_scanners())
+    source = work / "src"
+    source.mkdir()
+    (source / "app.py").write_text("x = 1\\n", encoding="utf-8")
+    try:
+        run_ash_scan(
+            source_dir=str(source),
+            output_dir=str(work / "out"),
+            mode=RunMode.local,
+            scanners=["detect-secrets"],
+            offline=True,
+            fail_on_findings=False,
+            show_summary=False,
+            log_level=AshLogLevel.ERROR,
+        )
+    except SystemExit:
+        pass
+    print("\\nOUTCOME " + json.dumps({"listed": listed, "engines": engines}))
+    """
+)
+
+VENDORED_SCANNERS = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}
+
+
+def test_a_scan_after_list_scanners_resolves_no_vendored_scanner(tmp_path):
+    """list_scanners loads ferret, snyk and trivy to describe them; a scan whose
+    config lists none of them must not get them from that."""
+    work = tmp_path / "work"
+    work.mkdir()
+    completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            importing_this_checkout(LIST_THEN_SCAN),
+            str(work),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=_child_env(tmp_path),
+        cwd=tmp_path,
+    )
+    assert completed.returncode == 0, completed.stderr[-4000:]
+    lines = [
+        line for line in completed.stdout.splitlines() if line.startswith("OUTCOME ")
+    ]
+    assert lines, completed.stdout[-3000:] + completed.stderr[-3000:]
+    outcome = json.loads(lines[-1][len("OUTCOME ") :])
+
+    # The premise: list_scanners did load and describe them.
+    assert "snyk_code" in outcome["listed"], outcome["listed"]
+    assert len(outcome["engines"]) == 1, outcome
+    assert VENDORED_SCANNERS & set(outcome["engines"][0]) == set(), outcome

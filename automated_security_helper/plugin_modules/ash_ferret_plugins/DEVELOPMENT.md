@@ -232,7 +232,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 
 | Feature | ASH Flag | Notes |
 |---------|----------|-------|
-| Suppressions | `.ash/suppressions.yaml` | ASH manages centrally |
+| Suppressions | `global_settings.suppressions` in the ASH config file | ASH manages centrally |
 | Output directory | `--output-dir` | Uses `.ash/ash_output/scanners/ferret-scan/` |
 | Offline mode | `ASH_OFFLINE=true` | Respects environment variable |
 
@@ -542,6 +542,20 @@ unsupported) — but note the substring branch means a short token like `test` o
 can over-exclude any path containing it. The plugin joins all patterns into a single
 comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
 
+The substring branch is why the plugin's exclusion of a link that leaves the scanned
+tree (`_link_exclude_patterns`) refuses the target when another walked file's path
+contains the link's pattern: on 2.4.x, the pattern for a link `conf.py` would also
+leave out `conf.py.bak` and everything below `conf.py.d/`.
+
+It is also why the global ignore paths are not passed as written. A bare `.` or
+`api` would leave out every path holding it. `_ignore_exclude_patterns` passes the
+paths ASH itself ignores (`ignored_entries`, which matches each ignore path as ASH
+does when it drops findings): a file as its escaped full path, and a fully ignored
+directory as its escaped full path followed by `/*`, the output-directory form. A
+pattern another walked file that nothing ignores holds is left out rather than
+widened, and so is a path with a comma; ferret-scan reads those files and ASH drops
+their findings. The configured `exclude_patterns` are passed as written.
+
 ### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
 
 Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
@@ -555,8 +569,8 @@ backwards.** ferret-scan's CLI flags take precedence over the config file's `def
 #                                            bundled config's defaults set recursive:false
 ```
 
-So ASH's `exclude_patterns` (and the `global_ignore_paths` the plugin folds into
-`--exclude`) are **honoured regardless of `use_default_config`** — a security-relevant
+So ASH's `exclude_patterns` (and the paths the global ignore paths ignore, which the
+plugin adds to `--exclude`; section 9) are **honoured regardless of `use_default_config`** — a security-relevant
 guarantee: ignore paths are respected. Setting `use_default_config: false` is **not**
 required for excludes to work.
 
@@ -961,7 +975,7 @@ cat .ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif | jq '[.runs[0
 # Enable ferret-scan's own debug output (independent of ASH logging)
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
-    -o ferret_debug=true 2>&1
+    --config-overrides 'scanners.ferret-scan.options.ferret_debug=true' 2>&1
 # Expected: ferret-scan debug output showing preprocessing and validation flow
 ```
 
@@ -971,7 +985,7 @@ uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
 # Enable ferret-scan's own verbose output (independent of ASH logging)
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins \
-    -o ferret_verbose=true 2>&1
+    --config-overrides 'scanners.ferret-scan.options.ferret_verbose=true' 2>&1
 # Expected: ferret-scan verbose output with detailed finding info
 ```
 
@@ -1011,7 +1025,11 @@ scanners:
 EOF
 
 uv run ash scan --source-dir tests/test_data/scanners/ferret-scan --config /tmp/test-ash-config.yaml 2>&1
-# Expected: Error message about unsupported 'debug' option, suggesting ferret_debug
+echo "exit=$?"
+# Expected: exit=3, before any scanner runs, with
+#   scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported
+#   option 'debug' in ferret-scan plugin configuration. Use 'ferret_debug: true'
+#   instead. ...
 rm /tmp/test-ash-config.yaml
 ```
 
@@ -1019,7 +1037,7 @@ rm /tmp/test-ash-config.yaml
 
 ```bash
 mkdir -p /tmp/empty-test-dir
-uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
+uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
 # Expected: ferret-scan completes with 0 findings, SARIF has results: [] (empty array), no crash
 rmdir /tmp/empty-test-dir
 ```
@@ -1027,9 +1045,9 @@ rmdir /tmp/empty-test-dir
 #### 9a. Missing Directory Handling
 
 ```bash
-uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
-# Expected: ASH framework throws FileNotFoundError (os.chdir fails before plugin runs)
-# This is an ASH-level issue, not a plugin concern
+uv run ash scan --source-dir /tmp/this-does-not-exist --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins 2>&1
+# Expected: ASH refuses before any plugin runs: "Source directory does not exist",
+# exit 5 (a usage error). This is an ASH-level check, not a plugin concern
 ```
 
 #### 10. Missing Binary Handling
@@ -1147,7 +1165,7 @@ snyk-code, trivy-repo). This plugin follows the same contract.
 |---|---|---|
 | `SarifReport` | Happy path — validated SARIF results | Full processing: path sanitization, suppressions, metrics extraction |
 | `True` | Nothing to scan (empty dir, no scannable files) | Falls through all `isinstance` checks; container keeps defaults (no error, no findings) |
-| `False` | `_pre_scan()` failed or dependencies not satisfied | Falsy → logs "plugin is missing dependencies", sets `ScannerStatus.MISSING` |
+| `False` | `_pre_scan()` failed or dependencies not satisfied | Falsy → logs a WARNING, "Scanner {name} found its dependencies unavailable on the {target_type} files, marking as MISSING: {reason}", and sets `ScannerStatus.MISSING` on that target, with `missing_dependency_reason()` as its `missing_reason` |
 | `None` | Results file missing or unparseable output | Sets `status = "failed"` with error "Scanner returned None" |
 | raw `dict` | JSON parsed but SARIF validation failed — fallback | Checks for `"status": "failed"`, then tries `severity_counts` or `findings` extraction |
 | `raise ScannerError` | Fatal/unrecoverable failure | Caught by exception handler → structured error dict with stack trace |

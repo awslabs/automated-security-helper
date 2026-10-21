@@ -5,14 +5,19 @@
 
 ferret-scan walks the directory it is given, and how it treats links was not
 measured. So each such link (``get_scan_set.file_links_leaving_tree``) goes into its
-``--exclude`` value, comma-joined with the configured patterns, as the path relative
-to the target. ``--exclude`` takes glob patterns and splits on commas, so a path
-with a comma or a glob character cannot be carried: then ferret-scan is not started
-and the scan of that target fails, naming the path.
+``--exclude`` value, comma-joined with the configured patterns, as the link's full
+path with its glob characters escaped (``scan_output_dirs.escape_for_pattern``), the
+form ASH's output directories take there. ``--exclude`` splits on commas, so a path
+with a comma cannot be carried, and ferret-scan 2.4.x also leaves out every path a
+pattern is a substring of (DEVELOPMENT.md section 9), so a link whose path another
+file's path holds cannot be left out alone: then ferret-scan is not started and the
+scan of that target fails, naming the path.
 """
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -82,9 +87,26 @@ def test_each_link_leaving_the_target_is_excluded(mock_plugin_context, target):
 
     argv = _scan(scanner, root)
 
-    assert _excludes(argv) == ["*.log", "docs/notes.txt"]
+    assert _excludes(argv) == ["*.log", os.fspath(root / "docs" / "notes.txt")]
     # The configured patterns are left as they were.
     assert scanner.config.options.exclude_patterns == ["*.log"]
+
+
+def test_a_same_named_file_inside_the_tree_is_not_excluded(mock_plugin_context, target):
+    """The pattern is the link's full path, so it names that file and no other:
+    ferret-scan matches it as a glob against the whole path."""
+    root, _ = target
+    (root / "other").mkdir()
+    (root / "other" / "notes.txt").write_text("in the tree\n", encoding="utf-8")
+    scanner = _scanner(mock_plugin_context)
+
+    (pattern,) = _excludes(_scan(scanner, root))
+
+    assert fnmatch.fnmatchcase(os.fspath(root / "docs" / "notes.txt"), pattern)
+    assert not fnmatch.fnmatchcase(os.fspath(root / "other" / "notes.txt"), pattern)
+    # 2.4.x's substring test does not reach it either.
+    assert pattern not in os.fspath(root / "other" / "notes.txt")
+    assert pattern not in os.fspath(root / "real.txt")
 
 
 def test_without_links_nothing_is_added(mock_plugin_context, tmp_path):
@@ -98,17 +120,57 @@ def test_without_links_nothing_is_added(mock_plugin_context, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "name", ["a,b.txt", "a*b.txt", "a?b.txt", "a[1].txt", "a{b}.txt", "a\\b.txt"]
+    "name, escaped",
+    [
+        ("a*b.txt", "a[*]b.txt"),
+        ("a?b.txt", "a[?]b.txt"),
+        ("a[1].txt", "a[[]1].txt"),
+        ("a{b}.txt", "a[{]b}.txt"),
+        ("a\\b.txt", "a\\\\b.txt"),
+    ],
 )
-def test_a_link_the_exclude_value_cannot_carry_refuses_the_target(
-    mock_plugin_context, target, name
+def test_a_link_with_a_glob_character_is_excluded_escaped(
+    mock_plugin_context, target, name, escaped
 ):
     root, outside = target
     (root / name).symlink_to(outside / "secret.txt")
     scanner = _scanner(mock_plugin_context)
 
+    argv = _scan(scanner, root)
+
+    assert os.fspath(root / escaped) in _excludes(argv)
+
+
+def test_a_link_the_exclude_value_cannot_carry_refuses_the_target(
+    mock_plugin_context, target
+):
+    root, outside = target
+    (root / "a,b.txt").symlink_to(outside / "secret.txt")
+    scanner = _scanner(mock_plugin_context)
+
     with pytest.raises(ScannerError) as refused:
         _scan(scanner, root)
 
-    assert repr(name) in str(refused.value)
+    assert repr("a,b.txt") in str(refused.value)
+    assert "link leaves the scanned tree" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "other", ["conf.txt.bak", "conf.txt.d/x.txt"], ids=["longer-name", "below-a-dir"]
+)
+def test_a_link_whose_path_another_file_holds_refuses_the_target(
+    mock_plugin_context, target, other
+):
+    """ferret-scan 2.4.x leaves out every path a pattern is a substring of, so the
+    link's pattern would also leave out that in-tree file."""
+    root, outside = target
+    (root / "conf.txt").symlink_to(outside / "secret.txt")
+    (root / other).parent.mkdir(parents=True, exist_ok=True)
+    (root / other).write_text("in the tree\n", encoding="utf-8")
+    scanner = _scanner(mock_plugin_context)
+
+    with pytest.raises(ScannerError) as refused:
+        _scan(scanner, root)
+
+    assert repr("conf.txt") in str(refused.value)
     assert "link leaves the scanned tree" in str(refused.value)

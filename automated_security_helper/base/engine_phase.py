@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional, Sequence
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.events import AshEventType
@@ -13,6 +12,13 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 class EnginePhase(ABC):
     """Base class for execution engine phases with observer pattern support."""
+
+    #: Which event handlers this phase's events reach: a filter from
+    #: ``loader.plugins_of`` for the run's own plugin modules, which
+    #: ScanExecutionEngine sets on the phases it builds, or that an engine hands
+    #: the constructor as ``plugin_filter``. None, for a phase built outside an
+    #: engine, reaches every subscriber.
+    plugin_scope: Optional[Callable[[Any], bool]] = None
 
     def __init__(
         self,
@@ -31,8 +37,8 @@ class EnginePhase(ABC):
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
             plugin_filter: The event handlers this phase's notifications reach;
-                the scan's ``plugins.loader.scan_handler_filter``. None reaches
-                every subscriber.
+                the scan's ``plugins.loader.scan_handler_filter``, kept as
+                ``plugin_scope``. None leaves the scope to be set on the phase.
         """
         if plugins is None:
             plugins = []
@@ -41,7 +47,8 @@ class EnginePhase(ABC):
         self.plugin_filter = plugin_filter
         self.progress_display = progress_display
         self.asharp_model = asharp_model or AshAggregatedResults()
-        self.phase_task = None
+        if plugin_filter is not None:
+            self.plugin_scope = plugin_filter
 
     @property
     @abstractmethod
@@ -68,7 +75,7 @@ class EnginePhase(ABC):
             f"EnginePhase.notify_event: Notifying event {event_type} from phase {self.phase_name}"
         )
         return ash_plugin_manager.notify(
-            event_type, handler_filter=self.plugin_filter, **event_data
+            event_type, handler_filter=self.plugin_scope, **event_data
         )
 
     def execute(
@@ -89,9 +96,6 @@ class EnginePhase(ABC):
         Returns:
             AshAggregatedResults: Phase-specific results
         """
-        # Initialize progress
-        self.initialize_progress()
-
         # Notify phase start
         start_event_name = f"{self.phase_name.upper()}_PHASE_START"
         try:
@@ -150,10 +154,6 @@ class EnginePhase(ABC):
         ASH_LOGGER.debug(f"EnginePhase.execute: Notifying {complete_event} event")
         self.notify_event(complete_event, results=results, **kwargs)
 
-        # Update progress to complete
-        # Don't update the progress here, let the phase implementation handle it
-        # self.update_progress(100, f"{self.phase_name.capitalize()} phase complete")
-
         return results
 
     @abstractmethod
@@ -175,59 +175,12 @@ class EnginePhase(ABC):
             AshAggregatedResults: Phase-specific results
         """
 
-    def initialize_progress(self, description: str = None) -> None:
-        """Initialize progress tracking for this phase.
-
-        Args:
-            description: Initial description for the progress task
-        """
-        if self.progress_display:
-            if not description:
-                description = f"Initializing {self.phase_name} phase..."
-
-    def update_progress(self, completed: int, description: str = None) -> None:
-        """Update progress for this phase.
-
-        Args:
-            completed: Percentage completed (0-100)
-            description: Updated description for the progress task
-        """
-        if self.progress_display and self.phase_task is not None:
-            # Convert string phase name to ExecutionPhase enum
-            phase_enum = None
-            if self.phase_name == "convert":
-                phase_enum = ExecutionPhase.CONVERT
-            elif self.phase_name == "scan":
-                phase_enum = ExecutionPhase.SCAN
-            elif self.phase_name == "report":
-                phase_enum = ExecutionPhase.REPORT
-            else:
-                # Default to CONVERT if unknown
-                phase_enum = ExecutionPhase.CONVERT
-
-            self.progress_display.update_task(
-                phase=phase_enum,
-                task_id=self.phase_task,
-                completed=completed,
-                description=description
-                or f"{self.phase_name} phase: {completed}% complete",
-            )
-
-            # Notify progress event
-            progress_event_name = f"{self.phase_name.upper()}_PHASE_PROGRESS"
-            try:
-                progress_event = AshEventType[progress_event_name]
-            except KeyError:
-                progress_event = progress_event_name
-            self.notify_event(
-                progress_event, completed=completed, description=description
-            )
-
     def filter_enabled_plugins(
         self,
         plugin_instances: list,
         plugin_context: Any,
         python_only: bool = False,
+        check_dependencies: bool = True,
     ) -> list:
         """Return only the plugins that are enabled and have satisfied dependencies.
 
@@ -239,6 +192,10 @@ class EnginePhase(ABC):
             plugin_instances: Pre-instantiated plugin objects to filter.
             plugin_context: Current plugin context (used for future extension).
             python_only: When True, exclude plugins where is_python_only() is False.
+            check_dependencies: When False, select on the enabled flag and
+                ``python_only`` only. ScanPhase passes False: it decides what a run
+                selects before it asks for any tool, and records an absent tool
+                itself, as MISSING.
 
         Returns:
             Filtered list of plugin instances in original order.
@@ -251,7 +208,7 @@ class EnginePhase(ABC):
                         continue
                 if python_only and not instance.is_python_only():
                     continue
-                if not instance.validate_plugin_dependencies():
+                if check_dependencies and not instance.validate_plugin_dependencies():
                     continue
                 result.append(instance)
             except Exception as e:

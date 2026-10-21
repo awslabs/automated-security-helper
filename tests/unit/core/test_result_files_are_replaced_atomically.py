@@ -118,9 +118,15 @@ def test_a_failed_report_write_leaves_the_previous_report_intact(tmp_path):
     assert report.read_text(encoding="utf-8") != PREVIOUS
 
 
-def test_a_failed_changed_files_sarif_rewrite_leaves_the_previous_sarif_intact(
+def test_changed_files_mode_does_not_rewrite_ash_sarif_after_the_reports(
     tmp_path,
 ):
+    """ash.sarif is written once, by the report phase, already filtered.
+
+    The scan engine filters the results before any report is written, and
+    run_ash_scan does not filter them again after the report phase, so there
+    is no second write of ash.sarif to fail or to race a reader.
+    """
     from automated_security_helper.interactions.run_ash_scan import (
         ScanOptions,
         _run_local_mode,
@@ -147,10 +153,9 @@ def test_a_failed_changed_files_sarif_rewrite_leaves_the_previous_sarif_intact(
         patch(
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             return_value=orchestrator,
-        ),
-        # The changed-files filter anchors the diff on the repository root and
-        # falls back to a full scan when there is none, which tmp_path is not.
-        # Pinned so the rewrite under test actually runs.
+        ) as create,
+        # A repository root and a non-empty diff, so a changed-file set is
+        # computed and handed over, where a second filter would rewrite ash.sarif.
         patch(
             "automated_security_helper.utils.get_scan_set.git_repository_root",
             return_value=tmp_path,
@@ -160,28 +165,24 @@ def test_a_failed_changed_files_sarif_rewrite_leaves_the_previous_sarif_intact(
             return_value=["a.py"],
         ),
         patch(
-            "automated_security_helper.interactions.run_ash_scan._filter_results_to_changed_files",
-            side_effect=lambda results, *_: results,
-        ),
-        patch(
             "automated_security_helper.utils.atomic_write.os.replace",
             _failing_replace_for("ash.sarif", intercepted),
         ),
     ):
-        # _run_local_mode turns the injected OSError into exit 1. Captured rather than
-        # asserted first, so that on a truncating write -- which raises nothing -- the
-        # failure reported is the overwritten file, not the missing exit.
         exit_code = None
         try:
             _run_local_mode(opts, MagicMock())
         except SystemExit as exc:
             exit_code = exc.code
 
-    assert sarif.read_text(encoding="utf-8") == PREVIOUS, (
-        "ash.sarif was overwritten in place by the changed-files rewrite."
+    # Handed over once create() has returned; see run_ash_scan._changed_file_set_for.
+    assert "changed_files" not in create.call_args.kwargs
+    orchestrator.restrict_to_changed_files.assert_called_once_with(
+        {(tmp_path / "a.py").resolve()}
     )
-    assert intercepted == [str(sarif)]
-    assert exit_code == 1, "A failed report write must not look like a clean run."
+    assert sarif.read_text(encoding="utf-8") == PREVIOUS
+    assert intercepted == [], "run_ash_scan rewrote ash.sarif after the reports."
+    assert exit_code is None
     assert _leftover_staging_files(sarif.parent) == []
 
 

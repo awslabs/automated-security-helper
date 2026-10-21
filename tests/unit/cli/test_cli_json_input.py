@@ -16,6 +16,7 @@ validated and listed in the skeleton.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from unittest.mock import patch
@@ -28,6 +29,7 @@ from typer.testing import CliRunner
 from automated_security_helper.cli.json_input import CliJsonInputCommand
 from automated_security_helper.cli.main import app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
@@ -216,7 +218,7 @@ class TestScanJsonInputErrors:
 
     def test_unknown_key_names_the_key_and_valid_ones(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"sauce_dir": "x"})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'sauce_dir'" in _flat(result.output)
         assert "source_dir" in _flat(result.output)
@@ -224,7 +226,7 @@ class TestScanJsonInputErrors:
 
     def test_wrong_enum_value_points_at_the_key(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"strategy": "sideways"})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'strategy'" in _flat(result.output)
         assert "sideways" in _flat(result.output)
@@ -233,20 +235,20 @@ class TestScanJsonInputErrors:
         result, mock_run = self._invoke(
             runner, tmp_path, {"shard_index": "zero", "shard_count": 2}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'shard_index'" in _flat(result.output)
 
     def test_list_for_scalar_parameter_is_rejected(self, runner, tmp_path):
         # A string parameter would otherwise accept str(['a', 'b']).
         result, mock_run = self._invoke(runner, tmp_path, {"source_dir": ["a", "b"]})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'source_dir'" in _flat(result.output)
 
     def test_scalar_for_list_parameter_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"scanners": "bandit"})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'scanners'" in _flat(result.output)
 
@@ -255,13 +257,13 @@ class TestScanJsonInputErrors:
         result, mock_run = self._invoke(
             runner, tmp_path, {"shard_index": True, "shard_count": 2}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'shard_index'" in _flat(result.output)
 
     def test_object_for_parameter_is_rejected(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, {"config": {"a": 1}})
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'config'" in _flat(result.output)
 
@@ -269,13 +271,13 @@ class TestScanJsonInputErrors:
         result, mock_run = self._invoke(
             runner, tmp_path, {"strategy": "parallel", "--strategy": "sequential"}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "strategy" in _flat(result.output)
 
     def test_top_level_must_be_an_object(self, runner, tmp_path):
         result, mock_run = self._invoke(runner, tmp_path, ["strategy", "parallel"])
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "object" in _flat(result.output)
 
@@ -284,7 +286,7 @@ class TestScanJsonInputErrors:
         path.write_text('{"strategy": "parallel", "strategy": "sequential"}')
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "strategy" in _flat(result.output)
 
@@ -293,24 +295,70 @@ class TestScanJsonInputErrors:
         path.write_text("{not json")
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "JSON" in _flat(result.output)
 
     def test_missing_file_is_rejected(self, runner, tmp_path):
+        missing = tmp_path / ("a-directory-name-long-enough" * 4) / "absent.json"
+        missing.parent.mkdir()
+        # The control: longer than a console line, so a refusal that wrapped
+        # it would split the path (the one-line contract
+        # tests/unit/cli/test_usage_errors_naming_a_path_on_one_line.py pins
+        # for the other usage errors).
+        assert len(str(missing)) > 120
         with patch(RUN_ASH_SCAN) as mock_run:
-            result = runner.invoke(
-                app, ["scan", "--cli-json-input", str(tmp_path / "absent.json")]
-            )
-        assert result.exit_code == 2
+            result = runner.invoke(app, ["scan", "--cli-json-input", str(missing)])
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
-        assert "absent.json" in _flat(result.output)
+        error_lines = [
+            line for line in result.output.splitlines() if line.startswith("Error: ")
+        ]
+        assert len(error_lines) == 1, result.output
+        assert str(missing) in error_lines[0], result.output
+
+    @pytest.mark.parametrize("shape", ["missing", "a-directory"])
+    def test_an_unreadable_document_path_is_named_once(self, runner, tmp_path, shape):
+        path = tmp_path / "params.json"
+        if shape == "a-directory":
+            path.mkdir()
+        # The control: the OS's own error names the same path, so a refusal that
+        # appends its text to "cannot read <path>" names the path twice.
+        with pytest.raises(OSError) as raised:
+            Path(str(path)).read_text(encoding="utf-8")
+        assert os.fsdecode(raised.value.filename) == str(path)
+        reason = f"[Errno {raised.value.errno}] {raised.value.strerror}"
+        assert raised.value.strerror, reason
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(app, ["scan", "--cli-json-input", str(path)])
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert not mock_run.called
+        assert result.output.count(str(path)) == 1, result.output
+        assert reason in result.output, result.output
+
+    def test_a_rewritten_document_path_is_still_named_once(
+        self, runner, tmp_path, monkeypatch
+    ):
+        # Path() rewrites "./params.json" to "params.json" before the open, so
+        # the OSError's own filename is not the string the command was given.
+        # The one-name drop compares them as paths (utils/error_text.py), so
+        # the refusal still names the path once, as typed.
+        monkeypatch.chdir(tmp_path)
+        with patch(RUN_ASH_SCAN) as mock_run:
+            result = runner.invoke(app, ["scan", "--cli-json-input", "./params.json"])
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert not mock_run.called
+        assert "./params.json" in result.output, result.output
+        # One occurrence covers both spellings: the as-typed name contains the
+        # rewritten one, so a second, OSError-sourced "params.json" would
+        # raise the count to two.
+        assert result.output.count("params.json") == 1, result.output
 
     def test_meta_options_cannot_be_set_from_json(self, runner, tmp_path):
         result, mock_run = self._invoke(
             runner, tmp_path, {"cli_json_input": "other.json"}
         )
-        assert result.exit_code == 2
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert not mock_run.called
         assert "'cli_json_input'" in _flat(result.output)
 

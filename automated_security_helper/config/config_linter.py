@@ -13,26 +13,87 @@ Provides lint checks that go beyond basic validation, including:
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 import yaml
 
-from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.config_sources import (
-    named_text_stream,
-    read_config_bytes,
-    read_config_file,
+    is_config_parse_error,
+    is_json_file,
+    is_toml_file,
+    parse_config_text,
+    read_config_file_literally,
+    read_config_text,
+    unparsed_config_reason,
+    uses_env_references,
 )
 from automated_security_helper.config.config_validator import (
+    ABSOLUTE_PATH_MESSAGE,
     ConfigValidator,
-    directory_path_advice,
+    absolute_path_warning,
+    is_path_pattern_advice,
+    path_pattern_advice,
+    redact_values,
+)
+from automated_security_helper.config.environment_record import (
+    ENVIRONMENT_VALUE_SHOWN,
+    EnvironmentReference,
+    record_environment_references,
+    with_environment_values_shown,
+    written_without_tag,
+)
+from automated_security_helper.core.exceptions import (
+    ASHConfigSourceError,
+    ASHConfigUnparsedError,
+)
+from automated_security_helper.models.core import (
+    IGNORE_PATH_LISTS,
+    expiration_has_passed,
+)
+from automated_security_helper.base.plugin_config import _options_class
+from automated_security_helper.config.config_validator import (
+    _built_in_section_classes,
+)
+from automated_security_helper.utils.unknown_keys import (
+    INTERNAL_FIELD_MESSAGE,
+    INTERNAL_SECTION_FIELDS,
+    OPTION_MEANINGS,
+    internal_field_message,
+    internal_fields_named,
 )
 
 logger = logging.getLogger(__name__)
+
+_SEGMENT_OF_KIND = {
+    "Scanner": "scanners",
+    "Reporter": "reporters",
+    "Converter": "converters",
+}
+
+# One internal_field_message sentence of a model refusal, with what separates it
+# from the next.
+_INTERNAL_FIELD_SENTENCE = re.compile(
+    INTERNAL_FIELD_MESSAGE.pattern
+    + r"(?:; if you meant [^,;]+, put it under options)?\.\s*"
+)
+
+
+def _starts_list_item(stripped: str) -> bool:
+    """Whether a line, without its indent, starts a YAML block list entry.
+
+    That is `- ` followed by the entry, or a `-` alone on the line with the
+    entry's fields on the lines below it. `rstrip` takes a dash followed only
+    by blanks as alone too, a tab among them, which `- ` does not cover (a
+    CRLF file has no `\\r` left here: fix_unused reads it with read_text,
+    whose universal newlines drop them). Whether a line is an entry of the
+    suppressions list also depends on its indent; see _comment_out_suppressions.
+    """
+    return stripped.startswith("- ") or stripped.rstrip() == "-"
 
 
 class LintSeverity(str, Enum):
@@ -61,6 +122,9 @@ class LintCategory(str, Enum):
     LEGACY_NAME_CONFLICT = "legacy-name-conflict"
     SYNTAX_ERROR = "syntax-error"
     EXTENDS_ERROR = "extends-error"
+    # A value the AshConfig model refuses, so a scan refuses the config.
+    SCHEMA_ERROR = "schema-error"
+    PLUGIN_OPTIONS_UNCHECKED = "plugin-options-unchecked"
 
 
 @dataclass
@@ -73,6 +137,21 @@ class LintIssue:
     path: str = ""  # dot-notation path in config (e.g., "scanners.bandit.name")
     fixable: bool = False
     fix_description: str = ""
+    # True for a problem that makes a scan refuse the config (exit 3): its
+    # extends chain does not resolve, or the AshConfig model refuses a value.
+    # See ConfigValidator.check_config_file.
+    blocks_scan: bool = False
+    # True when the file does not parse (YAML, JSON, not UTF-8), which a scan
+    # refuses with exit 3 as it refuses TOML that does not parse.
+    ignored_by_scan: bool = False
+    # True when the file could not be read at all (OSError), one of the
+    # ignored_by_scan cases: the verdict then says read, not parse.
+    could_not_read: bool = False
+    # For an IGNORE_PATH_ISSUE: the path as the config holds it, before any value
+    # read from the environment is shown, so _merge_path_duplicates tells apart
+    # two paths whose messages both read `<value>`. Never shown, so not in the
+    # repr, and not compared.
+    pattern: Optional[str] = field(default=None, repr=False, compare=False)
 
     def __str__(self) -> str:
         prefix = {
@@ -81,8 +160,16 @@ class LintIssue:
             LintSeverity.INFO: "ℹ️ ",
         }[self.severity]
         fix_hint = " [auto-fixable]" if self.fixable else ""
-        path_hint = f" at '{self.path}'" if self.path else ""
-        return f"{prefix} {self.message}{path_hint}{fix_hint}"
+        scan_hint = " [blocks the scan]" if self.blocks_scan else ""
+        # A model error, and most structure messages, already name the field.
+        path_hint = (
+            f" at '{self.path}'"
+            if self.path
+            and self.category != LintCategory.SCHEMA_ERROR
+            and f"'{self.path}'" not in self.message
+            else ""
+        )
+        return f"{prefix} {self.message}{path_hint}{fix_hint}{scan_hint}"
 
 
 @dataclass
@@ -91,6 +178,33 @@ class LintResult:
 
     issues: List[LintIssue] = field(default_factory=list)
     config_path: Optional[Path] = None
+    # The files the config was built from, lowest precedence first; see
+    # ConfigCheck.chain.
+    chain: List[Path] = field(default_factory=list)
+    # Values the config read from the environment, for a message that names
+    # no field; see ConfigCheck.environment_values.
+    environment_values: List[str] = field(default_factory=list)
+    # What the checked file read from the environment, each at its place, and
+    # the files of ``chain`` the environment chose; see ConfigCheck. A message
+    # quotes a value or key read from the environment as ``<value>``.
+    file_references: List[EnvironmentReference] = field(default_factory=list)
+    # What the whole chain read from the environment, the extends bases'
+    # references included; see ConfigCheck.references. What applies to the
+    # merged configuration (``resolved_data``) is derived from these: a base's
+    # entry has no reference among ``file_references``.
+    references: List[EnvironmentReference] = field(default_factory=list)
+    environment_paths: FrozenSet[Path] = frozenset()
+    # The merged configuration, and its copy as a message quotes it
+    # (ConfigCheck.resolved_data and shown_resolved).
+    resolved_data: Any = None
+    shown_resolved: Any = None
+
+    def shown_path(self, path: Path) -> str:
+        """How a message names ``path``, a file of ``chain``: ``<value>`` when
+        the environment chose it."""
+        if Path(path) in self.environment_paths:
+            return ENVIRONMENT_VALUE_SHOWN
+        return str(path)
 
     @property
     def has_errors(self) -> bool:
@@ -99,6 +213,27 @@ class LintResult:
     @property
     def has_warnings(self) -> bool:
         return any(i.severity == LintSeverity.WARNING for i in self.issues)
+
+    @property
+    def scan_refuses(self) -> bool:
+        """Whether a scan would refuse this config with exit 3."""
+        return any(i.blocks_scan for i in self.issues)
+
+    @property
+    def scan_ignores_file(self) -> bool:
+        """Whether the file does not parse (YAML, JSON, not UTF-8), which a scan
+        refuses with exit 3."""
+        return any(i.ignored_by_scan for i in self.issues)
+
+    @property
+    def file_could_not_be_read(self) -> bool:
+        """Whether the file could not be read at all, one of the
+        scan_ignores_file cases: the verdict then says read, not parse.
+
+        ``could_not_read`` is one issue's (and one ConfigCheck's) own flag;
+        this property aggregates the file's issues for the verdict line, so a
+        reader can tell the per-record flag from the file-level answer."""
+        return any(i.could_not_read for i in self.issues)
 
     @property
     def fixable_issues(self) -> List[LintIssue]:
@@ -149,35 +284,123 @@ class ConfigLinter:
         """
         result = LintResult(config_path=config_path)
 
-        # Load the raw config data
+        # Load the raw config data. Not _load_config, which turns an empty file
+        # into {}: the scan refuses an empty file, so the check below must see
+        # what the file holds.
         try:
-            config_data = cls._load_config(config_path)
+            # One read: the check below takes its redaction values and its
+            # structural checks from this text, not a second read of the file.
+            config_text = read_config_text(config_path)
+            config_data = parse_config_text(config_path, config_text)
         except Exception as e:
+            # A scan refuses a file that does not parse, whatever its format.
+            # YAML, JSON, TOML and undecodable files are marked ignored_by_scan,
+            # so the verdict says the file does not parse; the issue is the
+            # shared refusal's one line. A TOML parse refusal
+            # arrives as ASHConfigUnparsedError; the subtree's other refusals (a
+            # pyproject.toml with no [tool.ash], tool.ash not a table) are not
+            # parse failures and stay out. A read failure (OSError) says read:
+            # the file's syntax is not the problem.
+            # A constructor's ValueError (!!int, !!float) is a parse refusal
+            # too (is_config_parse_error, which covers yaml.YAMLError,
+            # json.JSONDecodeError and UnicodeDecodeError as well), so lint's
+            # verdict says the file does not parse wherever its own issue line
+            # and config validate do.
+            ignored = isinstance(
+                e, (OSError, ASHConfigUnparsedError)
+            ) or is_config_parse_error(e)
+            verb = "read" if isinstance(e, OSError) else "parse"
+            # The parser's own words can quote the file (unparsed_config_reason),
+            # and the formatted reason says the file did not parse, so a prefix
+            # saying it again would read double. The TOML reader's refusals
+            # (ASHConfigSourceError, its parse refusals ASHConfigUnparsedError)
+            # carry the formatted reason already, with the file named in it, so
+            # they are shown as they are.
+            if is_config_parse_error(e):
+                problem = unparsed_config_reason(config_path, e)
+            elif isinstance(e, ASHConfigSourceError):
+                problem = str(e)
+            else:
+                problem = f"Failed to {verb} config file: {e}"
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.ERROR,
                     category=LintCategory.SYNTAX_ERROR,
-                    message=f"Failed to parse config file: {e}",
+                    message=problem,
+                    blocks_scan=True,
+                    ignored_by_scan=ignored,
+                    could_not_read=isinstance(e, OSError),
                 )
             )
             return result
 
         # Run validation checks (same as `ash config validate`)
-        cls._check_validation_issues(config_path, config_data, result, source_dir)
+        cls._check_validation_issues(
+            config_path, config_data, result, source_dir, config_text=config_text
+        )
+        if not isinstance(config_data, dict):
+            # The checks below read keys; the issue above already says why
+            # there are none.
+            return result
+
+        # The copy the lint checks' own messages quote: each value and key the
+        # file read from the environment is `<value>` at its own place, while
+        # every check reads the values themselves.
+        shown_data = with_environment_values_shown(config_data, result.file_references)
 
         # Run suppression-specific lint checks
-        cls._check_suppression_issues(config_data, result)
+        cls._check_suppression_issues(config_data, result, shown_data)
 
         # Run ignore_path and suppression path checks
-        cls._check_ignore_path_issues(config_path, config_data, result, source_dir)
+        cls._check_ignore_path_issues(
+            config_path, config_data, result, source_dir, shown_data
+        )
         # Snake/kebab built-in name variant check (#82)
-        cls._check_legacy_name_variants(config_data, result)
+        cls._check_legacy_name_variants(config_data, result, shown_data)
+
+        # Options of plugins from ash_plugin_modules: say they are not checked here
+        cls._note_unchecked_plugin_options(config_data, result, shown_data)
 
         # Check for unused suppressions if requested
         if check_unused:
             cls._check_unused_suppressions(config_path, config_data, output_dir, result)
 
+        cls._merge_path_duplicates(result)
         return result
+
+    @classmethod
+    def _merge_path_duplicates(cls, result: LintResult) -> None:
+        """Report each piece of path advice (``path_pattern_advice``), and each
+        absolute path, once.
+
+        ConfigValidator checks the merged config's paths, and the linter's own
+        check the file's entries, with each entry's location. For a path both
+        find, the located issue is kept. A path only a base supplies is
+        reported by the validator alone, and stays: its message names the base
+        (" It is in <base>."), so it never reads as one of the file's own.
+
+        The whole message is compared, and the path as the config holds it
+        (``LintIssue.pattern``). Paths the file read from the environment are
+        each `<value>`, so the start of the message is the same for all of them
+        and tells none apart, and two such paths with the same advice, the
+        file's own and one a patch operation adds, have the same message too.
+        """
+
+        def advice(issue: LintIssue) -> Optional[Tuple[str, Optional[str]]]:
+            if issue.category != LintCategory.IGNORE_PATH_ISSUE:
+                return None
+            if is_path_pattern_advice(issue.message):
+                return issue.message, issue.pattern
+            # DOTALL: the path is the file's text, and may hold a newline.
+            match = re.match(
+                r"Path '.*?' " + re.escape(ABSOLUTE_PATH_MESSAGE),
+                issue.message,
+                re.DOTALL,
+            )
+            return (issue.message, issue.pattern) if match else None
+
+        located = {advice(i) for i in result.issues if i.path and advice(i)}
+        result.issues = [i for i in result.issues if i.path or advice(i) not in located]
 
     @classmethod
     def fix(
@@ -195,8 +418,8 @@ class ConfigLinter:
             Tuple of (fixed_content, list_of_fixed_issues)
         """
         cls._refuse_to_rewrite_toml(config_path)
-        config_data = cls._load_config(config_path)
-        raw_content = read_config_bytes(config_path).decode("utf-8")
+        cls._refuse_to_rewrite_env_references(config_path)
+        config_data, raw_content = cls._load_config_and_text(config_path)
 
         if issues is None:
             lint_result = cls.lint(config_path)
@@ -276,8 +499,13 @@ class ConfigLinter:
             Tuple of (fixed_content, list_of_commented_suppressions, report_timestamp)
         """
         cls._refuse_to_rewrite_toml(config_path)
-        config_data = cls._load_config(config_path)
-        raw_content = read_config_bytes(config_path).decode("utf-8")
+        if is_json_file(config_path):
+            # Unused suppressions are commented out, and JSON has no comments.
+            raise ValueError(
+                f"--fix-unused comments suppressions out, which JSON cannot hold; "
+                f"remove them from {config_path} by hand"
+            )
+        config_data, raw_content = cls._load_config_and_text(config_path)
 
         # Find the unused suppressions report
         report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
@@ -302,18 +530,44 @@ class ConfigLinter:
         # Work with the raw YAML lines to comment out unused suppressions
         fixed_issues: List[LintIssue] = []
         suppressions = config_data.get("global_settings", {}).get("suppressions", [])
+        # The path and rule_id each message quotes can be values the file read
+        # from the environment: they are quoted from the copy in which each is
+        # <value> at its own place, as in every other lint message.
+        references = ConfigValidator.file_references_of(
+            config_path, config_data, raw_content
+        )
+        shown_data = with_environment_values_shown(config_data, references)
+        shown_suppressions = cls._shown_entries(
+            suppressions, shown_data, ("global_settings", "suppressions")
+        )
+        # Each entry's fields as the file wrote them: one read from the
+        # environment is its reference. The report lists an entry that way, so
+        # its id hashes the reference, while this load resolved the reference;
+        # each entry is matched by either id, which also keeps reports written
+        # before the reference form, holding resolved values, matching.
+        written_suppressions = (
+            record_environment_references(config_data, references)
+            .get("global_settings", {})
+            .get("suppressions", suppressions)
+        )
 
         # Identify which suppression indices are unused
         unused_indices = set()
-        for i, suppression in enumerate(suppressions):
-            supp_id = cls._make_suppression_id(suppression)
-            if supp_id in unused_ids:
+        for i, (suppression, written) in enumerate(
+            zip(suppressions, written_suppressions)
+        ):
+            ids = cls._suppression_ids(suppression, written)
+            if ids & unused_ids:
                 unused_indices.add(i)
+                # Past the shown copy's end, None: _shown_entry then shows every
+                # value as read from the environment, never as resolved.
+                shown = shown_suppressions[i] if i < len(shown_suppressions) else None
+                shown = cls._shown_entry(suppression, shown)
                 fixed_issues.append(
                     LintIssue(
                         severity=LintSeverity.INFO,
                         category=LintCategory.SUPPRESSION_UNUSED,
-                        message=f"Commented out unused suppression: path='{suppression.get('path', '')}', rule_id='{suppression.get('rule_id', '*')}'",
+                        message=f"Commented out unused suppression: path='{shown.get('path', '')}', rule_id='{shown.get('rule_id', '*')}'",
                         path=f"global_settings.suppressions[{i}]",
                         fixable=True,
                         fix_description="Comment out unused suppression",
@@ -342,15 +596,24 @@ class ConfigLinter:
         """Comment out specific suppressions in the raw YAML content.
 
         Finds each suppression block in the YAML and comments it out with a note.
+        A list whose every entry is commented out becomes `suppressions: []`:
+        with only comments under it the key would hold null, which a scan
+        refuses (exit 3).
         """
         lines = raw_content.split("\n")
-        result_lines = []
+        result_lines: List[str] = []
+        # For each `suppressions:` line (by its index in result_lines), how many
+        # entries its list had and how many of them were commented out.
+        entries_seen: Dict[int, int] = {}
+        entries_commented: Dict[int, int] = {}
+        section_line = -1
 
         # Find the suppressions list in the YAML by locating suppression entries
         # Each suppression starts with "- path:" at the appropriate indentation
         in_suppressions_section = False
         current_suppression_idx = -1
         suppression_indent = None
+        key_indent = 0
         i = 0
 
         while i < len(lines):
@@ -362,17 +625,25 @@ class ConfigLinter:
                 in_suppressions_section = True
                 current_suppression_idx = -1
                 suppression_indent = None
+                key_indent = len(line) - len(stripped)
+                section_line = len(result_lines)
+                entries_seen[section_line] = 0
+                entries_commented[section_line] = 0
                 result_lines.append(line)
                 i += 1
                 continue
 
             # If we're in the suppressions section, look for list items
             if in_suppressions_section:
-                # Detect end of suppressions section (less or equal indentation, non-empty, non-comment)
+                # The section ends at a non-comment line indented less than the
+                # `suppressions:` key, or at the key's own indent when it is not
+                # a list item: a list may be indented under the key or written
+                # at the key's indent (`  suppressions:` then `  - path: ...`),
+                # and the next key (`  ignore_paths:`) is at the key's indent.
                 if stripped and not stripped.startswith("#"):
                     line_indent = len(line) - len(line.lstrip())
-                    if suppression_indent is not None and line_indent <= (
-                        suppression_indent - 2
+                    if line_indent < key_indent or (
+                        line_indent == key_indent and not _starts_list_item(stripped)
                     ):
                         # We've left the suppressions section
                         in_suppressions_section = False
@@ -380,13 +651,21 @@ class ConfigLinter:
                         i += 1
                         continue
 
-                # Detect a new suppression entry (starts with "- ")
-                if stripped.startswith("- ") and not stripped.startswith("#"):
+                # Detect a new suppression entry ("- ...", or "-" alone). Once
+                # the first entry set the list's indent, only a list item at
+                # that indent starts one: a `-` or `- x` line deeper is part of
+                # an entry, such as a line of a block `reason: |`.
+                line_indent = len(line) - len(line.lstrip())
+                if _starts_list_item(stripped) and (
+                    suppression_indent is None or line_indent == suppression_indent
+                ):
                     current_suppression_idx += 1
+                    entries_seen[section_line] += 1
                     if suppression_indent is None:
                         suppression_indent = len(line) - len(line.lstrip())
 
                     if current_suppression_idx in unused_indices:
+                        entries_commented[section_line] += 1
                         # Comment out this entire suppression block
                         comment_note = f"{' ' * suppression_indent}# [ash-lint {date_str}] Commented out: unused suppression (not matched in last scan)"
                         result_lines.append(comment_note)
@@ -408,7 +687,7 @@ class ConfigLinter:
                                 i += 1
                                 continue
                             if (
-                                next_stripped.startswith("- ")
+                                _starts_list_item(next_stripped)
                                 and next_indent <= suppression_indent
                             ):
                                 break
@@ -437,6 +716,11 @@ class ConfigLinter:
                 i += 1
                 continue
 
+        for line_idx, seen in entries_seen.items():
+            if seen and entries_commented[line_idx] == seen:
+                result_lines[line_idx] = result_lines[line_idx].replace(
+                    "suppressions:", "suppressions: []", 1
+                )
         return "\n".join(result_lines)
 
     @classmethod
@@ -463,31 +747,42 @@ class ConfigLinter:
 
     @classmethod
     def _load_config(cls, config_path: Path) -> Dict[str, Any]:
-        """Load and parse a config file.
+        """Load and parse a config file with the reader a scan uses.
 
-        A TOML file goes through the config loader's reader, so a
-        pyproject.toml yields its [tool.ash] table. Its own ``extends`` is not
-        followed: lint reports on the file it would fix. Every file is read as a
-        scan reads it (``read_config_bytes``): without blocking on a FIFO, only a
-        regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES``.
+        ``read_config_file`` resolves ``!ENV`` references the way a scan does
+        (``yaml.safe_load`` failed on the tag, so a config using it was reported
+        as unparseable), and a pyproject.toml yields its [tool.ash] table. Its
+        own ``extends`` is not followed: lint reports on the file it would fix.
         """
-        if str(config_path).endswith(".toml"):
-            return read_config_file(config_path) or {}
-        data = read_config_bytes(config_path)
-        if str(config_path).endswith(".json"):
-            return json.loads(data.decode("utf-8-sig"))
-        return (
-            load_config_yaml(named_text_stream(data.decode("utf-8"), config_path)) or {}
-        )
+        return cls._load_config_and_text(config_path)[0]
+
+    @classmethod
+    def _load_config_and_text(cls, config_path: Path) -> Tuple[Dict[str, Any], str]:
+        """_load_config, and the text it was parsed from: one read, so what a
+        command rewrites and redacts with is the file it parsed."""
+        text = read_config_text(config_path)
+        return parse_config_text(config_path, text) or {}, text
 
     @classmethod
     def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:
         # The fixers regenerate the file as YAML text. Applied to a TOML file
         # that would replace pyproject.toml's every other table with ASH's.
-        if str(config_path).endswith(".toml"):
+        if is_toml_file(config_path):
             raise ValueError(
                 f"Auto-fix rewrites YAML and JSON config files only; edit "
                 f"{config_path} by hand"
+            )
+
+    @classmethod
+    def _refuse_to_rewrite_env_references(cls, config_path: Path) -> None:
+        # fix() writes back the values _load_config read, so every !ENV
+        # reference would be replaced by what it resolves to now (a secret read
+        # from the environment would end up in the file). fix_unused_suppressions
+        # edits the text instead, so it does not need this.
+        if uses_env_references(config_path):
+            raise ValueError(
+                f"Auto-fix would replace the environment references (${{VAR}} or "
+                f"!ENV) in {config_path} with their current values; edit it by hand"
             )
 
     @classmethod
@@ -497,26 +792,214 @@ class ConfigLinter:
         config_data: Dict[str, Any],
         result: LintResult,
         source_dir: Optional[Path] = None,
+        config_text: Optional[str] = None,
     ) -> None:
-        """Delegate shared structural checks to ConfigValidator, then enrich to LintIssues."""
-        if not isinstance(config_data, dict):
-            result.issues.append(
-                LintIssue(
-                    severity=LintSeverity.ERROR,
-                    category=LintCategory.SYNTAX_ERROR,
-                    message=f"Configuration must be a dictionary/object, got {type(config_data).__name__}",
-                )
-            )
-            return
+        """Delegate shared structural checks to ConfigValidator, then enrich to LintIssues.
 
-        # source_dir is passed only when given, so the call keeps the
-        # single-argument shape for callers that never had one.
-        if source_dir is None:
-            _, errors = ConfigValidator.validate_config_file(config_path)
-        else:
-            _, errors = ConfigValidator.validate_config_file(config_path, source_dir)
-        for error in errors:
-            result.issues.append(cls._validator_error_to_lint_issue(error, config_data))
+        A file that is not a mapping goes through the check too: the model's
+        refusal of it is the one a scan prints. ``config_text`` is the text
+        ``config_data`` was parsed from.
+        """
+        check = ConfigValidator.check_config_file(
+            config_path,
+            source_dir=source_dir,
+            config_data=config_data,
+            config_text=config_text,
+        )
+        result.chain = check.chain
+        result.environment_values = check.environment_values
+        result.file_references = check.file_references
+        result.references = check.references
+        result.environment_paths = check.environment_paths
+        result.resolved_data = check.resolved_data
+        result.shown_resolved = check.shown_resolved
+        bases = cls._bases_as_written(config_path, check.chain)
+        for error in check.errors:
+            for issue in cls._validator_error_to_lint_issues(error, config_data, bases):
+                issue.severity = LintSeverity.ERROR
+                issue.blocks_scan = True
+                result.issues.append(issue)
+        # A warning is something a scan accepts, so it never counts as an
+        # error: lint gives the scan's verdict (exit 0) for it. A path warning
+        # takes its path as the config holds it, from the check's list of them,
+        # which is in the order of the warnings.
+        path_patterns = list(check.path_patterns)
+        for warning in check.warnings:
+            for issue in cls._validator_error_to_lint_issues(warning, config_data):
+                issue.severity = LintSeverity.WARNING
+                if issue.category == LintCategory.IGNORE_PATH_ISSUE:
+                    issue.pattern = cls._take_path_pattern(path_patterns, warning)
+                result.issues.append(issue)
+
+    @staticmethod
+    def _take_path_pattern(
+        path_patterns: List[Tuple[str, str]], warning: str
+    ) -> Optional[str]:
+        """The path of the first entry of ``path_patterns`` (ConfigCheck's) whose
+        warning is ``warning``, removed from the list; None when none is."""
+        for index, (message, path_pattern) in enumerate(path_patterns):
+            if message == warning:
+                del path_patterns[index]
+                return path_pattern
+        return None
+
+    @classmethod
+    def _bases_as_written(cls, config_path: Path, chain: List[Path]) -> List[Any]:
+        """Each `extends` base in ``chain`` as its file writes it.
+
+        Read without the environment: only which keys a base holds is used.
+        """
+        root = Path(config_path).resolve()
+        bases = []
+        for path in chain:
+            if Path(path).resolve() == root:
+                continue
+            try:
+                bases.append(read_config_file_literally(Path(path)))
+            except (ASHConfigSourceError, yaml.YAMLError, OSError, ValueError):
+                # The chain resolved, so this does not happen; a base that
+                # cannot be read again holds nothing to compare.
+                continue
+        return bases
+
+    @classmethod
+    def _validator_error_to_lint_issues(
+        cls, error: str, config_data: Dict[str, Any], bases: Sequence[Any] = ()
+    ) -> List[LintIssue]:
+        """The issues one ConfigValidator message holds.
+
+        The model refuses every key of a plugin section in one message. Each
+        internal-only field the file's own section holds is an issue of its
+        own, which --fix removes, and the rest of the message, if it says more,
+        is one more. That rest keeps every field an `extends` base sets (in
+        ``bases``), the ones the file also sets included: removing the file's
+        copy leaves the base's, which the scan still refuses.
+        """
+        refused = ConfigValidator.internal_fields_refused(error, config_data)
+        if not refused:
+            return [cls._validator_error_to_lint_issue(error, config_data)]
+        issues = [
+            cls._internal_field_issue(*field_ref, config_data) for field_ref in refused
+        ]
+        location = ConfigValidator.model_error_location(error) or ""
+        segment, _, section = location.partition(".")
+        gone_after_fix = {
+            field_name
+            for _segment, _section, field_name in refused
+            if not any(
+                cls._section_holds(base, segment, section, field_name) for base in bases
+            )
+        }
+        rest = _INTERNAL_FIELD_SENTENCE.sub(
+            lambda sentence: "" if sentence.group(3) in gone_after_fix else sentence[0],
+            error,
+        ).rstrip()
+        said = rest.split("': ", 1)[1] if "': " in rest else rest
+        if said.removeprefix("Value error,").strip():
+            issues.append(cls._validator_error_to_lint_issue(rest, config_data))
+        return issues
+
+    @classmethod
+    def _section_holds(
+        cls, data: Any, segment: str, section: str, field_name: str
+    ) -> bool:
+        """Whether ``data`` sets ``field_name`` in the section ``segment.section``."""
+        file_segment = data.get(segment) if isinstance(data, dict) else None
+        if not isinstance(file_segment, dict):
+            return False
+        key = ConfigValidator.section_key_in_file(data, segment, section)
+        file_section = file_segment.get(key)
+        return isinstance(file_section, dict) and field_name in file_section
+
+    @classmethod
+    def _internal_field_issue(
+        cls,
+        segment_name: str,
+        section_name: str,
+        field_name: str,
+        config_data: Dict[str, Any],
+    ) -> LintIssue:
+        """The issue for an internal-only field the file's own section holds.
+
+        --fix removes it, except a tool_version or install_timeout that may be
+        a pin the operator meant: the plugin declares an option of that name,
+        and the value is neither null nor equal to the option's default. For a
+        plugin loaded from ash_plugin_modules, which is not loaded here, only a
+        null is removed, since whether it declares the option is unknown.
+        """
+        kind = internal_field_message(segment_name, section_name, field_name).split()[0]
+        message = f"{kind} '{section_name}' contains internal-only field '{field_name}'"
+        kept_because = cls._option_pin_kept_because(
+            segment_name, section_name, field_name, config_data
+        )
+        if kept_because is not None:
+            message += (
+                f"; kept, because {kept_because}. If you meant "
+                f"{OPTION_MEANINGS[field_name]}, put it under options; otherwise "
+                "remove it"
+            )
+        return LintIssue(
+            severity=LintSeverity.ERROR,
+            category=LintCategory.INTERNAL_FIELD,
+            message=message,
+            path=f"{segment_name}.{section_name}.{field_name}",
+            fixable=kept_because is None,
+            fix_description=(
+                f"Remove internal field '{field_name}' from {kind.lower()} "
+                f"'{section_name}'"
+            ),
+        )
+
+    @classmethod
+    def fix_removes(
+        cls, field_ref: Tuple[str, str, str], config_data: Dict[str, Any]
+    ) -> bool:
+        """Whether --fix removes ``(segment, section, field)``, an internal-only
+        field ``config_data`` holds (ConfigValidator.internal_fields_refused)."""
+        return cls._option_pin_kept_because(*field_ref, config_data) is None
+
+    @classmethod
+    def _option_pin_kept_because(
+        cls,
+        segment_name: str,
+        section_name: str,
+        field_name: str,
+        config_data: Dict[str, Any],
+    ) -> Optional[str]:
+        """Why --fix must leave the field in place, or None when it may remove it."""
+        if field_name not in OPTION_MEANINGS:
+            return None
+        segment = (
+            config_data.get(segment_name) if isinstance(config_data, dict) else None
+        )
+        section = segment.get(section_name) if isinstance(segment, dict) else None
+        if not isinstance(section, dict) or field_name not in section:
+            return None
+        value = section[field_name]
+        if value is None:
+            # A null pins nothing, whichever plugin it is under.
+            return None
+        config_class = (
+            _built_in_section_classes(segment_name).get(section_name)
+            if segment_name in INTERNAL_SECTION_FIELDS
+            else None
+        )
+        if config_class is None:
+            return (
+                "its plugin is not loaded here, so whether it declares this "
+                "option is unknown"
+            )
+        options_class = _options_class(config_class)
+        option = (
+            options_class.model_fields.get(field_name)
+            if options_class is not None
+            else None
+        )
+        if option is None or value == option.default:
+            return None
+        return (
+            "the plugin declares this option and the value is not the option's default"
+        )
 
     @classmethod
     def _validator_error_to_lint_issue(
@@ -531,18 +1014,26 @@ class ConfigLinter:
                 path="extends",
             )
 
-        # Missing required top-level field: 'field_name'
-        if error.startswith("Missing required top-level field: '"):
-            field_name = error.split("'")[1]
+        location = ConfigValidator.model_error_location(error)
+        if location is not None:
             return LintIssue(
                 severity=LintSeverity.ERROR,
-                category=LintCategory.MISSING_FIELD,
+                category=LintCategory.SCHEMA_ERROR,
                 message=error,
-                path=field_name,
+                path=location,
             )
 
-        # Invalid top-level field 'field_name' - this is an internal field...
-        if error.startswith("Invalid top-level field '"):
+        # project_name is optional; a scan uses the default name without it.
+        if error == ConfigValidator.MISSING_PROJECT_NAME_MESSAGE:
+            return LintIssue(
+                severity=LintSeverity.WARNING,
+                category=LintCategory.MISSING_FIELD,
+                message=error,
+                path="project_name",
+            )
+
+        # Top-level field 'field_name' is an internal field ...
+        if error.startswith("Top-level field '") and "is an internal field" in error:
             field_name = error.split("'")[1]
             return LintIssue(
                 severity=LintSeverity.ERROR,
@@ -563,8 +1054,11 @@ class ConfigLinter:
                 path=field_name,
             )
 
-        # Duplicate top-level field 'field_name' found at multiple locations
-        if error.startswith("Duplicate top-level field '"):
+        # Duplicate top-level field 'field_name' found at multiple locations,
+        # or Top-level field 'alias' is set twice, as 'alias' and 'name'
+        if error.startswith("Duplicate top-level field '") or (
+            error.startswith("Top-level field '") and "is set twice" in error
+        ):
             field_name = error.split("'")[1]
             return LintIssue(
                 severity=LintSeverity.ERROR,
@@ -573,51 +1067,30 @@ class ConfigLinter:
                 path=field_name,
             )
 
-        # Scanner 'scanner_name' contains internal-only field 'field_name' - ...
-        if error.startswith("Scanner '"):
-            parts = error.split("'")
-            # parts: ['Scanner ', scanner_name, ' contains internal-only field ', field_name, ...]
-            if len(parts) >= 4:
-                scanner_name = parts[1]
-                field_name = parts[3]
-                return LintIssue(
-                    severity=LintSeverity.ERROR,
-                    category=LintCategory.INTERNAL_FIELD,
-                    message=f"Scanner '{scanner_name}' contains internal-only field '{field_name}'",
-                    path=f"scanners.{scanner_name}.{field_name}",
-                    fixable=True,
-                    fix_description=f"Remove internal field '{field_name}' from scanner '{scanner_name}'",
-                )
+        # Scanner 'bandit' contains internal-only field 'name' - ...: the
+        # validator's warning for one a scan accepts, which names the section
+        # as the file spells it.
+        named = internal_fields_named(error)
+        if named and error.startswith(named[0][0] + " '"):
+            kind, section_name, field_name = named[0]
+            return cls._internal_field_issue(
+                _SEGMENT_OF_KIND[kind], section_name, field_name, config_data
+            )
 
-        # Reporter 'reporter_name' contains internal-only field 'field_name' - ...
-        if error.startswith("Reporter '"):
-            parts = error.split("'")
-            if len(parts) >= 4:
-                reporter_name = parts[1]
-                field_name = parts[3]
-                return LintIssue(
-                    severity=LintSeverity.ERROR,
-                    category=LintCategory.INTERNAL_FIELD,
-                    message=f"Reporter '{reporter_name}' contains internal-only field '{field_name}'",
-                    path=f"reporters.{reporter_name}.{field_name}",
-                    fixable=True,
-                    fix_description=f"Remove internal field '{field_name}' from reporter '{reporter_name}'",
-                )
-
-        # Converter 'converter_name' contains internal-only field 'field_name' - ...
-        if error.startswith("Converter '"):
-            parts = error.split("'")
-            if len(parts) >= 4:
-                converter_name = parts[1]
-                field_name = parts[3]
-                return LintIssue(
-                    severity=LintSeverity.ERROR,
-                    category=LintCategory.INTERNAL_FIELD,
-                    message=f"Converter '{converter_name}' contains internal-only field '{field_name}'",
-                    path=f"converters.{converter_name}.{field_name}",
-                    fixable=True,
-                    fix_description=f"Remove internal field '{field_name}' from converter '{converter_name}'",
-                )
+        # A path pattern that matches nothing (path_pattern_advice: a directory
+        # without its slash, a './' prefix, a path that names no path, a case-only
+        # match), and Path '/x' is absolute, so it matches nothing ...: a warning,
+        # as `ash config validate` prints it. The validator checks the merged
+        # config, the linter's own check the file's entries (with their
+        # location); _merge_path_duplicates keeps one.
+        if is_path_pattern_advice(error) or (
+            error.startswith("Path '") and ABSOLUTE_PATH_MESSAGE in error
+        ):
+            return LintIssue(
+                severity=LintSeverity.WARNING,
+                category=LintCategory.IGNORE_PATH_ISSUE,
+                message=error,
+            )
 
         # Fallback: unknown error format — surface as generic error
         return LintIssue(
@@ -626,11 +1099,45 @@ class ConfigLinter:
             message=error,
         )
 
+    @staticmethod
+    def _shown_entries(
+        entries: List[Any], shown_data: Any, keys: Sequence[str]
+    ) -> List[Any]:
+        """The entries of the list at ``keys``, as a message quotes them.
+
+        From ``shown_data``, the copy of the config ``lint`` makes, in which each
+        value read from the environment is ``<value>``. None quotes ``entries``
+        as they are. A copy that does not line up with ``entries`` gives None for
+        each, which the caller shows as read from the environment.
+        """
+        if shown_data is None:
+            return list(entries)
+        shown: Any = shown_data
+        for key in keys:
+            shown = shown.get(key) if isinstance(shown, dict) else None
+        if isinstance(shown, list) and len(shown) == len(entries):
+            return shown
+        return [None] * len(entries)
+
+    @staticmethod
+    def _shown_entry(entry: Dict[str, Any], shown: Any) -> Dict[str, Any]:
+        """``shown``, an entry of ``_shown_entries``; one that is not a mapping
+        shows every value of ``entry`` as read from the environment."""
+        if isinstance(shown, dict):
+            return shown
+        return dict.fromkeys(entry, ENVIRONMENT_VALUE_SHOWN)
+
     @classmethod
     def _check_suppression_issues(
-        cls, config_data: Dict[str, Any], result: LintResult
+        cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
     ) -> None:
-        """Check for suppression-specific issues."""
+        """Check for suppression-specific issues, and ignore-path expirations.
+
+        ``shown_data`` is the copy of ``config_data`` a message quotes
+        (``lint``); None quotes ``config_data``.
+        """
+        cls._check_ignore_path_expirations(config_data, result, shown_data)
+
         global_settings = config_data.get("global_settings", {})
         if not isinstance(global_settings, dict):
             return
@@ -638,22 +1145,31 @@ class ConfigLinter:
         suppressions = global_settings.get("suppressions", [])
         if not isinstance(suppressions, list):
             return
+        shown_suppressions = cls._shown_entries(
+            suppressions, shown_data, ("global_settings", "suppressions")
+        )
 
         reported_missing_symbols_extra = False
-        for i, suppression in enumerate(suppressions):
+        for i, (suppression, shown) in enumerate(zip(suppressions, shown_suppressions)):
             if not isinstance(suppression, dict):
                 continue
+            shown = cls._shown_entry(suppression, shown)
 
             path_prefix = f"global_settings.suppressions[{i}]"
 
             if suppression.get("symbol") is not None:
                 reported_missing_symbols_extra = cls._check_suppression_symbol(
-                    suppression, path_prefix, result, reported_missing_symbols_extra
+                    suppression,
+                    path_prefix,
+                    result,
+                    reported_missing_symbols_extra,
+                    shown=shown,
                 )
 
             # Check: line_start present but line_end missing
             line_start = suppression.get("line_start")
             line_end = suppression.get("line_end")
+            shown_line_start = shown.get("line_start", ENVIRONMENT_VALUE_SHOWN)
 
             if line_start is not None and line_end is None:
                 # The old wording said the range "will default to line_start
@@ -677,16 +1193,16 @@ class ConfigLinter:
                         severity=LintSeverity.WARNING,
                         category=LintCategory.SUPPRESSION_LINE_RANGE,
                         message=(
-                            f"Suppression has 'line_start' ({line_start}) but "
+                            f"Suppression has 'line_start' ({shown_line_start}) but "
                             f"missing 'line_end' - it matches any finding that "
-                            f"ends at or after line {line_start}, including a "
+                            f"ends at or after line {shown_line_start}, including a "
                             f"multi-line finding that starts before it"
                         ),
                         path=path_prefix,
                         fixable=True,
                         fix_description=(
-                            f"Narrow the suppression to line {line_start} alone "
-                            f"by setting line_end = {line_start}"
+                            f"Narrow the suppression to line {shown_line_start} "
+                            f"alone by setting line_end = {shown_line_start}"
                         ),
                     )
                 )
@@ -726,32 +1242,127 @@ class ConfigLinter:
                 )
 
             # Check: expired suppressions
-            expiration = suppression.get("expiration")
-            if expiration is not None:
-                try:
-                    from datetime import date as date_type
+            cls._check_expiration(
+                suppression.get("expiration"),
+                path_prefix,
+                "Suppression",
+                result,
+                shown=shown.get("expiration", ENVIRONMENT_VALUE_SHOWN),
+            )
 
-                    exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
-                    if exp_date < date_type.today():
-                        result.issues.append(
-                            LintIssue(
-                                severity=LintSeverity.WARNING,
-                                category=LintCategory.SUPPRESSION_EXPIRED,
-                                message=f"Suppression has expired (expiration: {expiration})",
-                                path=path_prefix,
-                                fixable=True,
-                                fix_description="Remove expired suppression",
-                            )
-                        )
-                except ValueError:
-                    result.issues.append(
-                        LintIssue(
-                            severity=LintSeverity.ERROR,
-                            category=LintCategory.SUPPRESSION_LINE_RANGE,
-                            message=f"Suppression has invalid expiration date format: '{expiration}' (expected YYYY-MM-DD)",
-                            path=path_prefix,
-                        )
+    # Ignore-path entries outside suppressions, by where they sit in the config.
+    # They share the suppression's expiration rule, and the scan-start warnings
+    # read the same table (models/core.py).
+    _IGNORE_PATH_LISTS = IGNORE_PATH_LISTS
+
+    @classmethod
+    def _check_ignore_path_expirations(
+        cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
+    ) -> None:
+        """Report ignore-path entries that have expired or carry a bad date."""
+        for keys, subject in cls._IGNORE_PATH_LISTS:
+            entries: Any = config_data
+            for key in keys:
+                entries = entries.get(key) if isinstance(entries, dict) else None
+            if not isinstance(entries, list):
+                continue
+            shown_entries = cls._shown_entries(entries, shown_data, keys)
+            for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
+                if isinstance(entry, dict):
+                    cls._check_expiration(
+                        entry.get("expiration"),
+                        f"{'.'.join(keys)}[{i}]",
+                        subject,
+                        result,
+                        shown=cls._shown_entry(entry, shown).get(
+                            "expiration", ENVIRONMENT_VALUE_SHOWN
+                        ),
                     )
+
+    @classmethod
+    def _check_expiration(
+        cls,
+        expiration: Any,
+        path_prefix: str,
+        subject: str,
+        result: LintResult,
+        shown: Any = None,
+    ) -> None:
+        """Report ``expiration`` by the rule a scan applies, ``expiration_has_passed``.
+
+        A message quotes it as ``shown``, ``<value>`` when it was read from the
+        environment; None quotes it as it is.
+
+        So lint calls an entry expired on its expiration date, as the scan does.
+        Only a suppression's issue is ``SUPPRESSION_EXPIRED``
+        and fixable: ``fix`` removes those from ``suppressions`` by index, so an
+        ignore path must not carry that category.
+
+        An expiration that is not a YYYY-MM-DD string is the model's to report,
+        in the words a scan and ``ash config validate`` print
+        (``_check_validation_issues``), and lint does not report it again in words of
+        its own.
+        """
+        if not isinstance(expiration, str):
+            return
+        try:
+            expired = expiration_has_passed(expiration)
+        except ValueError:
+            return
+        is_suppression = subject == "Suppression"
+        if not expired:
+            return
+        if shown is None:
+            shown = expiration
+        if is_suppression:
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.WARNING,
+                    category=LintCategory.SUPPRESSION_EXPIRED,
+                    message=f"Suppression has expired (expiration: {shown})",
+                    path=path_prefix,
+                    fixable=True,
+                    fix_description="Remove expired suppression",
+                )
+            )
+        else:
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.WARNING,
+                    category=LintCategory.IGNORE_PATH_ISSUE,
+                    message=(
+                        f"{subject} has expired (expiration: {shown}) and no "
+                        "longer applies; its files are scanned again"
+                    ),
+                    path=path_prefix,
+                )
+            )
+
+    @classmethod
+    def _note_unchecked_plugin_options(
+        cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
+    ) -> None:
+        """Say which plugin sections lint cannot check, and who does.
+
+        Lint does not import the modules ``ash_plugin_modules`` names, so it
+        cannot know what those plugins declare; a scan checks their options when
+        it loads them (config/plugin_option_check.py) and refuses an unknown one.
+        """
+        from automated_security_helper.config.plugin_option_check import (
+            options_checked_at_scan_note,
+        )
+
+        # Sections named as the copy lint() makes holds them: a key read from
+        # the environment is <value>.
+        note = options_checked_at_scan_note(config_data, shown_data)
+        if note:
+            result.issues.append(
+                LintIssue(
+                    severity=LintSeverity.INFO,
+                    category=LintCategory.PLUGIN_OPTIONS_UNCHECKED,
+                    message=note,
+                )
+            )
 
     @classmethod
     def _check_ignore_path_issues(
@@ -760,14 +1371,18 @@ class ConfigLinter:
         config_data: Dict[str, Any],
         result: LintResult,
         source_dir: Optional[Path] = None,
+        shown_data: Any = None,
     ) -> None:
         """Check ignore_paths and suppression paths for common issues.
 
         Detects:
-        - Paths that point to existing directories but lack a '**' glob suffix,
-          which means they won't match any files inside the directory.
+        - Paths that point to existing directories, which means they won't
+          match any files inside the directory.
         - Only warns when the path actually exists as a directory in the repo
           (avoids false positives for virtual environments that may not be initialized).
+
+        ``shown_data`` is the copy of ``config_data`` a message quotes
+        (``lint``); None quotes ``config_data``.
         """
         # Determine the project root for resolving relative paths
         if source_dir is not None:
@@ -784,35 +1399,29 @@ class ConfigLinter:
         if not isinstance(global_settings, dict):
             return
 
-        # Check ignore_paths
-        ignore_paths = global_settings.get("ignore_paths", [])
-        if isinstance(ignore_paths, list):
-            for i, entry in enumerate(ignore_paths):
+        # Check ignore_paths, then suppression paths
+        for section in ("ignore_paths", "suppressions"):
+            entries = global_settings.get(section, [])
+            if not isinstance(entries, list):
+                continue
+            shown_entries = cls._shown_entries(
+                entries, shown_data, ("global_settings", section)
+            )
+            for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
+                # An empty path is checked too; a missing one is the model's.
                 if not isinstance(entry, dict):
                     continue
-                path_pattern = entry.get("path", "")
-                if path_pattern:
+                path_pattern = entry.get("path")
+                if isinstance(path_pattern, str):
                     cls._check_single_path_pattern(
                         path_pattern=path_pattern,
-                        path_prefix=f"global_settings.ignore_paths[{i}].path",
+                        path_prefix=f"global_settings.{section}[{i}].path",
                         project_root=project_root,
                         result=result,
-                        slash_names_directory=True,
-                    )
-
-        # Check suppression paths
-        suppressions = global_settings.get("suppressions", [])
-        if isinstance(suppressions, list):
-            for i, entry in enumerate(suppressions):
-                if not isinstance(entry, dict):
-                    continue
-                path_pattern = entry.get("path", "")
-                if path_pattern:
-                    cls._check_single_path_pattern(
-                        path_pattern=path_pattern,
-                        path_prefix=f"global_settings.suppressions[{i}].path",
-                        project_root=project_root,
-                        result=result,
+                        ignore_path=section == "ignore_paths",
+                        shown_pattern=cls._shown_entry(entry, shown).get(
+                            "path", ENVIRONMENT_VALUE_SHOWN
+                        ),
                     )
 
     @classmethod
@@ -822,45 +1431,56 @@ class ConfigLinter:
         path_prefix: str,
         project_root: Path,
         result: LintResult,
-        slash_names_directory: bool = False,
+        *,
+        ignore_path: bool,
+        shown_pattern: Optional[str] = None,
     ) -> None:
-        """Check a single path pattern for directory-without-glob issues.
+        """Report a path pattern that matches nothing, with what to write instead
+        (``config_validator.path_pattern_advice``, shared with ``ash config
+        validate``), after an absolute one (``absolute_path_warning``).
 
-        A path like 'tests/test_data' that points to an existing directory will
-        silently fail to match any files inside it. The user likely intended
-        'tests/test_data/**'. So does 'tests/test_data/' for a suppression; an
-        ignore path ending in '/' names the directory and matches what is in it
-        (``slash_names_directory``), so it is not reported.
+        A path like 'tests/test_data' that points to an existing directory
+        matches no file inside it; the warning gives the spelling that does:
+        'tests/test_data/' for an ignore path, 'tests/test_data/**/*' for a
+        suppression path. An ignore path that ends in '/' is fine: it names the
+        directory's files (utils/path_matching.ignore_path_pattern). A suppression
+        path that ends in '/' is literal, matches no file, and gets the advice. A
+        pattern that starts with './', a bare '.', './', '.\\' or an empty one,
+        and one whose leading names the tree holds only in another case, match
+        nothing either. ``shown_pattern`` is how the message names the path, with
+        any part read from the environment shown as ``<value>``; None names it as
+        it is.
         """
-        # Skip patterns that already contain glob characters that would match files
-        # Patterns with ** already handle recursive matching
-        if "**" in path_pattern:
+        # A path that is not a string is a model error, reported as one; the
+        # string checks below would raise on it.
+        if not isinstance(path_pattern, str):
             return
-        if slash_names_directory and path_pattern.endswith(("/", "\\")):
-            return
+        if not isinstance(shown_pattern, str):
+            shown_pattern = (
+                path_pattern if shown_pattern is None else ENVIRONMENT_VALUE_SHOWN
+            )
 
-        # Strip trailing slash for directory check
-        clean_path = path_pattern.rstrip("/")
-
-        # Skip patterns with wildcards in the filename portion (e.g., "src/*.py")
-        # These are valid file-matching patterns
-        basename = Path(clean_path).name
-        if "*" in basename or "?" in basename or "[" in basename:
-            return
-
-        # Check if this path resolves to an existing directory
-        # We strip leading **/ patterns that won't exist as literal paths
-        candidate = project_root / clean_path
-        if candidate.is_dir():
-            # The path exists as a directory and matches no file in it.
+        # Checked first: joined to the root, an absolute path is itself, so the
+        # directory check would advise a spelling of it under itself.
+        advice = absolute_path_warning(
+            path_pattern,
+            project_root,
+            ignore_path=ignore_path,
+            shown_pattern=shown_pattern,
+        ) or path_pattern_advice(
+            path_pattern,
+            project_root,
+            ignore_path=ignore_path,
+            shown_pattern=shown_pattern,
+        )
+        if advice is not None:
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
                     category=LintCategory.IGNORE_PATH_ISSUE,
-                    message=directory_path_advice(
-                        path_pattern, ignore_path=slash_names_directory
-                    ),
+                    message=advice,
                     path=path_prefix,
+                    pattern=path_pattern,
                 )
             )
 
@@ -913,16 +1533,85 @@ class ConfigLinter:
                 )
 
         unused_suppressions = report_data.get("unused_suppressions", [])
+        # The report holds the suppressions as the scan read them. Each one is
+        # matched by its id to the suppressions the config's chain resolves to,
+        # and quoted as the copy of those shows it: a value read from the
+        # environment is <value>, the text after a reference included.
+        # The chain's references, not the checked file's own: a base's entry
+        # gets its written form from the base's reference.
+        shown_by_id = cls._shown_suppressions_by_id(
+            result.resolved_data, result.shown_resolved, result.references
+        )
         for unused in unused_suppressions:
+            if not isinstance(unused, dict):
+                continue
+            shown = shown_by_id.get(cls._make_suppression_id(unused))
+            message = (
+                f"Unused suppression: path='{(shown or unused).get('path', '')}', "
+                f"rule_id='{(shown or unused).get('rule_id', '*')}'"
+            )
+            if shown is None:
+                # An entry the config no longer holds names no place in it:
+                # free text, with what the chain read from the environment
+                # redacted.
+                message = redact_values(message, result.environment_values)
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.INFO,
                     category=LintCategory.SUPPRESSION_UNUSED,
-                    message=f"Unused suppression: path='{unused.get('path', '')}', rule_id='{unused.get('rule_id', '*')}'",
+                    message=message,
                     fixable=True,
                     fix_description="Remove unused suppression (use --fix-unused)",
                 )
             )
+
+    @classmethod
+    def _suppression_ids(cls, entry: Any, written: Any) -> Set[str]:
+        """The ids *entry* is matched by: its own, and its written form's,
+        whose values read from the environment are the references as the file
+        wrote them. A report lists an entry the way the scan read it, the
+        written form since the reference record, while an older report holds
+        resolved values; either id matches. The one rule for the
+        check and for ``--fix-unused``."""
+        ids: Set[str] = set()
+        if isinstance(entry, dict):
+            ids.add(cls._make_suppression_id(entry))
+        if isinstance(written, dict):
+            ids.add(cls._make_suppression_id(written))
+        return ids
+
+    @classmethod
+    def _shown_suppressions_by_id(
+        cls, data: Any, shown: Any, references: List[EnvironmentReference]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Each suppression of ``data``, the merged config, by its ids, as a
+        message quotes it: from ``shown``, ``data`` as
+        ``environment_record.with_environment_values_shown`` returns it. Keyed
+        by both the resolved and the written form's id (_suppression_ids), so
+        a report entry matches whichever form the scan wrote."""
+        suppressions = cls._suppressions_of(data)
+        shown_suppressions = cls._suppressions_of(shown)
+        if len(shown_suppressions) != len(suppressions):
+            return {}
+        written_suppressions = cls._suppressions_of(
+            record_environment_references(data, references)
+        )
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for i, (suppression, shown_entry) in enumerate(
+            zip(suppressions, shown_suppressions)
+        ):
+            if not (isinstance(suppression, dict) and isinstance(shown_entry, dict)):
+                continue
+            written = written_suppressions[i] if i < len(written_suppressions) else None
+            for suppression_id in cls._suppression_ids(suppression, written):
+                by_id[suppression_id] = shown_entry
+        return by_id
+
+    @staticmethod
+    def _suppressions_of(data: Any) -> List[Any]:
+        settings = data.get("global_settings") if isinstance(data, dict) else None
+        entries = settings.get("suppressions") if isinstance(settings, dict) else None
+        return entries if isinstance(entries, list) else []
 
     @classmethod
     def _find_unused_report(
@@ -968,6 +1657,7 @@ class ConfigLinter:
         path_prefix: str,
         result: LintResult,
         reported_missing_extra: bool,
+        shown: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Check one suppression's ``symbol``. Returns the updated
         ``reported_missing_extra``, so a missing extra is reported once per
@@ -976,7 +1666,10 @@ class ConfigLinter:
         Each issue here is one under which the entry can never match. An
         unmatched suppression fails closed, so none of them hides a finding,
         but each one is a suppression its author believes is in force.
+        ``shown`` is the entry as a message quotes it (``_shown_entries``); None
+        quotes the entry as it is.
         """
+        quoted = suppression if shown is None else shown
         from automated_security_helper.utils.symbol_spans import (
             GRAMMARS_BY_EXTENSION,
             SYMBOLS_EXTRA,
@@ -987,18 +1680,8 @@ class ConfigLinter:
 
         symbol = suppression.get("symbol")
         if not isinstance(symbol, str) or not is_valid_symbol(symbol):
-            result.issues.append(
-                LintIssue(
-                    severity=LintSeverity.ERROR,
-                    category=LintCategory.SUPPRESSION_SYMBOL,
-                    message=(
-                        f"Suppression 'symbol' {symbol!r} is not a dotted qualified "
-                        f"name such as 'MyClass.my_method': identifiers joined by "
-                        f"'.', with no spaces, wildcards or call syntax"
-                    ),
-                    path=path_prefix,
-                )
-            )
+            # The model's to report, in the words a scan prints
+            # (``_check_validation_issues``).
             return reported_missing_extra
 
         path = suppression.get("path")
@@ -1009,14 +1692,18 @@ class ConfigLinter:
                 if not any(c in suffix for c in "*?[") and (
                     suffix not in GRAMMARS_BY_EXTENSION
                 ):
+                    shown_path = quoted.get("path", ENVIRONMENT_VALUE_SHOWN)
+                    # The suffix is a piece of the path, which <value> does not
+                    # hide when the path was read from the environment.
+                    files = f"'{suffix}' files" if shown_path == path else "files"
                     result.issues.append(
                         LintIssue(
                             severity=LintSeverity.WARNING,
                             category=LintCategory.SUPPRESSION_SYMBOL,
                             message=(
-                                f"Suppression sets 'symbol' but its path {path!r} "
-                                f"only matches '{suffix}' files, which ASH has no "
-                                f"symbol grammar for (supported: "
+                                f"Suppression sets 'symbol' but its path "
+                                f"'{shown_path}' only matches {files}, which ASH "
+                                f"has no symbol grammar for (supported: "
                                 f"{', '.join(sorted(GRAMMARS_BY_EXTENSION))}), so "
                                 f"it never matches"
                             ),
@@ -1051,7 +1738,7 @@ class ConfigLinter:
 
     @classmethod
     def _check_legacy_name_variants(
-        cls, config_data: Dict[str, Any], result: LintResult
+        cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
     ) -> None:
         """Detect snake/kebab variants of built-in plugin names.
 
@@ -1071,15 +1758,41 @@ class ConfigLinter:
 
         Each issue is :class:`LintSeverity.WARNING` and ``fixable=True``;
         ``ash config lint --fix`` renames the key in-place.
+
+        A message names a section key as ``shown_data`` (the copy of
+        ``config_data`` ``lint`` makes) holds it, so one the file read from the
+        environment is ``<value>``. The canonical form it is compared with is
+        the schema's own name, and is named as it is.
         """
         # Lazy import to avoid pulling the full config-segment graph on
         # module import.
         from automated_security_helper.config.ash_config import (
+            AshConfig,
             ConverterConfigSegment,
             ReporterConfigSegment,
             ScannerConfigSegment,
             field_name_spellings,
         )
+
+        # The same for a top-level key: the model reads a field's name as its
+        # alias. With both spellings present, ConfigValidator warns instead.
+        for fname, finfo in AshConfig.model_fields.items():
+            alias = finfo.alias
+            if alias and alias != fname and fname in config_data:
+                if alias in config_data:
+                    continue
+                result.issues.append(
+                    LintIssue(
+                        severity=LintSeverity.WARNING,
+                        category=LintCategory.LEGACY_NAME_VARIANT,
+                        path=fname,
+                        message=(
+                            f"Top-level field '{fname}' is the field name of "
+                            f"'{alias}': a scan reads it as '{alias}', but only "
+                            f"'{alias}' is documented"
+                        ),
+                    )
+                )
 
         segment_specs = (
             ("scanners", ScannerConfigSegment),
@@ -1099,7 +1812,28 @@ class ConfigLinter:
                 alias = getattr(finfo, "alias", None)
                 canonical_input_forms.add(alias or fname)
 
-            for key in list(segment_data):
+            shown_segment = (
+                shown_data.get(segment_name) if isinstance(shown_data, dict) else None
+            )
+            if shown_data is None:
+                shown_keys = list(segment_data)
+            elif isinstance(shown_segment, dict) and len(shown_segment) == len(
+                segment_data
+            ):
+                shown_keys = list(shown_segment)
+            else:
+                shown_keys = [ENVIRONMENT_VALUE_SHOWN] * len(segment_data)
+
+            for key, shown_key in zip(list(segment_data), shown_keys):
+                env_read_key = shown_key != key
+                if env_read_key:
+                    # Named by its written reference (``${VAR}``), the form the
+                    # ambiguity refusal uses, so one key reads the same on both
+                    # surfaces; ``<value>`` only when no reference matches.
+                    for reference in result.file_references:
+                        if reference.key and reference.resolved == key:
+                            shown_key = written_without_tag(reference.written)
+                            break
                 if key in canonical_input_forms:
                     continue  # already canonical; not a typo
                 if "-" in key:
@@ -1112,22 +1846,23 @@ class ConfigLinter:
                     continue  # not a built-in variant; let it pass
 
                 # Collision: BOTH the legacy variant AND the canonical
-                # form are present. This is an ambiguity (which config
-                # wins?) — surface it as a non-fixable ERROR rather than
-                # silently picking one. See DA r7 #1 and #2.
+                # form are present. A scan accepts the file and reads the
+                # canonical form, so this is a warning; --fix does not
+                # rename the key, since that would drop one of the two.
                 if swapped in segment_data:
                     result.issues.append(
                         LintIssue(
-                            severity=LintSeverity.ERROR,
+                            severity=LintSeverity.WARNING,
                             category=LintCategory.LEGACY_NAME_CONFLICT,
-                            path=f"{segment_name}.{key}",
+                            # The location names an env-read key as the message
+                            # does, by its written form, never by its value.
+                            path=f"{segment_name}.{shown_key}",
                             message=(
-                                f"{segment_name} has BOTH the legacy form "
-                                f"{key!r} and the canonical form {swapped!r} "
-                                f"defined. This is ambiguous and would lose "
-                                f"data on auto-fix. Remove or merge one of "
-                                f"the entries by hand before running "
-                                f"`ash config lint --fix`."
+                                f"'{segment_name}.{shown_key}' (the legacy form) "
+                                f"and '{segment_name}.{swapped}' are both set; a "
+                                f"scan reads '{swapped}' and ignores "
+                                f"'{shown_key}'. Remove or merge one of them by "
+                                f"hand: `ash config lint --fix` does not rename it"
                             ),
                             fixable=False,
                         )
@@ -1139,7 +1874,7 @@ class ConfigLinter:
                     # The field-name spelling of an aliased field: the
                     # segment's before-validator reads it as the alias.
                     consequence = (
-                        f"ASH reads it as {swapped!r}, but only the "
+                        f"ASH reads it as '{swapped}', but only the "
                         f"canonical form is documented."
                     )
                 else:
@@ -1153,16 +1888,24 @@ class ConfigLinter:
                     LintIssue(
                         severity=LintSeverity.WARNING,
                         category=LintCategory.LEGACY_NAME_VARIANT,
-                        path=f"{segment_name}.{key}",
+                        # The location names an env-read key by its written
+                        # form, as the message does. Such a key is never
+                        # auto-fixable: lint --fix refuses any file that reads
+                        # the environment before it reaches a fixer, so an
+                        # auto-fixable claim here would send the operator to a
+                        # command that refuses.
+                        path=f"{segment_name}.{shown_key}",
                         message=(
-                            f"{segment_name}.{key!r} uses the legacy "
+                            f"{segment_name}.'{shown_key}' uses the legacy "
                             f"snake/kebab variant; canonical form is "
-                            f"{swapped!r}. {consequence}"
+                            f"'{swapped}'. {consequence}"
                         ),
-                        fixable=True,
+                        fixable=not env_read_key,
                         fix_description=(
-                            f"Rename {segment_name}.{key!r} to the canonical "
-                            f"form {swapped!r}"
+                            ""
+                            if env_read_key
+                            else f"Rename {segment_name}.'{shown_key}' to the "
+                            f"canonical form '{swapped}'"
                         ),
                     )
                 )
@@ -1174,7 +1917,10 @@ class ConfigLinter:
         """Rename a legacy snake/kebab variant to its canonical form.
 
         ``issue.path`` is ``"<segment>.<legacy-key>"``. The corresponding
-        canonical form is the kebab↔snake swap of ``<legacy-key>``.
+        canonical form is the kebab↔snake swap of ``<legacy-key>``. An
+        env-read key never reaches here: its issue is not fixable, and lint
+        --fix refuses any file that reads the environment before any fixer
+        runs, so the path's key is always a key of the data.
         """
         if not issue.path or "." not in issue.path:
             return False
@@ -1188,7 +1934,7 @@ class ConfigLinter:
             canonical_key = legacy_key.replace("_", "-")
         else:
             return False
-        # Defense in depth (DA r7 #1): refuse to fix if the canonical key
+        # Defense in depth, per an earlier review: refuse to fix if the canonical key
         # already exists. The lint phase emits a LEGACY_NAME_CONFLICT
         # error in this case which keeps `fixable=False` for that issue,
         # but a stale issue or a direct caller could otherwise reach this
@@ -1325,7 +2071,14 @@ class ConfigLinter:
         raw_content: str,
         config_data: Dict[str, Any],
     ) -> str:
-        """Generate the fixed config file content, preserving the schema comment."""
+        """Generate the fixed config file content, preserving the schema comment.
+
+        A ``.json`` file gets JSON back, without the comment JSON cannot hold:
+        writing YAML into it left a file the loader could not parse, so a scan
+        fell back to the default configuration.
+        """
+        if is_json_file(config_path):
+            return json.dumps(config_data, indent=2) + "\n"
         config_strings = []
 
         # Preserve the schema reference if it exists in the original file
@@ -1345,7 +2098,7 @@ class ConfigLinter:
             )
 
         # Dump the config data
-        from automated_security_helper.cli.config import IndentableYamlDumper
+        from automated_security_helper.config.config_writer import IndentableYamlDumper
 
         config_strings.append(
             yaml.dump(

@@ -26,6 +26,46 @@ which option values the operator named.
 
 Each refusal logs one warning naming the option, however many times the scanner
 asks.
+
+Configured tool inputs that are refused or missing
+--------------------------------------------------
+
+One rule covers a tool input the configuration names (a config file or a
+baseline file) when that input is refused or does not exist: it never falls back
+to anything the repository being scanned can influence. No discovery by name, no
+in-tree candidate and no checkout candidate takes its place. Where the tool
+tolerates running without the input and looks for one itself when it is given
+none, or demands one, it gets a neutral file ASH owns. Where the tool neither
+looks nor demands, it runs without it. Each case logs a warning that says which
+happened. Discovery still runs when nothing was configured at all; the rule
+governs only the configured-but-refused and configured-but-missing arms.
+
+A tool that discovers its own config from its working directory or its targets
+(syft ``.syft.yaml``, grype ``.grype.yaml``, bandit ``.bandit``) would take the
+repository's file the moment it is handed none, so for these a refused or
+missing input is replaced by an explicit neutral file, not by the absence of
+the option.
+
+The call sites, by module path:
+
+* ``plugin_modules/ash_builtin/scanners/bandit_scanner.py``: an empty ``--ini``
+  file ASH writes, so ``.bandit`` is not searched for.
+* ``plugin_modules/ash_builtin/scanners/grype_scanner.py``: an empty
+  ``--config`` file ASH writes.
+* ``plugin_modules/ash_builtin/scanners/syft_scanner.py``: an empty
+  ``--config`` file ASH writes.
+* ``plugin_modules/ash_builtin/scanners/checkov_scanner.py``: runs with no
+  ``--config-file``, from a working directory outside the scanned tree.
+* ``plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py``: runs
+  without a baseline.
+* ``plugin_modules/ash_ferret_plugins/ferret_scanner.py``: the tool demands a
+  config, so it gets the default bundled with ASH (refused) or the empty file
+  ASH writes (missing), both ASH's own.
+* ``plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py``
+  (``_trivy_input_file``): the demanded-input arm. A refused option falls to the
+  operator's environment variable and then to a neutral file ASH writes into the
+  results directory; a configured file that is not a file stops the scan. Nothing
+  it falls to is influenced by the repository.
 """
 
 from __future__ import annotations
@@ -35,17 +75,41 @@ import re
 import shutil
 import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Collection,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
+if TYPE_CHECKING:
+    from automated_security_helper.config.sandbox_grants import WalkJudgment
+
 _WARNED: Set[Tuple[str, str]] = set()
 _WARNED_LOCK = threading.Lock()
+
+#: The scan run the derived roots recorded and judged here belong to, set by
+#: :func:`derived_roots_scope`; None outside every run.
+_DERIVED_ROOTS_RUN: ContextVar[Optional[str]] = ContextVar(
+    "ash_derived_roots_run", default=None
+)
+#: Held over each read-and-replace of a config's derived-root record, so two
+#: runs recording on one config at once never lose each other's roots.
+_DERIVED_ROOTS_LOCK = threading.Lock()
 
 
 def reset_path_refusal_warnings() -> None:
@@ -210,28 +274,68 @@ def _client_delivered_reason(path: Union[str, Path]) -> Optional[str]:
     return None
 
 
-def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path]) -> bool:
+def in_scanned_tree(path: Union[str, Path], scan_root: Union[str, Path, None]) -> bool:
     """Whether ``path`` was written by the party whose code is being scanned.
 
-    True for a path the scanned repository could have written
-    (``sandbox_grants.untrusted_path``, the same rule ``resolve_config`` applies to
-    config files: inside any git checkout, or inside the scan root), and, under the
-    MCP server,
+    The fail-closed collapse of :func:`scanned_tree_judgment`: a path whose
+    walk never decided it reads as the scanned party's. A caller whose answer
+    feeds a sentence uses ``scanned_tree_judgment`` instead, so the sentence
+    can say when the walk never decided it.
+    """
+    return scanned_tree_judgment(path, scan_root).verdict
+
+
+def scanned_tree_judgment(
+    path: Union[str, Path], scan_root: Union[str, Path, None]
+) -> "WalkJudgment":
+    """:func:`in_scanned_tree`'s verdict, with whether a walk established it.
+
+    True for a path in a tree the scanned repository controls, judged by the
+    membership rule every other site applies (``sandbox_grants.confined_files``
+    over ``scanned_trees`` of the scan root, the same trees ``resolve_config``
+    checks config files against): tree containment, a name a repository link
+    resolves, and the marks the host set for the scan inside a container
+    (``marked_repository_written``, ``marked_files_repository_written``), whose
+    mounted copies sit in no checkout there. Also true, under the MCP server,
     for any file an MCP client delivered (``cli.mcp.sandbox
     .config_is_client_supplied``: a delivered tree, an upload or its staging, in
     this session or another), which a client-written config could otherwise name
     from outside the tree it scans. The one membership test this module and
-    ``plugin_module_trust`` use, so the rule changes in one place.
+    ``plugin_module_trust`` use, so the rule changes in one place. A mark only
+    takes grants away. ``decided`` is False when the True verdict is only an
+    unfinished walk's fail-closed answer (``ConfinedFiles.undecided``), so a
+    sentence that explains the judgment can say the walk stopped instead of
+    claiming the tree.
     """
-    return scanned_tree_reason(path, scan_root) is not None
+    # Imported here: sandbox_grants imports ash_config, which imports the scanners
+    # that import this module.
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.sandbox_grants import (
+        WalkJudgment,
+        confined_files,
+        scanned_trees,
+    )
+
+    # A None scan root is no scanned tree (``scanned_trees(None)`` is no tree),
+    # so only the marks and the client-supplied arm below can make the path
+    # the scanned party's.
+    trees = scanned_trees(None if scan_root is None else Path(scan_root))
+    judged = confined_files([Path(path)], trees, named=[Path(path)])
+    if judged.members:
+        return WalkJudgment(verdict=True, decided=not judged.undecided)
+    return WalkJudgment(verdict=config_is_client_supplied(path), decided=True)
 
 
 def scanned_tree_reason(
     path: Union[str, Path], scan_root: Union[str, Path]
 ) -> Optional[str]:
-    """Why ``in_scanned_tree`` holds for ``path``, for a warning, or None.
+    """Why the scanned party could have chosen ``path``, for a warning, or None.
 
-    Pass ``path`` as it was named. Both it and its resolved path are checked, so a
+    The reason-tier judgment for a path a repository's config names
+    (``sandbox_grants.untrusted_reason``: inside any git checkout, or the scan
+    root under each name it has, or reached through a link inside one), plus
+    the client-delivered arm. Pass ``path`` as it was named. Both it and its
+    resolved path are checked, so a
     symlink is judged by where it sits and by where it points.
     """
     # Imported here, in this module's functions: sandbox_grants imports ash_config,
@@ -452,12 +556,266 @@ def _first_warning(key: str, path: Path) -> bool:
     return first
 
 
+def derived_roots(context: Any) -> Tuple[Union[str, Path], ...]:
+    """The directories whose files the scan derived from the repository being
+    scanned: the output directory and the plugin work directory.
+
+    This is the one place the list is built. A run that registers further
+    derived locations extends it here, and every caller that passes
+    ``derived_dirs`` to ``honored_path`` follows without changing.
+    """
+    return (context.output_dir, context.work_dir)
+
+
+@contextmanager
+def derived_roots_scope(run: str) -> Iterator[None]:
+    """Record and judge derived roots as scan run *run*'s inside the block.
+
+    A config can outlive one scan (a caller can hand one ``resolved_config``
+    to several orchestrators, one after another or at the same time). Inside
+    the block, ``record_derived_roots`` files the directories under *run*, and
+    a path is judged against *run*'s roots and the unscoped record only, so an
+    earlier or concurrent run's output directory does not refuse this run's
+    paths. Nothing is ever removed from the record: a run that is still going
+    keeps every root it filed, whatever another run on the same config does.
+
+    The scope is a context variable, so it holds in the thread or task that
+    enters it and in what copies its context (the scanner pool submits each
+    scanner with ``contextvars.copy_context().run``). Code that reads the
+    roots outside every scope, including a thread that did not copy the
+    context, is judged against the whole record, every run's roots with the
+    unscoped ones, which fails closed. ``ASHScanOrchestrator`` enters the scope
+    under its run id where it builds its plugin context and where it runs its
+    phases.
+    """
+    token = _DERIVED_ROOTS_RUN.set(run)
+    try:
+        yield
+    finally:
+        _DERIVED_ROOTS_RUN.reset(token)
+
+
+def record_derived_roots(config: Any, *dirs: Union[str, Path, None]) -> None:
+    """Record *dirs* on *config* as locations holding repository-derived files.
+
+    ``honored_path`` and ``refused_derived_product`` read the record, so a
+    caller that does not pass ``derived_dirs`` still has the scan's output and
+    work directories judged as derived. The record is the de-duplicated union
+    over every plugin context that holds *config* (a config can serve more than
+    one context, as the context's own copies do): a path under any of them is a
+    derived product, which fails closed. Inside a scan run
+    (:func:`derived_roots_scope`) the directories are filed under that run, and
+    the union is the run's own; outside every run they go to the unscoped
+    record, which every reader judges against.
+
+    This is the one place the record is maintained. Nothing is recorded for a
+    config that is not an ``AshConfig`` (None, a stand-in), and blank or None
+    directories are skipped.
+    """
+    # Imported here: config.ash_config imports this module.
+    from automated_security_helper.config.ash_config import AshConfig
+
+    if not isinstance(config, AshConfig):
+        return
+    resolved_dirs = [
+        Path(os.path.realpath(Path(directory)))
+        for directory in dirs
+        if directory is not None and str(directory).strip() != ""
+    ]
+    run = _DERIVED_ROOTS_RUN.get()
+    with _DERIVED_ROOTS_LOCK:
+        try:
+            unscoped = config._derived_roots
+            by_run = config._run_derived_roots
+        except AttributeError:
+            return
+        recorded = unscoped if run is None else by_run.get(run, ())
+        additions = []
+        for resolved in resolved_dirs:
+            if resolved not in recorded and resolved not in additions:
+                additions.append(resolved)
+        if not additions:
+            return
+        # A NEW list or mapping, never an in-place change: model_copy() copies
+        # the private state shallowly, so the original and its copies hold the
+        # one object, and a change through any of them changed all. A reader
+        # takes the attribute once, so it sees one record or the next, whole.
+        if run is None:
+            config._derived_roots = [*unscoped, *additions]
+        else:
+            config._run_derived_roots = {**by_run, run: (*recorded, *additions)}
+
+
+def _recorded_roots(config: Any) -> Tuple[Path, ...]:
+    """The derived roots recorded on *config* that judge a path here; empty
+    when it holds none.
+
+    The unscoped record, and inside a scan run (:func:`derived_roots_scope`)
+    that run's own roots; outside every run, every run's roots as well, the
+    whole record, so a reader that lost its run's scope still fails closed."""
+    try:
+        unscoped = tuple(getattr(config, "_derived_roots", None) or ())
+    except Exception:  # a stand-in whose attribute access raises
+        return ()
+    try:
+        by_run = getattr(config, "_run_derived_roots", None) or {}
+        run = _DERIVED_ROOTS_RUN.get()
+        if run is None:
+            scoped = tuple(root for roots in by_run.values() for root in roots)
+        else:
+            scoped = tuple(by_run.get(run, ()))
+    except Exception:  # a stand-in whose attribute access raises
+        return unscoped
+    return (*unscoped, *scoped)
+
+
+def _shown(message: str, config: Any) -> str:
+    """*message* with every value *config* read from the environment shown as
+    ``<value>``.
+
+    The refusal warnings name the path they refused, and a configured path can
+    come from the environment: environment values are never logged, so such a
+    value is shown through the shown form, as every other message that can
+    quote one does. A value the environment did not choose is the
+    configuration's own text and stays named."""
+    # Imported here: error_text imports the validator package lazily itself,
+    # and this module is imported by the scanners the config package loads.
+    from automated_security_helper.utils.error_text import (
+        config_environment_values,
+        text_without_values,
+    )
+
+    return text_without_values(message, config_environment_values(config))
+
+
+def _named(
+    value: Union[str, Path], path: Path, config: Any, env_named: bool = False
+) -> str:
+    """How a refusal warning names the path it refused.
+
+    ``<value>`` when the caller read the value from an environment variable
+    itself (*env_named*), or when the WRITTEN value corresponds to a reference
+    the config chain read from the environment
+    (``config._environment_references``), as the recorded spelling or anchored
+    under one; the resolved path otherwise.
+    Keyed on the written value, not the resolved spelling, because resolution
+    (a relative value, a link) can produce a path that shares no text with the
+    environment's value while still being derived from it."""
+    # Imported here, as in _shown.
+    from automated_security_helper.config.environment_record import (
+        ENVIRONMENT_VALUE_SHOWN,
+    )
+
+    if env_named:
+        return ENVIRONMENT_VALUE_SHOWN
+    written = str(value)
+    for reference in getattr(config, "_environment_references", ()) or ():
+        for recorded in (
+            getattr(reference, "resolved", None),
+            getattr(reference, "value", None),
+        ):
+            if not recorded:
+                continue
+            # Either side can carry a scheme or directory prefix around the
+            # other: the config can anchor the environment's value under a
+            # prefix, and a caller can strip a scheme (``file://``) before
+            # judging the path, so a suffix match in either direction is a
+            # correspondence.
+            if recorded in written or recorded.endswith(written):
+                return ENVIRONMENT_VALUE_SHOWN
+    return path.as_posix()
+
+
+def refused_derived_product(
+    value: Union[str, Path, None],
+    *,
+    source_dir: Union[str, Path],
+    key: str,
+    config: Any = None,
+    derived_dirs: Collection[Union[str, Path]] = (),
+    operator_written: bool = False,
+    env_named: bool = False,
+) -> bool:
+    """Whether *value* is a repository-derived work product the tool is not handed.
+
+    The derived-directory clause of :func:`honored_path`, on its own: a value
+    that is not the operator's own write and resolves under one of
+    ``derived_dirs`` (the output and work directories, ``derived_roots``) is
+    refused with the same warning. For the scanners whose in-tree configs are
+    accepted deliberately (bandit, grype, syft), where ``honored_path``'s tree
+    clause does not apply but a config the scan derived from the repository
+    being scanned must still not reach the tool.
+
+    The directories judged are ``derived_dirs`` together with those recorded on
+    *config* (``record_derived_roots``): inside a scan run, that run's and the
+    ones recorded outside every run (``derived_roots_scope``). A derived root
+    that contains a scanned tree (the config's ``_scanned_root`` or
+    *source_dir*), as with an output directory above the source directory, does
+    not refuse a file inside that same tree: judging it there would make every
+    repository file a work product. The same root still refuses a file under it
+    that sits in no tree the root contains, which is a real work product. Omitting ``operator_written`` judges the value as not the
+    operator's own.
+
+    A value an environment variable chose is never printed: with *env_named*
+    the warning names only the key, and the path shows as the shown form.
+
+    Args as for :func:`honored_path`. True means refused; the caller passes
+    nothing built from *value* to the tool. False for a blank value: the
+    caller's own handling of a missing option stands.
+    """
+    if value is None or str(value).strip() == "":
+        return False
+    if operator_written:
+        return False
+    path = resolved_path(value, source_dir)
+    scanned = {
+        Path(os.path.realpath(Path(held)))
+        for held in (getattr(config, "_scanned_root", None), source_dir)
+        if held is not None and str(held).strip() != ""
+    }
+    for base in (*derived_dirs, *_recorded_roots(config)):
+        if base is None or str(base).strip() == "":
+            continue
+        resolved_base = Path(os.path.realpath(Path(base)))
+        # One tree has to hold the file and sit under the derived root. Judging
+        # the two tests against different trees (the file in one, the root's
+        # containment in another) let a work product outside the tree the root
+        # was meant for pass whenever any other scanned tree held it.
+        if any(
+            (path == held or held in path.parents)
+            and (held == resolved_base or resolved_base in held.parents)
+            for held in scanned
+        ):
+            continue
+        if path == resolved_base or resolved_base in path.parents:
+            with _WARNED_LOCK:
+                first = (key, path.as_posix()) not in _WARNED
+                _WARNED.add((key, path.as_posix()))
+            if first:
+                ASH_LOGGER.warning(
+                    _shown(
+                        f"Ignoring {key} ({_named(value, path, config, env_named)}): it is under "
+                        "the scan's own output or work directory, which "
+                        "holds files derived from the scanned repository, "
+                        "and the entry is not the operator's own. Such a "
+                        "file is not passed to the tool; name one outside "
+                        "them with the operator's configuration.",
+                        config,
+                    )
+                )
+            return True
+    return False
+
+
 def honored_path(
     value: Union[str, Path, None],
     *,
     source_dir: Union[str, Path],
     key: str,
     config: Any = None,
+    derived_dirs: Collection[Union[str, Path]] = (),
+    operator_written: bool = False,
+    env_named: bool = False,
 ) -> Optional[Path]:
     """The resolved path to hand the tool, or None when it may not be used.
 
@@ -474,6 +832,26 @@ def honored_path(
             (``AshConfig._scanned_root``, the workspace root in workspace mode),
             the tree is taken from that instead of from ``source_dir``; its
             ``_operator_paths`` says which option values the operator named.
+        derived_dirs: Directories whose files the scan derived from the
+            repository being scanned (the output directory and the plugin work
+            directory). They sit outside the scanned tree, so a path under one
+            passes the tree check; a value that is not the operator's own is
+            refused there the same way an in-tree path is, because handing the
+            tool a repository-derived file honors the repository's writes
+            through a location the tree check cannot see. The directories
+            recorded on *config* (``record_derived_roots``, filled by every
+            ``PluginContext`` that holds it) are judged too, so omitting this
+            argument does not skip the clause.
+        operator_written: Whether *value* is the operator's own write
+            (``operator_only_options.operator_wrote_value``). Omitting it
+            judges the value as not the operator's, so a caller that does not
+            say where the value came from gets the strict judgment. Feeds only
+            the derived-product clause; who named the path is judged by
+            ``named_by_operator``.
+        env_named: Whether *value* came from an environment variable the
+            caller read. A value an environment variable chose is never
+            printed: the warning names only *key*, and the path shows as the
+            shown form.
     """
     if value is None or str(value).strip() == "":
         return None
@@ -490,6 +868,16 @@ def honored_path(
     else:
         reason = scanned_tree_reason(named.absolute(), root)
     if reason is None:
+        if refused_derived_product(
+            value,
+            source_dir=source_dir,
+            key=key,
+            config=config,
+            derived_dirs=derived_dirs,
+            operator_written=operator_written,
+            env_named=env_named,
+        ):
+            return None
         return path
     with _WARNED_LOCK:
         first = (key, path.as_posix()) not in _WARNED
@@ -509,10 +897,16 @@ def honored_path(
             )
         # The value and the paths in the reason are written with their control
         # characters escaped: a newline in an environment variable's value would
-        # otherwise start a line of its own in the log.
+        # otherwise start a line of its own in the log. A value an environment
+        # variable chose is never printed: the path shows as the shown form
+        # (_named), and the whole message is shown with the configuration's
+        # environment values hidden (_shown).
         ASH_LOGGER.warning(
-            f"Ignoring {key} ({escape_controls(named.as_posix())}): "
-            f"{escape_controls(reason)}. {advice}"
+            _shown(
+                f"Ignoring {key} ({escape_controls(_named(value, named, config, env_named))}): "
+                f"{escape_controls(reason)}. {advice}",
+                config,
+            )
         )
     return None
 

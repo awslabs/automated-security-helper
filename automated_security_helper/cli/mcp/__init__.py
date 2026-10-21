@@ -17,12 +17,14 @@ supports multiple transports:
 
 from __future__ import annotations
 
+import functools
 import os
+import signal
 import stat
+import types
 from pathlib import Path
-from typing import Annotated, List, Optional
+from typing import Annotated, Callable, Dict, List, Optional
 import typer
-from rich.console import Console
 from rich.markup import escape
 
 from automated_security_helper.cli.mcp.http_sessions import (
@@ -37,11 +39,21 @@ from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
     set_profile_registry,
 )
+from automated_security_helper.core.constants import (
+    ASH_EXIT_INTERRUPTED,
+    ASH_EXIT_USAGE_ERROR,
+)
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
 from automated_security_helper.utils.ash_install import ash_reinstall_command
-from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.process_env import set_environ
+from automated_security_helper.utils.console import ash_console
+from automated_security_helper.utils.error_text import error_text, log_unexpected_error
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    configure_last_resort_level,
+    escape_markup,
+)
+from automated_security_helper.utils.process_env import environ_overrides
 
 # Import MCP dependencies directly. We capture both the server class and the
 # Starlette type so the streamable-HTTP path can build a typed ASGI app.
@@ -60,7 +72,7 @@ _logger = ASH_LOGGER
 # console to stderr makes that structural instead of depending on each call site
 # remembering to check --quiet, which the dependency-missing and validation-error
 # paths never did. --quiet still controls *whether* to write, not where.
-_stderr = Console(stderr=True)
+_stderr = ash_console(stderr=True)
 
 # Valid --transport values. Kept as a tuple so typer can render help cleanly
 # without forcing an Enum class on the public CLI surface.
@@ -466,7 +478,7 @@ def _build_auth_middleware(header_name: str, header_value: str):
     # Per RFC 7230 (and Starlette's implementation), HTTP header values
     # are decoded as latin-1; encoding back as utf-8 here would mutate
     # any byte ≥ 0x80 and silently fail-auth for non-ASCII tokens.
-    # See DA r6 #7.
+    # Settled in an earlier review.
     expected_value_bytes = header_value.encode("latin-1", errors="replace")
 
     class _StaticHeaderAuth(BaseHTTPMiddleware):
@@ -613,7 +625,7 @@ def build_streamable_http_app(
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
         app.add_middleware(middleware_cls)
 
-    return app
+    return _stop_scans_when_the_app_stops(app)
 
 
 def build_sse_app(
@@ -695,7 +707,7 @@ def build_sse_app(
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
         app.add_middleware(middleware_cls)
 
-    return app
+    return _stop_scans_when_the_app_stops(app)
 
 
 def _ash_log_level_to_uvicorn(level: AshLogLevel) -> str:
@@ -764,6 +776,246 @@ def _log_where_the_server_listens(config, listen_socket) -> None:
     )
 
 
+def _stop_scans_when_the_app_stops(app):
+    """Make ``app``'s lifespan stop the scans and their tools when it ends.
+
+    A scanner's tool runs in a session of its own (utils/subprocess_utils), so
+    the server's exit does not end it. A graceful uvicorn stop ends the app's
+    lifespan and then cancels the scans' tasks, which stopped the tools with the
+    ordinary ten-second grace while the process waited; the stdio server stops
+    them promptly instead (cli/mcp_server._lifespan). The app's lifespan, not
+    the MCP server's: over HTTP that one is entered per session, and a session
+    that ends does not end the server's scans.
+
+    A scan still running once the stop is done, busy where no cancel check
+    reaches it, does not hold up a server that a signal stopped
+    (_exit_if_a_signal_stopped_the_server).
+    """
+    from contextlib import asynccontextmanager
+
+    from automated_security_helper.cli import mcp_server
+
+    inner = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(scope_app):
+        async with inner(scope_app) as state:
+            try:
+                yield state
+            finally:
+                still_running = await mcp_server.stop_scans_at_server_exit(
+                    "the HTTP server is stopping"
+                )
+                if still_running:
+                    _exit_if_a_signal_stopped_the_server()
+
+    app.router.lifespan_context = lifespan
+    return app
+
+
+#: The status `ash mcp` exits with when a signal stopped the HTTP server and a
+#: scan was still running once the stop was done: 130 for Ctrl-C, as on every
+#: transport, and 0 for SIGHUP, as when uvicorn returns. SIGTERM is not here.
+#: uvicorn raises it again once the lifespan is done, and its default action ends
+#: the process there, before anything waits for a scan's thread.
+_EXIT_STATUS_BY_STOP_SIGNAL: Dict[int, int] = {signal.SIGINT: ASH_EXIT_INTERRUPTED}
+if hasattr(signal, "SIGHUP"):
+    _EXIT_STATUS_BY_STOP_SIGNAL[signal.SIGHUP] = 0
+
+#: The first signal that asked the uvicorn server _run_uvicorn runs to stop, until
+#: _run_uvicorn returns; None when none has (_note_the_signal_that_stops).
+_stop_signal: Optional[int] = None
+
+
+def _exit_if_a_signal_stopped_the_server() -> None:
+    """Exit at once with the signal's status, if a signal stopped the server.
+
+    Called when the app's lifespan has stopped the scans and one was still
+    running, busy in Python where no cancel check reaches it. Left to uvicorn,
+    the process then waited for that scan's thread, when asyncio closed its loop
+    and again at interpreter exit: measured with a stand-in phase busy for 30 s,
+    Ctrl-C exited 130 and SIGHUP 0 about 32 s after the signal, and a second
+    Ctrl-C did not help. A stdio server exits the same way after the same stop
+    (cli/mcp_server._stop_on_signal).
+
+    The exit comes after the stop, as on stdio, so the scans that did stop have
+    put their previous results back by then, each on its own thread. The scan
+    still running keeps its previous results held in .ash_previous_results, where
+    the next scan in that directory takes them back.
+    """
+    stop_signal = _stop_signal
+    if stop_signal is None:
+        return
+    status = _EXIT_STATUS_BY_STOP_SIGNAL.get(stop_signal)
+    if status is None:
+        return
+    from automated_security_helper.cli import mcp_server
+
+    name = signal.Signals(stop_signal).name
+    _logger.warning(
+        f"{name} received and a scan did not stop: exiting without waiting for it"
+    )
+    mcp_server.exit_at_once(status)
+
+
+def _ask_server_to_stop_on_sighup(server) -> Callable[[], None]:
+    """Treat SIGHUP as uvicorn treats SIGTERM, and return what puts it back.
+
+    uvicorn handles SIGINT and SIGTERM only, so SIGHUP (a closed terminal, a
+    supervisor's reload) ended the process at once, before the app's lifespan
+    could stop the scans, and every scanner's tool kept running. Only the main
+    thread can set a handler, and Windows has no SIGHUP.
+
+    A process started with SIGHUP ignored keeps it ignored, as a stdio server
+    does (cli/mcp_server._watched_stop_signals). nohup starts a command that way
+    so that it outlives the terminal it was started from, and this handler
+    replaced it, so that closing the terminal stopped the server, with exit 0.
+    Nothing in `ash mcp` sets SIGHUP before this, so one that is ignored here was
+    ignored when the process started.
+    """
+    import threading
+
+    if (
+        not hasattr(signal, "SIGHUP")
+        or threading.current_thread() is not threading.main_thread()
+        or signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
+    ):
+        return lambda: None
+    previous = signal.signal(signal.SIGHUP, server.handle_exit)
+
+    def put_back() -> None:
+        signal.signal(signal.SIGHUP, previous)
+
+    return put_back
+
+
+def _uvicorn_server_class():
+    """uvicorn's Server, kept off SIGINT when the process started with it ignored.
+
+    A shell starts a background job (``ash mcp --transport streamable-http &``)
+    with SIGINT ignored, so that a Ctrl-C meant for the job in the foreground
+    does not reach it. Python and asyncio leave an ignored SIGINT ignored, and so
+    does the stdio server (cli/mcp_server._watched_stop_signals). uvicorn does
+    not. Measured on uvicorn 0.54.0: ``Server.capture_signals`` points SIGINT and
+    SIGTERM at ``handle_exit`` with ``signal.signal`` whatever was set before, so
+    Ctrl-C would stop the background server, which would then exit 0.
+
+    The subclass lets uvicorn install its handlers and then ignores SIGINT again
+    before the server starts, and uvicorn puts back what it found on the way out,
+    which is SIG_IGN again. The subclass's ``handle_exit`` drops a SIGINT
+    delivered in the instant between the two. SIGTERM and SIGHUP
+    (_ask_server_to_stop_on_sighup) stop the server. Whether SIGINT was
+    ignored is the disposition the process started with, which is what the shell
+    set (automated_security_helper.cli.SIGINT_IGNORED_AT_START).
+    """
+    import contextlib
+    import threading
+
+    import uvicorn
+
+    from automated_security_helper import cli
+
+    if not cli.SIGINT_IGNORED_AT_START:
+        return uvicorn.Server
+
+    class _SigintIgnoringServer(uvicorn.Server):
+        @contextlib.contextmanager
+        def capture_signals(self):
+            with super().capture_signals():
+                # uvicorn sets no handler off the main thread, and neither can we.
+                if threading.current_thread() is threading.main_thread():
+                    signal.signal(signal.SIGINT, signal.SIG_IGN)
+                yield
+
+        def handle_exit(self, sig, frame) -> None:
+            if sig != signal.SIGINT:
+                super().handle_exit(sig, frame)
+
+    return _SigintIgnoringServer
+
+
+def _note_the_signal_that_stops(server) -> None:
+    """Record in _stop_signal the first signal that asks ``server`` to stop.
+
+    By wrapping its handle_exit, which uvicorn installs for SIGINT and SIGTERM,
+    and _ask_server_to_stop_on_sighup for SIGHUP. A SIGINT that the server of
+    _uvicorn_server_class drops does not ask it to stop, and is not recorded.
+
+    A Ctrl-C that forces the stop ends the process (_exit_when_forced).
+
+    The wrapper is bound to the server, as uvicorn's own handler is:
+    sse_starlette finds the server from the SIGTERM handler's ``__self__``, to
+    end its event streams when the server stops, if its patch of uvicorn's
+    ``Server.handle_exit`` did not take.
+    """
+    handle_exit = server.handle_exit
+
+    def noting(self, sig, frame) -> None:
+        global _stop_signal
+        forced_before = self.force_exit
+        handle_exit(sig, frame)
+        if _stop_signal is None and self.should_exit:
+            _stop_signal = sig
+        if self.force_exit and not forced_before:
+            _exit_when_forced()
+
+    server.handle_exit = types.MethodType(noting, server)
+
+
+def _exit_when_forced() -> None:
+    """Kill the scanners' tools' groups and exit with 130, at once.
+
+    For the second Ctrl-C, which uvicorn takes as a force quit, while its
+    graceful stop waits for the open connections to close. The app's lifespan,
+    which stops the scans, runs after that wait, and a forced stop skips it. Nor
+    does a forced stop end the wait: uvicorn still awaits asyncio's
+    Server.wait_closed, which since Python 3.12.1 returns only once every
+    connection has closed. Measured on uvicorn 0.54.0 under Python 3.14, with a
+    client that kept a request open, the server went on running after the second
+    Ctrl-C, its scans' tools with it, for as long as the client kept the request
+    open, and SIGKILL, the signal left to end it with, left the tools running.
+    _run_uvicorn's finally is never reached in that wait, so the exit is made
+    here.
+
+    Scheduled on the event loop, whose thread the handler runs on, rather than
+    run in the handler: the handler can interrupt that thread in the middle of
+    kill_running_groups, whose lock is not reentrant, or of a write to stdout,
+    which exit_at_once flushes. Between callbacks the loop holds neither, and
+    while uvicorn waits it has nothing else to run. The scans' previous results
+    stay held, or halfway back, in their output directories, where the next scan
+    in each takes them back (core/previous_results).
+    """
+    import asyncio
+
+    from automated_security_helper.cli import mcp_server
+
+    def exit_now() -> None:
+        _logger.warning(
+            "SIGINT received again while the server was stopping: killing the "
+            "scanners' tools and exiting without waiting for the open connections"
+        )
+        # uvicorn forces a stop only on SIGINT, which exits 130 on every transport.
+        mcp_server.exit_at_once(ASH_EXIT_INTERRUPTED)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        exit_now()
+    else:
+        loop.call_soon_threadsafe(exit_now)
+
+
+#: How long uvicorn's graceful stop waits for the open connections and their
+#: requests before it cancels them and goes on to the app's lifespan, which stops
+#: the scans and ends their tools. Unbounded, it waited for as long as a client
+#: kept a request open, the tools running throughout. A service manager follows
+#: SIGTERM with SIGKILL once a grace of its own runs out (``docker stop``: 10 s
+#: for a Linux container, https://docs.docker.com/reference/cli/docker/container/stop/),
+#: and a SIGKILL leaves the tools running, so this stays short enough for the
+#: whole stop to finish inside that.
+_GRACEFUL_SHUTDOWN_SECONDS = 5
+
+
 def _run_uvicorn(
     app, host: str, port: int, log_level: AshLogLevel, listen_socket=None
 ) -> None:
@@ -773,12 +1025,49 @@ def _run_uvicorn(
     ``host`` and ``port`` (see :func:`_bind_listen_socket`). Once the server
     listens on it, the line that names its address is logged as uvicorn logs it
     for a socket of its own (see :func:`_log_where_the_server_listens`).
+
+    Whatever is left of the scanners' tools' groups when uvicorn returns or
+    raises is killed: a server that failed before or during its lifespan's
+    shutdown stopped no scan. A SIGKILL cannot be handled; see the MCP server
+    guide for what it leaves behind. A SIGINT the process started with ignored
+    stays ignored (_uvicorn_server_class), and so does a SIGHUP
+    (_ask_server_to_stop_on_sighup). The signal that stops the server is
+    recorded, so that a scan that does not stop cannot keep a Ctrl-C or SIGHUP
+    waiting (_exit_if_a_signal_stopped_the_server). The graceful stop's wait for
+    the open connections is bounded (_GRACEFUL_SHUTDOWN_SECONDS). A second
+    Ctrl-C, uvicorn's force quit, kills the groups and exits from the event loop
+    at once, because uvicorn may not return then (_exit_when_forced).
     """
+    global _stop_signal
     import socket
 
     import uvicorn
 
-    class _Server(uvicorn.Server):
+    from automated_security_helper.utils.log import (
+        check_commands_of_stderr,
+        check_commands_of_stdout,
+        route_library_handlers_through_command_check,
+    )
+    from automated_security_helper.utils.subprocess_utils import kill_running_groups
+
+    # The sinks that are not handlers (lastResort, warnings, the excepthooks, a
+    # stray print) write to the console a CI step reads, as for stdio
+    # (cli/mcp_server.run_mcp_server). Wrapped before uvicorn.Config, whose
+    # logging setup gives uvicorn's handlers sys.stderr and sys.stdout as they
+    # are then: so they write through these wraps, and one line state sees
+    # their lines and every other write to the stream.
+    check_commands_of_stderr()
+    check_commands_of_stdout()
+    config = uvicorn.Config(
+        app=app,
+        host=host,
+        port=port,
+        log_level=_ash_log_level_to_uvicorn(log_level),
+        access_log=False,
+        timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_SECONDS,
+    )
+
+    class _Server(_uvicorn_server_class()):
         async def startup(self, sockets: Optional[List[socket.socket]] = None) -> None:
             # uvicorn exits from startup when the app's startup fails, so the
             # line is logged only for a server that started and listens.
@@ -786,15 +1075,20 @@ def _run_uvicorn(
             if sockets:
                 _log_where_the_server_listens(self.config, sockets[0])
 
-    config = uvicorn.Config(
-        app=app,
-        host=host,
-        port=port,
-        log_level=_ash_log_level_to_uvicorn(log_level),
-        access_log=False,
-    )
     server = _Server(config)
-    server.run(sockets=None if listen_socket is None else [listen_socket])
+    # uvicorn has configured its loggers' handlers by now, on the wraps the two
+    # calls above put in sys.stdout's and sys.stderr's place; the routing leaves
+    # a stream that is checked already as it is and wraps any other std stream a
+    # library's handler writes to.
+    route_library_handlers_through_command_check()
+    _note_the_signal_that_stops(server)
+    put_sighup_back = _ask_server_to_stop_on_sighup(server)
+    try:
+        server.run(sockets=None if listen_socket is None else [listen_socket])
+    finally:
+        _stop_signal = None
+        put_sighup_back()
+        kill_running_groups()
 
 
 def _ash_config_refusal() -> Optional[str]:
@@ -834,6 +1128,37 @@ def _ash_config_refusal() -> Optional[str]:
     return None
 
 
+def _logging_to_stderr(command):
+    """Run ``command`` with ``ASH_LOG_TO_STDERR=1``, then put the variable back.
+
+    The MCP server runs scans in-process: mcp_tools hands run_ash_scan to
+    loop.run_in_executor, which is a thread in this same process. That scan calls
+    get_logger, which reads this variable to choose the stream of the RichHandler it
+    attaches to the shared "ash" logger. Without it every log record from the scan
+    phase, suppression matching and the reporters would be written to stdout --
+    inside the JSON-RPC stream on the stdio transport, which is the reported
+    "Expecting value" failure. It applies to the HTTP transports too, where it is
+    harmless.
+
+    Set for the call, not for the process, so a get_logger call after the command
+    returns (another command in a process that lives on, or the next test on a
+    worker) does not build a stderr console. The previous
+    value, or its absence, comes back on every way out, typer.Exit and
+    KeyboardInterrupt included.
+
+    Nothing ASH starts while serving needs the variable: the scanners' tools do not
+    read it, and ASH's worker processes do not configure logging.
+    """
+
+    @functools.wraps(command)
+    def run(*args, **kwargs):
+        with environ_overrides({"ASH_LOG_TO_STDERR": "1"}):
+            return command(*args, **kwargs)
+
+    return run
+
+
+@_logging_to_stderr
 def mcp_command(
     ctx: typer.Context,
     log_level: Annotated[
@@ -841,16 +1166,22 @@ def mcp_command(
         typer.Option(
             "--log-level",
             help="Set the log level.",
+            case_sensitive=False,
         ),
     ] = AshLogLevel.INFO,
     verbose: Annotated[
-        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+        bool,
+        typer.Option("--verbose/--no-verbose", "-v", help="Enable verbose logging"),
     ] = False,
     debug: Annotated[
-        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+        bool,
+        typer.Option("--debug/--no-debug", "-d", help="Enable debug logging"),
     ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
-    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = True,
+    # Off by default, as on `ash mcp` (the wrapper in cli/main.py). On by default,
+    # -v and -d would fail the --quiet check below unless --no-quiet was also
+    # given.
+    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
     transport: Annotated[
         str,
         typer.Option(
@@ -981,16 +1312,7 @@ def mcp_command(
     if ctx.resilient_parsing:
         return
 
-    # The MCP server runs scans in-process: mcp_tools hands run_ash_scan to
-    # loop.run_in_executor, which is a thread in this same process. That scan calls
-    # get_logger and attaches a RichHandler to the shared "ash" logger, so without
-    # this every log record from the scan phase, suppression matching and the
-    # reporters would be written to stdout -- inside the JSON-RPC stream on the
-    # stdio transport, which is the reported "Expecting value" failure.
-    #
-    # Set before the transport is chosen so it also covers the HTTP transports,
-    # where it is harmless, and before any scan can start.
-    set_environ("ASH_LOG_TO_STDERR", "1")
+    # ASH_LOG_TO_STDERR is set for the whole call by @_logging_to_stderr above.
 
     # Check for MCP dependencies using our validation function
     if not validate_mcp_dependencies():
@@ -1030,9 +1352,12 @@ def mcp_command(
     if not quiet:
         _stderr.print("[green]MCP dependencies found. Starting MCP server...[/green]")
 
-    # Validate command options for consistency. The auth header value is read
-    # here, once, from whichever form carries it; a file or descriptor that holds
-    # no usable value stops startup like any other bad option.
+    # Validate command options for consistency. Each refusal below is of the command
+    # line itself -- a value or a combination of options the server cannot run with --
+    # so each exits with the usage-error code, not 3, which reports an invalid config.
+    # The auth header value is read here, once, from whichever form carries it; a
+    # file or descriptor that holds no usable value stops startup like any other
+    # bad option.
     try:
         validate_command_options(verbose, debug, quiet)
         argv_auth_value = auth_header_value is not None
@@ -1041,8 +1366,8 @@ def mcp_command(
         )
         _validate_auth_options(auth_header_name, auth_header_value)
     except ASHValidationError as e:
-        _stderr.print(f"[red]Validation Error: {escape(str(e))}[/red]", highlight=False)
-        raise typer.Exit(3)
+        _stderr.print(f"[red]Validation Error: {escape_markup(error_text(e))}[/red]")
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
     if argv_auth_value:
         # Not gated on --quiet: the value is already on the command line, where
         # every local user can read it, and this is the one place that says so.
@@ -1079,11 +1404,14 @@ def mcp_command(
         )
         raise typer.Exit(_EXIT_USAGE)
 
+    # Each value below is the operator's or an error's, printed to a console that
+    # reads markup, so it is escaped once: a "[/x]" in it raised MarkupError.
     if transport not in _VALID_TRANSPORTS:
         _stderr.print(
-            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, got '{transport}'.[/red]"
+            f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, "
+            f"got '{escape_markup(transport)}'.[/red]"
         )
-        raise typer.Exit(3)
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
     # A value the server can't load would leave every scan that names no config
     # on the built-in default, so the server refuses to start instead.
@@ -1122,8 +1450,8 @@ def mcp_command(
             # reach the socket.
             _validate_bind(host, allowed_host, trust_upstream_host_check)
     except ASHValidationError as e:
-        _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
-        raise typer.Exit(3)
+        _stderr.print(f"[red]Validation Error: {escape_markup(error_text(e))}[/red]")
+        raise typer.Exit(ASH_EXIT_USAGE_ERROR)
 
     # Deliberately NOT recording the transport here. The scan-target and
     # config-input boundaries decide "is this caller remote" per call, from the
@@ -1151,7 +1479,9 @@ def mcp_command(
         try:
             set_profile_registry(register_profiles(list(profile)))
         except ValueError as e:
-            _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
+            _stderr.print(
+                f"[red]Validation Error: {escape_markup(error_text(e))}[/red]"
+            )
             raise typer.Exit(3)
         if not quiet:
             _stderr.print(
@@ -1160,6 +1490,12 @@ def mcp_command(
 
     # Validate and configure logging options
     log_level_value = validate_log_options(verbose, debug, log_level)
+
+    # The process-wide last-resort gate, set once at the server's start: the
+    # level the operator asked for here; a name logging does not know (SIMPLE,
+    # say) falls back to ASH_LOG_LEVEL, WARNING by default. The hosted scans'
+    # own logger setup never moves this gate.
+    configure_last_resort_level(log_level_value.value)
 
     # Log the command execution
     _logger.info(
@@ -1212,7 +1548,7 @@ def mcp_command(
             if not quiet:
                 _stderr.print(
                     f"[green]Streamable-HTTP MCP server listening on "
-                    f"http://{host}:{port}{mount_path}[/green]"
+                    f"{escape_markup(f'http://{host}:{port}{mount_path}')}[/green]"
                 )
             _run_uvicorn(
                 app,
@@ -1243,7 +1579,7 @@ def mcp_command(
             if not quiet:
                 _stderr.print(
                     f"[green]SSE MCP server listening on "
-                    f"http://{host}:{port}{sse_path}[/green]"
+                    f"{escape_markup(f'http://{host}:{port}{sse_path}')}[/green]"
                 )
             _run_uvicorn(
                 app,
@@ -1253,10 +1589,19 @@ def mcp_command(
                 listen_socket=listen_socket,
             )
     except KeyboardInterrupt:
+        # Ctrl-C, ASH_EXIT_INTERRUPTED on every transport. uvicorn raises SIGINT
+        # again once its graceful stop is done, and it arrives here as
+        # KeyboardInterrupt; with a scan that did not stop, the HTTP server exits
+        # with the same status before that (_exit_if_a_signal_stopped_the_server),
+        # and so it does on a second Ctrl-C (_exit_when_forced).
+        # A stdio server exits from its signal watcher without
+        # returning (cli/mcp_server._stop_on_signal), and raises KeyboardInterrupt
+        # only where it cannot watch for signals. A process started with SIGINT
+        # ignored gets no Ctrl-C on any transport (_uvicorn_server_class).
         _logger.info("MCP server shutdown requested by user")
         if not quiet:
             _stderr.print("\n[yellow]MCP server shutdown requested by user[/yellow]")
-        raise typer.Exit(0)
+        raise typer.Exit(ASH_EXIT_INTERRUPTED)
     except ScannerError as e:
         _logger.error(f"ASH Scanner Error: {str(e)}")
         if not quiet:
@@ -1282,10 +1627,15 @@ def mcp_command(
             _stderr.print(f"[red]{escape(str(e))}[/red]", highlight=False)
         raise typer.Exit(3)
     except Exception as e:
-        _logger.exception(f"Unexpected error starting MCP server: {str(e)}")
+        # Also what run_mcp_server raises when the stdio server fails while it
+        # serves. The line naming the error is printed even with --quiet, which
+        # hides log output: it is why the process exits 1, and the log may be off.
+        log_unexpected_error(_logger, e, "MCP server failed")
+        _stderr.print(
+            f"[red]MCP server failed: {escape_markup(type(e).__name__)}: "
+            f"{escape_markup(error_text(e))}[/red]"
+        )
         if not quiet:
-            _stderr.print(f"[red]Unexpected error starting MCP server: {str(e)}[/red]")
-            _stderr.print(f"[red]Error type: {type(e).__name__}[/red]")
             _stderr.print(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )

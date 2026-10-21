@@ -102,6 +102,10 @@ class SemgrepScannerConfig(ScannerPluginConfigBase):
 class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
     """SemgrepScanner implements code scanning using Semgrep."""
 
+    #: semgrep is a Python package ASH runs through uv. See
+    #: ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = True
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
         cache_paths=("~/.semgrep",),
@@ -125,6 +129,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         self.tool_type = ScannerToolType.SAST
 
         self._setup_uv_tool_install_commands()
+        # Under deferred_tool_version_probes (the scan phase's construction
+        # context) this records the probe for resolve_deferred_tool_version
+        # instead of running it, so the dependency check probes, not this.
         self.tool_version = self._get_uv_tool_version("semgrep")
         self.args = ToolArgs(
             format_arg=None,

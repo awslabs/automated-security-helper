@@ -65,7 +65,8 @@ class TestGitLabSASTSuppressions:
 
         vulns = {v["name"]: v for v in report["vulnerabilities"]}
         assert vulns["B101"]["severity"] == "Info"
-        assert vulns["B201"]["severity"] == "High"
+        # error, with no declared severity: Critical, as the gate grades it.
+        assert vulns["B201"]["severity"] == "Critical"
 
     def test_suppressed_findings_have_solution(
         self, plugin_context, model_with_suppressed_finding

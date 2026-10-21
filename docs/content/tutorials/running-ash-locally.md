@@ -88,7 +88,7 @@ Create a default configuration file:
 ash config init
 ```
 
-This creates `.ash/.ash.yaml` in your current directory with default settings.
+This creates `.ashrc.yaml` in your current directory with default settings.
 
 ## Windows Support
 

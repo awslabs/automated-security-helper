@@ -17,6 +17,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
+from automated_security_helper.utils.git_command import GIT_SAFETY_OPTIONS
 
 
 _SESSION = "session-test"
@@ -150,7 +151,7 @@ class TestSetSourceGit:
             res.stderr = ""
             return res
 
-        with patch.object(sd, "_run_git", side_effect=fake_run):
+        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
             target = sd.set_source_git(
                 url="https://example.com/foo.git",
                 workspace_root=tmp_path,
@@ -173,6 +174,39 @@ class TestSetSourceGit:
         assert sd.get_session_source_dir(_SESSION) == target
         sd.clear_source(_SESSION, workspace_root=tmp_path)
 
+    def test_every_git_run_gets_no_stdin(self, tmp_path):
+        """A clone source can be a repository on this machine, and git reads the
+        files it names: cloning a linked worktree whose admin commondir was
+        linked to /dev/stdin, git waited on an open stdin (git 2.50.1, measured)
+        and returned at once on /dev/null. On the stdio transport the server's
+        stdin carries the client's requests."""
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append((cmd, kw))
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = ""
+            res.stderr = ""
+            return res
+
+        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref="main",
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+
+        # Past git and git_argv's options, then past -C <dir> where it is given.
+        subcommands = []
+        for cmd, _ in seen:
+            rest = cmd[1 + len(GIT_SAFETY_OPTIONS) :]
+            subcommands.append(rest[0] if rest[0] != "-C" else rest[2])
+        assert subcommands == ["clone", "fetch", "checkout"]
+        assert all(kw.get("stdin") is sd.subprocess.DEVNULL for _, kw in seen)
+        sd.clear_source(_SESSION, workspace_root=tmp_path)
+
     def test_clone_failure_raises_runtime_error(self, tmp_path):
         def fake_run(cmd, **kw):
             res = MagicMock()
@@ -181,7 +215,7 @@ class TestSetSourceGit:
             res.stdout = ""
             return res
 
-        with patch.object(sd, "_run_git", side_effect=fake_run):
+        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git clone failed"):
                 sd.set_source_git(
                     url="https://bogus/repo.git",
@@ -210,7 +244,7 @@ class TestSetSourceGit:
                 res.returncode = 1
             return res
 
-        with patch.object(sd, "_run_git", side_effect=fake_run):
+        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git checkout"):
                 sd.set_source_git(
                     url="https://example.com/foo.git",
@@ -354,7 +388,7 @@ class TestGitArgumentInjectionDefenses:
     )
     def test_option_like_url_is_rejected_before_spawning_git(self, tmp_path, bad_url):
         with (
-            patch.object(sd, "_run_git") as run,
+            patch.object(sd, "run_ended_with_the_server") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -364,7 +398,7 @@ class TestGitArgumentInjectionDefenses:
     def test_command_executing_transport_is_rejected(self, tmp_path, bad_url):
         """ext:: is matched case-insensitively; git accepts either casing."""
         with (
-            patch.object(sd, "_run_git") as run,
+            patch.object(sd, "run_ended_with_the_server") as run,
             pytest.raises(ValueError, match="transport"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -373,7 +407,7 @@ class TestGitArgumentInjectionDefenses:
     @pytest.mark.parametrize("bad_ref", ["--upload-pack=touch /tmp/pwned", "-x"])
     def test_option_like_ref_is_rejected_before_spawning_git(self, tmp_path, bad_ref):
         with (
-            patch.object(sd, "_run_git") as run,
+            patch.object(sd, "run_ended_with_the_server") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(
@@ -387,7 +421,7 @@ class TestGitArgumentInjectionDefenses:
     def test_rejection_leaves_no_session_directory_behind(self, tmp_path):
         """Validation runs before any mkdir, so a rejected call is inert."""
         with (
-            patch.object(sd, "_run_git") as run,
+            patch.object(sd, "run_ended_with_the_server") as run,
             pytest.raises(ValueError),
         ):
             sd.set_source_git(

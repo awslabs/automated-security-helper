@@ -54,14 +54,15 @@ ASH v3 can run directly on Windows in local mode with Python 3.10+. Simply insta
 ## Usage
 
 ### What are the different execution modes in ASH v3?
-ASH v3 supports three execution modes:
-- **Local Mode**: Runs entirely in the local Python process
-- **Container Mode**: Runs non-Python scanners in a container
-- **Precommit Mode**: Runs a subset of fast scanners optimized for pre-commit hooks
+ASH v3 supports four execution modes:
+- **Local Mode**: Runs the scan in the local Python process, with the scanner tools installed on this machine
+- **Container Mode**: Builds the ASH container image and runs the whole scan inside it
+- **Precommit Mode**: Runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit, with simplified output
+- **Nix Mode**: Runs the scan inside `nix develop`, with every scanner at a pinned version, always offline
 
 ### How do I run a basic scan?
 ```bash
-# Run in local mode (Python-based scanners only)
+# Run in local mode (the scanner tools installed on this machine)
 ash --mode local
 
 # Run in container mode (all scanners)
@@ -76,7 +77,7 @@ ash --mode precommit
 # Scan a specific directory
 ash --source-dir /path/to/code
 
-# Configure ignore paths in .ash/.ash.yaml
+# Configure ignore paths in your ASH config file (.ashrc.yaml in a new project)
 global_settings:
   ignore_paths:
     - path: 'tests/test_data'
@@ -85,6 +86,8 @@ global_settings:
 
 ### How do I exclude files from scanning?
 ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries and `ash_aggregated_results.json` (`metadata.ignore_file_exclusions`) record how many files the ignore files excluded.
+
+ASH leaves its own output out of the scan, whether or not `.gitignore` lists it: the output directory of the current scan, and `.ash/ash_output` under the scanned directory and under the directory ASH runs from. In a git checkout, regular files committed to one of those directories are still scanned (a committed link is not), and ASH warns that its output directory holds committed files. Outside a git checkout, or when git cannot list the repository, only the current scan's output directory is left out: an earlier run's `.ash/ash_output` is scanned like the rest of the tree, and ASH warns once per scan while the scan set still holds files in it, naming it and saying how to leave it out: delete it, or list it in an ignore file such as `.gitignore`. Adding it to `global_settings.ignore_paths` leaves its findings out, but the scan still reads it, so the warning repeats until the directory is deleted or an ignore file lists it. The output directory is recognized when it or the scanned directory is given through a link above the tree, as `/var` is on macOS. A scan does not delete or overwrite a committed file: when git tracks one where a scan writes its output (`ash_aggregated_results.json`, `ash-ignore-report.txt`, `ash-scan-set-files-list.txt`, `ash-scan-set-run.json`, `ash.log`, `ash.log.jsonl`, `.ash_previous_results_restored`, or anything under `analysis/`, `reports/`, `scanners/`, `converted/`, `.ash_previous_results/` or `.ash_previous_results.partial/`), the scan exits 3 before it deletes or writes anything, in every mode and from the MCP server. When git cannot list the repository the output directory is in (git is not installed, or it fails on the repository), any file at one of those paths stops the scan the same way, and the message names git's error and says to let git read the repository or remove the old results. A report over existing results (`--use-existing`) is stopped only where it writes: the results file, the logs, `reports/`, and `analysis/` with `--inspect` or `converted/` with `--cleanup`. A `.ash/ash_output` that is a link, or that a link inside the scanned directory leads to, is not taken as ASH's output, however the path to it is spelled, and a scan into an output directory git tracks as a link exits 3. The trivy-repo plugin still reads those directories, and ASH drops the findings it reports there, except in committed files. Any other directory is scanned, even one holding an earlier run's or another shard's results; ASH warns when a directory holds `ash_aggregated_results.json`, or both `ash-ignore-report.txt` and `ash-scan-set-files-list.txt`. Write shard output outside the scanned directory, or list it in `.gitignore`. CloudFormation templates that `cdk synth` writes (`*.template.json`) are scanned even when `.gitignore` excludes `cdk.out`, so cdk-nag and cfn-nag check them; the rest of the `cdk.out` directory stays excluded.
 
 ### How do I scan files that a `.gitignore` excludes?
 Pass `--no-honor-ignore-files`, or set `honor_ignore_files: false` in a config file outside the scanned tree. A config file inside the repository being scanned cannot change this setting. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
@@ -101,7 +104,7 @@ ash --exclude-scanners cfn-nag,cdk-nag
 ### How do I generate specific report formats?
 ```bash
 # Generate specific report formats
-ash --output-formats markdown,html,json
+ash --output-formats markdown,html,flat-json
 
 # Generate a report from existing results
 ash report --format html --output-dir ./my-scan-results
@@ -146,6 +149,11 @@ configuration guide for `[tool.ash]` and for `extends`.
 ash config init
 ```
 
+This writes `.ashrc.yaml` in the current directory (item 14 above). Names 1-12 still
+work, but the discovery warning calls them deprecated, so a new file gets the newer
+name. When the directory already has a config file, `ash config init` refuses rather
+than add a second one; edit the existing file instead.
+
 ### How do I override configuration values at runtime?
 ```bash
 # Enable a specific scanner
@@ -176,7 +184,7 @@ ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates*
 You can create custom scanners by implementing the scanner plugin interface and adding your plugin module to the ASH configuration:
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 ash_plugin_modules:
   - my_ash_plugins
 ```
@@ -194,8 +202,10 @@ repos:
   - repo: https://github.com/awslabs/automated-security-helper
     rev: v{{VERSION}}
     hooks:
-      - id: ash-simple-scan
+      - id: ash
 ```
+
+The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](tutorials/using-ash-with-pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
 
 ### How do I fail CI builds on security findings?
 ```bash
@@ -208,6 +218,8 @@ ash --mode local --fail-on-findings
 ### How do I run ASH in an offline/air-gapped environment?
 Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
 
+npm-audit does not run offline, because npm, yarn and pnpm audit a lockfile by asking the registry. In an offline scan a project with a lockfile beside a `package.json` reports npm-audit `MISSING` and the scan exits 1; a project without one reports it `SKIPPED`. Pass `--exclude-scanners npm-audit` to scan a JavaScript project offline without it. See [Offline mode](docs/advanced-usage.md#offline-mode).
+
 ### Can I use ASH programmatically?
 Yes, ASH v3 can be used programmatically in Python:
 
@@ -216,9 +228,18 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import RunMode
 
 results = run_ash_scan(
-    source_dir="/path/to/code", output_dir="/path/to/output", mode=RunMode.local
+    source_dir="/path/to/code",
+    output_dir="/path/to/output",
+    mode=RunMode.local,
+    # Return the results even when there are actionable findings
+    fail_on_findings=False,
 )
+print(f"{results.metadata.summary_stats.actionable} actionable findings")
 ```
+
+The call returns the results only when the scan's exit code is 0; otherwise it
+raises `SystemExit` with that code, as `ash scan` exits with it. See
+[Programmatic Usage](docs/advanced-usage.md#programmatic-usage) for the details.
 
 ### How do I customize the container image?
 ```bash
@@ -354,33 +375,26 @@ Model Context Protocol (MCP) is a standardized way for AI applications to access
 
 ### How do I configure resource management for the MCP server?
 
-ASH v3 includes comprehensive resource management that can be configured through your ASH configuration file:
+The server enforces two limits, `max_concurrent_scans` (default 3) and `scan_timeout_seconds`
+(default 1800). It reads them only from the operator's config, the file the `ASH_CONFIG`
+environment variable of the `ash mcp` process names, never from a scanned repository's
+`.ash/.ash.yaml`:
 
 ```yaml
-# .ash/ash.yaml
+# The file ASH_CONFIG names for the ash mcp process
 mcp-resource-management:
-  max_concurrent_scans: 5          # Limit simultaneous scans
-  max_concurrent_tasks: 25         # Limit async tasks
-  thread_pool_max_workers: 6       # Thread pool size
-  scan_timeout_seconds: 2400       # 40 minute scan timeout
-  memory_warning_threshold_mb: 2048 # Memory usage warnings
-  enable_health_checks: true       # Enable monitoring
+  max_concurrent_scans: 5      # most scans running at once, across every session
+  scan_timeout_seconds: 2400   # a scan still running after this is stopped and reported failed
 ```
 
-This prevents memory leaks, manages system resources, and ensures stable operation under load.
+The other keys of the section are accepted and have no effect. See the
+[MCP server guide](docs/mcp-server-guide.md#server-limits).
 
-### I'm getting "Maximum concurrent scans exceeded" errors
+### `run_ash_scan` says the server is at its max_concurrent_scans limit
 
-This is a resource protection feature. You can adjust the limits in your configuration:
-
-```yaml
-# .ash/ash.yaml
-mcp-resource-management:
-  max_concurrent_scans: 10  # Increase from default of 3
-  max_concurrent_tasks: 50  # Increase task limit if needed
-```
-
-Or wait for existing scans to complete before starting new ones.
+The server is already running that many scans. Wait for one to finish, cancel one you no longer
+need with `cancel_scan`, or ask the operator to raise `max_concurrent_scans` in the server's
+`ASH_CONFIG` file.
 
 ### I'm getting MCP dependency errors
 MCP dependencies are included by default in ASH v3. If you're still getting errors:
@@ -403,22 +417,10 @@ uvx --from=git+https://github.com/awslabs/automated-security-helper@v{{VERSION}}
 
 ### How do I monitor MCP server performance?
 
-Enable resource monitoring in your configuration:
-
-```yaml
-# .ash/ash.yaml
-mcp-resource-management:
-  enable_health_checks: true
-  enable_resource_logging: true
-  log_resource_operations: true
-```
-
-Then ask your AI assistant:
-```
-"Show me the current resource usage of the MCP server"
-"How many scans are currently running?"
-"What's the memory usage of the security scanner?"
-```
+The server has no resource monitoring of its own: the `enable_health_checks`,
+`enable_resource_logging` and `log_resource_operations` keys are accepted and have no effect. Ask
+your AI assistant to call `list_active_scans` to see the scans the server is running, and watch the
+`ash mcp` process with your system's own tools.
 
 For more details, see the [MCP Tutorial](tutorials/using-ash-with-mcp.md).
 

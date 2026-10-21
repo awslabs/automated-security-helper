@@ -82,7 +82,7 @@ the mapping is one to one.
 
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
-| `ash_version` | `AshVersion` | `string` | *required* | Git ref: release tag, branch, or full commit SHA. No default, so the pin is always deliberate. |
+| `ash_version` | `AshVersion` | `string` | *required* | Git ref: release tag, branch, or full commit SHA. No default, so the pin is always deliberate. Use the release these modules came from, as the examples do; see [Which `AshVersion` to use](../../../README.md#which-ashversion-to-use). |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Builds with `OFFLINE=YES`, vendoring rulesets and setting `ASH_OFFLINE` in the image. |
 | `ash_base_config_yaml` | `AshBaseConfigYaml` | `string` | `null` | Full `.ash.yaml` contents. Stored in SSM, written to `.ash/.ash.yaml` at container start. Capped at 8192 bytes. |
 | `rebuild_schedule` | `RebuildSchedule` | `string` | `"rate(1 day)"` | EventBridge `rate(...)` or `cron(...)`. |

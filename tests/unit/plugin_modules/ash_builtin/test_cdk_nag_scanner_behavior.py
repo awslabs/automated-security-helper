@@ -329,8 +329,12 @@ def test_a_report_less_template_makes_the_whole_scan_unsuccessful(
 ):
     """With one template, a report-less run must leave the scan not-succeeded.
 
-    This is the shape the earlier defect took, and it is asserted on the derived predicate the
-    executor and status computation actually read, rather than on the counters alone.
+    This is the shape the earlier defect took, and it is asserted on the derived
+    predicate the SARIF flag and status computation actually read
+    (``_sarif_execution_successful``, the rule ``scan_succeeded`` states), not on
+    a rule recomputed here from the counters. An earlier version hand-computed
+    ``targets_failed < targets_attempted`` -- the old all-failed rule -- so it
+    kept passing whatever the real predicate did.
     """
     wrapper_double.return_value = CdkNagWrapperResponse(
         results={}, failure="no validation report"
@@ -339,10 +343,54 @@ def test_a_report_less_template_makes_the_whole_scan_unsuccessful(
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert scanner.targets_attempted > 0
-    scan_succeeded = scanner.targets_failed < scanner.targets_attempted
-    assert not scan_succeeded, (
+    assert not scanner._sarif_execution_successful(), (
         "every attempted template failed, so this is not a successful scan"
     )
+
+
+def test_an_unevaluable_template_is_a_failed_target(
+    scanner, cdk_available, wrapper_double, plugin_context
+):
+    """The parse-failure arm: a template whose value cannot be built is counted.
+
+    The worker raises a YAML error for it, and only the exception's name and
+    text cross back, so the arm decides from the file: a structure that is a
+    template (a top-level Resources mapping) that ASH could not evaluate counts
+    as a failed, recorded unevaluated target with the file's reason in
+    ``scanner.errors`` -- not as "not a CloudFormation file", which would
+    un-count it and leave the scan reading clean.
+    """
+    from yaml import YAMLError
+
+    from automated_security_helper.utils.cfn_template_model import (
+        unevaluable_template_reason,
+    )
+
+    path = plugin_context.work_dir / "unbuildable.yaml"
+    path.write_text(
+        # ``!!binary`` over text that is not base64: YAML reads the syntax and
+        # cannot build the value, the TemplateConstructorError shape.
+        "Resources:\n"
+        "  Bucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Properties:\n"
+        "      Tags:\n"
+        "        - Key: created\n"
+        "          Value: !!binary abcde\n",
+        encoding="utf-8",
+    )
+    assert unevaluable_template_reason(path, plugin_context.work_dir) is not None, (
+        "the fixture must be a template ASH cannot evaluate, or the arm under "
+        "test is never reached"
+    )
+    wrapper_double.side_effect = YAMLError("could not construct a value")
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    assert any("unbuildable.yaml" in error for error in scanner.errors), scanner.errors
+    assert not scanner._sarif_execution_successful()
 
 
 def test_a_genuinely_clean_template_is_not_a_failed_target(
@@ -804,6 +852,27 @@ def test_final_report_invocation_describes_the_ash_run(
     assert invocation.startTimeUtc is not None
     assert invocation.endTimeUtc is not None
     assert report.runs[0].tool.driver.name == "ash-cdk-nag-wrapper"
+
+
+@pytest.mark.parametrize(
+    "tool_version, expected", [("2.37.55", "2.37.55"), ("unavailable", None)]
+)
+def test_the_driver_carries_cdk_nags_version_not_ashs(
+    scanner, cdk_available, wrapper_double, template_in_work_dir, tool_version, expected
+):
+    """ScanResultProcessor names this driver "cdk-nag" and keeps its version.
+
+    The driver declares cdk_nag's own version, or none when unknown, never
+    ASH's.
+    """
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result()]}
+    )
+    scanner.tool_version = tool_version
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert report.runs[0].tool.driver.version == expected
 
 
 def test_source_target_type_scans_the_source_tree(

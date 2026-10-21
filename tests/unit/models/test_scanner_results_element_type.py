@@ -49,8 +49,10 @@ TARGET_ONLY_FIELDS = (
     "severity_counts",
     "exit_code",
     "duration",
-    # Why a MISSING row is missing, when ASH knows: set by the scan phase only.
+    # Why a MISSING or SKIPPED row is so: rebuilt onto the row by unified_metrics from
+    # what the scan phase and the executor recorded.
     "missing_reason",
+    "skipped_reason",
 )
 
 

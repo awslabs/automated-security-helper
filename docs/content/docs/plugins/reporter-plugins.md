@@ -33,19 +33,21 @@ Define a configuration class for your reporter:
 from typing import Literal
 from pydantic import Field
 
+from automated_security_helper.base.options import ReporterOptionsBase
+
+
+class MyReporterConfigOptions(ReporterOptionsBase):
+    include_details: bool = Field(default=True, description="Include detailed findings")
+    max_findings: int = Field(
+        default=100, description="Maximum number of findings to include"
+    )
+
 
 class MyReporterConfig(ReporterPluginConfigBase):
     name: Literal["my-reporter"] = "my-reporter"
     extension: str = "my-report.txt"
     enabled: bool = True
-
-    class Options:
-        include_details: bool = Field(
-            default=True, description="Include detailed findings"
-        )
-        max_findings: int = Field(
-            default=100, description="Maximum number of findings to include"
-        )
+    options: MyReporterConfigOptions = MyReporterConfigOptions()
 ```
 
 ## Reporter Plugin Example
@@ -54,7 +56,9 @@ Here's a complete example of a custom reporter plugin based on the S3Reporter in
 
 ```python
 import json
+import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal, Optional, TYPE_CHECKING
 
@@ -126,22 +130,21 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
         except Exception as e:
             self._plugin_log(
                 f"Error when validating S3 access: {e}",
-                level="WARNING",
+                level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
             )
-        finally:
-            return self.dependencies_satisfied
+        return self.dependencies_satisfied
 
-    def report(self, model: "AshAggregatedResults") -> str:
-        """Format ASH model and upload to S3 bucket."""
+    def report(self, model: "AshAggregatedResults") -> str | None:
+        """Upload the results to S3 and return the URL, or None on failure."""
         if isinstance(self.config, dict):
-            self.config = S3ReporterConfig.model_validate_plugin_dependencies(
-                self.config
-            )
+            self.config = S3ReporterConfig.model_validate(self.config)
 
-        # Create a unique key for the S3 object
-        timestamp = model.scan_metadata.scan_time.strftime("%Y%m%d-%H%M%S")
+        # Create a key for the S3 object from the time the results were generated
+        timestamp = model.metadata.generated_at or datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
         s3_key = (
             f"{self.config.options.key_prefix}ash-report-{timestamp}.{file_extension}"
@@ -194,10 +197,13 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             error_msg = f"Error uploading to S3: {str(e)}"
             self._plugin_log(
                 error_msg,
-                level="ERROR",
+                level=logging.ERROR,
                 append_to_stream="stderr",
             )
-            return error_msg
+            # None, not the message: ASH treats a None result as a reporter that
+            # produced nothing and writes no report file for it. A returned
+            # message would be written into that file as if it were the report.
+            return None
 ```
 
 ## Simple Reporter Plugin Example
@@ -250,17 +256,18 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
         content = []
         content.append("# Security Scan Report")
         content.append("")
-        content.append(f"Project: {model.project_name}")
-        content.append(f"Scan Time: {model.scan_metadata.scan_time}")
+        stats = model.metadata.summary_stats
+        content.append(f"Project: {model.metadata.project_name}")
+        content.append(f"Scan Time: {model.metadata.generated_at}")
         content.append("")
         content.append("## Summary")
         content.append("")
-        content.append(f"Total Findings: {model.summary_stats.total_findings}")
-        content.append(f"Critical: {model.summary_stats.critical_count}")
-        content.append(f"High: {model.summary_stats.high_count}")
-        content.append(f"Medium: {model.summary_stats.medium_count}")
-        content.append(f"Low: {model.summary_stats.low_count}")
-        content.append(f"Info: {model.summary_stats.info_count}")
+        content.append(f"Total Findings: {stats.total}")
+        content.append(f"Critical: {stats.severity_counts.critical}")
+        content.append(f"High: {stats.severity_counts.high}")
+        content.append(f"Medium: {stats.severity_counts.medium}")
+        content.append(f"Low: {stats.severity_counts.low}")
+        content.append(f"Info: {stats.severity_counts.info}")
         content.append("")
 
         # Add detailed findings if configured
@@ -279,7 +286,7 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
                 content.append(f"Title: {vuln.title}")
                 content.append(f"Severity: {vuln.severity}")
                 content.append(f"File: {vuln.file_path}")
-                content.append(f"Line: {vuln.line_number}")
+                content.append(f"Line: {vuln.line_start}")
                 content.append(f"Description: {vuln.description}")
                 content.append("")
 
@@ -299,12 +306,12 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
 ## Reporter Plugin Best Practices
 
 1. **Handle Configuration**: Use Pydantic models for configuration
-2. **Validate Dependencies**: Implement the `validate` method to check dependencies
+2. **Validate Dependencies**: Implement the `validate_plugin_dependencies` method to check dependencies
 3. **Error Handling**: Use try/except blocks and provide meaningful error messages
 4. **Output to Files**: Write reports to the `reports` directory. Return the report and ASH writes it to
    `ash.<extension>`; write any other file there with `write_report_file` and return its name from
    `companion_file_names()`, so that a link already at that name stops the run before any reporter writes
-5. **Return Content**: Return the report content as a string
+5. **Return Content**: Return the report content as a string, or `None` when the report could not be produced (ASH then writes no file for it)
 6. **Use Model Methods**: Use the model's helper methods like `to_simple_dict()` and `to_flat_vulnerabilities()`
 
 ## Reporter Plugin Configuration in ASH
@@ -312,7 +319,7 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
 Configure your reporter in the ASH configuration file:
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 reporters:
   simple:
     enabled: true
@@ -388,11 +395,9 @@ def test_simple_reporter():
     # Create reporter instance
     reporter = SimpleReporter(context=context)
 
-    # Create a mock model
-    model = AshAggregatedResults(
-        project_name="test-project",
-        # Add other required fields
-    )
+    # Create a model; the project name is part of its metadata
+    model = AshAggregatedResults()
+    model.metadata.project_name = "test-project"
 
     # Generate the report
     report = reporter.report(model)

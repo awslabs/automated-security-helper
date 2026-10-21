@@ -155,10 +155,10 @@ STATUS_MISSING = "MISSING"
 STATUS_SKIPPED = "SKIPPED"
 
 # ASH_EXIT_CODES in automated_security_helper.core.constants documents these as
-# 0 success, 1 "scan errors / scanner failures", 2 actionable findings above
-# threshold, 3 invalid config. The fixture is built to produce actionable findings,
-# so 2 is the expected code, and 0 is accepted in case a future default turns
-# fail_on_findings off.
+# 0 success, 1 "scan errors / scanner failures", 2 actionable findings at or above
+# threshold, 3 invalid config or refused input, 4 a workspace error and 5 a usage
+# error. The fixture is built to produce actionable findings, so 2 is the expected
+# code, and 0 is accepted in case a future default turns fail_on_findings off.
 #
 # The 1 in that table is aspirational, and this matters: a scanner at ERROR does NOT
 # produce exit 1. _compute_exit_code in run_ash_scan.py returns 1 only when
@@ -168,10 +168,9 @@ STATUS_SKIPPED = "SKIPPED"
 # check_exit_code. So check_exit_code is NOT a backstop for
 # check_no_scanner_errors. Do not trim either one believing the other covers it.
 #
-# One more wrinkle: click/Typer raise UsageError as exit 2, which is inside this
-# tuple. That is harmless today only because a usage error also writes no results
-# file, so load_results fails first and reports the missing file. If the tolerated
-# set ever grows, re-check that assumption.
+# A usage error, the gate's own command line being refused, exits 5 and is outside
+# this tuple. A usage error also writes no results file, so load_results fails
+# first in any case.
 TOLERATED_EXIT_CODES = (0, 2)
 
 #: The scanners this gate runs, named rather than left at the default ten.
@@ -864,7 +863,8 @@ def check_exit_code(exit_code: int) -> List[str]:
         (
             f"ash scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
-            "Exit 1 is a scan error and exit 3 is an invalid config"
+            "Exit 1 is a scan error, exit 3 is an invalid config or refused input "
+            "and exit 5 is a usage error: ASH refused this script's command line"
         )
     ]
 

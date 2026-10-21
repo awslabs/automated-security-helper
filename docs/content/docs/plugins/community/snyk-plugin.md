@@ -104,7 +104,8 @@ can stay in the repository's `.ash/.ash.yaml`:
 scanners:
   snyk-code:
     enabled: true
-    severity_threshold: "MEDIUM"
+    options:
+      severity_threshold: "MEDIUM"
 ```
 
 ### Run Snyk Code Scan
@@ -147,7 +148,8 @@ Configure the minimum severity level for reported vulnerabilities:
 scanners:
   snyk-code:
     enabled: true
-    severity_threshold: "HIGH"  # Options: LOW, MEDIUM, HIGH, CRITICAL
+    options:
+      severity_threshold: "HIGH"  # Options: LOW, MEDIUM, HIGH, CRITICAL
 ```
 
 ### Exclusion files in the scanned tree
@@ -188,8 +190,8 @@ A config file inside the scanned tree, such as the repository's own
 scanners:
   snyk-code:
     enabled: true
-    severity_threshold: "MEDIUM"
     options:
+      severity_threshold: "MEDIUM"
       # Additional scanner-specific options can be added here
 ```
 
@@ -201,7 +203,8 @@ scanners:
 scanners:
   snyk-code:
     enabled: true
-    severity_threshold: "HIGH"
+    options:
+      severity_threshold: "HIGH"
 ```
 
 ### All Severity Levels
@@ -210,7 +213,8 @@ scanners:
 scanners:
   snyk-code:
     enabled: true
-    severity_threshold: "LOW"
+    options:
+      severity_threshold: "LOW"
 ```
 
 ### Combined with Other Scanners
@@ -235,6 +239,20 @@ Snyk Code results are integrated into ASH's unified reporting system:
 - **HTML Reports**: Visual security dashboard with remediation guidance
 - **JSON/CSV**: Structured data for analysis and tracking
 - **Markdown**: Human-readable summaries for pull requests
+
+`snyk code test` exits 0 when it finds nothing and 1 when it finds something. ASH treats both as a completed scan and reports the findings from the SARIF file Snyk writes, each at the level Snyk gave it (`error` as CRITICAL, `warning` as MEDIUM, `note` as LOW) and a finding Snyk marks ignored as suppressed. Whether the scan then fails is decided by ASH's severity threshold, as for every scanner. A run that exits 1 but whose SARIF file holds no results, and any other exit code, such as 2 (a failed run) or 3 (no supported files found), is reported as a snyk-code scanner error.
+
+## What ASH sends to Snyk
+
+`snyk code test` uploads the files of the directory it tests, and it has no option that leaves a path out. For the source directory, ASH therefore runs it on a copy of the scan set. The copy is made in a new directory under the system temporary directory (`TMPDIR`), outside both the scanned directory and the output directory, and is removed when the scan of that directory ends; snyk-code reports an error rather than run when `TMPDIR` is inside either of them. A run that is killed (with SIGKILL, or SIGTERM) leaves its copy behind. On Linux and macOS, each later snyk-code run removes such copies: the user's own `ash-snyk-code-*` directories that no running scan holds and that were last modified longer ago than the scan timeout (`scanners.snyk-code.options.scan_timeout`, 1800 seconds by default, or an hour when it is null). On Windows, remove them yourself. Under the scanner sandbox, the Snyk CLI is given read access to that directory for its run. The copy leaves out:
+
+- files under `global_settings.ignore_paths`, matched the way ASH matches findings against ignore paths;
+- files that a `.gitignore` or `.ignore` file excludes from the scan set, and ASH's own output directory, apart from the files git tracks there;
+- symlinks, files with more than one hard link, paths outside the scanned directory, and files ASH cannot read, which ASH counts in a warning.
+
+If ASH cannot write the copy, because the disk is full for example, snyk-code reports a scanner error instead of testing part of the tree. It reports one too when it leaves out every file it would have sent, so a tree of links is not reported as a clean scan. When no file is left to send (every file is under an ignore path, or the scan set holds none), nothing is sent, snyk-code does not run, and the log says which. Files the converters wrote are tested where ASH wrote them. Making the copy takes time and disk space in proportion to the scan set. As for every scanner, a finding in a file under an ignore path is also left out of the reports.
+
+Ignores managed in the Snyk app belong to a Snyk project, and Snyk may rely on the tested directory's git remote to find that project. The copy ASH sends carries no `.git` directory, so Snyk may not match it to that project, and those ignores may not apply: a finding ignored in the Snyk app can be reported again. To keep a finding out of ASH's results, suppress it in ASH's configuration.
 
 ## Performance Considerations
 

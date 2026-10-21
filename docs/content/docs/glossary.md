@@ -12,11 +12,11 @@
 | **IaC** | Infrastructure as Code — configuration files that define cloud resources (Terraform, CloudFormation, Kubernetes manifests, etc.). |
 | **Inline Suppression** | A code comment (e.g., `# ash-ignore:rule-id`) that suppresses a specific finding at the line where it appears. |
 | **MCP** | Model Context Protocol — a standard for connecting AI assistants to external tools. ASH exposes an MCP server for AI-driven security scanning. |
-| **Mode** | How ASH executes: `local` (direct on host), `container` (inside Docker), or `precommit` (as a Git hook on staged files). |
+| **Mode** | How ASH executes: `local` (direct on host), `container` (inside the ASH container image), `precommit` (a local scan limited to bandit, detect-secrets, checkov, cdk-nag and npm-audit), or `nix` (inside `nix develop`, with pinned scanner versions). |
 | **OCSF** | Open Cybersecurity Schema Framework — a standard schema for security telemetry. ASH can emit findings in OCSF format. |
 | **Phase** | A stage in the ASH pipeline: convert, scan, report, or inspect. Phases run sequentially in that order. |
 | **Plugin** | A self-contained extension that adds scanning, reporting, converting, or event-handling capability to ASH. |
-| **Pre-commit hook** | A Git hook that runs ASH automatically before each commit, scanning only staged files for fast feedback. |
+| **Pre-commit hook** | A Git hook that runs ASH automatically before each commit, with `--mode precommit`. It scans the whole working tree, not only the staged files. |
 | **Reporter** | A plugin that transforms aggregated SARIF findings into a specific output format (HTML, CSV, SARIF file, Security Hub, etc.). |
 | **Rule ID** | A unique identifier for a class of finding (e.g., `B105` for Bandit's hardcoded password check, `CKV_AWS_18` for a Checkov rule). |
 | **SARIF** | Static Analysis Results Interchange Format — an OASIS standard JSON format for static analysis output. ASH uses SARIF as its internal data model. |

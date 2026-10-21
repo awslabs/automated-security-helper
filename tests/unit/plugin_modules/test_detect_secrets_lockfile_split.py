@@ -37,6 +37,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
 )
 
+# The scanner's dependency check asked uv for detect-secrets' version (``uv tool run
+# detect-secrets --version``), so every scan here started the tool wherever uv could
+# reach it. The scan itself runs in ASH's worker, so the probes answer without a
+# process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
+
 # An obviously-fake credential in a private-index URL. detect-secrets' Basic Auth
 # Credentials plugin is what fires on it.
 _FAKE_INDEX_URL = "https://fake-user:fake-token-not-real@pypi.example.com/simple"  # pragma: allowlist secret

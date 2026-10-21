@@ -137,8 +137,10 @@ def run_scan(
         "--sandbox",
         mode,
         "--no-progress",
-        "--fail-on-findings",
-        "false",
+        # --fail-on-findings is an on/off flag. It was written here as
+        # `--fail-on-findings false`, which `ash scan` accepted while it ignored
+        # extra arguments, and which set the flag ON: the stray `false` was dropped.
+        "--no-fail-on-findings",
         "--no-fail-on-incomplete-scanners",
     ]
     for module in plugin_modules:

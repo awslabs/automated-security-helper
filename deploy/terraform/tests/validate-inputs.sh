@@ -386,9 +386,10 @@ run_case "shard_count 8 -> allowed" mustnot \
 run_case "min_severity outside ASH's ladder -> refused" must \
   "min_severity must be one of" \
   "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=catastrophic
-# ASH ranks no "info" level and does `_SEVERITY_RANK.get(value, 1)`, so it would
-# silently treat info as "low" — a gate running at a threshold nobody chose. This
-# validation is the only thing that turns that into an error.
+# ASH ranks no "info" level. 3.7.0 and 3.7.1 do `_SEVERITY_RANK.get(value, 1)`, so
+# they silently treat info as "low" — a gate running at a threshold nobody chose —
+# and releases after 3.7.1 refuse it as a usage error on every run. This validation turns
+# either into an error at plan time.
 run_case "min_severity info -> refused (ASH ranks no such level)" must \
   "min_severity must be one of" \
   "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=info

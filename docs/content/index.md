@@ -99,7 +99,7 @@ pip install .
 ## Basic Usage
 
 ```bash
-# Run a scan in local mode (Python only)
+# Run a scan in local mode (the scanner tools installed on this machine)
 ash --mode local
 
 # Run a scan in container mode (all tools)
@@ -143,9 +143,12 @@ To investigate...
   4. Review scanner-specific reports and outputs in the '.ash/ash_output/scanners' directory
 
 === ASH Exit Codes ===
-  0: Success - No actionable findings or not configured to fail on findings
-  1: Error during execution
-  2: Actionable findings detected when configured with `fail_on_findings: true`. Default is True. Current value: True
+  0: success
+  1: scan errors / scanner failures
+  2: actionable findings at or above threshold (fail_on_findings is true; default true)
+  3: invalid config or refused input
+  4: workspace definition or policy error
+  5: usage error
 ERROR (2) Exiting due to 122 actionable findings found in ASH scan
 ```
 
@@ -182,14 +185,16 @@ repos:
   - repo: https://github.com/awslabs/automated-security-helper
     rev: v3.7.0
     hooks:
-      - id: ash-simple-scan
+      - id: ash
 ```
 
 Run with:
 
 ```bash
-pre-commit run ash-simple-scan --all-files
+pre-commit run ash --all-files
 ```
+
+The `ash` hook runs bandit, detect-secrets, checkov, cdk-nag and npm-audit. It needs pre-commit running on Python 3.10 to 3.14, and Node.js and npm on `PATH` for cdk-nag and npm-audit. `ash-simple-scan` is the same hook under its earlier id. See [Using ASH with pre-commit](tutorials/using-ash-with-pre-commit.md) for running without Node.js and for the container hook, `ash-full-scan`.
 
 ## Output Files
 
@@ -219,6 +224,12 @@ ASH can be run in container mode in any CI/CD environment that supports containe
 <summary>How do I exclude files from scanning?</summary>
 
 ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries record how many files the ignore files excluded, and `--no-honor-ignore-files` (or `honor_ignore_files: false` in a config file outside the scanned tree) scans those files too. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
+</details>
+
+<details>
+<summary>Does ASH scan its own output, or the templates in cdk.out?</summary>
+
+ASH leaves its own output out of the scan, whether or not `.gitignore` lists it: the output directory of the current scan, and `.ash/ash_output` under the scanned directory and under the directory ASH runs from. In a git checkout, regular files committed to one of those directories are still scanned (a committed link is not), and ASH warns that its output directory holds committed files. Outside a git checkout, or when git cannot list the repository, only the current scan's output directory is left out: an earlier run's `.ash/ash_output` is scanned like the rest of the tree, and ASH warns once per scan while the scan set still holds files in it, naming it and saying how to leave it out: delete it, or list it in an ignore file such as `.gitignore`. Adding it to `global_settings.ignore_paths` leaves its findings out, but the scan still reads it, so the warning repeats until the directory is deleted or an ignore file lists it. The output directory is recognized when it or the scanned directory is given through a link above the tree, as `/var` is on macOS. A scan does not delete or overwrite a committed file: when git tracks one where a scan writes its output (`ash_aggregated_results.json`, `ash-ignore-report.txt`, `ash-scan-set-files-list.txt`, `ash-scan-set-run.json`, `ash.log`, `ash.log.jsonl`, `.ash_previous_results_restored`, or anything under `analysis/`, `reports/`, `scanners/`, `converted/`, `.ash_previous_results/` or `.ash_previous_results.partial/`), the scan exits 3 before it deletes or writes anything, in every mode and from the MCP server. When git cannot list the repository the output directory is in (git is not installed, or it fails on the repository), any file at one of those paths stops the scan the same way, and the message names git's error and says to let git read the repository or remove the old results. A report over existing results (`--use-existing`) is stopped only where it writes: the results file, the logs, `reports/`, and `analysis/` with `--inspect` or `converted/` with `--cleanup`. A `.ash/ash_output` that is a link, or that a link inside the scanned directory leads to, is not taken as ASH's output, however the path to it is spelled, and a scan into an output directory git tracks as a link exits 3. The trivy-repo plugin still reads those directories, and ASH drops the findings it reports there, except in committed files. Any other directory is scanned, even one holding an earlier run's or another shard's results; ASH warns when a directory holds `ash_aggregated_results.json`, or both `ash-ignore-report.txt` and `ash-scan-set-files-list.txt`. Write shard output outside the scanned directory, or list it in `.gitignore`. CloudFormation templates that `cdk synth` writes (`*.template.json`) are scanned even when `.gitignore` excludes `cdk.out`, so cdk-nag and cfn-nag check them; the rest of the `cdk.out` directory stays excluded.
 </details>
 
 <details>

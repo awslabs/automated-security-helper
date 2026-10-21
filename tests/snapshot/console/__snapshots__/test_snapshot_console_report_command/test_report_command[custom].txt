@@ -1,5 +1,7 @@
 $ ash report --format custom --log-level ERROR
-[exit 1]
+[exit 5]
+
+[stderr]
 Error: Reporter plugin 'custom' not found.
 Available reporter formats:
   - csv

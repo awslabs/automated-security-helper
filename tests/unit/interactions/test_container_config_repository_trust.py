@@ -40,6 +40,7 @@ from tests.utils.config_link_layouts import (
     config_through_a_link_in,
     config_through_links,
 )
+from tests.utils.helpers import mark_git_checkout
 
 FLAG = "--config-from-scanned-repository"
 #: A module no environment has: a config inside the tree may not add it.
@@ -87,7 +88,7 @@ def _inner_args(cmd: List[str]) -> List[str]:
 def checkout(tmp_path) -> Dict[str, Path]:
     """A git checkout whose scan root is a subdirectory, with an operator dir beside it."""
     root = tmp_path / "repo"
-    (root / ".git").mkdir(parents=True)
+    mark_git_checkout(root)
     source = root / "services" / "api"
     source.mkdir(parents=True)
     (root / "ci").mkdir()
@@ -139,7 +140,7 @@ class TestTheHostTellsTheContainer:
         """As locally: a config inside any git checkout cannot grant, not only one in
         the checkout being scanned."""
         ops = tmp_path / "ops"
-        (ops / ".git").mkdir(parents=True)
+        mark_git_checkout(ops)
         config = ops / "ash.yaml"
         config.write_text("project_name: p\n", encoding="utf-8")
 
@@ -266,6 +267,45 @@ class TestTheScanInsideAppliesTheSameLimits:
 
         assert result.exit_code == 3, result.output
         assert FLAG in result.output
+
+    def test_the_mark_needs_a_config_beside_the_hosts_ash_config(
+        self, monkeypatch, tmp_path
+    ):
+        """The chain mark marks the --config file and the files it extends:
+        with only --ash-config-from-host there is nothing it names, so the
+        inner CLI refuses with exit 3 before any scan starts, rather than
+        marking the host's ASH_CONFIG chain by accident."""
+        from automated_security_helper.cli import scan as scan_cli
+        from automated_security_helper.cli.main import app
+
+        monkeypatch.setenv("COLUMNS", "400")
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.chdir(tmp_path)
+        env_config = tmp_path / "env" / "ash-env.yaml"
+        env_config.parent.mkdir()
+        env_config.write_text("project_name: e\n", encoding="utf-8")
+        (tmp_path / "src").mkdir()
+        started = []
+        monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: started.append(kw))
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--source-dir",
+                str(tmp_path / "src"),
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--no-progress",
+                FLAG,
+                "--ash-config-from-host",
+                str(env_config),
+            ],
+        )
+
+        assert result.exit_code == 3, result.output
+        assert started == []
+        assert "marks the --config file and every" in " ".join(result.output.split())
 
     def test_a_marked_config_is_limited_with_a_warning_as_on_the_host(
         self, checkout, monkeypatch, tmp_path
@@ -452,7 +492,10 @@ class TestTheScanInsideAppliesTheSameLimits:
         assert seen["ASH_CONFIG"] == str(env)
         assert seen["kwargs"]["config"] is None
         assert seen["env"] == [env.resolve()]
-        assert "ASH_CONFIG" not in os.environ
+        # Membership over the NAMES only: a failed assert over the mapping
+        # itself, or over its .get, makes pytest print every environment
+        # value (the meta-test in tests/unit pins this file to this shape).
+        assert "ASH_CONFIG" not in set(os.environ)
         assert repository_written([env.resolve()], source) == []
 
     def test_a_file_mark_in_neither_chain_is_a_usage_error_with_ash_config(
@@ -484,7 +527,8 @@ class TestTheScanInsideAppliesTheSameLimits:
 
         assert result.exit_code == 3, result.output
         assert rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG in result.output
-        assert "ASH_CONFIG" not in os.environ
+        # As above: membership over the names only, never the mapping itself.
+        assert "ASH_CONFIG" not in set(os.environ)
 
     def test_the_host_hands_its_ash_config_file_to_the_scan_inside(
         self, checkout, monkeypatch, tmp_path

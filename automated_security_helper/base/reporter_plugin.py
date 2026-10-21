@@ -124,6 +124,9 @@ class ReporterWorkspaceBehaviour(str, Enum):
 
 
 class ReporterPluginConfigBase(PluginConfigBase):
+    SECTION_SEGMENT: ClassVar[str] = "reporters"
+    GENERIC_SECTION: ClassVar[bool] = True
+
     options: Annotated[ReporterOptionsBase, Field(description="Reporter options")] = (
         ReporterOptionsBase()
     )
@@ -408,6 +411,41 @@ def warn_off_host_section_without_enabled(
         "Its config section sets options but not 'enabled', so it does not run. "
         f"To run it, set reporters.{key}.enabled: true in the operator's config, or "
         f"pass --config-overrides reporters.{key}.enabled=true."
+    )
+
+
+def reporter_classes_for_run(
+    plugin_modules: Iterable[object], *, manager: Any = None
+) -> list:
+    """The reporter classes one run may use: ASH's built-ins and the modules it names.
+
+    The plugin registry is process-wide, and a module registers its reporters the
+    first time anything in the process imports it: an earlier scan, an MCP
+    session, a test. Reading the whole registry gave a run every reporter the
+    process had ever loaded, and the run then built, checked and ran the enabled
+    ones, a dependency check that calls STS included. A scan's engine keeps to its
+    own modules (``loader.plugins_of``); workspace reporting, ``ash report`` and
+    ``ash merge`` take their candidates from here, with the modules their run
+    names (``ash_plugin_modules`` in its configuration, plus any it was given on
+    the command line). A report phase runs only the list its caller gives it.
+
+    Which of them run is decided after this, in the same order at every site:
+    enabled (and, for an off-host reporter, enabled by its section,
+    ``off_host_reporter_refused``), then selected by the requested output
+    formats, then the dependency check, for those alone.
+
+    ``manager`` is the plugin manager to read, ``ash_plugin_manager`` by default;
+    a caller passes the one it imported so a test that stands in for it sees
+    this call too.
+    """
+    from automated_security_helper.plugins.loader import plugins_of
+
+    if manager is None:
+        from automated_security_helper.plugins import ash_plugin_manager
+
+        manager = ash_plugin_manager
+    return list(
+        manager.plugin_modules("reporter", filter_callback=plugins_of(plugin_modules))
     )
 
 

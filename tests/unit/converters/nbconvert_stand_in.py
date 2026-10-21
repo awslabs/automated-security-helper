@@ -58,6 +58,30 @@ def notebook_patterns(args: list[str]) -> list[str]:
     return patterns
 
 
+def accept_stand_in_nbconvert(monkeypatch) -> list[str]:
+    """Take any jupyter-nbconvert as one whose nbconvert satisfies ``tool_version``.
+
+    The converter runs a jupyter-nbconvert from PATH only once
+    ``verify_pre_installed_tool`` says its nbconvert satisfies the requirement, and a
+    stand-in script belongs to no nbconvert distribution, so none would run. Tests
+    about anything but that check use this; the check itself is
+    test_nbconvert_runs_directly_only_once_verified's subject. Returns the list of
+    executables the converter asked about, in order.
+    """
+    from automated_security_helper.utils import pre_installed_tool
+
+    asked: list[str] = []
+
+    def satisfied(executable, package, *args, **kwargs):
+        asked.append(executable)
+        return pre_installed_tool.PreInstalledToolVerdict(
+            "satisfied", executable, package, ""
+        )
+
+    monkeypatch.setattr(pre_installed_tool, "verify_pre_installed_tool", satisfied)
+    return asked
+
+
 def expand(pattern: str) -> list[str]:
     """``NbConvertApp.init_notebooks`` for one pattern."""
     found = glob.glob(pattern) + glob.glob(pattern + ".ipynb")

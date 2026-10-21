@@ -22,10 +22,11 @@ not have to relearn the first four codes:
 * ``0`` success.
 * ``1`` scan errors / scanner failures. A workspace-mode internal error -- ASH
   itself failed and reached no verdict -- is a case of this.
-* ``2`` actionable findings above threshold. Workspace mode uses this for
+* ``2`` actionable findings at or above threshold. Workspace mode uses this for
   exactly that: a project exceeded its effective threshold, consistently with
   single-project mode.
-* ``3`` invalid config. A project's own config being unusable is a case of this.
+* ``3`` invalid config or refused input. A project's own config being unusable is
+  a case of this.
 * ``4`` workspace definition or policy error -- the workspace file, a project
   path, or a workspace-level policy is not usable. NOTHING WAS SCANNED.
 
@@ -40,7 +41,7 @@ This is a deliberate deviation from the RFC, not a transcription error.
 The RFC assigned "workspace definition or policy error" to exit code 2. But 2
 was already published, in
 ``automated_security_helper.core.constants.ASH_EXIT_CODES``, as "actionable
-findings above threshold" -- exposed as an MCP resource and pinned by
+findings at or above threshold" -- exposed as an MCP resource and pinned by
 ``tests/unit/cli/mcp/test_exit_codes_resource.py``. It is also the ordinary,
 expected result of a scan that worked: ``_compute_exit_code`` in
 ``run_ash_scan`` returns 2 whenever there are actionable findings.
@@ -159,7 +160,10 @@ from __future__ import annotations
 from enum import Enum, IntEnum
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
 
-from pydantic import BaseModel, Field, PrivateAttr, computed_field
+from pydantic import Field, PrivateAttr, computed_field
+
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.utils.undecodable_text import RecordModel
 
 from automated_security_helper.models.core import IgnoreFileExclusions
 
@@ -171,6 +175,8 @@ class WorkspaceExitCode(IntEnum):
     ``sys.exit`` without conversion at the call site.
 
     Every value agrees with ``ASH_EXIT_CODES``; only ``WORKSPACE_ERROR`` is new.
+    ``USAGE_ERROR`` is the CLI-wide code for a refused command line, listed here
+    because a workspace-mode invocation can exit with it too.
     ``ACTIONABLE_FINDINGS`` is modelled here rather than left as a bare literal
     because workspace mode really does return it -- a project over its
     effective threshold -- and a call site should not have to hardcode 2.
@@ -184,18 +190,25 @@ class WorkspaceExitCode(IntEnum):
     ACTIONABLE_FINDINGS = 2
     INVALID_PROJECT_CONFIG = 3
     WORKSPACE_ERROR = 4
+    # Not a verdict over projects either: the command line was refused before any
+    # workspace was resolved. Taken from ASH_EXIT_CODES' own name, so the number
+    # is defined once.
+    USAGE_ERROR = ASH_EXIT_USAGE_ERROR
 
 
 # Descriptions keyed by code, mirroring the shape of ASH_EXIT_CODES so the MCP
 # resource can serialise either table the same way. The wording matches
-# ASH_EXIT_CODES for the four shared codes, because they are the same codes --
+# ASH_EXIT_CODES for every shared code, because they are the same codes --
 # not a parallel vocabulary for them.
 WORKSPACE_EXIT_CODES: Dict[int, str] = {
     WorkspaceExitCode.SUCCESS.value: "success",
     WorkspaceExitCode.INTERNAL_ERROR.value: "scan errors / scanner failures",
-    WorkspaceExitCode.ACTIONABLE_FINDINGS.value: "actionable findings above threshold",
-    WorkspaceExitCode.INVALID_PROJECT_CONFIG.value: "invalid config",
+    WorkspaceExitCode.ACTIONABLE_FINDINGS.value: (
+        "actionable findings at or above threshold"
+    ),
+    WorkspaceExitCode.INVALID_PROJECT_CONFIG.value: "invalid config or refused input",
     WorkspaceExitCode.WORKSPACE_ERROR.value: "workspace definition or policy error",
+    WorkspaceExitCode.USAGE_ERROR.value: "usage error",
 }
 
 
@@ -216,7 +229,7 @@ class SkippedProjectReason(str, Enum):
         return self is SkippedProjectReason.ERROR
 
 
-class SkippedProject(BaseModel):
+class SkippedProject(RecordModel):
     """One entry of the ``workspace.skipped_projects`` payload."""
 
     project: Annotated[
@@ -263,7 +276,7 @@ class ProjectRunStatus(str, Enum):
     FAILED = "failed"
 
 
-class ProjectInputNotScanned(BaseModel):
+class ProjectInputNotScanned(RecordModel):
     """One input a project's scanner found and did not scan, and why."""
 
     scanner: Annotated[str, Field(..., min_length=1, description="The scanner.")]
@@ -289,7 +302,7 @@ class ProjectInputNotScanned(BaseModel):
 SCANNER_EXIT_CODE_UNRECORDED = 125
 
 
-class WorkspaceProjectResult(BaseModel):
+class WorkspaceProjectResult(RecordModel):
     """One project's outcome, as it appears in the aggregated results."""
 
     model_config = {"extra": "allow"}
@@ -415,6 +428,20 @@ class WorkspaceProjectResult(BaseModel):
             description="Final status per scanner name, for this project alone.",
         ),
     ]
+    scanner_reasons: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Why each SKIPPED, MISSING or ERROR scanner gave no result, for "
+                "this project alone: a SKIPPED or MISSING row's skipped_reason or "
+                "missing_reason, and the first error an ERROR scanner's reports "
+                "recorded, such as a constructor that raised. A scanner that ran, "
+                "or that recorded no reason, is not listed. Empty in a workspace "
+                "file written before the field existed."
+            ),
+        ),
+    ]
     incomplete_scanners: Annotated[
         List[str],
         Field(
@@ -426,7 +453,47 @@ class WorkspaceProjectResult(BaseModel):
                 "the risk and has not asked to be told the scan was complete. Read "
                 "through the unified metrics rather than off `scanners`, so a "
                 "scanner the operator excluded on a host that also lacks its tool "
-                "reads SKIPPED here rather than MISSING."
+                "reads SKIPPED here rather than MISSING. A scanner listed only for "
+                "a stale content database is not here; see stale_content_databases."
+            ),
+        ),
+    ]
+    incomplete_scanner_details: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Each incomplete scanner's display status as the completeness "
+                "gate reports it -- the bare status, or the status followed by "
+                "the unevaluated-target counts for a partial audit. Keyed by the "
+                "names in incomplete_scanners; empty in results files written "
+                "before the field existed, where a reader falls back to the "
+                "status."
+            ),
+        ),
+    ]
+    partial_coverage_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "The incomplete scanners whose recorded counts show a partial "
+                "audit (some targets evaluated, some not), whatever status the "
+                "writer graded. A coverage row for one carries the reason "
+                "partial_coverage rather than its status token. Empty in results "
+                "files written before the field existed."
+            ),
+        ),
+    ]
+    stale_content_databases: Annotated[
+        List[Dict[str, Any]],
+        Field(
+            default_factory=list,
+            description=(
+                "Content databases past their declared age bound under "
+                "content_db_staleness: fail, each as the single-scan MCP payload "
+                "reports it. A stale database fails the project (scan_incomplete) "
+                "whatever fail_on_incomplete_scanners says."
             ),
         ),
     ]
@@ -579,7 +646,7 @@ class WorkspaceProjectResult(BaseModel):
         return self._scanner_exit_codes
 
 
-class WorkspaceResults(BaseModel):
+class WorkspaceResults(RecordModel):
     """Everything a workspace scan concluded, keyed under ``workspace``."""
 
     model_config = {"extra": "allow"}

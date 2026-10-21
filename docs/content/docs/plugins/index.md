@@ -78,7 +78,7 @@ ASH_CONVERTERS = [MyCustomConverter]
 Add your custom plugin module to the ASH configuration:
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 ash_plugin_modules:
   - my_ash_plugins
 ```

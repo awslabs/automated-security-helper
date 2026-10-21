@@ -23,6 +23,7 @@ import pytest
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.utils.helpers import mark_git_checkout
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +64,7 @@ def layout(tmp_path, monkeypatch):
     """An operator directory holding a checkout whose scan root is ``repo/src``."""
     operator = tmp_path / "operator"
     repo = operator / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     (repo / "src" / ".ash").mkdir(parents=True)
     (operator / "operator-only.yaml").write_text("project_name: p\n", encoding="utf-8")
     monkeypatch.chdir(operator)

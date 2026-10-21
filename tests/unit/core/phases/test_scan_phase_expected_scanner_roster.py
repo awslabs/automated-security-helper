@@ -119,19 +119,20 @@ def _run_phase(tmp_path, plugin_classes, load_errors=None):
 
     double.run_parallel.side_effect = _run
     double.run_sequential.side_effect = _run
-    # Patched on the loader rather than on scan_phase: the phase imports it inside
-    # the function (a module-level import creates a pydantic forward-reference cycle
-    # through config.ash_config), so the name is resolved from the loader at call
-    # time and that is where the patch has to land.
+    # Written into the context's own record rather than patched on the loader:
+    # the failure record is run-scoped, carried by the PluginContext, and the
+    # phase reads it from there.
+    from automated_security_helper.plugins.loader import PluginLoadFailure
+
+    context.plugin_load_record = {
+        name: PluginLoadFailure(recorded=text)
+        for name, text in (load_errors or {}).items()
+    }
     with patch(
-        "automated_security_helper.plugins.loader.plugin_load_errors",
-        return_value=dict(load_errors or {}),
-    ):
-        with patch(
-            "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
-        ) as executor:
-            executor.return_value = double
-            return phase._execute_phase(aggregated_results=aggregated)
+        "automated_security_helper.core.phases.scan_phase.ScannerExecutor"
+    ) as executor:
+        executor.return_value = double
+        return phase._execute_phase(aggregated_results=aggregated)
 
 
 def test_the_builtin_module_prefix_matches_a_real_builtin_scanner():

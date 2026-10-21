@@ -982,6 +982,8 @@ def check_config_input(
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         env_refused_for,
+        is_config_parse_error,
+        unparsed_config_reason,
     )
     from automated_security_helper.config.resolve_config import (
         CLIENT_FILE,
@@ -1051,6 +1053,19 @@ def check_config_input(
         return ConfigInputCheck(
             load_error=_config_load_error(config_path, exc), document=document
         )
+    except Exception as exc:
+        # A parser's message can quote the file's text (an undefined alias, an
+        # unknown tag), so a file that does not parse is reported through the
+        # formatted reason, never the parser's words. Anything that is not a
+        # parse refusal propagates.
+        if not is_config_parse_error(exc):
+            raise
+        return ConfigInputCheck(
+            load_error=_config_load_error(
+                config_path, unparsed_config_reason(path, exc)
+            ),
+            document=document,
+        )
     except BaseException as exc:
         # As resolve_config refuses it: pydantic-core reports a Rust panic as
         # pyo3's PanicException, a BaseException, which would otherwise reach
@@ -1079,6 +1094,63 @@ def _config_load_error(config_path: object, reason: object) -> MCPResourceError:
             "config_path": str(config_path),
             "error_category": ErrorCategory.INVALID_FORMAT.value,
         },
+    )
+
+
+def validate_discovered_config(
+    source_dir: str | Path,
+    session_id: Optional[str] = None,
+) -> Optional[MCPResourceError]:
+    """Check the config a scan of ``source_dir`` discovers, as a named one is checked.
+
+    A scan given no config file uses the one it finds in its target
+    (``config_sources.discover_config_source``), and that file can be a link out
+    of the permitted roots. Only its ``extends`` bases were checked, so for a
+    remote caller the outside file was read: one that parsed configured the scan,
+    and one that did not failed the scan on the outside file.
+
+    Every name discovery looks at that is there is checked before discovery runs
+    (``config_sources.discovery_candidates``): ``pyproject.toml``, which
+    discovery reads to learn whether it configures ASH, and a link to a missing
+    target, which discovery skips, so that it is refused as a link to a present
+    file is and the answer does not say whether the target exists. The file
+    discovery selects then goes through :func:`validate_config_chain`. A
+    discovery that fails is left to the scan, which reports it as it always has.
+
+    Args:
+        source_dir: The scan target, already checked against the scan roots.
+        session_id: The session this call acts for.
+
+    Returns:
+        None if permitted, otherwise an :class:`MCPResourceError`.
+    """
+
+    from automated_security_helper.config.config_sources import (
+        discover_config_source,
+        discovery_candidates,
+    )
+
+    source_dir = Path(source_dir)
+    # Every name discovery looks at that is there, a link to a missing target
+    # included, and the pyproject.toml discovery reads among them: refused the
+    # same whether or not the target exists.
+    for candidate in discovery_candidates(source_dir):
+        refusal = validate_config_input(candidate, session_id=session_id)
+        if refusal is not None:
+            return refusal
+    try:
+        selected = discover_config_source(source_dir).selected
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        # The type alone: a parser's message can quote the file's text, and
+        # discovery has no one file to name here.
+        _logger.debug(
+            "MCP sandbox: config discovery not done here (%s)", type(exc).__name__
+        )
+        return None
+    if selected is None:
+        return None
+    return validate_config_chain(
+        selected.path, session_id=session_id, source_dir=source_dir
     )
 
 

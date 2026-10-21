@@ -36,9 +36,16 @@ from automated_security_helper.utils.pre_installed_tool import (
     reset_pre_installed_tool_cache,
 )
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="nixpkgs wrappers are POSIX shell scripts"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        sys.platform == "win32", reason="nixpkgs wrappers are POSIX shell scripts"
+    ),
+    # The unit tests' tool guard would answer for uv; these tests need uv's own
+    # `uv pip install --dry-run` verdict, run offline with no cache or config.
+    pytest.mark.runs_real_tools(
+        reason="the real uv judges the nix checkov, offline, with no cache or config"
+    ),
+]
 
 BASH = shutil.which("bash") or "/bin/bash"
 
@@ -146,7 +153,8 @@ def nix_mode(tmp_path, monkeypatch):
         monkeypatch.setenv("PATH", f"{wrapper.parent}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setenv("ASH_OFFLINE", "YES")
         recorder = UvToolRecorder(subprocess.run)
-        monkeypatch.setattr(subprocess, "run", recorder)
+        # Every uv and tool run here starts through ASH's plain runner.
+        monkeypatch.setattr(subprocess_utils, "_run_plain", recorder)
         return wrapper, recorder
 
     return make

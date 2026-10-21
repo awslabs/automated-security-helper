@@ -2,10 +2,14 @@
 
 import logging
 from rich.console import RenderableType
+from rich.highlighter import ReprHighlighter
 from rich.text import Text
 from rich.table import Table
 from collections import deque
 import sys
+
+from automated_security_helper.utils.log import ShownHandlerErrors, console_text
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 
 class RichLogPanel:
@@ -16,11 +20,17 @@ class RichLogPanel:
 
         Args:
             max_lines: Maximum number of log lines to keep in the buffer
-            use_markup: Whether to interpret Rich markup in log messages
+            use_markup: Whether a message logged with ``extra=MARKUP`` (see
+                utils/log.py) is read as Rich markup. Every other message is text
+                either way, as on the console handler: a table cell given a plain
+                string reads it as markup, so a path or exception text holding
+                ``[/x]`` raised MarkupError inside the live display, and
+                ``[bold]`` vanished.
         """
         self.logs = deque(maxlen=max_lines)
         self.max_lines = max_lines
         self.use_markup = use_markup
+        self._highlighter = ReprHighlighter()
 
         # Map log levels to their display names
         self.level_names = {
@@ -33,15 +43,20 @@ class RichLogPanel:
             5: "TRAC",  # TRACE
         }
 
-    def add_log(self, message: str, level: int = logging.INFO):
+    def add_log(self, message: str, level: int = logging.INFO, markup: bool = False):
         """Add a log message to the panel.
 
         Args:
             message: The log message
             level: The log level
+            markup: Whether the record asked for Rich markup (``extra=MARKUP``)
         """
-        # Store the log entry as a tuple of (level, message)
-        self.logs.append((level, message))
+        # Stored as Text, so the table renders it without reading markup in it. The
+        # highlighter is the one a printed string gets.
+        text = (
+            Text.from_markup(message) if markup and self.use_markup else Text(message)
+        )
+        self.logs.append((level, self._highlighter(text)))
 
     def __rich__(self) -> RenderableType:
         """Make the log panel renderable for Rich."""
@@ -79,7 +94,7 @@ class RichLogPanel:
             # Add the row to the table - only colorize the level column
             table.add_row(
                 f"[{level_style}]{level_name}[/{level_style}]",
-                message,  # No styling applied to message, respects any markup in the message
+                message,  # Text, built in add_log
             )
 
         # Pad to a fixed height so the panel does not change size as records
@@ -92,8 +107,12 @@ class RichLogPanel:
         return table
 
 
-class LiveDisplayLogHandler(logging.Handler):
-    """A log handler that sends log messages to a Rich log panel."""
+class LiveDisplayLogHandler(ShownHandlerErrors, logging.Handler):
+    """A log handler that sends log messages to a Rich log panel.
+
+    A record it cannot add is reported as ShownHandlerErrors reports one: the
+    traceback shown, not obeyed.
+    """
 
     def __init__(self, log_panel: RichLogPanel, level: int = logging.INFO):
         """Initialize the handler.
@@ -112,8 +131,14 @@ class LiveDisplayLogHandler(logging.Handler):
             record: The log record to process
         """
         try:
-            message = self.format(record)
-            self.log_panel.add_log(message, record.levelno)
+            # As the console prints it: terminal controls shown, not obeyed.
+            message = console_text(record, self.format(record))
+            self.log_panel.add_log(
+                message, record.levelno, markup=getattr(record, "markup", False)
+            )
         except Exception as e:
-            print(f"ERROR in LiveDisplayLogHandler: {e}", file=sys.stderr)
+            print(
+                shown_not_obeyed(f"ERROR in LiveDisplayLogHandler: {e}"),
+                file=sys.stderr,
+            )
             self.handleError(record)

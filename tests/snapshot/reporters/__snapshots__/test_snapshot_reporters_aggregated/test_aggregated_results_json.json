@@ -2,7 +2,7 @@
   "name": "ASH Scan 2026-01-15T12:00:00",
   "description": "Aggregated security scan results",
   "metadata": {
-    "report_id": "ASH-20260115",
+    "report_id": "ASH-20260115120000-000000000001",
     "generated_at": "2026-01-15T12:00:00+00:00",
     "project_name": "ASH",
     "tool_version": "<ASH_VERSION>",
@@ -235,6 +235,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "confidence_level": "all",
           "ignore_nosec": false,
@@ -250,6 +251,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "nag_packs": {
             "AwsSolutionsChecks": true,
             "HIPAASecurityChecks": false,
@@ -292,7 +294,8 @@
         "enabled": true,
         "options": {
           "severity_threshold": null,
-          "scan_timeout": 1800
+          "scan_timeout": 1800,
+          "offline": false
         }
       },
       "checkov": {
@@ -301,12 +304,12 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "skip_path": [],
           "additional_formats": [
             "cyclonedx_json"
           ],
-          "offline": false,
           "frameworks": [
             "all"
           ],
@@ -322,6 +325,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "baseline_file": null,
           "scan_settings": {
             "version": null,
@@ -330,7 +334,8 @@
             "filters_used": [],
             "results": {}
           },
-          "skip_generated_lockfiles": true
+          "skip_generated_lockfiles": true,
+          "max_worker_output_mib": 256
         }
       },
       "gitleaks": {
@@ -351,8 +356,8 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
-          "config_file": null,
-          "offline": false
+          "offline": false,
+          "config_file": null
         }
       },
       "npm-audit": {
@@ -370,6 +375,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config": "p/ci",
           "exclude": [
             "*-converted.py",
@@ -378,7 +384,6 @@
           "exclude_rule": [],
           "severity": [],
           "metrics": "auto",
-          "offline": false,
           "patterns": [],
           "version": "v1.30.2",
           "sha256": {}
@@ -390,6 +395,7 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config": "p/ci",
           "exclude": [
             "*-converted.py",
@@ -398,7 +404,6 @@
           "exclude_rule": [],
           "severity": [],
           "metrics": "auto",
-          "offline": false,
           "tool_version": null,
           "install_timeout": 300
         }
@@ -409,12 +414,12 @@
         "options": {
           "severity_threshold": null,
           "scan_timeout": 1800,
+          "offline": false,
           "config_file": null,
           "exclude": [],
           "additional_outputs": [
             "syft-table"
-          ],
-          "offline": false
+          ]
         }
       },
       "trivy": {
@@ -573,6 +578,7 @@
         "extension": "yaml"
       }
     },
+    "output_formats": [],
     "mcp-resource-management": {
       "max_concurrent_scans": 3,
       "max_concurrent_scans_per_session": 2,
@@ -613,9 +619,10 @@
       "finding_count": 0,
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
-      "exit_code": 0,
+      "exit_code": null,
       "duration": 0.0,
-      "missing_reason": null
+      "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
+      "skipped_reason": null
     },
     "cdk-nag": {
       "status": "SKIPPED",
@@ -632,9 +639,10 @@
       "finding_count": 0,
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
-      "exit_code": 0,
+      "exit_code": null,
       "duration": 0.0,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": "left out of this run"
     },
     "bandit": {
       "status": "FAILED",
@@ -653,7 +661,8 @@
       "suppressed_finding_count": 0,
       "exit_code": 0,
       "duration": 1.25,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     },
     "cfn-nag": {
       "status": "ERROR",
@@ -670,9 +679,10 @@
       "finding_count": 0,
       "actionable_finding_count": 0,
       "suppressed_finding_count": 0,
-      "exit_code": 0,
+      "exit_code": 1,
       "duration": 0.25,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     },
     "checkov": {
       "status": "FAILED",
@@ -691,7 +701,8 @@
       "suppressed_finding_count": 0,
       "exit_code": 0,
       "duration": 7.5,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     },
     "detect-secrets": {
       "status": "PASSED",
@@ -710,7 +721,8 @@
       "suppressed_finding_count": 1,
       "exit_code": 0,
       "duration": 0.5,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     },
     "grype": {
       "status": "FAILED",
@@ -729,7 +741,8 @@
       "suppressed_finding_count": 0,
       "exit_code": 0,
       "duration": 3.0,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     },
     "semgrep": {
       "status": "PASSED",
@@ -748,7 +761,8 @@
       "suppressed_finding_count": 0,
       "exit_code": 0,
       "duration": 4.0,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     },
     "syft": {
       "status": "PASSED",
@@ -767,7 +781,8 @@
       "suppressed_finding_count": 0,
       "exit_code": 0,
       "duration": 2.0,
-      "missing_reason": null
+      "missing_reason": null,
+      "skipped_reason": null
     }
   },
   "converter_results": {},
@@ -1316,7 +1331,7 @@
                   "tool_name": "cfn-nag",
                   "tool_version": "0.8.10",
                   "tool_invocation": {
-                    "exit_code": 0,
+                    "exit_code": 1,
                     "duration": 0.25,
                     "start_time": "2026-01-15T12:00:18.250000+00:00",
                     "end_time": "2026-01-15T12:00:18.500000+00:00"
@@ -2575,6 +2590,7 @@
         "report_type": "sarif",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 0,
         "finding_count": 2,
         "start_time": "2026-01-15T12:00:00Z",
         "end_time": "2026-01-15T12:00:01.250000Z",
@@ -2595,6 +2611,7 @@
         "report_type": "sarif",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 0,
         "finding_count": 4,
         "start_time": "2026-01-15T12:00:01.250000Z",
         "end_time": "2026-01-15T12:00:08.750000Z",
@@ -2616,6 +2633,7 @@
         "report_type": "sarif",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 0,
         "finding_count": 2,
         "start_time": "2026-01-15T12:00:08.750000Z",
         "end_time": "2026-01-15T12:00:12.750000Z",
@@ -2636,6 +2654,7 @@
         "report_type": "sarif",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 0,
         "finding_count": 1,
         "start_time": "2026-01-15T12:00:12.750000Z",
         "end_time": "2026-01-15T12:00:13.250000Z",
@@ -2655,6 +2674,7 @@
         "report_type": "sarif",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 0,
         "finding_count": 2,
         "start_time": "2026-01-15T12:00:13.250000Z",
         "end_time": "2026-01-15T12:00:16.250000Z",
@@ -2675,6 +2695,7 @@
         "report_type": "cyclonedx",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 0,
         "start_time": "2026-01-15T12:00:16.250000Z",
         "end_time": "2026-01-15T12:00:18.250000Z",
         "duration": 2.0,
@@ -2690,6 +2711,7 @@
         "report_type": "sarif",
         "target": "<REPO>/tests/test_data/snapshot_fixture/repo",
         "target_type": "source",
+        "exit_code": 1,
         "finding_count": 0,
         "start_time": "2026-01-15T12:00:18.250000Z",
         "end_time": "2026-01-15T12:00:18.500000Z",

@@ -152,9 +152,18 @@ def scanner_context(tmp_path):
 
 @pytest.fixture
 def install_commands_when_cdk_missing(
-    scanner_context: PluginContext,
+    scanner_context: PluginContext, monkeypatch: pytest.MonkeyPatch
 ) -> list[list[str]]:
-    """The commands emitted when the CDK dependencies are not importable."""
+    """The commands emitted when the CDK dependencies are not importable.
+
+    In an environment with pip, so the command is the pip form these tests read; the
+    uv form for an environment without pip is covered in
+    tests/unit/utils/test_python_package_installs.py.
+    """
+    from automated_security_helper.utils import python_installer
+
+    monkeypatch.setattr(python_installer, "pip_is_importable", lambda: True)
+    monkeypatch.setattr(python_installer, "is_uv_tool_environment", lambda: False)
     with patch.object(cdk_nag_scanner_module, "_CDK_AVAILABLE", False):
         scanner = CdkNagScanner(context=scanner_context)
         return scanner.get_installation_commands("linux", "amd64")

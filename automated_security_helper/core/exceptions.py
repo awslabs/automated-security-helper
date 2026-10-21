@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 
 class ScannerError(Exception):
@@ -10,8 +10,67 @@ class ASHValidationError(Exception):
     """Exception raised when an ASH component fails to validate."""
 
 
-class ASHConfigValidationError(ASHValidationError):
-    """Exception raised when an AshConfig is invalid."""
+class OrchestratorAlreadyUsedError(ASHValidationError):
+    """A second execute_scan was called on one ASHScanOrchestrator.
+
+    The orchestrator is single-scan: its run id is per instance and never
+    refreshed, the scan set is recorded under that id, and reading the scan
+    set with the same id returns the recorded list instead of walking again
+    (by design, so plugins reread their own scan's list). A second scan on
+    the same instance would therefore silently reuse the first scan's file
+    list. Build a new ASHScanOrchestrator for a new scan.
+    """
+
+
+class ASHConfigValidationError(ASHValidationError, ValueError):
+    """Exception raised when an AshConfig is invalid.
+
+    A ValueError, as pydantic's ValidationError is, so code that catches either
+    with ``except ValueError`` catches this too. A pydantic validator that raises
+    it has it reported as a validation error.
+
+    ``validation_error`` is the pydantic ValidationError a model refusal was
+    described from, when there is one, for code that reads its fields. It is
+    kept here and not chained as ``__cause__``: the message is redacted, and a
+    traceback (or ``logger.exception``) prints a chained cause in full, and
+    pydantic's text quotes every input, values read from the environment
+    included. The sites that describe a ValidationError raise ``from None``.
+    """
+
+    #: The file ASH_CONFIG names, when this is that file's refusal: set by
+    #: get_default_config, which every load of it goes through, so a command can
+    #: say which file was refused without loading it again.
+    ash_config_file: Optional[Path] = None
+
+    #: True when the message ends with a parser's own message, which spans lines
+    #: of its own that a printer keeps (cli/config.py _print_invalid_config).
+    parser_message: bool = False
+
+    def __init__(self, *args: object, validation_error: object = None) -> None:
+        super().__init__(*args)
+        self.validation_error = validation_error
+
+
+class CommittedOutputFilesError(ASHConfigValidationError):
+    """The output directory holds files git tracks where a scan writes its own.
+
+    A scan deletes the previous run's results there and writes this run's, so
+    running it would delete or overwrite the committed files. A subclass of
+    ``ASHConfigValidationError`` so that the scan exits 3, as for any other setting
+    it cannot run with: here the output directory.
+    """
+
+
+class ASHRespelledOverrideError(ASHConfigValidationError):
+    """An override's key is a non-exact spelling of a section that exists.
+
+    Raised by ``config_sources.resolve_override_segment``, the one resolver
+    every override walker uses. Its own class so a caller that deliberately
+    tolerates overrides that do not apply to a given base (the scan's replay
+    of ``reporters`` overrides onto the operator's own configuration) can
+    still re-raise this refusal: applying the respelling as a new extra key
+    would be a silent no-op against the section the plugin reads.
+    """
 
 
 class ASHConfigSourceError(ASHConfigValidationError):
@@ -27,6 +86,18 @@ class ASHConfigSourceError(ASHConfigValidationError):
     """
 
 
+class ASHConfigUnparsedError(ASHConfigSourceError):
+    """A config file's text did not parse, said in the shared refusal's words.
+
+    The message is the complete refusal (``<path> could not be parsed (...)``,
+    from ``unparsed_config_reason`` or built around ``parse_error_kind``): it
+    names the file and says what failed, so a printer that frames other source
+    errors ("Failed to parse config file:", "--profile 'x' failed to load
+    <path>:") shows this one as it is, or the frame restates the reason and
+    names the path twice.
+    """
+
+
 class ASHConfigFileNotFoundError(ASHConfigSourceError):
     """A config file that was named or discovered does not exist.
 
@@ -38,14 +109,16 @@ class ASHConfigFileNotFoundError(ASHConfigSourceError):
 
 
 class ASHConfigInputNotPermittedError(ASHConfigSourceError):
-    """A file in an ``extends`` chain is outside what the caller may read.
+    """A config file is outside what the caller may read.
 
-    Raised only when the caller passed a ``permit_base`` gate, which the MCP server
-    does with the session's allowed config roots. A subclass of
-    ``ASHConfigSourceError`` so every path that already refuses a broken chain
-    refuses this one, and distinct so the MCP tools can report it as a refusal
-    rather than as a malformed config. The message names the ``extends`` entry as
-    written and never the resolved target, so it reads the same whether or not
+    A file an ``extends`` chain names, or the one discovery selects in a
+    directory (``resolve_config.find_config_file``). Raised only when the caller
+    passed a ``permit_base`` gate, which the MCP server does with the session's
+    allowed config roots. A subclass of ``ASHConfigSourceError`` so every path
+    that already refuses a broken chain refuses this one, and distinct so the
+    MCP tools can report it as a refusal rather than as a malformed config. The
+    message names the ``extends`` entry as written, or the discovered file by
+    its name, and never the resolved target, so it reads the same whether or not
     that target exists.
     """
 
@@ -194,17 +267,29 @@ class ToolDownloadIntegrityError(ASHValidationError):
 class ToolNotProvisionableError(ASHValidationError):
     """Exception raised when a tool cannot be installed on the current platform.
 
-    Covers three distinct cases, all refused rather than approximated:
+    Covers four distinct cases, all refused rather than approximated:
 
     * the tool has no install path in ASH at all,
     * the tool has one but publishes no asset for this platform/architecture,
     * the pinned version and the pinned digests disagree, which is what a
-      half-applied version bump looks like.
+      half-applied version bump looks like,
+    * ASH is offline and has no verified copy to install from, so the tool would
+      have to be downloaded.
 
     Substituting a nearby architecture would install an executable that fails at
     exec time, and that surfaces in a scan report as an execution failure rather
     than as a bad install -- the diagnosis lands on the wrong thing. An absent
     asset is a real constraint and is reported as one.
+    """
+
+
+class ScanSetUnreadableError(ASHValidationError):
+    """The run's scan set could not be read or built, so a scanner cannot run on it.
+
+    Raised by utils/scan_output_dirs.py's scan_set_of in place of the empty list
+    it returned, which told the scanner nothing was in scope. Not an OSError or a
+    ValueError, so a handler that reads those as "nothing to exclude" does not
+    catch it; the scanner stops, and the scan exits 1 with it incomplete.
     """
 
 
@@ -216,11 +301,48 @@ class WorkspaceDefinitionError(ASHValidationError):
     workspace root, is a symlink, or overlaps another entry, and two projects
     whose scanner version pins cannot both be satisfied.
 
-    Maps to ``WorkspaceExitCode.WORKSPACE_ERROR`` (2). Kept distinct from
+    Maps to ``WorkspaceExitCode.WORKSPACE_ERROR`` (4). Kept distinct from
     ASHConfigValidationError, which maps to ``INVALID_PROJECT_CONFIG`` (3),
-    because the two route to different people: 2 means the operator's workspace
+    because the two route to different people: 4 means the operator's workspace
     file is wrong and nothing could run, 3 means one project is misconfigured.
 
     The message is expected to name every offending entry rather than the first,
     so an operator with three typos fixes three in one pass.
+
+    A refusal that lists its problems is built with :meth:`listing`, which keeps
+    the layout in ``lines``: the headline, then ``  - <problem>`` per problem.
+    The layout is ASH's own text and each line quotes the operator's text as it
+    is, so a sink shows each line on one line (the CLI's refusal): a newline in a
+    project name is then written ``\\x0a`` and cannot start a list item of its
+    own. ``lines`` is empty for a refusal that is one message.
+    """
+
+    def __init__(self, message: str = "", *, lines: tuple[str, ...] = ()):
+        super().__init__(message)
+        self.lines: tuple[str, ...] = tuple(lines)
+
+    @classmethod
+    def listing(
+        cls, headline: str, problems: Iterable[str]
+    ) -> "WorkspaceDefinitionError":
+        """A refusal of *headline* followed by one ``  - <problem>`` line each."""
+        lines = (headline, *(f"  - {problem}" for problem in problems))
+        return cls("\n".join(lines), lines=lines)
+
+
+class WorkspacePathNotUtf8Error(WorkspaceDefinitionError):
+    """A path the workspace plan would hold is not UTF-8, so it cannot be planned.
+
+    The workspace file, its root, a project folder, the workspace policy file or
+    the default config. A WorkspaceDefinitionError, so it exits 4 like every other
+    definition refusal. Its message names each path as it is, surrogate escapes
+    and any newline in a name included. Each sink shows it once, as the whole message
+    through utils/terminal_text.py's shown_on_one_line: the CLI's refusal, the
+    workspace run's handler in run_ash_scan, and the MCP tools' response, which is
+    JSON and cannot hold a lone surrogate. On one line, so a newline in a name is
+    written ``\\x0a`` and cannot start a line of its own.
+
+    ``str()`` of it still holds those surrogate escapes, so a new sink that writes
+    it as it is writes a lone surrogate: show it through ``shown_on_one_line`` as
+    the three sinks above do.
     """

@@ -1,9 +1,10 @@
 """Module containing the Grype security scanner implementation."""
 
 import logging
+import os
 import re
 from pathlib import Path
-from typing import Annotated, ClassVar, Final, List, Literal, Mapping
+from typing import Annotated, ClassVar, Final, Iterable, List, Literal, Mapping
 
 import yaml
 from pydantic import Field, model_validator
@@ -29,8 +30,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.link_exclusions import syft_excludes
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.package_identity import (
     NpmLockIndex,
     identity_properties,
@@ -88,6 +91,57 @@ _GRYPE_PACKAGE_MESSAGE = re.compile(
     r"was found at: "
 )
 
+#: What grype writes for a file-name byte that is not UTF-8: Go strings hold the
+#: replacement character (U+FFFD) where such a byte sits, so grype's SARIF cannot
+#: spell the name.
+_GRYPE_REPLACEMENT = "�"
+
+#: One file-name character Python lists for a byte that is not UTF-8: a lone
+#: surrogate, from os.fsdecode's surrogateescape.
+_ONE_UNDECODABLE_CHARACTER = "[\ud800-\udfff]"
+
+
+def _name_grype_garbled(root: Path, uri: str) -> str:
+    """The name under *root* that *uri* garbles, or *uri* as grype wrote it.
+
+    Each path component holding the replacement character is matched against the
+    directory's own entries, with each replacement character standing for exactly
+    one character the directory listing shows as a lone surrogate (the form a
+    file-name byte that is not UTF-8 takes). A component is replaced only when no
+    entry is literally named with the replacement character and exactly one entry
+    matches; anything else, two matches included, is left as grype wrote it,
+    since the output does not say which file it means.
+    """
+    if _GRYPE_REPLACEMENT not in uri:
+        return uri
+    current = root
+    components: List[str] = []
+    for component in uri.split("/"):
+        # os.path.lexists, not Path.exists: inside a directory the process
+        # cannot list, Path.exists raises PermissionError on Python 3.10-3.13
+        # (only 3.14 answers False), and os.path.lexists answers False on any
+        # OSError. A file literally named with the replacement character is
+        # found either way and left as grype wrote it.
+        if _GRYPE_REPLACEMENT in component and not os.path.lexists(current / component):
+            pattern = re.compile(
+                "".join(
+                    _ONE_UNDECODABLE_CHARACTER
+                    if character == _GRYPE_REPLACEMENT
+                    else re.escape(character)
+                    for character in component
+                )
+            )
+            try:
+                entries = os.listdir(current)
+            except OSError:
+                entries = []
+            matches = [entry for entry in entries if pattern.fullmatch(entry)]
+            if len(matches) == 1:
+                component = matches[0]
+        components.append(component)
+        current = current / component
+    return "/".join(components)
+
 
 class GrypeScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
@@ -118,11 +172,31 @@ class GrypeScannerConfig(ScannerPluginConfigBase):
     ] = GrypeScannerConfigOptions()
 
 
+def _with_path_spellings(values: Iterable[str]) -> list[str]:
+    """*values*, each also as Path() writes it ("a/./b" as "a/b").
+
+    The scanner names its config through Path(), which collapses "." segments
+    and doubled or trailing slashes, and redaction finds only a spelling it is
+    given.
+    """
+    values = list(value_tuple(values))
+    spelled = [Path(value).as_posix() for value in values if value and "/" in value]
+    return list(dict.fromkeys([*values, *spelled]))
+
+
 def _declared_grype_db_bound(
-    environ: Mapping[str, str], grype_config: Path | None
+    environ: Mapping[str, str],
+    grype_config: Path | None,
+    values: Iterable[str] = (),
 ) -> dict[str, str]:
-    """The grype-db bound from the registry, minus anything the user set themselves."""
+    """The grype-db bound from the registry, minus anything the user set themselves.
+
+    *values*, the config's environment values, are redacted from the DEBUG line
+    about a config it could not read: the config's path can come from the
+    environment, and ash.log keeps DEBUG lines under --debug.
+    """
     from automated_security_helper.utils.content_databases import get
+    from automated_security_helper.utils.error_text import text_without_values
 
     user_config_keys: set[str] = set()
     if grype_config is not None:
@@ -134,7 +208,11 @@ def _declared_grype_db_bound(
             if isinstance(db_section, dict):
                 user_config_keys = {str(key) for key in db_section}
         except Exception as exc:  # nosec B110 - an unreadable config is grype's to report
-            ASH_LOGGER.debug(f"Could not read {grype_config} for db settings: {exc}")
+            ASH_LOGGER.debug(
+                text_without_values(
+                    f"Could not read {grype_config} for db settings: {exc}", values
+                )
+            )
     config_key_for_env = {
         "GRYPE_DB_MAX_ALLOWED_BUILT_AGE": "max-allowed-built-age",
         "GRYPE_DB_VALIDATE_AGE": "validate-age",
@@ -149,6 +227,9 @@ def _declared_grype_db_bound(
 @ash_scanner_plugin
 class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
     """GrypeScanner implements IaC scanning using Grype."""
+
+    #: grype is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
@@ -219,8 +300,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         return found is not None
 
     @staticmethod
-    def _strip_leading_slash_from_uri(location) -> None:
-        """Strip leading slashes from the artifact location URI, if present."""
+    def _strip_leading_slash_from_uri(location, root: Path) -> None:
+        """Strip leading slashes from the artifact location URI, if present, and
+        read a name grype could not spell back from the directory."""
         if (
             location.physicalLocation
             and location.physicalLocation.root
@@ -228,19 +310,23 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         ):
             uri = location.physicalLocation.root.artifactLocation.uri
             if uri:
-                location.physicalLocation.root.artifactLocation.uri = uri.lstrip("/")
+                location.physicalLocation.root.artifactLocation.uri = (
+                    _name_grype_garbled(root, uri.lstrip("/"))
+                )
 
-    def _normalize_result_uris(self, result) -> None:
+    def _normalize_result_uris(self, result, root: Path) -> None:
         """Strip leading slashes from all URIs in a single SARIF result."""
         try:
             for loc in result.locations or []:
-                self._strip_leading_slash_from_uri(loc)
+                self._strip_leading_slash_from_uri(loc, root)
 
             for rel in getattr(result, "relatedLocations", None) or []:
-                self._strip_leading_slash_from_uri(rel)
+                self._strip_leading_slash_from_uri(rel, root)
 
             if result.analysisTarget and result.analysisTarget.uri:
-                result.analysisTarget.uri = result.analysisTarget.uri.lstrip("/")
+                result.analysisTarget.uri = _name_grype_garbled(
+                    root, result.analysisTarget.uri.lstrip("/")
+                )
         except Exception as e:
             ASH_LOGGER.warning(f"Error processing Grype result: {e}")
 
@@ -298,7 +384,22 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 level=logging.WARNING,
             )
 
-    def _process_config_options(self):
+    def _use_empty_config(self) -> None:
+        """Hand grype an empty config file ASH writes.
+
+        Given no ``--config``, grype runs from the source directory and reads
+        ``.grype.yaml`` from it, which would put the repository's file where the
+        operator's refused or missing one was. An explicit ``--config`` ends
+        the discovery.
+        """
+        self.args.extra_args.append(
+            ToolExtraArg(
+                key="--config",
+                value=self._neutral_tool_file("grype-config-empty.yaml", "{}\n"),
+            )
+        )
+
+    def _process_config_options(self) -> None:
         # Grype config path
         # Only the operator's config file. A config file inside the scanned tree
         # does not choose it (config/tool_config_trust.py), and ASH no longer looks
@@ -324,31 +425,105 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # exist: .ash/.grype.yaml", producing no SARIF -- so the scanner reported
         # EXECUTION FAILED with zero findings while grype itself was fine.
         source_dir = Path(self.context.source_dir)
+        # The config's environment values, each also as Path() spells it: the
+        # lines below name the config through Path().
+        environment_values = _with_path_spellings(self._environment_values())
         resolved_config: Path | None = None
-        for conf_path in possible_config_paths:
+        # The path as configured, for anything that NAMES the config: a symlink
+        # in the configured path changes the resolved spelling, and redaction
+        # can only find the spelling the config (and _environment_values) carry.
+        configured_config: Path | None = None
+        # A config the scan derived from the repository being scanned (under
+        # the output or work directory) is not handed to grype unless the
+        # operator's own configuration names it; see config/path_trust.py. The
+        # checkout's own in-tree configs stay accepted as before, so only the
+        # derived-directory clause applies here. A refused configured value
+        # drops the ``--config`` rather than falling through to discovery: the
+        # option named one file, and discovery would silently replace it.
+        from automated_security_helper.config.operator_only_options import (
+            operator_wrote_value,
+        )
+        from automated_security_helper.config.path_trust import (
+            derived_roots,
+            refused_derived_product,
+        )
+
+        context_config = getattr(self.context, "config", None)
+        for index, conf_path in enumerate(possible_config_paths):
+            configured = index == 0 and self.config.options.config_file is not None
             candidate = Path(conf_path)
             if not candidate.is_absolute():
                 candidate = source_dir / candidate
             if candidate.exists():
+                if refused_derived_product(
+                    candidate,
+                    source_dir=source_dir,
+                    key="scanners.grype.options.config_file"
+                    if configured
+                    else f"grype config file {conf_path}",
+                    config=context_config,
+                    derived_dirs=derived_roots(self.context),
+                    operator_written=configured
+                    and operator_wrote_value(
+                        context_config,
+                        "scanner",
+                        "grype",
+                        ("options", "config_file"),
+                        conf_path,
+                        config_from_context=self._config_from_context,
+                    ),
+                ):
+                    if configured:
+                        self._use_empty_config()
+                        ASH_LOGGER.warning(
+                            "Configured grype config file was not used because "
+                            "it is a work product derived from the scanned "
+                            "repository. Grype will run with an empty config "
+                            "file that ASH writes; no config file is "
+                            "discovered from the scanned tree in its place."
+                        )
+                        break
+                    continue
                 # Say so when the config narrows the report. Without this the
                 # only record that matches were withheld is the config file
                 # itself, which nobody reads while looking at a clean scan.
                 restricting_keys = self._output_restricting_keys(candidate)
                 if restricting_keys:
+                    # Redacted: the config path is configured, and a configured
+                    # option can come from the environment.
                     self._plugin_log(
-                        f"The grype config at {candidate} sets "
-                        f"{', '.join(restricting_keys)}, which restricts which "
-                        "matches reach the report. Vulnerabilities grype detected "
-                        "may be absent from these results, and the scan can pass "
-                        "with findings withheld.",
+                        text_without_values(
+                            f"The grype config at {candidate} sets "
+                            f"{', '.join(restricting_keys)}, which restricts which "
+                            "matches reach the report. Vulnerabilities grype detected "
+                            "may be absent from these results, and the scan can pass "
+                            "with findings withheld.",
+                            environment_values,
+                        ),
                         level=logging.WARNING,
                     )
                 self._warn_if_config_moves_the_database(candidate)
                 resolved_config = candidate.resolve()
+                configured_config = candidate
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
                         value=resolved_config.as_posix(),
+                    )
+                )
+                break
+            elif configured:
+                # A configured file that does not exist takes no discovered
+                # replacement (config/path_trust.py, "Configured tool inputs
+                # that are refused or missing").
+                self._use_empty_config()
+                ASH_LOGGER.warning(
+                    text_without_values(
+                        f"Configured grype config file does not exist: "
+                        f"{self.config.options.config_file}. Grype will run "
+                        "with an empty config file that ASH writes; no config "
+                        "file is discovered from the scanned tree in its place.",
+                        environment_values,
                     )
                 )
                 break
@@ -368,7 +543,9 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         offline = self._scanner_offline()
         if not offline:
             self.extra_env.update(
-                _declared_grype_db_bound(snapshot_environ(), resolved_config)
+                _declared_grype_db_bound(
+                    snapshot_environ(), configured_config, environment_values
+                )
             )
 
         # Handle offline mode. Stash offline-mode env vars on the instance
@@ -420,10 +597,11 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
-        # Each link leaving the target, for this resolution only (extra_args
-        # persists across scan() calls, and the next target has links of its own).
-        # grype follows none of them; see utils/link_exclusions.py.
-        # A new list: the one extra_args holds is restored as it was, unchanged.
+        # Each link leaving the target, and each path the global ignore paths
+        # ignore, for this resolution only (extra_args persists across scan()
+        # calls, and the next target has links of its own). grype follows none of
+        # the links; see utils/link_exclusions.py. A new list: the one extra_args
+        # holds is put back as it was, unchanged.
         original_extra_args = self.args.extra_args
         self.args.extra_args = [
             *original_extra_args,
@@ -468,6 +646,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
                 results_dir=self.results_dir or results_file.parent,
                 config=getattr(self.context, "config", None),
                 scan_id=scan_id_for(self.context),
+                values=self._values_to_redact(),
             )
             scan_env.update(GRYPE_PREPARED_ENV)
         return final_args, results_file, scan_env
@@ -483,6 +662,36 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             return {}
         return {"properties": PropertyBag(tool=sarif_report.runs[0].tool)}
 
+    def _resolve_arguments(
+        self, target: str | Path, results_file: str | Path | None = None
+    ) -> List[str]:
+        """The base arguments plus an ``--exclude`` per ASH output directory.
+
+        Added for this resolution only: the patterns depend on the target, and
+        extra_args persists across scan() calls. *target* is the ``dir:`` source
+        _execute_scan builds. A new list: the one extra_args holds is put back as
+        it was, unchanged.
+        """
+        from automated_security_helper.utils.scan_output_dirs import (
+            output_dir_exclude_globs,
+        )
+
+        directory = str(target).removeprefix("dir:")
+        original_extra_args = self.args.extra_args
+        self.args.extra_args = [
+            *original_extra_args,
+            *(
+                ToolExtraArg(key="--exclude", value=pattern)
+                for pattern in output_dir_exclude_globs(
+                    self._ash_output_dirs_inside(Path(directory))
+                )
+            ),
+        ]
+        try:
+            return super()._resolve_arguments(target=target, results_file=results_file)
+        finally:
+            self.args.extra_args = original_extra_args
+
     def _post_process_sarif(
         self,
         sarif_report: SarifReport,
@@ -492,7 +701,7 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         """Strip leading slashes from artifact URIs and attach package identity."""
         lock_index = NpmLockIndex(target)
         for result in sarif_report.get_all_results():
-            self._normalize_result_uris(result)
+            self._normalize_result_uris(result, target)
             self._attach_package_identity(result, lock_index)
         return sarif_report
 

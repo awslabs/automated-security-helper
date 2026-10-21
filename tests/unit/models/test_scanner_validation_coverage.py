@@ -244,6 +244,56 @@ def test_the_result_entry_carries_the_dependency_and_exclusion_flags(
     assert entry.excluded is True
 
 
+@pytest.mark.parametrize(
+    "raw_status,expected,field",
+    [
+        ("excluded", ScannerStatus.SKIPPED, "skipped_reason"),
+        ("missing_deps", ScannerStatus.MISSING, "missing_reason"),
+    ],
+)
+def test_a_backfilled_row_keeps_the_trackers_reason_through_the_rebuild(
+    checkpointer, tracker, quiet, raw_status, expected, field
+):
+    """The reason ensure_complete_results writes survives the rebuild and a reload.
+
+    The rebuild reads a reason off the row first, and that is the only place a
+    backfilled scanner has one: it wrote no per-target report.
+    """
+    from automated_security_helper.core.unified_metrics import (
+        populate_metrics_from_unified_source,
+    )
+
+    reason = "the state tracker's own reason"
+    # Registered only: a scanner whose enablement_status is "excluded" is passed over
+    # as properly excluded and never backfilled. The status comes from the execution
+    # data, patched below.
+    tracker.update_scanner_state("bandit", registration_status="registered")
+    results = AshAggregatedResults()
+    results.scanner_results = {}
+    with patch.object(
+        tracker,
+        "determine_scanner_status_from_execution_data",
+        return_value=_status(
+            raw_status,
+            dependencies_satisfied=raw_status != "missing_deps",
+            excluded=raw_status == "excluded",
+            failure_reason=reason,
+        ),
+    ):
+        checkpointer.ensure_complete_results(results)
+
+    rebuilt = populate_metrics_from_unified_source(aggregated_results=results)
+    reloaded = populate_metrics_from_unified_source(
+        aggregated_results=AshAggregatedResults.model_validate_json(
+            rebuilt.model_dump_json()
+        )
+    )
+    for when, model in [("rebuilt", rebuilt), ("reloaded", reloaded)]:
+        row = model.scanner_results["bandit"]
+        assert row.status is expected, (when, row)
+        assert getattr(row, field) == reason, (when, row)
+
+
 # ---------------------------------------------------------------------------
 # _get_executed_scanners_from_validation_state
 # ---------------------------------------------------------------------------
@@ -583,7 +633,7 @@ def test_handling_a_clean_checkpoint_changes_no_state(checkpointer, tracker, qui
 def test_handling_missing_queue_entries_records_a_failure_reason(
     checkpointer, tracker, quiet
 ):
-    """An error is required to open the gate; see the test below for why."""
+    """With an error on the checkpoint too: the error is logged and the reason recorded."""
     checkpoint = ValidationCheckpoint(
         checkpoint_name="task_queue_validation",
         expected_scanners=["bandit", "semgrep"],
@@ -599,16 +649,16 @@ def test_handling_missing_queue_entries_records_a_failure_reason(
     assert "1 scanners missing from queue" in quiet.warning.call_args.args[0]
 
 
-def test_missing_queue_entries_alone_do_not_open_the_error_handling_gate(
+def test_missing_queue_entries_alone_still_record_a_failure_reason(
     checkpointer, tracker, quiet
 ):
     """``has_issues()`` counts discrepancies and errors, not missing scanners.
 
     A checkpoint whose expected set exceeds its actual set therefore reads as
-    clean, and ``handle_queue_validation_errors`` records no failure reason for
-    the scanners that never reached the queue. This pins the current behavior so
-    a change to either ``has_issues()`` or this gate is visible rather than
-    silent -- it is the same shape as a MISSING-scanner run reading as healthy.
+    clean, and that is exactly the checkpoint ``validate_task_queue`` builds for a
+    scanner that was enabled and never queued. ``handle_queue_validation_errors``
+    records a reason for it whatever ``has_issues()`` says, so such a scanner does
+    not read as healthy, the shape a MISSING-scanner run would have.
     """
     checkpoint = ValidationCheckpoint(
         checkpoint_name="task_queue_validation",
@@ -621,7 +671,13 @@ def test_missing_queue_entries_alone_do_not_open_the_error_handling_gate(
 
     checkpointer.handle_queue_validation_errors(checkpoint)
 
-    assert tracker.get_scanner_state("bandit") is None
+    state = tracker.get_scanner_state("bandit")
+    assert state is not None
+    assert state.failure_reason == (
+        "Scanner was expected to be queued but was not found in task queue"
+    )
+    assert tracker.get_scanner_state("semgrep") is None
+    assert "1 scanners missing from queue" in quiet.warning.call_args.args[0]
 
 
 def test_handling_a_checkpoint_with_errors_but_no_missing_scanners_logs_each_error(

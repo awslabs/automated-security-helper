@@ -1192,7 +1192,7 @@ class TestDenialsMatchEveryPluginSpelling:
         value = "us-east-1" if suffix else {"options": {"aws_region": "us-east-1"}}
         ops = [{"op": "add", "path": f"/reporters/{spelling}{suffix}", "value": value}]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
-            check_runtime_ops(ops, allowlist=allowlist)
+            check_runtime_ops(ops, allowlist=allowlist, config=AshConfig())
         assert "denied_paths" in excinfo.value.rule
 
     @pytest.mark.parametrize("spelling", ["TrivyRepo", "trivyrepo", "TrivyRepoScanner"])
@@ -1210,7 +1210,7 @@ class TestDenialsMatchEveryPluginSpelling:
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
-            check_runtime_ops(ops, allowlist=allowlist)
+            check_runtime_ops(ops, allowlist=allowlist, config=AshConfig())
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_every_spelling(self) -> None:
@@ -1231,7 +1231,7 @@ class TestDenialsMatchEveryPluginSpelling:
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
-            check_runtime_ops(ops, allowlist=allowlist)
+            check_runtime_ops(ops, allowlist=allowlist, config=AshConfig())
         assert "denied_value_patterns" in excinfo.value.rule
 
     def test_another_plugin_is_not_refused(self) -> None:
@@ -1821,3 +1821,176 @@ class TestGlobDenialsNameKnownPlugins:
         )
         assert result.returncode == 0, result.stderr[-2000:]
         assert result.stdout.strip().endswith("unchanged")
+
+
+def _operator_with_s3() -> AshConfig:
+    """A profile that runs the S3 reporter, with the operator's bucket."""
+    return AshConfig.model_validate(
+        {
+            "reporters": {
+                "s3": {"enabled": True, "options": {"bucket_name": "operators-bucket"}}
+            }
+        }
+    )
+
+
+class TestTurningAnOffHostReporterOffHasNoEffect:
+    """A client's ``enabled: false`` on an off-host reporter is accepted, and dropped.
+
+    It asks for nothing beyond the operator's profile, so a client profile that
+    carries it does not fail, but it does not take effect either: whether an
+    off-host reporter runs is the operator's to say. Only ``false`` itself, on
+    the four AWS reporters, in one of two shapes: ``enabled`` set to false, or a
+    section added with only ``enabled: false`` where the profile has none. Each
+    dropped op is named in a warning.
+    """
+
+    _ALLOWLIST = RuntimeOverridesConfig(
+        enabled=True, allowed_paths=["/reporters/**"], denied_paths=[]
+    )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/reporters/s3/enabled",
+            "/reporters/aws_security_hub/enabled",
+            "/reporters/CloudwatchLogs/enabled",
+            "/reporters/bedrock-summary-reporter/enabled",
+        ],
+    )
+    def test_enabled_false_is_accepted(self, path: str) -> None:
+        check_runtime_ops(
+            [{"op": "replace", "path": path, "value": False}],
+            allowlist=self._ALLOWLIST,
+            config=_operator_with_s3(),
+        )
+
+    def test_enabled_false_is_accepted_under_a_shipped_denial(self) -> None:
+        """/reporters/cloudwatch-logs/** is denied by default; turning it off is not."""
+        allowlist = RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"])
+        check_runtime_ops(
+            [
+                {
+                    "op": "replace",
+                    "path": "/reporters/cloudwatch-logs/enabled",
+                    "value": False,
+                }
+            ],
+            allowlist=allowlist,
+            config=_operator_with_s3(),
+        )
+
+    @pytest.mark.parametrize(
+        "allowlist",
+        [
+            _ALLOWLIST,
+            RuntimeOverridesConfig(enabled=True, allowed_paths=["/**"]),
+        ],
+        ids=["allowed", "under-a-shipped-denial"],
+    )
+    def test_without_the_config_a_turn_off_is_checked_like_any_write(
+        self, allowlist: RuntimeOverridesConfig
+    ) -> None:
+        """The exemption holds only where the caller drops the op, and each caller
+        that does passes the config it drops it from. Without one, nothing drops
+        it, so a turn-off accepted here would take effect: it is refused, under
+        the off-host rule and any denial that covers it."""
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops(
+                [
+                    {
+                        "op": "replace",
+                        "path": "/reporters/cloudwatch-logs/enabled",
+                        "value": False,
+                    }
+                ],
+                allowlist=allowlist,
+                config=None,
+            )
+
+    def test_it_changes_nothing_and_says_so(self, caplog) -> None:
+        import logging
+
+        base = _operator_with_s3()
+        with caplog.at_level(logging.WARNING):
+            patched = apply_runtime_patch(
+                base,
+                [{"op": "replace", "path": "/reporters/s3/enabled", "value": False}],
+                allowlist=self._ALLOWLIST,
+            )
+
+        assert patched.get_plugin_config("reporter", "s3") == base.get_plugin_config(
+            "reporter", "s3"
+        )
+        assert any(
+            "/reporters/s3/enabled" in record.getMessage()
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+        ), [record.getMessage() for record in caplog.records]
+
+    def test_a_section_with_only_enabled_false_is_dropped_where_there_is_none(
+        self,
+    ) -> None:
+        base = AshConfig()
+        patched = apply_runtime_patch(
+            base,
+            [{"op": "add", "path": "/reporters/s3", "value": {"enabled": False}}],
+            allowlist=self._ALLOWLIST,
+        )
+        assert patched.get_plugin_config("reporter", "s3") == base.get_plugin_config(
+            "reporter", "s3"
+        )
+
+    def test_an_override_that_only_turns_it_off_binds_the_profile(self) -> None:
+        base = _operator_with_s3()
+        override = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "s3": {
+                        "enabled": False,
+                        "options": {"bucket_name": "operators-bucket"},
+                    }
+                }
+            }
+        )
+        patched = apply_runtime_override(base, override, allowlist=self._ALLOWLIST)
+        assert patched.get_plugin_config("reporter", "s3")["enabled"] is True
+
+    @pytest.mark.parametrize(
+        "op",
+        [
+            {
+                "op": "add",
+                "path": "/reporters/s3",
+                "value": {"enabled": False, "options": {"bucket_name": "clients"}},
+            },
+            {"op": "replace", "path": "/reporters/s3/enabled", "value": True},
+            {"op": "replace", "path": "/reporters/s3/enabled", "value": 0},
+            {"op": "replace", "path": "/reporters/s3/enabled", "value": "false"},
+            {"op": "remove", "path": "/reporters/s3/enabled"},
+            {"op": "replace", "path": "/reporters/webhook/enabled", "value": False},
+        ],
+        ids=[
+            "with-a-bucket",
+            "true",
+            "zero",
+            "the-string-false",
+            "remove",
+            "a-plugins-reporter",
+        ],
+    )
+    def test_anything_else_is_refused(self, op) -> None:
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=AshConfig())
+
+    def test_a_section_with_only_enabled_false_is_refused_where_there_is_one(
+        self,
+    ) -> None:
+        """Adding it there replaces the operator's whole section, options and all,
+        so it is not only a turn-off."""
+        with pytest.raises(RuntimePatchDeniedError):
+            apply_runtime_patch(
+                _operator_with_s3(),
+                [{"op": "add", "path": "/reporters/s3", "value": {"enabled": False}}],
+                allowlist=self._ALLOWLIST,
+            )

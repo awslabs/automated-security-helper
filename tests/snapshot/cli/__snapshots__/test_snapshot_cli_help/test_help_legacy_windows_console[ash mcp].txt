@@ -4,100 +4,85 @@
  Start the ASH MCP server (Model Context Protocol)
 
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --log-level                                           <str>   Log level [default: INFO]         │
-│ --verbose                      --no-verbose                   Verbose output                    │
-│                                                               [default: no-verbose]             │
-│ --debug                        --no-debug                     Debug output [default: no-debug]  │
-│ --color                        --no-color                     Enable color output               │
-│                                                               [default: color]                  │
-│ --quiet                        --no-quiet                     Quiet output [default: no-quiet]  │
-│ --transport                                           <str>   Transport: 'stdio' (default),     │
-│                                                               'streamable-http', or 'sse'.      │
-│                                                               [default: stdio]                  │
-│ --host                                                <str>   Host to bind for HTTP transports. │
-│                                                               [default: 127.0.0.1]              │
-│ --port                                                <int>   Port to bind for HTTP transports. │
-│                                                               [default: 8000]                   │
-│ --mount-path                                          <str>   HTTP path the transport listens   │
-│                                                               on (default: /mcp for             │
-│                                                               streamable-http, /sse for sse).   │
-│                                                               [default: /mcp]                   │
-│ --auth-header-name                                    <str>   Required HTTP header name for     │
-│                                                               single-tenant auth (HTTP          │
-│                                                               transports only).                 │
-│ --auth-header-value                                   <str>   Expected value of                 │
-│                                                               --auth-header-name. Visible to    │
-│                                                               other local users on the command  │
-│                                                               line; prefer                      │
-│                                                               --auth-header-value-file or       │
-│                                                               --auth-header-value-fd.           │
-│ --auth-header-value-file                              <path>  Read the expected value of        │
-│                                                               --auth-header-name from this      │
-│                                                               file, once at startup: a regular  │
-│                                                               file, not a symlink, readable by  │
-│                                                               its owner only. One trailing      │
-│                                                               newline is dropped.               │
-│ --auth-header-value-fd                                <int>   Read the expected value of        │
-│                                                               --auth-header-name from this      │
-│                                                               inherited file descriptor (3 or   │
-│                                                               above), once at startup, then     │
-│                                                               close it.                         │
-│ --stateless-http               --no-stateless-http            Handle each streamable-HTTP       │
-│                                                               request independently instead of  │
-│                                                               binding it to a server-held       │
-│                                                               session. Required behind a load   │
-│                                                               balancer that may route           │
-│                                                               consecutive requests to different │
-│                                                               replicas, and by managed runtimes │
-│                                                               that inject their own             │
-│                                                               Mcp-Session-Id. Only valid with   │
-│                                                               --transport streamable-http.      │
-│                                                               [default: no-stateless-http]      │
-│ --trust-upstream-session-id                                   Stateless streamable-HTTP only.   │
-│                                                               Declare that a platform in front  │
-│                                                               of ASH issues and authenticates   │
-│                                                               the Mcp-Session-Id header, so it  │
-│                                                               can name the caller's session.    │
-│                                                               Without it a stateless server     │
-│                                                               identifies no session, and tools  │
-│                                                               that need one (source delivery,   │
-│                                                               profiles, the scan registry)      │
-│                                                               refuse.                           │
-│ --allowed-host                                        <str>   Host header value to accept,      │
-│                                                               repeatable. Keeps DNS-rebinding   │
-│                                                               protection enabled while allowing │
-│                                                               a known proxy or load balancer    │
-│                                                               hostname. Required with a         │
-│                                                               non-loopback --host unless        │
-│                                                               --trust-upstream-host-check is    │
-│                                                               given.                            │
-│ --session-workspace-ttl                               <int>   HTTP transports only. Seconds a   │
-│                                                               session workspace (delivered      │
-│                                                               source, uploads, bound profile)   │
-│                                                               may go unused before it is        │
-│                                                               removed. Covers sessions whose    │
-│                                                               end the server cannot see, such   │
-│                                                               as every stateless one. Default:  │
-│                                                               86400 (24 hours).                 │
-│ --trust-upstream-host-check                                   HTTP transports only. Declare     │
-│                                                               that a proxy or platform in front │
-│                                                               of ASH checks the Host and Origin │
-│                                                               headers, so ASH serves any.       │
-│                                                               Without it, a non-loopback --host │
-│                                                               needs --allowed-host or the       │
-│                                                               server refuses to start. Cannot   │
-│                                                               be combined with --allowed-host.  │
-│ --profile                                             <str>   Register a named config profile   │
-│                                                               as NAME=path/to/ash.yaml,         │
-│                                                               repeatable. Clients list them     │
-│                                                               with the list_profiles tool and   │
-│                                                               bind one to their session with    │
-│                                                               select_profile; a bound profile   │
-│                                                               supplies the config for every     │
-│                                                               later call in that session that   │
-│                                                               names none. Each file is loaded   │
-│                                                               and schema-validated now, so a    │
-│                                                               typo fails startup rather than a  │
-│                                                               scan.                             │
-│ --help                                                        Show this message and exit.       │
+│ --log-level                                     <quiet|simple|error|in  Set the log level.      │
+│                                                 fo|verbose|debug|trace  [default: INFO]         │
+│                                                 >                                               │
+│ --verbose            -v  --no-verbose                                   Enable verbose logging  │
+│                                                                         [default: no-verbose]   │
+│ --debug              -d  --no-debug                                     Enable debug logging    │
+│                                                                         [default: no-debug]     │
+│ --color                  --no-color                                     Enable/disable          │
+│                                                                         colorized output        │
+│                                                                         [default: color]        │
+│ --quiet                  --no-quiet                                     Hide all log output     │
+│                                                                         [default: no-quiet]     │
+│ --transport                                     <str>                   Transport: 'stdio'      │
+│                                                                         (default),              │
+│                                                                         'streamable-http', or   │
+│                                                                         'sse'.                  │
+│                                                                         [default: stdio]        │
+│ --host                                          <str>                   Host to bind for HTTP   │
+│                                                                         transports.             │
+│                                                                         [default: 127.0.0.1]    │
+│ --port                                          <int>                   Port to bind for HTTP   │
+│                                                                         transports.             │
+│                                                                         [default: 8000]         │
+│ --mount-path                                    <str>                   HTTP path the transport │
+│                                                                         listens on (default:    │
+│                                                                         /mcp for                │
+│                                                                         streamable-http, /sse   │
+│                                                                         for sse).               │
+│                                                                         [default: /mcp]         │
+│ --auth-header-name                              <str>                   Required HTTP header    │
+│                                                                         name for single-tenant  │
+│                                                                         auth (HTTP transports   │
+│                                                                         only).                  │
+│ --auth-header-value                             <str>                   Expected value of       │
+│                                                                         --auth-header-name.     │
+│ --stateless-http         --no-stateless-http                            Handle each             │
+│                                                                         streamable-HTTP request │
+│                                                                         independently instead   │
+│                                                                         of binding it to a      │
+│                                                                         server-held session.    │
+│                                                                         Required behind a load  │
+│                                                                         balancer that may route │
+│                                                                         consecutive requests to │
+│                                                                         different replicas, and │
+│                                                                         by managed runtimes     │
+│                                                                         that inject their own   │
+│                                                                         Mcp-Session-Id. Only    │
+│                                                                         valid with --transport  │
+│                                                                         streamable-http.        │
+│                                                                         [default:               │
+│                                                                         no-stateless-http]      │
+│ --allowed-host                                  <str>                   Host header value to    │
+│                                                                         accept, repeatable.     │
+│                                                                         Keeps DNS-rebinding     │
+│                                                                         protection enabled      │
+│                                                                         while allowing a known  │
+│                                                                         proxy or load balancer  │
+│                                                                         hostname. Without this, │
+│                                                                         protection is enabled   │
+│                                                                         only when --host is     │
+│                                                                         loopback, matching the  │
+│                                                                         MCP SDK's own default.  │
+│ --profile                                       <str>                   Register a named config │
+│                                                                         profile as              │
+│                                                                         NAME=path/to/ash.yaml,  │
+│                                                                         repeatable. Clients     │
+│                                                                         list them with the      │
+│                                                                         list_profiles tool and  │
+│                                                                         bind one to their       │
+│                                                                         session with            │
+│                                                                         select_profile; a bound │
+│                                                                         profile supplies the    │
+│                                                                         config for every later  │
+│                                                                         call in that session    │
+│                                                                         that names none. Each   │
+│                                                                         file is loaded and      │
+│                                                                         schema-validated now,   │
+│                                                                         so a typo fails startup │
+│                                                                         rather than a scan.     │
+│ --help                                                                  Show this message and   │
+│                                                                         exit.                   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

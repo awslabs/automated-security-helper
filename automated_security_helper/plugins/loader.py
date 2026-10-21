@@ -1,38 +1,84 @@
 """Plugin loading mechanism for ASH."""
 
+import ast
+import collections.abc
+import functools
 import importlib
+import logging
+import re
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+import types
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Tuple,
+)
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.plugin_manager import callback_display_name
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
 #: Plugin modules this process failed to import, mapped to the error text.
 #:
-#: MODULE-LEVEL BECAUSE THE LOSS OUTLIVES THE CALL. ``load_internal_plugins``
-#: returns the plugins it loaded, and four of its five call sites discard that
-#: return value -- so a caller that needs to know a plugin group went missing had
-#: no way to ask. ``ScanPhase`` reads this to record a MISSING row per failed
-#: module, which is what puts the loss in front of the completeness gate instead
-#: of in a WARNING nobody reads.
-#:
-#: Not reset per call, because ``importlib`` caches imports and a later call would
-#: otherwise report a clean set for a process whose first call lost a group. Each
-#: call does ask the package to import its failed groups again
-#: (``ash_builtin.retry_failed_plugin_groups``), and drops an entry once its group
-#: has loaded, so a group lost only to import order is not reported missing after
-#: it has been recovered.
+#: Superseded as the record of a run's failures by the run-scoped
+#: :data:`PluginLoadRecord` below, which is what ``ScanPhase`` reads: a
+#: process-wide record poisoned every later run in the same interpreter. Kept
+#: because ``load_internal_plugins`` still drops an entry recorded here once
+#: its group has loaded (``ash_builtin.retry_failed_plugin_groups``), so a
+#: group lost only to import order is not reported missing after it has been
+#: recovered.
 _PLUGIN_LOAD_ERRORS: Dict[str, str] = {}
 
 
-def plugin_load_errors() -> Dict[str, str]:
-    """Plugin modules that failed to import in this process, with their errors.
+@dataclass(frozen=True)
+class PluginLoadFailure:
+    """One plugin module this run failed to import or to register.
 
-    A copy, so a caller inspecting the failures cannot clear them for the next one.
+    ``recorded`` is the error as the run's results record it
+    (``metadata.plugin_load_errors``). ``kind`` is the error's type name, which
+    is all a refusal may say about a module whose name a config read from the
+    environment: the error's own text can quote the name. ``stage`` is where
+    the loss happened -- "import" for the import itself, "register" for a
+    module that imported but whose declarations (the ASH_* lists,
+    ASH_EVENT_HANDLERS) could not be read or subscribed -- so the refusal can
+    say which truthfully. Defaulted, so a record built before the split reads
+    the same.
     """
-    return dict(_PLUGIN_LOAD_ERRORS)
+
+    recorded: str
+    kind: str = ""
+    stage: str = "import"
+
+
+#: One run's import failures, keyed by module path. RUN-SCOPED, NEVER
+#: MODULE-GLOBAL: a process-wide record poisoned every later run in the same
+#: interpreter (the MCP server above all) -- a rerun after the operator fixed
+#: the dependency still refused on the stale record, and a clean config's
+#: results carried an earlier run's failure, module name included. The record
+#: lives on the run's ``PluginContext`` and is passed explicitly; a caller
+#: loading its own fixed list (the vendored inventory) passes none and gets a
+#: throwaway. ``ScanPhase`` reads the run's record to write
+#: ``metadata.plugin_load_errors`` and a MISSING row per failed scanner-region
+#: module, which is what puts the loss in front of the completeness gate
+#: instead of in a WARNING nobody reads. ``importlib`` caches successful
+#: imports only, so a failed module is re-attempted, and re-recorded, by the
+#: next run.
+PluginLoadRecord = MutableMapping[str, PluginLoadFailure]
+
+
+def recorded_load_errors(record: Mapping[str, PluginLoadFailure]) -> Dict[str, str]:
+    """``record`` as ``metadata.plugin_load_errors`` holds it: module to error text."""
+    return {name: failure.recorded for name, failure in record.items()}
 
 
 def combined_plugin_load_errors(
@@ -55,11 +101,15 @@ def combined_plugin_load_errors(
     return {module_path: "; ".join(seen) for module_path, seen in errors.items()}
 
 
-def load_internal_plugins():
-    """Load all internal ASH plugins."""
-    internal_modules = [
-        "automated_security_helper.plugin_modules.ash_builtin",
-    ]
+def load_internal_plugins(record: Optional[PluginLoadRecord] = None):
+    """Load all internal ASH plugins.
+
+    ``record`` is the run's :data:`PluginLoadRecord`; with none given the
+    failures are logged but recorded nowhere.
+    """
+    if record is None:
+        record = {}
+    internal_modules = [INTERNAL_PLUGIN_PACKAGE]
 
     loaded_plugins = {"converters": [], "scanners": [], "reporters": []}
 
@@ -119,12 +169,12 @@ def load_internal_plugins():
             # group missing from the set is the failure the completeness gate exists
             # to catch, and per-group isolation without this would make it quieter
             # than the startup crash it replaced: the run degrades and reports
-            # itself complete. `plugin_load_errors()` is how ScanPhase turns each
-            # one into a MISSING row.
+            # itself complete. `recorded_load_errors` over the run's record is
+            # how ScanPhase turns each one into a MISSING row.
             for failed_module, error in getattr(
                 module, "ASH_PLUGIN_LOAD_ERRORS", {}
             ).items():
-                _PLUGIN_LOAD_ERRORS[failed_module] = error
+                record[failed_module] = PluginLoadFailure(recorded=error)
                 ASH_LOGGER.error(
                     f"Plugin module {failed_module} failed to import, so the plugins "
                     f"it declares are not registered and will not run: {error}"
@@ -136,7 +186,9 @@ def load_internal_plugins():
             # total loss reaches the same reader as a partial one; nothing else in
             # the run can distinguish "no plugins configured" from "the plugin
             # package did not load".
-            _PLUGIN_LOAD_ERRORS[module_name] = f"{type(e).__name__}: {e}"
+            record[module_name] = PluginLoadFailure(
+                recorded=f"{type(e).__name__}: {e}", kind=type(e).__name__
+            )
             ASH_LOGGER.error(
                 f"Failed to import internal module {module_name}, so no built-in "
                 f"plugins are registered: {e}"
@@ -176,6 +228,14 @@ _ALLOWED_MODULE_PREFIXES = (
 #: Matched with its separator: the top-level package is ``ash_plugins`` or ends in
 #: ``_ash_plugins``, so ``hash_plugins`` or ``flash_plugins`` is not in the namespace.
 _ALLOWED_TOP_LEVEL_SUFFIX = "ash_plugins"
+
+#: Where ASH keeps the plugin packages a scan opts into by naming them in
+#: ``ash_plugin_modules`` (``ash_aws_plugins``, ``ash_snyk_plugins``, ...).
+_OPT_IN_PLUGIN_ROOT = "automated_security_helper.plugin_modules"
+
+
+def _module_within(module: str, package: str) -> bool:
+    return module == package or module.startswith(package + ".")
 
 
 def _module_path_refusal(module_path: str) -> Optional[str]:
@@ -229,23 +289,6 @@ def _namespace_rule() -> str:
     )
 
 
-class PluginModuleError(ASHConfigValidationError):
-    """``ash_plugin_modules`` names something that adds no plugin module to a scan.
-
-    An invalid configuration, so a scan maps it to exit code 3 with every other
-    ``ASHConfigValidationError``. Its own type lets a command that maps other
-    configuration errors differently still give this one exit code 3.
-    """
-
-
-class PluginModuleNamespaceError(PluginModuleError):
-    """``ash_plugin_modules`` names a module outside the plugin namespace."""
-
-
-class PluginModuleImportError(PluginModuleError):
-    """A module ``ash_plugin_modules`` names could not be imported."""
-
-
 def _namespace_package_refusal(module_path: str) -> Optional[str]:
     """Why *module_path* is refused as a namespace package, or None.
 
@@ -286,54 +329,8 @@ def _namespace_package_refusal(module_path: str) -> Optional[str]:
     return None
 
 
-def refuse_plugin_modules_outside_namespace(plugin_modules: Iterable[str]) -> None:
-    """Refuse a scan whose ``ash_plugin_modules`` names something that is not a plugin module.
-
-    Refused: a name outside the plugin namespace or not spelled as a module path
-    (:func:`_module_path_refusal`), and a namespace package
-    (:func:`_namespace_package_refusal`). Checked before any of them is imported,
-    so a refused name runs no code and an accepted name beside it is not imported
-    either. Empty entries (a trailing comma) name nothing and are ignored.
-
-    Raises:
-        PluginModuleNamespaceError: Naming every refused entry. A scan maps it to
-            exit code 3, invalid configuration.
-    """
-    misnamed: List[str] = []
-    namespace_packages: List[str] = []
-    for name in dict.fromkeys(plugin_modules):
-        if not name:
-            continue
-        reason = _module_path_refusal(name)
-        if reason is not None:
-            misnamed.append(f"{name!r} ({reason})")
-            continue
-        reason = _namespace_package_refusal(name)
-        if reason is not None:
-            namespace_packages.append(f"{name!r} ({reason})")
-    if not misnamed and not namespace_packages:
-        return
-    rule = f" {_namespace_rule()}" if misnamed else ""
-    raise PluginModuleNamespaceError(
-        "ash_plugin_modules names "
-        + ", ".join(misnamed + namespace_packages)
-        + f", which is not a plugin module ASH imports.{rule} Nothing was imported "
-        "and nothing was scanned. Rename the package or name the packages inside it, "
-        "or remove the entry from the config file, --config-overrides, "
-        "--ash-plugin-modules or ASH_PLUGIN_MODULES."
-    )
-
-
 #: ASH's built-in plugin package. Every scan selects its plugins without naming it.
 BUILTIN_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
-
-#: Where ASH keeps the plugin packages a scan opts into by naming them in
-#: ``ash_plugin_modules`` (``ash_aws_plugins``, ``ash_snyk_plugins``, ...).
-_OPT_IN_PLUGIN_ROOT = "automated_security_helper.plugin_modules"
-
-
-def _module_within(module: str, package: str) -> bool:
-    return module == package or module.startswith(package + ".")
 
 
 def _is_builtin_plugin_module(module: str) -> bool:
@@ -440,86 +437,924 @@ def scan_handler_filter(plugin_modules: Iterable[str]) -> Callable[[Any], bool]:
     return admits
 
 
+#: The namespace roots the rule above names, which stay readable when a
+#: masked module's dotted prefixes and suffixes are hidden below. The
+#: rule's own text is public -- ASH prints it on every namespace refusal,
+#: and it names the opt-in plugin root too -- so a failure quoting one of
+#: these alone ("No module named 'ash_plugins'", a message pointing at
+#: automated_security_helper.plugin_modules) gives away nothing the rule
+#: did not already say, and hiding it would blank ASH's own messages.
+#: Derived from the prefix list and the opt-in root so they cannot drift.
+_READABLE_NAMESPACE_ROOTS = frozenset(
+    prefix.rstrip(".") for prefix in _ALLOWED_MODULE_PREFIXES
+) | {_OPT_IN_PLUGIN_ROOT}
+
+#: Module words ASH's own text prints, which are never suffix needles: the
+#: readable roots above, the opt-in root's own leaf, and the plugin kinds
+#: (cli/dependencies.PLUGIN_KINDS plus their plural directory spellings and
+#: the event-handler kind). A masked value whose suffix equals one of these
+#: is quoting a word every ASH message may hold, so hiding it would blank
+#: readable text; the value's other forms stay hidden.
+_ASH_PUBLIC_MODULE_WORDS = _READABLE_NAMESPACE_ROOTS | {
+    _OPT_IN_PLUGIN_ROOT.rsplit(".", 1)[1],
+    "converter",
+    "scanner",
+    "reporter",
+    "converters",
+    "scanners",
+    "reporters",
+    "event_handler",
+    "event_handlers",
+}
+
+#: Words a load's own failure text always prints: ASH's loader frame and the
+#: import machinery's frames. A run needle that occurs INSIDE one of these
+#: would blank readable text ("security" matched anywhere blanks part of
+#: automated_security_helper in every frame), so runs are exempt by
+#: containment here, not only by equality against the public words. The cost
+#: mirrors the public-word set's: a masked segment spelled like part of these
+#: words prints where a text quotes it alone.
+_ASH_LOAD_PRINTED_WORDS = (
+    "automated_security_helper",
+    "importlib",
+    "_bootstrap",
+)
+
+
+def _masked_module_forms(module_path: str) -> Tuple[str, ...]:
+    """Every form of a masked *module_path* a failure's text can print.
+
+    The dotted name itself, and -- since a crash's traceback frames and
+    ``__file__`` print it as a filesystem path -- the same name with "/" or
+    "\\" in place of the dots. A dotted name adds each proper dotted prefix
+    in those three spellings too: a missing top-level package quotes the top
+    level alone ("No module named 'pkg'"), and a parent package that raises
+    puts ".../pkg/__init__.py" in the frame, neither of which the full
+    name's forms match. Two bounds keep the prefixes from blanking readable
+    text: one shorter than the redaction word band
+    (``MIN_REDACTED_LENGTH``) is matched too widely to be a safe needle,
+    and one equal to a namespace root the rule names
+    (``_READABLE_NAMESPACE_ROOTS``) is public text. The whole name and each
+    prefix needle add their PEP 503 distribution spelling (lowercase, every
+    run of ".", "_" or "-" to one "-") when it differs: a package body
+    asking ``importlib.metadata`` for its own distribution quotes that
+    spelling, which no dotted or path form matches.
+
+    Every contiguous run of segments past the first is a needle too, in the
+    same three spellings: a text can quote a segment past the last masked
+    boundary alone -- "cannot import name 'leaf' from ...", "has no
+    attribute 'leaf'" -- and a from-import of a MIDDLE segment quotes that
+    segment alone ("cannot import name 'mid' from '<top>'"), which no
+    whole-name, prefix or suffix form matches. A run's bounds are stricter
+    than a prefix's: one shorter than the anywhere band
+    (``MIN_ANYWHERE_LENGTH``) would match as a whole word in unrelated
+    text, and one equal to a word ASH's own messages print
+    (``_ASH_PUBLIC_MODULE_WORDS``) is public. A short or public segment
+    therefore still prints: that is the accepted cost of not blanking
+    readable text, and a run contained INSIDE a word the load's own frames
+    print (``_ASH_LOAD_PRINTED_WORDS``) is exempt the same way. When any
+    suffix is hidden, the LAST segment also adds its ".py" and
+    "__pycache__" ".cpython" file spellings ("leaf.py",
+    "__pycache__/leaf.cpython-*.pyc" print the segment with an extension no
+    dotted form matches); only the last, because a package's frame prints
+    "<seg>/__init__.py", which a hidden run's "/" form matches, and a
+    middle segment's file spelling can be an ASH file of its own. A leaf
+    shorter than ``MIN_REDACTED_LENGTH`` is left out on the prefix rule's
+    floor.
+
+    Every form is returned as a ``ModuleFormNeedle``: a str that the
+    redaction engine exempts inside ASH's and the import machinery's own
+    traceback frame lines (a segment named like that vocabulary otherwise
+    blanks text that is the same for every failing load), and whose PEP 503
+    spelling carries a bounded pattern for the other separator spellings of
+    the same distribution name.
+    """
+    from automated_security_helper.utils.numeric_text import (
+        MIN_ANYWHERE_LENGTH,
+        MIN_REDACTED_LENGTH,
+    )
+
+    def pep503(form: str) -> str:
+        # The distribution-name spelling (PEP 503 normalization): a package
+        # body asking importlib.metadata for its own distribution quotes
+        # "No package metadata was found for <top-ash-plugins>", which no
+        # dotted or path form matches.
+        return re.sub(r"[-_.]+", "-", form.lower())
+
+    forms = [module_path]
+    distribution_spellings = set()
+    if pep503(module_path) != module_path:
+        forms.append(pep503(module_path))
+        distribution_spellings.add(pep503(module_path))
+    if "." in module_path:
+        forms.append(module_path.replace(".", "/"))
+        forms.append(module_path.replace(".", "\\"))
+        parts = module_path.split(".")
+        for end in range(1, len(parts)):
+            prefix = ".".join(parts[:end])
+            if len(prefix) < MIN_REDACTED_LENGTH:
+                continue
+            if prefix in _READABLE_NAMESPACE_ROOTS:
+                continue
+            forms.append(prefix)
+            if pep503(prefix) != prefix:
+                forms.append(pep503(prefix))
+                distribution_spellings.add(pep503(prefix))
+            if "." in prefix:
+                forms.append(prefix.replace(".", "/"))
+                forms.append(prefix.replace(".", "\\"))
+        last_hidden = False
+        for start in range(1, len(parts)):
+            for end in range(start + 1, len(parts) + 1):
+                run = ".".join(parts[start:end])
+                if len(run) < MIN_ANYWHERE_LENGTH:
+                    continue
+                if run in _ASH_PUBLIC_MODULE_WORDS:
+                    continue
+                if any(run in word for word in _ASH_LOAD_PRINTED_WORDS):
+                    continue
+                forms.append(run)
+                if "." in run:
+                    forms.append(run.replace(".", "/"))
+                    forms.append(run.replace(".", "\\"))
+            suffix = ".".join(parts[start:])
+            if len(suffix) < MIN_ANYWHERE_LENGTH:
+                continue
+            if suffix in _ASH_PUBLIC_MODULE_WORDS:
+                continue
+            last_hidden = True
+        # The ".py" and "__pycache__" ".cpython" file spellings cover the LAST
+        # segment only: a package's frame prints "<seg>/__init__.py", which a
+        # hidden run's "/" path form already matches, while a middle segment's
+        # file spelling can be an ASH file of its own ("loader" would make
+        # "loader.py" a needle and blank the loader's frame).
+        leaf = parts[-1]
+        if (
+            last_hidden
+            and len(leaf) >= MIN_REDACTED_LENGTH
+            and leaf not in _ASH_PUBLIC_MODULE_WORDS
+        ):
+            forms.append(f"{leaf}.py")
+            forms.append(f"{leaf}.cpython")
+    # Each form is a ModuleFormNeedle: frame-exempt, so a segment spelled
+    # like the load's own frame vocabulary ("import_module") keeps ASH's and
+    # importlib's frame lines readable while redacting everywhere else. A
+    # PEP 503 spelling long enough for the word band also carries a variant
+    # pattern: the normalization treats every run of "-", "_" and "." as one
+    # separator, so the canonical literal alone left the other separator
+    # spellings readable ("Segtop.Ash_Plugins"). The pattern takes the
+    # canonical's own band. At the anywhere band it is unbounded, as the
+    # literal is: a dist-info file name runs the spelling straight into
+    # "-1.0", and the literal already hides itself inside longer words. Below
+    # it the pattern is bounded on both sides by characters that are not word
+    # characters, dots or dashes -- at least as strict as the word band -- so
+    # a short variant is matched only whole. Either way a name that does not
+    # normalize segment for segment never matches.
+    from automated_security_helper.config.config_validator import (
+        make_module_form_needle,
+    )
+
+    needles = []
+    for form in dict.fromkeys(forms):
+        pattern = None
+        if (
+            form in distribution_spellings
+            and "-" in form
+            and len(form) >= MIN_REDACTED_LENGTH
+        ):
+            body = r"[-_.]+".join(re.escape(piece) for piece in form.split("-"))
+            if len(form) >= MIN_ANYWHERE_LENGTH:
+                pattern = re.compile(body, re.IGNORECASE)
+            else:
+                pattern = re.compile(
+                    r"(?<![\w.\-])" + body + r"(?![\w.\-])", re.IGNORECASE
+                )
+        needles.append(
+            make_module_form_needle(form, frame_exempt=True, pattern=pattern)
+        )
+    return tuple(needles)
+
+
+class PluginModuleError(ASHConfigValidationError):
+    """``ash_plugin_modules`` names something that adds no plugin module to a scan.
+
+    An invalid configuration, so a scan maps it to exit code 3 with every other
+    ``ASHConfigValidationError``. Its own type lets a command that maps other
+    configuration errors differently still give this one exit code 3.
+
+    ``str`` carries the scan's closing sentences. A command that neither scans
+    nor has the scan's options (``ash report``, ``ash dependencies install``,
+    ``ash merge``) shows :meth:`shown_with` instead, so its message does not
+    tell the operator nothing was scanned or name options it does not have.
+    """
+
+    def __init__(self, naming: str, closing: str = "") -> None:
+        super().__init__(f"{naming} {closing}" if closing else naming)
+        #: The sentence naming each refused entry (and the reason), without the
+        #: scan's closing sentences.
+        self.naming = naming
+        #: The refused entries as configured, raw: a check that knows which
+        #: input contributed each entry picks its closing's remedies from
+        #: these (an entry only ASH_PLUGIN_MODULES added is not fixed by
+        #: editing a config file). The raisers that know their entries set it.
+        self.entries: Tuple[str, ...] = ()
+        #: The refused entries only ASH_PLUGIN_MODULES contributed, set by the
+        #: check that holds both lists (plugin_module_trust.
+        #: refuse_plugin_modules_a_scan_refuses). None means the message
+        #: builder offers NO environment remedy: it maps None to an empty
+        #: set. Every surface that builds its refusal through
+        #: plugin_module_refusal_message gets the field from the judge; the
+        #: config validator's own check offers the same remedy by its own
+        #: subtraction, without this field.
+        self.environment_only_entries: Optional[FrozenSet[str]] = None
+
+    def shown_with(self, closing: str) -> str:
+        """The refusal with *closing* in place of the scan's closing sentences."""
+        return f"{self.naming} {closing}"
+
+
+class PluginModuleNamespaceError(PluginModuleError):
+    """``ash_plugin_modules`` names a module outside the plugin namespace."""
+
+
+class PluginModuleImportError(PluginModuleError):
+    """A module ``ash_plugin_modules`` names failed to import.
+
+    The configuration asked for the module's plugins and the run has none of
+    them, which is the fail-open the namespace refusal already closes for a
+    misnamed entry: without this, the import failure would be only a WARNING,
+    the run would go on without the configured plugins, and completeness would
+    read 100%.
+    """
+
+    #: Which stage(s) the named modules failed at ("import", "register").
+    #: :func:`plugin_module_fix` reads it to pick a command closing's fix
+    #: clause; the builders below set it.
+    stages: frozenset = frozenset(("import",))
+
+
+def refuse_plugin_modules_outside_namespace(
+    plugin_modules: Iterable[str], shown: Optional[Mapping[str, str]] = None
+) -> None:
+    """Refuse a scan whose ``ash_plugin_modules`` names something that is not a plugin module.
+
+    Refused: a name outside the plugin namespace or not spelled as a module path
+    (:func:`_module_path_refusal`), and a namespace package
+    (:func:`_namespace_package_refusal`). Checked before any of them is imported,
+    so a refused name runs no code and an accepted name beside it is not imported
+    either. Empty entries (a trailing comma) name nothing and are ignored.
+
+    ``shown`` maps a name to how the message names it, for a name a config read
+    from the environment; any other name is named as it is. Callers build it
+    with ``plugin_module_trust.config_module_names`` (``shown_module_names``
+    underneath) from the resolved config.
+
+    Raises:
+        PluginModuleNamespaceError: Naming every refused entry. A scan maps it to
+            exit code 3, invalid configuration.
+    """
+    labels = shown or {}
+    misnamed: List[str] = []
+    namespace_packages: List[str] = []
+    refused_entries: List[str] = []
+    for name in dict.fromkeys(plugin_modules):
+        if not name:
+            continue
+        label = labels.get(name, name)
+        reason = _module_path_refusal(name)
+        if reason is not None:
+            misnamed.append(f"{label!r} ({reason})")
+            refused_entries.append(name)
+            continue
+        reason = _namespace_package_refusal(name)
+        if reason is not None:
+            namespace_packages.append(f"{label!r} ({reason})")
+            refused_entries.append(name)
+    if not misnamed and not namespace_packages:
+        return
+    rule = f" {_namespace_rule()}" if misnamed else ""
+    refusal = PluginModuleNamespaceError(
+        "ash_plugin_modules names "
+        + ", ".join(misnamed + namespace_packages)
+        + f", which is not a plugin module ASH imports.{rule}",
+        "Nothing was imported "
+        "and nothing was scanned. Rename the package or name the packages inside it, "
+        "or remove the entry from the config file, --config-overrides, "
+        "--ash-plugin-modules or ASH_PLUGIN_MODULES.",
+    )
+    refusal.entries = tuple(refused_entries)
+    raise refusal
+
+
 def load_additional_plugin_modules(
     plugin_modules: List[str] | None = None,
-    fail_on_import_error: bool = False,
+    shown: Optional[Mapping[str, str]] = None,
+    record: Optional[PluginLoadRecord] = None,
+    values: Iterable[str] = (),
 ) -> dict:
     """Load additional plugin modules specified in configuration.
 
     Args:
-        plugin_modules: List of module paths to import
-        fail_on_import_error: Raise :class:`PluginModuleImportError` naming every
-            module that failed to import, after trying them all, rather than
-            logging a warning per module. A scan and the commands that read a
-            config's ``ash_plugin_modules`` pass True: a module the operator named
-            that does not import would otherwise leave a scan that runs without its
-            plugins and passes. ASH's own vendored packages are loaded with False.
-
-    Raises:
-        PluginModuleImportError: With *fail_on_import_error*, when any named module
-            raised while it was imported (ImportError for a missing package or
-            dependency, or any other exception its own code raised).
+        plugin_modules: List of module paths to import. An entry may name several,
+            separated by commas, as a config file's ``ash_plugin_modules`` entry
+            may; they are imported in order, each once.
+        shown: How a log line names a module, for a name a config read from the
+            environment (``plugin_module_trust.shown_module_names``), as
+            :func:`refuse_plugin_modules_outside_namespace` takes it; any other
+            name is named as it is.
+        record: The run's :data:`PluginLoadRecord` for import failures. With
+            none given the failures are logged but recorded nowhere, which is
+            the tolerant shape a caller loading its own fixed list (the
+            vendored inventory) wants: its failures must not reach any scan.
+        values: The values the run's configuration read from the environment
+            (``error_text.config_environment_values`` or the workspace's).
+            An import error's text can quote any of them, not only the
+            module's own name, so they are redacted from the recorded text --
+            which feeds the warning line here, the refusal and
+            ``metadata.plugin_load_errors`` -- and carried on the error.
     """
-    if plugin_modules is None:
-        plugin_modules = []
-    discovered = {"converters": [], "scanners": [], "reporters": []}
-    failed: List[str] = []
+    # Imported here: plugin_module_trust imports config modules that import the
+    # plugin packages, which import this module.
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+    from automated_security_helper.plugins.discovery import shown_import_failure
+    from automated_security_helper.utils.redacted_model import value_tuple
 
-    for module_path in dict.fromkeys(plugin_modules):
+    # One string given as values is one value, not its characters, when the
+    # path spellings are added to it below.
+    values = value_tuple(values)
+    if record is None:
+        record = {}
+    labels = shown or {}
+    discovered = {"converters": [], "scanners": [], "reporters": []}
+
+    unique = split_plugin_modules(plugin_modules)
+    if unique:
+        # A long-lived process (the MCP server) re-attempts these modules after
+        # the operator installs what one needs. The import system caches a miss
+        # for a sys.path entry it could not read, so a module installed into a
+        # directory that did not exist at startup is never found without this.
+        importlib.invalidate_caches()
+
+    # A masked module's forms are needles for the WHOLE load, not only for
+    # its own failure: a value that splits into several module names (a
+    # comma-joined variable) never appears whole in a traceback -- a piece's
+    # body importing a sibling piece quotes the SIBLING -- and a literal
+    # module can import a masked piece's missing submodule, which puts the
+    # piece in a failure whose own name is not masked at all. Needles built
+    # per failing module miss both, so every masked module's forms
+    # (_masked_module_forms: the name, its path spellings, its dotted
+    # prefixes) are computed once here and every failure in the load,
+    # literal modules included, redacts with the one set. Widened at the one
+    # place both failure arms carry and redact from, so the record, the
+    # WARNING line, the exit-3 refusal and the DEBUG traceback all hide
+    # every form.
+    masked_forms: List[str] = []
+    for piece in unique:
+        if labels.get(piece, piece) == piece:
+            continue
+        for form in _masked_module_forms(piece):
+            if form not in values and form not in masked_forms:
+                masked_forms.append(form)
+    shown_values = (*values, *masked_forms)
+
+    for module_path in unique:
+        label = labels.get(module_path, module_path)
         # Validate module path matches expected namespace patterns
         if not _is_allowed_module_path(module_path):
             ASH_LOGGER.warning(
-                f"Skipping module with unexpected namespace: {module_path}. "
+                f"Skipping module with unexpected namespace: {label}. "
                 f"{_namespace_rule()}"
             )
             continue
 
-        ASH_LOGGER.info(f"Importing additional plugin module: {module_path}")
+        # For the two failure arms' cleanup: what this module's import
+        # registers (its decorators) and what the loop below subscribes must
+        # not outlive its refusal in the process-wide registry, and only
+        # modules THIS window imported are this load's to evict -- a module
+        # loaded by some earlier import of the process is not.
+        registered_before = ash_plugin_manager.registration_snapshot()
+        modules_before = set(sys.modules)
         try:
+            ASH_LOGGER.info(f"Importing additional plugin module: {label}")
             # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             module = importlib.import_module(module_path)
-        except ImportError as e:
-            if not fail_on_import_error:
-                ASH_LOGGER.warning(f"Failed to import plugin module {module_path}: {e}")
-                continue
-            failed.append(f"{module_path!r} ({type(e).__name__}: {e})")
-            continue
-        except Exception as e:
-            if not fail_on_import_error:
-                raise
-            failed.append(f"{module_path!r} ({type(e).__name__}: {e})")
-            continue
-
-        # The import itself triggers plugin registration through the plugin
-        # decorators. Track what the module declares.
-        if hasattr(module, "ASH_CONVERTERS"):
-            discovered["converters"].extend(module.ASH_CONVERTERS)
-        if hasattr(module, "ASH_SCANNERS"):
-            discovered["scanners"].extend(module.ASH_SCANNERS)
-        if hasattr(module, "ASH_REPORTERS"):
-            discovered["reporters"].extend(module.ASH_REPORTERS)
-
-        # Register event handlers from external modules
-        if hasattr(module, "ASH_EVENT_HANDLERS"):
-            ASH_LOGGER.debug(
-                f"Found event handlers in {module_path}: {list(module.ASH_EVENT_HANDLERS.keys())}"
+            # The import itself should trigger plugin registration
+            # via the AshPlugin metaclass
+        except Exception as e:  # noqa: BLE001 -- one path for every import failure
+            # Not only ImportError: a configured module whose body raises
+            # anything at import is the same loss, so it takes the same
+            # recorded, carried, exit-3 path instead of an unrecorded crash.
+            from automated_security_helper.utils.error_text import (
+                carry_environment_values,
+                error_text,
             )
-            for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
-                for callback in handlers:
+
+            # The import arm's half of the register arm's cleanup below.
+            # Python removes the failed module itself from sys.modules, but a
+            # submodule its body imported before raising stays, so a
+            # long-lived process (the MCP server) would reload the FIXED file
+            # against the stale submodule. Only the module's own subtree, and
+            # only what this window imported: a dependency it imported first
+            # is shared with the whole process.
+            #
+            # For a dotted entry, the PARENT package can be what failed:
+            # importing "pkg.sub" runs pkg/__init__ first, and when that
+            # raises, Python removes "pkg" itself while a sibling it imported
+            # and the registrations it made would outlive a cleanup scoped to
+            # the entry. The owner is the shortest prefix this window imported
+            # that the failure took back out of sys.modules; with every
+            # prefix still importable, the entry itself failed and owns.
+            owner = module_path
+            parts = module_path.split(".")
+            for end in range(1, len(parts)):
+                prefix = ".".join(parts[:end])
+                if prefix not in modules_before and prefix not in sys.modules:
+                    owner = prefix
+                    break
+            for added in [
+                key
+                for key in sys.modules
+                if key not in modules_before
+                and (key == owner or key.startswith(owner + "."))
+            ]:
+                sys.modules.pop(added, None)
+            # And a plugin its decorators registered before the body raised
+            # must not outlive the refusal either, exactly as on the register
+            # arm: with the module gone, the next resolution would re-import
+            # and re-run the refused module.
+            ash_plugin_manager.undo_registrations_since(registered_before, owner=owner)
+
+            # Recorded, not only logged: the run's record is how ScanPhase and
+            # the completeness gate see an import loss, and
+            # `refuse_failed_plugin_imports` is how a configured module's loss
+            # refuses the run instead of degrading it. Keyed by the module
+            # path, one entry per real module: keying by the shown form made
+            # every env-read entry share the one '<value>' key. The keys reach
+            # no surface (the field is repr=False and excluded from dumps, and
+            # a configured failure refuses the run before any metadata is
+            # written); the shown label is applied where a key is printed.
+            # Recorded redacted: the error's text can quote any env-read
+            # value, and this one string reaches every surface.
+            carry_environment_values(e, shown_values)
+            record[module_path] = PluginLoadFailure(
+                recorded=f"{type(e).__name__}: {error_text(e)}",
+                kind=type(e).__name__,
+            )
+            ASH_LOGGER.warning(
+                f"Failed to import plugin module {label}: "
+                f"{shown_import_failure(e, module_path, label)}"
+            )
+            # The refusal withholds a masked module's error text, so the
+            # traceback is the one place the cause survives: at DEBUG, with
+            # every env-read value redacted (the frames quote the module's
+            # path, which for an env-read entry is the variable's value).
+            if ASH_LOGGER.isEnabledFor(logging.DEBUG):
+                import traceback
+
+                from automated_security_helper.utils.error_text import (
+                    text_without_values,
+                )
+
+                ASH_LOGGER.debug(
+                    "Plugin module import failure traceback (redacted):\n%s",
+                    text_without_values(
+                        "".join(traceback.format_exception(e)), shown_values
+                    ),
+                )
+            continue
+
+        try:
+            # Track what was discovered, per module first: a module refused
+            # below must contribute nothing to the returned groups, which the
+            # scanner inventory keeps with no record and no refusal. A str is
+            # iterable, so a declaration like ASH_CONVERTERS = 'x' would turn
+            # its characters into converters (and bytes its ints): those two
+            # and non-iterables are refused, and every other iterable -- a
+            # set, dict values, a generator -- is accepted, as it was before
+            # the check existed.
+            found: dict = {"converters": [], "scanners": [], "reporters": []}
+            for group, attribute in (
+                ("converters", "ASH_CONVERTERS"),
+                ("scanners", "ASH_SCANNERS"),
+                ("reporters", "ASH_REPORTERS"),
+            ):
+                if hasattr(module, attribute):
+                    declared = getattr(module, attribute)
+                    if isinstance(declared, (str, bytes)) or not isinstance(
+                        declared, collections.abc.Iterable
+                    ):
+                        raise TypeError(
+                            f"{attribute} must be an iterable of plugins, "
+                            f"not {type(declared).__name__}"
+                        )
+                    found[group].extend(declared)
+
+            # Register event handlers from external modules
+            if hasattr(module, "ASH_EVENT_HANDLERS"):
+                ASH_LOGGER.debug(
+                    f"Found event handlers in {label}: {list(module.ASH_EVENT_HANDLERS.keys())}"
+                )
+                # The whole mapping is validated before anything subscribes,
+                # display names included: the manager is process-wide, so a
+                # bad second entry -- or one whose __name__ the debug line
+                # below cannot read, a functools.partial say -- must not
+                # leave the first entry's callbacks registered past this
+                # module's refusal. In a long-lived server they would fire
+                # in the next scan.
+                subscriptions = []
+                for event_type, handlers in module.ASH_EVENT_HANDLERS.items():
+                    for callback in handlers:
+                        if not callable(callback):
+                            raise TypeError(
+                                f"ASH_EVENT_HANDLERS[{event_type!r}] holds an "
+                                "entry that is not callable"
+                            )
+                        # Strict: a declared handler the debug line cannot
+                        # truthfully name (a metaclass makes even the type
+                        # name raise) is refused with the mapping, while
+                        # notify()'s display of an already-subscribed
+                        # callback never raises.
+                        subscriptions.append(
+                            (
+                                event_type,
+                                callback,
+                                callback_display_name(callback, strict=True),
+                            )
+                        )
+                for event_type, callback, display in subscriptions:
                     ASH_LOGGER.debug(
-                        f"Registering event callback {callback.__name__} for {event_type}"
+                        f"Registering event callback {display} for {event_type}"
                     )
                     ash_plugin_manager.subscribe(event_type, callback)
+        except Exception as e:  # noqa: BLE001 -- one path for every registration failure
+            # The module imported; the loss is in reading or registering what
+            # it declares. Recorded apart (stage), so the refusal does not say
+            # "failed to import" about a module that imported, with the same
+            # carry, redaction and DEBUG traceback as the import arm: the
+            # declarations can quote env-read values too.
+            from automated_security_helper.utils.error_text import (
+                carry_environment_values,
+                error_text,
+            )
 
-    if failed:
-        raise PluginModuleImportError(
-            "ash_plugin_modules names "
-            + ", ".join(failed)
-            + ", which could not be imported. Nothing was scanned or installed. "
-            "Install the package, or remove the entry from the config file, "
-            "--config-overrides, --ash-plugin-modules or ASH_PLUGIN_MODULES."
-        )
+            # The refused module and its own submodules leave sys.modules, so
+            # a long-lived process (the MCP server) imports the FIXED file on
+            # the next load instead of re-failing from the stale module. Only
+            # those, and only what this window imported: a dependency the
+            # module imported first is shared with the whole process (popping
+            # it would make a later import run its body again and mint new
+            # class objects), a module another thread imported in the same
+            # window is not this import's to remove, and a module some earlier
+            # import loaded stays as it was.
+            for added in [
+                key
+                for key in sys.modules
+                if key not in modules_before
+                and (key == module_path or key.startswith(module_path + "."))
+            ]:
+                sys.modules.pop(added, None)
+            # And what the refused module itself registered leaves the
+            # registry: its decorated plugins and anything the loop above
+            # subscribed must not fire in the next scan of a long-lived
+            # server, nor make a later resolution re-import the refused
+            # module. Only the refused module's own: another thread's plugin
+            # loaded in this window, and a plugin module this one
+            # first-imported, keep theirs.
+            ash_plugin_manager.undo_registrations_since(
+                registered_before, owner=module_path
+            )
+            carry_environment_values(e, shown_values)
+            record[module_path] = PluginLoadFailure(
+                recorded=f"{type(e).__name__}: {error_text(e)}",
+                kind=type(e).__name__,
+                stage="register",
+            )
+            ASH_LOGGER.warning(
+                f"Failed to register plugin module {label}: "
+                f"{shown_import_failure(e, module_path, label)}"
+            )
+            if ASH_LOGGER.isEnabledFor(logging.DEBUG):
+                import traceback
+
+                from automated_security_helper.utils.error_text import (
+                    text_without_values,
+                )
+
+                ASH_LOGGER.debug(
+                    "Plugin module registration failure traceback (redacted):\n%s",
+                    text_without_values(
+                        "".join(traceback.format_exception(e)), shown_values
+                    ),
+                )
+        else:
+            # Only an accepted module's declarations reach the returned
+            # groups: the refusal says the module's plugins are not loaded,
+            # and a tolerant caller (the scanner inventory) keeps the return.
+            for group, items in found.items():
+                discovered[group].extend(items)
+
     return discovered
+
+
+def refuse_failed_plugin_imports(
+    plugin_modules: Iterable[str],
+    record: Mapping[str, PluginLoadFailure],
+    shown: Optional[Mapping[str, str]] = None,
+) -> None:
+    """Refuse the run when a configured plugin module failed to import.
+
+    The configuration named these modules, so a run without their plugins is
+    not the run the operator configured: load_additional_plugin_modules keeps
+    going (a vendored-inventory caller wants every importable group), records
+    each failure in ``record`` (the run's own, never the process's), and the
+    callers that load a CONFIG's modules call this right after it with the same
+    record. ``shown`` is the refusal's naming map, as
+    :func:`refuse_plugin_modules_outside_namespace` takes it.
+
+    Raises:
+        PluginModuleImportError: Naming every configured module that failed,
+            with its import error. A scan maps it to exit code 3, invalid
+            configuration.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+    from automated_security_helper.plugins.discovery import masked_failure_kind
+
+    labels = shown or {}
+    failed = []
+    unregistered = []
+    for name in split_plugin_modules(plugin_modules):
+        # The record is keyed by the module path; the shown label is applied
+        # only here, where a key is printed, so two env-read entries keep
+        # their own records and only the failed one is named.
+        if name not in record:
+            continue
+        failure = record[name]
+        label = labels.get(name, name)
+        # A masked name's error text is withheld with it: an import error
+        # routinely quotes the module's own name ("cannot import name ...
+        # from 'the_module'"), which would put the env-read value in the
+        # refusal beside the mask.
+        said = (
+            failure.recorded
+            if label == name
+            else masked_failure_kind(failure.kind or "an import failure")
+        )
+        phrase = f"{label!r} ({said})"
+        # By the loss's stage, so the refusal's sentence is true for each
+        # module: "failed to import" about a module that imported sent the
+        # operator debugging the wrong thing.
+        if getattr(failure, "stage", "import") == "register":
+            unregistered.append(phrase)
+        else:
+            failed.append(phrase)
+    if not failed and not unregistered:
+        return
+    if not unregistered:
+        raise _import_refusal(failed)
+    if not failed:
+        raise _registration_refusal(unregistered)
+    imports, registrations = (
+        _import_refusal(failed),
+        _registration_refusal(unregistered),
+    )
+    both = PluginModuleImportError(
+        f"{imports.naming} {registrations.naming}",
+        "Nothing was scanned. Install what the modules need, fix what they "
+        "declare, or remove the entries from the config file, "
+        "--config-overrides, --ash-plugin-modules or ASH_PLUGIN_MODULES.",
+    )
+    both.stages = frozenset(("import", "register"))
+    raise both
+
+
+def _import_refusal(failed: List[str]) -> PluginModuleImportError:
+    """The import refusal, one wording for the scan's loader and the checks."""
+    refusal = PluginModuleImportError(
+        "ash_plugin_modules names " + ", ".join(failed) + ", which failed to "
+        "import, so the plugins it declares are not loaded.",
+        "Nothing was scanned. Install what the module needs, or remove the "
+        "entry from the config file, --config-overrides, --ash-plugin-modules "
+        "or ASH_PLUGIN_MODULES.",
+    )
+    refusal.stages = frozenset(("import",))
+    return refusal
+
+
+def _registration_refusal(unregistered: List[str]) -> PluginModuleImportError:
+    """The refusal for a module that imported but could not be registered.
+
+    Its own words: saying "failed to import" about a module that imported is
+    false, and the loss is in what the module declares (the ASH_* lists,
+    ASH_EVENT_HANDLERS), which is what the operator has to fix.
+    """
+    refusal = PluginModuleImportError(
+        "ash_plugin_modules names "
+        + ", ".join(unregistered)
+        + ", which imported, but what it declares could not be registered, so "
+        "the plugins it declares are not loaded.",
+        "Nothing was scanned. Fix the module's ASH_EVENT_HANDLERS or ASH_* "
+        "lists, or remove the entry from the config file, --config-overrides, "
+        "--ash-plugin-modules or ASH_PLUGIN_MODULES.",
+    )
+    refusal.stages = frozenset(("register",))
+    return refusal
+
+
+def plugin_module_fix(error: PluginModuleError) -> str:
+    """The fix clause of a command's closing, by the recorded loss's stage.
+
+    ``ash report``, ``ash merge``, ``ash dependencies install`` and ``ash
+    plugin list`` each close the refusal in their own words; this is the one
+    clause between them that depends on what failed, so a registration loss
+    is not answered with "install what the module needs" -- the module
+    imported, and its dependencies are not the problem. An error that records
+    no stage reads as an import loss (the namespace refusals keep their own
+    closings and never reach this)."""
+    stages = getattr(error, "stages", None) or frozenset(("import",))
+    if stages == {"register"}:
+        return "Fix the module's ASH_EVENT_HANDLERS or ASH_* lists"
+    if "register" in stages:
+        return "Install what the modules need, fix what they declare"
+    return "Install what the module needs"
+
+
+def _unfindable_level(module_path: str) -> Optional[str]:
+    """The shortest prefix of ``module_path`` no installed package provides.
+
+    Each level is located without importing anything
+    (``config.plugin_module_trust._spec_without_importing``), the way
+    :func:`_namespace_package_refusal` walks a name, so the check runs no
+    code. None when every level is found, or when a level cannot be judged
+    without importing (a parent that fills its ``__path__`` on import, say):
+    those are left to the import.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        _spec_without_importing,
+    )
+
+    parts = module_path.split(".")
+    spec = None
+    for depth in range(1, len(parts) + 1):
+        prefix = ".".join(parts[:depth])
+        parent = spec
+        try:
+            spec = _spec_without_importing(prefix, spec)
+        except (ImportError, ValueError):
+            return None
+        if spec is None:
+            # find_spec returns None for a missing name; PathFinder for a
+            # missing submodule. Either way the scan's import would raise
+            # ModuleNotFoundError naming this prefix -- unless the parent
+            # fills its __path__ on import, which only the import can judge.
+            if _parent_extends_its_path(parts[: depth - 1], parent):
+                return None
+            return prefix
+    return None
+
+
+def _parent_extends_its_path(parent_parts: List[str], parent: Optional[Any]) -> bool:
+    """Whether the missing child's not-yet-imported parent extends its ``__path__``.
+
+    A pkgutil-style namespace package (an ``__init__`` calling
+    ``pkgutil.extend_path`` or ``pkg_resources.declare_namespace``) keeps
+    portions in other directories that only its import adds to its
+    ``__path__``, so a child not found under the one located portion can still
+    import. Judged by the parent's source, never by importing it, and only
+    for a parent that is not imported: an imported parent's search locations
+    are its real, extended ``__path__``, so a miss there is a miss. The
+    source comes from the parent spec's loader (``get_source``), so a zipped
+    package is read too. The judgment is of calls: an ``ast.Call`` whose
+    function is a name or attribute called ``extend_path`` or
+    ``declare_namespace``, or a name either was imported as from ``pkgutil``
+    or ``pkg_resources``. An identifier that is no call -- an f-string's
+    expression, an attribute assignment target, the parent's own ``def`` of
+    the name -- extends nothing, and a comment, a string or a longer name
+    never did. A PEP 420 namespace parent has no source and its spec lists
+    every portion already. A parent that cannot be judged is left to the
+    import: no source to get (a sourceless, .pyc-only package included),
+    source the parser rejects, or source over the one-MiB bound.
+
+    Named limits, left as they are: a call built without either identifier
+    (``getattr(pkgutil, 'extend' + '_path')``) and a manual ``__path__``
+    append are refused although the import works. Leaving an unjudgeable
+    parent to the import also means the check surfaces miss what only the
+    import can see: a PLAIN parent that is sourceless or over the bound has
+    its missing child accepted here while the scan refuses it, the trade
+    accepted over refusing parents whose calls the check cannot read.
+    """
+    if not parent_parts or parent is None:
+        return False
+    parent_name = ".".join(parent_parts)
+    if parent_name in sys.modules:
+        return False
+    loader = getattr(parent, "loader", None)
+    get_source = getattr(loader, "get_source", None)
+    if get_source is None:
+        return False
+    try:
+        source = get_source(parent_name)
+    except Exception:  # noqa: BLE001 -- a source that can't be got can't be judged
+        return True
+    if source is None:
+        # Sourceless (a .pyc-only package): nothing to judge from.
+        return True
+    if len(source) > 1024 * 1024:
+        # Bounded work: a parent this large is left to the import rather than
+        # judged from a prefix the parser would reject.
+        return True
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        # Source the parser rejects is left to the import, whose own failure
+        # names the real problem: a null byte raises ValueError, and a deeply
+        # nested expression raises MemoryError ("Parser stack overflowed"),
+        # not SyntaxError.
+        return True
+    names = {"extend_path", "declare_namespace"}
+    called_as = set(names)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in (
+            "pkgutil",
+            "pkg_resources",
+        ):
+            called_as.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name in names
+            )
+    for node in ast.walk(tree):
+        target = node.func if isinstance(node, ast.Call) else None
+        if isinstance(target, ast.Name) and target.id in called_as:
+            return True
+        if isinstance(target, ast.Attribute) and target.attr in names:
+            return True
+    return False
+
+
+def refuse_unfindable_plugin_imports(
+    plugin_modules: Iterable[str],
+    shown: Optional[Mapping[str, str]] = None,
+) -> None:
+    """Refuse configured modules no installed package provides, importing nothing.
+
+    The locatable half of :func:`refuse_failed_plugin_imports`'s class, for the
+    check surfaces (``config validate``, ``lint``, ``get``,
+    ``validate-plugin-dependencies``, the MCP ``validate_config``), which must
+    agree with the scan without importing a plugin module. One named
+    exception: ``lint`` judges the file as written, so it reads neither
+    ``--config-overrides`` nor ``ASH_PLUGIN_MODULES`` and judges only the
+    file's own entries -- the same input can lint clean and still refuse a
+    scan. A name whose spec is
+    not found would give the scan's import exactly ``ModuleNotFoundError: No
+    module named '...'``, so the refusal says that, in the import refusal's
+    words. The limit: a module that is installed but fails while importing (a
+    missing dependency of its own, say) can only be caught by importing it, so
+    that half stays with the scan's loader and the checks accept it.
+
+    Raises:
+        PluginModuleImportError: Naming every configured module no installed
+            package provides. Every caller maps ASHConfigValidationError to
+            exit 3, invalid configuration.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+    from automated_security_helper.plugins.discovery import masked_failure_kind
+
+    labels = shown or {}
+    names = split_plugin_modules(plugin_modules)
+    if not names:
+        return
+    # The import system caches a miss for a sys.path entry it could not read,
+    # as the loader's own invalidation above this says: without the same
+    # invalidation a long-lived process (the MCP server) keeps refusing a
+    # module installed after its first answer while the scan's loader imports
+    # it.
+    importlib.invalidate_caches()
+    failed = []
+    failed_entries: List[str] = []
+    for name in names:
+        missing = _unfindable_level(name)
+        if missing is None:
+            continue
+        label = labels.get(name, name)
+        # The masked arm withholds the error text with the name, as the
+        # loader's refusal does: the text quotes the name.
+        said = (
+            f"ModuleNotFoundError: No module named '{missing}'"
+            if label == name
+            else masked_failure_kind("ModuleNotFoundError")
+        )
+        failed.append(f"{label!r} ({said})")
+        failed_entries.append(name)
+    if failed:
+        refusal = _import_refusal(failed)
+        refusal.entries = tuple(failed_entries)
+        raise refusal
 
 
 def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
@@ -536,33 +1371,58 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
             plugin namespace (see refuse_plugin_modules_outside_namespace).
         PluginModuleImportError: A module the config names could not be imported.
     """
-    # Extract additional plugin modules from context if available, split on
-    # commas the way a scan reads them
-    additional_plugin_modules = []
-    if plugin_context and plugin_context.config:
-        from automated_security_helper.config.plugin_module_trust import (
-            split_plugin_modules,
-        )
+    # Imported here: plugin_module_trust imports config modules that import the
+    # plugin packages, which import this module.
+    from automated_security_helper.config.plugin_module_trust import (
+        config_module_names,
+        split_plugin_modules,
+    )
 
+    # Extract additional plugin modules from context if available
+    additional_plugin_modules = []
+    shown = None
+    if plugin_context and plugin_context.config:
         additional_plugin_modules = split_plugin_modules(
             getattr(plugin_context.config, "ash_plugin_modules", [])
         )
-    # The same refusal as a scan's, before anything is imported
-    refuse_plugin_modules_outside_namespace(additional_plugin_modules)
+        # An entry the config read from the environment is named by its masked
+        # form, never the variable's value.
+        shown = config_module_names(plugin_context.config)
+    # Before importing any of them: a name outside the plugin namespace refuses
+    # the command with exit 3 (every caller maps ASHConfigValidationError so),
+    # and nothing is imported.
+    refuse_plugin_modules_outside_namespace(additional_plugin_modules, shown=shown)
 
     # Set the context on the plugin manager if provided
     if plugin_context:
         ash_plugin_manager.set_context(plugin_context)
 
+    # The run's own failure record, never the process's: a stale record from an
+    # earlier run in the same interpreter must not refuse or pollute this one.
+    record = plugin_context.plugin_load_record if plugin_context is not None else {}
+
     # Load internal plugins
-    internal_plugins = load_internal_plugins()
+    internal_plugins = load_internal_plugins(record=record)
 
     # Load any additional plugin modules specified in configuration
     external_plugins = {}
     if additional_plugin_modules:
-        external_plugins = load_additional_plugin_modules(
-            additional_plugin_modules, fail_on_import_error=True
+        from automated_security_helper.utils.error_text import (
+            config_environment_values,
         )
+
+        external_plugins = load_additional_plugin_modules(
+            additional_plugin_modules,
+            shown=shown,
+            record=record,
+            values=config_environment_values(
+                plugin_context.config if plugin_context else None
+            ),
+        )
+        # A configured module that failed to import refuses the command, as a
+        # misnamed one did above: the run has none of the plugins the operator
+        # asked for (every caller maps ASHConfigValidationError to exit 3).
+        refuse_failed_plugin_imports(additional_plugin_modules, record, shown=shown)
 
     # Combine internal and external plugins
     all_plugins = {
@@ -581,3 +1441,63 @@ def load_plugins(plugin_context=None) -> Dict[str, List[Any]]:
     )
 
     return all_plugins
+
+
+#: The plugin package every run loads, whatever its config lists. The same one
+#: load_internal_plugins imports.
+INTERNAL_PLUGIN_PACKAGE = "automated_security_helper.plugin_modules.ash_builtin"
+
+
+def plugins_of(plugin_modules: Iterable[object]) -> Callable[[Any], bool]:
+    """A filter for one run's plugins: classes, and event handlers too.
+
+    For ``plugin_modules()``'s ``filter_callback`` and ``notify()``'s ``_scope``.
+
+    The registry is process-wide, and a module registers its plugins once, the
+    first time anything in the process imports it. In a process that runs more
+    than one scan, the MCP server above all, it therefore holds every module any
+    earlier scan, session or tool loaded. A run that resolved its plugins from
+    the whole registry ran plugins its own configuration never named: an earlier
+    session's AWS reporters, with this session's results and the server's
+    credentials, or the vendored scanners ``list_scanners`` loads.
+
+    The filter keeps a class or handler defined in ASH's built-in plugin package
+    or in one of ``plugin_modules`` (or a module below one of them), and one that
+    one of them exports by name, for a package that re-exports plugins defined
+    elsewhere. ``plugin_modules`` takes the same entries
+    ``load_additional_plugin_modules`` does, comma lists included.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    roots = (INTERNAL_PLUGIN_PACKAGE, *split_plugin_modules(plugin_modules))
+    exported = {
+        id(value)
+        for root in roots
+        if (module := sys.modules.get(root)) is not None
+        for value in vars(module).values()
+        if isinstance(value, (type, types.FunctionType))
+    }
+
+    def belongs(plugin: Any) -> bool:
+        # A functools.partial reports functools as its module; its function is
+        # what was defined somewhere.
+        while isinstance(plugin, functools.partial):
+            plugin = plugin.func
+        if id(plugin) in exported:
+            return True
+        # Never-raising, like callback_display_name: the loader accepts
+        # callables whose attribute reads raise or hold odd values, and
+        # subscriptions are process-wide, so a filter that raises on one
+        # callback breaks every scoped notify of its event -- in other runs'
+        # scans too. Such a callback is left out of the scope instead.
+        try:
+            name = getattr(plugin, "__module__", None)
+        except Exception:  # noqa: BLE001 -- a scope filter must never raise
+            name = None
+        if not isinstance(name, str):
+            return False
+        return any(name == root or name.startswith(root + ".") for root in roots)
+
+    return belongs

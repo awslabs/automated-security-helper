@@ -2,8 +2,14 @@
 
 import os
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import subprocess
+
+from tests.utils.env_assertions import NamesOnlyEnvironment
 
 from typing_extensions import Self
 
@@ -344,6 +350,35 @@ def iter_repo_files(
             yield here / name
 
 
+def ash_tool_not_found_reason(tool: str, windows: Optional[bool] = None) -> str:
+    """The skip reason for a test that needs a tool ASH installs, and found none.
+
+    ``find_executable`` looks on PATH, then in ASH's bin directory (ASH_BIN_PATH, or
+    ~/.ash/bin) and /usr/local/bin. tests/conftest.py gives every run and every test
+    a home of its own, so during a run ~/.ash/bin is an empty directory there, and a
+    tool ``ash dependencies install`` put in the developer's ~/.ash/bin is not found
+    unless that directory is on PATH. The reason says so, because "not installed" sends
+    whoever reads it to install a tool they already have. It names PATH rather than
+    ASH_BIN_PATH because tests that install to the default directory install into
+    ASH_BIN_PATH. ``windows`` picks the shell syntax, PowerShell and cmd or POSIX; by
+    default, this platform's.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    if windows:
+        advice = (
+            '$env:PATH = "$HOME\\.ash\\bin;$env:PATH" (PowerShell), or '
+            'set "PATH=%USERPROFILE%\\.ash\\bin;%PATH%" (cmd)'
+        )
+    else:
+        advice = 'PATH="$HOME/.ash/bin:$PATH"'
+    return (
+        f"{tool} is not on PATH or in ASH's bin directory, which tests keep in a home "
+        "of their own; to run this test against a copy `ash dependencies install` put "
+        f"in ~/.ash/bin, run with {advice}"
+    )
+
+
 def get_ash_temp_path():
     """Create a temporary directory using the gitignored tests/pytest-temp directory.
 
@@ -360,3 +395,235 @@ def get_ash_temp_path():
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     return temp_dir
+
+
+def module_from_this_checkout(module: str) -> str:
+    """Code that runs ``module`` as ``python -m`` would, importing ASH from this
+    checkout (``importing_this_checkout``).
+
+    For a child started as ``python -I -m automated_security_helper...``: ``-I``
+    ignores ``PYTHONPATH``, so ``checkout_env`` cannot reach it. Start it as
+    ``[sys.executable, "-I", "-c", module_from_this_checkout(module), *args]``
+    instead; ``runpy`` gives the module ``sys.argv[0]`` and ``__main__`` as ``-m``
+    does, and the arguments after the code are its ``sys.argv[1:]``.
+    """
+    return importing_this_checkout(
+        "import runpy\n"
+        f"runpy.run_module({module!r}, run_name='__main__', alter_sys=True)\n"
+    )
+
+
+def checkout_env(env: Optional[dict] = None) -> dict:
+    """``env`` (os.environ when None), with this checkout first on ``PYTHONPATH``.
+
+    For a child Python that is not started with ``-I`` or ``-E``: a
+    ``-m automated_security_helper...`` module, a script that imports ASH, or the
+    ``ash`` console script. Each imports ASH from wherever the interpreter's
+    installed copy points unless ``PYTHONPATH`` names the checkout: an editable
+    install points at the tree it was installed from, which need not be this one.
+
+    A ``NamesOnlyEnvironment``, so a failure whose traceback passes through a frame
+    given it shows its names, not their values.
+    """
+    given = NamesOnlyEnvironment(os.environ if env is None else env)
+    parts = [str(REPO_ROOT)]
+    if given.get("PYTHONPATH"):
+        parts.append(given["PYTHONPATH"])
+    given["PYTHONPATH"] = os.pathsep.join(parts)
+    return given
+
+
+def run_a_child_pytest_under_this_suite(
+    source: str,
+    basetemp: Path,
+    *,
+    prefix: str,
+    options: "Sequence[str]" = (),
+    environment: "Optional[dict[str, str]]" = None,
+    junitxml: Optional[Path] = None,
+    extra_files: "Optional[dict[str, str]]" = None,
+    timeout: int = 240,
+) -> "subprocess.CompletedProcess[str]":
+    """Run *source* as a test module in a child pytest under this suite's own
+    root conftest, and give the completed process.
+
+    The module sits in a directory of its own (``mkdtemp``, *prefix*) under
+    ASH_TEST_TEMP_ROOT, so the suite's conftest governs the child and no two
+    runs share a holder; the holder is removed whatever the child did. The
+    child's environment is built here, not inherited: PATH, what Windows
+    needs to start Python, HOME and the temp variables at *basetemp*, no
+    bytecode, this checkout first on PYTHONPATH (checkout_env), and
+    *environment* over all of that. The report backstop
+    (tests/utils/env_assertions.py) redacts every environment value from the
+    child's failure reports, so a caller that asserts a report's exact words
+    must not hand the child a value an ordinary word could be -- one host
+    holds "user" as a value, and a caller that inherited this run's
+    environment there missed text the backstop had rewritten.
+
+    *extra_files* maps holder-relative paths to contents, for a probe that
+    needs more than one module -- a package with its ``__init__.py`` and
+    ``conftest.py``, a second module. With extra files, the child collects
+    the whole holder, in name order, so a package named before ``test_zz``
+    runs before *source*'s module; without them, only *source*'s module.
+    """
+    import subprocess
+    import sys
+    import tempfile
+
+    ASH_TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+    holder = Path(tempfile.mkdtemp(prefix=prefix, dir=ASH_TEST_TEMP_ROOT))
+    module = holder / f"test_zz_{prefix.rstrip('-').replace('-', '_')}_probe.py"
+    extras = {
+        holder / relative: content for relative, content in (extra_files or {}).items()
+    }
+    made_directories: "list[Path]" = []
+    # Everything after the mkdtemp runs inside the try: a write that fails
+    # must not leave the holder behind, and the cleanup tolerates a file the
+    # failure never wrote (missing_ok).
+    scratch = {
+        name: os.environ[name]
+        for name in ("SYSTEMROOT", "COMSPEC", "PATHEXT")
+        if name in os.environ
+    }
+    # Containment names the run sets survive the build: a sanitizing wrapper
+    # carries GIT_CEILING_DIRECTORIES itself, so a child's git discovery
+    # cannot walk into shared parents, and the proxies and the metadata
+    # switch keep a child off the network and real credentials. Their values
+    # are paths, URLs or flags, never ordinary words the report backstop
+    # could rewrite out of a caller's asserted text. *environment* still
+    # wins (setdefault after the update below).
+    containment = (
+        "GIT_CEILING_DIRECTORIES",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        # curl and git-over-http prefer the lower-case proxy names for an
+        # http:// URL and fall back to all_proxy/ALL_PROXY (measured on
+        # loopback: curl with only HTTP_PROXY connected straight; with
+        # ALL_PROXY beside it, it stayed on the proxy). A child missing the
+        # lower-case names bypasses a refusing proxy exactly when the parent
+        # set no ALL_PROXY either; carrying every spelling closes that case.
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "AWS_EC2_METADATA_DISABLED",
+        "ASH_BIN_PATH",
+        # The run's wrapper points these off real credentials and telemetry.
+        "KRB5CCNAME",
+        "SEMGREP_SEND_METRICS",
+    )
+    scratch.update(
+        {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(basetemp),
+            "USERPROFILE": str(basetemp),
+            "TMPDIR": str(basetemp),
+            "TEMP": str(basetemp),
+            "TMP": str(basetemp),
+            # No __pycache__ beside the module, so its holder empties.
+            "PYTHONDONTWRITEBYTECODE": "1",
+            **(environment or {}),
+        }
+    )
+    for name in containment:
+        if name in os.environ:
+            scratch.setdefault(name, os.environ[name])
+    scratch.setdefault("UV_OFFLINE", "1")
+    # The AWS file-path settings are pinned, never copied. A plain run that
+    # points them at real files would re-point a child whose scratch HOME
+    # was meant to hide ~/.aws, and no other AWS_*_FILE name
+    # (AWS_WEB_IDENTITY_TOKEN_FILE among them) is carried at all, since this
+    # environment is built, not inherited. A test that needs real AWS files
+    # passes them in *environment*, which wins over these pins.
+    scratch.setdefault("AWS_CONFIG_FILE", os.devnull)
+    scratch.setdefault("AWS_SHARED_CREDENTIALS_FILE", os.devnull)
+    try:
+        module.write_text(source, encoding="utf-8")
+        for path in extras:
+            parent = path.parent
+            missing: "list[Path]" = []
+            while parent != holder and not parent.exists():
+                missing.append(parent)
+                parent = parent.parent
+            for directory in reversed(missing):
+                directory.mkdir()
+                made_directories.append(directory)
+        for path, content in extras.items():
+            path.write_text(content, encoding="utf-8")
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(holder) if extras else str(module),
+                "-p",
+                "no:cacheprovider",
+                "-o",
+                "addopts=",
+                f"--basetemp={basetemp / 'bt'}",
+                *([f"--junitxml={junitxml}"] if junitxml is not None else []),
+                *options,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=REPO_ROOT,
+            env=checkout_env(scratch),
+        )
+    finally:
+        for path in extras:
+            path.unlink(missing_ok=True)
+        for directory in sorted(
+            made_directories, key=lambda path: len(path.parts), reverse=True
+        ):
+            directory.rmdir()
+        module.unlink(missing_ok=True)
+        holder.rmdir()
+
+
+def builtin_scanner_config_names() -> list:
+    """Every built-in scanner's config name, derived from the registry.
+
+    For a cell that disables each built-in scanner: a hardcoded list silently
+    drops a newly shipped scanner out of the pin, while this list stays equal
+    to what a scan registers.
+    """
+    import typing
+
+    from automated_security_helper.plugin_modules import ash_builtin
+
+    names = []
+    for cls in ash_builtin.ASH_SCANNERS:
+        annotation = cls.model_fields["config"].annotation
+        config_cls = [a for a in typing.get_args(annotation) if a is not type(None)][0]
+        names.append(config_cls.model_fields["name"].default)
+    return sorted(names)
+
+
+def mark_git_checkout(root: Path) -> None:
+    """Mark ``root`` as a git checkout the way git's own discovery sees one.
+
+    A ``.git`` directory holding ``HEAD``. ``sandbox_grants`` counts only a
+    git-shaped ``.git`` (a gitfile, a link, or a directory with ``HEAD``) as
+    a checkout boundary, so a bare empty ``.git`` directory -- a stray mkdir,
+    or a transient mount point another process leaves in a shared parent --
+    no longer moves it. Fixtures use this instead of ``(root / ".git").mkdir()``
+    so the marker they plant is one the boundary still honors."""
+    git_dir = root / ".git"
+    git_dir.mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+
+def stand_in_host_ids(monkeypatch, uid: int = 1000, gid: int = 1000) -> None:
+    """Answer the host's uid and gid without running ``id -u`` and ``id -g``.
+
+    Container mode bakes both into the image's build arguments. The real lookup
+    is a program start the process guard refuses, and on Windows ``id`` does
+    not exist.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: uid)
+    monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: gid)

@@ -8,6 +8,31 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 
 
+@pytest.fixture(autouse=True)
+def _no_tool_starts(tmp_path_factory, monkeypatch):
+    """No test here may start a tool: they exercise ASH's code, not the host's tools.
+
+    Recording stand-ins go first on PATH, and each test fails at teardown if one
+    was started. Without them, building and validating these scanners started
+    ``uv --version``, ``uv tool run <tool> --version``, ``semgrep --version``,
+    ``opengrep --version`` and ``npm --version`` on whatever the host had
+    installed, and ``uv tool run`` can fetch the tool from PyPI. The probes are
+    answered as on a host without the tools (``stub_tool_probes``); a test that
+    needs a tool present says so with its own double.
+    """
+    from tests.utils.tool_guard import (
+        install_tool_guard,
+        reset_tool_lookup_caches,
+        stub_tool_probes,
+    )
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    stub_tool_probes(monkeypatch)
+    yield guard
+    reset_tool_lookup_caches()
+    assert guard.started == [], f"the test started tools: {guard.started}"
+
+
 @pytest.fixture
 def scanner_context(tmp_path):
     source_dir = tmp_path / "source"
@@ -261,13 +286,36 @@ class TestNpmAuditScannerCoverage:
         scanner = NpmAuditScanner(context=scanner_context)
         assert scanner.config.name == "npm-audit"
 
+    @staticmethod
+    def _validate_with_npm_present(scanner):
+        """npm found, and its ``--version`` answered without starting it.
+
+        True came from whether the host had npm installed; the double says so.
+        """
+        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+            npm_audit_scanner,
+        )
+
+        with (
+            patch.object(
+                npm_audit_scanner, "find_executable", return_value="/usr/bin/npm"
+            ),
+            patch.object(
+                scanner, "_run_subprocess", return_value={"stdout": "10.0.0"}
+            ) as spawn,
+        ):
+            result = scanner.validate_plugin_dependencies()
+        spawn.assert_called_once()
+        assert spawn.call_args.kwargs["command"] == ["npm", "--version"]
+        return result
+
     def test_validate_no_package_json(self, scanner_context):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
             NpmAuditScanner,
         )
 
         scanner = NpmAuditScanner(context=scanner_context)
-        result = scanner.validate_plugin_dependencies()
+        result = self._validate_with_npm_present(scanner)
         assert isinstance(result, bool)
 
     def test_validate_with_package_json(self, scanner_context):
@@ -277,7 +325,7 @@ class TestNpmAuditScannerCoverage:
 
         (scanner_context.source_dir / "package.json").write_text('{"name": "test"}')
         scanner = NpmAuditScanner(context=scanner_context)
-        result = scanner.validate_plugin_dependencies()
+        result = self._validate_with_npm_present(scanner)
         assert result is True
 
 

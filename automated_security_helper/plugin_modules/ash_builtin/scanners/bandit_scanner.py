@@ -1,11 +1,11 @@
 """Module containing the Bandit security scanner implementation."""
 
-import bisect
 import fnmatch
+import glob
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Sequence, Tuple
 
 from pydantic import Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -16,7 +16,6 @@ from automated_security_helper.base.options import (
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
-from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -33,15 +32,20 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
-from automated_security_helper.utils.link_exclusions import (
-    ignored_entries,
-    walked_files,
-)
-from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
+from automated_security_helper.utils.link_exclusions import walked_files
+from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
+from automated_security_helper.utils.scan_output_dirs import (
+    PatternSyntax,
+    escape_for_pattern,
+)
+from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
+from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
+
+_GLOB_CHARACTERS = set("*?[]")
 
 #: What an ``--exclude`` entry cannot hold: bandit splits the value on commas and
 #: reads ``* ? [`` as fnmatch syntax, and a line break fails ASH's flag-key check.
@@ -52,9 +56,227 @@ _BANDIT_EXCLUDE_UNSAFE = frozenset(",*?[\n\r")
 _EXCLUDE_ARGUMENT_LIMIT = 120 * 1024
 
 
+def _paths_holding_glob_characters(target: Path) -> List[str]:
+    """The file paths under ``target`` with ``*?[]`` below it, as bandit spells them.
+
+    bandit walks ``os.walk(<target as given>)`` and joins each file with
+    ``os.path.join(root, name)``. Every --exclude entry ASH emits holds ``*`` or
+    ``?`` after the target, so only a path with such a character below the
+    target can hold an entry as text.
+    """
+    top = str(target)
+    found = []
+    for root, _dirs, files in os.walk(top):
+        below = root[len(top) :]
+        for name in files:
+            if _GLOB_CHARACTERS & set(below + name):
+                found.append(os.path.join(root, name))
+    return found
+
+
+def _entries_no_path_holds_as_text(
+    target: Path,
+    ignore_entries: List[str],
+    output_entries: List[Tuple[str, Path]],
+    holding: Optional[List[str]] = None,
+) -> List[str]:
+    """The entries, less any that a file path under ``target`` holds as text.
+
+    bandit skips a file whose path contains an --exclude entry as a plain
+    substring, as well as one the entry matches as a glob (bandit 1.9.4,
+    ``manager._is_file_included``). Measured: ignore path ``docs/*.md`` gave
+    ``<src>/docs/*.md``, and bandit skipped ``<src>/docs/*.md/evil.py``, in a
+    directory literally named ``*.md``, which the ignore path does not cover.
+    Such an entry is left out, and the SARIF step still applies the ignore
+    path. ``output_entries`` pairs each of ASH's output directories inside
+    ``target`` (relative to it) with its entry; an entry is kept for paths
+    inside its own directory, which it is meant to skip.
+
+    bandit also rewrites an entry that names an existing directory to
+    ``<entry>/*`` (``manager.discover_files``), which covers the files of every
+    directory the glob matches. Measured: with an empty directory, or a
+    directory symlink, literally named ``docs/*.md`` (or ``*.md`` linked to
+    ``.``, or ``lib/?``), bandit skipped an ``evil.py`` the ignore path does not
+    cover. An entry that names an existing directory is left out too, unless it
+    already ends in ``/*``, for which the rewrite only narrows it.
+
+    ``holding`` is ``_paths_holding_glob_characters(target)``, when the caller
+    has walked it already, so a caller that filters two entry sets walks once.
+    """
+    if holding is None:
+        holding = _paths_holding_glob_characters(target)
+    kept = [e for e in ignore_entries if not any(e in path for path in holding)]
+    dropped = [e for e in ignore_entries if e not in kept]
+    for output_entry, output_dir in output_entries:
+        inside = os.path.join(str(target), *output_dir.parts) + os.sep
+        outside = [path for path in holding if not path.startswith(inside)]
+        if any(output_entry in path for path in outside):
+            dropped.append(output_entry)
+        else:
+            kept.append(output_entry)
+    named_directories = [e for e in kept if not e.endswith("/*") and os.path.isdir(e)]
+    kept = [e for e in kept if e not in named_directories]
+    dropped += named_directories
+    if dropped:
+        ASH_LOGGER.verbose(
+            f"Not passing {dropped} to bandit --exclude: a file path under "
+            f"'{target}' contains it as text, or it names an existing "
+            "directory, and bandit would skip files it does not cover.",
+            extra=NO_MARKUP,
+        )
+    return kept
+
+
+def _not_a_plain_substring(literal: str) -> str:
+    """``literal`` as an ``fnmatch`` glob that matches only itself and holds a
+    ``[``, so bandit's substring test cannot fire on an ordinary path.
+
+    bandit skips a file whose path contains an --exclude entry as plain text,
+    so a literal ``<anchor>/app.py`` would also skip ``<anchor>/app.py.d/x.py``
+    and ``<anchor>/app.pyx.py``. ``<anchor>/app.p[y]`` matches ``<anchor>/app.py``
+    as a glob and nothing else, and as text it occurs only in a path that has a
+    ``[`` itself, which ``_entries_no_path_holds_as_text`` checks the tree for.
+    """
+    for index in range(len(literal) - 1, -1, -1):
+        if literal[index] not in "/!^-]":
+            return f"{literal[:index]}[{literal[index]}]{literal[index + 1 :]}"
+    return literal
+
+
+def bandit_exclude_globs(anchor: str, pattern: str) -> List[str]:
+    """bandit ``--exclude`` globs for an ignore path, anchored at ``anchor``.
+
+    Only globs that make bandit skip no file the ignore path does not cover, so
+    a glob emitted here may skip fewer files than the ignore path covers, never
+    others.
+    bandit tests each entry two ways against ``<anchor>/<relative path>``: as an
+    ``fnmatch`` glob, where ``*`` crosses ``/``, and as a plain substring. So a
+    literal is emitted in a form that is not a plain substring of anything
+    (``_not_a_plain_substring``), and a ``**`` shape that has no exact
+    ``fnmatch`` form is not emitted. What is not emitted is still scanned, and
+    its findings are dropped by the SARIF step, which applies every ignore path;
+    a file bandit skipped that the SARIF step would have kept would lose its
+    findings instead.
+
+    ASH matches case-sensitively on every platform. bandit's ``fnmatch`` does on
+    POSIX, and on Windows it folds both sides to lower case (``os.path.normcase``).
+    For a literal, ``*`` and ``?`` that only makes bandit skip, on Windows, another
+    spelling of a name the file system already reads as the same file; for a
+    character class it can make bandit skip other files (``[A-Z]`` folded is
+    ``[a-z]``, which takes ``b.py``), so a pattern with ``[`` or ``]`` is not
+    emitted.
+
+    Emitted:
+
+    * a literal (``app.py``, ``src/app.py``), which ASH reads as that path
+      only: ``<anchor>/app.p[y]``.
+    * ``dir/**`` and ``dir/`` (``dir`` literal, any depth of components):
+      ``<anchor>/dir/*``.
+    * ``**/dir/**`` and ``**/dir/``: ``<anchor>/dir/*`` and ``<anchor>/*/dir/*``.
+    * a pattern without ``**`` that has ``*`` or ``?`` (``src/*.py``):
+      ``<anchor>/src/*.py``. ASH matches such a pattern with ``fnmatch`` too.
+
+    Not emitted: a pattern with a ``.`` or empty component, a leading ``./``
+    included. ASH's matcher compares a path as it is given and drops no ``./``, so
+    ``./app.py`` covers no file of the tree and bandit is told to skip none.
+    """
+    pattern = pattern.replace("\\", "/")
+    if pattern.endswith("/") and pattern.strip("/"):
+        pattern = pattern.rstrip("/") + "/**"
+    anchor_glob = glob.escape(anchor)
+    if not pattern.strip("/") or "," in pattern or "," in anchor:
+        return []
+    if "[" in pattern or "]" in pattern:
+        # ASH compares a character class as written; bandit's fnmatch folds the
+        # pattern and the path to lower case on Windows, which turns [A-Z] into
+        # [a-z] and makes bandit skip b.py, a file the ignore path does not cover.
+        # No character class reaches bandit. (While ASH lower-cased both sides,
+        # bandit 1.9.4 skipped src/b.py for src/[!A-Z].py on every platform.)
+        return []
+    if "**" not in pattern:
+        # A leading "/" names nothing to ASH's matcher, which compares the
+        # pattern with the path as written; nor do "." or empty components.
+        if pattern.startswith("/") or any(
+            part in ("", ".", "..") for part in pattern.split("/")
+        ):
+            return []
+        if _GLOB_CHARACTERS & set(pattern):
+            return [f"{anchor_glob}/{pattern}"]
+        return [f"{anchor_glob}/{_not_a_plain_substring(pattern)}"]
+    parts = pattern.split("/")
+    leading = parts[0] == "**"
+    middle = parts[1:-1] if leading else parts[:-1]
+    if (
+        parts[-1] != "**"
+        or not middle
+        or any(
+            part in ("", ".", "..", "**") or _GLOB_CHARACTERS & set(part)
+            for part in middle
+        )
+    ):
+        return []
+    directory = "/".join(middle)
+    if leading:
+        return [f"{anchor_glob}/{directory}/*", f"{anchor_glob}/*/{directory}/*"]
+    return [f"{anchor_glob}/{directory}/*"]
+
+
+def bandit_excluded_path_globs(anchor: str, path: str) -> List[str]:
+    """bandit ``--exclude`` globs for an ``excluded_paths`` entry or a known
+    directory (``.venv/``), anchored at ``anchor``.
+
+    Such an entry names a path anywhere below the scanned target, bandit's own
+    reading, which ASH applies with nothing after the scan. It was emitted as
+    ``**/<path>/**``, which bandit only matches inside a directory called
+    ``<path>``: a file entry such as ``app.py`` never skipped its file, and
+    ``tests/*`` skipped only files in subdirectories. Unanchored, it also
+    matched the target's own path, so a project inside a directory named
+    ``venv`` had every file skipped, and ``src/vendor`` under a target named
+    ``src`` skipped the top-level ``vendor`` too.
+
+    * A file or directory (``app.py``, ``vendor``) or a glob (``*.pyc``,
+      ``tests/*``): the files it matches and the files under the directories
+      it matches, at the top of the target or below any directory.
+    * ``dir/``, ``dir/**``, ``**/dir/**``: only the files under such
+      directories. A leading ``**/`` and a leading ``./`` add nothing.
+    * ``**`` elsewhere reads as ``*``, which in bandit's ``fnmatch`` crosses
+      ``/``, as the old form did.
+    * A ``,`` (bandit splits on it), a ``.`` or empty component, or nothing at
+      all: no entry.
+    """
+    spelled = path.replace("\\", "/")
+    while spelled.startswith("./"):
+        spelled = spelled[2:]
+    spelled = spelled.lstrip("/")
+    directory_only = False
+    if spelled.endswith("/"):
+        directory_only = True
+        spelled = spelled.rstrip("/")
+    if spelled.endswith("/**"):
+        directory_only = True
+        spelled = spelled[: -len("/**")]
+    while spelled.startswith("**/"):
+        spelled = spelled[len("**/") :]
+    parts = spelled.split("/")
+    if (
+        not spelled
+        or "," in spelled
+        or "," in anchor
+        or any(part in ("", ".", "..") for part in parts)
+    ):
+        return []
+    body = "/".join("*" if part == "**" else part for part in parts)
+    anchor_glob = glob.escape(anchor)
+    entries = [f"{anchor_glob}/{body}/*", f"{anchor_glob}/*/{body}/*"]
+    if not directory_only:
+        top = body if _GLOB_CHARACTERS & set(body) else _not_a_plain_substring(body)
+        entries += [f"{anchor_glob}/{top}", f"{anchor_glob}/*/{body}"]
+    return entries
+
+
 class BanditScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
-        Path | str | None,
+        str | None,
         Field(
             description="Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory."
             f" {SET_BY_THE_OPERATOR}"
@@ -62,57 +284,58 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = None
     confidence_level: Annotated[
-        Literal["all", "low", "medium", "high"],
-        Field(description="Confidence level for Bandit findings"),
+        str,
+        Field(
+            description="Confidence level for bandit scan (all, low, medium, high)",
+            pattern="^(all|low|medium|high)$",
+        ),
     ] = "all"
+    severity_threshold: Annotated[
+        str,
+        Field(
+            description="Severity threshold for bandit scan (ALL, LOW, MEDIUM, HIGH)",
+            pattern="^(ALL|LOW|MEDIUM|HIGH)$",
+        ),
+    ] = "ALL"
     ignore_nosec: Annotated[
         bool,
         Field(
-            description="If True, do not skip lines with # nosec comments. Defaults to False."
+            description="Whether to ignore #nosec comments in the code",
         ),
     ] = False
     excluded_paths: Annotated[
         List[IgnorePathWithReason],
         Field(
-            description="List of excluded paths and their corresponding reason to exclude from scanning"
+            description="List of paths to exclude from the bandit scan",
         ),
     ] = []
     additional_formats: Annotated[
-        List[
-            Literal[
-                "csv",
-                "custom",
-                "html",
-                "json",
-                "sarif",
-                "txt",
-                "xml",
-                "yaml",
-            ]
-        ],
-        Field(description="List of additional formats to output"),
+        List[str],
+        Field(
+            description="Additional output formats to generate (e.g., html, csv, xml)",
+        ),
     ] = []
     tool_version: Annotated[
         str | None,
         tool_version_constraint("scanners.bandit.options.tool_version"),
         Field(
-            description=(
-                "Version constraint for bandit installation, in pip requirement "
-                "syntax. The default below is the constraint the scanner enforces."
-            )
+            description="Version constraint for bandit tool installation (e.g., '>=1.7.0'). If not specified, uses '>=1.7.0,<2.0.0' for stability."
         ),
     ] = ">=1.7.0,<2.0.0"
     install_timeout: Annotated[
         int,
-        Field(description="Timeout in seconds for tool installation"),
+        Field(description="Timeout in seconds for tool installation (default: 300)"),
     ] = 300
 
 
 class BanditScannerConfig(ScannerPluginConfigBase):
+    """Bandit scanner configuration."""
+
     name: Literal["bandit"] = "bandit"
     enabled: bool = True
     options: Annotated[
-        BanditScannerConfigOptions, Field(description="Configure Bandit scanner")
+        BanditScannerConfigOptions,
+        Field(description="Configure Bandit scanner"),
     ] = BanditScannerConfigOptions()
 
 
@@ -123,6 +346,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     This scanner uses Bandit to perform static security analysis of Python code
     and returns results in a structured format using the StaticAnalysisReport model.
     """
+
+    #: bandit is a Python package ASH runs through uv. See
+    #: ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = True
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         env_prefixes=("BANDIT_",)
@@ -144,7 +371,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
-        # Update tool version detection to work with explicit installation
+        # Under a scan phase the probe is deferred until the dependency check
+        # asks (uv_tool_mixin.deferred_tool_version_probes), so nothing runs
+        # here then; see resolve_deferred_tool_version.
         self.tool_version = self._get_uv_tool_version("bandit")
         self.description = "Bandit is a Python source code security analyzer."
         extra_args = [
@@ -226,6 +455,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         Returns:
             True if validation passes, False otherwise
         """
+        # First, while use_uv_tool still says what construction set: the
+        # tool-version probe, which construction leaves to this point.
+        self.resolve_deferred_tool_version()
         if not self._validate_uv_tool_availability():
             # UV is required but not present.  Defer to consolidated resolver:
             # if the tool is on PATH directly we can still run it.
@@ -278,33 +510,119 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Final fallback: consolidated UV-or-direct-binary resolver.
         return get_uv_tool_command(self.command) is not None
 
+    def _use_empty_ini(self) -> None:
+        """Hand bandit an empty ini file ASH writes.
+
+        Given no ``--ini``, bandit walks its targets for a ``.bandit`` file,
+        which can set ``skips`` and ``exclude``, and would put the repository's
+        file where the operator's refused or missing one was. An explicit
+        ``--ini`` ends the search. The path is recorded now and the file is
+        written when the arguments are resolved (``_neutral_tool_file``), so
+        building a scanner writes nothing.
+        """
+        self.args.extra_args.append(
+            ToolExtraArg(
+                key="--ini",
+                value=self._neutral_tool_file("bandit-empty.ini", "[bandit]\n"),
+            )
+        )
+
     def _process_config_options(self):
         # The operator's config file, if there is one. A config file inside the
-        # scanned tree does not choose it (config/tool_config_trust.py), and ASH no
-        # longer looks for .bandit, bandit.yaml or bandit.toml by name: their skips
-        # and exclude_dirs would let the repository decide what its scan reports.
-        ini_file: Path | None = None
-        if self.config.options.config_file is not None:
-            config_file_path = Path(self.config.options.config_file)
-            if not config_file_path.is_absolute():
-                config_file_path = Path(self.context.source_dir) / config_file_path
+        # scanned tree does not choose it (config/tool_config_trust.py), and ASH
+        # does not look for .bandit, bandit.yaml or bandit.toml by name: their
+        # skips and exclude_dirs would let the repository decide what its scan
+        # reports. A scan always passes an --ini (the operator's .bandit, or an
+        # empty one ASH writes), which ends bandit's own .bandit search.
+        #
+        # The configured value is read as the tool will read it (resolved from
+        # the scanned tree, not from whatever directory the process runs in),
+        # and one that is a work product the scan derived from the repository
+        # being scanned (under the output or work directory) is not handed to
+        # bandit unless the operator's own configuration names it; see
+        # config/path_trust.py. A configured value that is refused or missing
+        # takes no discovered replacement: bandit gets the empty ini.
+        from automated_security_helper.config.operator_only_options import (
+            operator_wrote_value,
+        )
+        from automated_security_helper.config.path_trust import (
+            derived_roots,
+            refused_derived_product,
+            resolved_path,
+        )
+
+        context_config = getattr(self.context, "config", None)
+        source_dir = Path(getattr(self.context, "source_dir", None) or ".")
+        configured = self.config.options.config_file
+        configured_path = None
+        refused_configured = False
+        if configured is not None:
+            # The option as the tool will read it: the file that passed the
+            # check below is exactly the file handed over.
+            config_file_path = resolved_path(configured, source_dir)
             if not config_file_path.is_file():
+                # The path as the config gave it, which can be a value the config
+                # read from the environment, and env values are never logged.
+                from automated_security_helper.config.config_validator import (
+                    redact_values,
+                )
+                from automated_security_helper.utils.error_text import (
+                    config_environment_values,
+                )
+
+                shown = redact_values(
+                    str(Path(configured)),
+                    config_environment_values(context_config),
+                )
                 ASH_LOGGER.warning(
-                    "Configured bandit config file does not exist or is not a file: "
-                    f"{config_file_path}. It is ignored, and bandit runs with an empty "
-                    "config file."
+                    f"Configured bandit config file does not exist or is not a "
+                    f"file: {shown}. Bandit will run with an empty ini file that "
+                    "ASH writes; no config file is discovered from the scanned "
+                    "tree in its place."
                 )
-            elif config_file_path.name == ".bandit":
-                ini_file = config_file_path
+            elif refused_derived_product(
+                configured,
+                source_dir=source_dir,
+                key="scanners.bandit.options.config_file",
+                config=context_config,
+                derived_dirs=derived_roots(self.context),
+                operator_written=operator_wrote_value(
+                    context_config,
+                    "scanner",
+                    "bandit",
+                    ("options", "config_file"),
+                    configured,
+                    config_from_context=self._config_from_context,
+                ),
+            ):
+                refused_configured = True
             else:
+                configured_path = config_file_path
+        if refused_configured:
+            # A configured value that was refused takes no discovered
+            # replacement (config/path_trust.py, "Configured tool inputs that
+            # are refused or missing"): bandit runs with an empty ini file.
+            ASH_LOGGER.warning(
+                "Configured bandit config file was not used because it is a "
+                "work product derived from the scanned repository. Bandit will "
+                "run with an empty ini file that ASH writes; no config file is "
+                "discovered from the scanned tree in its place."
+            )
+        if configured_path is not None and Path(configured).name == ".bandit":
+            # The ini-or-config decision follows the name the operator's
+            # configuration gave, so a link named .bandit keeps its format.
+            self._ini_file = configured_path
+            self.args.extra_args.append(
+                ToolExtraArg(key="--ini", value=configured_path.as_posix())
+            )
+        else:
+            if configured_path is not None:
                 self.args.extra_args.append(
-                    ToolExtraArg(key="--configfile", value=config_file_path.as_posix())
+                    ToolExtraArg(key="--configfile", value=configured_path.as_posix())
                 )
-        # bandit reads a .bandit file it finds under the scan target on its own
-        # unless --ini names one, so a scan always passes one: the operator's, or
-        # an empty one written outside the scanned tree when the scan runs
-        # (_execute_scan), not here, where constructing the scanner would write it.
-        self._ini_file = ini_file
+            # With no operator .bandit, the --ini is the empty file, so bandit
+            # never reads one from the scanned tree, --configfile or not.
+            self._use_empty_ini()
 
         self.args.extra_args.append(
             ToolExtraArg(
@@ -317,32 +635,131 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         if self.config.options.ignore_nosec:
             self.args.extra_args.append(ToolExtraArg(key="--ignore-nosec", value=None))
 
-        # Rebuilt, with the scan's own entries, when each command is assembled
-        # (_execute_scan); this one is the value from the configuration alone.
+        required, _best_effort = self._configured_token_excludes(warn=True)
         self.args.extra_args.append(
-            ToolExtraArg(
-                key=f"--exclude={','.join(self._configured_excludes())}", value=None
-            )
+            ToolExtraArg(key="--exclude=" + ",".join(required), value=None)
         )
 
         return super()._process_config_options()
 
-    def _configured_excludes(self) -> List[str]:
-        """The ``--exclude`` entries the configuration gives, read when called.
+    def _configured_token_excludes(self, warn: bool) -> Tuple[List[str], List[str]]:
+        """The construction-time ``--exclude`` token's entries, for the source
+        directory: ``_configured_excludes`` anchored there. Rebuilt per scan by
+        ``_execute_scan``; this token only keeps the argument's shape visible."""
+        anchor = Path(getattr(self.context, "source_dir", None) or ".")
+        return self._configured_excludes(anchor, warn=warn), []
 
-        ASH's known ignore paths, each as ``<path>/**`` and ``**/<path>/**``, and each
-        ``scanners.bandit.options.excluded_paths`` entry as ``**/<path>/**``.
-        """
-        entries = []
+    def _configured_excludes(self, target: Path, warn: bool = False) -> List[str]:
+        """The ``--exclude`` entries every scan of ``target`` gets: the known
+        ignore paths and bandit's own ``excluded_paths`` (expired entries left
+        out), anchored at the target (``bandit_excluded_path_globs``). ``warn``
+        names an entry that has no bandit form; the scanner passes it once,
+        when it is built."""
+        anchor = Path(target).as_posix()
+        bandit_excludes = []
         for item in KNOWN_IGNORE_PATHS:
-            entries.append(str(Path(item).joinpath("**")))
-            entries.append(str(Path("**").joinpath(item, "**")))
-        for item in self.config.options.excluded_paths:
+            bandit_excludes.extend(bandit_excluded_path_globs(anchor, item))
+        # Redacted: the entries are configured, a configured value can come from
+        # the environment, and ash.log keeps these lines (DEBUG under --debug).
+        environment_values = self._environment_values()
+        for item in active_ignore_paths(
+            self.config.options.excluded_paths,
+            where="scanners.bandit.options.excluded_paths",
+        ):
             ASH_LOGGER.debug(
-                f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
+                text_without_values(
+                    f"Path '{item.path}' excluded from {self.config.name} scan "
+                    f"for reason: {item.reason}",
+                    environment_values,
+                ),
+                extra=NO_MARKUP,
             )
-            entries.append(str(Path("**").joinpath(item.path, "**")))
-        return entries
+            entries = bandit_excluded_path_globs(anchor, item.path)
+            if warn and not entries:
+                ASH_LOGGER.warning(
+                    text_without_values(
+                        f"bandit excluded_paths entry '{item.path}' has no bandit "
+                        "--exclude form, so it excludes nothing: write a file, a "
+                        "directory, or a glob without ',' and without '.' or empty "
+                        "path components.",
+                        environment_values,
+                    ),
+                    extra=NO_MARKUP,
+                )
+            bandit_excludes.extend(entries)
+        return bandit_excludes
+
+    def _scan_excludes(
+        self, target: Path, global_ignore_paths: Sequence[IgnorePathWithReason]
+    ) -> Tuple[List[str], List[str]]:
+        """The ``--exclude`` entries for one scan of ``target``, as
+        ``(required, best_effort)``.
+
+        Anchored at the target as it appears in argv, since bandit matches each
+        entry against ``os.path.join(root, name)`` while walking that string.
+        ``required``: the known ignore paths and ``excluded_paths``
+        (``_configured_excludes``), and each of ASH's output directories inside
+        the target: this run's, and an earlier run's default ``.ash/ash_output``,
+        the directories every other scanner that walks a directory skips
+        (``_ash_output_dirs_inside``). Without them, a source tree holding
+        ``.ash/ash_output`` had the converters' output scanned in the source pass
+        as well as in the converted pass, and each of its findings reported twice.
+        None is inside the converted target, which lives inside the output
+        directory. ``best_effort``: globs for the live global ignore paths that
+        bandit can be given without skipping a file they do not cover
+        (``bandit_exclude_globs``), when the target is the source directory; the
+        SARIF step applies every ignore path either way, so a caller may drop
+        them under an argv bound. Any entry a file path under the target holds
+        as text is left out of both (``_entries_no_path_holds_as_text``, one
+        walk for the two sets).
+        """
+        anchor = Path(target).as_posix()
+        excludes: List[str] = self._configured_excludes(target)
+        # Ignore paths are relative to the source directory, so they are anchored
+        # only when bandit is scanning it. Under the converted target the same
+        # pattern names different files: "archive/**" would skip everything the
+        # archive converter wrote, which the SARIF step keeps.
+        ignore_globs: List[str] = []
+        source_dir = getattr(self.context, "source_dir", None)
+        if (
+            source_dir is not None
+            and Path(target).absolute() == Path(source_dir).absolute()
+        ):
+            for ignore_path in active_ignore_paths(global_ignore_paths):
+                ignore_globs.extend(bandit_exclude_globs(anchor, ignore_path.path))
+        output_entries: List[Tuple[str, Path]] = []
+        for relative in self._ash_output_dirs_inside(Path(target)):
+            # The path as bandit spells it while walking the anchor, then the
+            # separator and "*": bandit adds "/*" itself only to a value naming an
+            # existing directory, which an escaped value does not.
+            output_path = os.path.join(anchor, *relative.parts)
+            if "," in output_path:
+                ASH_LOGGER.warning(
+                    f"Not excluding ASH's output directory {output_path} from "
+                    "bandit: its --exclude value is comma-separated, and the path "
+                    "has a comma. ASH drops bandit's findings there after the scan."
+                )
+                continue
+            output_entries.append(
+                (
+                    escape_for_pattern(output_path, PatternSyntax.FNMATCH)
+                    + os.sep
+                    + "*",
+                    relative,
+                )
+            )
+        if not excludes and not ignore_globs and not output_entries:
+            return [], []
+        holding = _paths_holding_glob_characters(target)
+        required = _entries_no_path_holds_as_text(
+            target, excludes, output_entries, holding=holding
+        )
+        best_effort = (
+            _entries_no_path_holds_as_text(target, ignore_globs, [], holding=holding)
+            if ignore_globs
+            else []
+        )
+        return required, best_effort
 
     # Bandit emits exit code 1 when findings are present; treat that as success
     # alongside 0. (Same as base default, but spelled out for clarity.)
@@ -380,23 +797,30 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     ):
         """Resolve final argv and results path for Bandit.
 
-        The ``--exclude`` value is assembled here, for this scan, from the current
-        configuration (``_configured_excludes``), the links leaving ``target``
-        (``_link_excludes``) and the scan's global ignore paths
-        (``_ignore_excludes``). It was built once at construction, so the global
-        ignore paths, which a scan passes in, never reached bandit, and an option
-        changed after construction did not either. The value, and the ``--ini``,
-        are in a new extra_args list for this resolution only; the list extra_args
-        held is put back as it was, unchanged.
+        The ``--exclude`` token built at construction is swapped, for this
+        resolution only, for one that also carries this scan's entries
+        (``_scan_excludes``) and the links leaving ``target``
+        (``_link_excludes``); the scanner's own arguments are restored
+        afterwards, so repeated scans do not accumulate them. Built only at
+        construction, the token would miss the global ignore paths, which are
+        merged here while ``_resolve_arguments`` runs: resolution does not
+        rebuild the token.
+
+        The value is bounded to one command-line argument
+        (``_EXCLUDE_ARGUMENT_LIMIT``): the configured, output-directory and
+        link entries have to fit, or bandit is not run on ``target`` (over the
+        bound it would read the file a link points at, or exec would fail with
+        E2BIG and blame nothing); the global-ignore globs are added while they
+        fit and dropped with a warning past it, since the SARIF step applies
+        every ignore path after the scan either way.
         """
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("bandit.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
         files, links = walked_files(target)
-        entries = self._configured_excludes() + self._link_excludes(
-            target, files=files, links=links
-        )
+        required, best_effort = self._scan_excludes(target, global_ignore_paths or [])
+        entries = required + self._link_excludes(target, files=files, links=links)
         length = len(f"--exclude={','.join(entries)}".encode())
         if length > _EXCLUDE_ARGUMENT_LIMIT:
             raise ScannerError(
@@ -406,7 +830,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 f"({_EXCLUDE_ARGUMENT_LIMIT} bytes)."
             )
         left_out = 0
-        for entry in self._ignore_excludes(target, files, global_ignore_paths):
+        for entry in best_effort:
             added = len(entry.encode()) + (1 if entries else 0)
             if length + added > _EXCLUDE_ARGUMENT_LIMIT:
                 left_out += 1
@@ -415,26 +839,19 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             length += added
         if left_out:
             self._plugin_log(
-                f"{left_out} paths the global ignore paths match are not in bandit's "
+                f"{left_out} globs for the global ignore paths are not in bandit's "
                 "--exclude, which would be longer than one command-line argument "
-                "can be; bandit reads them, and ASH drops their findings.",
+                "can be; bandit reads the files they cover, and ASH drops their "
+                "findings.",
                 target_type=target_type,
                 level=logging.WARNING,
             )
 
+        # A new list: the one extra_args holds is put back as it was, unchanged.
         original_extra_args = self.args.extra_args
-        ini_file = self._ini_file or empty_tool_config(
-            "bandit-empty.ini", "[bandit]\n", context=self.context
-        )
         self.args.extra_args = [
-            *(
-                arg
-                for arg in original_extra_args
-                if not arg.key.startswith("--exclude=")
-            ),
-            ToolExtraArg(key=f"--exclude={','.join(entries)}", value=None),
-            ToolExtraArg(key="--ini", value=ini_file.as_posix()),
-        ]
+            arg for arg in original_extra_args if not arg.key.startswith("--exclude=")
+        ] + [ToolExtraArg(key=f"--exclude={','.join(entries)}", value=None)]
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file
@@ -443,51 +860,6 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             self.args.extra_args = original_extra_args
 
         return final_args, results_file, None
-
-    def _ignore_excludes(
-        self,
-        target: Path,
-        files: List[str],
-        global_ignore_paths: List[IgnorePathWithReason],
-    ) -> List[str]:
-        """``--exclude`` entries for the files the global ignore paths match.
-
-        The files and fully ignored directories come from ``ignored_entries``, which
-        matches each pattern as ASH does when it drops findings. Each is passed as
-        bandit's walk spells it, ``<target>/<path>`` (a directory with its trailing
-        ``/``). bandit 1.9.4 also leaves out every path an entry is a substring of,
-        and reads ``,`` as a separator and ``* ? [`` as pattern syntax, so an entry
-        is left out of the value when it holds one of those or a line break, or
-        when it is the start of a path that is not ignored (``x.py`` of ``x.pyw``).
-        bandit then reads that file, and ASH drops its findings after the scan. None
-        on Windows, where bandit's walk does not join paths with ``/``.
-        """
-        if os.sep != "/":
-            return []
-        relative_entries = ignored_entries(
-            target, self.context.source_dir, global_ignore_paths, files
-        )
-        if not relative_entries:
-            return []
-        root = Path(target).as_posix()
-        walked = sorted(f"{root}/{relative}" for relative in files)
-        # A path holding the root a second time could hold an entry other than at
-        # its start; there are normally none.
-        repeated = [path for path in walked if path.find(root, 1) != -1]
-        entries = []
-        for relative in relative_entries:
-            entry = f"{root}/{relative}"
-            if any(character in entry for character in _BANDIT_EXCLUDE_UNSAFE):
-                continue
-            if not entry.endswith("/"):
-                index = bisect.bisect_left(walked, entry)
-                after = walked[index + 1] if index + 1 < len(walked) else ""
-                if after.startswith(entry):
-                    continue
-            if any(entry in path and not path.startswith(entry) for path in repeated):
-                continue
-            entries.append(entry)
-        return entries
 
     def _link_excludes(
         self,
@@ -608,8 +980,18 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
 
 
 if __name__ == "__main__":
+    # As npm_audit's block does: a scanner needs a context, and run as a script its
+    # class resolves its "AshConfig" reference only once that name is bound here.
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+
+    AshConfig.model_rebuild()
     ASH_LOGGER.debug("Running Bandit via __main__")
     scanner = BanditScanner(
+        context=PluginContext(
+            source_dir=Path.cwd(),
+            output_dir=Path.cwd().joinpath(".ash", "ash_output"),
+        ),
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
                 confidence_level="all",
@@ -618,15 +1000,24 @@ if __name__ == "__main__":
                 excluded_paths=[],
                 additional_formats=[],
             )
-        )
+        ),
     )
     report = scanner.scan(target=Path("."), target_type="source")
 
     if isinstance(report, SarifReport):
-        print(
-            report.model_dump_json(
-                indent=2,
-                by_alias=True,
-                exclude_unset=True,
+        from automated_security_helper.utils.command_safe_stream import (
+            json_commands_broken,
+        )
+        from automated_security_helper.utils.console import echo_raw
+
+        # The SARIF repeats the tree's file names: no "##name[" of theirs is a
+        # CI command where this prints, and the JSON is still the same document.
+        echo_raw(
+            json_commands_broken(
+                report.model_dump_json(
+                    indent=2,
+                    by_alias=True,
+                    exclude_unset=True,
+                )
             )
         )

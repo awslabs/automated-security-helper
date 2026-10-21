@@ -32,6 +32,7 @@ from unittest.mock import patch
 import pytest
 
 from automated_security_helper.utils.log import configure_windows_safe_logging
+from tests.utils.windows_console import windows_logging_kept_in_the_test
 
 # The characters ASH actually emits from non-logging call sites.
 ASH_CONSOLE_SYMBOLS = ["❌", "✅", "⚠", "️", "✓", "\U0001f527"]
@@ -69,8 +70,9 @@ class TestConfigureWindowsSafeLogging:
         assert sys.stdout is before
         assert getattr(sys.stdout, "encoding", None) == before_encoding
 
-    def test_makes_ash_symbols_writable_on_a_cp1252_console(self):
+    def test_makes_ash_symbols_writable_on_a_cp1252_console(self, monkeypatch):
         """The regression: emoji-bearing console writes must stop raising."""
+        windows_logging_kept_in_the_test(monkeypatch)
         replacement = _cp1252_stream()
         original_out, original_err = sys.stdout, sys.stderr
         try:
@@ -92,8 +94,9 @@ class TestConfigureWindowsSafeLogging:
             f"stdout left at {encoding!r}; console writes will still raise"
         )
 
-    def test_stderr_is_handled_too(self):
+    def test_stderr_is_handled_too(self, monkeypatch):
         """The compounding failure path writes to stderr as well."""
+        windows_logging_kept_in_the_test(monkeypatch)
         replacement = _cp1252_stream()
         original_out, original_err = sys.stdout, sys.stderr
         try:
@@ -111,8 +114,9 @@ class TestConfigureWindowsSafeLogging:
 
         assert "utf-8" in encoding.lower()
 
-    def test_survives_a_stream_without_reconfigure(self):
+    def test_survives_a_stream_without_reconfigure(self, monkeypatch):
         """Must degrade quietly rather than raise on an exotic stream."""
+        windows_logging_kept_in_the_test(monkeypatch)
 
         class Bare:
             encoding = "cp1252"

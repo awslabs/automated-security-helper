@@ -8,6 +8,7 @@ from __future__ import annotations
 import fnmatch
 from typing import (
     Any,
+    ClassVar,
     Dict,
     Iterable,
     List,
@@ -20,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -29,11 +31,22 @@ from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     ignore_path_pattern,
 )
+from automated_security_helper.utils.redacted_model import RedactedSection
 from automated_security_helper.utils.symbol_spans import is_valid_symbol
+from automated_security_helper.utils.unknown_keys import (
+    refuse_unknown_keys,
+    tolerated_notes,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.models.flat_vulnerability import FlatVulnerability
     from automated_security_helper.utils.symbol_spans import SymbolResolver
+
+
+#: What an entry's expiration that is not a YYYY-MM-DD date records under
+#: TOLERATE_STORED_CONFIG. No value: the reader of a results file names where the
+#: entry is (models/asharp_model.py), since the value is the file's data.
+UNREADABLE_EXPIRATION_NOTE = "an expiration that is not a YYYY-MM-DD date"
 
 
 class ToolExtraArg(BaseModel):
@@ -42,17 +55,148 @@ class ToolExtraArg(BaseModel):
     value: str | int | float | bool | None = None
 
 
-class IgnorePathWithReason(BaseModel):
+def current_date() -> date:
+    """Today on this host's local clock, the date every ``expiration`` is read against.
+
+    Ignore paths and suppressions both compare with this one function, so the
+    places that decide whether an entry still applies cannot disagree about which
+    day it is.
+    """
+    return date.today()
+
+
+def expiration_has_passed(expiration: str) -> bool:
+    """Whether an entry with this ``expiration`` no longer applies today.
+
+    The one rule for suppressions and ignore paths, wherever they are applied
+    (``utils/suppression_matcher.py``), in ``is_expired`` and in
+    ``ash config lint``: ``expiration`` is a YYYY-MM-DD date, and the entry stops
+    applying at the start of that day on ``current_date()``, so on the expiration
+    date itself it has already expired.
+
+    Raises:
+        ValueError: ``expiration`` is not a YYYY-MM-DD date.
+    """
+    return datetime.strptime(expiration, "%Y-%m-%d").date() <= current_date()
+
+
+# The one wording for a refused ``expiration`` and ``symbol``. The models raise
+# them, and a scan, ``ash config validate`` and ``ash config lint`` all print
+# the model's message.
+SYMBOL_RULE = (
+    "symbol must be a dotted qualified name such as 'MyClass.my_method' "
+    "(identifiers joined by '.', no spaces, wildcards or call syntax)"
+)
+EXPIRATION_RULE = "Invalid expiration date format. Use YYYY-MM-DD"
+
+
+def _named_by_type(value: Any) -> str:
+    """How a message names a value that is not text, without showing it."""
+    if isinstance(value, bool):
+        return "true or false"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, list):
+        return "a list"
+    if isinstance(value, dict):
+        return "a mapping"
+    return f"a {type(value).__name__}"
+
+
+def refuse_an_expiration_that_is_not_text(value: Any) -> Any:
+    """``value``, unless it is an ``expiration`` that is not a string.
+
+    For a ``mode="before"`` validator: YAML and TOML read an unquoted
+    2099-01-31 as a date, which a strict ``str`` field refused with pydantic's
+    own string error, before any check that could say what to write. A date or
+    a number can only be the file's own text, never a value read from the
+    environment (that is always a string), so a date is shown; anything else is
+    named by its type, since a list or a mapping can hold strings that are.
+    """
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, date):
+        raise ValueError(
+            "expiration must be a quoted YYYY-MM-DD string: an unquoted "
+            f"{value.isoformat()} is read as a date, not text, so put it in quotes"
+        )
+    raise ValueError(
+        f"expiration must be a quoted YYYY-MM-DD string, not {_named_by_type(value)}"
+    )
+
+
+def expiration_date_problem(value: str) -> Optional[str]:
+    """EXPIRATION_RULE when the string ``value`` is not a YYYY-MM-DD date, or None.
+
+    The rule, not the value: a redaction replaces only a value it can recognize,
+    and the value may have been read from the environment.
+    """
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return EXPIRATION_RULE
+    return None
+
+
+# Where ignore-path entries sit in a configuration, by key, and how a message
+# names an entry of each list. ``ash config lint`` walks the file's mapping with
+# it and the scan-start expiry warnings walk the loaded config, so the two
+# cannot cover different lists. Every list holds ``IgnorePathWithReason``
+# entries, which expire by the rule below.
+IGNORE_PATH_LISTS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("global_settings", "ignore_paths"), "Ignore path"),
+    (("scanners", "bandit", "options", "excluded_paths"), "Bandit excluded path"),
+    (("scanners", "checkov", "options", "skip_path"), "Checkov skip path"),
+    (("scanners", "syft", "options", "exclude"), "Syft exclude entry"),
+)
+
+
+def value_at(container: Any, keys: Tuple[str, ...]) -> Any:
+    """The value at ``keys`` in a config mapping or a loaded config, or None."""
+    value = container
+    for key in keys:
+        if isinstance(value, dict):
+            value = value.get(key)
+        elif isinstance(value, BaseModel):
+            value = getattr(value, key, None)
+        else:
+            return None
+    return value
+
+
+# ``expiration`` means the same here and on ``AshSuppression``, which inherits
+# it: a YYYY-MM-DD date compared with ``current_date()``. The entry stops applying
+# at the start of that day, so on the expiration date itself it no longer applies.
+# ``utils/suppression_matcher.py`` enforces it for both. (A comment rather than
+# the docstring, which pydantic publishes as the JSON schema's description.)
+class IgnorePathWithReason(RedactedSection):
     """Represents a path exclusion entry."""
 
     # Validated on its own from a config or a results file: a refused value can
     # be a secret, and an error's text goes wherever the error is shown.
-    model_config = ConfigDict(hide_input_in_errors=True)
+    # Unknown keys are refused by _refuse_unknown_keys below. Extras are allowed
+    # only so that a results file holding one (utils/unknown_keys.py) keeps it,
+    # and the schema says what a config file may contain.
+    model_config = ConfigDict(
+        extra="allow",
+        hide_input_in_errors=True,
+        json_schema_extra={"additionalProperties": False},
+    )
+
+    # How errors and warnings name an entry of this kind.
+    ENTRY_KIND: ClassVar[str] = "an ignore path"
 
     path: Annotated[str, Field(..., description="Path or pattern to exclude")]
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
     expiration: Annotated[
-        str | None, Field(None, description="(Optional) Expiration date (YYYY-MM-DD)")
+        str | None,
+        Field(
+            None,
+            description=(
+                "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying "
+                "on this date, by the local clock of the host running the scan."
+            ),
+        ),
     ] = None
     client_supplied: Annotated[
         bool,
@@ -66,11 +210,91 @@ class IgnorePathWithReason(BaseModel):
         ),
     ] = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unknown_keys(cls, data: Any, info: ValidationInfo) -> Any:
+        """Refuse a key the entry does not declare, rather than drop it.
+
+        Dropped, a misspelled ``rule_id`` left a suppression with no rule, and a
+        suppression with no rule covers every rule in its path; a misspelled
+        ``expiration`` made an entry permanent. See utils/unknown_keys.py for the
+        message and for the results-file exception.
+        """
+        return refuse_unknown_keys(cls, data, info, cls.ENTRY_KIND)
+
+    @field_validator("expiration", mode="before")
+    @classmethod
+    def _expiration_is_text(cls, v: Any) -> Any:
+        """An unquoted date, refused with what to write (``refuse_an_expiration_that_is_not_text``)."""
+        return refuse_an_expiration_that_is_not_text(v)
+
+    @field_validator("expiration")
+    @classmethod
+    def validate_expiration_date(cls, v, info: ValidationInfo):
+        """Validate that expiration date is in YYYY-MM-DD format.
+
+        Past dates are accepted; use is_expired to check whether the
+        entry has expired at runtime. Under the TOLERATE_STORED_CONFIG context
+        (utils/unknown_keys.py) a malformed date is kept and recorded rather than
+        refused; the matcher never applies such an entry. The note records no
+        value: the reader that collects it names the entry's location instead.
+        """
+        problem = None if v is None else expiration_date_problem(v)
+        if problem is not None:
+            notes = tolerated_notes(info)
+            if notes is not None:
+                notes.append(UNREADABLE_EXPIRATION_NOTE)
+                return v
+            raise ValueError(problem)
+        return v
+
+    @property
+    def has_unknown_keys(self) -> bool:
+        """True for an entry kept from a results file with a key it does not declare.
+
+        Such an entry is never applied: what the unknown key was meant to say
+        cannot be known, and a suppression that lost its ``rule_id`` that way
+        would cover every rule in its path.
+        """
+        return bool(self.model_extra)
+
+    @property
+    def is_expired(self) -> bool:
+        """Return True if this entry's expiration date has been reached.
+
+        An expiration that is not a YYYY-MM-DD date counts as expired. A config
+        refuses one, so only an entry kept from a results file can hold it, and
+        ``active_ignore_paths`` and ``should_suppress_finding`` already leave
+        such an entry out: an unreadable date gives no assurance the entry still
+        applies. Returning False here made ``AshSuppression.matches`` apply it.
+        """
+        if not self.expiration:
+            return False
+        try:
+            return expiration_has_passed(self.expiration)
+        except ValueError:
+            return True
+
+    @property
+    def days_until_expiry(self) -> Optional[int]:
+        """Days from today until expiration; None if no expiration is set.
+
+        A negative value indicates the entry has already expired.
+        """
+        if not self.expiration:
+            return None
+        try:
+            expiration_date = datetime.strptime(self.expiration, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+        return (expiration_date - current_date()).days
+
     def matches_path(self, file_path: str) -> bool:
         """Return True if ``file_path`` matches this entry's path pattern.
 
         Supports exact matches, simple globs (``*.py``), and recursive globs
-        (``tests/**/*.py``). Matching is case-insensitive for OS portability. A
+        (``tests/**/*.py``). Matching is case-sensitive and the same on every
+        platform: on a case-sensitive filesystem ``TESTS/`` is not ``tests/``. A
         path ending in ``/`` names a directory and matches everything below it
         (``path_matching.ignore_path_pattern``); ``AshSuppression`` keeps the
         literal meaning.
@@ -354,6 +578,16 @@ def suppression_id(suppression: Dict[str, Any]) -> str:
 class AshSuppression(IgnorePathWithReason):
     """Represents a finding suppression rule."""
 
+    ENTRY_KIND: ClassVar[str] = "a suppression"
+
+    # The unused-suppressions report and the expiry warning show each field
+    # the config read from the environment by its reference, never the value.
+    # An int cannot carry the reference text, so a line number read from the
+    # environment would print as the value. The section base's default
+    # already refuses a reference at a typed field
+    # (RedactedSection._env_scalar_typed_fields is empty unless a section
+    # opts a measured field in), so this section declares nothing.
+
     rule_id: Annotated[str | None, Field(None, description="Rule ID to suppress")] = (
         None
     )
@@ -439,41 +673,20 @@ class AshSuppression(IgnorePathWithReason):
             )
         return v
 
-    @field_validator("symbol")
+    @field_validator("symbol", mode="before")
     @classmethod
     def validate_symbol(cls, v):
         """Reject a symbol that is not a dotted qualified name.
 
         A malformed name could never equal a parsed definition's name, so the
-        entry would silently match nothing.
+        entry would silently match nothing. Before the field's own ``str`` check,
+        so a number gets this message too, not pydantic's string error. The rule
+        alone, for text and for anything else: the value is not quoted.
         """
-        if v is not None and not is_valid_symbol(v):
-            # The rule, not the value: a value can be one read from the
-            # environment, and the message goes wherever the error is shown.
-            raise ValueError(
-                "symbol must be a dotted qualified name such as "
-                "'MyClass.my_method' (identifiers joined by '.', no spaces, "
-                "wildcards or call syntax)"
-            )
-        return v
-
-    @field_validator("expiration")
-    @classmethod
-    def validate_expiration_date(cls, v):
-        """Validate that expiration date is in YYYY-MM-DD format.
-
-        Past dates are accepted; use is_expired to check whether the
-        suppression has expired at runtime.
-        """
-        if v is not None:
-            try:
-                datetime.strptime(v, "%Y-%m-%d")
-            except ValueError:
-                # Not the value, as for symbol; from None so strptime's message,
-                # which quotes it, is not the context either.
-                raise ValueError(
-                    "Invalid expiration date format. Use YYYY-MM-DD"
-                ) from None
+        if v is None:
+            return v
+        if not isinstance(v, str) or not is_valid_symbol(v):
+            raise ValueError(SYMBOL_RULE)
         return v
 
     @property
@@ -494,31 +707,6 @@ class AshSuppression(IgnorePathWithReason):
         without a symbol keep the id they had before the field existed.
         """
         return suppression_id(self.model_dump())
-
-    @property
-    def is_expired(self) -> bool:
-        """Return True if this suppression has a past expiration date."""
-        if not self.expiration:
-            return False
-        try:
-            expiration_date = datetime.strptime(self.expiration, "%Y-%m-%d").date()
-        except ValueError:
-            return False
-        return expiration_date <= date.today()
-
-    @property
-    def days_until_expiry(self) -> Optional[int]:
-        """Days from today until expiration; None if no expiration is set.
-
-        A negative value indicates the suppression has already expired.
-        """
-        if not self.expiration:
-            return None
-        try:
-            expiration_date = datetime.strptime(self.expiration, "%Y-%m-%d").date()
-        except ValueError:
-            return None
-        return (expiration_date - date.today()).days
 
     def matches_path(self, file_path: str) -> bool:
         """Return True if ``file_path`` matches this suppression's path pattern.
@@ -550,7 +738,7 @@ class AshSuppression(IgnorePathWithReason):
         matches nothing, and so does a finding with no line number or in a
         file the resolver cannot parse.
         """
-        if self.is_expired:
+        if self.is_expired or self.has_unknown_keys:
             return False
 
         if self.rule_id:

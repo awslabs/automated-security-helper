@@ -198,12 +198,16 @@ class TestResolveConfig:
         assert config.project_name == "overridden"
 
     def test_invalid_yaml_is_refused_with_fallback(self, tmp_path):
-        """A file that does not parse is refused, as a schema error already is."""
+        """fallback_to_default stands for "no config file": a file that is there
+        and does not parse is refused, never replaced by the defaults."""
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text(": invalid yaml {{")
 
-        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml"):
+        with pytest.raises(ASHConfigValidationError) as refused:
             resolve_config(config_path=config_path, fallback_to_default=True)
+        assert f"{config_path.as_posix()} could not be parsed (ParserError" in str(
+            refused.value
+        )
 
     def test_source_dir_string(self, tmp_path):
         ash_dir = tmp_path / ".ash"

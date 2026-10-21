@@ -16,7 +16,7 @@ import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
-import { ASH_PARAMETER_NAMES } from '../lib/ash-config';
+import { ASH_PARAMETER_NAMES, DEFAULT_ASH_VERSION } from '../lib/ash-config';
 import {
   ASH_MATERIALIZED_CONFIG_PATH,
   ASH_S3_SYNC_PATH,
@@ -112,12 +112,15 @@ describe('CodeCommit gate handler', () => {
   });
 
   test('distinguishes findings from scanner failure', () => {
-    // ASH exit 2 means a scan completed and found something; 1 and 3 mean it could
-    // not do its job. Collapsing them would report a broken scanner as a clean
-    // repository, which is the worst possible failure for a security gate.
+    // ASH exit 2 means a scan completed and found something; 1, 3 and 5 mean it
+    // could not do its job. Collapsing them would report a broken scanner as a
+    // clean repository, which is the worst possible failure for a security gate.
+    // 5 is the usage error of ASH releases after 3.7.1, which 3.7.0 and 3.7.1 report as 2.
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_ACTIONABLE_FINDINGS = 2');
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_SCANNER_ERROR = 1');
     expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_INVALID_CONFIG = 3');
+    expect(CODECOMMIT_GATE_HANDLER).toContain('EXIT_USAGE_ERROR = 5');
+    expect(CODECOMMIT_GATE_HANDLER).toContain('if exit_code == EXIT_USAGE_ERROR:');
     expect(CODECOMMIT_GATE_HANDLER).toContain('"errored"');
   });
 
@@ -133,7 +136,7 @@ describe('CodeCommit gate handler', () => {
     expect(CODECOMMIT_GATE_HANDLER).toContain('PullRequestCannotBeApprovedByAuthorException');
   });
 
-  test('narrows the scan to the pull request diff against the destination commit', () => {
+  test('reports only the findings in the pull request diff against the destination commit; every file is still scanned', () => {
     expect(CODECOMMIT_GATE_HANDLER).toContain('"--changed-files-only", "--base-ref", destination_commit');
   });
 
@@ -595,9 +598,12 @@ exit 1
     const { env, parameters } = agentCoreDefaultEnvironment();
 
     // The two defaults whose combination was the defect, so a reader can see the
-    // fixture really is the poisoned pair rather than something neutral.
+    // fixture really is the shipped pair rather than something neutral. The fake
+    // ash below has v3.7.0's option set whatever AshVersion says, so this holds the
+    // stack to starting on an ASH without --stateless-http at every release; the
+    // version is the constant `cz bump` moves, not a literal a bump turns red.
     expect(env.ASH_MCP_STATELESS).toBe('true');
-    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe('v3.7.0');
+    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe(DEFAULT_ASH_VERSION);
 
     const { status, stderr, argv } = runEntrypoint(env);
     expect(status).toBe(0);

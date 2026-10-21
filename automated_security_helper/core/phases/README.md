@@ -17,49 +17,36 @@ The phases are designed to be used by the `ScanExecutionEngine` class. Each phas
 Example:
 
 ```python
-# Create a convert phase
+# Every phase takes the run's PluginContext (source, output and work
+# directories, and the config), the plugin classes it runs, a progress display
+# and the results model it updates.
 convert_phase = ConvertPhase(
-    source_dir=source_dir,
-    output_dir=output_dir,
-    work_dir=work_dir,
-    config=config,
-    progress_display=progress_display,
-    asharp_model=asharp_model,
-)
-
-# Execute the convert phase
-converted_paths = convert_phase.execute(plugin_registry=plugin_registry)
-
-# Create a scan phase
-scan_phase = ScanPhase(
-    source_dir=source_dir,
-    output_dir=output_dir,
-    work_dir=work_dir,
-    config=config,
-    progress_display=progress_display,
-    asharp_model=asharp_model,
-)
-
-# Execute the scan phase
-results = scan_phase.execute(
-    scanner_factory=scanner_factory,
-    plugin_registry=plugin_registry,
-    enabled_scanners=enabled_scanners,
-    parallel=True,
-)
-
-# Create a report phase
-report_phase = ReportPhase(
-    source_dir=source_dir,
-    output_dir=output_dir,
-    work_dir=work_dir,
-    config=config,
+    plugin_context=plugin_context,
+    plugins=converter_classes,
     progress_display=progress_display,
     asharp_model=results,
 )
+results = convert_phase.execute(aggregated_results=results)
 
-# Execute the report phase
-report_phase.execute()
+scan_phase = ScanPhase(
+    plugin_context=plugin_context,
+    plugins=scanner_classes,
+    progress_display=progress_display,
+    asharp_model=results,
+)
+results = scan_phase.execute(aggregated_results=results, parallel=True)
+
+# A report phase runs only the reporters it is given, here ASH's built-ins and
+# those of the modules the config names; given none, it runs none.
+report_phase = ReportPhase(
+    plugin_context=plugin_context,
+    plugins=reporter_classes_for_run(plugin_context.config.ash_plugin_modules),
+    progress_display=progress_display,
+    asharp_model=results,
+)
+results = report_phase.execute(
+    report_dir=plugin_context.output_dir / "reports", aggregated_results=results
+)
 ```
 
 ## Benefits of the Phase-Based Architecture

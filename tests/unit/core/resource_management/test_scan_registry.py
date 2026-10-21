@@ -198,10 +198,21 @@ class TestScanRegistryEntry:
 
 @pytest.fixture
 def mock_validate_directory_path():
-    """Mock the validate_directory_path function to always return None (no error)."""
-    with mock.patch(
-        "automated_security_helper.core.resource_management.error_handling.validate_directory_path",
-        return_value=None,
+    """Mock the directory checks to always return None (no error).
+
+    register_scan checks the source directory with source_directory_error and the
+    output directory with validate_directory_path; these tests name directories
+    that do not exist.
+    """
+    with (
+        mock.patch(
+            "automated_security_helper.core.resource_management.error_handling.validate_directory_path",
+            return_value=None,
+        ),
+        mock.patch(
+            "automated_security_helper.core.resource_management.error_handling.source_directory_error",
+            return_value=None,
+        ),
     ):
         yield
 
@@ -1000,3 +1011,62 @@ class TestDirectoryComparisonIsCanonical:
         matched = registry.list_scans(directory_path=str(project) + os.sep)
 
         assert [entry["scan_id"] for entry in matched] == [first]
+
+
+class TestTheOutputDirectoryNeedNotExistYet:
+    """A scan creates its output directory once registered, so it may be missing.
+
+    register_scan refused an output directory that did not exist, which made
+    both MCP scans create theirs before asking for a slot: a scan refused at
+    max_concurrent_scans left an empty output tree behind.
+    """
+
+    def test_a_missing_output_directory_is_registered_and_not_created(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = tmp_path / "proj" / ".ash" / "ash_output"
+        registry = ScanRegistry()
+
+        scan_id = registry.register_scan(
+            directory_path=str(project), output_directory=str(output)
+        )
+
+        assert registry.get_scan(scan_id).output_directory == str(output)
+        assert not (project / ".ash").exists()
+
+    def test_an_output_path_that_is_a_file_is_refused(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = tmp_path / "out"
+        output.write_text("not a directory\n", encoding="utf-8")
+        registry = ScanRegistry()
+
+        with pytest.raises(MCPResourceError) as excinfo:
+            registry.register_scan(
+                directory_path=str(project), output_directory=str(output)
+            )
+
+        assert str(excinfo.value) == f"Output directory is not a directory: {output}"
+        assert registry.list_scans() == []
+
+
+def test_a_failed_scans_message_hides_a_value_split_by_an_escape_code(tmp_path):
+    """The status sink redacts the message with the entry's registered values;
+    an escape code a tool printed inside a value must not split the match."""
+    head, tail = "ASH_CANARY_Zq7Kx9LmHead", "ASH_CANARY_Pw4Nv2RtTail"
+    project = tmp_path / "proj"
+    project.mkdir()
+    registry = ScanRegistry()
+    scan_id = registry.register_scan(
+        directory_path=str(project),
+        output_directory=str(tmp_path / "out"),
+        environment_values=(f"{head}{tail}",),
+    )
+
+    registry.update_scan_status(
+        scan_id, MCScanStatus.FAILED, f"tool failed at {head}\x1b[K{tail} here"
+    )
+
+    message = registry.get_scan(scan_id).error_message
+    assert "tool failed" in message, repr(message)
+    assert head not in message and tail not in message, repr(message)

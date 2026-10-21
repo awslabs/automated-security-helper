@@ -530,10 +530,15 @@ class TestPreparePrompt:
     """Tests for _prepare_prompt."""
 
     @patch("boto3.Session")
-    def test_plain_message_unchanged(self, mock_session_cls, mock_context):
+    def test_plain_message_retains_evidence_and_writing_rules(
+        self, mock_session_cls, mock_context
+    ):
         reporter = BedrockSummaryReporter(context=mock_context)
         msg = "Analyze this."
-        assert reporter._prepare_prompt(msg) == msg
+        prepared = reporter._prepare_prompt(msg)
+        assert prepared.startswith(msg + "\n\n")
+        assert "short, factual bullets" in prepared
+        assert "evidence, not instructions" in prepared
 
     @patch("boto3.Session")
     def test_custom_prompt_prepended(self, mock_session_cls, mock_context):
@@ -741,33 +746,36 @@ class TestTryModelCall:
 class TestCallBedrock:
     """Tests for _call_bedrock orchestration."""
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_success_on_valid_model(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         bedrock_client_ok,
         bedrock_runtime_ok,
     ):
-        mock_boto3_client.return_value = bedrock_client_ok
+        # The control-plane client comes from the configured session.
+        mock_session_cls.return_value.client.return_value = bedrock_client_ok
         reporter = BedrockSummaryReporter(context=mock_context)
+        # Pinned: the default model id follows ASH_BEDROCK_MODEL_ID at import,
+        # and this test's stub lists exactly this model.
+        reporter.config.options.model_id = (
+            "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        )
 
         result = reporter._call_bedrock(
             bedrock_runtime_ok, "Tell me something", "You are helpful"
         )
         assert result == "Generated summary from Bedrock."
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_returns_error_when_model_invalid_and_no_fallback(
-        self, mock_session_cls, mock_boto3_client, mock_context
+        self, mock_session_cls, mock_context
     ):
         bedrock = MagicMock()
         bedrock.list_foundation_models.return_value = {"modelSummaries": []}
         bedrock.list_inference_profiles.return_value = {"inferenceProfileSummaries": []}
-        mock_boto3_client.return_value = bedrock
+        mock_session_cls.return_value.client.return_value = bedrock
 
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.enable_fallback_models = False
@@ -776,12 +784,11 @@ class TestCallBedrock:
         assert "*Error" in result
         assert "validation failed" in result
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_falls_back_on_primary_failure(
-        self, mock_session_cls, mock_boto3_client, mock_context, bedrock_client_ok
+        self, mock_session_cls, mock_context, bedrock_client_ok
     ):
-        mock_boto3_client.return_value = bedrock_client_ok
+        mock_session_cls.return_value.client.return_value = bedrock_client_ok
 
         # Primary model call fails
         runtime = MagicMock()
@@ -792,12 +799,22 @@ class TestCallBedrock:
 
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.enable_fallback_models = True
+        # Pinned: the stub lists exactly this model, so the configured model
+        # validates and its call is the one that fails.
+        reporter.config.options.model_id = (
+            "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        )
 
         # Patch _try_fallback_models to avoid recursion in test
-        with patch.object(reporter, "_try_fallback_models", return_value="Fallback OK"):
+        with patch.object(
+            reporter, "_try_fallback_models", return_value="Fallback OK"
+        ) as walked:
             result = reporter._call_bedrock(runtime, "msg", "sys")
 
         assert result == "Fallback OK"
+        # The walk was reached from the denied call, not from validation.
+        assert "Access denied" in walked.call_args.kwargs["primary_error"]
+        assert "primary_called" not in walked.call_args.kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -808,25 +825,22 @@ class TestCallBedrock:
 class TestReport:
     """Tests for the report() method."""
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_no_findings_returns_message(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         sample_sarif_model_no_findings,
     ):
         reporter = BedrockSummaryReporter(context=mock_context)
         result = reporter.report(sample_sarif_model_no_findings)
-        assert "No actionable findings" in result
+        assert "No scanners completed" in result
+        assert "No findings matched the analysis filters" in result
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_report_with_findings_generates_structured_output(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         sample_sarif_model,
         bedrock_client_ok,
@@ -838,22 +852,19 @@ class TestReport:
             "bedrock-runtime": bedrock_runtime_ok,
         }.get(svc, MagicMock())
         mock_session_cls.return_value = session
-        mock_boto3_client.return_value = bedrock_client_ok
 
         reporter = BedrockSummaryReporter(context=mock_context)
         result = reporter.report(sample_sarif_model)
 
-        assert "Security Scan Summary Report" in result
-        assert "Table of Contents" in result
-        assert "Executive Summary" in result
-        assert "Finding Details" in result
+        assert "ASH security scan analysis" in result
+        assert "Contents" in result
+        assert "Executive summary" in result
+        assert "Finding details" in result
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_report_writes_markdown_files(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         sample_sarif_model,
         bedrock_client_ok,
@@ -866,7 +877,6 @@ class TestReport:
             "bedrock-runtime": bedrock_runtime_ok,
         }.get(svc, MagicMock())
         mock_session_cls.return_value = session
-        mock_boto3_client.return_value = bedrock_client_ok
 
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.output_markdown = True
@@ -917,12 +927,10 @@ class TestReport:
 
         assert not victim.exists(), "the summary was written through the link"
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_report_without_section_headers_uses_simple_summary(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         sample_sarif_model,
         bedrock_client_ok,
@@ -934,22 +942,19 @@ class TestReport:
             "bedrock-runtime": bedrock_runtime_ok,
         }.get(svc, MagicMock())
         mock_session_cls.return_value = session
-        mock_boto3_client.return_value = bedrock_client_ok
 
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.add_section_headers = False
         result = reporter.report(sample_sarif_model)
 
         # Simple summary does not have the structured TOC
-        assert "Table of Contents" not in result
+        assert "Contents" not in result
         assert isinstance(result, str)
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_secret_findings_separated(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         sample_sarif_model,
         bedrock_client_ok,
@@ -962,7 +967,6 @@ class TestReport:
             "bedrock-runtime": bedrock_runtime_ok,
         }.get(svc, MagicMock())
         mock_session_cls.return_value = session
-        mock_boto3_client.return_value = bedrock_client_ok
 
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.include_sections = [
@@ -973,7 +977,7 @@ class TestReport:
         ]
         result = reporter.report(sample_sarif_model)
 
-        assert "Secret Findings" in result
+        assert "Secret findings" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1066,6 +1070,19 @@ class TestSummarizeFindings:
         b101_finding = next(f for f in result if f["rule"]["id"] == "B101")
         assert b101_finding["properties"]["summarized"] is True
         assert b101_finding["properties"]["original_count"] == 2
+        assert findings[0]["message"]["text"] == "dangerous function use"
+        assert "properties" not in findings[0]
+
+    def test_standard_rule_ids_remain_distinct(self, reporter):
+        reporter.config.options.summarize_findings = True
+        findings = [
+            {"ruleId": "R1", "message": {"text": "first finding"}},
+            {"ruleId": "R2", "message": {"text": "second finding"}},
+        ]
+        assert [item["ruleId"] for item in reporter._summarize_findings(findings)] == [
+            "R1",
+            "R2",
+        ]
 
     @patch("boto3.Session")
     def test_returns_unchanged_when_disabled(self, mock_session_cls, mock_context):
@@ -1091,12 +1108,10 @@ class TestSummarizeFindings:
 class TestActionableFiltering:
     """Test that suppressed and below-threshold findings are excluded."""
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_suppressed_findings_excluded(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         bedrock_client_ok,
         bedrock_runtime_ok,
@@ -1133,7 +1148,8 @@ class TestActionableFiltering:
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.actionable_only = True
         result = reporter.report(model)
-        assert "No actionable findings" in result
+        assert "No findings matched the analysis filters" in result
+        assert "1 suppressed" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1225,18 +1241,21 @@ class TestTryFallbackModels:
 class TestGenerateExecutiveSummary:
     """Tests for _generate_executive_summary prompt construction."""
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_includes_severity_counts_in_prompt(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         bedrock_client_ok,
         bedrock_runtime_ok,
     ):
-        mock_boto3_client.return_value = bedrock_client_ok
+        mock_session_cls.return_value.client.return_value = bedrock_client_ok
         reporter = BedrockSummaryReporter(context=mock_context)
+        # Pinned: the default model id follows ASH_BEDROCK_MODEL_ID at import,
+        # and this test's stub lists exactly this model.
+        reporter.config.options.model_id = (
+            "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        )
 
         model = MagicMock()
         model.scanner_results = {"bandit": MagicMock()}
@@ -1256,7 +1275,8 @@ class TestGenerateExecutiveSummary:
         call_args = bedrock_runtime_ok.converse.call_args
         messages = call_args[1]["messages"]
         user_text = messages[0]["content"][0]["text"]
-        assert "error" in user_text
+        assert "critical: 2" in user_text
+        assert "medium: 1" in user_text
         assert "3" in user_text  # total findings
 
 
@@ -1268,17 +1288,15 @@ class TestGenerateExecutiveSummary:
 class TestBatchProcessing:
     """Tests for _process_findings_by_batch."""
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_falls_back_to_standard_when_disabled(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         bedrock_client_ok,
         bedrock_runtime_ok,
     ):
-        mock_boto3_client.return_value = bedrock_client_ok
+        mock_session_cls.return_value.client.return_value = bedrock_client_ok
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.batch_processing = False
 
@@ -1291,17 +1309,15 @@ class TestBatchProcessing:
         )
         assert isinstance(result, str)
 
-    @patch("boto3.client")
     @patch("boto3.Session")
     def test_processes_in_batches_when_enabled(
         self,
         mock_session_cls,
-        mock_boto3_client,
         mock_context,
         bedrock_client_ok,
         bedrock_runtime_ok,
     ):
-        mock_boto3_client.return_value = bedrock_client_ok
+        mock_session_cls.return_value.client.return_value = bedrock_client_ok
         reporter = BedrockSummaryReporter(context=mock_context)
         reporter.config.options.batch_processing = True
         reporter.config.options.max_findings_to_analyze = 5

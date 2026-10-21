@@ -1,17 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import threading
+import uuid
 from pydantic import (
     AnyUrl,
     BaseModel,
     ConfigDict,
     Field,
     PrivateAttr,
-    SerializerFunctionWrapHandler,
+    ValidationError,
+    ValidationInfo,
     field_serializer,
     field_validator,
     model_validator,
@@ -21,10 +24,23 @@ from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.core.sharding import ShardAssignment
 from automated_security_helper.models.core import IgnoreFileExclusions
-from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.models.flat_vulnerability import (
+    FlatVulnerability,
+    assign_identity_ids,
+)
 from automated_security_helper.models.workspace import WorkspaceResults
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from typing import TYPE_CHECKING, Annotated, Dict, Any, Optional, Union, List
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Dict,
+    Any,
+    Iterator,
+    Literal,
+    Optional,
+    Union,
+    List,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Run,
@@ -33,12 +49,20 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.undecodable_text import (
+    RecordModel,
+    StrippedRecordModel,
+    names_as_recorded,
+    recorded,
+    undecodables_of_texts,
+)
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.secret_masking import (
     SecretValueShape,
     mask_secrets_in_results,
 )
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -53,7 +77,7 @@ _SUMMARY_SEVERITY_FIELDS = frozenset(
 )
 
 
-class ScannerSeverityCount(BaseModel):
+class ScannerSeverityCount(StrippedRecordModel):
     """Information about scanner status."""
 
     model_config = ConfigDict(
@@ -113,7 +137,7 @@ class ScannerSeverityCount(BaseModel):
         return "none"
 
 
-class SummaryStats(BaseModel):
+class SummaryStats(StrippedRecordModel):
     """Summary statistics for the final report.
 
     Composes a ScannerSeverityCount for per-severity tallies. Flat severity
@@ -247,7 +271,7 @@ class SummaryStats(BaseModel):
         self.duration = duration
 
 
-class ScannerTargetStatusInfo(BaseModel):
+class ScannerTargetStatusInfo(StrippedRecordModel):
     """Information about scanner status."""
 
     model_config = ConfigDict(
@@ -259,25 +283,74 @@ class ScannerTargetStatusInfo(BaseModel):
     )
 
     status: ScannerStatus = ScannerStatus.PASSED
-    dependencies_satisfied: bool = True
-    excluded: bool = False
+    dependencies_satisfied: Annotated[
+        bool,
+        Field(
+            description=(
+                "False on a MISSING row: the scanner's tool or another dependency "
+                "was not available. True on every other row, including a SKIPPED "
+                "one, which did not need its tool, and a MISSING row for a scanner "
+                "whose filtering raised before any dependency was checked (its "
+                "missing_reason says so)."
+            ),
+        ),
+    ] = True
+    excluded: Annotated[
+        bool,
+        Field(
+            description=(
+                "True when the run left the scanner out: --exclude-scanners or the "
+                "shard split, --scanners, the configuration's enabled flag, "
+                "--python-only, or a platform the scanner does not support."
+            ),
+        ),
+    ] = False
     severity_counts: ScannerSeverityCount = ScannerSeverityCount()
     finding_count: int | None = 0
     actionable_finding_count: int | None = 0
     suppressed_finding_count: int | None = 0
-    exit_code: int | None = 0
+    exit_code: Annotated[
+        int | None,
+        Field(
+            description=(
+                "The exit code of the scanner's tool, the highest over the targets "
+                "it ran on. None when no tool ran (a MISSING or excluded row, a "
+                "scanner that had nothing to scan or started no tool for its "
+                "targets, or one that could not be built) or when no target recorded "
+                "one."
+            ),
+        ),
+    ] = 0
     duration: float | None = 0.0
-    # Set only when a MISSING row has a reason better than "not installed": today,
-    # that its tool was found only inside the scanned tree. Left unset otherwise,
-    # so an exclude_unset dump of every other row is what it was.
+    # The two reasons are set by core.unified_metrics when it rebuilds the row, from
+    # what the scan phase and the executor recorded, so a SKIPPED or MISSING row
+    # always says why and every other row carries None.
     missing_reason: Annotated[
         str | None,
         Field(
             default=None,
             description=(
-                "Why the scanner is MISSING, when ASH knows more than that its tool "
-                "was not found: for example, that the tool was found only inside "
-                "the scanned tree, which ASH does not run tools from by default."
+                "Why the scanner is MISSING: its tool was not found (or was found "
+                "only inside the scanned tree, which ASH does not run tools from "
+                "by default), a dependency check failed with the reason the scanner "
+                "gave, or the scanner could not be sandboxed. Set on every MISSING "
+                "row and None on every other."
+            ),
+        ),
+    ] = None
+    skipped_reason: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why the scanner is SKIPPED: excluded with --exclude-scanners (the "
+                "excluded_scanners parameter over MCP) or by the shard split, not "
+                "named by --scanners (the scanners parameter over MCP), disabled in the "
+                "configuration, left out by --python-only, not supported on this "
+                "platform, or nothing to scan in the project (no CloudFormation "
+                "template for cdk-nag and cfn-nag, no lockfile for npm-audit), "
+                "whether or not its tool is installed. Set on every SKIPPED row and "
+                "None on every other."
             ),
         ),
     ] = None
@@ -288,7 +361,7 @@ class ScannerTargetStatusInfo(BaseModel):
         return self.duration or 0.0
 
 
-class ScannerStatusInfo(BaseModel):
+class ScannerStatusInfo(StrippedRecordModel):
     """Information about scanner status."""
 
     model_config = ConfigDict(
@@ -326,7 +399,7 @@ class ScannerStatusInfo(BaseModel):
         return _non_default(self.source) and _non_default(self.converted)
 
 
-class InputNotScanned(BaseModel):
+class InputNotScanned(RecordModel):
     """One input that was found and not scanned, and why.
 
     A scanner records its own in its report (``ScanResultsContainer.
@@ -350,13 +423,36 @@ class InputNotScanned(BaseModel):
     reason: Annotated[str, Field(description="Why it was not scanned.")]
 
 
-class RefusedInputInfo(BaseModel):
+#: The validation-context key under which RefusedInputInfo counts the keys it drops,
+#: for the one warning ``warning_of_dropped_keys`` logs per results file.
+_DROPPED_RECORD_KEYS = "dropped_refused_input_keys"
+
+
+class RefusedInputInfo(StrippedRecordModel):
     """One input a converter declined to read, and why."""
 
+    # Only these fields are kept. A results file ASH reads back can hold any other
+    # key in a record, and every record and report written from it carried that
+    # key; no ASH writer sets one. Such a key is dropped, not refused, so a record
+    # an earlier ASH wrote still loads.
     # Read from a results file, whose values an error does not quote.
     model_config = ConfigDict(
-        str_strip_whitespace=True, extra="allow", hide_input_in_errors=True
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _count_the_keys_it_drops(cls, data: Any, info: ValidationInfo) -> Any:
+        context = info.context
+        if (
+            isinstance(data, dict)
+            and isinstance(context, dict)
+            and _DROPPED_RECORD_KEYS in context
+        ):
+            context[_DROPPED_RECORD_KEYS] += sum(
+                1 for key in data if key not in cls.model_fields
+            )
+        return data
 
     path: Annotated[
         str,
@@ -406,12 +502,29 @@ class RefusedInputInfo(BaseModel):
     ] = None
 
 
-class FailedInputInfo(BaseModel):
+def known_failed_input_kind(value: Any) -> str:
+    """*value* read as a failed-input record's kind: itself when it is "input" or
+    "tool", and "tool" for anything else.
+
+    The one reading of the kind. FailedInputInfo's validator applies it to every
+    record built through the model; a reader of a record that skipped validation
+    (one built with model_construct, a kind assigned after the record was made, a
+    row ``ash merge`` assembled) applies it itself. "tool" is the fail-closed
+    reading: a tool failure is never accepted, so an unknown kind can never waive
+    the completeness gate.
+    """
+    return value if value in ("input", "tool") else "tool"
+
+
+class FailedInputInfo(StrippedRecordModel):
     """One input a converter set out to convert and could not."""
 
-    # Read from a results file, whose values an error does not quote.
+    # Only these fields are kept, as for RefusedInputInfo: a results file ASH reads
+    # back can hold any other key in a record, and no ASH writer sets one. Read
+    # from a results file, whose values an error does not quote
+    # (hide_input_in_errors).
     model_config = ConfigDict(
-        str_strip_whitespace=True, extra="allow", hide_input_in_errors=True
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
     )
 
     path: Annotated[
@@ -423,9 +536,83 @@ class FailedInputInfo(BaseModel):
         ),
     ]
     reason: Annotated[str, Field(description="Why it was not converted.")]
+    kind: Annotated[
+        Literal["input", "tool"],
+        Field(
+            description=(
+                "What failed: 'input' when the file is not one the converter "
+                "could hand to its tool (for the jupyter converter, not a "
+                "notebook), 'tool' when the tool could not convert it. The "
+                "completeness gate's trust in 'accepted' rides on the kind, "
+                "so any other value is read as 'tool', which is never "
+                "accepted, rather than as 'input' or as a refusal to load "
+                "the record."
+            ),
+        ),
+    ] = "tool"
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _an_unknown_kind_reads_as_tool(cls, value: Any) -> Any:
+        """A kind this version does not know is read as "tool".
+
+        Recording a failure must not itself fail (a converter plugin outside
+        this repository can pass its own kind, after the failure was already
+        logged), and a results file ASH reads back can carry a record it did
+        not write; refusing the value would turn one unknown record into a
+        failed load of the whole results. The reading is
+        known_failed_input_kind's.
+        """
+        return known_failed_input_kind(value)
+
+    accepted: Annotated[
+        bool,
+        Field(
+            description=(
+                "True when a suppression with rule_id 'ash-unconverted-input' "
+                "accepts this input error, so it does not count against the "
+                "completeness gate. The record stays, with the suppression's "
+                "reason. A tool failure is never accepted."
+            ),
+        ),
+    ] = False
+    accepted_reason: Annotated[
+        str | None,
+        Field(description="The accepting suppression's reason."),
+    ] = None
+    accepted_by: Annotated[
+        str | None,
+        Field(
+            description=(
+                "The written-form id of the suppression that accepted this "
+                "input error, recorded when the acceptance was granted. The "
+                "convert phase registers exactly this id in "
+                "used_suppressions, so no other entry that happens to match "
+                "the path reads used. None when the id write failed, for a "
+                "record a third-party converter built, and in a results file "
+                "written before the field existed; the phase re-derives those "
+                "records' entries from their paths instead."
+            ),
+        ),
+    ] = None
 
 
-class ConverterStatusInfo(BaseModel):
+def waives_gate(record: Any) -> bool:
+    """Whether a failed-input record does not count against the completeness gate.
+
+    The one trust rule, read by the gate (``incomplete_converters``) and the
+    convert phase's reporting alike: accepted, and of kind "input". Only the
+    writer promises a tool failure is never accepted, and a shard file can come
+    from any producer, so an accepted record of any other kind still counts.
+    Read with ``getattr`` because a shard row assembled by ``ash merge`` can
+    carry records that never passed this model's validation.
+    """
+    return bool(getattr(record, "accepted", False)) and (
+        getattr(record, "kind", None) == "input"
+    )
+
+
+class ConverterStatusInfo(StrippedRecordModel):
     """Information about converter status."""
 
     model_config = ConfigDict(
@@ -438,6 +625,24 @@ class ConverterStatusInfo(BaseModel):
 
     dependencies_satisfied: bool = True
     excluded: bool = False
+
+    # Declared for the same reason as the fields below, and the converter's
+    # counterpart of a MISSING scanner's missing_reason: without it the reason was
+    # in the console's warning and ash.log only, where a merge of shards or an MCP
+    # client reading the results never sees it.
+    dependency_unavailable_reason: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why the converter's dependencies were unavailable: the reason its "
+                "dependency check recorded, with the home directory written as ~, "
+                "or a message naming the converter when the check recorded none or "
+                "raised. Set on every row whose dependencies_satisfied is False and "
+                "None on every other."
+            ),
+        ),
+    ] = None
 
     # Declared rather than left to ride on extra="allow", so model_json_schema()
     # carries it and the committed AshAggregatedResults.json documents the shape a
@@ -511,23 +716,134 @@ class ConverterStatusInfo(BaseModel):
     )
 
     # A converter that raised has failure; one that could not convert some of its
-    # inputs carried on, and before this field those inputs were in the log alone.
-    # The completeness gate reads it, so a notebook nbconvert could not convert is
-    # lost coverage in the exit code as well. Omitted from the row when empty, as
-    # refused_inputs is.
+    # inputs carries on, and the completeness gate reads this, so a notebook
+    # nbconvert could not convert is lost coverage in the exit code as well as in
+    # the log. Omitted from the row when empty, as refused_inputs is.
     failed_inputs: List[FailedInputInfo] = Field(
         default_factory=list,
         description=(
             "Inputs this converter tried to convert and could not, so the scanners "
             "never saw what conversion would have produced from them. The "
-            "completeness gate counts a converter with any as incomplete."
+            "completeness gate counts a converter with any such record as "
+            "incomplete, except records a suppression accepted (kind 'input' "
+            "with accepted true), which stay here for the reader."
         ),
     )
 
     converted_paths: List[str] = []
 
 
-class ReportMetadata(BaseModel):
+def _unreadable_expirations(stored: Any) -> List[str]:
+    """Where a stored config holds an expiration that is not a YYYY-MM-DD date.
+
+    The config is validated again without the tolerance, and each such date is
+    one of its errors, located by pydantic: ``global_settings.ignore_paths[0]
+    .expiration``. A mapping key that is not a name of the config schema is
+    shown as ``<key>``, since it is the file's data too. Called only when the
+    tolerant validation kept such a date.
+
+    A date is told by where and how it failed, a ``value_error`` at an
+    ``expiration``, never by the refusal's words, which are the date check's
+    own (models/core.expiration_date_problem) and change with it. A count that
+    still disagrees falls back to unlocated warnings (validate_ash_config).
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.config_validator import (
+        _schema_names,
+        location_text,
+    )
+
+    try:
+        AshConfig.model_validate(stored)
+    except ValidationError as error:
+        names = _schema_names()
+        return [
+            location_text(item["loc"], names)
+            for item in error.errors(include_url=False)
+            if item.get("loc")
+            and item["loc"][-1] == "expiration"
+            and item.get("type") == "value_error"
+        ]
+    return []
+
+
+def _kept_unknown_keys(config: BaseModel) -> List[str]:
+    """Where a tolerantly loaded config kept a key its model does not declare.
+
+    One location per kept key, of the entry or options section that holds it
+    (``global_settings.suppressions[0]``, ``scanners.bandit.options``): the
+    models that refuse unknown keys keep them as extras under the tolerance.
+    The generic options bases record nothing there (base/options.py), so their
+    extras are not counted either. Names that are not in the config schema
+    are shown as ``<key>``.
+    """
+    from automated_security_helper.base.options import (
+        _GENERIC_OPTION_BASES,
+        PluginOptionsBase,
+    )
+    from automated_security_helper.config.config_validator import (
+        _schema_names,
+        location_text,
+    )
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    names = _schema_names()
+    found: List[str] = []
+
+    def walk(node: Any, loc: tuple) -> None:
+        if isinstance(node, BaseModel):
+            extra = node.model_extra or {}
+            # The bases exactly, as base/options.py tests them: every plugin's
+            # own options model subclasses one.
+            refuses = (
+                isinstance(node, (IgnorePathWithReason, PluginOptionsBase))
+                and type(node) not in _GENERIC_OPTION_BASES
+            )
+            if refuses and extra:
+                found.extend([location_text(loc, names)] * len(extra))
+            for name, field in type(node).model_fields.items():
+                walk(getattr(node, name, None), loc + (field.alias or name,))
+            for key, value in extra.items():
+                walk(value, loc + (key,))
+        elif isinstance(node, (list, tuple)):
+            for index, item in enumerate(node):
+                walk(item, loc + (index,))
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, loc + (key,))
+
+    walk(config, ())
+    return found
+
+
+def new_report_id(
+    now: Optional[datetime] = None,
+    token: Optional[str] = None,
+    prefix: str = "ASH",
+) -> str:
+    """A report id for one scan: ``<prefix>-<UTC YYYYMMDDHHMMSS>-<12 hex digits>``.
+
+    The time comes first, so ids sort by when the scan started and begin with
+    the ``ASH-YYYYMMDD`` a reader may match on; the random ``token`` separates
+    scans started in the same second, including the
+    shards of one sharded scan, which run at the same time on different hosts.
+
+    Args:
+        now: The scan's start. Defaults to the current UTC time.
+        token: Twelve lowercase hex digits. Defaults to the last twelve of a fresh
+            ``uuid4``, which are all random bits. ``ash merge`` passes a digest of
+            the shard ids instead, so the union's id is reproducible.
+        prefix: ``ASH`` for a scan; the workspace aggregate adds its own marker.
+    """
+    instant = now if now is not None else datetime.now(timezone.utc)
+    if instant.tzinfo is not None:
+        instant = instant.astimezone(timezone.utc)
+    if token is None:
+        token = uuid.uuid4().hex[-12:]
+    return f"{prefix}-{instant.strftime('%Y%m%d%H%M%S')}-{token}"
+
+
+class ReportMetadata(StrippedRecordModel):
     """Metadata for security reports."""
 
     model_config = ConfigDict(
@@ -683,7 +999,11 @@ class ReportMetadata(BaseModel):
     @field_validator("generated_at")
     @classmethod
     def validate_datetime(cls, v: Union[str, datetime, None] = None) -> str:
-        """Validate that value is timestamp or, if empty, set to current datetime"""
+        """Validate that value is timestamp or, if empty, set to current datetime.
+
+        A string that is not one is refused with the rule, from None: the
+        parser's own error quotes the string.
+        """
         if not v:
             v = datetime.now(timezone.utc)
         if isinstance(v, str):
@@ -703,26 +1023,10 @@ class ReportMetadata(BaseModel):
         if not self.generated_at:
             self.generated_at = default_timestamp
         if not self.report_id:
-            self.report_id = (
-                f"ASH-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            )
+            self.report_id = new_report_id()
 
 
-def _recorded_config(config: Any, data: Any) -> Any:
-    """``data``, a dump of ``config``, as a record of the config holds it: each
-    value and key the config's files read from the environment as the file
-    wrote it, never the value (config/environment_record.py)."""
-    references = getattr(config, "_environment_references", ()) if config else ()
-    if not references:
-        return data
-    from automated_security_helper.config.environment_record import (
-        record_environment_references,
-    )
-
-    return record_environment_references(data, references)
-
-
-class AshAggregatedResults(BaseModel):
+class AshAggregatedResults(RecordModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
     model_config = ConfigDict(
@@ -739,9 +1043,17 @@ class AshAggregatedResults(BaseModel):
         default="Automated Security Helper - Aggregated Report",
         description="The description of the generated report.",
     )
+
+    # Its own str fields, not "*" (StrippedRecordModel): a before-validator on sarif
+    # would hand the whole report's JSON to Python on every read-back.
+    @field_validator("name", "description", mode="before")
+    @classmethod
+    def _names_as_recorded_before(cls, value: Any, info: ValidationInfo) -> Any:
+        return names_as_recorded(value, info)
+
     metadata: ReportMetadata = Field(
         default_factory=lambda: ReportMetadata(
-            report_id="ASH-" + datetime.now(timezone.utc).strftime("%Y%m%d"),
+            report_id=new_report_id(),
             project_name="ASH",
             # tool_name="ASH",
             tool_version=get_ash_version(),
@@ -799,7 +1111,10 @@ class AshAggregatedResults(BaseModel):
     used_suppressions: Annotated[
         set[str],
         Field(
-            description="Set of suppression IDs that were actually applied to findings during the scan.",
+            description=(
+                "Set of suppression IDs that were applied to findings or "
+                "accepted an unconverted input during the scan."
+            ),
             default_factory=set,
         ),
     ]
@@ -844,11 +1159,12 @@ class AshAggregatedResults(BaseModel):
     # every project exposed.
     _secret_values: set = PrivateAttr(default_factory=set)
 
-    # Each of the three entry points below retries the AshConfig forward-reference
-    # rebuild before doing anything else, because the attempt made when this
-    # module is imported does not always get to run. _resolve_forward_refs at the
-    # bottom of this module explains when, and why the retry cannot be dropped in
-    # favour of Pydantic's own rebuild-on-first-access.
+    # Each of the three entry points below resolves the AshConfig forward reference
+    # before doing anything else. This module does not resolve it when it is
+    # imported, so unless config.ash_config's last line already has, the first of
+    # them to run is what does. The comment above _resolve_forward_refs explains
+    # why, and why they cannot be dropped in favour of Pydantic's own
+    # rebuild-on-first-access.
     #
     # These three are the entry points production reaches: six call sites
     # deserialize through model_validate / model_validate_json, and
@@ -888,64 +1204,157 @@ class AshAggregatedResults(BaseModel):
         _resolve_forward_refs()
         return super().model_validate_json(*args, **kwargs)
 
+    # These two need the reference resolved as well: in a process that imported only
+    # this module, model_json_schema() raised PydanticUserError and model_rebuild()
+    # PydanticUndefinedAnnotation for AshConfig. _resolve_forward_refs rebuilds through
+    # BaseModel.model_rebuild, not this override, so it does not call itself.
+    @classmethod
+    def model_rebuild(cls, *args: Any, **kwargs: Any) -> bool | None:
+        _resolve_forward_refs()
+        return super().model_rebuild(*args, **kwargs)
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        _resolve_forward_refs()
+        return super().model_json_schema(*args, **kwargs)
+
     @field_validator("ash_config", mode="before")
     @classmethod
-    def read_recorded_ash_config(cls, v: Any):
-        """A recorded configuration read back: a reference to the environment
-        that a field cannot hold reads as the field's default, with a warning,
-        and is noted for ash merge and ash report (config/environment_record.py).
-        Before pydantic validates the field, which would refuse the reference."""
-        if isinstance(v, dict):
-            from automated_security_helper.config.environment_record import (
-                load_recorded_config,
-            )
-
-            return load_recorded_config(v)
-        return v
-
-    @field_validator("ash_config")
-    @classmethod
     def validate_ash_config(cls, v: Any):
+        """Read the stored config, keeping expiration dates today's check refuses.
+
+        A results file records the config its scan ran with. One written before
+        ``expiration`` was checked on ignore paths can hold a value such as
+        ``TBD`` there, and every reader of results files (``ash report``,
+        ``--existing-results``, ``ash merge``, workspace reporting, the MCP
+        tools) would otherwise refuse the whole file. The value is kept as
+        written and a warning names it; the matcher never applies such an
+        entry. Any other refusal fails the load.
+
+        A "before" validator, so it sees the stored data before the field's own
+        validation: an "after" validator's fallback to the default config could
+        never run, since the field would already have failed.
+
+        A kept date is named by where it is (``global_settings.ignore_paths[0]
+        .expiration``), never by what it says, and a kept key by the section
+        that holds it (``an unknown key <key> in 'scanners.bandit.options'``),
+        never by its name: both are the results file's data, and the warning
+        reaches the CI log.
+        """
         from automated_security_helper.config.ash_config import AshConfig
-
-        # No configuration recorded stays None, so the results never carry a
-        # configuration the scan did not record (the defaults, or the file
-        # ASH_CONFIG names in the process reading them). A value that is not a
-        # valid configuration raises.
-        if v is None:
-            return None
-        return AshConfig.model_validate(v)
-
-    @field_serializer("ash_config", mode="wrap")
-    def _record_ash_config(self, value: Any, handler: SerializerFunctionWrapHandler):
-        """The configuration as a record holds it: each value and key its files
-        read from the environment as the file wrote it, never the value
-        (config/environment_record.py). The model itself keeps the live
-        configuration, so what the run computes from it, its reports included,
-        does not change."""
-        return _recorded_config(value, handler(value))
-
-    @field_serializer("metadata", mode="wrap")
-    def _record_metadata(self, value: Any, handler: SerializerFunctionWrapHandler):
-        """``expected_scanners`` lists the configuration's ``scanners`` keys, so a
-        key read from the environment is recorded as the file wrote it there
-        too (``_record_ash_config``)."""
-        data = handler(value)
-        config = self.ash_config
-        references = getattr(config, "_environment_references", ()) if config else ()
-        if not references or not isinstance(data, dict):
-            return data
-        names = data.get("expected_scanners")
-        if not isinstance(names, list):
-            return data
-        from automated_security_helper.config.environment_record import (
-            recorded_names,
+        from automated_security_helper.models.core import UNREADABLE_EXPIRATION_NOTE
+        from automated_security_helper.utils.unknown_keys import (
+            TOLERATE_STORED_CONFIG,
+            UNKNOWN_KEY_NOTE,
         )
 
-        return {
-            **data,
-            "expected_scanners": recorded_names(names, references, ("scanners",)),
-        }
+        if v is None or isinstance(v, AshConfig):
+            return v
+        # A name the record holds in its record form, a surrogate's escape such as
+        # \udcNN, is read back as the name (utils/undecodable_text
+        # .undecodables_of_texts), so ash report, --existing-results and ash merge
+        # apply the ignore paths and suppressions the scan applied.
+        if isinstance(v, dict):
+            v = undecodables_of_texts(v)
+        from automated_security_helper.config.recorded_config import (
+            without_unreadable_references,
+        )
+
+        notes: List[str] = []
+        unreadable: List[Any] = []
+        try:
+            config = AshConfig.model_validate(
+                v, context={TOLERATE_STORED_CONFIG: notes}
+            )
+        except ValidationError as error:
+            # A results file keeps an environment reference as the file wrote
+            # it, and a fixed-choice field (severity_threshold) cannot hold one.
+            # Read with that field's default; any other refusal still fails.
+            kept, unreadable = without_unreadable_references(v, error)
+            if not unreadable:
+                raise
+            notes = []
+            config = AshConfig.model_validate(
+                kept, context={TOLERATE_STORED_CONFIG: notes}
+            )
+        unreadable_dates = notes.count(UNREADABLE_EXPIRATION_NOTE)
+        unknown = notes.count(UNKNOWN_KEY_NOTE)
+        described = [
+            note
+            for note in notes
+            if note not in (UNREADABLE_EXPIRATION_NOTE, UNKNOWN_KEY_NOTE)
+        ]
+        if unknown:
+            kept = _kept_unknown_keys(config)
+            # Located only when the walk finds exactly the keys the load
+            # recorded; otherwise each still warns, without a location.
+            described = (
+                [f"{UNKNOWN_KEY_NOTE} in '{where}'" for where in kept]
+                if len(kept) == unknown
+                else [UNKNOWN_KEY_NOTE] * unknown
+            ) + described
+        if unreadable_dates:
+            located = [
+                f"{UNREADABLE_EXPIRATION_NOTE} at '{where}'"
+                for where in _unreadable_expirations(v)
+            ]
+            # Located only when the strict pass finds every kept date: it stops
+            # at a section that also holds an unknown key, so it can miss one.
+            # Otherwise each still warns, without a location.
+            described = (
+                located
+                if len(located) == unreadable_dates
+                else [UNREADABLE_EXPIRATION_NOTE] * unreadable_dates
+            ) + described
+        for note in described:
+            ASH_LOGGER.warning(
+                f"The configuration stored in these results has {note}. It is "
+                "kept as written; an entry with it does not apply, and a "
+                "configuration file with it is refused."
+            )
+        for field, reference in unreadable:
+            ASH_LOGGER.warning(
+                f"The configuration stored in these results records {field} as "
+                f"{reference}, a reference read from the environment where the "
+                "scan ran, which that field cannot hold. It is read with the "
+                "field's default; a command that acts on it takes the value from "
+                "its own configuration.",
+                extra={"markup": False},
+            )
+        config._unreadable_references = unreadable
+        return config
+
+    @field_serializer("ash_config", mode="wrap")
+    def _record_ash_config(self, value: Any, handler: Any) -> Any:
+        """The configuration as its record: each value and key its files read
+        from the environment as the file wrote it (config_validator
+        record_of_config), never the value.
+
+        On the dump, not the model: during the scan this is the run's own
+        configuration object, which the scan reads its values from. A results
+        file, the merged results, and anything else dumped from these results
+        keep the reference. Read back, the record holds the reference text where
+        the file wrote one, and ``ash report`` renders that text, as the scan's
+        own reports do for the project name (ScanExecutionEngine).
+        """
+        from automated_security_helper.config.config_validator import (
+            record_of_config,
+        )
+
+        return record_of_config(value, handler(value))
+
+    @field_serializer("metadata", mode="wrap")
+    def _record_metadata(self, value: Any, handler: Any) -> Any:
+        """The metadata, with the project name and the scanner names as the
+        configuration's record has them (config_validator record_of_metadata,
+        through record_of_config): the run's reports take the project name from
+        here, and a name read from the environment is recorded as the reference
+        the file wrote, as the configuration's own record keeps it (above)."""
+        from automated_security_helper.config.config_validator import (
+            record_of_metadata,
+        )
+
+        return record_of_metadata(self.ash_config, handler(value))
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
@@ -982,20 +1391,30 @@ class AshAggregatedResults(BaseModel):
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        # As a record of the config holds it (_record_ash_config): the off-host
-        # reporters send this dict.
-        conf = (
-            _recorded_config(
+        from automated_security_helper.config.config_validator import (
+            record_of_config,
+            record_of_metadata,
+        )
+
+        conf = {}
+        if self.ash_config is not None:
+            # The record, as a results file keeps it (_record_ash_config): this
+            # dict is what the CloudWatch Logs and S3 reporters send off the
+            # host, so no value read from the environment is in it.
+            conf = record_of_config(
                 self.ash_config,
                 self.ash_config.model_dump(by_alias=True, exclude_unset=True),
             )
-            if self.ash_config is not None
-            else None
-        )
+        # Results that record no configuration send an empty one. ASH's default
+        # configuration is not the one the scan ran with, and it is loaded from
+        # the ASH_CONFIG file of the process sending it.
         simple_dict = {
             "name": self.name,
             "description": self.description,
-            "metadata": self.metadata.model_dump(by_alias=True, exclude_unset=True),
+            "metadata": record_of_metadata(
+                self.ash_config,
+                self.metadata.model_dump(by_alias=True, exclude_unset=True),
+            ),
             "converter_results": {
                 k: v.model_dump(by_alias=True, exclude_unset=True)
                 for k, v in sorted(self.converter_results.items())
@@ -1024,8 +1443,12 @@ class AshAggregatedResults(BaseModel):
 
         flat_vulns: List[FlatVulnerability] = []
 
-        if self.sarif and self.sarif.runs:
-            for run in self.sarif.runs:
+        # The results are read field by field below, so a name set on one after it
+        # was validated is read from a copy in the record form (the same report
+        # when there is none).
+        sarif = recorded(self.sarif) if self.sarif else self.sarif
+        if sarif and sarif.runs:
+            for run in sarif.runs:
                 if not run.results:
                     continue
 
@@ -1073,6 +1496,13 @@ class AshAggregatedResults(BaseModel):
                         FlatVulnerability.from_additional_report(finding, scanner_name)
                     )
 
+        project = getattr(self.metadata, "workspace_project", None)
+        assign_identity_ids(
+            flat_vulns,
+            default_project=project
+            if isinstance(project, str) and project.strip()
+            else None,
+        )
         self._flat_cache = flat_vulns
         return flat_vulns
 
@@ -1256,37 +1686,31 @@ class AshAggregatedResults(BaseModel):
 # model_validate and model_validate_json raise PydanticUserError instead of
 # returning a model.
 #
-# This is called from two places and needs both:
+# It is called on first use, and the last line of config/ash_config.py rebuilds the
+# model too when that module is imported. It is not called at import time at the
+# bottom of this module, because that call would do harm: importing
+# config.ash_config from inside this module's import loads every built-in plugin
+# group, while the module that started the chain (core.unified_metrics,
+# utils.sarif_utils, ...) is still partially initialized, and a plugin module
+# importing back from it would take its whole group down with it. The half-imported
+# config.ash_config would then be evicted too, so the model would stay unresolved
+# until first use anyway.
 #
-#   * At import time, at the bottom of this module, which is all it used to be.
-#     That call cannot succeed when asharp_model is itself being imported from
-#     inside the ash_config import cycle: core.unified_metrics -> asharp_model ->
-#     config.ash_config -> converters.archive_converter -> ash_builtin.reporters
-#     -> reporters.html_reporter -> reporters.report_content_emitter, which
-#     imports get_unified_scanner_metrics back out of the still-initializing
-#     core.unified_metrics. Python then evicts the half-imported
-#     config.ash_config from sys.modules, and on that path nothing imports it
-#     again, so nothing left holds a resolvable AshConfig and the model stays
-#     unusable for the whole process. The one thing that would repair it is the
-#     AshAggregatedResults.model_rebuild() on the last line of
-#     config/ash_config.py, and it is unreachable here for the same reason.
-#
-#   * On first use, from __init__, model_validate and model_validate_json.
-#     The cycle only exists while the package is being imported, so by the time
-#     anything constructs or deserializes the model the same import succeeds.
-#     That retry is what recovers the failing order, and it is why those three
-#     overrides cannot be dropped in favour of the rebuild Pydantic attempts by
-#     itself when a mocked validator, serializer or core schema is first touched:
-#     on the failing path config.ash_config is not in sys.modules at all, so
-#     Pydantic's attempt has nothing to resolve the reference against. Removing
-#     the overrides puts the failing order straight back -- measured, not assumed.
+# First use means __init__, model_validate and model_validate_json. The cycle only
+# exists while the package is being imported, so by the time anything constructs
+# or deserializes the model the import succeeds. That is why those three overrides
+# cannot be dropped in favour of the rebuild Pydantic attempts by itself when a
+# mocked validator, serializer or core schema is first touched: when nothing has
+# imported config.ash_config yet, it is not in sys.modules at all, so Pydantic's
+# attempt has nothing to resolve the reference against. Removing the overrides
+# leaves a model that cannot validate in that process -- measured, not assumed.
 #
 # Resolving on first use is not a new idea here, it is the older one. Before
 # 9babca5f, interactions/run_ash_scan.py and cli/report.py each ran this rebuild
 # themselves, at call time, right before deserializing. That commit consolidated
-# both into the single import-time call below -- which is the one moment the
-# cycle can block it. The retry restores call-time resolution, in one place
-# instead of two.
+# both into a single call at import time, the one moment the cycle can block it,
+# and that call is gone. Resolving on first use restores call-time resolution, in
+# one place instead of two.
 #
 # The import binds AshConfig into this module's globals before rebuilding.
 # model_rebuild() resolves the reference against the model's own module namespace
@@ -1327,21 +1751,56 @@ def _resolve_forward_refs() -> None:
         try:
             from automated_security_helper.config.ash_config import AshConfig
         except ImportError:
-            # Mid-cycle, so AshConfig does not exist yet. Not logged: this is the
-            # expected state on the import path described above, and the retry on
-            # first use is what clears it.
+            # Mid-cycle, so AshConfig does not exist yet: the model was used while
+            # the package was still being imported. Not logged; the next use, once
+            # the import has finished, resolves it.
             return
 
         globals()["AshConfig"] = AshConfig
-        AshAggregatedResults.model_rebuild()
+        # The base class's rebuild: AshAggregatedResults.model_rebuild would call
+        # this function again.
+        super(AshAggregatedResults, AshAggregatedResults).model_rebuild()
         # Set after the rebuild, never before. A caller that saw the flag early
         # would skip the rebuild and run against the still-mocked validator.
         _forward_refs_resolved = True
 
 
-_resolve_forward_refs()
+# Not called at import time. Importing config.ash_config from here imported the
+# built-in converter and reporter modules, and with them the ash_builtin package,
+# which loads every plugin group -- while whichever module started this import was
+# still partially initialized. A plugin module importing back from it (sarif_utils,
+# suppression_matcher, unified_metrics, scanner_statistics_calculator) then failed,
+# and its whole group was lost for the process. Resolution happens instead on first
+# use (__init__, model_validate, model_validate_json above), and on the last line
+# of config/ash_config.py when that module is imported. See
+# tests/unit/plugins/test_entry_module_import_order.py.
+
+
+@contextmanager
+def warning_of_dropped_keys(source: str | Path) -> Iterator[Dict[str, int]]:
+    """The validation context for reading a results file, as ash report, ash merge
+    and --use-existing do:
+    ``AshAggregatedResults.model_validate_json(text, context=context)``.
+
+    A refused-input record keeps only the keys it defines. When the file's records
+    held others, one warning after the read says how many were dropped and from
+    which file. It names neither a key nor its value, which come from the file.
+    """
+    context: Dict[str, int] = {_DROPPED_RECORD_KEYS: 0}
+    yield context
+    dropped = context[_DROPPED_RECORD_KEYS]
+    if dropped:
+        noun = "key" if dropped == 1 else "keys"
+        ASH_LOGGER.warning(
+            shown_on_one_line(
+                f"Dropped {dropped} {noun} that a refused-input record does not "
+                f"define from '{source}'"
+            )
+        )
 
 
 if __name__ == "__main__":
+    from automated_security_helper.utils.console import echo_raw
+
     model = AshAggregatedResults()
-    print(model.model_dump_json(indent=2))
+    echo_raw(model.model_dump_json(indent=2))

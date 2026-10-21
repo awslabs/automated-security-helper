@@ -509,12 +509,8 @@ class TestAScanThatRanNothingIsNotACleanScan:
                 for index in range(9)
             ],
         ):
-            with patch.object(
-                logging.getLogger(
-                    "automated_security_helper.interactions.run_ash_scan"
-                ),
-                "error",
-            ) as logged:
+            # ASH's logger, where the exit code's reasons go.
+            with patch.object(logging.getLogger("ash"), "error") as logged:
                 code = _compute_exit_code(results, opts)
 
         assert code == 1
@@ -650,6 +646,30 @@ class TestIndependenceFromFailOnFindings:
         with patch(
             f"{_MODULE}.get_unified_scanner_metrics",
             return_value=[_metric("bandit", ScannerStatus.FAILED.value, actionable=3)],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 2
+
+    def test_an_error_scanners_findings_still_exit_two_with_the_coverage_gate_off(
+        self, tmp_path
+    ):
+        """With the coverage gate declined, a scanner in ERROR that reported
+        actionable findings above the threshold still fails the run on them.
+
+        The coverage arms are skipped under ``--no-fail-on-incomplete-scanners``,
+        so the findings verdict is all that is left, and the findings sum does not
+        depend on the status of the row that carries them. A status filter on that
+        sum would turn this run into exit 0 while the findings it did report went
+        unjudged.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=False, fail_on_findings=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[_metric("bandit", ScannerStatus.ERROR.value, actionable=3)],
         ):
             code = _compute_exit_code(results, opts)
 
@@ -1079,6 +1099,51 @@ class TestConfigFileResolution:
 
         opts = ScanOptions(source_dir=source, output_dir=tmp_path / "out")
         assert _resolve_config_fail_on_incomplete_scanners(opts) is True
+
+    def test_reads_the_field_past_a_repository_twin_in_the_chain(self, tmp_path):
+        """The pre-read loads the file as the scan loads it, patch-pointer
+        ownership included: the scanned repository's file holds a
+        case-variant twin of the section the operator's own base writes, and
+        the operator's root patches it under a third spelling. The scan's
+        own resolve folds the patch onto the operator's section and runs
+        with the file's gate; a pre-read without the ownership refused the
+        chain as ambiguous and answered None, so the operator's explicit
+        False was silently replaced by the caller's default."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            _resolve_config_fail_on_incomplete_scanners,
+        )
+        from tests.utils.helpers import mark_git_checkout
+
+        source = tmp_path / "src"
+        mark_git_checkout(source)
+        repository = source / ".ash" / ".ash.yaml"
+        repository.parent.mkdir(parents=True, exist_ok=True)
+        repository.write_text(
+            "project_name: repository\nreporters:\n  AwsSecurityHub:\n"
+            "    enabled: false\n",
+            encoding="utf-8",
+        )
+        own = tmp_path / "own.yaml"
+        own.write_text(
+            "reporters:\n  aws-security-hub:\n    enabled: true\n"
+            "    options:\n      aws_region: us-east-1\n",
+            encoding="utf-8",
+        )
+        root = tmp_path / "operator.yaml"
+        root.write_text(
+            f"extends:\n  - {own.as_posix()}\n  - {repository.as_posix()}\n"
+            "fail_on_incomplete_scanners: false\n"
+            "patch:\n"
+            "  - op: replace\n"
+            "    path: /reporters/AWS_Security_Hub/options/aws_region\n"
+            "    value: us-west-2\n",
+            encoding="utf-8",
+        )
+
+        opts = ScanOptions(
+            source_dir=source, output_dir=tmp_path / "out", config=str(root)
+        )
+        assert _resolve_config_fail_on_incomplete_scanners(opts) is False
 
     def test_absent_field_resolves_to_the_models_default(self, tmp_path):
         from automated_security_helper.interactions.run_ash_scan import (

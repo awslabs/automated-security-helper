@@ -42,7 +42,7 @@
           "uid": "B602"
         },
         "desc": "subprocess call with shell=True identified, security issue.",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "B602"
       }
     ]
@@ -90,7 +90,7 @@
           "uid": "B105"
         },
         "desc": "Possible hardcoded password: 'hu**********************t'",
-        "severity": "NOTE",
+        "severity": "LOW",
         "title": "B105"
       }
     ]
@@ -138,7 +138,7 @@
           "uid": "CKV_AWS_20"
         },
         "desc": "S3 Bucket has an ACL defined which allows public READ access.",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "CKV_AWS_20"
       }
     ]
@@ -186,7 +186,7 @@
           "uid": "CKV_AWS_18"
         },
         "desc": "Ensure the S3 bucket has access logging enabled",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CKV_AWS_18"
       }
     ]
@@ -234,7 +234,7 @@
           "uid": "CKV_DOCKER_8"
         },
         "desc": "Ensure the last USER is not root",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CKV_DOCKER_8"
       }
     ]
@@ -282,7 +282,7 @@
           "uid": "CKV_DOCKER_2"
         },
         "desc": "Ensure that HEALTHCHECK instructions have been added to container images",
-        "severity": "NOTE",
+        "severity": "LOW",
         "title": "CKV_DOCKER_2"
       }
     ]
@@ -330,7 +330,7 @@
           "uid": "dockerfile.security.last-user-is-root.last-user-is-root"
         },
         "desc": "The last user in the container is 'root'. Switch back to an unprivileged user.",
-        "severity": "NOTE",
+        "severity": "LOW",
         "title": "dockerfile.security.last-user-is-root.last-user-is-root"
       }
     ]
@@ -378,7 +378,7 @@
           "uid": "python.lang.best-practice.unpinned-shell-command"
         },
         "desc": "Command string built with an f-string; prefer an argument list.",
-        "severity": "NONE",
+        "severity": "INFO",
         "title": "python.lang.best-practice.unpinned-shell-command"
       }
     ]
@@ -427,7 +427,7 @@
           "uid": "SECRET-SECRET-KEYWORD"
         },
         "desc": "Secret of type Secret Keyword detected in file app/app.py at line 5",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "SECRET-SECRET-KEYWORD"
       }
     ]
@@ -452,7 +452,7 @@
       },
       "version": "1.1.0"
     },
-    "severity_id": 4,
+    "severity_id": 5,
     "status": "New",
     "status_id": 1,
     "time": 1768478442000,
@@ -475,7 +475,7 @@
           "uid": "CVE-2018-18074-requests"
         },
         "desc": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
-        "severity": "ERROR",
+        "severity": "CRITICAL",
         "title": "CVE-2018-18074-requests"
       }
     ]
@@ -523,7 +523,7 @@
           "uid": "CVE-2023-32681-requests"
         },
         "desc": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "CVE-2023-32681-requests"
       }
     ]

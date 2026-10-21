@@ -113,7 +113,7 @@ missing, unreadable or readable.
 
 ### Configuring ASH in pyproject.toml
 
-`[tool.ash]` holds the same settings as `.ash.yaml`, written as TOML, and is
+`[tool.ash]` holds the same settings as `.ashrc.yaml`, written as TOML, and is
 validated by the same schema:
 
 ```toml
@@ -140,8 +140,9 @@ resolved from the environment by the same rule as in YAML, including the limit
 on which variable names may be read; see the `!ENV` notes in
 [Configuration Overrides](config-overrides.md).
 `ash config update`, `ash config wizard`, `ash config lint --fix` and the
-suppression dialog in `ash inspect` edit YAML, so they refuse a TOML file rather
-than rewrite it; edit `[tool.ash]` by hand.
+suppression dialog in `ash inspect` edit YAML and JSON (a `.json` config is written
+back as JSON), so they refuse a TOML file rather than rewrite it; edit `[tool.ash]`
+by hand.
 
 A `pyproject.toml` that is not valid TOML is skipped, unless its text declares a
 `[tool.ash]` table, in which case the scan fails instead of running with the
@@ -157,7 +158,15 @@ The easiest way to create a configuration file is to use the `config init` comma
 ash config init
 ```
 
-This creates a default configuration file at `.ash/.ash.yaml` with recommended settings.
+This creates `.ashrc.yaml` in the current directory with every setting at its default.
+It is one of the newer names discovery reads (items 13-21 above), so its
+discovery warning does not apply to it. When the directory already has a config
+source, such as `.ash/.ash.yaml` or a `[tool.ash]` table, `ash config init` refuses
+instead of adding a second one, because sources are never merged; keep using the
+existing file, or pass `--config` to write somewhere else. Existing files under the
+older names keep working. `ash config wizard` without `--config` edits the config a
+scan would use, or creates `.ashrc.yaml`, and `ash inspect findings` saves suppressions
+to `.ashrc.yaml` when there is no config yet.
 
 ## Configuration Structure
 
@@ -176,8 +185,17 @@ scanners:
   # Scanner plugins configuration
 reporters:
   # Reporter plugins configuration
+output_formats: []  # Empty writes every enabled reporter
 ash_plugin_modules: []
 ```
+
+### Naming the project
+
+`project_name` names the project in the reports: the HTML, Markdown and text
+reports, `metadata.project` in `ash.flat.json`, `metadata.project_name` in
+`ash_aggregated_results.json`, and the SPDX document's root package. Without it the
+name is the `ASH_PROJECT_NAME` environment variable, else `ash-scan`. In workspace
+mode each project's reports carry that project's label instead.
 
 ### Failing on an incomplete scan
 
@@ -221,9 +239,24 @@ and per project in workspace mode as well.
 
 `SKIPPED` scanners are ones you did not select and never trip it, which is what
 keeps a sharded scan working: each shard excludes the scanners its siblings own,
-and those are recorded as `SKIPPED`. Narrowing a run with `--scanners` or
-`--exclude-scanners` also records the scanners you left out as `SKIPPED`, so
-selecting a subset does not fail the gate.
+and those are recorded as `SKIPPED`. Narrowing a run with `--scanners`,
+`--exclude-scanners` or `--python-only` also records the scanners you left out as
+`SKIPPED`, whether or not their tools are installed, so selecting a subset does not
+fail the gate.
+
+A scanner with nothing to scan in the project is `SKIPPED` too, whether or not its
+tool is installed: cdk-nag and cfn-nag when no scanned file is a CloudFormation
+template, npm-audit when no `package.json` has a lockfile (`package-lock.json`,
+`npm-shrinkwrap.json`, `yarn.lock` or `pnpm-lock.yaml`) beside it. A JSON or YAML
+file ASH cannot read counts as a possible template. A file that does not parse as a
+template is read again with unknown YAML tags and JSON comments allowed, and counts
+when that yields a document with `Resources`, or when its text contains
+`AWSTemplateFormatVersion` or a `Type: AWS::` resource type, as a damaged template
+does. So an `mkdocs.yml` with `!!python/name:` tags, a Helm chart's templates and a
+`tsconfig.json` with comments leave cdk-nag and cfn-nag `SKIPPED`, as they do with the
+tools installed, and a truncated template leaves them `MISSING`. A scanner that has
+files to scan and no tool is still `MISSING`, and still fails the gate. The row's `skipped_reason` or `missing_reason` in `ash_aggregated_results.json`
+says which.
 
 To accept a partial scan's exit code, set it to `false`:
 
@@ -268,6 +301,14 @@ exist`, no `VulnerabilityDB` from trivy, no rules files in the offline rules
 directory) also makes that scanner `ERROR`, under `fail` and `warn` alike: the scan had
 nothing to match against, so its zero findings are not a result. `warn` relaxes the
 age bound for a database that exists.
+
+Under `fail`, a scanner whose result is clean and whose database is stale is
+recorded `ERROR`, not `PASSED`, in its scanner row, `ash.flat.json` and the summary
+table, with the stale database named. A scanner that found something keeps `FAILED`,
+because its findings are real. The scan reports that `ERROR` once, as the stale
+database with how to refresh it: it is not listed again as an incomplete scanner, it
+counts as a scanner that ran, and `ash merge` merges its shard and then exits 1 on the
+stale database.
 
 To let one scan run against a stale database, pass `--allow-stale-content-db`, or
 set:
@@ -530,7 +571,7 @@ The `global_settings` section controls general behavior:
 ```yaml
 global_settings:
   # Minimum severity level to consider findings actionable
-  # Options: CRITICAL, HIGH, MEDIUM, LOW, INFO
+  # Options: ALL, LOW, MEDIUM, HIGH, CRITICAL
   severity_threshold: MEDIUM
 
   # Paths to ignore during scanning
@@ -539,6 +580,11 @@ global_settings:
       reason: 'Test data only'
     - path: '**/vendor/'
       reason: 'Vendored third-party code'
+    - path: 'node_modules/'   # Also drops dependency-scanner findings located there
+      reason: 'Third-party dependencies'
+    - path: 'vendor/legacy-sdk/**'
+      reason: 'Vendored copy, removed by the SDK upgrade'
+      expiration: '2027-06-30'  # Optional expiration date (YYYY-MM-DD)
 
   # Findings to suppress based on rule ID, file path, and line numbers
   suppressions:
@@ -604,6 +650,28 @@ tools are given none of these.
 `--ignore-suppressions` lifts ignore paths along with
 suppressions: every scanner reads those files and their findings are reported. See
 [Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).
+
+An ignore path also names the members of an archive ASH extracts (`.zip`, `.tar`,
+`.gz`), in the scanned tree's own terms: by the archive's path and then the
+member's, as if the archive were a directory (`lib/bundle.zip/vendor/m.js`,
+`lib/bundle.zip/vendor/**`). Such a member is not extracted, so no scanner reads
+it. A pattern that matches at any depth, such as `**/vendor/**`, also matches
+through the archive's name, so it leaves out the members under a `vendor/` in the
+archive too. A path in the tree names no member: `vendor/**`, or an ignore path for
+the file `lib/vendor/m.js`, leaves out the tree's files and keeps `lib/bundle.zip`'s
+`vendor/m.js` in the scan. A single `*` also matches `/` in ASH's patterns, so
+`*.js`, `lib/*.js`, `lib/**/*.js` and `*/vendor/*` reach `lib/bundle.zip`'s members
+as well. An ignore path matching the archive itself (`lib/bundle.zip`) leaves out
+the whole archive.
+
+An `expiration` works the same way on an ignore path and on a suppression: a quoted
+`YYYY-MM-DD` date, read on the local clock of the host running the scan (UTC in
+container mode, where the ASH image sets `TZ=UTC`). On that date the entry stops
+applying, so the ignored files are scanned again or the suppressed findings count
+again. For the 30 days before it each scan logs a warning naming the entry, and
+after it one warning at the start of each scan lists the expired entries. A date in
+another format refuses the configuration (exit code 3). See
+[Expiring Suppressions](suppressions.md#expiring-suppressions).
 
 Omitting `line_end` does **not** suppress only `line_start`. A suppression with
 `line_start` and no `line_end` matches every finding from that line to the end of
@@ -719,14 +787,66 @@ accepts only uppercase (`ALL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), while bandi
 `confidence_level` accepts only lowercase (`all`, `low`, `medium`, `high`). The wrong
 case is rejected with a validation error rather than coerced.
 
-#### An unrecognized option is accepted and ignored
+#### An unrecognized option refuses the configuration
 
-Scanner option models allow extra keys, so a misspelled or invented option does not
-raise an error -- it is stored and never read. `severity_level: medium` on bandit
-validates cleanly and changes nothing, because bandit reads `severity_threshold`.
-When a setting appears to have no effect, check the option name against
-[the built-in scanner reference](plugins/builtin/scanners.md) before assuming the
-scanner ignored the value.
+An option a plugin does not declare stops the run with exit code 3 (invalid
+configuration). The error names the plugin by where the option sits and names the
+key, with a suggestion when a declared option is close: `severity_level: HIGH` on
+bandit fails with `scanners.bandit.options: Unknown key 'severity_level' (did you
+mean 'severity_threshold'?)`. An undeclared key is never read, so the refusal is
+what keeps a misspelled setting from silently having no effect.
+
+The same goes for a key at the section level, beside `enabled`, other than
+`enabled`, `options`, `name` and a reporter's `extension`. An option written there
+is not read, so the error says where it goes: `severity_threshold: HIGH` directly
+under `scanners.bandit` fails with `scanners.bandit.severity_threshold is not a
+section-level key; move severity_threshold under options`. Any other key is named
+as unknown. `tool_version`, `install_timeout` and a scanner's `extension` beside
+`enabled` are named as internal-only fields instead, because moving a leaked
+`tool_version` under `options` would pin the tool's version. A scan and `ash config
+validate` print the same message for them; `ash config lint` reports each field as
+an issue of its own, at its path. Where the plugin also declares an option of that
+name (bandit, checkov, semgrep, jupyter, ferret-scan), the message adds `if you
+meant a version constraint, put it under options`. `ash config lint --fix` removes
+these fields, except a `tool_version` or `install_timeout` that is neither `null`
+nor equal to the plugin option's default (for a plugin loaded from
+`ash_plugin_modules`, which lint does not load, anything but `null`): that can be a
+pin you meant, so it is left for you to move under `options` or remove. A field an
+`extends` base sets is reported but not removed, since `--fix` edits only the file
+it lints.
+
+```yaml
+scanners:
+  bandit:
+    enabled: true
+    options:
+      severity_threshold: HIGH   # not beside enabled
+```
+
+For a built-in plugin the options are checked when the configuration loads. For a
+plugin loaded from `ash_plugin_modules`, they are checked once the plugins are
+loaded, before anything is converted or scanned; a value the plugin's own options
+model rejects fails there too, with that plugin's message. Options for a plugin
+that the run does not load cannot be checked, and are left as they are.
+
+The same applies to the entries of `suppressions` and `ignore_paths`, global or in
+a scanner option of the same kind (bandit `excluded_paths`, checkov `skip_path`,
+syft `exclude`): `ruleId: B101` fails with `Unknown key 'ruleId' (did you mean
+'rule_id'?)`. The key is refused rather than dropped because a suppression with no
+rule suppresses every rule in its path. In a workspace policy file the same key
+refuses the policy, and `ash scan` exits 4, the code for a workspace definition or
+policy error.
+
+`ash config validate` and `ash config lint` check the options of built-in plugins
+only. They do not import the modules listed in `ash_plugin_modules`, so they cannot
+know what those plugins declare, and a configuration they pass can still be refused
+by a scan for an option of such a plugin. Both name those sections: `validate` in
+a note after its verdict lines, `lint` in one INFO issue, category
+`plugin-options-unchecked`. Run a scan to check their options.
+
+A results file written by another ASH version can hold such a key. It still loads
+for `ash report`, `ash merge` and the other readers of results: the key is kept, a
+warning names it, and an entry that has one is never applied.
 
 #### Bounding how long a scanner may run
 
@@ -745,7 +865,7 @@ scanners:
 ```
 
 A scanner killed by its timeout produces no results file, so the scan fails with an
-error naming the scanner and the limit (`<scanner> timed out after 1800.0s`) rather
+error naming the scanner and the limit (`<scanner> timed out after '1800' s`) rather
 than silently reporting zero findings for it. Whatever the tool wrote before it was
 killed is kept in `scanners/<name>/<target>/<Scanner>.stderr.log` under the output
 directory. While a scanner runs, ASH logs `<scanner> still running on <target>
@@ -784,6 +904,19 @@ reporters:
     options:
       exclude_suppressed: true  # Exclude ASH-suppressed findings (default)
 ```
+
+#### Writing only some reports
+
+`output_formats` lists the reports to write, by reporter name. It narrows the enabled reporters and does not enable a disabled one:
+
+```yaml
+output_formats:
+  - sarif
+  - github-ghas
+  - markdown
+```
+
+One name (`output_formats: sarif`) or names separated by commas also work, as on the command line. An empty list or `null`, the default, writes every enabled reporter. A `--output-formats` list on the command line replaces this list for that run, and `ash merge` uses the list from the scan's own configuration when it is given no `--output-formats`. A name outside the accepted list makes the configuration invalid (exit 3). The accepted names are the reporter names in [Output formats](output-formats.md). In workspace mode, a project's `output_formats` applies to that project's reports; the workspace-level reports follow `--output-formats` only.
 
 ### Custom Plugin Modules
 
@@ -1078,11 +1211,24 @@ for the details, including which profile the policy comes from.
 
 ## Validating Configuration
 
-To validate your configuration file:
+To check that a scan accepts your configuration:
 
 ```bash
 ash config validate
 ```
+
+`ash config validate` loads the file the way a scan does, with its `extends` chain,
+`${VAR}` and `!ENV` references and the `AshConfig` model the JSON schema is generated from. When a
+scan would refuse the configuration, it lists every field the model refuses and exits
+3, the exit code a scan gives for an invalid configuration. Problems a scan tolerates,
+such as an unknown top-level key, an internal-only field a section declares (`name`)
+or the `build` section, are
+printed as warnings and leave the exit code at 0, in `ash config lint` too. A file that does not parse also exits 3, and a
+scan refuses it with exit 3 too. Pass the
+`--config-overrides` a scan will get to check the configuration with them applied,
+and `--source-dir` when the scan will not run from the current directory. `ash config lint` runs the same checks, adds
+suppression checks, and can fix some issues; see the
+[CLI reference](cli-reference.md#config-validate-details) for both.
 
 ## Viewing Current Configuration
 
@@ -1100,6 +1246,20 @@ To update configuration values:
 ash config update --set 'scanners.bandit.enabled=true'
 ash config update --set 'global_settings.severity_threshold=LOW'
 ```
+
+`--set` takes the same syntax as `--config-overrides`, and is applied by the same
+code. If any `--set` cannot be parsed, or leaves a configuration a scan would refuse,
+nothing is written and the command exits 3. The file is rewritten with every setting,
+defaults included, except the internal-only fields (`build`, and `name` or
+`extension` under a scanner, reporter or converter) and an unchanged
+`mcp-resource-management` section, and comments other than the schema line are not
+kept. Top-level keys ASH does not know, such as a JSON `$schema`, are kept as written.
+A `.json` file is written back as JSON. `ash config update` and
+`ash config wizard` refuse to rewrite a file that reads values from the
+environment (`!ENV`, or `${VAR:default}`), because the rewrite would store the values
+the references resolve to; edit such a file by hand. MCP profiles are saved with the
+same writer. `ash config wizard` also refuses a file it cannot load (exit 3) rather than
+starting from the defaults and overwriting it.
 
 ## Configuration Overrides
 
@@ -1155,8 +1315,8 @@ A config can build on one or more base configs with `extends`, and adjust the
 result with RFC 6902 JSON-Patch operations under `patch`:
 
 ```yaml
-# .ash/.ash.yaml
-extends: ../shared/ash-base.yaml     # or a list: [org.yaml, team.yaml]
+# ASH config file (.ashrc.yaml in a new project)
+extends: shared/ash-base.yaml        # or a list: [org.yaml, team.yaml]
 project_name: my-service
 global_settings:
   severity_threshold: HIGH
@@ -1380,7 +1540,7 @@ scanners:
       frameworks: ['all']  # Frameworks to scan (plural; 'framework' is not a field)
       skip_frameworks: []  # Frameworks to exclude
       skip_path: []  # Paths to skip, matched as regular expressions
-      skip_ash_output_dir: true  # Skip ASH's output directory when it is inside the source (not on Windows)
+      skip_ash_output_dir: true  # Skip ASH's output directories inside the source (not on Windows)
       offline: false  # Run in offline mode
       additional_formats: ['cyclonedx_json']  # Additional output formats
       tool_version: null  # Version constraint (e.g., '>=3.2.0,<4.0.0')

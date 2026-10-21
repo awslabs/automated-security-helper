@@ -79,10 +79,10 @@ from automated_security_helper.plugins.loader import load_plugins
 # The measured table.
 # --------------------------------------------------------------------------- #
 
-#: Every ``ExportFormat`` member, and the exact report filenames that naming it
-#: on ``--output-formats`` must produce.
+#: Every ``ExportFormat`` member except :data:`PLUGIN_MODULE_FORMATS`, and the
+#: exact report filenames that naming it on ``--output-formats`` must produce.
 #:
-#: Nine formats produce a file. Six produce none, and they are not
+#: Thirteen formats produce a file. Six produce none, and they are not
 #: interchangeable -- see :data:`UNPRODUCIBLE` for which cause applies to each,
 #: because "no reporter exists" and "the reporter is switched off" send an
 #: operator to entirely different places.
@@ -91,6 +91,11 @@ from automated_security_helper.plugins.loader import load_plugins
 #: anything: the three whose extension happens to equal their format name and
 #: which also ship enabled. ``yaml`` is the fourth name/extension coincidence but
 #: ships disabled, so it produced nothing then and produces nothing now.
+#:
+#: ``github-ghas``, ``gitlab-sast``, ``gitlab-cyclonedx`` and
+#: ``unused-suppressions`` had no ``ExportFormat`` member at all until those
+#: reporters were given one, so naming them was a usage error and every
+#: ``--output-formats`` list switched them off.
 EXPECTED_REPORTS: Dict[ExportFormat, List[str]] = {
     ExportFormat.AGGREGATED: [],
     ExportFormat.TEXT: ["ash.summary.txt"],
@@ -107,6 +112,28 @@ EXPECTED_REPORTS: Dict[ExportFormat, List[str]] = {
     ExportFormat.CYCLONEDX: ["ash.cdx.json"],
     ExportFormat.SPDX: [],
     ExportFormat.CUSTOM: [],
+    ExportFormat.GITHUB_GHAS: ["ash.ghas.sarif"],
+    ExportFormat.GITLAB_SAST: ["ash.gl-sast-report.json"],
+    ExportFormat.GITLAB_CYCLONEDX: ["ash.gl-dependency-scanning-report.cdx.json"],
+    # The reporter writes its Markdown companion itself, next to the JSON.
+    ExportFormat.UNUSED_SUPPRESSIONS: [
+        "ash.unused-suppressions.json",
+        "ash.unused-suppressions.md",
+    ],
+}
+
+#: ``ExportFormat`` members whose reporter lives in a plugin module this harness
+#: does not load, mapped to that module. They are kept out of
+#: :data:`EXPECTED_REPORTS` because what naming one produces here depends on
+#: whether some earlier test in the same process imported the module (the plugin
+#: registry is process-wide), and because two of the four ship enabled and would
+#: run their AWS dependency checks. That they select their reporter by name is
+#: asserted in ``tests/unit/cli/test_output_formats_select_every_reporter.py``.
+PLUGIN_MODULE_FORMATS: Dict[ExportFormat, str] = {
+    ExportFormat.AWS_SECURITY_HUB: "automated_security_helper.plugin_modules.ash_aws_plugins",
+    ExportFormat.BEDROCK_SUMMARY: "automated_security_helper.plugin_modules.ash_aws_plugins",
+    ExportFormat.CLOUDWATCH_LOGS: "automated_security_helper.plugin_modules.ash_aws_plugins",
+    ExportFormat.S3: "automated_security_helper.plugin_modules.ash_aws_plugins",
 }
 
 #: Why each non-producing format produces nothing.
@@ -318,7 +345,8 @@ def test_expectations_cover_every_export_format():
     formats that are accepted by the CLI and quietly write nothing -- which is the
     original defect returning through the front door.
     """
-    assert set(EXPECTED_REPORTS) == set(ExportFormat)
+    assert not set(EXPECTED_REPORTS) & set(PLUGIN_MODULE_FORMATS)
+    assert set(EXPECTED_REPORTS) | set(PLUGIN_MODULE_FORMATS) == set(ExportFormat)
 
 
 def test_unproducible_expectations_agree_with_the_table():
@@ -355,7 +383,9 @@ def test_no_output_filename_changed(tmp_path):
             (fmt for fmt in ExportFormat if fmt.value == name),
             None,
         )
-        if export_format is None or not EXPECTED_REPORTS[export_format]:
+        # .get: a reporter from a plugin module another test registered in this
+        # process has no pinned filename here; see PLUGIN_MODULE_FORMATS.
+        if export_format is None or not EXPECTED_REPORTS.get(export_format):
             continue
 
         assert f"ash.{extension}" in EXPECTED_REPORTS[export_format], (
@@ -627,9 +657,8 @@ def test_no_requested_formats_runs_every_enabled_reporter(tmp_path):
     """No ``--output-formats`` means the configured default set, not nothing.
 
     Asserted as a superset of the individually-requested files rather than an
-    exact list: reporters with no ``ExportFormat`` at all (``github-ghas``,
-    ``gitlab-sast``, ``gitlab-cyclonedx``, ``unused-suppressions``) also run here,
-    and they are unreachable by name because no enum member selects them.
+    exact list, so that a reporter some other test registered in this process
+    (the registry is process-wide) does not fail it.
     """
     written = _run_report_phase(tmp_path, None)
 
@@ -643,10 +672,11 @@ def test_reporters_without_an_export_format_are_not_emitted_by_a_named_request(
 ):
     """Asking for one format must not drag in reporters nobody asked for.
 
-    These four reporters have no corresponding ``ExportFormat``, so they cannot be
-    requested by name. The fix must leave them skipped under an explicit request
-    -- widening selection to "anything enabled" would publish GitHub and GitLab
-    ingestion artefacts to operators who asked only for markdown.
+    These four reporters each have an ``ExportFormat`` and can be requested by
+    name, and an explicit request for something else must leave them
+    skipped -- widening selection to "anything enabled"
+    would publish GitHub and GitLab ingestion artefacts to operators who asked
+    only for markdown.
     """
     written = _run_report_phase(tmp_path, ["markdown"])
 
@@ -716,3 +746,18 @@ def test_reporter_without_a_name_never_matches_a_named_request():
     assert not reporter_matches_requested_formats(nameless, ["markdown"])
     # But an empty request is not a named request, so it still runs.
     assert reporter_matches_requested_formats(nameless, [])
+
+
+def test_the_diagnostics_do_not_assume_the_list_came_from_the_command_line():
+    """The requested list can come from the config's ``output_formats`` too."""
+    for reason, message in _FORMAT_REASON_MESSAGES.items():
+        assert "accepted by --output-formats" not in message, reason
+
+
+def test_the_enum_description_names_the_formats_that_no_reporter_writes():
+    """The ExportFormat docstring is a published schema description; it must not
+    claim that every value names a reporter."""
+    description = ExportFormat.__doc__ or ""
+    for value in UNPRODUCIBLE:
+        if UNPRODUCIBLE[value] == FORMAT_NO_REPORTER:
+            assert value.value in description, value

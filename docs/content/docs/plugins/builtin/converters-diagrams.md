@@ -49,7 +49,7 @@ sequenceDiagram
         CV-->>ASH: Return Validation Status
 
         alt Converter Valid
-            ASH->>CV: convert(target)
+            ASH->>CV: convert()
             CV->>FS: Read Source Files
             FS-->>CV: Return File Contents
 
@@ -59,7 +59,7 @@ sequenceDiagram
             CV->>FS: Write Converted Files
             FS-->>CV: Files Written
 
-            CV-->>ASH: Return Converted Path
+            CV-->>ASH: Return Converted Paths
         else Converter Invalid
             ASH->>ES: Emit ConverterError Event
         end
@@ -136,7 +136,7 @@ The following diagram shows how configuration flows through the built-in convert
 
 ```mermaid
 flowchart TD
-    A[.ash/.ash.yaml] --> B[Configuration Parser]
+    A[ASH config file] --> B[Configuration Parser]
     C[CLI Arguments] --> B
     B --> D[ASH Configuration]
     D --> E[Converter Configuration]

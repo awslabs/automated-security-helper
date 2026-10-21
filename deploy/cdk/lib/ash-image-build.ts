@@ -700,6 +700,15 @@ export class AshImageBuild extends Construct {
             // all five committed templates, including the two that build no
             // Lambda at all. See the note on `flavorBuildCommands`.
 
+            // Every build gets BUILD_DATE_EPOCH, UTC midnight of today, which
+            // re-runs the Dockerfile's core stage from its apt-get upgrade step
+            // down (see ARG BUILD_DATE_EPOCH there). This project keeps no layer
+            // cache, so every build runs those steps anyway: the value is passed so
+            // that every ASH image build passes the same thing. Buildspec 0.2 runs
+            // all build commands in one shell, so the variable reaches the
+            // `docker build`s below.
+            'now_epoch=$(date +%s); ASH_BUILD_DATE_EPOCH=$((now_epoch - now_epoch % 86400))',
+
             // Build each ASH Dockerfile stage this image set needs. --platform is
             // explicit even though the compute already matches, so a build on the
             // wrong fleet fails loudly instead of producing an image AgentCore
@@ -716,6 +725,7 @@ export class AshImageBuild extends Construct {
                 '--platform "linux/${ASH_BUILD_PLATFORM}" ' +
                 `--target ${target} ` +
                 '--build-arg "OFFLINE=${ASH_OFFLINE}" ' +
+                '--build-arg "BUILD_DATE_EPOCH=${ASH_BUILD_DATE_EPOCH}" ' +
                 '--build-arg INSTALL_ASH_REVISION=LOCAL ' +
                 `-t "ash-base-${target}:local" ash-src`,
             ),

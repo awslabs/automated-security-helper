@@ -95,7 +95,7 @@ change for adopters and desynchronizes the two implementations.
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `AshVersion` | `v3.7.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. |
+| `AshVersion` | `v3.7.0` | Git ref fetched and built: a tag, a branch, or a full commit SHA. Not a PyPI version. The release these files belong to; see [Which `AshVersion` to use](../README.md#which-ashversion-to-use). |
 | `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. It bakes scanner data into the image and does not restrict network egress: Fargate tasks keep TCP 443 through the NAT gateway, AgentCore runs in `PUBLIC` mode, and the gate has open egress unless `VpcId` is set. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
@@ -422,17 +422,17 @@ findings fails the pipeline before the other shards' findings have been collecte
 So shards pass `--no-fail-on-findings` and only the merge action fails.
 
 A shard's success is not decided by an exit code at all, and that is deliberate.
-Click reports a usage error as exit 2 and ASH reports actionable findings as exit
-2, so the two are indistinguishable — and one of them means nothing was scanned. A
-shard therefore succeeds if and only if ASH wrote `ash_aggregated_results.json`,
+ASH 3.7.0 and 3.7.1 report a usage error as exit 2, the code they use for actionable
+findings, so the two are indistinguishable there — and one of them means nothing was scanned.
+ASH releases after 3.7.1 exit 5 for a usage error, but `AshVersion` can name an older
+release. A shard therefore succeeds if and only if ASH wrote `ash_aggregated_results.json`,
 which is the artifact the merge actually consumes. The exit code is recorded for
-diagnosis and never trusted. That holds whether the flag is unrecognized (usage
-error, no results, shard fails), a scanner crashed (no results, shard fails),
+diagnosis and never trusted. That holds whether ASH refused the command line (a
+usage error, no results, shard fails), a scanner crashed (no results, shard fails),
 findings were found (results present, merge gates) or the shard was clean.
 
-`--no-fail-on-findings` was **not** verified from this repository, because ASH is
-not installed in the checkout this was written in. Correctness does not depend on
-it; the results-file check does the work.
+`--no-fail-on-findings` exists in ASH 3.7.0 and later. Correctness does not depend
+on it; the results-file check does the work.
 
 The merge independently requires that file from every shard, and refuses two cases
 separately: a partial result set, and zero collected shards. Reporting a clean scan

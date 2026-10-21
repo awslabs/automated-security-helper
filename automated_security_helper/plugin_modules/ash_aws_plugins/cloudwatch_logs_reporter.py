@@ -10,6 +10,7 @@ import botocore.exceptions
 
 from typing import Annotated, Literal, TYPE_CHECKING
 
+from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
@@ -193,8 +194,10 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             caller_id = sts_client.get_caller_identity()
             self.dependencies_satisfied = "Account" in caller_id
         except Exception as e:
+            # error_text with the config's environment values: botocore's
+            # exceptions name the region, group or stream they were given.
             self._plugin_log(
-                f"Error when calling STS: {e}",
+                f"Error when calling STS: {error_text(e, self._environment_values())}",
                 level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
@@ -245,12 +248,16 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
             )
             return json.dumps({"message": output_dict, "response": resp}, default=str)
         except Exception as e:
+            # Redacted once, for the line and for the text returned as the
+            # report, which ReportPhase writes to a file.
+            described = error_text(e, self._environment_values())
             self._plugin_log(
-                f"Error when publishing results to CloudWatch Logs after retries: {e}",
+                "Error when publishing results to CloudWatch Logs after retries: "
+                f"{described}",
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )
-            return str(e)
+            return described
 
     def _create_log_stream_with_retry(self, cwlogs_client):
         """Create log stream with retry logic."""
@@ -275,18 +282,22 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 e.response.get("Error", {}).get("Code")
                 == "ResourceAlreadyExistsException"
             ):
+                # Redacted: the stream name is configured, and ash.log keeps
+                # DEBUG lines under --debug.
                 ASH_LOGGER.debug(
                     "The log stream the log_stream_name option names already exists"
                 )
             else:
                 self._plugin_log(
-                    f"Error when creating log stream: {e}",
+                    "Error when creating log stream: "
+                    f"{error_text(e, self._environment_values())}",
                     level=logging.WARNING,
                     append_to_stream="stderr",
                 )
         except Exception as e:
             self._plugin_log(
-                f"Error when creating log stream: {e}",
+                "Error when creating log stream: "
+                f"{error_text(e, self._environment_values())}",
                 level=logging.WARNING,
                 append_to_stream="stderr",
             )

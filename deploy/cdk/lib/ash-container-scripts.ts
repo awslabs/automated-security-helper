@@ -372,12 +372,12 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * ------------------------------------------------
  * This script is fixed when the image is built, but the ASH inside the image is
  * whatever `AshVersion` names at deploy time. Measured across the repository:
- * `--stateless-http` and `--allowed-host` exist on neither v3.5.x, v3.6.0,
- * v3.7.0, `main` nor `beta` — the word `stateless` appears nowhere under
- * `automated_security_helper/cli` at v3.7.0. Emitting them unconditionally made
- * the shipped default (`AshVersion=v3.7.0`) undeployable: Typer rejects the
- * unknown option, the server never binds, and CloudFormation reports a
- * health-check timeout rather than the flag that caused it.
+ * `--stateless-http` and `--allowed-host` exist in no release up to v3.7.1 — the
+ * word `stateless` appears nowhere under `automated_security_helper/cli` at
+ * v3.7.0 or v3.7.1 — and were added on main after them. Emitting them
+ * unconditionally made the shipped default (`AshVersion=v3.7.0`) undeployable:
+ * Typer rejects the unknown option, the server never binds, and CloudFormation
+ * reports a health-check timeout rather than the flag that caused it.
  *
  * So the script asks `ash mcp --help` once and branches on what it finds.
  *
@@ -406,7 +406,7 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * `ASH_MCP_STATELESS_FALLBACK`, AND WHY THE SHIPPED DEFAULTS NEEDED IT
  * -------------------------------------------------------------------
  * The refusal above is correct and it made the one-click templates undeployable
- * with their own defaults. `AshVersion` defaults to `v3.7.0`, whose `ash mcp` has
+ * with their own defaults. `AshVersion` defaulted to `v3.7.0`, whose `ash mcp` has
  * no `--stateless-http`, and `McpStatelessHttp` defaults to `true`, so the
  * entrypoint took the refusal branch and exited 65 before the server ever bound.
  * An adopter who changed nothing got a container that never started and a
@@ -431,7 +431,9 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * This is maintainer decision D6's second option. The first — moving
  * `DEFAULT_ASH_VERSION` to a ref whose `ash mcp` accepts the flag — is the right
  * end state and needs a release cut from `main`, which no change here can make.
- * When that release exists, delete this fallback rather than keeping both.
+ * `cz bump` makes that move at the first release after 3.7.1, and the AgentCore
+ * stack stops setting `warn` then (a tripwire test fails at
+ * that bump until it does, as set out where the stack sets it).
  *
  * The Fargate stack deliberately does NOT set it. Its hazard is a load balancer
  * routing consecutive requests to different replicas, which no measurement here
@@ -843,13 +845,15 @@ import uuid
 import boto3
 
 # ASH's documented exit codes. 2 means a scan completed and found actionable
-# findings, which is a gate failure but NOT an operational error; 1 and 3 mean
+# findings, which is a gate failure but NOT an operational error; 1, 3 and 5 mean
 # ASH could not do its job. Treating them alike would report a broken scanner as
-# a clean repository.
+# a clean repository. 5 is a usage error in ASH releases after 3.7.1; 3.7.0 and
+# 3.7.1 exit 2 for one, which reads as findings here and revokes all the same.
 EXIT_SUCCESS = 0
 EXIT_SCANNER_ERROR = 1
 EXIT_ACTIONABLE_FINDINGS = 2
 EXIT_INVALID_CONFIG = 3
+EXIT_USAGE_ERROR = 5
 
 # Defensive bound. The PostCommentForPullRequest reference documents no length
 # constraint on "content", so this is a safety margin rather than the API limit.
@@ -966,6 +970,9 @@ def _verdict(exit_code):
         return "errored", "ASH rejected its configuration, so nothing was scanned."
     if exit_code == EXIT_SCANNER_ERROR:
         return "errored", "One or more scanners failed, so this result is incomplete."
+    if exit_code == EXIT_USAGE_ERROR:
+        return "errored", ("ASH refused this gate's command line (a usage error), so nothing "
+                           "was scanned. Check that AshVersion names the release this stack came from.")
     return "errored", "ASH exited with unexpected code %d." % exit_code
 
 

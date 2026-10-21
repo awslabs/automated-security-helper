@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install ASH MCP customization for Amazon Q Developer CLI.
-# Idempotent: re-running overwrites the target config files.
+# Writes ASH's own agent file, ash.json, and no other file. Re-running replaces that file.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

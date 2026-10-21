@@ -41,11 +41,12 @@ ASH processes code in four sequential phases:
 
 ## Modes
 
-ASH supports three execution modes:
+ASH supports four execution modes:
 
 - **Local** — runs scanners directly on the host using UV-managed tool installations
 - **Container** — runs inside a Docker container with all tools pre-installed
-- **Pre-commit** — runs as a Git pre-commit hook, scanning only staged files
+- **Pre-commit** — a local scan limited to bandit, detect-secrets, checkov, cdk-nag and npm-audit, with simplified output; it scans the whole source directory, not only staged files
+- **Nix** — runs the scan inside `nix develop`, with every scanner at a pinned version, always offline
 
 ## Output directory
 

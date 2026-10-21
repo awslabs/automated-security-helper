@@ -9,7 +9,7 @@ ASH includes built-in event handlers that respond to scan lifecycle events.
 | Handler | Purpose | Events | Key Features |
 |---------|---------|--------|--------------|
 | **Scan Completion Logger** | Enhanced scan progress logging | SCAN_COMPLETE | Remaining scanner tracking |
-| **Suppression Expiration Checker** | Check for expiring suppressions | EXECUTION_START | Proactive expiration warnings |
+| **Suppression Expiration Checker** | Check for expiring suppressions and ignore paths | EXECUTION_START | Proactive expiration warnings |
 
 ## Built-in Event Handlers
 
@@ -29,22 +29,33 @@ INFO: All scanners completed!
 
 ### Suppression Expiration Checker
 
-**Purpose**: Checks for suppressions that are approaching their expiration date and warns users at the start of execution.
+**Purpose**: Checks for suppressions and ignore paths that are approaching their expiration date and warns users at the start of execution.
 
 **Events**: `EXECUTION_START`
 
 **Module**: `automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker`
 
 **Key Features**:
-- Warns about suppressions expiring within 30 days
+- Warns about suppressions and ignore paths expiring within the next 30 days,
+  including the entries of bandit `excluded_paths`, checkov `skip_path` and syft
+  `exclude`
+- Lists, in one warning, the suppressions and ignore paths that have already expired
+  (including any whose expiration date is today), since they no longer apply
 - Provides helpful guidance on updating suppressions
-- Respects the `--ignore-suppressions` flag
+- Skips the suppression check under `--ignore-suppressions`; ignore paths are still
+  checked, because that flag turns off suppressions only and ignore paths still apply
 - Detailed logging with rule ID, file path, expiration date, and reason
 
 **Example Output**:
 ```
+The following ignore paths and suppressions have expired and no longer apply:
+  - Ignore path 'build/generated/**' expired on 2024-06-30. Reason: Generated until the build moves
+Remove them, or move their expiration dates, in your ASH configuration file.
+The following ignore paths will expire within 30 days:
+  - Ignore path 'vendor/**' expires on 2024-07-20. Reason: Vendored until the upgrade
+To update ignore path expiration dates, modify your ASH configuration file
 The following suppressions will expire within 30 days:
-  - Rule B101 for src/test.py expires on 2024-07-15. Reason: Test file with intentional assert
+  - Rule 'B101' for 'src/test.py' expires on 2024-07-15. Reason: Test file with intentional assert
 To update suppression expiration dates, modify your ASH configuration file
 ```
 

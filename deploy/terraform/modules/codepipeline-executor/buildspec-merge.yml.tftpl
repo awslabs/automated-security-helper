@@ -9,6 +9,10 @@ version: 0.2
 #   1  refused to merge - shard coverage is incomplete, so the findings are
 #      unknown, which ASH is careful to distinguish from "no findings"
 #   2  actionable findings at or above --min-severity
+#   5  usage error - ASH refused the merge command line, so nothing was merged.
+#      ASH releases after 3.7.1 use 5 for this. 3.7.0 and 3.7.1 have no `ash
+#      merge` at all, and click reports that as 2, which the arm below would name
+#      as findings.
 #
 # Nothing here re-derives that judgment. ASH already routes it through
 # _compute_exit_code, the same function `ash scan` uses, precisely so a merged
@@ -143,6 +147,7 @@ phases:
           0) echo "ash merge: no actionable findings at or above $MIN_SEVERITY" ;;
           1) echo "ash merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
           2) echo "ash merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
+          5) echo "ash merge: usage error - ASH refused its command line; check the image's ash_version" >&2 ;;
           *) echo "ash merge: exited $MERGE_EXIT" >&2 ;;
         esac
         exit "$MERGE_EXIT"

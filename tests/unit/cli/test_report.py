@@ -10,17 +10,34 @@ from automated_security_helper.cli.report import report_command
 import pytest
 
 
+def _squeezed(text: str) -> str:
+    """*text* without its whitespace: rich folds a long line at the console width, so
+    a message is compared as the characters it holds, not by where a line broke."""
+    return "".join(text.split())
+
+
+def _results_file_only_in_the_directory_itself(mock_output_dir: MagicMock) -> None:
+    """The three places an --output-dir is searched, as a mocked Path: a results
+    file is there only in the directory itself, since more than one is refused."""
+
+    def joinpath(*parts):
+        candidate = MagicMock()
+        candidate.exists.return_value = parts == ("ash_aggregated_results.json",)
+        return candidate
+
+    mock_output_dir.joinpath.side_effect = joinpath
+
+
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_report_command_basic(
-    mock_print,
     mock_results_class,
     mock_plugin_context,
     mock_plugin_manager,
     mock_load_plugins,
+    capfd,
 ):
     """Test report command with basic options."""
     # Mock PluginContext
@@ -58,6 +75,7 @@ def test_report_command_basic(
     with patch("automated_security_helper.cli.report.Path") as mock_path:
         mock_path_instance = MagicMock()
         mock_path_instance.exists.return_value = True
+        _results_file_only_in_the_directory_itself(mock_path_instance)
         mock_path.return_value = mock_path_instance
 
         # Call report_command with basic options
@@ -74,19 +92,22 @@ def test_report_command_basic(
     mock_results_class.model_validate_json.assert_called_once()
     # Verify reporter plugin was called
     mock_reporter_plugin.report.assert_called_once()
+    # The report is what stdout holds, and the command printed no error about it.
+    out, err = capfd.readouterr()
+    assert "This is a test markdown report." in out, out
+    assert "Error" not in err, err
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_a_reporter_that_returns_none_exits_non_zero(
-    mock_print,
     mock_results_class,
     mock_plugin_context,
     mock_plugin_manager,
     mock_load_plugins,
+    capfd,
 ):
     """``report`` is ``-> str | None``, and None must not be printed as text.
 
@@ -113,6 +134,7 @@ def test_a_reporter_that_returns_none_exits_non_zero(
     with patch("automated_security_helper.cli.report.Path") as mock_path:
         mock_path_instance = MagicMock()
         mock_path_instance.exists.return_value = True
+        _results_file_only_in_the_directory_itself(mock_path_instance)
         mock_path.return_value = mock_path_instance
 
         with patch("builtins.open", return_value=mock_file):
@@ -123,68 +145,71 @@ def test_a_reporter_that_returns_none_exits_non_zero(
                 )
 
     assert exit_info.value.exit_code == 1
-    printed = " ".join(str(call) for call in mock_print.call_args_list)
-    assert "None" not in printed.replace("produced no report", ""), printed
-    assert "produced no report" in printed
+    out, err = capfd.readouterr()
+    # Nothing on stdout, so no "None" in place of a report.
+    assert out == "", out
+    assert _squeezed("Error: reporter 'github-ghas' produced no report.") in _squeezed(
+        err
+    ), err
     # The deliberate exit must not be relabelled by the generic handler, which
     # catches Exception and typer.Exit subclasses RuntimeError.
-    assert "Error generating report" not in printed
+    assert "Error generating report" not in err, err
 
 
-def test_report_command_with_resilient_parsing():
-    """Test report command with resilient parsing."""
-    # Call report_command with no arguments (resilient parsing)
-    # Create the results file first
-    # Mock Path.exists to return True for results file
-    # Mock open to return a file with JSON content
+def test_report_command_with_resilient_parsing(tmp_path, monkeypatch):
+    """With no arguments and no results file, the command refuses with exit 1.
+
+    This test used to patch builtins.open so that open(None) -- what the command
+    called when it found no results file -- returned a mock, and it passed only
+    because of that. The command now refuses a missing results file before it
+    opens anything, so the no-argument call is asserted to do exactly that.
+    """
+    monkeypatch.chdir(tmp_path)
     mock_file = MagicMock()
     mock_file.__enter__.return_value.read.return_value = (
         '{"metadata": {"summary_stats": {"actionable": 5}}}'
     )
-    # Call report_command with verbose option
-    with patch("builtins.open", return_value=mock_file):
-        report_command()
+    with patch("builtins.open", return_value=mock_file) as mock_open:
+        with pytest.raises(typer.Exit) as exit_info:
+            report_command()
+
+    assert exit_info.value.exit_code == 1
+    mock_open.assert_not_called()
 
 
-@patch("automated_security_helper.cli.report.PluginContext")
-@patch("automated_security_helper.cli.report.print")
-def test_report_command_with_nonexistent_file(mock_print, mock_plugin_context):
-    """Test report command with nonexistent results file."""
-    # Mock PluginContext
-    mock_context_instance = MagicMock()
-    mock_plugin_context.return_value = mock_context_instance
+def test_report_command_with_nonexistent_file(tmp_path, monkeypatch, capfd):
+    """An --output-dir that holds no results file is refused, and the message names
+    where the command looked.
 
-    # Mock Path.exists to return False for results file
-    with patch("automated_security_helper.cli.report.Path") as mock_path:
-        mock_path_instance = MagicMock()
-        mock_path_instance.exists.return_value = False
-        mock_path_instance.as_posix.return_value = (
-            "/test/output/ash_aggregated_results.json"
-        )
-        mock_path.return_value = mock_path_instance
+    A real, empty directory rather than a mocked PluginContext and Path: with the
+    context mocked no reporter can be built, so the command stops at its unknown
+    --format refusal before it looks for a results file at all.
+    """
+    monkeypatch.chdir(tmp_path)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
 
-        with pytest.raises(typer.Exit) as pytest_wrapped_e:
-            report_command(
-                report_format="markdown",
-                output_dir="/test/output",
-            )
-        assert pytest_wrapped_e.type is typer.Exit
+    with pytest.raises(typer.Exit) as exit_info:
+        report_command(report_format="markdown", output_dir=output_dir.as_posix())
 
-    # Verify error message was printed
-    mock_print.assert_called()
+    assert exit_info.value.exit_code != 0
+    _out, err = capfd.readouterr()
+    assert _squeezed("No scan results found: none of") in _squeezed(err), err
+    assert _squeezed(
+        output_dir.joinpath("ash_aggregated_results.json").as_posix()
+    ) in _squeezed(err), err
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_report_command_with_verbose(
-    mock_print,
     mock_results_class,
     mock_plugin_context,
     mock_plugin_manager,
     mock_load_plugins,
+    capfd,
 ):
     """Test report command with verbose option."""
     # Mock PluginContext
@@ -220,6 +245,7 @@ def test_report_command_with_verbose(
     with patch("automated_security_helper.cli.report.Path") as mock_path:
         mock_path_instance = MagicMock()
         mock_path_instance.exists.return_value = True
+        _results_file_only_in_the_directory_itself(mock_path_instance)
         mock_path.return_value = mock_path_instance
 
         # Call report_command with verbose option
@@ -234,6 +260,10 @@ def test_report_command_with_verbose(
     mock_results_class.model_validate_json.assert_called_once()
     # Verify reporter plugin was called
     mock_reporter_plugin.report.assert_called_once()
+    # The report is what stdout holds, and the command printed no error about it.
+    out, err = capfd.readouterr()
+    assert "This is a test markdown report." in out, out
+    assert "Error" not in err, err
 
 
 @pytest.mark.skipif(

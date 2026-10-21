@@ -113,6 +113,7 @@ class TestContainerModeConfigFailOnFindings:
 
         dummy_results = MagicMock(spec=AshAggregatedResults)
         dummy_results.sarif = None
+        dummy_results.additional_reports = {}
 
         captured: dict = {}
 

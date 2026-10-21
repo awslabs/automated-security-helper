@@ -56,6 +56,7 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
 def layout(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/scan\n", encoding="utf-8")
     (repo / ".ash").mkdir()
     (repo / "src").mkdir()
     outside = tmp_path / "other" / "settings" / "config.json"

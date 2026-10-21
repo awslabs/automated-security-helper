@@ -4,6 +4,12 @@
  The `inspect findings` command provides an interactive TUI to explore the findings and identify
  actions to quickly take.
 
+ A finding's code is the code snippet the results hold, wherever the results file is.
+ For a finding with none, its lines are read from its file only when the results
+ file sits in <root>/.ash/ash_output, and only from a regular file inside <root>
+ (a hard link inside the tree counts as a file in it, as it does for the scanners);
+ otherwise the detail view says "(source not shown)".
+
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --output-dir           <path>  Path to the output directory containing an ASH Aggregated Results │
 │                                JSON report file to analyze.                                      │
@@ -16,7 +22,9 @@
 │                                root, then in .ash/), then ['.ashrc.toml', '.ashrc.yaml',         │
 │                                '.ashrc.yml', '.ashrc.json', 'ashrc.toml', 'ashrc.yaml',          │
 │                                'ashrc.yml', 'ashrc.json'] at the root, then the tool.ash table   │
-│                                of pyproject.toml at the root; the first found is used.           │
+│                                of pyproject.toml at the root; the first found is used. With none │
+│                                found, suppressions go to a new .ashrc.yaml in the current        │
+│                                directory.                                                        │
 │                                [env var: ASH_CONFIG]                                             │
 │ --help                         Show this message and exit.                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

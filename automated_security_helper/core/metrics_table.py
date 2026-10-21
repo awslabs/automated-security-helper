@@ -2,11 +2,11 @@
 
 from pathlib import Path
 from rich.console import Console
-from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
 
+from automated_security_helper.config.environment_record import reads_as_reference
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
@@ -15,8 +15,45 @@ from automated_security_helper.core.unified_metrics import (
     format_duration,
     inputs_not_scanned,
 )
+from automated_security_helper.utils.console import ash_console
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
+
+# Not rich.markup.escape, which shows a trailing backslash twice; see escape_markup.
+from automated_security_helper.utils.log import escape_markup as escape
 import platform
+
+
+#: The help panel printed above the metrics table. Its threshold sources are the two
+#: ScannerStatisticsCalculator.get_scanner_threshold_info produces.
+METRICS_HELP_TEXT = (
+    "How to read this table:\n"
+    "- [bold]*Severity levels*[/bold]:\n"
+    "  - [bold]Suppressed (S)[/bold]: Findings that have been explicitly suppressed and don't affect scanner status\n"
+    "  - [bold]Critical (C)[/bold]: Highest severity findings that require immediate attention\n"
+    "  - [bold]High (H)[/bold]: Serious findings that should be addressed soon\n"
+    "  - [bold]Medium (M)[/bold]: Moderate risk findings\n"
+    "  - [bold]Low (L)[/bold]: Lower risk findings\n"
+    "  - [bold]Info (I)[/bold]: Informational findings with minimal risk\n"
+    "- [bold]*Duration (Time)*[/bold]: Time taken by the scanner to complete its execution\n"
+    "- [bold]*Actionable (Action)*[/bold]: Number of findings at or above the threshold severity level that require attention\n"
+    "- [bold]*Result*[/bold]: \n"
+    "  - [bold green]PASSED[/bold green] = No findings at or above threshold\n"
+    "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
+    "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
+    "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
+    "  - [bold red]ERROR[/bold red] = Scanner execution error\n"
+    "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail\n"
+    "  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL\n"
+    "  - Source: (g)lobal = global_settings or the default, (c)onfig = the scanner's own options\n"
+    "  - ENV = (narrow terminal) read from an environment reference; the wide table and reports show the reference instead\n"
+    "  - REF = (narrow terminal) a reference ASH did not read in this run (read back from a results file, quoted, or a name ASH refuses to read); the wide table shows it as written\n"
+    "  - Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
+    "- [bold]*Statistics calculation*[/bold]:\n"
+    "  - All statistics are calculated from the final aggregated SARIF report\n"
+    "  - Suppressed findings are counted separately and do not contribute to actionable findings\n"
+    "  - Scanner status is determined by comparing actionable findings to the threshold\n"
+)
 
 
 def generate_metrics_table_from_unified_data(
@@ -55,8 +92,17 @@ def generate_metrics_table_from_unified_data(
     table = Table(
         title="ASH Scan Results Summary",
         expand=False,
+        # Text, not markup: the paths are the operator's, and a "[/x]" in one
+        # raised in Rich and lost the table. Rich gives only a str caption the
+        # table's caption style, so the Text carries it.
         caption=(
-            f"source-dir: '{Path(source_dir_rel).as_posix()}'\noutput-dir: '{Path(output_dir_rel).as_posix()}'"
+            Text(
+                shown_not_obeyed(
+                    f"source-dir: '{Path(source_dir_rel).as_posix()}'\n"
+                    f"output-dir: '{Path(output_dir_rel).as_posix()}'"
+                ),
+                style="table.caption",
+            )
             if source_dir_rel and output_dir_rel
             else None
         ),
@@ -86,14 +132,27 @@ def generate_metrics_table_from_unified_data(
         # Format the threshold for display based on terminal width
         if use_short_headers:
             # Use shortened format for small terminals
-            threshold_display = (
-                "MED"
-                if metrics.threshold == "MEDIUM"
-                else metrics.threshold[:4].upper()
-            )
+            if metrics.threshold_from_env:
+                # An env-read threshold is shown as its written reference; four
+                # characters of it would name nothing, so it gets a fixed token.
+                # Keyed on where the value came from, not on its text: a
+                # ``${...}`` the resolver left as written was not read.
+                threshold_display = "ENV"
+            elif reads_as_reference(metrics.threshold):
+                # No provenance flag, yet the text is a reference as a record
+                # holds one. That is a results file read back by ``ash merge``
+                # or ``ash report`` (it keeps the flag nowhere), and also, in a
+                # live scan, a reference the resolver did not read: a quoted
+                # one, or a name it refuses such as ``${HOME}``. The same four
+                # characters would cut it mid-reference, so it gets a token too.
+                threshold_display = "REF"
+            elif metrics.threshold == "MEDIUM":
+                threshold_display = "MED"
+            else:
+                threshold_display = metrics.threshold[:4].upper()
             threshold_location = metrics.threshold_source[
                 0
-            ].lower()  # First char of location (g, c, s)
+            ].lower()  # First char of the source: (g)lobal or (c)onfig
             threshold_text = Text(
                 f"{threshold_display} ({threshold_location})", style="cyan"
             )
@@ -131,7 +190,8 @@ def generate_metrics_table_from_unified_data(
             elif metrics.status == "MISSING":
                 status_text = "[bold yellow]MISSING[/bold yellow]"
             else:
-                status_text = f"[bold white]{metrics.status}[/bold white]"
+                # Not a status of ASH's: a results file read back gives it.
+                status_text = f"[bold white]{escape(metrics.status)}[/bold white]"
 
         # Format the actionable count with color based on value
         if metrics.actionable > 0:
@@ -142,9 +202,10 @@ def generate_metrics_table_from_unified_data(
         # Format the duration
         formatted_duration = format_duration(metrics.duration)
 
-        # Add row to table
+        # Add row to table. The name is escaped: a str cell is markup, and ash
+        # report builds the table from a results file, whose keys are its data.
         table.add_row(
-            metrics.scanner_name,
+            escape(metrics.scanner_name),
             str(metrics.suppressed),
             str(metrics.critical),
             str(metrics.high),
@@ -195,9 +256,17 @@ def print_coverage_shortfalls(
     if not shortfalls:
         return
     for scanner_name, attempted, failed in shortfalls:
+        if attempted is None or failed is None:
+            # Unusable stored counters: the shortfall exists, its size is unknown.
+            console.print(
+                f"[bold yellow]Incomplete coverage:[/bold yellow] {escape(scanner_name)} "
+                f"recorded target counters that could not be read, so how many targets "
+                f"it evaluated is unknown."
+            )
+            continue
         evaluated = attempted - failed
         console.print(
-            f"[bold yellow]Incomplete coverage:[/bold yellow] {scanner_name} evaluated "
+            f"[bold yellow]Incomplete coverage:[/bold yellow] {escape(scanner_name)} evaluated "
             f"{evaluated} of {attempted} target(s); {failed} could not be evaluated and "
             f"contributed no findings. See the scanner's exitCodeDescription in its SARIF "
             f"report for the reason per target."
@@ -315,7 +384,7 @@ def display_metrics_table(
         else:
             console_kwargs["color_system"] = None
 
-        console = Console(**console_kwargs)
+        console = ash_console(**console_kwargs)
 
         # Generate the metrics table using unified data
         table = generate_metrics_table_from_unified_data(
@@ -326,32 +395,7 @@ def display_metrics_table(
         )
 
         # Create a help panel with instructions
-        help_text = (
-            "How to read this table:\n"
-            "- [bold]*Severity levels*[/bold]:\n"
-            "  - [bold]Suppressed (S)[/bold]: Findings that have been explicitly suppressed and don't affect scanner status\n"
-            "  - [bold]Critical (C)[/bold]: Highest severity findings that require immediate attention\n"
-            "  - [bold]High (H)[/bold]: Serious findings that should be addressed soon\n"
-            "  - [bold]Medium (M)[/bold]: Moderate risk findings\n"
-            "  - [bold]Low (L)[/bold]: Lower risk findings\n"
-            "  - [bold]Info (I)[/bold]: Informational findings with minimal risk\n"
-            "- [bold]*Duration (Time)*[/bold]: Time taken by the scanner to complete its execution\n"
-            "- [bold]*Actionable (Action)*[/bold]: Number of findings at or above the threshold severity level that require attention\n"
-            "- [bold]*Result*[/bold]: \n"
-            "  - [bold green]PASSED[/bold green] = No findings at or above threshold\n"
-            "  - [bold red]FAILED[/bold red] = Findings at or above threshold\n"
-            "  - [bold yellow]MISSING[/bold yellow] = Required dependencies not available\n"
-            "  - [bold blue]SKIPPED[/bold blue] = Scanner explicitly disabled\n"
-            "  - [bold red]ERROR[/bold red] = Scanner execution error\n"
-            "- [bold]*Threshold (Thresh)*[/bold]: The minimum severity level that will cause a scanner to fail\n"
-            "  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL\n"
-            "  - Source: (g)lobal, (c)onfig, (s)canner\n"
-            "  - Example: With MEDIUM threshold, findings of MEDIUM, HIGH, or CRITICAL severity will cause a failure\n"
-            "- [bold]*Statistics calculation*[/bold]:\n"
-            "  - All statistics are calculated from the final aggregated SARIF report\n"
-            "  - Suppressed findings are counted separately and do not contribute to actionable findings\n"
-            "  - Scanner status is determined by comparing actionable findings to the threshold\n"
-        )
+        help_text = METRICS_HELP_TEXT
 
         # Use Windows-safe title without emoji
         help_title = (
@@ -396,7 +440,7 @@ def display_metrics_table(
         try:
             print("ASH Scan Results Summary")
             print("=" * 50)
-            print(f"Error displaying detailed table: {e}")
+            print(shown_not_obeyed(f"Error displaying detailed table: {e}"))
             print("Please check the output files for detailed results.")
         except (ValueError, OSError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)

@@ -63,18 +63,26 @@ reports and verdicts from the record, so for them such a field refuses the
 command (exit 3) unless the operator supplies it, with ``--config-overrides`` or
 in the file ``--config`` names (``supply_unread_references``): a default in
 place of the scan's value could drop findings or turn a failing verdict into a
-passing one.
+passing one. The outer process of a container or Nix scan, and
+``ash scan --use-existing``, resolve the scan's own configuration, so such a
+field takes the value that configuration gives it (``take_own_values``), and the
+exit code is computed with the threshold the scan used.
 """
 
 from __future__ import annotations
 
 import copy
 import os
+import re
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
+from pathlib import Path
 from typing import (
     Any,
     Callable,
+    Collection,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Optional,
@@ -87,6 +95,7 @@ from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
     EXPLICIT_ENV_TAG,
     config_env_var_is_interpolatable,
+    resolve_env_references,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -139,6 +148,20 @@ class EnvironmentReference:
     length: Optional[int] = None
     #: Where in ``path`` the index of that list entry sits; set with ``length``.
     index_at: Optional[int] = None
+    #: The file that wrote it, resolved, and the path it holds in that file's
+    #: own document, kept when ``at`` moves it: how the record of the
+    #: configuration (config_validator.environment_record_read) finds where
+    #: the reference it reads in the file ended up. Not compared.
+    origin: Optional[Tuple[Path, Tuple[PathSegment, ...]]] = dataclass_field(
+        default=None, compare=False
+    )
+
+    def at(self, path: Tuple[PathSegment, ...]) -> "EnvironmentReference":
+        """The reference moved to ``path``. The move invalidates what the
+        reference knew about the list it sat in, so ``length`` and ``index_at``
+        are dropped; a measure step (``_measured_in``) records the new list
+        from the post-move document. ``origin`` is kept."""
+        return replace(self, path=path, length=None, index_at=None)
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
@@ -162,6 +185,10 @@ class EnvironmentReference:
             self, path=path, index_at=self.index_at - prefix_len + len(prefix)
         )
 
+    def read_in(self, file: Path) -> "EnvironmentReference":
+        """This reference, read in ``file`` (resolved) at its path there."""
+        return replace(self, origin=(file, tuple(self.path)))
+
     @property
     def position_unknown(self) -> bool:
         """Whether the list index in ``path`` says nothing about where the entry
@@ -170,6 +197,12 @@ class EnvironmentReference:
         if any(isinstance(segment, _AnyIndex) for segment in self.path):
             return True
         return self.length is None and any(isinstance(s, int) for s in self.path)
+
+    @property
+    def place_key(self) -> Tuple[Any, ...]:
+        """The reference as its file wrote it, for a record of the file's text
+        to find it by: where in which file, value or key, and its text."""
+        return (self.origin, self.key, self.written)
 
 
 @dataclass(frozen=True)
@@ -186,11 +219,34 @@ def _without_tag(text: str) -> str:
     return text.removeprefix(EXPLICIT_ENV_TAG)
 
 
+def _reference_match(written: str) -> Optional[re.Match[str]]:
+    """``written``'s reference, matched as the loader matches it
+    (resolve_env_references and the YAML and TOML loaders): from the first
+    character, after an ``!ENV`` tag, with nothing stripped, so a text with
+    leading whitespace is no reference. Every reader of a written reference
+    here matches through this, so all share one whitespace rule."""
+    return ENV_REFERENCE_PATTERN.match(_without_tag(written))
+
+
 def reads_as_reference(text: Any) -> bool:
-    """Whether ``text`` is a reference as a record holds one."""
-    return isinstance(text, str) and bool(
-        ENV_REFERENCE_PATTERN.match(_without_tag(text).strip())
-    )
+    """Whether ``text`` is a reference as a record holds one: as its file
+    wrote it, which the loader read (``_reference_match``)."""
+    return isinstance(text, str) and bool(_reference_match(text))
+
+
+def referenced_name(written: str) -> Optional[str]:
+    """The variable ``written``, a reference as a file wrote it (``${VAR}``,
+    ``${VAR:default}``, with or without the ``!ENV`` tag), names; None for text
+    that is not one.
+
+    Matched as the loader matches it (``_reference_match``): a text with
+    leading whitespace names nothing, as the loader reads nothing for it. The
+    one parser of a written reference's variable here: a value's
+    (``_value_read``), a key's (``_written_key_reference``), and the Bedrock
+    reporter's knob rule all ask it.
+    """
+    match = _reference_match(written)
+    return match.group(1) if match else None
 
 
 def _value_read(written: str) -> Optional[str]:
@@ -200,10 +256,10 @@ def _value_read(written: str) -> Optional[str]:
     that is unset, whose default came from the file. The same rule as the
     resolver, read in the same process right after it.
     """
-    match = ENV_REFERENCE_PATTERN.match(_without_tag(written).strip())
-    if not match or not config_env_var_is_interpolatable(match.group(1)):
+    name = referenced_name(written)
+    if name is None or not config_env_var_is_interpolatable(name):
         return None
-    value = os.environ.get(match.group(1))
+    value = os.environ.get(name)
     if value is None or not value.strip():
         return None
     return value.strip()
@@ -217,6 +273,12 @@ def _reference(
         and "${" in written
         and isinstance(resolved, str)
         and resolved != written
+        # A value resolution left as its own text read nothing: with an
+        # explicit tag, the two readings differ by the tag alone (a composite
+        # or embedded reference, which is not resolved). The variable it
+        # names can be set, so _value_read alone would record its value for
+        # a place that holds the file's own text.
+        and resolved != _without_tag(written)
     ):
         return None
     value = _value_read(written)
@@ -229,6 +291,29 @@ def _has_reference(key: Any) -> bool:
     return isinstance(key, str) and "${" in key
 
 
+_UNRESOLVED: Any = object()
+
+
+def _resolved_key(written_key: str, resolved: Dict[Any, Any]) -> Any:
+    """The key of ``resolved`` that ``written_key``, a mapping key as its file
+    wrote it, came to; ``_UNRESOLVED`` when it came to none.
+
+    A reference the loader resolves comes to its value; any other key came to
+    its own text.
+    """
+    name = referenced_name(written_key)
+    if name is not None and config_env_var_is_interpolatable(name):
+        try:
+            key = resolve_env_references(_without_tag(written_key))
+        except Exception:  # noqa: BLE001 - a key that does not resolve came to none
+            return _UNRESOLVED
+        return key if key in resolved else _UNRESOLVED
+    for key in (written_key, _without_tag(written_key)):
+        if key in resolved:
+            return key
+    return _UNRESOLVED
+
+
 def environment_references(
     written: Any, resolved: Any, path: Tuple[PathSegment, ...] = ()
 ) -> List[EnvironmentReference]:
@@ -239,10 +324,11 @@ def environment_references(
     ``_resolve_toml_env``), ``resolved`` the same text read as a scan reads it.
 
     Mapping entries are paired by key: a key written without a reference with
-    the same key, and the keys holding one, in order, with the resolved keys the
-    file does not write. A key read from the environment that resolves to
-    another key of its mapping merges the two; pairing by position would then
-    compare every later value with the wrong one.
+    the same key, and a key holding one with the key it resolves to. A key read
+    from the environment that resolves to another key of its mapping merges the
+    two; pairing by position would then compare every later value with the
+    wrong one. The key's own read is recorded whether or not its entry is the
+    one the merge keeps; only the kept entry's value is paired.
     """
     found: List[EnvironmentReference] = []
     if isinstance(written, dict) and isinstance(resolved, dict):
@@ -252,12 +338,19 @@ def environment_references(
         for key, value in plain:
             if key in resolved:
                 found += environment_references(value, resolved[key], (*path, str(key)))
-        others = [(k, v) for k, v in resolved.items() if k not in plain_keys]
-        for (written_key, written_value), (key, value) in zip(referenced, others):
-            read = _reference(written_key, key, path, key=True)
+        names = [(k, v, _resolved_key(k, resolved)) for k, v in referenced]
+        # The loader keeps the last entry written under a name.
+        last = {name: index for index, (_, _, name) in enumerate(names)}
+        for index, (written_key, written_value, name) in enumerate(names):
+            if name is _UNRESOLVED:
+                continue
+            read = _reference(written_key, name, path, key=True)
             if read is not None:
                 found.append(read)
-            found += environment_references(written_value, value, (*path, str(key)))
+            if name not in plain_keys and last[name] == index:
+                found += environment_references(
+                    written_value, resolved[name], (*path, str(name))
+                )
     elif isinstance(written, list) and isinstance(resolved, list):
         for index, (written_item, item) in enumerate(zip(written, resolved)):
             entry = (*path, index)
@@ -274,14 +367,74 @@ def environment_references(
     return found
 
 
-def _normal(segment: PathSegment) -> PathSegment:
+def _written_key_reference(key: Any) -> bool:
+    """Whether ``key``, a mapping key as its file wrote it, is a reference the
+    loader resolves: one starting with ``${VAR}`` or ``${VAR:default}`` that
+    names a variable it may read, whether or not the variable is set."""
+    if not isinstance(key, str):
+        return False
+    name = referenced_name(key)
+    return name is not None and config_env_var_is_interpolatable(name)
+
+
+#: A mapping that holds a key its file writes as a reference: the mapping's path
+#: in the file's own document, or None where that document does not place it in
+#: the configuration, and the keys the file writes there as text.
+WrittenKeyMapping = Tuple[Optional[Tuple[PathSegment, ...]], FrozenSet[str]]
+
+
+def mappings_with_written_reference_keys(
+    written: Any, unplaced: Collection[str] = ()
+) -> List[WrittenKeyMapping]:
+    """Each mapping of ``written``, a file read as written
+    (read_config_file_as_written), that holds a key written as a reference,
+    whatever its variable holds and whether or not it is set.
+
+    The record of what a file read (environment_references) has no such key
+    where the variable is unset, since the key is then the default the file
+    wrote, nor where it resolves to another key of its mapping and merges with
+    it. A rule that decides from the record answers by the variable's value;
+    one that decides from these answers the same for every value. A mapping
+    under a top-level key ``unplaced`` names (``extends``, ``patch``), or under
+    a key written as a reference, gets no path: where it ends up in the
+    configuration depends on more than this file.
+    """
+    found: List[WrittenKeyMapping] = []
+
+    def walk(node: Any, path: Optional[Tuple[PathSegment, ...]]) -> None:
+        if isinstance(node, dict):
+            if any(_written_key_reference(key) for key in node):
+                text = frozenset(
+                    str(key) for key in node if not _written_key_reference(key)
+                )
+                found.append((path, text))
+            for key, value in node.items():
+                placed = (
+                    path is not None
+                    and not _written_key_reference(key)
+                    and not (path == () and key in unplaced)
+                )
+                walk(value, (*path, str(key)) if placed and path is not None else None)
+        elif isinstance(node, list):
+            for index, item in enumerate(node):
+                walk(item, None if path is None else (*path, index))
+
+    walk(written, ())
+    return found
+
+
+def _normal(segment: PathSegment, exact_indices: bool = False) -> PathSegment:
     if isinstance(segment, (int, _AnyIndex)):
+        if exact_indices and isinstance(segment, int):
+            return segment
         return _ANY_INDEX
     return segment.replace("-", "_").lower()
 
 
-def _normal_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
-    return tuple(_normal(segment) for segment in path)
+def _normal_path(
+    path: Iterable[PathSegment], exact_indices: bool = False
+) -> Tuple[PathSegment, ...]:
+    return tuple(_normal(segment, exact_indices) for segment in path)
 
 
 def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
@@ -292,10 +445,10 @@ def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
 
 
 def _bare(written: str) -> str:
-    """The reference alone, ``${VAR}`` or ``${VAR:default}``, from ``written``."""
-    text = _without_tag(written).strip()
-    match = ENV_REFERENCE_PATTERN.match(text)
-    return match.group(0) if match else text
+    """The reference alone, ``${VAR}`` or ``${VAR:default}``, from ``written``
+    (``_reference_match``); the text without its tag when it is none."""
+    match = _reference_match(written)
+    return match.group(0) if match else _without_tag(written)
 
 
 def _anchored(text: str, reference: EnvironmentReference) -> bool:
@@ -371,23 +524,63 @@ def environment_marker(written: str) -> str:
     return f"<from {_bare(written)}>"
 
 
+#: How a check's message shows a value or key a config file read from the
+#: environment (``with_environment_values_shown``).
+ENVIRONMENT_VALUE_SHOWN = "<value>"
+
+
+def _shown_marker(_written: str) -> str:
+    return ENVIRONMENT_VALUE_SHOWN
+
+
+def with_environment_values_shown(
+    data: Any,
+    references: Sequence[EnvironmentReference],
+    at: Sequence[PathSegment] = (),
+    *,
+    exact_indices: bool = False,
+) -> Any:
+    """``data`` with each value and key ``references`` read from the environment
+    shown as ``<value>``, at its own position; see "Where".
+
+    For the messages of a check: the check decides on ``data``, and a message
+    quotes this copy at the same position, so a value read from the environment
+    is never in the text while what the file wrote itself is. A copy: ``data``
+    itself is not changed.
+
+    ``exact_indices`` (record_environment_references) shows a reference written
+    at a list index in the entry at that index only. Without it, the reference
+    follows its entry when the list is no longer the length the file wrote, or
+    when its index is unknown (see "Where"): an entry of the shape the load
+    gives it is then shown with ``<value>`` at any index, while an entry the
+    file wrote as the same text stays as written.
+    """
+    return record_environment_references(
+        data, references, at=at, mark=_shown_marker, exact_indices=exact_indices
+    )
+
+
 class _Index:
     def __init__(
         self,
         references: Iterable[EnvironmentReference],
         mark: Optional[Callable[[str], Any]] = None,
         whole_only: bool = False,
+        exact_indices: bool = False,
     ) -> None:
         self.values: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.mark = mark
         self.whole_only = whole_only
+        self.exact_indices = exact_indices
         #: The data's strings by exact position, and its lists' lengths (``scan``).
         self.strings: Dict[Tuple[PathSegment, ...], str] = {}
         self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
         for reference in references:
             target = self.keys if reference.key else self.values
-            target.setdefault(_normal_path(reference.path), []).append(reference)
+            target.setdefault(_normal_path(reference.path, exact_indices), []).append(
+                reference
+            )
 
     def scan(self, item: Any, exact: Tuple[PathSegment, ...]) -> None:
         """Note the strings of ``item`` by exact position and the length of each
@@ -479,7 +672,11 @@ class _Index:
             return result
         if isinstance(item, (list, tuple)):
             return type(item)(
-                self.record(value, (*path, _ANY_INDEX), (*exact, index))
+                self.record(
+                    value,
+                    (*path, index if self.exact_indices else _ANY_INDEX),
+                    (*exact, index),
+                )
                 for index, value in enumerate(item)
             )
         if isinstance(item, str):
@@ -573,6 +770,8 @@ def record_environment_references(
     at: Sequence[PathSegment] = (),
     mark: Optional[Callable[[str], Any]] = None,
     whole_only: bool = False,
+    *,
+    exact_indices: bool = False,
 ) -> Any:
     """``data``, a dump of a configuration, with what ``references`` read written
     as the file wrote it; see "Where".
@@ -582,14 +781,21 @@ def record_environment_references(
     ``mark``, when given, is applied to each reference as written, and replaces
     it: ``environment_marker`` for a view of the config, or a type a file writer
     tags ``!ENV``. ``whole_only`` replaces only a string that is the whole value,
-    for a file that is loaded again (``AshConfig.save(as_written=True)``). A
-    copy: ``data`` itself is not changed.
+    for a file that is loaded again (``AshConfig.save(as_written=True)``).
+    ``exact_indices`` places a reference at the list index its file wrote it at,
+    and at no other entry of that list, for a view of a configuration as its
+    files hold it (the MCP get_config tool): an entry beside it with the same
+    text is shown as it is, and a reference whose index the file's layout does
+    not give is placed nowhere. Without it, a reference is read at its own
+    index and, when its entry moved or its index is unknown (see "Where"), at
+    any index of its list, so it follows an entry a patch moves. A copy:
+    ``data`` itself is not changed.
     """
     if not references:
         return data
-    index = _Index(references, mark, whole_only)
+    index = _Index(references, mark, whole_only, exact_indices)
     index.scan(data, _exact_path(at))
-    return index.record(data, _normal_path(at), _exact_path(at))
+    return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
 
 
 def setting_names(
@@ -824,6 +1030,90 @@ def supply_unread_references(
             node = node.setdefault(_matching_key(node, step), {})
         node[_matching_key(node, steps[-1])] = value
     return AshConfig.model_validate(data)
+
+
+def record_unread_references(data: Any, unread: Sequence[UnreadReference]) -> Any:
+    """``data``, a dump of a configuration read from a record, with each field
+    ``load_recorded_config`` could not read written as the reference the record
+    held there, not the default it was read with. A copy: ``data`` itself is not
+    changed."""
+    if not unread or not isinstance(data, dict):
+        return data
+    data = copy.deepcopy(data)
+    for entry in unread:
+        node = data
+        steps = entry.field.split(".")
+        for step in steps[:-1]:
+            if isinstance(node, list) and step.isdigit() and int(step) < len(node):
+                node = node[int(step)]
+            elif isinstance(node, dict):
+                node = node.setdefault(_matching_key(node, step), {})
+            else:
+                break
+        else:
+            if isinstance(node, dict):
+                node[_matching_key(node, steps[-1])] = entry.reference
+            elif (
+                isinstance(node, list)
+                and steps[-1].isdigit()
+                and int(steps[-1]) < len(node)
+            ):
+                node[int(steps[-1])] = entry.reference
+    return data
+
+
+def _field_path(field: str) -> Tuple[PathSegment, ...]:
+    """``field``, dotted keys of a record, as a path: list indices as numbers."""
+    return tuple(int(step) if step.isdigit() else step for step in field.split("."))
+
+
+def take_own_values(config: Any, own: Any) -> Any:
+    """``config``, a recorded configuration, with each field ``load_recorded_config``
+    could not read given ``own``'s value for it; see "Reading a record".
+
+    ``own`` is this invocation's own configuration, resolved as the scan resolved
+    its: the outer process of a container or Nix scan resolves the scan's
+    configuration, and ``ash scan --use-existing`` has the orchestrator's. A field
+    ``own`` does not hold (an option of a plugin it does not configure) keeps the
+    default the record was read with, which is what ``own`` uses too, and stays
+    noted in ``_unread_references``. Where ``own``
+    read the field from the environment, the result keeps that reference
+    (``_environment_references``), so a record written from it holds the
+    reference, not the value.
+    """
+    unread = tuple(getattr(config, "_unread_references", ()) or ())
+    if not unread or own is None:
+        return config
+    from automated_security_helper.config.ash_config import AshConfig
+
+    own_data = own.model_dump(by_alias=True)
+    own_references = tuple(getattr(own, "_environment_references", ()) or ())
+    data = config.model_dump(by_alias=True)
+    carried: List[EnvironmentReference] = []
+    kept: List[UnreadReference] = []
+    for entry in unread:
+        found, value = _value_at(own_data, entry.field)
+        if not found:
+            kept.append(entry)
+            continue
+        node = data
+        steps = entry.field.split(".")
+        for step in steps[:-1]:
+            node = node.setdefault(_matching_key(node, step), {})
+        node[_matching_key(node, steps[-1])] = value
+        wanted = _normal_path(_field_path(entry.field))
+        carried += [
+            reference.at(_field_path(entry.field))
+            for reference in own_references
+            if not reference.key and _normal_path(reference.path) == wanted
+        ]
+    updated = AshConfig.model_validate(data)
+    updated._environment_references = (
+        *tuple(getattr(config, "_environment_references", ()) or ()),
+        *carried,
+    )
+    updated._unread_references = tuple(kept)
+    return updated
 
 
 def _matching_key(mapping: Dict[Any, Any], step: str) -> Any:

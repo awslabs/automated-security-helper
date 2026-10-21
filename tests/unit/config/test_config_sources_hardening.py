@@ -228,3 +228,357 @@ class TestMcpConfigTools:
             assert result["valid"] is False
         finally:
             Path(other.name).unlink(missing_ok=True)
+
+
+class TestACallersOwnReaderNeedsItsTextCache:
+    """A caller's own reader returns parsed data, so the resolution's only
+    as-written view of each file is the ``texts`` cache the reader fills. A
+    call without one used to resolve the environment's values into the data
+    while recording no reference at all, so nothing downstream redacted them.
+    """
+
+    def test_a_readers_call_without_texts_is_a_type_error(self, tmp_path, monkeypatch):
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+
+        monkeypatch.setenv("ASH_HARDENING_READER_VAR", "reader-held-value-7731")
+        config = _write(
+            tmp_path / "ash.yaml", "project_name: ${ASH_HARDENING_READER_VAR}\n"
+        )
+
+        def reader(path: Path):
+            return parse_config_text(Path(path), read_config_text(Path(path)))
+
+        with pytest.raises(TypeError, match="texts"):
+            resolve_config_document(config, reader=reader, texts=None)
+
+    def test_a_reader_with_its_cache_records_what_the_chain_read(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+
+        monkeypatch.setenv("ASH_HARDENING_READER_VAR", "reader-held-value-7731")
+        config = _write(
+            tmp_path / "ash.yaml", "project_name: ${ASH_HARDENING_READER_VAR}\n"
+        )
+        texts: dict = {}
+
+        def reader(path: Path):
+            text = read_config_text(Path(path))
+            texts[Path(path).resolve()] = text
+            return parse_config_text(Path(path), text)
+
+        document = resolve_config_document(config, reader=reader, texts=texts)
+        assert document.data == {"project_name": "reader-held-value-7731"}
+        assert document.environment_values == ["reader-held-value-7731"]
+        assert [r.written for r in document.environment_references] == [
+            "${ASH_HARDENING_READER_VAR}"
+        ]
+
+    def test_the_literal_reader_still_needs_no_cache(self, tmp_path):
+        from automated_security_helper.config.config_sources import (
+            read_config_file_literally,
+            resolve_config_document,
+        )
+
+        config = _write(tmp_path / "ash.yaml", "project_name: plain\n")
+        document = resolve_config_document(
+            config, reader=read_config_file_literally, texts=None
+        )
+        assert document.data == {"project_name": "plain"}
+        assert document.environment_references == []
+
+    def test_a_texts_mapping_the_reader_never_fills_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        """Passing an empty mapping satisfied the call-time check while the
+        reader filled nothing, so the environment's value was resolved into
+        the data with no reference recorded. The read of the unfilled file is
+        refused instead."""
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+
+        monkeypatch.setenv("ASH_HARDENING_READER_VAR", "reader-held-value-7731")
+        config = _write(
+            tmp_path / "ash.yaml", "project_name: ${ASH_HARDENING_READER_VAR}\n"
+        )
+
+        def reader(path: Path):
+            return parse_config_text(Path(path), read_config_text(Path(path)))
+
+        with pytest.raises(TypeError, match="no held text"):
+            resolve_config_document(config, reader=reader, texts={})
+
+    def test_a_reader_filling_only_the_top_file_is_refused_at_the_base(
+        self, tmp_path, monkeypatch
+    ):
+        """A fill of the first file alone left every base of the chain without
+        an as-written view, so a base's environment read went unrecorded. The
+        base's refusal reaches the caller through the chain's own error
+        (``_resolve`` wraps what following ``extends`` raises), with the
+        constant no-held-text reason and no value in it."""
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+        from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+        monkeypatch.setenv("ASH_HARDENING_READER_VAR", "reader-held-value-7731")
+        base = _write(
+            tmp_path / "base.yaml", "project_name: ${ASH_HARDENING_READER_VAR}\n"
+        )
+        top = _write(tmp_path / "ash.yaml", f"extends: {base.name}\n")
+        texts: dict = {}
+        filled: list = []
+
+        def reader(path: Path):
+            text = read_config_text(Path(path))
+            if not filled:
+                texts[Path(path).resolve()] = text
+                filled.append(Path(path).resolve())
+            return parse_config_text(Path(path), text)
+
+        with pytest.raises(ASHConfigSourceError, match="no held text") as refused:
+            resolve_config_document(top, reader=reader, texts=texts)
+        assert filled == [top.resolve()], filled
+        assert "reader-held-value-7731" not in str(refused.value), str(refused.value)
+
+    def test_an_env_named_base_left_unfilled_keeps_the_no_held_text_reason(
+        self, tmp_path, monkeypatch
+    ):
+        """The same top-only fill, with the base named through the environment:
+        the chain read from it, so the refusal took the environment-blind path,
+        whose generic text points at the file system ("missing, cannot be
+        read") when the cause is the caller's reader. The no-held-text refusal
+        holds no value by construction, so it is kept as it is."""
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+        from automated_security_helper.core.exceptions import ASHConfigSourceError
+        from automated_security_helper.utils.error_text import _chain
+
+        hidden = "reader-named-base-7731"
+        monkeypatch.setenv("ASH_HARDENING_BASE_VAR", f"{hidden}.yaml")
+        _write(tmp_path / f"{hidden}.yaml", "project_name: from-the-base\n")
+        top = _write(tmp_path / "ash.yaml", "extends: ${ASH_HARDENING_BASE_VAR}\n")
+        texts: dict = {}
+        filled: list = []
+
+        def reader(path: Path):
+            text = read_config_text(Path(path))
+            if not filled:
+                texts[Path(path).resolve()] = text
+                filled.append(Path(path).resolve())
+            return parse_config_text(Path(path), text)
+
+        with pytest.raises(ASHConfigSourceError) as refused:
+            resolve_config_document(top, reader=reader, texts=texts)
+        assert filled == [top.resolve()], filled
+        assert "no held text" in str(refused.value), str(refused.value)
+        members = list(_chain(refused.value))
+        text = "\n".join(f"{member!s}\n{member!r}" for member in members)
+        assert hidden not in text, text[:2000]
+
+    def test_the_no_held_text_refusal_names_no_private_class(
+        self, tmp_path, monkeypatch
+    ):
+        """The refusal names the builtin TypeError and the public source-error
+        class, never a private class that marks a refusal internally, on every
+        surface that prints it: its text, and each chain-walking printer (repr
+        of each member, traceback_text, traceback.format_exception). Through
+        the chain's catch-all (an unfilled base, whose kept refusal is the
+        document-quoting one) and through resolve_config's own fallback (an
+        unheld top file)."""
+        import traceback
+
+        from automated_security_helper.utils.error_text import _chain, traceback_text
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+        from automated_security_helper.config.resolve_config import resolve_config
+        from automated_security_helper.core.exceptions import (
+            ASHConfigSourceError,
+            ASHConfigValidationError,
+        )
+
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        base = _write(tmp_path / "base.yaml", "project_name: from-the-base\n")
+        top = _write(tmp_path / "ash.yaml", f"extends: {base.name}\n")
+        texts: dict = {}
+
+        def top_only(path: Path):
+            text = read_config_text(Path(path))
+            if Path(path).resolve() == top.resolve():
+                texts[top.resolve()] = text
+            return parse_config_text(Path(path), text)
+
+        with pytest.raises(ASHConfigSourceError) as through_the_chain:
+            resolve_config_document(top, reader=top_only, texts=texts)
+        shown = str(through_the_chain.value)
+        assert "no held text" in shown, shown
+        assert "_UnheldTextError" not in shown, shown
+        assert "TypeError: config_sources._file_references" in shown, shown
+        # The kept document-quoting refusal is the public class itself, marked
+        # by attribute. Pinned by exact type and repr prefix, not by one
+        # private name's absence, which nothing could print once the name
+        # left the code: a future private subclass under any name changes
+        # both, where the old check knew only the one spelling.
+        assert type(through_the_chain.value) is ASHConfigSourceError, type(
+            through_the_chain.value
+        )
+        assert repr(through_the_chain.value).startswith("ASHConfigSourceError("), repr(
+            through_the_chain.value
+        )
+
+        lone = _write(tmp_path / "lone" / "ash.yaml", "project_name: t\n")
+        reads = {lone.resolve(): parse_config_text(lone, read_config_text(lone))}
+        with pytest.raises(ASHConfigValidationError) as through_the_fallback:
+            resolve_config(
+                config_path=lone,
+                source_dir=lone.parent,
+                reads=reads,
+                fallback_to_default=True,
+            )
+        shown = str(through_the_fallback.value)
+        assert "no held text" in shown, shown
+        assert "_UnheldTextError" not in shown, shown
+        assert "TypeError: config_sources._file_references" in shown, shown
+
+        for refused in (through_the_chain.value, through_the_fallback.value):
+            unheld = [
+                member
+                for member in _chain(refused)
+                if str(member).startswith("config_sources._file_references")
+            ]
+            assert len(unheld) == 1, [type(m).__name__ for m in _chain(refused)]
+            assert type(unheld[0]) is TypeError, type(unheld[0])
+            for printed in (
+                repr(unheld[0]),
+                repr(refused),
+                traceback_text(refused),
+                "".join(
+                    traceback.format_exception(
+                        type(refused), refused, refused.__traceback__
+                    )
+                ),
+            ):
+                assert "_UnheldTextError" not in printed, printed[-2000:]
+                assert "TypeError" in printed, printed[-2000:]
+
+    def test_a_run_load_reads_cache_missing_a_bases_text_keeps_the_reason(
+        self, tmp_path, monkeypatch
+    ):
+        """A run load handed a ``reads`` cache that holds a base but no text
+        for it never reads that base, so its text is never held. After the top
+        file read the environment, the refusal used to take the environment-
+        blind path, whose generic text blames a missing or unreadable file in
+        the operator's config for what is the caller's cache. It keeps the
+        constant no-held-text reason, and names no value."""
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+        )
+        from automated_security_helper.config.resolve_config import (
+            load_config_file_for_run,
+        )
+        from automated_security_helper.core.exceptions import ASHConfigSourceError
+        from automated_security_helper.utils.error_text import _chain
+
+        value = "run-load-top-value-7731"
+        monkeypatch.setenv("ASH_HARDENING_TOP_VAR", value)
+        base = _write(tmp_path / "base.yaml", "fail_on_findings: false\n")
+        top = _write(
+            tmp_path / "ash.yaml",
+            f"project_name: ${{ASH_HARDENING_TOP_VAR}}\nextends: {base.name}\n",
+        )
+        reads = {base.resolve(): parse_config_text(base, read_config_text(base))}
+        with pytest.raises(ASHConfigSourceError) as refused:
+            load_config_file_for_run(top, reads=reads)
+        shown = str(refused.value)
+        assert "no held text" in shown, shown
+        assert "missing, cannot be read" not in shown, shown
+        text = "\n".join(f"{m!s}\n{m!r}" for m in _chain(refused.value))
+        assert value not in text, text[:2000]
+
+    def test_a_readers_own_type_error_still_takes_the_blind_path(
+        self, tmp_path, monkeypatch
+    ):
+        """Only the no-held-text refusal, whose text is a constant, is kept as
+        it is. A caller's reader raising a plain TypeError that quotes a value,
+        for an env-named base, is still replaced by the environment-blind
+        reason: its text is the reader's, and can hold anything."""
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+            resolve_config_document,
+        )
+        from automated_security_helper.core.exceptions import ASHConfigSourceError
+        from automated_security_helper.utils.error_text import _chain
+
+        hidden = "reader-named-base-7731"
+        value = "reader-quoted-value-7731"
+        monkeypatch.setenv("ASH_HARDENING_BASE_VAR", f"{hidden}.yaml")
+        _write(tmp_path / f"{hidden}.yaml", "project_name: from-the-base\n")
+        top = _write(tmp_path / "ash.yaml", "extends: ${ASH_HARDENING_BASE_VAR}\n")
+        texts: dict = {}
+
+        def reader(path: Path):
+            text = read_config_text(Path(path))
+            if Path(path).resolve() == top.resolve():
+                texts[top.resolve()] = text
+                return parse_config_text(Path(path), text)
+            raise TypeError(f"reader refused a file holding {value}")
+
+        with pytest.raises(ASHConfigSourceError) as refused:
+            resolve_config_document(top, reader=reader, texts=texts)
+        members = list(_chain(refused.value))
+        text = "\n".join(f"{member!s}\n{member!r}" for member in members)
+        assert value not in text, text[:2000]
+        assert hidden not in text, text[:2000]
+        assert not any(type(m) is TypeError for m in members), [
+            type(m).__name__ for m in members
+        ]
+
+    def test_a_run_load_reads_cache_without_texts_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        """A pre-seeded ``reads`` cache without its matching ``texts`` is a
+        cache hit the reader never reads, so the file's text is never held and
+        its environment reads went unrecorded; the control with both caches
+        records them."""
+        from automated_security_helper.config.config_sources import (
+            parse_config_text,
+            read_config_text,
+        )
+        from automated_security_helper.config.resolve_config import (
+            load_config_file_for_run,
+        )
+
+        monkeypatch.setenv("ASH_HARDENING_READER_VAR", "reader-held-value-7731")
+        config = _write(
+            tmp_path / "ash.yaml", "project_name: ${ASH_HARDENING_READER_VAR}\n"
+        )
+        key = config.resolve()
+        text = read_config_text(config)
+        parsed = parse_config_text(config, text)
+        with pytest.raises(TypeError, match="no held text"):
+            load_config_file_for_run(config, reads={key: dict(parsed)})
+        _, built = load_config_file_for_run(
+            config, reads={key: dict(parsed)}, texts={key: text}
+        )
+        assert built._environment_values == ["reader-held-value-7731"]

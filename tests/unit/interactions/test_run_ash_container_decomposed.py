@@ -195,6 +195,171 @@ def test_assemble_run_command_env_vars():
     assert "ash_output" in out_val, out_val
 
 
+def test_assemble_run_command_carries_ash_config_as_a_mount_not_the_variable(tmp_path):
+    """The assembled command never passes ASH_CONFIG as an environment
+    variable: the value is a host path, meaningless inside the container. The
+    file it names is mounted read-only instead and its container path is
+    passed with --ash-config-from-host, so the scan inside reads the same base
+    a local scan reads, from a path that exists there."""
+    config = tmp_path / "operator" / "ash.yaml"
+    config.parent.mkdir()
+    config.write_text("project_name: operator\n", encoding="utf-8")
+    kwargs = _base_assemble_kwargs()
+    with patch.dict(os.environ, {"ASH_CONFIG": str(config)}):
+        cmd = _assemble_run_command(**kwargs)
+    env_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-e"]
+    carried = [v for v in env_args if v == "ASH_CONFIG" or v.startswith("ASH_CONFIG=")]
+    assert carried == [], carried
+    # The control: the same read finds the env arguments the command does set.
+    assert any(v.startswith("ASH_ACTUAL_SOURCE_DIR=") for v in env_args), env_args
+    # The file rides as a read-only mount under /ash-env-config instead, and
+    # the inner scan is told its path there.
+    inner = cmd[cmd.index("--ash-config-from-host") + 1]
+    assert inner.startswith("/ash-env-config/"), inner
+    mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--mount"]
+    expected = (
+        f"type=bind,source={os.path.realpath(config)},destination={inner},readonly"
+    )
+    assert expected in mounts, mounts
+
+
+def _git_repo(root: Path) -> Path:
+    import subprocess
+
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    return root
+
+
+def _scan_source_env(cmd):
+    env_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-e"]
+    return [v for v in env_values if v.startswith("ASH_SCAN_SOURCE=")]
+
+
+def test_the_container_scan_is_told_the_scanned_directory_within_its_repository(
+    tmp_path, _git_stops_at_tmp
+):
+    """Inside the container the source is always /src, and git there cannot see
+    the repository when only a subdirectory is mounted. The host can, so the
+    label is worked out here and passed in; without it container scans of
+    services/api and services/web both recorded "/src" and shared one scope."""
+    source = _git_repo(tmp_path / "repo") / "services" / "api"
+    source.mkdir(parents=True)
+
+    cmd = _assemble_run_command(
+        **_base_assemble_kwargs(source_dir=source, output_dir=tmp_path / "out")
+    )
+
+    assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE=services/api"]
+
+
+@pytest.fixture
+def _git_stops_at_tmp(tmp_path, monkeypatch):
+    """tmp_path, with git and the nesting check kept from looking above it.
+
+    tmp_path is made an empty repository that excludes everything, with
+    GIT_CEILING_DIRECTORIES there (tests/utils/git_isolation.py): git does not
+    move up into it, and the repository it hides holds nothing below it, so the
+    nesting check honors it too. So a tmp_path inside some other work tree (a
+    basetemp under a worktree, a CI workspace) changes nothing here. No git runs
+    in tmp_path itself.
+    """
+    from tests.utils.git_isolation import isolate_git_at
+
+    isolate_git_at(tmp_path, monkeypatch)
+
+
+def test_an_empty_label_is_passed_for_a_directory_outside_a_repository(
+    tmp_path, _git_stops_at_tmp
+):
+    """Empty, not absent: the scan in the container then records no scan_source
+    and archives nothing, instead of asking git there, which sees only the
+    mount."""
+    source = tmp_path / "not-a-repo"
+    source.mkdir()
+
+    cmd = _assemble_run_command(
+        **_base_assemble_kwargs(source_dir=source, output_dir=tmp_path / "out")
+    )
+
+    assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE="]
+
+
+def test_an_empty_label_is_passed_for_a_clone_nested_in_another_repository(
+    tmp_path, _git_stops_at_tmp
+):
+    """The host sees the outer repository. Git in the container would see only
+    the mount, a repository with nothing above it, and call it "."."""
+    outer = _git_repo(tmp_path / "outer")
+    nested = _git_repo(outer / "third_party" / "x")
+
+    cmd = _assemble_run_command(
+        **_base_assemble_kwargs(source_dir=nested, output_dir=tmp_path / "out")
+    )
+
+    assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE="]
+
+
+def test_workspace_mode_passes_the_mounts_own_label(tmp_path, _git_stops_at_tmp):
+    """The label names the workspace mount. Projects in the container use git's
+    view only when it is ".", the mount being a repository's root."""
+    source = _git_repo(tmp_path / "repo") / "services"
+    source.mkdir(parents=True)
+
+    cmd = _assemble_run_command(
+        **_base_assemble_kwargs(
+            source_dir=source,
+            output_dir=tmp_path / "out",
+            workspace_relative_file="fixture.code-workspace",
+        )
+    )
+
+    assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE=services"]
+
+
+def test_an_empty_label_is_passed_for_a_submodule(tmp_path, _git_stops_at_tmp):
+    """A submodule's root is "." to git, as the superproject's root is; the two
+    must not share a scope, so the label is empty and nothing is archived."""
+    import subprocess
+
+    def git(*args, cwd):
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "protocol.file.allow=always",
+                *args,
+            ],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+        )
+
+    library = _git_repo(tmp_path / "library")
+    (library / "README.md").write_text("library\n", encoding="utf-8")
+    git("add", "README.md", cwd=library)
+    git("commit", "-qm", "library", cwd=library)
+    root = _git_repo(tmp_path / "super")
+    (root / "README.md").write_text("super\n", encoding="utf-8")
+    git("add", "README.md", cwd=root)
+    git("commit", "-qm", "super", cwd=root)
+    git("submodule", "add", "-q", library.as_uri(), "vendor/lib", cwd=root)
+
+    cmd = _assemble_run_command(
+        **_base_assemble_kwargs(
+            source_dir=root / "vendor" / "lib", output_dir=tmp_path / "out"
+        )
+    )
+
+    assert _scan_source_env(cmd) == ["ASH_SCAN_SOURCE="]
+
+
 def test_assemble_run_command_image_argument_position():
     """Image name appears before the 'ash' subcommand."""
     image = "automated-security-helper:non-root"

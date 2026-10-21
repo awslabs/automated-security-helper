@@ -35,6 +35,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScannerConfig,
     NpmAuditScannerConfigOptions,
 )
+from tests.utils.env_assertions import differing_names
+from tests.utils.npm_audit_reports import PNPM_CLEAN
 
 
 def _scanner(context, *, offline: bool):
@@ -74,7 +76,8 @@ def _run_scan(scanner, tmp_path, returned=None):
 
     def fake_run(command, **kwargs):
         captured.append(kwargs)
-        return {"stdout": '{"vulnerabilities":{}}', "returncode": 0}
+        # pnpm's own clean report: an npm-shaped document is not a pnpm report.
+        return {"stdout": PNPM_CLEAN, "returncode": 0}
 
     with (
         patch(
@@ -154,6 +157,8 @@ def test_online_mode_passes_no_environment_override(
     inherited = {k: v for k, v in snapshot_environ().items() if k != "YARN_IGNORE_PATH"}
     for kw in captured:
         env = kw.get("env") or {}
-        assert {k: v for k, v in env.items() if k != "YARN_IGNORE_PATH"} == inherited, (
+        seen = {k: v for k, v in env.items() if k != "YARN_IGNORE_PATH"}
+        # By names: a failure would print the values of every variable that differs.
+        assert differing_names(seen, inherited) == [], (
             "online scan changed the inherited environment"
         )

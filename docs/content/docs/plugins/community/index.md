@@ -77,7 +77,7 @@ pip install <my-plugin-package-name>
 ### Configuration
 
 ```yaml
-# Example configuration in .ash.yaml
+# Example configuration in your ASH config file (.ashrc.yaml in a new project)
 plugins:
   my-plugin:
     enabled: true

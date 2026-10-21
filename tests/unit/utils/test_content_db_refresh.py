@@ -36,6 +36,7 @@ from automated_security_helper.utils.sandbox.scope import (
     active_scope,
     sandbox_scope,
 )
+from tests.utils.helpers import importing_this_checkout
 
 
 #: trivy's own opt-outs of its database updates, which the refresh honors; cleared
@@ -688,7 +689,9 @@ def test_two_scans_in_separate_processes_take_turns(tmp_path):
         """
     )
     procs = [
-        subprocess.Popen([sys.executable, "-c", program])  # nosec B603 - fixed argv
+        subprocess.Popen(  # nosec B603 - fixed argv
+            [sys.executable, "-c", importing_this_checkout(program)]
+        )
         for _ in range(2)
     ]
     assert [p.wait(timeout=60) for p in procs] == [0, 0]
@@ -746,7 +749,10 @@ class TestScannersUseThePreparedDatabase:
             _, _, env = scanner._execute_scan(tmp_path, "source", [])
         (call,) = prepared
         assert call.tool == "grype" and call.offline is False
-        assert call.cache_dir == refresh.default_cache_dir("grype", env)
+        # Out of the assertion: env is the scan's whole environment, which a failure
+        # would print.
+        expected_cache = refresh.default_cache_dir("grype", env)
+        assert call.cache_dir == expected_cache
         for name, value in refresh.GRYPE_PREPARED_ENV.items():
             assert env[name] == value, name
 
@@ -756,7 +762,9 @@ class TestScannersUseThePreparedDatabase:
         scanner = self._grype(test_plugin_context)
         _, _, env = scanner._execute_scan(tmp_path, "source", [])
         assert prepared == []
-        assert (env or {}).get("GRYPE_DB_AUTO_UPDATE") != "false"
+        # The one value, not the scan's whole environment, which a failure would print.
+        auto_update = (env or {}).get("GRYPE_DB_AUTO_UPDATE")
+        assert auto_update != "false"
 
     def test_grype_sandboxed_offline_refreshes_nothing(
         self, prepared, test_plugin_context, tmp_path, monkeypatch
@@ -1059,3 +1067,32 @@ class TestOncePerScan:
                 **_where(tmp_path),
             )
         assert len(recorder.calls) == 2
+
+
+def test_a_failed_updates_excerpt_hides_a_value_straddling_its_cut(
+    monkeypatch, tmp_path
+):
+    """The tool's stderr is redacted BEFORE the 1000-character head cut.
+
+    The 992 filler characters put the head cut inside the value: cut first,
+    the message would keep the fragment ``EDGE-SEC``, which the downstream
+    whole-spelling redaction cannot match.
+    """
+    value = "EDGE-SECRET-9271"
+    failing = _Recorder(returncode=1, stderr="y" * 992 + value + " then " + "z" * 1100)
+    monkeypatch.setattr(refresh, "spawn_run", failing)
+
+    with pytest.raises(ScannerError) as raised:
+        refresh.prepare_content_db(
+            "grype",
+            tmp_path,
+            offline=False,
+            scan_id="s",
+            executable="grype",
+            values=[value],
+        )
+
+    message = str(raised.value)
+    assert "could not update" in message, message
+    assert value not in message, message
+    assert "EDGE-SEC" not in message, message

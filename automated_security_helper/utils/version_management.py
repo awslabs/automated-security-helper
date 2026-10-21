@@ -6,6 +6,7 @@ from pyproject.toml, ensuring a single source of truth.
 """
 
 import re
+import sys
 from pathlib import Path
 from typing import Optional
 import importlib.metadata
@@ -13,20 +14,29 @@ import importlib.metadata
 # tomllib is stdlib only from Python 3.11. pyproject.toml declares
 # requires-python = ">=3.10", and this module is imported by the package
 # __init__, so an unconditional "import tomllib" makes the whole package
-# unimportable on 3.10. Fall back to the already-declared `toml` dependency.
-try:  # pragma: no cover - branch depends on interpreter version
+# unimportable on 3.10. There it uses tomli, which pyproject.toml declares for
+# Python below 3.11, held below 2.4. tomllib was taken from tomli, and up to 2.3
+# tomli reads the same TOML 1.0; 2.4 added TOML 1.1 (a trailing comma in an
+# inline table, `\e`), which tomllib on 3.11-3.14 and the image's Python refuse.
+# With 2.4, a pyproject.toml that only TOML 1.1 reads was ASH's to the CLI on
+# 3.10 and to nothing else. It used `toml` 0.10, which implements TOML 0.5 and
+# refuses valid TOML 1.0 such as an array of mixed types, so on 3.10 the CLI
+# could call a tree "not ASH" that the image's clone step, on Python 3.12,
+# called ASH's.
+#
+# Chosen by version, not by catching the failed import: mypy reads a
+# sys.version_info test and checks only the branch for the Python it targets,
+# while a try/except import made it report the tomli import as missing, and
+# tomllib as defined twice, on 3.11 and later.
+if sys.version_info >= (3, 11):  # pragma: no cover - depends on the interpreter
     import tomllib
+else:  # pragma: no cover - Python 3.10
+    import tomli as tomllib
 
-    def _load_toml(path: Path) -> dict:
-        with open(path, "rb") as fh:
-            return tomllib.load(fh)
 
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10
-    import toml
-
-    def _load_toml(path: Path) -> dict:
-        with open(path, "r", encoding="utf-8") as fh:
-            return toml.load(fh)
+def _load_toml(path: Path) -> dict:
+    with open(path, "rb") as fh:
+        return tomllib.load(fh)
 
 
 def get_project_root() -> Path:

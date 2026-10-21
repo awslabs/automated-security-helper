@@ -255,7 +255,7 @@ quoted, and the exit code is explicitly marked as inferred rather than observed.
 
 ## Where this should live
 
-Standalone here so it did not have to be committed while fix lanes were in
+Standalone here so it did not have to be committed while the fixes were in
 flight. It belongs in the ASH repository near the other deployment tests once
 the fixes land — `deploy/cdk/test/` holds the unit tests for this stack, but this
 is an integration fixture and needs a home that can run docker.

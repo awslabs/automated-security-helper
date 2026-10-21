@@ -33,9 +33,16 @@ from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-import yaml
-
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.config_sources import (
+    describe_config_path,
+    is_config_parse_error,
+    read_config_file_literally,
+    resolve_config_document,
+    unparsed_config_reason,
+)
+from automated_security_helper.core.exceptions import ASHConfigUnparsedError
+from automated_security_helper.utils.error_text import error_text
 
 if TYPE_CHECKING:
     from automated_security_helper.config.client_config_policy import (
@@ -100,8 +107,12 @@ def _sha256_of_path(path: Path) -> str:
 def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
     """Parse + load every ``--profile`` spec into a registry dict.
 
-    Each profile is loaded via :meth:`AshConfig.from_file`, so the same
-    YAML/JSON/!ENV resolution path the regular CLI uses is in effect here.
+    Each profile is loaded as a run's configuration is
+    (``resolve_config.load_config_file_for_run``), so the same YAML/JSON/!ENV
+    resolution path the regular CLI uses is in effect here, and the profile knows
+    which of its values were read from the environment and the reference each
+    was written as: materialize_session_config writes those references, not the
+    values.
 
     Raises:
         ProfileRegistryError: on duplicate name, missing file, malformed
@@ -119,33 +130,45 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
             raise ProfileRegistryError(
                 f"--profile {name!r} points at missing file: {path}"
             )
+        unparsed: Optional[str] = None
         try:
             from automated_security_helper.config.operator_paths import (
                 not_delivered_by_a_client,
             )
 
-            from automated_security_helper.config.config_sources import (
-                load_config_with_references,
+            from automated_security_helper.config.resolve_config import (
+                load_config_file_for_run,
             )
 
             # The operator's file: a relative path in it is taken from its
             # directory, before the session's copy is written somewhere else
-            # (config/operator_paths.py). Read as AshConfig.from_file reads it,
-            # keeping what it read from the environment, so the session's copy
-            # holds each such value as the file wrote it and the scan reads it
-            # from the environment itself (materialize_session_config).
-            cfg = load_config_with_references(
+            # (config/operator_paths.py). Read as the run reads its
+            # configuration, keeping what it read from the environment, so the
+            # session's copy holds each such value as the file wrote it and the
+            # scan reads it from the environment itself
+            # (materialize_session_config).
+            cfg = load_config_file_for_run(
                 path, anchor_relative_paths=not_delivered_by_a_client
-            )
-        except yaml.YAMLError as exc:
-            raise ProfileRegistryError(
-                f"--profile {name!r} failed to parse {path}: {exc}"
-            ) from exc
+            )[1]
         except Exception as exc:
-            # Pydantic ValidationError, JSON decode errors, OSError, etc.
-            raise ProfileRegistryError(
-                f"--profile {name!r} failed to load {path}: {exc}"
-            ) from exc
+            if isinstance(exc, ASHConfigUnparsedError):
+                # A TOML parse refusal arrives already formatted: its message is
+                # the complete refusal and names the file, so the "failed to
+                # load <path>" frame would name the path twice.
+                unparsed = error_text(exc)
+            elif not is_config_parse_error(exc):
+                # ASHConfigValidationError (from_file's model refusal, described
+                # and redacted, with no pydantic error chained), OSError, etc.
+                raise ProfileRegistryError(
+                    f"--profile {name!r} failed to load {path}: {error_text(exc)}"
+                ) from exc
+            else:
+                # The parser's own words can quote the file
+                # (unparsed_config_reason).
+                unparsed = unparsed_config_reason(path, exc)
+        if unparsed is not None:
+            # Outside the handler, so the parser's error is not its context.
+            raise ProfileRegistryError(f"--profile {name!r}: {unparsed}")
         # Re-validate the *raw* YAML/JSON top-level keys against AshConfig
         # so operator typos in profile YAML fail at MCP boot rather than at
         # silently-ignored runtime. AshConfig.model_config has extra='ignore'
@@ -160,26 +183,37 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
         # Read by the loader's own reader, as from_file read it, so a profile that
         # uses !ENV or is TOML is checked rather than refused by a plain parser.
         try:
-            from automated_security_helper.config.config_sources import (
-                read_config_file,
-            )
-
-            raw = read_config_file(path)
             allowed = set(AshConfig.model_fields.keys())
             for finfo in AshConfig.model_fields.values():
                 if finfo.alias:
                     allowed.add(finfo.alias)
-            unknown = sorted(set(raw or {}) - allowed)
-            if unknown:
-                raise ProfileRegistryError(
-                    f"--profile {name!r} has unknown top-level field(s): "
-                    f"{', '.join(unknown)}"
-                )
+            # Every file the profile is built from: from_file follows its
+            # `extends` chain, so a base's typo is the same mistake as the
+            # profile's own and was ignored. The chain is resolved as from_file
+            # resolved it (bases confined to the profile's directory, an
+            # error naming no value read from the environment), and each
+            # file's own keys are read in its format (YAML, JSON, TOML, a
+            # pyproject.toml's [tool.ash] table) as the file writes them.
+            chain = resolve_config_document(path).chain
+            for source in dict.fromkeys(chain):
+                raw = read_config_file_literally(source)
+                unknown = sorted(set(raw or {}) - allowed)
+                if unknown:
+                    where = (
+                        ""
+                        if Path(source).resolve() == path.resolve()
+                        else f" in its base {describe_config_path(Path(source))}"
+                    )
+                    raise ProfileRegistryError(
+                        f"--profile {name!r} has unknown top-level field(s)"
+                        f"{where}: {', '.join(unknown)}"
+                    )
         except ProfileRegistryError:
             raise
         except Exception as exc:
             raise ProfileRegistryError(
-                f"--profile {name!r} re-validation against schema failed: {exc}"
+                f"--profile {name!r} re-validation against schema failed: "
+                f"{error_text(exc)}"
             ) from exc
         registry[name] = ProfileEntry(
             name=name,

@@ -289,8 +289,38 @@ async def test_validate_config(case, allowed, tmp_path, monkeypatch, snapshot):
 
 
 @pytest.mark.asyncio
-async def test_check_installation(snapshot):
-    assert await _call("check_installation", make_ctx()) == snapshot(name="result")
+async def test_check_installation(monkeypatch, snapshot, snapshot_normalizer):
+    """The installation report, for a host with every built-in scanner's tool but one.
+
+    Pinned as test_list_scanners pins the inventory: every dependency check passes
+    except grype's, no external version probe runs, the bundled scanners' versions
+    are registered as literals, and the `ash` executable is at a fixed path. So the
+    snapshot shows ready false with grype in missing_dependencies.
+    """
+    import shutil
+
+    from automated_security_helper.cli import mcp_tools
+    from automated_security_helper.core import scanner_inventory
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cdk_nag_scanner,
+    )
+
+    for cls in mcp_tools._builtin_scanner_classes():
+        satisfied = cls.__name__ != "GrypeScanner"
+        monkeypatch.setattr(
+            cls, "validate_plugin_dependencies", lambda self, ok=satisfied: ok
+        )
+    monkeypatch.setattr(scanner_inventory, "_probe_tool_version", lambda _: None)
+    monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "0.0.0-snapshot")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/opt/ash/bin/{name}")
+
+    reported = await _call("check_installation", make_ctx())
+    for entry in reported["result"]["scanners"]:
+        if entry.get("version"):
+            snapshot_normalizer.add_literal(
+                entry["version"], f"{entry['name'].upper()}_VERSION"
+            )
+    assert reported == snapshot(name="result")
 
 
 @pytest.mark.asyncio

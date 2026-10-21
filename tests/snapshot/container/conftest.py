@@ -184,6 +184,8 @@ class FakeOciRunner:
         self.calls.append(subcommand)
         step = {"build": self.build, "run": self.run}[subcommand]
         if subcommand == "run" and step.results_json is not None:
+            # surrogateescape: a lone surrogate such as "\udcff" is written as the
+            # byte it stands for, so a step can leave a file that is not UTF-8.
             results_json = (
                 completed_by(step.results_json, _outer_run_id(args, kwargs.get("env")))
                 if step.marks_completion
@@ -191,7 +193,7 @@ class FakeOciRunner:
             )
             _mounted_output_dir(args).joinpath(
                 "ash_aggregated_results.json"
-            ).write_text(results_json, encoding="utf-8")
+            ).write_text(results_json, encoding="utf-8", errors="surrogateescape")
         script = (
             "import sys\n"
             f"sys.stdout.write({step.stdout!r})\n"
@@ -224,8 +226,8 @@ def fake_docker(
     """Resolve ``docker`` to :data:`FAKE_DOCKER` and run :class:`FakeOciRunner` for it.
 
     The clock is pinned in run_ash_container as well, because the build command it
-    assembles carries ``BUILD_DATE_EPOCH=<now>`` and a failed build prints that
-    command. The buildx probe is answered "no", so the build is a plain
+    assembles for an offline build carries ``BUILD_DATE_EPOCH=<now>`` and a failed
+    build prints that command. The buildx probe is answered "no", so the build is a plain
     ``docker build`` whatever the machine's docker supports.
     """
     from automated_security_helper.interactions import run_ash_container

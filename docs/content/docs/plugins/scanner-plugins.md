@@ -119,6 +119,28 @@ instance, and records `exit_code` on each target's row. Start an override with
 tool runs (an empty tree, missing dependencies) does not report the previous
 target's code.
 
+### Declaring whether a scanner is Python-only
+
+`--python-only` (`--python-based-plugins-only`) runs only the scanners that need
+nothing but Python, and records every other scanner `SKIPPED` without looking for
+its tool. A scanner says which it is with the `python_only` class variable:
+
+```python
+from typing import ClassVar
+
+
+@ash_scanner_plugin
+class ApiScanner(ScannerPluginBase[ApiScannerConfig]):
+    # Calls a Python library in-process and starts no other program.
+    python_only: ClassVar[bool | None] = True
+```
+
+`True` puts the scanner in a `--python-only` run. `False` keeps it out: use it for a
+scanner that runs a binary, Node.js or anything else that is not a Python package. A
+scanner that declares nothing (`None`, the default) counts as Python-only only when
+it runs its tool through uv (`use_uv_tool = True`), so an in-process scanner like
+the one above is left out of a `--python-only` run unless it declares `True`.
+
 ## Scanner Plugin Configuration
 
 Define a configuration class for your scanner:
@@ -317,6 +339,10 @@ The following built-in scanners use UV tool integration:
 - **Checkov**: Infrastructure-as-Code scanning
 - **Semgrep**: Static Application Security Testing
 
+## Dependency Checks That Resolve the Tool Off PATH
+
+`ash dependencies install` verifies an installed tool with a PATH lookup. A scanner whose `validate_plugin_dependencies` can start the tool anyway (it runs a library in-process, or finds the tool its own way) sets `resolves_tool_off_path: ClassVar[bool] = True` on the class, and the installer asks the check instead of failing the tool for the PATH. The flag has no effect on a UV tool scanner: a tool run through `uv tool run` is judged by `uv tool list`, not by a PATH lookup or by this check. See the [Plugin Development Guide](development-guide.md) for when the check is asked and why it must not install anything itself.
+
 ## Scanner Plugin Best Practices
 
 1. **Generate SARIF Reports**: SARIF is the standard format for security findings
@@ -331,7 +357,7 @@ The following built-in scanners use UV tool integration:
 Configure your scanner in the ASH configuration file:
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   custom-scanner:
     enabled: true

@@ -243,9 +243,10 @@ def test_the_fallback_says_so_on_the_pr(workflow):
     steps = _steps(workflow)
     pr_step = next(s for s in steps if "gh pr create" in str(s.get("run", "")))
     env = pr_step.get("env") or {}
+    app_token_used = str(env.get("APP_TOKEN_USED", ""))
     run = str(pr_step.get("run", ""))
 
-    assert "steps.appcreds.outputs.present" in str(env.get("APP_TOKEN_USED", "")), (
+    assert "steps.appcreds.outputs.present" in app_token_used, (
         "The PR step cannot tell whether it is running on the App token."
     )
     assert "Approve workflows to run" in run, (

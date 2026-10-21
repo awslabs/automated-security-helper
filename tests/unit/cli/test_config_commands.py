@@ -6,7 +6,11 @@ import yaml
 from unittest.mock import patch
 from typer.testing import CliRunner
 
-from automated_security_helper.cli.config import config_app, IndentableYamlDumper
+from automated_security_helper.cli.config import (
+    INVALID_CONFIG_EXIT_CODE,
+    config_app,
+)
+from automated_security_helper.config.config_writer import IndentableYamlDumper
 
 
 runner = CliRunner()
@@ -79,7 +83,7 @@ class TestConfigGet:
             config_app,
             ["get", str(tmp_path / "nonexistent.yaml")],
         )
-        assert result.exit_code == 3
+        assert result.exit_code == INVALID_CONFIG_EXIT_CODE
         assert "nonexistent.yaml" in "".join(result.output.split())
 
     def test_get_existing_config(self, tmp_path):
@@ -114,7 +118,10 @@ class TestConfigGetRefusesUnparseableFiles:
 
     def _assert_refused(self, result, path):
         assert result.exit_code == 3, result.output
-        assert "Invalid configuration: could not parse" in result.output
+        # The parse refusal is printed as it is: it already names the file and
+        # says it could not be parsed, with no restating header (W2).
+        assert "could not be parsed" in result.output
+        assert "could not parse" not in result.output.replace("could not be parsed", "")
         assert str(path) in result.output
         # The defaults were not printed in its place.
         assert "global_settings" not in result.output
@@ -177,7 +184,7 @@ class TestConfigUpdate:
             config_app,
             ["update", str(tmp_path / "nonexistent.yaml"), "--set", "project_name=new"],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == INVALID_CONFIG_EXIT_CODE
 
     def test_update_dry_run(self, tmp_path):
         config_path = tmp_path / ".ash.yaml"
@@ -255,35 +262,46 @@ class TestConfigValidate:
             config_app,
             ["validate", "--config", "/nonexistent/path.yaml"],
         )
-        assert result.exit_code == 3
+        assert result.exit_code == INVALID_CONFIG_EXIT_CODE
 
     def test_validate_valid_config(self, tmp_path):
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text("project-name: test\n")
 
+        from automated_security_helper.config.config_validator import ConfigCheck
+
         with patch(
-            "automated_security_helper.config.config_validator.ConfigValidator.validate_config_file"
-        ) as mock_validate:
-            mock_validate.return_value = (True, [])
+            "automated_security_helper.config.config_validator.ConfigValidator.check_config_file"
+        ) as mock_check:
+            mock_check.return_value = ConfigCheck()
             result = runner.invoke(
                 config_app,
                 ["validate", "--config", str(config_path)],
             )
             assert result.exit_code == 0
+            mock_check.assert_called_once()
 
     def test_validate_invalid_config(self, tmp_path):
+        from automated_security_helper.config.config_validator import ConfigCheck
+
         config_path = tmp_path / ".ash.yaml"
         config_path.write_text("project-name: test\ninvalid_section: true\n")
 
         with patch(
-            "automated_security_helper.config.config_validator.ConfigValidator.validate_config_file"
-        ) as mock_validate:
-            mock_validate.return_value = (False, ["Invalid section: invalid_section"])
+            "automated_security_helper.config.config_validator.ConfigValidator.check_config_file"
+        ) as mock_check:
+            mock_check.return_value = ConfigCheck(
+                errors=[
+                    "Invalid value at 'invalid_section': Extra inputs are not permitted"
+                ]
+            )
             result = runner.invoke(
                 config_app,
                 ["validate", "--config", str(config_path)],
             )
-            assert result.exit_code == 1
+            # 3: the exit code a scan gives for an invalid configuration.
+            assert result.exit_code == 3
+            assert "invalid_section" in result.output
 
 
 class TestConfigValidatePluginDependencies:
@@ -294,7 +312,7 @@ class TestConfigValidatePluginDependencies:
             config_app,
             ["validate-plugin-dependencies", str(tmp_path / "nonexistent.yaml")],
         )
-        assert result.exit_code == 1
+        assert result.exit_code == INVALID_CONFIG_EXIT_CODE
 
     def test_valid_config_passes(self, tmp_path):
         config_path = tmp_path / ".ash.yaml"

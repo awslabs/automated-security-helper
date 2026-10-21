@@ -308,20 +308,16 @@ class TestRoundTrip:
         (source / "full").mkdir()
         (source / "full" / "f.txt").write_text("f", encoding="utf-8")
 
-        assert (
-            run_helper(
-                helper, ["upload", str(source), bucket, "run"], child_env
-            ).returncode
-            == 0
-        )
+        uploaded = run_helper(
+            helper, ["upload", str(source), bucket, "run"], child_env
+        ).returncode
+        assert uploaded == 0
 
         destination = tmp_path / "back"
-        assert (
-            run_helper(
-                helper, ["download", bucket, "run", str(destination)], child_env
-            ).returncode
-            == 0
-        )
+        downloaded = run_helper(
+            helper, ["download", bucket, "run", str(destination)], child_env
+        ).returncode
+        assert downloaded == 0
 
         assert (destination / "full" / "f.txt").is_file()
         assert not (destination / "empty").exists()
@@ -1132,7 +1128,7 @@ class TestCommittedBuildspecCommands:
         than an unexplained red. The shard upload deliberately has no such
         suffix, which the test above depends on.
 
-        Owned by another lane's file; reported rather than changed.
+        Another file owns this; reported rather than changed.
         """
         merge = _merge_buildspec()
         command = helper_invocation(merge, "post_build", "upload")

@@ -229,8 +229,7 @@ class TestIgnorePathLinting:
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
         assert len(ignore_path_issues) == 1
-        assert "docs" in ignore_path_issues[0].message
-        assert "/**" in ignore_path_issues[0].message
+        assert "'docs/**/*'" in ignore_path_issues[0].message
 
     def test_respects_source_dir_parameter(self, tmp_path):
         """The source_dir parameter should be used for resolving paths."""
@@ -318,8 +317,8 @@ class TestIgnorePathValidation:
             config_with_dir_ignore_path
         )
 
-        # Should not be valid because of the path warning
-        assert not is_valid
+        # A scan accepts the path, so the file is valid; the warning is listed.
+        assert is_valid
         assert any("'tests/test_data/'" in e for e in errors), errors
 
     def test_validate_passes_with_valid_paths(self, config_with_valid_ignore_paths):
@@ -351,7 +350,7 @@ class TestIgnorePathValidation:
             config_with_suppression_dir_path
         )
 
-        assert not is_valid
+        assert is_valid
         assert any("'docs/**/*'" in e for e in errors), errors
 
     def test_validate_with_source_dir(self, tmp_path):
@@ -377,9 +376,18 @@ class TestIgnorePathValidation:
             config_path, source_dir=source_dir
         )
 
-        assert not is_valid
+        assert is_valid
         path_errors = [e for e in errors if "'vendor/'" in e]
         assert len(path_errors) == 1, errors
+
+
+#: The advice for a suppression path "docs/" is whatever the suppression matcher
+#: makes of it: 'docs/**/*' while the matcher reads the trailing slash as written,
+#: as it does today (file_path_matches("docs/a.py", "docs/") is False), and none
+#: once it reads "docs/" as the directory's files. The expectation is taken from
+#: the matcher, so a matcher that changes turns this cell red until the advice
+#: changes with it.
+_FOLLOWS_THE_MATCHER = "follows-the-matcher"
 
 
 @pytest.mark.parametrize("checker", ["lint", "validate"])
@@ -389,7 +397,7 @@ class TestIgnorePathValidation:
         ("ignore_paths", "docs", "'docs/'"),
         ("ignore_paths", "docs/", None),
         ("suppressions", "docs", "'docs/**/*'"),
-        ("suppressions", "docs/", "'docs/**/*'"),
+        ("suppressions", "docs/", _FOLLOWS_THE_MATCHER),
     ],
 )
 def test_one_spelling_for_every_file_inside_a_directory(
@@ -397,9 +405,16 @@ def test_one_spelling_for_every_file_inside_a_directory(
 ):
     """``ash config lint`` and ``ash config validate`` give the spelling the scan
     reads as "every file inside the directory": ``docs/`` for an ignore path, and
-    ``docs/**/*`` for a suppression path, whose trailing slash is literal and where
-    ``docs/**`` would also match a path named exactly ``docs``. An ignore path
-    already ending in ``/`` gets no advice."""
+    ``docs/**/*`` for a suppression path, where ``docs/**`` would also match a
+    path named exactly ``docs``. A path already ending in ``/`` gets no advice
+    when the matcher reads it as the directory's files: an ignore path always,
+    a suppression path as _FOLLOWS_THE_MATCHER says."""
+    if advice == _FOLLOWS_THE_MATCHER:
+        from automated_security_helper.utils.suppression_matcher import (
+            file_path_matches,
+        )
+
+        advice = None if file_path_matches("docs/a.py", "docs/") else "'docs/**/*'"
     entry = {"path": path, "reason": "r"}
     if section == "suppressions":
         entry["rule_id"] = "R1"

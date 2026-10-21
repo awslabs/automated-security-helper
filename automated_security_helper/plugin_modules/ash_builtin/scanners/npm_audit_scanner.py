@@ -4,8 +4,9 @@ import copy
 import json
 import logging
 import re
+import secrets
 from pathlib import Path
-from typing import Annotated, ClassVar, Dict, List, Literal, Any
+from typing import Annotated, ClassVar, Dict, List, Literal, Any, Sequence
 
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -19,6 +20,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -37,12 +39,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ReportingDescriptor,
     Invocation,
 )
-from automated_security_helper.utils.get_scan_set import (
-    honors_ignore_files,
-    scan_set,
-)
+from automated_security_helper.utils.error_text import ESCAPE_CODES, shown_tool_stderr
+from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.link_exclusions import drop_ignored
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.package_identity import (
@@ -59,6 +59,7 @@ from automated_security_helper.utils.package_manager_child import (
     refused_inputs,
 )
 from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
 
 # The top-level key each package manager's audit report always carries, clean or
@@ -67,7 +68,33 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 # _parse_yarn_audit, which decides for yarn whether a report came back.
 _REPORT_KEY = {"npm": "vulnerabilities", "pnpm": "advisories"}
 
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# The shared escape pattern: every complete CSI or OSC sequence, the same set
+# every other reader of tool output strips, so no side strips a code another
+# keeps (a narrower CSI-only copy here left OSC hyperlinks in yarn's version
+# answer and its NDJSON stdout).
+_ANSI_ESCAPE = ESCAPE_CODES
+
+
+def _without_an_exit_code(result: Dict[str, Any]) -> str:
+    """Why an audit whose response has an error and no exit code produced no
+    report. The flags are read before the code: with ``post_run_error`` the audit
+    ran and ASH stopped it before it finished; without, it never ran."""
+    if result.get("post_run_error") is True:
+        return f"did not finish: {result['error']}"
+    return f"did not run: {result['error']}"
+
+
+def _has_problem_text(problems: List[str]) -> bool:
+    """Whether the kept segments say anything.
+
+    The parse loops keep every non-event segment, whitespace-only ones
+    included, so a value that spans such a line keeps its whole spelling for
+    the redaction. Whether yarn REPORTED anything is this question instead:
+    whitespace alone is no error of yarn's, and must neither demote a real
+    advisory stream nor turn the no-report wording into an error wording
+    with nothing to show."""
+    return any(piece.strip() for piece in problems)
+
 
 # Advisory severity to SARIF level, for npm, yarn and pnpm alike.
 _SEVERITY_LEVEL = {
@@ -108,9 +135,21 @@ class NpmAuditScannerConfig(ScannerPluginConfigBase):
     ] = NpmAuditScannerConfigOptions()
 
 
+#: Why npm-audit does not run offline; see NpmAuditScanner.validate_plugin_dependencies.
+_OFFLINE_REASON = (
+    "offline: npm, yarn and pnpm audit a lockfile by asking the registry for its "
+    "advisories, and offline npm audit reads none and reports every lockfile "
+    "clean, so ASH does not run it offline. Scan online, or exclude npm-audit "
+    "with --exclude-scanners"
+)
+
+
 @ash_scanner_plugin
 class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
+
+    #: npm-audit runs npm, yarn or pnpm. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
 
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         network=True,
@@ -124,7 +163,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         env_names=("YARN_IGNORE_PATH", "YARN_RC_FILENAME"),
     )
 
-    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+    # npm, yarn and pnpm audit by asking the registry, so offline there is nothing to
+    # run: validate_plugin_dependencies says no, as snyk-code's does.
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
     def model_post_init(self, context):
         if self.config is None:
@@ -164,12 +205,23 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
 
+        False offline, whatever is installed. npm, yarn and pnpm audit a lockfile
+        by asking the registry for the advisories that match it, and offline there
+        is no registry to ask. npm does not say so: ``npm audit --json --offline``
+        on a lockfile pinning lodash 4.17.15, which has published advisories,
+        prints ``"vulnerabilities": {}`` and exits 0 (npm 10.9.4), which read as a
+        clean audit. The reason is recorded for the MISSING row; with no lockfile to
+        audit ScanPhase records the scanner SKIPPED instead.
+
         Returns:
             True if validation passes, False otherwise
 
         Raises:
             ScannerError: If validation fails
         """
+        if self._scanner_offline():
+            self.dependency_unavailable_reason = _OFFLINE_REASON
+            return False
         found = find_executable(self.command)
         if found:
             self.tool_version = self._run_subprocess(
@@ -179,6 +231,91 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             ).get("stdout", "1.0.0")
 
         return found is not None
+
+    #: Lockfiles npm-audit audits, in the order it looks for one beside a package.json.
+    #: npm reads npm-shrinkwrap.json ahead of package-lock.json when both exist, and
+    #: audits either; yarn.lock and pnpm-lock.yaml are audited with their own tools.
+    LOCKFILE_NAMES: ClassVar[tuple[str, ...]] = (
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "npm-shrinkwrap.json",
+        "package-lock.json",
+    )
+
+    def _package_manifests(self, target_type: str) -> List[str]:
+        """Every package.json in one tree: the scan set, or the work directory.
+
+        The scan set leaves out a link whose target is outside the tree, so a
+        package whose package.json is such a link would vanish here and its in-tree
+        lockfile go unaudited with nothing failing. Such a package is taken from its
+        lockfile instead, when a package.json sits beside it (by lstat) that the
+        list left out, once per directory; scan() then refuses it. A lockfile with no
+        package.json beside it is not a package.
+
+        The scan set is taken without the files the global ignore paths ignore, the
+        entries that have not expired (the list the scanners are given), matched as
+        ASH matches them when it drops findings (``link_exclusions.drop_ignored``):
+        npm-audit read an ignored package's lockfile, and its results held it.
+        """
+        global_settings = getattr(
+            getattr(self.context, "config", None), "global_settings", None
+        )
+        orig_scannable = (
+            list(self.context.work_dir.glob("**/*.*"))
+            if target_type == "converted"
+            else drop_ignored(
+                scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                    run_id=getattr(self.context, "run_id", None),
+                ),
+                self.context.source_dir,
+                active_ignore_paths(
+                    getattr(global_settings, "ignore_paths", None) or []
+                ),
+            )
+        )
+        manifests = [Path(f) for f in orig_scannable if Path(f).name == "package.json"]
+        listed = {manifest.parent for manifest in manifests}
+        for f in orig_scannable:
+            pf = Path(f)
+            manifest = pf.parent / "package.json"
+            if (
+                pf.name in self.LOCKFILE_NAMES
+                and pf.parent not in listed
+                and (manifest.is_symlink() or manifest.exists())
+            ):
+                listed.add(pf.parent)
+                manifests.append(manifest)
+        return [manifest.as_posix() for manifest in manifests]
+
+    @classmethod
+    def _lockfile_beside(cls, package_file: str | Path) -> Path | None:
+        """The lockfile npm-audit audits for *package_file*, or None."""
+        for name in cls.LOCKFILE_NAMES:
+            candidate = Path(package_file).parent.joinpath(name)
+            if candidate.exists():
+                return candidate
+        return None
+
+    def nothing_to_scan_reason(self) -> str | None:
+        """None when either tree holds a package.json with a lockfile beside it.
+
+        npm, yarn and pnpm audit a lockfile, so a package.json without one is not
+        audited; that is the selection ``scan()`` makes. See the base class.
+        """
+        trees = ["source"]
+        work_dir = Path(self.context.work_dir)
+        if work_dir.is_dir() and any(work_dir.rglob("*.*")):
+            trees.append("converted")
+        for target_type in trees:
+            for package_file in self._package_manifests(target_type):
+                if self._lockfile_beside(package_file) is not None:
+                    return None
+        return (
+            "no lockfile (package-lock.json, npm-shrinkwrap.json, yarn.lock or "
+            "pnpm-lock.yaml) beside a package.json in the scanned files"
+        )
 
     def _has_install_commands(self) -> bool:
         """Check if scanner has non-empty custom install commands."""
@@ -273,10 +410,47 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         )
 
     @staticmethod
+    def _v1_report_has_evidence(document: Any) -> bool:
+        """Whether *document* is an npm v1 audit document with evidence the
+        lockfile was evaluated: its ``advisories`` is a dict holding findings,
+        or the counting ``metadata`` dict every real clean report writes.
+
+        One answer for every reader of the v1 shape - npm 6's report, pnpm's,
+        and yarn 2/3's document - so the readers cannot drift apart. A truthy
+        ``advisories`` of another type would otherwise be graded a clean
+        report with zero findings, and an empty one beside a null ``metadata``
+        would reach the SARIF conversion and crash there instead of reading as
+        an audit without a report; both are what a truncated or broken tool
+        emits, not evidence.
+
+        ``advisories`` counts only through the records it actually yields
+        (``_v1_advisory_records``): a dict of entries that are not advisory
+        objects, or that name no module, is as empty as ``{}``, and grading it
+        on truthiness alone read such a document as clean with zero findings."""
+        if not isinstance(document, dict):
+            return False
+        advisories = document.get("advisories")
+        if not isinstance(advisories, dict):
+            return False
+        if isinstance(document.get("metadata"), dict):
+            return True
+        return bool(NpmAuditScanner._v1_advisory_records(advisories))
+
+    @staticmethod
     def _audit_failure(
-        binary: str, result: Dict[str, Any], audit_results: Any
+        binary: str,
+        result: Dict[str, Any],
+        audit_results: Any,
+        values: Sequence[str] | None = (),
     ) -> str | None:
         """Why one audit produced no report, or None when it produced one.
+
+        ``values`` are the caller's env-read values: the stderr excerpt is
+        redacted with them BEFORE it is cut, so the cut cannot split a value
+        and leave a fragment the downstream whole-spelling redaction misses.
+        ``None`` means the caller's values hook raised: the verdict is still
+        given, but the stderr excerpt is dropped rather than shown with an
+        empty value set, which would print what the values would have hidden.
 
         npm exits 1 both for "vulnerabilities found" and for "could not reach
         the audit endpoint", so the exit code alone cannot tell them apart. When
@@ -286,8 +460,18 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         as ENOLOCK, write ``{"error": {"code": ..., "summary": ...}}``. pnpm
         writes nothing to stdout and its error to stderr. Each of those used to
         convert to zero findings and report PASSED.
+
+        A timed-out audit is a failure whatever it printed: the tool was
+        stopped, so the document on stdout is whatever had been written by
+        then, and treating a complete-looking one as a report swallowed the
+        timeout. And an exit code of 0 proves nothing by itself: a proxy that
+        answers HTML with 200, or a wrapper that eats the output, leaves no
+        report while the exit code alone reads as a clean run.
         """
         report_key = _REPORT_KEY.get(binary)
+        if result.get("timed_out"):
+            reason = str(result.get("error") or "the command was stopped")
+            return f"{binary} audit timed out, so its report is incomplete: {reason}"
         if isinstance(audit_results, dict) and "error" in audit_results:
             if report_key is None or report_key not in audit_results:
                 error = audit_results.get("error")
@@ -306,18 +490,67 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             return None
         returncode = result.get("returncode")
         if returncode is None and "error" in result:
-            return f"{binary} audit did not run: {result['error']}"
+            return f"{binary} audit {_without_an_exit_code(result)}"
+        # A report counts exactly when it carries evidence the tool evaluated
+        # the lockfile: findings under the report key, or the metadata block
+        # every real clean report writes (npm 7+ counts its dependencies there,
+        # pnpm its advisory totals). A bare report key with nothing else is
+        # what a truncated or broken tool emits, and grading it clean would say
+        # the dependencies were checked when nothing shows they were.
+        if binary == "npm" and NpmAuditScanner._v1_report_has_evidence(audit_results):
+            # npm 6 and earlier write the v1 report (advisories and the
+            # counting metadata block), which the SARIF converter reads; it
+            # counts as a report under the same evidence rule.
+            return None
+        if report_key == "advisories":
+            # pnpm writes the v1 shape, so its evidence answer is the one
+            # every reader of that shape gives (_v1_report_has_evidence).
+            if NpmAuditScanner._v1_report_has_evidence(audit_results):
+                return None
+        elif (
+            isinstance(audit_results, dict)
+            and isinstance(audit_results.get(report_key), dict)
+            and (
+                audit_results[report_key]
+                or isinstance(audit_results.get("metadata"), dict)
+            )
+        ):
+            # npm 7+'s own shape, held to the same bar: findings under the
+            # report key as a dict, or the counting metadata dict. A truthy
+            # value of another type, or a null metadata beside an empty key,
+            # is a truncated or broken reply, not evidence.
+            return None
         if returncode in (None, 0):
-            return None
-        if isinstance(audit_results, dict) and report_key in audit_results:
-            return None
-        stderr_lines = [
-            line.strip()
-            for line in _ANSI_ESCAPE.sub(
-                "", str(result.get("stderr") or "")
-            ).splitlines()
-            if line.strip() and "complete log of this run" not in line
-        ]
+            # Exit 0 with no parseable report: nothing was checked against the
+            # lockfile, and the exit code alone cannot say otherwise. A
+            # response with no exit code at all is worded as that, not as a 0.
+            stdout = str(result.get("stdout") or "")
+            what = (
+                "printing nothing"
+                if not stdout.strip()
+                else "with output that is not an audit report"
+            )
+            ended = (
+                "exited 0" if returncode == 0 else "ended with no exit code recorded"
+            )
+            return f"{binary} audit {ended} {what}, so no advisory was checked"
+        # REDACTED BEFORE the excerpt is cut: the [:300] below could split a
+        # value and leave a fragment the whole-spelling redaction misses.
+        # shown_tool_stderr strips every complete escape code itself before
+        # matching, so a non-color escape inside a value ("EDGE\x1b[KSECRET")
+        # cannot split the match. With no values (the hook raised) the
+        # excerpt is dropped: the message still names the exit code.
+        stderr_lines = (
+            []
+            if values is None
+            else [
+                line.strip()
+                for line in shown_tool_stderr(
+                    str(result.get("stderr") or ""), values
+                ).splitlines()
+                if line.strip() and "complete log of this run" not in line
+            ]
+        )
         detail = f": {' / '.join(stderr_lines[:3])[:300]}" if stderr_lines else ""
         return f"{binary} audit exited {returncode} without an audit report{detail}"
 
@@ -333,7 +566,28 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         return int(match.group(1)) if match else None
 
     @staticmethod
-    def _yarn_error_detail(text: Any) -> str:
+    def _yarn_event(raw: str) -> Any:
+        """The NDJSON event on one line of yarn output, or None.
+
+        The line is read as written first, non-strictly so a raw control
+        character inside a JSON string parses: the event's data then keeps
+        the spelling a value holding escape codes was read with. A line that
+        does not parse as written (JSON wrapped in color codes) is read from
+        its stripped form.
+        """
+        as_written = raw.strip()
+        stripped = ESCAPE_CODES.sub("", raw).strip()
+        for candidate, strict in ((as_written, False), (stripped, True)):
+            if not candidate.startswith("{"):
+                continue
+            try:
+                return json.loads(candidate, strict=strict)
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def _yarn_error_detail(cls, text: Any, values: Sequence[str] | None = ()) -> str:
         """The lines of yarn output that say what went wrong, joined and capped.
 
         yarn 1 writes errors as NDJSON ``{"type": "error"}`` events, which are
@@ -341,33 +595,127 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         often after a line of minified source; stack frames and source lines are
         dropped, and lines naming an error (``Error:``, ``[HTTPError]:``) are
         preferred over the rest.
+
+        ``values`` are the caller's env-read values, redacted out of
+        everything printed BEFORE every split and cut below -- a value can
+        hold a line break (a PEM, a multi-line token), a split is a cut, and
+        per-line redaction matches neither half -- and AFTER the NDJSON
+        parse, because a value that is also a JSON key or event-type word
+        ("error" from a log-level variable, "data") would otherwise rewrite
+        the event before ``json.loads`` reads it, the event would stop
+        looking like an error, and yarn 1's only error message would be
+        dropped. The decoded text is redacted as ONE piece in stream order
+        (each error event's data closed with its line's own terminator, each
+        run of plain lines with its own separators): a value whose line
+        break falls exactly at a segment boundary has no whole spelling
+        inside any one segment, so per-segment redaction would print both
+        halves. Each event's message is still its data's first redacted
+        line, recovered by a marker line carrying a per-call nonce; when the
+        marker split no longer maps back to the segments (a value redacted
+        across a boundary, or text that matched the marker), attribution is
+        dropped and the one redacted text is read as plain lines instead.
+        ``None`` means the caller's values hook raised: no detail, rather
+        than lines shown with an empty value set, which would print what the
+        values would have hidden.
         """
+        if values is None:
+            return ""
         lines: List[str] = []
         named: List[str] = []
-        for raw in _ANSI_ESCAPE.sub("", str(text or "")).splitlines():
-            line = raw.strip()
-            try:
-                event = json.loads(line) if line.startswith("{") else None
-            except ValueError:
-                event = None
+        # The text that is decoded and redacted keeps the raw spelling on
+        # both arms: a value that itself holds codes is matched as written,
+        # and shown_tool_stderr strips the redacted result, so what prints
+        # holds no code. A plain line is kept as written. An error event's
+        # data comes from the line as written when that line parses
+        # (``_yarn_event``), and only from its stripped form when it does
+        # not (a line wrapped in color codes), where the data holds no
+        # codes of its own to preserve.
+        raw_text = str(text or "")
+
+        def _shown(piece: str) -> str:
+            return shown_tool_stderr(piece, values)
+
+        # The decoded stream, in order: ("event", data + its line's own
+        # terminator) and ("plain", a run of raw lines with their own
+        # separators). Other typed events are dropped, as before: their
+        # fields are not error text and are never printed.
+        segments: List[tuple[str, str | None]] = []
+        plain_run: List[str] = []
+
+        def _close_plain() -> None:
+            if plain_run:
+                segments.append(("plain", "".join(plain_run)))
+                plain_run.clear()
+
+        for raw in raw_text.splitlines(keepends=True):
+            event = cls._yarn_event(raw)
             if isinstance(event, dict) and "type" in event:
-                if event.get("type") != "error":
-                    continue
-                message = str(event.get("data") or "").strip().splitlines()
+                if event.get("type") == "error":
+                    data = str(event.get("data") or "").strip()
+                    if data:
+                        _close_plain()
+                        body = raw.splitlines()[0] if raw else ""
+                        segments.append(("event", data + raw[len(body) :]))
+                continue
+            plain_run.append(raw)
+        _close_plain()
+        if not segments:
+            return ""
+
+        texts = [piece for _, piece in segments]
+        # ONE redaction over the whole decoded text: the only spelling a
+        # value spanning two segments has.
+        spanning = _shown("".join(texts))
+        # The same redaction with a marker line between segments recovers
+        # each segment's own redacted text in one pass. The marker's nonce
+        # is fresh per call and the values and text both pre-exist it, so
+        # neither can name it; the check below catches the residue (a
+        # redaction that crossed a boundary, or a planted marker-shaped
+        # line) rather than trusting the mapping.
+        if len(texts) == 1:
+            # One segment needs no recovery: the one redacted text IS it.
+            pieces = [spanning]
+        else:
+            marker = cls._segment_marker()
+            pieces = _shown(marker.join(texts)).split(marker)
+            if len(pieces) != len(segments) or "".join(pieces) != spanning:
+                # Per-segment attribution would print what the one-text
+                # redaction hides. Read the one redacted text as plain lines.
+                segments = [("plain", None)]
+                pieces = [spanning]
+
+        # The filters (stack frames, markers, over-long lines, source
+        # locations) read the SHOWN line: a dropped line costs nothing, and
+        # filtering raw lines first put a split before the redaction.
+        for (kind, _), shown_piece in zip(segments, pieces):
+            if kind == "event":
+                message = shown_piece.strip().splitlines()
                 if message:
                     named.append(message[0].strip()[:200])
                 continue
-            if (
-                not line
-                or line.startswith(("at ", "^", "Node.js v"))
-                or len(line) > 200
-                or _SOURCE_LOCATION.match(line)
-            ):
-                continue
-            lines.append(line)
-            if _NAMED_ERROR.search(line):
-                named.append(line)
+            for shown_raw in shown_piece.splitlines():
+                shown_line = shown_raw.strip()
+                if (
+                    not shown_line
+                    or shown_line.startswith(("at ", "^", "Node.js v"))
+                    or len(shown_line) > 200
+                    or _SOURCE_LOCATION.match(shown_line)
+                ):
+                    continue
+                lines.append(shown_line)
+                if _NAMED_ERROR.search(shown_line):
+                    named.append(shown_line)
         return " / ".join((named or lines)[:3])[:300]
+
+    @staticmethod
+    def _segment_marker() -> str:
+        """One marker line for one _yarn_error_detail call.
+
+        The nonce is drawn after the tool text and the values both exist, so
+        neither can contain it; a line that matches it anyway fails the
+        split-integrity check above and costs attribution, never redaction.
+        """
+        return f"ash-segment-{secrets.token_hex(16)}\n"
 
     @staticmethod
     def _v1_advisory_record(advisory: Dict[str, Any]) -> Dict[str, Any] | None:
@@ -433,7 +781,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
     @classmethod
     def _parse_yarn_audit(
-        cls, yarn_major: int, result: Dict[str, Any]
+        cls,
+        yarn_major: int,
+        result: Dict[str, Any],
+        values: Sequence[str] | None = (),
     ) -> tuple[Dict[str, Any] | None, str | None]:
         """(report, None) when yarn produced an audit report, else (None, reason).
 
@@ -452,28 +803,54 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
           request exits 1 with nothing on stdout and the error on stderr.
 
         The report is ``{_YARN_ADVISORIES_KEY: [records], "metadata": ...}``.
+
+        The timeout flag is read first, as ``_audit_failure`` reads it: a
+        timed-out run was stopped (or its stop did not end it, which leaves no
+        exit code), so whatever it wrote is not a report, and the no-exit-code
+        wording would call it an audit that did not run.
         """
+        if result.get("timed_out"):
+            reason = str(result.get("error") or "the command was stopped")
+            return None, f"yarn audit timed out, so its report is incomplete: {reason}"
         returncode = result.get("returncode")
         if returncode is None and "error" in result:
-            return None, f"yarn audit did not run: {result['error']}"
+            return None, f"yarn audit {_without_an_exit_code(result)}"
         stdout = _ANSI_ESCAPE.sub("", str(result.get("stdout") or ""))
-        detail = cls._yarn_error_detail(result.get("stderr"))
+        detail = cls._yarn_error_detail(result.get("stderr"), values)
 
         records: List[Dict[str, Any]] = []
         metadata: Dict[str, Any] = {}
         is_report = False
         problems: List[str] = []
 
+        # The problems keep their ORIGINAL text, line endings included: they
+        # are redacted later (in _yarn_error_detail, or the fallback below)
+        # and a value can hold a line break, so a strip-and-"\n"-rejoin here
+        # would rewrite a CRLF or FF value's spelling before the redaction
+        # could match it, and taking an error event's first raw line would
+        # cut such a value in half. EVERY non-event segment is kept, blank
+        # and whitespace-only ones and lines that parse as JSON without
+        # being an event or advisory included: a value can span such a line,
+        # and a dropped segment breaks the value's whole spelling, so the
+        # redaction over the rejoined text would match neither piece.
+        # Whether a segment counts as reportable problem TEXT is a separate
+        # question (saw_problem, _has_problem_text): kept whitespace and kept
+        # event lines complete a spanning value's spelling but are no error
+        # of yarn's on their own.
+        saw_problem = False
         if yarn_major < 2:
-            for line in stdout.splitlines():
-                if not line.strip():
+            for raw in stdout.splitlines(keepends=True):
+                line = raw.strip()
+                if not line:
+                    problems.append(raw)
                     continue
                 try:
                     event = json.loads(line)
                 except ValueError:
-                    problems.append(line.strip())
+                    problems.append(raw)
                     continue
                 if not isinstance(event, dict):
+                    problems.append(raw)
                     continue
                 data = event.get("data")
                 if event.get("type") == "auditAdvisory" and isinstance(data, dict):
@@ -489,8 +866,24 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     is_report = True
                     metadata = {"vulnerabilities": data.get("vulnerabilities") or {}}
                 elif event.get("type") == "error":
-                    message = str(data or "").strip().splitlines()
-                    problems.append(message[0] if message else "error event")
+                    # The RAW event line: _yarn_error_detail parses it back
+                    # and its event branch redacts the data whole, then takes
+                    # the first shown line -- the same reduction the stderr
+                    # events get, so a multi-line event is its MESSAGE, not
+                    # its trailing Error line, and its continuation lines
+                    # cannot crowd later events out of the detail cap. A
+                    # value's line breaks ride inside the JSON string, so its
+                    # spelling survives to that one redaction. An event with
+                    # no data has no message; the plain marker keeps the
+                    # failure reportable (_has_problem_text).
+                    text = str(data or "").strip()
+                    problems.append(raw if text else "error event\n")
+                elif "type" not in event:
+                    # A JSON object that is no event at all: kept raw, like
+                    # the non-JSON segments, for the same spanning-value
+                    # reason -- the detail reader keeps such objects too.
+                    problems.append(raw)
+            saw_problem = _has_problem_text(problems)
         else:
             document: Any = None
             try:
@@ -498,49 +891,106 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             except ValueError:
                 document = None
             if isinstance(document, dict) and "advisories" in document:
-                advisories = document.get("advisories") or {}
-                if isinstance(advisories, dict):
-                    is_report = True
-                    records.extend(cls._v1_advisory_records(advisories))
+                # A document counts with the evidence every reader of the v1
+                # shape requires (_v1_report_has_evidence): found advisories,
+                # or the counting metadata block every real clean report
+                # writes (berry3-clean.json carries both).
+                if cls._v1_report_has_evidence(document):
                     meta = document.get("metadata")
+                    is_report = True
+                    records.extend(
+                        cls._v1_advisory_records(document.get("advisories") or {})
+                    )
                     if isinstance(meta, dict):
                         metadata = {
                             "vulnerabilities": meta.get("vulnerabilities") or {}
                         }
             else:
                 advisory_lines = 0
-                for line in stdout.splitlines():
-                    if not line.strip():
+                for raw in stdout.splitlines(keepends=True):
+                    line = raw.strip()
+                    if not line:
+                        problems.append(raw)
                         continue
                     try:
                         entry = json.loads(line)
                     except ValueError:
-                        problems.append(line.strip())
+                        problems.append(raw)
+                        saw_problem = True
                         continue
                     if isinstance(entry, dict) and "children" in entry:
                         advisory_lines += 1
                         record = cls._berry_advisory_record(entry)
                         if record is not None:
                             records.append(record)
-                # yarn 4 prints nothing when it finds nothing, and exits 0.
-                is_report = not problems and (advisory_lines > 0 or returncode == 0)
+                    elif isinstance(entry, dict) and "type" in entry:
+                        # A StreamReport event line (info, warning): the
+                        # runner narrating, not a problem of the audit's --
+                        # the yarn 1 loop and the detail reader both read a
+                        # dict with a "type" as an event. Kept raw all the
+                        # same, so a value spanning this line keeps its whole
+                        # spelling for the redaction.
+                        problems.append(raw)
+                    else:
+                        # Not an advisory and not an event: kept raw, as the
+                        # yarn 1 loop keeps its non-event segments, for the
+                        # same spanning-value reason -- and a problem of
+                        # yarn's own.
+                        problems.append(raw)
+                        saw_problem = True
+                # yarn 4 prints nothing when it finds nothing, and exits 0
+                # (tests/test_data/scanners/npmaudit/yarn/berry-clean.json).
+                # yarn 2 and 3 write an npm v1 document even when clean
+                # (berry3-clean.json), so for them nothing on stdout with
+                # exit 0 is no evidence any advisory was checked.
+                is_report = not saw_problem and (
+                    advisory_lines > 0 or (returncode == 0 and yarn_major >= 4)
+                )
                 counts: Dict[str, int] = {}
                 for record in records:
                     severity = str(record["severity"])
                     counts[severity] = counts.get(severity, 0) + 1
                 metadata = {"vulnerabilities": counts}
 
-        if problems and not is_report:
-            reason = cls._yarn_error_detail("\n".join(problems)) or problems[0][:300]
+        if saw_problem and not is_report:
+            # The fallback is REDACTED BEFORE its cut, like every excerpt
+            # here. With no values (the caller's hook raised) the excerpt is
+            # dropped for a value-free note rather than shown with an empty
+            # value set, which would print what the values would have hidden.
+            if values is None:
+                return None, (
+                    "yarn audit reported an error (the tool's output is not shown)"
+                )
+            # The segments carry their own line endings, so they concatenate
+            # rather than rejoin: a "\n" join would rewrite a CRLF or FF
+            # value's spelling before the redaction could match it.
+            problem_text = "".join(problems)
+            reason = cls._yarn_error_detail(problem_text, values)
+            if not reason:
+                # The fallback redacts the SAME whole text before taking and
+                # cutting its first line, for the same spanning-value reason
+                # -- and only when the detail answered nothing, because it is
+                # a second redaction pass over the same text and nobody reads
+                # it when the detail named the failure.
+                fallback = shown_tool_stderr(problem_text, values).strip().splitlines()
+                reason = fallback[0].strip()[:300] if fallback else ""
             if detail:
                 reason = f"{reason} / {detail}"[:300]
             return None, f"yarn audit reported an error: {reason}"
         if not is_report:
             suffix = f": {detail}" if detail else ""
-            return (
-                None,
-                f"yarn audit exited {returncode} without an audit report{suffix}",
+            # On a clean-looking exit the wording says why that is a failure:
+            # with no report, nothing shows any advisory was checked.
+            checked = ", so no advisory was checked" if returncode in (None, 0) else ""
+            # A response with no exit code at all is worded as that, not as a
+            # literal None, matching _audit_failure's wording for npm.
+            ended = (
+                "ended with no exit code recorded"
+                if returncode is None
+                else f"exited {returncode}"
             )
+            no_report = f"yarn audit {ended} without an audit report"
+            return None, f"{no_report}{checked}{suffix}"
 
         # One record per (advisory, package); yarn 1 repeats an advisory once
         # per dependency path that reaches it. Keyed on the advisory's id before
@@ -745,8 +1195,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     known.add(rule.id)
         if report is None:
             return self._convert_npm_audit_to_sarif(merged_results, target_path)
+        # A v1 report can carry the metadata KEY with a null value, so the
+        # value's type decides, not the key's presence: .get's default fires
+        # only when the key is absent, and a null here crashed the conversion
+        # of a report whose advisories had already passed the evidence rule.
+        metadata = merged_results.get("metadata")
         report.runs[0].properties = PropertyBag(
-            metrics=merged_results.get("metadata", {}).get("vulnerabilities", {})
+            metrics=metadata.get("vulnerabilities", {})
+            if isinstance(metadata, dict)
+            else {}
         )
         return report
 
@@ -976,6 +1433,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         # Add all rules to the tool component
         tool_component.rules = list(rules_dict.values())
 
+        metadata = npm_audit_results.get("metadata")
+
         # Create the SARIF report
         sarif_report = SarifReport(
             version="2.1.0",
@@ -986,25 +1445,43 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(
-                                self.exit_code == 0 or self.exit_code == 1
-                            ),
+                            # Reached only from _convert_per_lockfile, after an
+                            # audit produced a report; the flag follows the
+                            # graded rule (_sarif_execution_successful), so a
+                            # lost lockfile or a codeless run never says
+                            # success beside an ERROR status.
+                            executionSuccessful=self._sarif_execution_successful(),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target_path)
                             ),
                         )
                     ],
+                    # metrics reads the metadata VALUE's type, never the key's
+                    # presence: a v1 report can carry "metadata": null beside
+                    # real advisories, and .get's default fires only when the
+                    # key is absent.
                     properties=PropertyBag(
-                        metrics=npm_audit_results.get("metadata", {}).get(
-                            "vulnerabilities", {}
-                        )
+                        metrics=metadata.get("vulnerabilities", {})
+                        if isinstance(metadata, dict)
+                        else {}
                     ),
                 )
             ],
         )
 
         return sarif_report
+
+    def _sarif_exit_code_accepted(self) -> bool:
+        """npm audit exits 0 or 1, and yarn classic exits a bitmask of the
+        severity levels its audit found (1|2|4|8|16), so any code in 0-31
+        from a run whose targets were all evaluated is a completed audit; the
+        base set ``{0, 1}`` graded a HIGH-only audit's 8 unsuccessful.
+        The audit that produced no report is already a failed
+        target in the counters, which grade first. A code past the band, a
+        signal death, and ASH's spawn-failure marker (127, outside the band)
+        are no audit's."""
+        return self.exit_code is not None and 0 <= self.exit_code <= 31
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — NpmAudit overrides scan() directly; this is unreachable."""
@@ -1084,14 +1561,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
-        # Above every early return, so the executor never reads the previous target's
-        # values (the same reason cfn_nag_scanner initializes its counters first).
-        # targets_attempted stays None, no claim, except offline (_skip_offline).
-        self.targets_attempted = None
+        # Per call, above every return, as in cfn_nag_scanner: each lockfile audited
+        # counts as a target, so a tree with none to audit reads as SKIPPED rather
+        # than as a clean audit. exit_code is None until an audit runs, so a scan that
+        # starts no npm, yarn or pnpm audit (a lockfile whose package manager is absent)
+        # reports no exit code; the version check before the scan is not an audit.
+        self.targets_attempted = 0
+        self.targets_failed = 0
         self.inputs_not_scanned = []
-        # Per target, and before the report below records it: the largest code of
-        # this target's audits. See ScannerPluginBase.scan().
-        self.exit_code = 0
+        self.exit_code = None
         tool_component = ToolComponent(
             name="npm-audit",
             version=self.tool_version,
@@ -1107,9 +1585,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(
-                                self.exit_code == 0 or self.exit_code == 1
-                            ),
+                            executionSuccessful=self._sarif_execution_successful(),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target)
@@ -1141,6 +1617,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             target_type=target_type,
             config=config,
         )
+        # The dependency check _pre_scan runs asks npm for its version, and that answer
+        # went through _process_command_response like any subprocess. It is not an
+        # audit, so the exit code starts again here.
+        self.exit_code = None
         if not validated:
             self._post_scan(
                 target=target,
@@ -1160,48 +1640,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             results_file = target_results_dir.joinpath("results.json")
             results_file.parent.mkdir(exist_ok=True, parents=True)
 
-            # Find all files to scan from the scan set
-            # The scan set, without the files the global ignore paths ignore.
-            orig_scannable = (
-                list(self.context.work_dir.glob("**/*.*"))
-                if target_type == "converted"
-                else drop_ignored(
-                    scan_set(
-                        source=self.context.source_dir,
-                        output=self.context.output_dir,
-                        honor_ignore_files=honors_ignore_files(self.context.config),
-                        # filter_pattern=r"\.(yaml|yml|json)$",
-                    ),
-                    self.context.source_dir,
-                    global_ignore_paths,
-                )
-            )
-
-            scannable = []
-            for f in orig_scannable:
-                pf = Path(f)
-                if pf.name == "package.json":
-                    scannable.append(pf.as_posix())
-            # The scan set leaves out a link whose target is outside the tree, so a
-            # package whose package.json is such a link would vanish here and its
-            # in-tree lockfile go unaudited with nothing failing. Such a package is
-            # taken from its lockfile instead, when a package.json sits beside it
-            # (by lstat) that the scan set left out; refused_inputs below then
-            # refuses it. A lockfile with no package.json beside it is not a
-            # package, as before.
-            listed = {Path(p).parent for p in scannable}
-            for f in orig_scannable:
-                pf = Path(f)
-                manifest = pf.parent / "package.json"
-                if (
-                    pf.name in self._AUDITED_LOCKFILE_NAMES
-                    and pf.parent not in listed
-                    and (manifest.is_symlink() or manifest.exists())
-                ):
-                    listed.add(pf.parent)
-                    scannable.append(manifest.as_posix())
+            # Find all files to scan from the scan set. Shared with
+            # nothing_to_scan_reason, which answers from this same selection.
+            scannable = self._package_manifests(target_type)
             joined_files = "\n- ".join(scannable)
-            self._plugin_log(f"Found {len(scannable)} package locks:\n- {joined_files}")
+            # Logged directly with markup off rather than through _plugin_log, whose
+            # prefix is markup: escaping the paths instead would write "\[" into
+            # ash.log and its JSONL copy (see NO_MARKUP in utils/log.py).
+            ASH_LOGGER.log(
+                15,
+                f"({self.config.name} @ {target_type})\tFound {len(scannable)} "
+                f"package locks:\n- {joined_files}",
+                extra=NO_MARKUP,
+            )
 
             if len(scannable) == 0:
                 self._plugin_log(
@@ -1241,20 +1692,22 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             # entry makes the scan an error: those dependencies were not
             # checked, and reporting the rest as clean would say they were.
             audit_failures: List[str] = []
-            lock_files = [
-                "yarn.lock",
-                "pnpm-lock.yaml",
-                "package-lock.json",
-            ]
+            # The ONE guarded read of the overridable values hook for this
+            # scan's message paths (_values_to_redact's guarding rule): the
+            # yarn probe detail, the probe excerpt and both audit-failure
+            # builders reuse it. None means the hook raised: those best-effort
+            # texts drop their tool excerpts -- never an empty value set,
+            # which would print what the values would have hidden -- and the
+            # scan itself goes on.
+            # A bare string it answers is one value, not its characters (the
+            # guarded read normalizes it); a hook that raised or answered no
+            # value set reads as None here too.
+            record_values: Sequence[str] | None = guarded_values_read(self).values
             for item in scannable:
                 package_file = Path(item)
-                lock_file = None
-                for item in lock_files:
-                    lf_path = package_file.parent.joinpath(item)
-                    if lf_path.exists():
-                        lock_file = lf_path
-                        break
+                lock_file = self._lockfile_beside(package_file)
                 if lock_file is not None:
+                    self.targets_attempted += 1
                     package_dir = package_file.parent
 
                     try:
@@ -1295,23 +1748,70 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         # attempting to run it (#180).  npm is already
                         # validated in validate_plugin_dependencies, but
                         # yarn and pnpm may not be present.
+                        # A failed target, not a failed scan. Passing the lockfile
+                        # over left its dependencies unchecked while the scan read as
+                        # clean; failing the whole scan discarded the findings of
+                        # every lockfile that was audited. Counted and recorded as an
+                        # unevaluated target, the other lockfiles' findings are kept
+                        # while the row grades ERROR naming this lockfile (the
+                        # executor refuses PASSED over a recorded name), and the
+                        # completeness gate's partial-coverage arm still names the
+                        # shortfall and exits 1.
                         if binary != "npm" and find_executable(binary) is None:
-                            ASH_LOGGER.warning(
-                                f"{binary} is not installed -- skipping "
-                                f"audit for {lock_file}. Install {binary} "
-                                "to scan this lock file."
+                            message = (
+                                f"{lock_file}: {binary} is not installed, so it was "
+                                f"not audited. Install {binary} to audit it"
                             )
+                            self.targets_failed += 1
+                            self.errors.append(message)
+                            # No advisory ran against this lockfile, and nothing
+                            # raises for it (the other lockfiles' findings are
+                            # kept), so the name is recorded and the executor
+                            # refuses to grade the run PASSED over it.
+                            self.record_unevaluated_target(lock_file)
+                            # The lockfile path is the repository's, so it is data:
+                            # a directory named "[/x]" is a closing tag to Rich.
+                            ASH_LOGGER.warning(f"npm-audit: {message}", extra=NO_MARKUP)
                             continue
 
-                        # Online only: offline no audit runs (_skip_offline), so
-                        # corepack never fetches a package manager here.
+                        # Corepack resolves the package manager version from the
+                        # repository's `packageManager` field, and fetches it if the
+                        # image has a different one cached. The Dockerfile sets
+                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
+                        # block on a stdin prompt that no one can answer -- but
+                        # disabling the prompt only stops the *asking*, not the
+                        # download.
+                        #
+                        # In offline mode a download is the wrong outcome twice
+                        # over: there is no network, so it fails, and it fails
+                        # instead of using the package manager already cached in the
+                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
+                        # to the cached version rather than reach out.
+                        #
+                        # This and the two offline branches below are not reached by a
+                        # scan: validate_plugin_dependencies refuses offline, and
+                        # _pre_scan returns before this loop. They are kept for a
+                        # caller that skips that check, so it gets a failure for an
+                        # audit that cannot run offline rather than a clean report
+                        # (test_npm_audit_absent_package_manager.py,
+                        # test_npm_audit_offline_env.py).
+                        offline_env = (
+                            {"COREPACK_ENABLE_NETWORK": "0"}
+                            if self._scanner_offline()
+                            else {}
+                        )
 
                         # yarn 2 and later dropped `yarn audit` for `yarn npm
                         # audit`, and print a different report. Which yarn runs
                         # depends on the project (corepack honours its
-                        # `packageManager` field), so ask it from there, reading
-                        # none of the repository's settings and running no
-                        # yarn-path (see utils/package_manager_child.py).
+                        # `packageManager` field), so ask it from there. The probe
+                        # runs no yarn-path and names no settings file for yarn
+                        # 2+ to read (YARN_RC_FILENAME). It cannot pass yarn 1's
+                        # --no-default-rc without knowing the version, so a yarn 1
+                        # probe in the package directory (a sandbox, or a system
+                        # temporary directory inside the scanned tree) still reads
+                        # .yarnrc and .npmrc there, with its yarn-path ignored
+                        # (see utils/package_manager_child.py).
                         yarn_major: int | None = None
                         cmd = [binary, "audit", "--json"]
                         if binary == "yarn":
@@ -1323,20 +1823,35 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     stdout_preference="return",
                                     stderr_preference="return",
                                     cwd=probe.cwd,
-                                    env=probe.env,
+                                    env={**probe.env, **offline_env},
                                     timeout=self._effective_scan_timeout(),
                                 )
                             yarn_major = self._yarn_major(version_result.get("stdout"))
                             if yarn_major is None:
                                 detail = self._yarn_error_detail(
                                     version_result.get("stderr")
-                                    or version_result.get("error")
+                                    or version_result.get("error"),
+                                    record_values,
+                                )
+                                # REDACTED BEFORE the excerpt is cut, like
+                                # every tool-output excerpt here; the helper
+                                # strips every complete escape code so a
+                                # non-color escape cannot split a value's
+                                # match. With no values (the hook raised)
+                                # the excerpt degrades to its value-free
+                                # placeholder.
+                                printed = (
+                                    shown_tool_stderr(
+                                        str(version_result.get("stdout") or ""),
+                                        record_values,
+                                    ).strip()[:80]
+                                    if record_values is not None
+                                    else "(not shown)"
                                 )
                                 audit_failures.append(
                                     f"{lock_file}: could not tell which yarn "
                                     "version runs here; `yarn --version` printed "
-                                    f"{str(version_result.get('stdout') or '').strip()[:80]!r}"
-                                    + (f" ({detail})" if detail else "")
+                                    f"{printed!r}" + (f" ({detail})" if detail else "")
                                 )
                                 continue
                             if yarn_major >= 2:
@@ -1359,14 +1874,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 env=child.env,
                                 timeout=self._effective_scan_timeout(),
                             )
-                        ASH_LOGGER.info(result)
+                        # The tool's own output, which names the project's paths:
+                        # data to Rich, so a "[/x]" in it cannot raise.
+                        ASH_LOGGER.info(result, extra=NO_MARKUP)
 
                         # npm audit returns non-zero exit code when vulnerabilities are found
                         # but we still want to process the output
                         audit_results: Any = None
                         if yarn_major is not None:
                             audit_results, failure = self._parse_yarn_audit(
-                                yarn_major, result
+                                yarn_major, result, record_values
                             )
                         else:
                             if result.get("stdout", None):
@@ -1376,9 +1893,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     )
                                 except json.JSONDecodeError:
                                     ASH_LOGGER.warning(
-                                        f"Failed to parse npm audit output for {package_dir}"
+                                        f"Failed to parse npm audit output for {package_dir}",
+                                        extra=NO_MARKUP,
                                     )
-                            failure = self._audit_failure(binary, result, audit_results)
+                            failure = self._audit_failure(
+                                binary, result, audit_results, record_values
+                            )
                         if failure is not None:
                             audit_failures.append(f"{lock_file}: {failure}")
                             continue
@@ -1403,10 +1923,19 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     all_results.setdefault("advisories", {}).update(
                                         audit_results["advisories"]
                                     )
-                                # Update metadata
-                                if "metadata" in audit_results:
+                                # Update metadata. A v1 report can carry the
+                                # key with a null value, so the value's type
+                                # decides on both sides: only a dict merges,
+                                # and a null already merged into is replaced,
+                                # never read. .items() on the null graded this
+                                # valid report as a failed audit.
+                                if isinstance(audit_results.get("metadata"), dict):
+                                    if not isinstance(
+                                        all_results.get("metadata"), dict
+                                    ):
+                                        all_results["metadata"] = {}
                                     for key, value in audit_results["metadata"].items():
-                                        if key in all_results.get("metadata", {}):
+                                        if key in all_results["metadata"]:
                                             if isinstance(value, dict):
                                                 all_results["metadata"][key].update(
                                                     value
@@ -1414,12 +1943,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                             elif isinstance(value, (int, float)):
                                                 all_results["metadata"][key] += value
                                         else:
-                                            all_results.setdefault("metadata", {})[
-                                                key
-                                            ] = value
+                                            all_results["metadata"][key] = value
                     except Exception as e:
                         ASH_LOGGER.warning(
-                            f"Failed to run npm audit in {package_dir}: {str(e)}"
+                            f"Failed to run npm audit in {package_dir}: {str(e)}",
+                            extra=NO_MARKUP,
                         )
                         audit_failures.append(
                             f"{lock_file}: the audit raised {type(e).__name__}: {e}"
@@ -1442,6 +1970,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     f"could not audit {len(audit_failures)} lockfile(s), so "
                     "their dependencies were not checked: " + " | ".join(audit_failures)
                 )
+                # Online and offline alike. Offline never reaches here in a scan,
+                # because validate_plugin_dependencies refuses it first; a caller
+                # that skips that check still gets a failure, not a clean report.
                 raise ScannerError(summary)
 
             # Convert npm audit results to SARIF
@@ -1478,9 +2009,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             invocations=[
                                 Invocation(
                                     commandLine="npm audit --json",
-                                    executionSuccessful=(
-                                        self.exit_code == 0 or self.exit_code == 1
-                                    ),
+                                    executionSuccessful=self._sarif_execution_successful(),
                                     exitCode=self.exit_code,
                                     workingDirectory=ArtifactLocation(
                                         uri=get_shortest_name(input=target)
@@ -1511,10 +2040,19 @@ if __name__ == "__main__":
     report = scanner.scan(target=scanner.context.source_dir, target_type="source")
 
     if report:
-        print(
-            report.model_dump_json(
-                indent=2,
-                by_alias=True,
-                exclude_unset=True,
+        from automated_security_helper.utils.command_safe_stream import (
+            json_commands_broken,
+        )
+        from automated_security_helper.utils.console import echo_raw
+
+        # The SARIF repeats the tree's file names: no "##name[" of theirs is a
+        # CI command where this prints, and the JSON is still the same document.
+        echo_raw(
+            json_commands_broken(
+                report.model_dump_json(
+                    indent=2,
+                    by_alias=True,
+                    exclude_unset=True,
+                )
             )
         )

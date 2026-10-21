@@ -65,24 +65,28 @@ class TestInvalidMergedConfigRefused:
 
         assert "severity_threshold" in str(exc_info.value)
 
-    def test_the_underlying_validation_error_is_chained(self):
-        """The pydantic detail must stay reachable for anyone debugging."""
+    def test_the_underlying_validation_error_is_kept(self):
+        """The pydantic detail must stay reachable for anyone debugging: on
+        ``validation_error``, not chained, since a traceback prints a chained
+        error's text, inputs and all."""
         with pytest.raises(ASHConfigValidationError) as exc_info:
             apply_config_overrides(
                 get_default_config(), ["global_settings.bogus_key=1"]
             )
 
-        assert isinstance(exc_info.value.__cause__, ValidationError)
+        assert isinstance(exc_info.value.validation_error, ValidationError)
+        assert exc_info.value.__cause__ is None
 
     def test_a_failure_applying_one_override_raises(self, monkeypatch):
-        """Defensive branch: nothing in the current parser reaches it.
+        """The branch for a failure the parser raises, such as a value nested
+        too deep for json to read. Injected here so any failure reaches it.
 
-        Injecting the failure is the only way to reach it, and it is worth
-        keeping covered so a future parser change cannot start swallowing.
+        The refusal names the key and the exception's type: the exception's
+        text, like the value, can be a credential the override passed.
         """
 
         def boom(*_args, **_kwargs):
-            raise RuntimeError("parser blew up")
+            raise RuntimeError("parser blew up on x")
 
         monkeypatch.setattr(
             "automated_security_helper.config.resolve_config._apply_config_override",
@@ -92,7 +96,11 @@ class TestInvalidMergedConfigRefused:
         with pytest.raises(ASHConfigValidationError) as exc_info:
             apply_config_overrides(get_default_config(), ["project_name=x"])
 
-        assert "project_name=x" in str(exc_info.value)
+        message = str(exc_info.value)
+        assert "'project_name'" in message
+        assert "RuntimeError" in message
+        assert "=x" not in message
+        assert "blew up" not in message
         assert isinstance(exc_info.value.__cause__, RuntimeError)
 
     def test_a_valid_override_is_not_discarded_by_a_later_invalid_one(self):
@@ -234,7 +242,7 @@ class TestExitCode:
     """Exit code 3 is the documented code for an invalid configuration."""
 
     def test_contract_says_three_is_invalid_config(self):
-        assert ASH_EXIT_CODES[3] == "invalid config"
+        assert ASH_EXIT_CODES[3] == "invalid config or refused input"
 
     def test_orchestrator_init_raises_the_exception_scan_maps_to_three(self, tmp_path):
         """run_ash_scan catches ASHConfigValidationError and exits 3."""
@@ -313,3 +321,93 @@ class TestExitCode:
 
         assert exc_info.value.exit_code == 1
         assert not Path(output_dir, "ash_aggregated_results.json").exists()
+
+
+class TestWhitespaceAroundAKeyIsRefused:
+    """An override is applied to its key exactly as written. With a space before
+    it, " reporters.aws-security-hub.options.archive_resolved_findings=false"
+    wrote a top-level " reporters" key that nothing reads, and the repository's
+    archive_resolved_findings: true reached the reporter. Whitespace around the
+    key, or around one of its segments, is refused instead."""
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            " reporters.aws-security-hub.options.archive_resolved_findings=false",
+            "reporters.aws-security-hub.options.archive_resolved_findings =false",
+            "reporters. aws-security-hub.enabled=false",
+            "reporters.aws-security-hub .enabled=false",
+            "\treporters.aws-security-hub.enabled=false",
+        ],
+        ids=["leading", "trailing", "segment-leading", "segment-trailing", "tab"],
+    )
+    def test_the_override_is_refused(self, override):
+        with pytest.raises(ASHConfigValidationError) as exc_info:
+            apply_config_overrides(AshConfig(project_name="test"), [override])
+
+        assert "whitespace" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            "reporters..aws-security-hub.options.archive_resolved_findings=false",
+            ".reporters.aws-security-hub.enabled=false",
+            "reporters.aws-security-hub.enabled.=false",
+            f"reporters.aws-security-hub{chr(0x200B)}.enabled=false",
+            f"{chr(0xFEFF)}reporters.aws-security-hub.enabled=false",
+            f"reporters.aws-security-hub{chr(0xA0)}.enabled=false",
+            "reporters.aws security hub.enabled=true",
+            f"reporters.{chr(0x202E)}buh-ytiruces-swa.enabled=false",
+            f"reporters.{chr(0x2066)}aws-security-hub{chr(0x2069)}.enabled=false",
+            f"reporters.aws-security{chr(0x200C)}-hub.enabled=false",
+            f"reporters.aws-security{chr(0x200D)}-hub.enabled=false",
+            f"reporters.aws-security{chr(0xAD)}-hub.enabled=false",
+        ],
+        ids=[
+            "empty-part",
+            "leading-dot",
+            "trailing-dot",
+            "zero-width-space",
+            "byte-order-mark",
+            "no-break-space",
+            "inner-space",
+            "right-to-left-override",
+            "left-to-right-isolate",
+            "zero-width-non-joiner",
+            "zero-width-joiner",
+            "soft-hyphen",
+        ],
+    )
+    def test_a_key_part_that_is_empty_spaced_or_unprintable_is_refused(self, override):
+        """Each was applied to a key nothing reads, so the setting it meant to
+        override kept the config file's value: "a..b" and a leading "." wrote an
+        empty key, a zero-width space or a byte order mark wrote a key that prints
+        like the real one, and "aws security hub" wrote a section of its own. A
+        trailing "." wrote {'': False} into the section. A bidirectional control
+        makes a key display as another: the right-to-left override shows the
+        reversed name as aws-security-hub. The zero-width joiner and non-joiner and
+        the soft hyphen do not print either; some scripts need them in text, but no
+        configuration key holds one, so they are refused too."""
+        with pytest.raises(ASHConfigValidationError) as exc_info:
+            apply_config_overrides(AshConfig(project_name="test"), [override])
+
+        assert "whitespace" in str(exc_info.value)
+
+    def test_a_value_may_still_hold_spaces(self):
+        config = apply_config_overrides(
+            AshConfig(project_name="test"), ["project_name=two words"]
+        )
+
+        assert config.project_name == "two words"
+
+    def test_report_exits_three(self, tmp_path):
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+
+        with pytest.raises(typer.Exit) as exc_info:
+            report_command(
+                output_dir=str(output_dir),
+                config_overrides=[" reporters.aws-security-hub.enabled=false"],
+            )
+
+        assert exc_info.value.exit_code == 3

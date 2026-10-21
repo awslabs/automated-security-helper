@@ -55,13 +55,19 @@ phases:
       - |
         set -eu
         export DOCKER_BUILDKIT=1
+        # A new BUILD_DATE_EPOCH re-runs the Dockerfile's core stage from its
+        # apt-get upgrade step down, offline download included (see ARG
+        # BUILD_DATE_EPOCH there). It is UTC midnight of today, as ASH's other
+        # image builds pass it, so OS packages and offline databases are at most
+        # a day old.
+        now_epoch="$(date +%s)"
         (
           cd ash-src
           docker build \
             --target "$ASH_IMAGE_TARGET" \
             --build-arg INSTALL_ASH_REVISION=LOCAL \
             --build-arg OFFLINE="$ASH_OFFLINE" \
-            --build-arg BUILD_DATE_EPOCH="$(date +%s)" \
+            --build-arg BUILD_DATE_EPOCH="$((now_epoch - now_epoch % 86400))" \
             -t ash-base:build \
             .
         )

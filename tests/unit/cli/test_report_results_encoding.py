@@ -116,9 +116,7 @@ def reporter_plugin():
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
-    _mock_print,
     mock_results_class,
     _mock_plugin_context,
     mock_plugin_manager,
@@ -126,6 +124,7 @@ def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
     _mock_load_plugins,
     tmp_path,
     reporter_plugin,
+    capfd,
 ):
     """The failing case, end to end through report_command.
 
@@ -147,6 +146,10 @@ def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
         "the results file was read but the non-cp1252 character did not survive, so "
         "some decoding happened that this test did not intend"
     )
+    # The report is written, and no refusal of the results file is printed.
+    out, err = capfd.readouterr()
+    assert "rendered" in out, out
+    assert "Could not read the scan results" not in err, err
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
@@ -154,9 +157,7 @@ def test_results_file_is_read_as_utf8_under_a_cp1252_locale(
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
 @patch("automated_security_helper.cli.report.AshAggregatedResults")
-@patch("automated_security_helper.cli.report.print")
 def test_the_read_pins_an_encoding_rather_than_inheriting_one(
-    _mock_print,
     _mock_results_class,
     _mock_plugin_context,
     mock_plugin_manager,
@@ -164,6 +165,7 @@ def test_the_read_pins_an_encoding_rather_than_inheriting_one(
     _mock_load_plugins,
     tmp_path,
     reporter_plugin,
+    capfd,
 ):
     """The invariant, named directly: no text read here may pass encoding=None.
 
@@ -187,21 +189,24 @@ def test_the_read_pins_an_encoding_rather_than_inheriting_one(
     assert set(shim.text_encodings_requested) == {"utf-8"}, (
         f"expected every text read to pin utf-8; got {shim.text_encodings_requested}"
     )
+    # The read succeeded, so the report was written and nothing was refused.
+    out, err = capfd.readouterr()
+    assert "rendered" in out, out
+    assert "Could not read the scan results" not in err, err
 
 
 @patch("automated_security_helper.cli.report.load_plugins")
 @patch("automated_security_helper.cli.report.resolve_config")
 @patch("automated_security_helper.cli.report.ash_plugin_manager")
 @patch("automated_security_helper.cli.report.PluginContext")
-@patch("automated_security_helper.cli.report.print")
 def test_an_unreadable_results_file_still_exits_non_zero(
-    _mock_print,
     _mock_plugin_context,
     mock_plugin_manager,
     _mock_resolve_config,
     _mock_load_plugins,
     tmp_path,
     reporter_plugin,
+    capfd,
 ):
     """Pinning utf-8 must not turn a genuinely broken file into a silent success.
 
@@ -218,3 +223,8 @@ def test_an_unreadable_results_file_still_exits_non_zero(
     with pytest.raises(typer.Exit) as exit_info:
         report_command(report_format="text", output_dir=str(tmp_path))
     assert exit_info.value.exit_code == 1
+    # The refusal names the file it could not read.
+    _out, err = capfd.readouterr()
+    squeezed = "".join(err.split())
+    assert "Couldnotreadthescanresultsin" in squeezed, err
+    assert "".join(results_path.as_posix().split()) in squeezed, err

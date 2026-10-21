@@ -156,6 +156,7 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config_file: null
       confidence_level: all
       ignore_nosec: false
@@ -168,6 +169,7 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       nag_packs:
         AwsSolutionsChecks: true
         HIPAASecurityChecks: false
@@ -200,16 +202,17 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
   checkov:
     enabled: false
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config_file: null
       skip_path: []
       additional_formats:
       - cyclonedx_json
-      offline: false
       frameworks:
       - all
       skip_frameworks: []
@@ -221,6 +224,7 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       baseline_file: null
       scan_settings:
         version: null
@@ -229,6 +233,7 @@ scanners:
         filters_used: []
         results: {}
       skip_generated_lockfiles: true
+      max_worker_output_mib: 256
   gitleaks:
     enabled: true
     options:
@@ -243,8 +248,8 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
-      config_file: null
       offline: false
+      config_file: null
   npm-audit:
     enabled: true
     options:
@@ -256,6 +261,7 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config: p/ci
       exclude:
       - '*-converted.py'
@@ -263,7 +269,6 @@ scanners:
       exclude_rule: []
       severity: []
       metrics: auto
-      offline: false
       patterns: []
       version: v1.30.2
       sha256: {}
@@ -272,6 +277,7 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config: p/ci
       exclude:
       - '*-converted.py'
@@ -279,7 +285,6 @@ scanners:
       exclude_rule: []
       severity: []
       metrics: auto
-      offline: false
       tool_version: null
       install_timeout: 300
   syft:
@@ -287,11 +292,11 @@ scanners:
     options:
       severity_threshold: null
       scan_timeout: 1800
+      offline: false
       config_file: null
       exclude: []
       additional_outputs:
       - syft-table
-      offline: false
   trivy:
     enabled: true
     options:
@@ -386,6 +391,7 @@ reporters:
   yaml:
     enabled: true
     options: {}
+output_formats: []
 workspace:
   max_parallel_projects: null
   project_timeout: null

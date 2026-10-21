@@ -6,6 +6,10 @@
 Covers bug H8: ReportMetadata default_factory used strftime("%Y%M%d")
 where %M is the minute-of-hour rather than the month. The default
 report_id must include the current month.
+
+The default id is ASH-<UTC YYYYMMDDHHMMSS>-<12 hex digits>, unique per scan
+(tests/unit/models/test_report_id_unique_per_scan.py), so these tests read the
+date from its first eight digits.
 """
 
 import re
@@ -23,8 +27,8 @@ def test_default_metadata_report_id_contains_current_month():
     assert report_id is not None
     assert report_id.startswith("ASH-")
 
-    # Format produced by the default_factory: ASH-YYYYMMDD
-    match = re.match(r"^ASH-(\d{4})(\d{2})(\d{2})$", report_id)
+    # Format produced by the default_factory: ASH-YYYYMMDDHHMMSS-<12 hex digits>
+    match = re.match(r"^ASH-(\d{4})(\d{2})(\d{2})\d{6}-[0-9a-f]{12}$", report_id)
     assert match is not None, f"Unexpected report_id format: {report_id}"
 
     year, month, day = match.group(1), match.group(2), match.group(3)
@@ -46,5 +50,5 @@ def test_default_report_id_never_reflects_the_minute():
     correct = f"ASH-{now:%Y}{now.month:02d}{now:%d}"
 
     if now.minute != now.month:
-        assert results.metadata.report_id != buggy
-    assert results.metadata.report_id == correct
+        assert not results.metadata.report_id.startswith(buggy)
+    assert results.metadata.report_id.startswith(correct)

@@ -4,7 +4,6 @@
 """Unit tests for FerretScanScanner plugin."""
 
 import json
-import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
@@ -16,6 +15,7 @@ from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner 
     UNSUPPORTED_FERRET_OPTIONS,
 )
 from automated_security_helper.core.exceptions import ScannerError
+from tests.utils.env_assertions import environ_value
 
 
 @pytest.mark.unit
@@ -581,15 +581,24 @@ class TestFerretScanScannerDependencies:
     def test_validate_dependencies_success(
         self, mock_find_executable, mock_plugin_context
     ):
-        """Test successful dependency validation when ferret-scan is available."""
+        """Test successful dependency validation when ferret-scan is available.
+
+        The version check is stubbed like the family's other dependency
+        cells: unstubbed, validate_plugin_dependencies spawned
+        ``<mocked path> --version`` for real, so the verdict depended on
+        whatever binary the HOST had at that path -- a hermeticity hole,
+        and a unit test executing a host binary."""
         mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
 
         scanner = FerretScanScanner(context=mock_plugin_context)
-        result = scanner.validate_plugin_dependencies()
+        with patch.object(
+            scanner, "_check_version_compatibility", return_value=(True, "2.5.2", None)
+        ):
+            result = scanner.validate_plugin_dependencies()
 
         assert result is True
         assert scanner.dependencies_satisfied is True
-        # find_executable is called twice: once for validation, once for version check
+        # find_executable still probes availability itself.
         assert mock_find_executable.call_count >= 1
 
     @patch(
@@ -1353,9 +1362,7 @@ class TestFerretVersionWindowBoundaries:
     ]
 
     @pytest.mark.parametrize(("version", "supported"), CASES)
-    @patch(
-        "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.subprocess.run"
-    )
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     @patch(
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
     )
@@ -1609,4 +1616,6 @@ class TestFerretSarifShapeAcrossVersions:
         assert env["FERRET_PRECOMMIT"] == "0"
         # The opt-out is added on top of the inherited environment, not instead of it.
         assert env["PRE_COMMIT"] == "1"
-        assert env.get("PATH") == os.environ.get("PATH")
+        # The one value, not the mapping: a failure would print the whole environment.
+        passed_path = env.get("PATH")
+        assert passed_path == environ_value("PATH")

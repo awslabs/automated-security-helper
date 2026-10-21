@@ -583,46 +583,6 @@ class TestRunParallelEdgeCases:
         assert sum("Failed to process error results" in m for m in logged) == 2
 
 
-class TestUpdateProgress:
-    """_update_progress is best-effort and never propagates display failures."""
-
-    def test_missing_phase_task_is_a_no_op(self, tmp_path):
-        ctx = _make_context(tmp_path)
-        display = MagicMock()
-        display.phase_task = None
-        executor = ScannerExecutor(
-            plugin_context=ctx, progress_display=display, scanner_tasks=[]
-        )
-
-        executor._update_progress(50, "halfway")
-
-        display.update_task.assert_not_called()
-
-    def test_phase_task_present_forwards_the_update(self, tmp_path):
-        ctx = _make_context(tmp_path)
-        display = MagicMock()
-        display.phase_task = 7
-        executor = ScannerExecutor(
-            plugin_context=ctx, progress_display=display, scanner_tasks=[]
-        )
-
-        executor._update_progress(50, "halfway")
-
-        assert display.update_task.call_args.kwargs["task_id"] == 7
-        assert display.update_task.call_args.kwargs["completed"] == 50
-
-    def test_display_exception_is_swallowed(self, tmp_path):
-        ctx = _make_context(tmp_path)
-        display = MagicMock()
-        display.phase_task = 7
-        display.update_task.side_effect = RuntimeError("display detached")
-        executor = ScannerExecutor(
-            plugin_context=ctx, progress_display=display, scanner_tasks=[]
-        )
-
-        executor._update_progress(50, "halfway")
-
-
 class _FlagLessScanner:
     """A scanner-shaped object that declares no ``dependencies_satisfied`` at all.
 
@@ -847,3 +807,282 @@ class TestTerminalStatusIsNotRegraded:
             for metric in get_unified_scanner_metrics(asharp_model=aggregated)
         ] == [("scripted", "MISSING")]
         assert incomplete_scanners(aggregated) == [("scripted", "MISSING")]
+
+
+def test_a_scanner_done_before_a_parallel_cancel_is_recorded():
+    """In the pool, a scanner that finished before the cancel stays recorded.
+
+    One scanner sets the scan's cancel and returns PASSED; its sibling, blocked
+    on the cancel, raises ScanCancelled. When the sibling's future came out of
+    as_completed first, its exception left the loop and the finished scanner
+    was dropped: its results never processed, it never counted as completed.
+    The sequential loop keeps such a scanner. The order is pinned by handing
+    the futures back only once both are done, the cancelled one first.
+    """
+    import threading
+    from concurrent.futures import wait
+
+    from automated_security_helper.core.cancellation import (
+        ScanCancelled,
+        cancel_scope,
+        raise_if_cancelled,
+    )
+    from automated_security_helper.core.phases import scanner_executor as module
+    from automated_security_helper.models.scan_results_container import (
+        ScanResultsContainer,
+    )
+
+    cancel = threading.Event()
+    setter, waiter = MagicMock(), MagicMock()
+    processed = []
+    executor = ScannerExecutor(
+        plugin_context=MagicMock(),
+        progress_display=MagicMock(),
+        scanner_tasks=[("setter", setter, []), ("waiter", waiter, [])],
+        max_workers=2,
+        process_results_fn=lambda container, aggregated: (
+            processed.append(container.scanner_name),
+            aggregated,
+        )[1],
+    )
+
+    def _execute(scanner_name, scanner_plugin, scan_targets):
+        if scanner_name == "setter":
+            cancel.set()
+            return [
+                ScanResultsContainer(scanner_name="setter", status=ScannerStatus.PASSED)
+            ]
+        assert cancel.wait(10), "the cancel was never set"
+        raise_if_cancelled()
+        return []
+
+    executor._execute_scanner = _execute
+
+    def _cancelled_first(fs, timeout=None):
+        fs = list(fs)
+        wait(fs)
+        yield from sorted(fs, key=lambda future: future.exception() is None)
+
+    with (
+        patch.object(module, "as_completed", _cancelled_first),
+        cancel_scope(cancel),
+    ):
+        with pytest.raises(ScanCancelled):
+            executor.run_parallel(MagicMock())
+
+    assert processed == ["setter"], processed
+    assert [plugin is setter for plugin in executor.completed_scanners] == [True]
+
+
+def test_a_scanner_still_running_at_a_parallel_cancel_is_recorded_when_it_finishes():
+    """In the pool, a scanner still running at the cancel is recorded once the
+    cancel's drain lets it finish.
+
+    The pool's own exit always waited for running futures (shutdown(wait=True)
+    in __exit__); what differed was only whether the sweep ran before or after
+    that wait. Swept before it, the slow scanner's PASSED result was thrown
+    away -- this cell pinned that as "is not waited for", a wait that in fact
+    happened either way. The cancel now drains the pool before the sweep, so
+    the slow scanner, released only when the pool shuts down, finishes during
+    the drain and is recorded like one that finished before the cancel. The
+    canceller sets the cancel only once the slow scanner is running, so the
+    slow scanner's own start check passes.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from automated_security_helper.core.cancellation import (
+        ScanCancelled,
+        cancel_scope,
+        raise_if_cancelled,
+    )
+    from automated_security_helper.core.phases import scanner_executor as module
+    from automated_security_helper.models.scan_results_container import (
+        ScanResultsContainer,
+    )
+
+    cancel = threading.Event()
+    slow_running = threading.Event()
+    pool_shutting_down = threading.Event()
+    released_by_the_shutdown = []
+    processed = []
+    executor = ScannerExecutor(
+        plugin_context=MagicMock(),
+        progress_display=MagicMock(),
+        scanner_tasks=[("slow", MagicMock(), []), ("canceller", MagicMock(), [])],
+        max_workers=2,
+        process_results_fn=lambda container, aggregated: (
+            processed.append(container.scanner_name),
+            aggregated,
+        )[1],
+    )
+
+    def _execute(scanner_name, scanner_plugin, scan_targets):
+        if scanner_name == "slow":
+            slow_running.set()
+            released_by_the_shutdown.append(pool_shutting_down.wait(5))
+            return [
+                ScanResultsContainer(scanner_name="slow", status=ScannerStatus.PASSED)
+            ]
+        assert slow_running.wait(10), "the slow scanner never started"
+        cancel.set()
+        raise_if_cancelled()
+        return []
+
+    executor._execute_scanner = _execute
+
+    class _ReleasingPool(ThreadPoolExecutor):
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            pool_shutting_down.set()
+            super().shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    with (
+        patch.object(module, "ThreadPoolExecutor", _ReleasingPool),
+        cancel_scope(cancel),
+    ):
+        with pytest.raises(ScanCancelled):
+            executor.run_parallel(MagicMock())
+
+    assert released_by_the_shutdown == [True], released_by_the_shutdown
+    assert processed == ["slow"], processed
+    assert len(executor.completed_scanners) == 1, executor.completed_scanners
+
+
+def test_a_scanner_failed_before_a_parallel_cancel_is_recorded_as_failed(tmp_path):
+    """In the pool, a scanner that failed before the cancel is recorded as failed.
+
+    The failer's future already holds its error when the canceller's
+    ScanCancelled comes out of as_completed first. The failure goes through the
+    loop's failure handling as it would have without the cancel: processed as a
+    FAILED container, and not counted as completed. The order is pinned by
+    handing the futures back only once both are done, the cancelled one first.
+    """
+    import threading
+    from concurrent.futures import wait
+
+    from automated_security_helper.core.cancellation import (
+        ScanCancelled,
+        cancel_scope,
+        raise_if_cancelled,
+    )
+    from automated_security_helper.core.phases import scanner_executor as module
+
+    cancel = threading.Event()
+    failing = threading.Event()
+    processed = []
+    executor = _make_executor(
+        _make_context(tmp_path),
+        [("failer", MagicMock(), []), ("canceller", MagicMock(), [])],
+        max_workers=2,
+        process_results_fn=lambda container, aggregated: (
+            processed.append((container.scanner_name, container.status)),
+            aggregated,
+        )[1],
+    )
+
+    def _safe_execute(scanner_name, scanner_plugin, scan_targets):
+        if scanner_name == "failer":
+            failing.set()
+            raise RuntimeError("the failer's thread failed")
+        assert failing.wait(10), "the failer never ran"
+        cancel.set()
+        raise_if_cancelled()
+        return [], True
+
+    executor._safe_execute_scanner = _safe_execute
+
+    def _cancelled_first(fs, timeout=None):
+        fs = list(fs)
+        wait(fs)
+        yield from sorted(
+            fs, key=lambda future: not isinstance(future.exception(), ScanCancelled)
+        )
+
+    with (
+        patch.object(module, "as_completed", _cancelled_first),
+        cancel_scope(cancel),
+    ):
+        with pytest.raises(ScanCancelled):
+            executor.run_parallel(MagicMock())
+
+    assert processed == [("failer", ScannerStatus.FAILED)], processed
+    assert executor.completed_scanners == []
+
+
+@pytest.mark.parametrize(
+    "make_held",
+    [KeyboardInterrupt, lambda: SystemExit(7)],
+    ids=["keyboard-interrupt", "system-exit"],
+)
+def test_a_future_holding_a_base_exception_does_not_replace_a_parallel_cancel(
+    tmp_path, make_held
+):
+    """A done future holding a KeyboardInterrupt or SystemExit stays unread at a cancel.
+
+    Neither is an Exception, so taking that future would let it pass the loop's
+    handlers and leave run_parallel in place of the cancel being re-raised. The
+    canceller's ScanCancelled comes out of as_completed first, with the holder's
+    future already done. The cell catches BaseException, so an escape fails the
+    cell rather than stopping the test session, and then checks that what left
+    run_parallel is the canceller's own ScanCancelled.
+    """
+    import threading
+    from concurrent.futures import wait
+
+    from automated_security_helper.core.cancellation import (
+        ScanCancelled,
+        cancel_scope,
+        raise_if_cancelled,
+    )
+    from automated_security_helper.core.phases import scanner_executor as module
+
+    cancel = threading.Event()
+    holding = threading.Event()
+    canceller_raised = []
+    processed = []
+    executor = _make_executor(
+        _make_context(tmp_path),
+        [("holder", MagicMock(), []), ("canceller", MagicMock(), [])],
+        max_workers=2,
+        process_results_fn=lambda container, aggregated: (
+            processed.append(container.scanner_name),
+            aggregated,
+        )[1],
+    )
+
+    def _safe_execute(scanner_name, scanner_plugin, scan_targets):
+        if scanner_name == "holder":
+            holding.set()
+            raise make_held()
+        assert holding.wait(10), "the holder never ran"
+        cancel.set()
+        try:
+            raise_if_cancelled()
+        except ScanCancelled as stop:
+            canceller_raised.append(stop)
+            raise
+        return [], True
+
+    executor._safe_execute_scanner = _safe_execute
+
+    def _cancelled_first(fs, timeout=None):
+        fs = list(fs)
+        wait(fs)
+        yield from sorted(
+            fs, key=lambda future: not isinstance(future.exception(), ScanCancelled)
+        )
+
+    left_with = None
+    with (
+        patch.object(module, "as_completed", _cancelled_first),
+        cancel_scope(cancel),
+    ):
+        try:
+            executor.run_parallel(MagicMock())
+        except BaseException as error:  # an escape must fail this cell, not the run
+            left_with = error
+
+    assert len(canceller_raised) == 1, canceller_raised
+    assert left_with is canceller_raised[0], repr(left_with)
+    assert processed == [], processed
+    assert executor.completed_scanners == []

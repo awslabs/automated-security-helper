@@ -61,18 +61,27 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
+    effective_sarif_level,
+    result_severity,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-# Mapping from SARIF level to security-severity score.
+# Mapping from ASH severity to security-severity score.
 # These scores place findings into GitHub's severity buckets:
 #   9.0-10.0 = Critical, 7.0-8.9 = High, 4.0-6.9 = Medium, 0.1-3.9 = Low
-_LEVEL_TO_SECURITY_SEVERITY: Dict[str, str] = {
-    "error": "8.0",
-    "warning": "6.0",
-    "note": "3.0",
-    "none": "1.0",
+# Keyed by the gate's severity (utils.severity_ladder.result_severity), not by
+# SARIF level, so an `error` the scan fails as critical scores 9.5, GitHub's
+# Critical.
+_SEVERITY_TO_SECURITY_SEVERITY: Dict[str, str] = {
+    "CRITICAL": "9.5",
+    "HIGH": "8.0",
+    "MEDIUM": "6.0",
+    "LOW": "3.0",
+    "INFO": "1.0",
 }
 
 
@@ -81,7 +90,7 @@ def _level_value(level: Any) -> str:
 
     ``Level`` is a ``(str, Enum)`` mixin, so ``Enum.__str__`` wins and
     ``str(Level.error)`` is "Level.error" -- not a member of the SARIF 2.1.0
-    level enum, and not a key in ``_LEVEL_TO_SECURITY_SEVERITY``. The field holds
+    level enum, and not a level the severity resolver knows. The field holds
     a member whenever it was not validated: a result or defaultConfiguration that
     omits the optional ``level`` key takes the field default, and assignment is
     unvalidated too. Writing that into the uploaded document hands GitHub a
@@ -89,6 +98,20 @@ def _level_value(level: Any) -> str:
     the rule to the 6.0 Medium fallback on the way.
     """
     return str(getattr(level, "value", level))
+
+
+def _rule_id(result: Any) -> Optional[str]:
+    """The id of the rule *result* names: its ruleId, else its rule.id.
+
+    SARIF 2.1.0 lets a result name its rule either way (3.27.5, 3.27.7). Read
+    as ruleId alone, a result naming it as rule.id was emitted with neither,
+    and with no rule entry.
+    """
+    if result.ruleId:
+        return result.ruleId
+    rule = getattr(result, "rule", None)
+    rule = getattr(rule, "root", rule)
+    return getattr(rule, "id", None) or None
 
 
 class GHASReporterConfigOptions(ReporterOptionsBase):
@@ -168,21 +191,36 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             for ext in run.tool.extensions or []:
                 self._collect_rules(ext, rules_map)
 
-            # 2. Build a level lookup from results (for rules that have no
-            #    defaultConfiguration.level, we infer from the result level)
+            # 2. The most severe of each rule's results, as the gate grades them
+            #    (issue_severity, else the level), for rules whose scanner gave
+            #    no security-severity. Only results this file emits count, so a
+            #    suppressed CRITICAL left out of the upload does not raise its
+            #    rule to 9.5 and make the rule's one remaining LOW alert show as
+            #    Critical on GitHub. A rule all of whose results are left out
+            #    keeps the score it would have with none (its default level,
+            #    else 6.0); no alert in the file carries it.
             rule_level_from_results: Dict[str, str] = {}
             for result in run.results or []:
-                if result.ruleId and result.ruleId not in rule_level_from_results:
-                    level_val = result.level or "error"
-                    rule_level_from_results[result.ruleId] = _level_value(level_val)
+                rule_id = _rule_id(result)
+                if not rule_id or self._left_out(result):
+                    continue
+                severity = result_severity(result)
+                current = rule_level_from_results.get(rule_id)
+                if current is None or SEVERITIES.index(severity) < SEVERITIES.index(
+                    current
+                ):
+                    rule_level_from_results[rule_id] = severity
 
-            # 3. Ensure every rule has security-severity
-            slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
-
-            # 4. Build slim results (excluding suppressed if configured)
+            # 3. Build slim results (excluding suppressed if configured). First,
+            #    because a result naming a rule the run does not declare adds
+            #    that rule to rules_map; the rules were built before it, so the
+            #    result reached GitHub with no rule and no security-severity.
             slim_results = self._build_slim_results(
                 run.results or [], rules_map, rule_level_from_results
             )
+
+            # 4. Ensure every rule has security-severity
+            slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
 
             # 5. Assemble the final SARIF structure
             report_dict = {
@@ -265,9 +303,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
 
         Priority:
         1. Existing security-severity from the scanner (preserve as-is)
-        2. Derived from rule's defaultConfiguration.level
-        3. Derived from the result.level of findings referencing this rule
+        2. The most severe of the rule's results, as the gate grades them
+        3. Derived from rule's defaultConfiguration.level, the gate's way
         4. Default to "6.0" (Medium)
+
+        The results come before the rule's default level because they carry
+        ``issue_severity``, which the gate reads first and a rule cannot.
         """
         rule_info = rules_map.get(rule_id)
 
@@ -275,14 +316,19 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         if rule_info and rule_info["security_severity"]:
             return rule_info["security_severity"]
 
-        # 2. Derive from rule's defaultConfiguration.level
-        if rule_info and rule_info["default_level"]:
-            return _LEVEL_TO_SECURITY_SEVERITY.get(rule_info["default_level"], "6.0")
+        # 2. Derive from the rule's results. report() records severities here; a
+        #    level is read the gate's way, so a caller passing one gets the same.
+        from_results = rule_level_from_results.get(rule_id)
+        if from_results:
+            if from_results not in _SEVERITY_TO_SECURITY_SEVERITY:
+                from_results = result_severity({"level": from_results})
+            return _SEVERITY_TO_SECURITY_SEVERITY[from_results]
 
-        # 3. Derive from result level
-        result_level = rule_level_from_results.get(rule_id)
-        if result_level:
-            return _LEVEL_TO_SECURITY_SEVERITY.get(result_level, "6.0")
+        # 3. Derive from rule's defaultConfiguration.level
+        if rule_info and rule_info["default_level"]:
+            return _SEVERITY_TO_SECURITY_SEVERITY[
+                result_severity({"level": rule_info["default_level"]})
+            ]
 
         # 4. Default
         return "6.0"
@@ -320,6 +366,16 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
 
         return slim_rules
 
+    def _left_out(self, result: Any) -> bool:
+        """Whether *result* is kept out of the file: suppressed, under
+        ``exclude_suppressed`` (the default). One test for the results list and
+        the rules' scores, so a result never scores a rule it is not in."""
+        return bool(
+            self.config
+            and self.config.options.exclude_suppressed
+            and getattr(result, "suppressions", None)
+        )
+
     def _build_slim_results(
         self,
         results: list,
@@ -331,20 +387,17 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
 
         for result in results:
             # Skip suppressed findings if configured
-            if self.config and self.config.options.exclude_suppressed:
-                if (
-                    hasattr(result, "suppressions")
-                    and result.suppressions
-                    and len(result.suppressions) > 0
-                ):
-                    continue
+            if self._left_out(result):
+                continue
 
             # If this result references a rule we haven't seen, create a
-            # synthetic entry so the rule list stays complete
-            if result.ruleId and result.ruleId not in rules_map:
-                level_val = _level_value(result.level) if result.level else "error"
-                rules_map[result.ruleId] = {
-                    "id": result.ruleId,
+            # synthetic entry so the rule list stays complete. report() builds
+            # the rules from rules_map after this returns.
+            rule_id = _rule_id(result)
+            if rule_id and rule_id not in rules_map:
+                level_val = effective_sarif_level(result)
+                rules_map[rule_id] = {
+                    "id": rule_id,
                     "security_severity": None,
                     "default_level": None,
                     "short_description": None,
@@ -352,23 +405,23 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                     "help_text": None,
                     "tags": [],
                 }
-                rule_level_from_results.setdefault(result.ruleId, level_val)
+                rule_level_from_results.setdefault(rule_id, level_val)
 
             # Build slim result
             result_dict: Dict[str, Any] = {}
 
-            if result.ruleId:
-                result_dict["ruleId"] = result.ruleId
+            if rule_id:
+                result_dict["ruleId"] = rule_id
 
             # Map level
-            level_val = _level_value(result.level) if result.level else "error"
+            level_val = effective_sarif_level(result)
             result_dict["level"] = level_val
 
             # Message
             if result.message and result.message.root and result.message.root.text:
                 result_dict["message"] = {"text": result.message.root.text}
             else:
-                result_dict["message"] = {"text": result.ruleId or "Finding detected"}
+                result_dict["message"] = {"text": rule_id or "Finding detected"}
 
             # Locations — only physical location with uri and region
             locations = self._build_slim_locations(result.locations)
@@ -376,9 +429,6 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 result_dict["locations"] = locations
 
             slim_results.append(result_dict)
-
-        # After processing all results, add any synthetic rules we created
-        # back into the slim rules list (handled by caller via rules_map mutation)
 
         return slim_results
 

@@ -88,8 +88,8 @@ def run_suite(report: pathlib.Path, workers: str) -> int:
         "-n",
         workers,
         # Coverage is scoped to automated_security_helper, which this suite does
-        # not import; measuring it here would only add a fail_under gate that has
-        # nothing to do with what is being verified.
+        # not import. pytest.ini measures nothing by default; --no-cov keeps it
+        # that way here even if coverage options are added to addopts again.
         "--no-cov",
         "-q",
         "-p",

@@ -17,16 +17,29 @@ from __future__ import annotations
 import os
 import subprocess  # nosec B404 - re-executing ASH inside `nix develop` is this module's purpose
 import sys
+import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+from automated_security_helper.core.cancellation import (
+    ScanCancelled,
+    current_cancel_event,
+    raise_if_cancelled,
+    record_tool_pid,
+)
 from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.utils.console import echo, secho
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.python_child import python_code_argv
 from automated_security_helper.utils.subprocess_utils import (
+    HeldInterrupt,
     child_environ,
+    discard_tool_pid_before_reap,
+    discard_tool_pid_once_exited,
     find_executable,
+    shown_arguments,
+    stop_after_interrupt,
 )
 
 # Recursion guard, following the existing ASH_IN_CONTAINER precedent. The inner invocation
@@ -241,20 +254,90 @@ def run_ash_nix(
         env[OUTER_RUN_ID_ENV] = outer_run_id
 
     ASH_LOGGER.info(f"Entering Nix shell from flake: {resolved_ref}")
-    ASH_LOGGER.debug(f"Nix command: {' '.join(cmd)}")
+    # Each --config-overrides value as its key: it can be a credential.
+    shown = " ".join(shown_arguments(cmd))
+    ASH_LOGGER.debug(f"Nix command: {shown}")
 
     if debug:
-        print(f"\n[bold blue]Debug: Nix Command[/bold blue]\nCommand: {' '.join(cmd)}")
+        secho("\nDebug: Nix command", fg="blue", bold=True)
+        echo(f"Command: {shown}")
 
-    # check=False so the caller decides what a non-zero status means. A scan that finds
-    # something exits non-zero by design, so raising here would turn a successful scan
-    # into an error.
-    return subprocess.run(  # nosec B603 - argument list is built here, not shell-parsed
-        cmd,
-        # The inner scan reads nothing from standard input; nix and the scanners
-        # it starts get an empty one, not this process's.
-        stdin=subprocess.DEVNULL,
-        env=env,
-        check=False,
-        text=True,
-    )
+    # The status is returned, not checked, so the caller decides what a non-zero one
+    # means. A scan that finds something exits non-zero by design, so raising here
+    # would turn a successful scan into an error.
+    return _enter_shell(cmd, env=env)
+
+
+def _enter_shell(cmd: List[str], env: Dict[str, str]) -> subprocess.CompletedProcess:
+    """Run the Nix shell, passing Ctrl-C on to it as container mode does its runtime.
+
+    `nix develop --command` execs the command in place (measured with nix 2.35.2:
+    the process started here is the inner ASH), so the interrupt reaches the inner
+    scan, which stops as an interrupted local scan does. It gets the same grace as
+    a container runtime, then is killed. subprocess.run gave it 0.25 s, killed it,
+    and passed nothing on when the interrupt reached this process alone.
+
+    The wait also reads the scan's cancel event (core/cancellation.py): when it
+    is set while the shell runs, the shell is stopped the same way and
+    :class:`ScanCancelled` is raised. Without that read, a SIGTERM to ASH set
+    the event and nothing looked at it, so the scan ran to completion as though
+    no signal had arrived.
+    """
+    # A scan already cancelled starts no shell: the wait below only reads
+    # the event once the child exists, so without this check a SIGTERM that
+    # landed just before this point still started the shell mid-cancel.
+    # Checked before the held window, as the spawn paths in
+    # utils/subprocess_utils.py check theirs: a Ctrl-C arriving here is an
+    # ordinary unheld interrupt that starts nothing.
+    raise_if_cancelled()
+
+    # A Ctrl-C while the shell is being started is held until the process is in
+    # hand: raised inside Popen, it left nothing to stop. Not recorded for the MCP
+    # server's kill at its stop (subprocess_utils.run_ended_with_the_server): an
+    # MCP scan runs in local mode and never reaches Nix mode.
+    with HeldInterrupt() as held:
+        process = subprocess.Popen(  # nosec B603 - argument list is built here, not shell-parsed
+            cmd,
+            # The inner scan reads nothing from standard input; nix and the scanners
+            # it starts get an empty one, not this process's.
+            stdin=subprocess.DEVNULL,
+            env=env,
+            text=True,
+        )
+        # The shell shares this process's group, so the die-now branches' group
+        # kill cannot name it: recorded by pid and forgotten the moment its
+        # exit is observed, before the reap.
+        record_tool_pid(process.pid)
+        try:
+            held.release()
+            cancel_event = current_cancel_event()
+            if cancel_event is None:
+                # Never signaled and healthy: wait for its end with the record
+                # kept the whole time, not only for the bound a killed child gets.
+                discard_tool_pid_before_reap(process, just_killed=False)
+                returncode = process.wait()
+            else:
+                while not discard_tool_pid_once_exited(process):
+                    if cancel_event.is_set():
+                        # The scan was cancelled: the CLI's SIGTERM handler does
+                        # nothing but set the event, so this wait is where the
+                        # stop happens, through the same path as the Ctrl-C arm
+                        # below. The signal was delivered to this process alone,
+                        # so the shell has not been interrupted yet, whatever
+                        # the terminal probe would say.
+                        stop_after_interrupt(process, child_got_the_interrupt=False)
+                        raise ScanCancelled(
+                            "the scan was cancelled while the Nix shell ran"
+                        ) from None
+                    time.sleep(0.1)
+                returncode = process.wait()
+        except KeyboardInterrupt:
+            stop_after_interrupt(process)
+            raise
+        finally:
+            # The stop paths and the loops above discard the record themselves;
+            # this net catches an exit that landed between an observation and
+            # its reap. A child still running keeps its record: it is exactly
+            # the one a die-now signal must still be able to kill.
+            discard_tool_pid_once_exited(process)
+    return subprocess.CompletedProcess(args=cmd, returncode=returncode)
