@@ -26,6 +26,7 @@ from typing import Dict
 import pytest
 import typer
 from starlette.testclient import TestClient
+from types import SimpleNamespace
 
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
 from automated_security_helper.cli.mcp.session_identity import (
@@ -421,22 +422,52 @@ def test_a_stateful_refusal_advises_initialize_not_an_operator_mode_change() -> 
     assert "newer protocol version" not in result.get("error", ""), result
 
 
+def _version_refused_stateful_caller():
+    """The stamp a stateful boundary leaves on an issued id refused for its version."""
+    from automated_security_helper.cli.mcp.http_sessions import (
+        MODE_STATEFUL,
+        STREAMABLE_HTTP,
+        HttpCaller,
+    )
+
+    return HttpCaller(
+        STREAMABLE_HTTP,
+        None,
+        protocol_version_is_cause=True,
+        server_mode=MODE_STATEFUL,
+    )
+
+
+def _ctx_carrying(caller):
+    """A stand-in context whose request carries ``caller``'s scope stamp.
+
+    ``session_identity_refusal`` reads the stamp from the request behind the
+    context it is given, so handing it one request's stamp fixes what the
+    refusal may say about cause and mode; no state outside the request can.
+    """
+    from automated_security_helper.cli.mcp.http_sessions import CALLER_SCOPE_KEY
+
+    request = SimpleNamespace(scope={CALLER_SCOPE_KEY: caller})
+    return SimpleNamespace(request_context=SimpleNamespace(request=request))
+
+
 def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
+    """An issued id refused for its version alone: the request's own stamp says so."""
     from automated_security_helper.cli.mcp.session_identity import (
-        _PROTOCOL_VERSION_IS_CAUSE,
         UNIDENTIFIED_SESSION_ID,
         session_identity_refusal,
     )
 
-    token = _PROTOCOL_VERSION_IS_CAUSE.set(True)
-    try:
-        refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
-    finally:
-        _PROTOCOL_VERSION_IS_CAUSE.reset(token)
+    refusal = session_identity_refusal(
+        UNIDENTIFIED_SESSION_ID,
+        "clear_source",
+        _ctx_carrying(_version_refused_stateful_caller()),
+    )
 
     assert refusal is not None
     assert "newer protocol version" in refusal["error"], refusal
     assert "Mcp-Protocol-Version" in refusal["error"], refusal
+    assert "--stateless-http" not in refusal["error"], refusal
 
 
 def test_a_refusal_the_protocol_version_did_not_cause_does_not_name_it() -> None:
@@ -456,8 +487,26 @@ def test_a_refusal_the_protocol_version_did_not_cause_does_not_name_it() -> None
 
 
 def test_the_protocol_version_cause_does_not_outlive_the_request_that_set_it() -> None:
+    """Only a refusal handed that request's context names the version."""
     from automated_security_helper.cli.mcp.session_identity import (
-        _PROTOCOL_VERSION_IS_CAUSE,
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    ctx = _ctx_carrying(_version_refused_stateful_caller())
+    with_request = session_identity_refusal(
+        UNIDENTIFIED_SESSION_ID, "clear_source", ctx
+    )
+    without_request = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+
+    assert with_request is not None and without_request is not None
+    assert "newer protocol version" in with_request["error"], with_request
+    assert "newer protocol version" not in without_request["error"], without_request
+
+
+def test_an_interleaved_resolution_does_not_change_the_refusals_cause() -> None:
+    """The refusal depends on the request it is given, not on call order."""
+    from automated_security_helper.cli.mcp.session_identity import (
         UNIDENTIFIED_SESSION_ID,
         resolve_caller_session_id,
         session_identity_refusal,
@@ -466,16 +515,50 @@ def test_the_protocol_version_cause_does_not_outlive_the_request_that_set_it() -
     class _StandIn:
         headers = {"mcp-session-id": "tenant-a"}
 
-    token = _PROTOCOL_VERSION_IS_CAUSE.set(True)
-    try:
-        # The next resolution in this context is a different request.
-        assert resolve_caller_session_id(_StandIn()) == "tenant-a"
-        refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
-    finally:
-        _PROTOCOL_VERSION_IS_CAUSE.reset(token)
+    ctx = _ctx_carrying(_version_refused_stateful_caller())
+    # Another caller's resolution runs between the request and its refusal.
+    assert resolve_caller_session_id(_StandIn()) == "tenant-a"
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx)
+
+    assert refusal is not None
+    assert "newer protocol version" in refusal["error"], refusal
+    assert "initialize" in refusal["error"], refusal
+
+
+def test_a_refusal_for_a_passed_down_id_claims_no_cause() -> None:
+    """mcp_scan_directory's shape: an id another tool resolved and passed down.
+
+    No request stamp is in reach here, so the refusal must not claim the
+    protocol version is the cause and must not pick a mode it cannot know.
+    """
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "scan_directory")
 
     assert refusal is not None
     assert "newer protocol version" not in refusal["error"], refusal
+    assert "Mcp-Protocol-Version" not in refusal["error"], refusal
+    assert "--trust-upstream-session-id" in refusal["error"], refusal
+
+
+def test_a_request_no_ash_app_stamped_gets_the_mode_less_advice() -> None:
+    """A context whose request carries no stamp claims neither cause nor mode."""
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    ctx = SimpleNamespace(
+        request_context=SimpleNamespace(request=SimpleNamespace(scope={}))
+    )
+    refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source", ctx)
+
+    assert refusal is not None
+    assert "newer protocol version" not in refusal["error"], refusal
+    assert "--trust-upstream-session-id" in refusal["error"], refusal
 
 
 def test_the_ash_command_line_forwards_the_declaration(monkeypatch) -> None:
