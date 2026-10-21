@@ -2567,6 +2567,17 @@
   these values instead; `scan_start_failure` remains for every other reason a scan
   could not be started.
 
+- **`run_ash_scan` reports a config-source check that could not finish as
+  `config_check_failed`.** When the check of the config sources in the scan
+  target cannot finish (an unreadable entry, a link loop), the scan does not
+  start and the response is `success: false` with `error_type`
+  `config_check_failed` and the reason in `error`. Before, this case returned
+  `config_input_not_permitted`, although the config was not found to be outside
+  the permitted roots. A client that branches on `config_input_not_permitted`
+  gets `config_check_failed` for this case instead; `config_input_not_permitted`
+  remains for a config that is outside the directories the session may read a
+  config from, and `scan_start_failure` does not cover this case.
+
 - **A scan against a content database past its declared age bound now exits 1 by
   default, online and offline. An air-gapped image stops passing once its database
   is too old: for grype, 5 days after the database was built.**
