@@ -49,11 +49,14 @@ correct, or that the preceding ``gh release create`` step works. Those need Acti
 itself. A pass here means "given a version, the right floating tag is the one that
 gets written", not "the release workflow is correct".
 
-It also does not assert prerelease behavior beyond major extraction. A ``4.0.0rc1``
-release resolves to ``v4``, which is the part this file cares about; whether a
-prerelease should move a floating tag at all is a separate question from the one the
-defect posed, and the workflow's behavior there is unchanged -- a ``3.8.0rc1`` release
-moves ``v3`` exactly as it did before.
+A ``4.0.0rc1`` release resolves to ``v4``. Whether a prerelease should move a floating
+tag at all is a separate question from the one the defect posed, and the workflow still
+lets one move it. What this file does assert about prereleases is the backward guard:
+a prerelease is older than the stable release with the same core, so a re-run of the
+``4.0.0rc1`` job after ``v4.0.0`` exists moves nothing; a prerelease is also older than
+a later prerelease of its own core, so a re-run of the ``4.1.0rc1`` job after
+``v4.1.0rc2`` moved the tag moves nothing either; and a prerelease that is the newest
+of its core, with no stable release at or past that core, still moves the tag.
 
 Failure mode of this harness itself
 -----------------------------------
@@ -158,11 +161,38 @@ done
 [ "${STUB_TAG_EXISTS:-0}" = "1" ]
 """
 
-# `git rev-parse HEAD` is the only git the step runs. Anything else is a change this
-# harness has not been taught about, and reads better as a loud failure than as a
-# stubbed success.
+# The step resolves the floating tag's target from the release tag: a fetch of that tag,
+# then `git rev-list -n1` on it, which answers FAKE_SHA. `git rev-parse HEAD` answers a
+# different sha, standing in for whatever main is at run time, so a step that reads HEAD
+# is visible at the API call. Anything else is a change this harness has not been taught
+# about, and reads better as a loud failure than as a stubbed success.
+HEAD_SHA = "fedcba9876543210fedcba9876543210fedcba98"  # pragma: allowlist secret
+#
+# `rev-list` answers for a release tag only after the stub has recorded a fetch of exactly
+# that tag, as the real repository would: the tag is created server-side after the
+# checkout, so a local `rev-list` without the fetch finds nothing. Without this a step
+# that dropped the fetch line would still read FAKE_SHA and pass. `ls-remote` lists the
+# tags named in STUB_REMOTE_TAGS, one per word, standing in for the remote's tags.
 GIT_STUB = f"""#!/usr/bin/env bash
-if [ "$1" = "rev-parse" ]; then echo "{FAKE_SHA}"; exit 0; fi
+printf '%s\\n' "$*" >> "$GIT_CALL_LOG"
+if [ "$1" = "rev-parse" ]; then echo "{HEAD_SHA}"; exit 0; fi
+if [ "$1" = "fetch" ]; then exit 0; fi
+if [ "$1" = "ls-remote" ]; then
+  if [ "${{STUB_LS_REMOTE_FAILS:-0}}" = "1" ]; then
+    echo "harness: ls-remote fails like an unreachable remote" >&2; exit 2
+  fi
+  for t in ${{STUB_REMOTE_TAGS:-}}; do printf '%s\\trefs/tags/%s\\n' "{FAKE_SHA}" "$t"; done
+  exit 0
+fi
+if [ "$1" = "rev-list" ] && [ "$2" = "-n1" ]; then
+  case "$3" in refs/tags/v*)
+    tag="${{3#refs/tags/}}"
+    if grep -qxF "fetch --no-tags origin refs/tags/$tag:refs/tags/$tag" "$GIT_CALL_LOG"; then
+      echo "{FAKE_SHA}"; exit 0
+    fi
+    echo "harness: rev-list of $3 before any fetch of it" >&2; exit 1;;
+  esac
+fi
 echo "harness: unexpected git invocation: $*" >&2
 exit 1
 """
@@ -213,9 +243,15 @@ def _floating_tag_script() -> str:
 class Result:
     """What the step did: its exit status, and the gh calls it made."""
 
-    def __init__(self, proc: subprocess.CompletedProcess, calls: list[str]):
+    def __init__(
+        self,
+        proc: subprocess.CompletedProcess,
+        calls: list[str],
+        git_calls: list[str] | None = None,
+    ):
         self.proc = proc
         self.calls = calls
+        self.git_calls = git_calls or []
 
     @property
     def ok(self) -> bool:
@@ -242,13 +278,29 @@ class Result:
         return (
             f"exit={self.proc.returncode}\n"
             f"gh calls:\n  " + ("\n  ".join(self.calls) or "(none)") + "\n"
+            "git calls:\n  " + ("\n  ".join(self.git_calls) or "(none)") + "\n"
             f"stdout: {self.proc.stdout.strip()}\n"
             f"stderr: {self.proc.stderr.strip()}"
         )
 
 
-def _run(script: str, version: str, tmp_path: Path, tag_exists: bool = True) -> Result:
-    """Run the step's shell with gh and git stubbed, and report what it touched."""
+def _run(
+    script: str,
+    version: str,
+    tmp_path: Path,
+    tag_exists: bool = True,
+    remote_tags: str | None = None,
+    ls_remote_fails: bool = False,
+) -> Result:
+    """Run the step's shell with gh and git stubbed, and report what it touched.
+
+    ``remote_tags`` is the space-separated list of tags the stubbed remote reports. Left
+    as None it lists the release tag of ``version`` alone, as the real remote does once
+    the release step has created that tag. ``ls_remote_fails`` makes ``git ls-remote``
+    exit non-zero, as it does when the remote cannot be reached.
+    """
+    if remote_tags is None:
+        remote_tags = f"v{version}"
     assert "${{" not in script, (
         "the step's run block contains an Actions expression, which this harness does "
         "not expand -- it would be running a template rather than the real script"
@@ -258,6 +310,8 @@ def _run(script: str, version: str, tmp_path: Path, tag_exists: bool = True) -> 
     bin_dir.mkdir(exist_ok=True)
     log = tmp_path / "gh-calls.log"
     log.write_text("", encoding="utf-8")
+    git_log = tmp_path / "git-calls.log"
+    git_log.write_text("", encoding="utf-8")
 
     for name, body in (("gh", GH_STUB), ("git", GIT_STUB)):
         path = bin_dir / name
@@ -275,6 +329,9 @@ def _run(script: str, version: str, tmp_path: Path, tag_exists: bool = True) -> 
         "GH_TOKEN": "stub-token",
         "GH_CALL_LOG": str(log),
         "STUB_TAG_EXISTS": "1" if tag_exists else "0",
+        "GIT_CALL_LOG": str(git_log),
+        "STUB_REMOTE_TAGS": remote_tags,
+        "STUB_LS_REMOTE_FAILS": "1" if ls_remote_fails else "0",
     }
     # `bash -e {0}` is the default shell Actions gives a `run:` block on ubuntu-latest,
     # and this workflow does not override it.
@@ -286,7 +343,10 @@ def _run(script: str, version: str, tmp_path: Path, tag_exists: bool = True) -> 
         timeout=60,
     )
     calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-    return Result(proc, calls)
+    git_calls = [
+        line for line in git_log.read_text(encoding="utf-8").splitlines() if line
+    ]
+    return Result(proc, calls, git_calls)
 
 
 class TestTheFloatingTagMatchesTheReleasedMajor:
@@ -348,7 +408,7 @@ class TestTheFloatingTagMatchesTheReleasedMajor:
         result = _run(_floating_tag_script(), "3.8.0", tmp_path, tag_exists=True)
 
         assert any(FAKE_SHA in call for call in result.calls), (
-            f"no gh call carried the sha from `git rev-parse HEAD`\n{result.describe()}"
+            f"no gh call carried the release tag's commit\n{result.describe()}"
         )
 
 
@@ -497,3 +557,435 @@ class TestTheHarnessCanFail:
             "malformed-version tests above are guarding against a different mechanism "
             f"than the one that shipped.\n{result.describe()}"
         )
+
+
+class TestTheFloatingTagFollowsTheReleaseTag:
+    """The floating tag points at the release tag's commit, never at the checkout's HEAD.
+
+    HEAD is main at run time. A merge whose release already exists, a re-run of an old
+    run, or a pull request merged after the release would otherwise move the floating
+    tag onto code that was never released.
+    """
+
+    pytestmark = _REQUIRES_BASH
+
+    @pytest.mark.parametrize("tag_exists", [True, False])
+    def test_the_floating_tag_is_moved_to_the_release_tag_commit(
+        self, tag_exists: bool, tmp_path: Path
+    ):
+        result = _run(_floating_tag_script(), "3.8.0", tmp_path, tag_exists=tag_exists)
+
+        assert result.ok, f"the step failed on a valid version\n{result.describe()}"
+        assert any(FAKE_SHA in call for call in result.calls), (
+            "no gh call carried the release tag's commit, so the floating tag was "
+            f"pointed somewhere else\n{result.describe()}"
+        )
+        assert not any(HEAD_SHA in call for call in result.calls), (
+            "a gh call carried the checkout's HEAD, which is main at run time and not "
+            f"necessarily the release commit\n{result.describe()}"
+        )
+
+
+class TestTheReleaseTagIsFetchedBeforeItIsResolved:
+    """The fetch line is what makes the release tag visible locally.
+
+    The tag is created server-side after the checkout, so `git rev-list` on it finds
+    nothing until it is fetched. GIT_STUB answers `rev-list` only after it recorded that
+    exact fetch, so deleting the fetch line turns these cells red.
+    """
+
+    pytestmark = _REQUIRES_BASH
+
+    def test_the_step_fetches_the_release_tag(self, tmp_path: Path):
+        result = _run(_floating_tag_script(), "3.8.0", tmp_path, tag_exists=True)
+
+        assert result.ok, f"the step failed on a valid version\n{result.describe()}"
+        assert "fetch --no-tags origin refs/tags/v3.8.0:refs/tags/v3.8.0" in (
+            result.git_calls
+        ), f"no fetch of the release tag was recorded\n{result.git_calls}"
+
+    def test_the_stub_refuses_a_rev_list_without_the_fetch(self, tmp_path: Path):
+        """Control: the stub is what gives the cell above its teeth."""
+        result = _run(
+            "git rev-list -n1 refs/tags/v3.8.0\n", "3.8.0", tmp_path, tag_exists=True
+        )
+
+        assert not result.ok, (
+            "the git stub answered rev-list for a tag that was never fetched, so a "
+            f"step without the fetch line would pass\n{result.describe()}"
+        )
+        assert "before any fetch" in result.proc.stderr
+
+
+class TestTheFloatingTagNeverMovesBackward:
+    """A re-run of an old release run, or two runs finishing out of order, must not
+    point the floating tag at an older release than one that already exists."""
+
+    pytestmark = _REQUIRES_BASH
+
+    @pytest.mark.parametrize(
+        ("version", "remote_tags"),
+        [
+            ("3.7.1", "v3.7.1 v3.8.0"),
+            ("3.8.0", "v3.8.0 v3.9.1"),
+            ("3.9.0", "v3.9.0 v3.10.0"),  # numeric, not lexical, order
+            ("3.0.0-beta-20250528", "v3.0.0-beta-20250528 v3.7.1 v3.8.0"),
+            # A prerelease is older than the stable release with the same core, so a
+            # re-run of its job after the stable release shipped moves nothing.
+            ("4.0.0rc1", "v4.0.0rc1 v4.0.0"),
+            ("3.0.0-beta-20250528", "v3.0.0-beta-20250528 v3.0.0"),
+            ("3.8.0.dev1", "v3.8.0.dev1 v3.8.0"),
+            # One prerelease against another: rc2 of the same core moved the tag, so
+            # a re-run of the rc1 job moves nothing. The stable list cannot decide
+            # this one -- neither rc is in it.
+            ("4.1.0rc1", "v4.0.0 v4.1.0rc1 v4.1.0rc2"),
+            ("3.0.0-beta-20250528", "v3.0.0-beta-20250528 v3.0.0-beta-20250601"),
+        ],
+    )
+    def test_an_older_release_does_not_move_the_floating_tag(
+        self, version: str, remote_tags: str, tmp_path: Path
+    ):
+        result = _run(
+            _floating_tag_script(),
+            version,
+            tmp_path,
+            tag_exists=True,
+            remote_tags=remote_tags,
+        )
+
+        # Liveness: the step compared against the remote's tags, so an empty result
+        # below is the guard's doing and not a step that never started.
+        assert any(call.startswith("ls-remote") for call in result.git_calls), (
+            f"the step never listed the remote's release tags\n{result.describe()}"
+        )
+        assert result.ok, (
+            f"skipping a backward move is not a failure\n{result.describe()}"
+        )
+        assert result.refs_written == [], (
+            f"releasing {version} moved {result.refs_written} although a newer "
+            f"release exists ({remote_tags})\n{result.describe()}"
+        )
+        assert "::notice::" in result.proc.stdout, result.describe()
+
+    @pytest.mark.parametrize(
+        ("version", "remote_tags", "expected"),
+        [
+            ("3.8.0", "v3.7.1 v3.8.0", [("PATCH", "v3")]),  # newest is itself
+            ("3.10.0", "v3.9.0 v3.10.0", [("PATCH", "v3")]),
+            ("4.0.0", "v3.9.9 v4.0.0", [("PATCH", "v4")]),  # another major is no rival
+            # A prerelease still moves the tag while no stable release of its major
+            # has the same or a newer core.
+            ("4.0.0rc1", "", [("PATCH", "v4")]),  # no stable tag listed at all
+            ("4.0.0rc1", "v4.0.0rc1 v3.9.9", [("PATCH", "v4")]),
+            ("4.1.0rc1", "v4.1.0rc1 v4.0.0", [("PATCH", "v4")]),
+            # The newest prerelease of a core is not a backward move over its own
+            # earlier prereleases.
+            ("4.1.0rc2", "v4.0.0 v4.1.0rc1 v4.1.0rc2", [("PATCH", "v4")]),
+        ],
+    )
+    def test_the_newest_release_still_moves_the_floating_tag(
+        self,
+        version: str,
+        remote_tags: str,
+        expected: list[tuple[str, str]],
+        tmp_path: Path,
+    ):
+        result = _run(
+            _floating_tag_script(),
+            version,
+            tmp_path,
+            tag_exists=True,
+            remote_tags=remote_tags,
+        )
+
+        assert result.ok, f"the step failed on a valid version\n{result.describe()}"
+        assert result.mutations == expected, (
+            f"releasing {version} with remote tags [{remote_tags}] should write "
+            f"{expected}\n{result.describe()}"
+        )
+
+
+class TestTheRemoteTagListMustBeUsable:
+    """The guard compares against the remote's tags, so a list it cannot trust stops the
+    step. Without this an unreachable remote reads as "no newer release" and the floating
+    tag moves unchecked, with nothing in the run to say the comparison never happened."""
+
+    pytestmark = _REQUIRES_BASH
+
+    # The prerelease row is the one that isolates the ls-remote status: a stable version
+    # also fails on the empty list a hidden failure leaves behind, a prerelease does not.
+    @pytest.mark.parametrize("version", ["3.8.0", "4.0.0rc1"])
+    def test_a_failing_ls_remote_fails_the_step(self, version: str, tmp_path: Path):
+        result = _run(
+            _floating_tag_script(),
+            version,
+            tmp_path,
+            tag_exists=True,
+            ls_remote_fails=True,
+        )
+
+        # Liveness: the step reached the remote read, so the absence below is the
+        # guard's doing and not a step that never started.
+        assert any(call.startswith("ls-remote") for call in result.git_calls), (
+            f"the step never listed the remote's release tags\n{result.describe()}"
+        )
+        assert not result.ok, (
+            f"a failing ls-remote was hidden and the step went on\n{result.describe()}"
+        )
+        assert result.refs_written == [], result.describe()
+
+    @pytest.mark.parametrize(
+        ("version", "remote_tags"),
+        [
+            ("3.8.0", ""),  # the list is empty
+            ("3.8.0", "v3.7.1"),  # it lacks this run's own tag
+            ("3.8.0", "v3.8.0.dev1"),  # a prerelease tag is not the stable one
+        ],
+    )
+    def test_a_stable_version_missing_from_the_list_fails_the_step(
+        self, version: str, remote_tags: str, tmp_path: Path
+    ):
+        result = _run(
+            _floating_tag_script(),
+            version,
+            tmp_path,
+            tag_exists=True,
+            remote_tags=remote_tags,
+        )
+
+        assert any(call.startswith("ls-remote") for call in result.git_calls), (
+            f"the step never listed the remote's release tags\n{result.describe()}"
+        )
+        assert "::error::" in result.proc.stdout, result.describe()
+        assert not result.ok, (
+            f"a tag list without v{version} must not be compared against\n"
+            f"{result.describe()}"
+        )
+        assert result.refs_written == [], result.describe()
+
+    def test_a_prerelease_may_be_absent_from_the_stable_list(self, tmp_path: Path):
+        """The list holds stable tags only, so a prerelease never has to appear in it."""
+        result = _run(
+            _floating_tag_script(),
+            "4.0.0rc1",
+            tmp_path,
+            tag_exists=True,
+            remote_tags="v3.9.9",
+        )
+
+        assert result.ok, result.describe()
+        assert result.refs_written == ["v4"], result.describe()
+
+
+class TestReleaseRunsAreSerialized:
+    """Two release runs finishing together must not interleave their tag writes."""
+
+    def test_the_job_declares_a_queueing_concurrency_group(self):
+        doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        concurrency = doc["jobs"][JOB].get("concurrency")
+
+        assert isinstance(concurrency, dict), (
+            f"job {JOB} has no concurrency block, so release runs can overlap"
+        )
+        group = concurrency.get("group")
+        # The literal, not truthiness: a group built from the pull request number or the
+        # version would still be truthy and would turn serialization off.
+        assert group == "ash-release-tag", (
+            f"the concurrency group is {group!r}; it must be the one literal shared by "
+            "every release run, with no ${{ }} expression in it"
+        )
+        assert "${{" not in group
+        assert concurrency.get("cancel-in-progress") is False, (
+            "cancel-in-progress must be false: cancelling a running release would "
+            "stop it between creating the tag and moving the floating tag"
+        )
+
+
+RELEASE_GH_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_CALL_LOG"
+# `gh release view` finds no release, so the step goes on to create one.
+if [ "$1" = "release" ] && [ "$2" = "view" ]; then exit 1; fi
+exit 0
+"""
+
+
+def _release_step_script() -> str:
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = [
+        step
+        for step in doc["jobs"][JOB]["steps"]
+        if isinstance(step, dict) and "gh release create" in (step.get("run") or "")
+    ]
+    assert len(steps) == 1, f"expected one release-creating step, found {len(steps)}"
+    return steps[0]["run"]
+
+
+# Answers the step's read of the release tag on the remote. STUB_TAG_SHA is the commit the
+# tag points at; with STUB_TAG_OBJECT set the tag is annotated, so the remote lists the
+# tag object first and the commit it peels to on the `^{}` line, as `git ls-remote` does.
+# Unset STUB_TAG_SHA means the tag is absent.
+RELEASE_GIT_STUB = """#!/usr/bin/env bash
+if [ "$1" = "ls-remote" ]; then
+  if [ -n "${STUB_TAG_SHA:-}" ]; then
+    if [ -n "${STUB_TAG_OBJECT:-}" ]; then
+      printf '%s\\trefs/tags/v3.8.0\\n' "$STUB_TAG_OBJECT"
+      printf '%s\\trefs/tags/v3.8.0^{}\\n' "$STUB_TAG_SHA"
+    else
+      printf '%s\\trefs/tags/v3.8.0\\n' "$STUB_TAG_SHA"
+    fi
+  fi
+  exit 0
+fi
+echo "harness: unexpected git invocation: $*" >&2
+exit 1
+"""
+
+OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"  # pragma: allowlist secret
+TAG_OBJECT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"  # pragma: allowlist secret
+
+
+def _run_release_step(
+    script: str,
+    tmp_path: Path,
+    tag_sha: str | None = None,
+    tag_object: str | None = None,
+) -> Result:
+    """Run the release step's shell with gh and git stubbed, in a directory with an empty
+    changelog. ``tag_sha`` is the commit the release tag already points at on the remote,
+    or None when the tag does not exist."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    log = tmp_path / "gh-calls.log"
+    log.write_text("", encoding="utf-8")
+    for name, body in (("gh", RELEASE_GH_STUB), ("git", RELEASE_GIT_STUB)):
+        stub = bin_dir / name
+        stub.write_text(body, encoding="utf-8")
+        stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    work = tmp_path / "work"
+    work.mkdir(exist_ok=True)
+    (work / "CHANGELOG.md").write_text("", encoding="utf-8")
+    script_path = tmp_path / "release-step.sh"
+    script_path.write_text(script, encoding="utf-8")
+
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "HOME": str(tmp_path),
+        "VERSION": "3.8.0",
+        "MERGE_SHA": FAKE_SHA,
+        "GITHUB_REPOSITORY": FAKE_REPO,
+        "GH_TOKEN": "stub-token",
+        "GH_CALL_LOG": str(log),
+        "RUNNER_TEMP": str(tmp_path),
+        "STUB_TAG_SHA": tag_sha or "",
+        "STUB_TAG_OBJECT": tag_object or "",
+    }
+    proc = subprocess.run(
+        ["bash", "-e", str(script_path)],
+        env=env,
+        cwd=work,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+    return Result(proc, calls)
+
+
+class TestTheReleaseTargetsTheMergeCommit:
+    """`--target main` is resolved when the release is created, so a pull request merged
+    in between puts the release tag past the release pull request's merge commit."""
+
+    pytestmark = _REQUIRES_BASH
+
+    def test_release_create_targets_the_merge_commit(self, tmp_path: Path):
+        result = _run_release_step(_release_step_script(), tmp_path)
+
+        created = [c for c in result.calls if c.startswith("release create")]
+        assert created, f"the step never ran `gh release create`\n{result.describe()}"
+        assert f"--target {FAKE_SHA}" in created[0], (
+            "the release must be created at the pull request's merge commit\n"
+            f"{result.describe()}"
+        )
+        assert "--target main" not in created[0], result.describe()
+
+    def test_the_version_is_read_from_the_merge_commit(self):
+        """The checkout the version and changelog are read from is the merge commit.
+
+        Reading them from the tip of main lets the run for an earlier release pull
+        request see a later release's version and create that release at the older
+        merge commit.
+        """
+        doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        steps = doc["jobs"][JOB]["steps"]
+        checkout = next(
+            s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")
+        )
+        read_version = next(s for s in steps if s.get("id") == "version")
+
+        assert steps.index(checkout) < steps.index(read_version)
+        assert (
+            checkout["with"]["ref"]
+            == "${{ github.event.pull_request.merge_commit_sha }}"
+        )
+
+    def test_the_merge_commit_comes_from_the_event_payload(self):
+        doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        step = next(
+            s
+            for s in doc["jobs"][JOB]["steps"]
+            if isinstance(s, dict) and "gh release create" in (s.get("run") or "")
+        )
+        assert (
+            step["env"]["MERGE_SHA"]
+            == "${{ github.event.pull_request.merge_commit_sha }}"
+        )
+
+
+class TestAnExistingReleaseTagMustSitAtTheMergeCommit:
+    """`gh release create --target` is ignored when the tag already exists, so a tag at
+    another commit would publish the release there. The step reads the tag on the remote
+    first and refuses unless it is absent or already at the merge commit."""
+
+    pytestmark = _REQUIRES_BASH
+
+    def _created(self, result: Result) -> list[str]:
+        return [c for c in result.calls if c.startswith("release create")]
+
+    def test_a_tag_at_another_commit_fails_the_step(self, tmp_path: Path):
+        result = _run_release_step(_release_step_script(), tmp_path, tag_sha=OTHER_SHA)
+
+        # Liveness: the step's own annotation, not a harness that failed to start.
+        assert "::error::" in result.proc.stdout, result.describe()
+        assert OTHER_SHA in result.proc.stdout and FAKE_SHA in result.proc.stdout, (
+            f"the error must name both commits\n{result.describe()}"
+        )
+        assert not result.ok, (
+            f"a release tag at another commit must fail the step\n{result.describe()}"
+        )
+        assert self._created(result) == [], (
+            f"the release was created anyway\n{result.describe()}"
+        )
+
+    def test_a_tag_at_the_merge_commit_proceeds(self, tmp_path: Path):
+        result = _run_release_step(_release_step_script(), tmp_path, tag_sha=FAKE_SHA)
+
+        assert result.ok, result.describe()
+        assert len(self._created(result)) == 1, result.describe()
+
+    def test_an_annotated_tag_is_judged_by_the_commit_it_peels_to(self, tmp_path: Path):
+        result = _run_release_step(
+            _release_step_script(),
+            tmp_path,
+            tag_sha=FAKE_SHA,
+            tag_object=TAG_OBJECT_SHA,
+        )
+
+        assert result.ok, result.describe()
+        assert len(self._created(result)) == 1, result.describe()
+
+    def test_an_absent_tag_proceeds(self, tmp_path: Path):
+        result = _run_release_step(_release_step_script(), tmp_path, tag_sha=None)
+
+        assert result.ok, result.describe()
+        assert len(self._created(result)) == 1, result.describe()
