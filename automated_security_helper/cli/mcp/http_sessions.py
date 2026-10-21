@@ -60,6 +60,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    FrozenSet,
     Iterable,
     Optional,
     Set,
@@ -102,10 +103,15 @@ class HttpCaller:
         session_id: The session the server issued (or, on a stateless app run
             with ``--trust-upstream-session-id``, the platform's header), or None
             when the request has no session identity.
+        protocol_version_is_cause: True when a stateful app gave the request no
+            identity because it names a protocol version outside the
+            ``initialize`` handshake versions. A caller that reads the refusal
+            can change that; it cannot change the other causes.
     """
 
     transport: str
     session_id: Optional[str]
+    protocol_version_is_cause: bool = False
 
 
 def caller_of(scope: Any) -> Optional[HttpCaller]:
@@ -143,25 +149,54 @@ def _route_path(scope: Scope) -> str:
     return path
 
 
-def _on_the_sdk_session_path(scope: Scope, endpoint_path: Optional[str]) -> bool:
+def _handshake_protocol_versions() -> FrozenSet[str]:
+    """The protocol versions the SDK sends through its session check.
+
+    Read from the SDK's own list. A stateful :class:`SessionBoundary` reads it
+    once, when it is built.
+
+    Raises:
+        RuntimeError: if the SDK's list cannot be imported. A stateful server
+            without it could identify no session, so every session tool would
+            refuse its caller.
+    """
+    try:
+        from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
+    except ImportError as exc:
+        raise RuntimeError(
+            "a stateful session boundary needs the MCP SDK's list of handshake "
+            "protocol versions (mcp_types.version.HANDSHAKE_PROTOCOL_VERSIONS), "
+            f"and importing it failed: {exc}"
+        ) from exc
+    return frozenset(HANDSHAKE_PROTOCOL_VERSIONS)
+
+
+def _through_the_sdk_session_check(
+    scope: Scope, handshake_versions: FrozenSet[str]
+) -> bool:
+    """True when the request names a protocol version the SDK session-checks.
+
+    A request that names a version outside the ``initialize`` handshake
+    versions goes to a separate, sessionless path. The same rule as the SDK's,
+    from its own list.
+    """
+    version = _header(scope, b"mcp-protocol-version")
+    return version is None or version in handshake_versions
+
+
+def _on_the_sdk_session_path(
+    scope: Scope, endpoint_path: Optional[str], through_the_sdk_session_check: bool
+) -> bool:
     """True when the SDK's session endpoint handles this request's session.
 
     Two conditions. The request is for the endpoint itself: Starlette answers
     404 for a path the app has no route for, and that says nothing about a
     session. And it names a protocol version the SDK sends through its session
-    check: a request that names a version outside the ``initialize`` handshake
-    versions goes to a separate, sessionless path. The same rule as the SDK's,
-    from its own list. If the list cannot be read, no request counts, so a 404
-    never ends a session.
+    check; see :func:`_through_the_sdk_session_check`.
     """
     if endpoint_path is None or _route_path(scope) != endpoint_path:
         return False
-    try:
-        from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
-    except ImportError:
-        return False
-    version = _header(scope, b"mcp-protocol-version")
-    return version is None or version in HANDSHAKE_PROTOCOL_VERSIONS
+    return through_the_sdk_session_check
 
 
 def _canonical_sse_session(raw: Optional[str]) -> Optional[str]:
@@ -215,6 +250,18 @@ class SessionBoundary:
         endpoint_path: Stateful only, and required there: the path the SDK's
             streamable endpoint was built at (``streamable_http_path``). Only a
             404 on that path ends a session.
+        handshake_versions: Stateful only: the protocol versions the SDK
+            session-checks, read by the caller with
+            :func:`_handshake_protocol_versions`. ``build_streamable_http_app``
+            reads the list at build time and passes it, so a missing SDK list
+            fails the build itself; Starlette constructs middleware at the
+            app's first ASGI call, so a read deferred to here would surface
+            only once the server is up. None (the default) reads the list here,
+            for a boundary built directly.
+
+    Raises:
+        RuntimeError: building a stateful boundary without ``handshake_versions``,
+            if the SDK's list of handshake protocol versions cannot be imported.
 
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
@@ -236,6 +283,7 @@ class SessionBoundary:
         trust_upstream_session_id: bool = False,
         session_workspace_ttl: float = DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
         endpoint_path: Optional[str] = None,
+        handshake_versions: Optional[FrozenSet[str]] = None,
     ) -> None:
         if mode not in (MODE_SSE, MODE_STATEFUL, MODE_STATELESS):
             raise ValueError(f"unknown session boundary mode: {mode!r}")
@@ -253,6 +301,17 @@ class SessionBoundary:
             trust_upstream_session_id and mode == MODE_STATELESS
         )
         self.session_workspace_ttl = session_workspace_ttl
+        # Stateful only: the protocol versions the SDK session-checks, read
+        # once -- by the app build where it passed them, here otherwise.
+        self._handshake_versions: FrozenSet[str] = (
+            (
+                handshake_versions
+                if handshake_versions is not None
+                else _handshake_protocol_versions()
+            )
+            if mode == MODE_STATEFUL
+            else frozenset()
+        )
         # Sessions this app issued and has not seen end. Stateful: ids seen on
         # the app's own responses. sse: ids read from the endpoint event of an
         # event stream that is still open.
@@ -262,14 +321,19 @@ class SessionBoundary:
 
     # -- identity --------------------------------------------------------------
 
-    def _identify(self, scope: Scope) -> HttpCaller:
+    def _identify(self, scope: Scope, through_check: bool) -> HttpCaller:
         if self.mode == MODE_SSE:
             session = _canonical_sse_session(_query_value(scope, "session_id"))
             return HttpCaller(SSE, session if session in self._issued else None)
         header = _header(scope, _SESSION_HEADER)
         if self.mode == MODE_STATEFUL:
+            # The SDK routes a request naming a newer protocol past its session
+            # check, so an id this app issued names no session there.
+            known = header in self._issued and through_check
             return HttpCaller(
-                STREAMABLE_HTTP, header if header in self._issued else None
+                STREAMABLE_HTTP,
+                header if known else None,
+                protocol_version_is_cause=not through_check,
             )
         if self.trust_upstream_session_id and header and header.strip():
             return HttpCaller(STREAMABLE_HTTP, header.strip())
@@ -332,7 +396,12 @@ class SessionBoundary:
             await self.app(scope, receive, send)
             return
 
-        caller = self._identify(scope)
+        # Decided once, so the identity and the end-of-session watch cannot
+        # disagree about whether this request names a session.
+        through_check = self.mode == MODE_STATEFUL and _through_the_sdk_session_check(
+            scope, self._handshake_versions
+        )
+        caller = self._identify(scope, through_check)
         scope[CALLER_SCOPE_KEY] = caller
         if caller.session_id:
             from automated_security_helper.cli.mcp.sessions import (
@@ -348,7 +417,9 @@ class SessionBoundary:
             await self._serve_event_stream(scope, receive, send)
             return
         if self.mode == MODE_STATEFUL:
-            await self.app(scope, receive, self._watch_stateful(scope, send))
+            await self.app(
+                scope, receive, self._watch_stateful(scope, send, through_check)
+            )
             return
         await self.app(scope, receive, send)
 
@@ -363,12 +434,13 @@ class SessionBoundary:
 
         return watched
 
-    def _watch_stateful(self, scope: Scope, send: Send) -> Send:
+    def _watch_stateful(self, scope: Scope, send: Send, through_check: bool) -> Send:
         """Record the ids a stateful app issues, and end the ones it ends.
 
         An id counts as issued only from a successful response: the SDK also
         sends one on a refused opening request and then discards that session.
-        A session ends here when its ``DELETE`` succeeds, and when the SDK
+        A session ends here when its ``DELETE`` succeeds (a ``DELETE`` that names
+        a newer protocol version names no session, so it ends none), and when the SDK
         answers 404 for it on its own session path, which it does once it has
         discarded the session (its idle timeout, for one). A 404 for another path
         is Starlette's, for a path with no route, and a 404 on the newer
@@ -376,9 +448,13 @@ class SessionBoundary:
         """
 
         header = _header(scope, _SESSION_HEADER)
-        known = header if header in self._issued else None
+        # A request naming a newer protocol names no session here, as in
+        # _identify, so its DELETE ends none.
+        known = header if header in self._issued and through_check else None
         deleting = scope.get("method") == "DELETE"
-        session_path = _on_the_sdk_session_path(scope, self.endpoint_path)
+        session_path = _on_the_sdk_session_path(
+            scope, self.endpoint_path, through_check
+        )
 
         async def watched(message: Message) -> None:
             if message.get("type") == "http.response.start":
@@ -390,7 +466,11 @@ class SessionBoundary:
                     await self._end(known)
                 elif known and status == 404 and session_path:
                     await self._end(known)
-                elif issued and 200 <= status < 300:
+                elif issued and not header and session_path and 200 <= status < 300:
+                    # Only a successful response, on the SDK's session path, to a
+                    # request that carried no session header (``initialize``) is
+                    # an issue. A response to a request that named a session, or
+                    # one from the sessionless path, issues nothing.
                     self._issued.add(issued)
             await send(message)
 
