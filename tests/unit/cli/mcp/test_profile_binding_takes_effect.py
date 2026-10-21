@@ -65,10 +65,10 @@ def _isolated_session_state(monkeypatch, tmp_path):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     yield
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
 
 
 def _register(tmp_path: Path, name: str, body: str) -> Path:

@@ -32,7 +32,7 @@ import pytest
 from automated_security_helper.cli.mcp.profile_registry import (
     DEFAULT_SESSION_ID,
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core import exceptions as _exceptions
@@ -92,7 +92,7 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     monkeypatch.setenv(PROBE_VAR, PROBE)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {
         "workspace": workspace,
         "scan_root": scan_root,
@@ -102,7 +102,7 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "tmp": tmp_path,
     }
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 @pytest.fixture

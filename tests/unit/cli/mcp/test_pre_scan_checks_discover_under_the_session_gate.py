@@ -28,7 +28,7 @@ import pytest
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 from automated_security_helper.config import config_sources
 
@@ -49,10 +49,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {"target": target, "outside": outside}
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 @pytest.fixture

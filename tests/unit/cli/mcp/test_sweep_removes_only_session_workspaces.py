@@ -21,7 +21,7 @@ import pytest
 from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.profile_registry import (
-    clear_session_state,
+    clear_all_session_state,
     materialize_session_config,
 )
 from automated_security_helper.config.ash_config import AshConfig
@@ -37,7 +37,7 @@ def root(tmp_path, monkeypatch) -> Path:
     sessions.reset_default_registry_for_tests()
     yield workspace
     sessions.reset_default_registry_for_tests()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _age(path: Path) -> None:

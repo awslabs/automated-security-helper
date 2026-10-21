@@ -173,7 +173,7 @@ class TestEveryReaderRefusesAnAlias:
     def test_an_mcp_client_override(self, tmp_path):
         from automated_security_helper.cli.mcp.profile_registry import (
             clear_profile_registry,
-            clear_session_state,
+            clear_all_session_state,
             register_profiles,
             set_profile_registry,
         )
@@ -181,13 +181,13 @@ class TestEveryReaderRefusesAnAlias:
 
         profile = _write(tmp_path / "team.yaml", "project_name: team\n")
         clear_profile_registry()
-        clear_session_state()
+        clear_all_session_state()
         try:
             set_profile_registry(register_profiles([f"team={profile}"]))
             result = mcp_select_profile("team", override_yaml=_chain(4))
         finally:
             clear_profile_registry()
-            clear_session_state()
+            clear_all_session_state()
 
         assert result["success"] is False, result
         assert "alias" in result["error"]
@@ -229,7 +229,7 @@ class TestEveryReaderRefusesAnAlias:
         """
         from automated_security_helper.cli.mcp.profile_registry import (
             clear_profile_registry,
-            clear_session_state,
+            clear_all_session_state,
         )
         from automated_security_helper.cli.mcp_tools import mcp_validate_config
         from automated_security_helper.config import client_config_policy
@@ -243,13 +243,13 @@ class TestEveryReaderRefusesAnAlias:
 
         monkeypatch.setattr(client_config_policy, "client_file_denials", _record)
         clear_profile_registry()
-        clear_session_state()
+        clear_all_session_state()
         try:
             # A real session id is a remote client's, whose content is checked.
             result = mcp_validate_config(config_content=content, session_id="client-1")
         finally:
             clear_profile_registry()
-            clear_session_state()
+            clear_all_session_state()
 
         if reaches_the_check:
             assert len(checked) == 1, result

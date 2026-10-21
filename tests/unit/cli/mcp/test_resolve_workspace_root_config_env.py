@@ -39,7 +39,7 @@ import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 
 SESSION = "client-1"
@@ -70,14 +70,14 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     monkeypatch.setenv(PROBE_VAR, PROBE)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     workspace_file = scan_root / "dev.code-workspace"
     workspace_file.write_text(
         json.dumps({"folders": [{"path": "target"}]}), encoding="utf-8"
     )
     yield {"scan_root": scan_root, "workspace_file": workspace_file, "tmp": tmp_path}
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 @pytest.fixture

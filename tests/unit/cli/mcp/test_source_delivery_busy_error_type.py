@@ -31,7 +31,7 @@ import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 
 SESSION = "busy-session"
@@ -46,10 +46,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "workspaces"))
     monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield tmp_path
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _ctx() -> Any:

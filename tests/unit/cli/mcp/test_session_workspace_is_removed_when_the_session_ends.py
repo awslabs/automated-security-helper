@@ -49,7 +49,7 @@ from automated_security_helper.cli.mcp import build_sse_app, build_streamable_ht
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     register_profiles,
     resolve_session_config_path,
     set_profile_registry,
@@ -82,10 +82,10 @@ def workspace_root(tmp_path, monkeypatch) -> Path:
 @pytest.fixture(autouse=True)
 def _isolate_profile_state():
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _zip_bytes() -> bytes:

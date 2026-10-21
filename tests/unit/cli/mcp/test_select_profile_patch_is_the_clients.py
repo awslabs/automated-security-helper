@@ -35,7 +35,7 @@ import yaml
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     register_profiles,
     resolve_session_config_path,
     set_profile_registry,
@@ -80,7 +80,7 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {
         "tmp": tmp_path,
         "scan_root": scan_root,
@@ -89,7 +89,7 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "operator": operator,
     }
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 @pytest.fixture
@@ -1044,7 +1044,7 @@ def test_session_config_was_patched_is_decided_by_location(_server) -> None:
     link.symlink_to(patched)
     arbitrary = _server["operator"] / "op.yaml"
 
-    clear_session_state()
+    clear_all_session_state()
 
     assert session_config_was_patched(patched)
     assert session_config_was_patched(Path(patched))

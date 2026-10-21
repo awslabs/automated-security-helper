@@ -36,7 +36,7 @@ from automated_security_helper.cli.mcp import sessions
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     get_session_state,
     register_profiles,
     set_profile_registry,
@@ -59,10 +59,10 @@ def root(tmp_path, monkeypatch) -> Path:
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     sessions.reset_default_registry_for_tests()
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield workspace
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     sessions.reset_default_registry_for_tests()
 
 

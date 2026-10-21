@@ -33,7 +33,7 @@ import yaml
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     register_profiles,
     resolve_session_config_path,
     set_profile_registry,
@@ -74,10 +74,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ASH_CONFIG", str(operator))
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {"workspace": workspace, "target": target, "tmp": tmp_path}
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _upload(files: Dict[str, str]) -> Path:

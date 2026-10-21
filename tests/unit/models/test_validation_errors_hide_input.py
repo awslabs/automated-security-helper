@@ -353,7 +353,7 @@ def test_a_client_s_refused_patch_does_not_show_the_profile(tmp_path, monkeypatc
 
     from automated_security_helper.cli.mcp.profile_registry import (
         clear_profile_registry,
-        clear_session_state,
+        clear_all_session_state,
         register_profiles,
         set_profile_registry,
     )
@@ -361,7 +361,7 @@ def test_a_client_s_refused_patch_does_not_show_the_profile(tmp_path, monkeypatc
 
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     profile = tmp_path / "profile.yaml"
     profile.write_text(
         yaml.safe_dump(
@@ -390,7 +390,7 @@ def test_a_client_s_refused_patch_does_not_show_the_profile(tmp_path, monkeypatc
         )
     finally:
         clear_profile_registry()
-        clear_session_state()
+        clear_all_session_state()
 
     assert result["success"] is False, result
     assert CANARY not in result["error"], result["error"]

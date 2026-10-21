@@ -73,10 +73,10 @@ def _environment(tmp_path, monkeypatch):
         sd, "_run_git", lambda *a, **k: pytest.fail("git ran during the scan")
     )
     reset_default_registry_for_tests()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     yield
     reset_default_registry_for_tests()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
 
 
 def _zip() -> bytes:

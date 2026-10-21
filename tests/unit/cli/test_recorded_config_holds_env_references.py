@@ -629,7 +629,7 @@ def test_a_patched_profile_copy_holds_no_value_and_the_scan_reads_it(
     probe_env.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     probe_env.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     try:
         profile = _operator_config(tmp_path, PATCHABLE_PROFILE, "patch.ash.yaml")
         profile_registry.set_profile_registry(
@@ -674,7 +674,7 @@ def test_a_patched_profile_copy_holds_no_value_and_the_scan_reads_it(
         )
     finally:
         profile_registry.clear_profile_registry()
-        profile_registry.clear_session_state()
+        profile_registry.clear_all_session_state()
 
 
 def test_a_reference_the_client_writes_elsewhere_reads_nothing(tmp_path, probe_env):

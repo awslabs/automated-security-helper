@@ -80,10 +80,10 @@ def _clean_env(monkeypatch, tmp_path):
     monkeypatch.setenv(ASH_MCP_TRANSPORT_ENV, "stdio")
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     yield
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
 
 
 @pytest.fixture

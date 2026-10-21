@@ -27,7 +27,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     DEFAULT_SESSION_ID,
     call_profile_filename,
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     session_client_rules,
 )
 
@@ -48,10 +48,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.setenv(PROBE_VAR, PROBE)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield root
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _config_file(root: Path, session: str, text: str = "project_name: x\n") -> Path:

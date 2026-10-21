@@ -41,7 +41,7 @@ import yaml
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 from automated_security_helper.config.ash_config import AshConfig
 
@@ -99,10 +99,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {"workspace": workspace, "host": host, "tmp": tmp_path}
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 @pytest.fixture

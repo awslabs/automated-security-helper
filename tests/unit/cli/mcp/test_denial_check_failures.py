@@ -26,7 +26,7 @@ import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 
 REMOTE = "client-1"
@@ -42,10 +42,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _upload(files: Dict[str, str]) -> Path:

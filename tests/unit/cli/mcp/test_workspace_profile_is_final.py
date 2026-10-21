@@ -43,10 +43,10 @@ def _server(monkeypatch, tmp_path):
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path / "work"))
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     yield
     profile_registry.clear_profile_registry()
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
 
 
 def _register(tmp_path: Path, document: Dict[str, Any]) -> Path:

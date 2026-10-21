@@ -24,7 +24,7 @@ from automated_security_helper.cli.mcp import workspace as workspace_module
 def _clear_policy_env(monkeypatch, tmp_path):
     from automated_security_helper.cli.mcp.profile_registry import (
         clear_profile_registry,
-        clear_session_state,
+        clear_all_session_state,
     )
 
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
@@ -33,10 +33,10 @@ def _clear_policy_env(monkeypatch, tmp_path):
     # directory, not the user's MCP cache, which concurrent runs share.
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _workspace(tmp_path: Path) -> Path:

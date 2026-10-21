@@ -446,17 +446,17 @@ def mcp_server(tmp_path, monkeypatch):
     from automated_security_helper.cli.mcp import sessions
     from automated_security_helper.cli.mcp.profile_registry import (
         clear_profile_registry,
-        clear_session_state,
+        clear_all_session_state,
     )
 
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     sessions.reset_default_registry_for_tests()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     sessions.reset_default_registry_for_tests()
 
 

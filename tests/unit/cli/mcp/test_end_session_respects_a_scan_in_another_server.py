@@ -193,7 +193,7 @@ def test_a_presence_guard_that_cannot_be_taken_clears_the_memory_and_warns(
         assert removed == ["unreadable"], "a sweep whose guard succeeds collects it"
         assert not sandbox.exists()
     finally:
-        profile_registry.clear_session_state()
+        profile_registry.clear_all_session_state()
         source_delivery._drop_session_source_dir("unreadable")
 
 
@@ -243,7 +243,7 @@ def test_forgetting_a_session_drops_its_delivered_source_record(
         assert "unreadable" not in registry, "the entry came back bound: forget undone"
         assert source_delivery.delivered_session_count() == 0
     finally:
-        profile_registry.clear_session_state()
+        profile_registry.clear_all_session_state()
         source_delivery._drop_session_source_dir("unreadable")
 
 

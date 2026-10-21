@@ -38,7 +38,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     SESSION_CONFIG_FILENAME,
     call_profile_filename,
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 
 REMOTE = "client-1"
@@ -63,10 +63,10 @@ def _server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("ASH_MCP_TRANSPORT", raising=False)
     monkeypatch.setenv(PROBE_VAR, "probe-value")
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {"workspace": workspace, "session": workspace / REMOTE}
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _write(path: Path, text: str) -> Path:

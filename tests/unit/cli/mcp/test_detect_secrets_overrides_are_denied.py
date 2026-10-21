@@ -27,7 +27,7 @@ import yaml
 from automated_security_helper.cli.mcp import workspace as workspace_module
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     register_profiles,
     set_profile_registry,
 )
@@ -43,10 +43,10 @@ VERIFICATION_FILTER = (
 def _isolate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _profile_document() -> Dict[str, Any]:

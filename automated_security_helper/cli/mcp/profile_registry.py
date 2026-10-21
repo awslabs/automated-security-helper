@@ -741,13 +741,18 @@ def session_client_rules(
 
 
 def clear_session_state(session_id: Optional[str] = None) -> None:
-    """Drop the SessionState for ``session_id`` (or every state if None).
+    """Drop the SessionState for ``session_id``.
 
-    ``sessions.end_session`` calls this when a session ends, so its bound
-    profile goes with its workspace; tests also use it to scrub between cases.
+    ``None`` is the stdio session (``DEFAULT_SESSION_ID``), as for the other
+    accessors; dropping every session's state is :func:`clear_all_session_state`,
+    so a caller that means one session cannot wipe them all. ``sessions.end_session``
+    calls this when a session ends, so its bound profile goes with its workspace.
     """
     with _session_lock:
-        if session_id is None:
-            _session_state.clear()
-        else:
-            _session_state.pop(session_id, None)
+        _session_state.pop(session_id or DEFAULT_SESSION_ID, None)
+
+
+def clear_all_session_state() -> None:
+    """Drop every session's SessionState; tests use it to scrub between cases."""
+    with _session_lock:
+        _session_state.clear()

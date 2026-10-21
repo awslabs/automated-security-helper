@@ -44,11 +44,11 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
     monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(operator))
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
     source = workspace / SESSION / "source"
     source.mkdir(parents=True)
     yield source, operator
-    profile_registry.clear_session_state()
+    profile_registry.clear_all_session_state()
 
 
 def _write(directory: Path, reference: str) -> Path:

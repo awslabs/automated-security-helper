@@ -25,7 +25,7 @@ import pytest
 
 from automated_security_helper.cli.mcp.profile_registry import (
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
 )
 
 REMOTE = "client-1"
@@ -54,10 +54,10 @@ def _env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ash_config.write_text("project_name: from-ash-config\n", encoding="utf-8")
     monkeypatch.setenv("ASH_CONFIG", str(ash_config))
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield {"scan_root": tmp_path / "scan-root"}
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _scanned_project_names(target: Path, monkeypatch: pytest.MonkeyPatch) -> List[str]:

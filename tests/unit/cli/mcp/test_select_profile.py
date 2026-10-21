@@ -20,7 +20,7 @@ from automated_security_helper.cli.mcp.profile_registry import (
     ProfileEntry,
     bind_session_config,  # noqa: F401 — imported for symmetry with binding tests
     clear_profile_registry,
-    clear_session_state,
+    clear_all_session_state,
     get_profile_registry,
     get_session_state,
     register_profiles,
@@ -41,10 +41,10 @@ from automated_security_helper.config.ash_config import (
 def _isolate_state() -> None:
     """Each test starts with empty registry + empty session state."""
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
     yield
     clear_profile_registry()
-    clear_session_state()
+    clear_all_session_state()
 
 
 def _write(path: Path, body: str) -> Path:
