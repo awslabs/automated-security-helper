@@ -525,6 +525,7 @@ def resolve_config_source(
     confine: Optional[Callable[[Path, Path, Any], Any]] = None,
     repository_file: Optional[Callable[[Path, Path], bool]] = None,
     refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
 ) -> ResolvedConfigDocument:
     """Read a config file and its ``extends`` chain the way a scan reads them.
 
@@ -549,6 +550,7 @@ def resolve_config_source(
         confine=confine,
         repository_file=repository_file,
         refuse_env=refuse_env,
+        anchor_relative_paths=anchor_relative_paths,
     )
 
 
@@ -780,8 +782,12 @@ def load_config_file(
     refuse_env: Optional[RefuseEnv] = None,
     overlay: Optional[ResolvedConfigDocument] = None,
     fill: Sequence[Any] = (),
+    anchor_relative_paths: Optional[AnchorPaths] = None,
 ) -> Tuple[ResolvedConfigDocument, AshConfig]:
     """Load a config file the way every scan loads one.
+
+    ``anchor_relative_paths`` is ``resolve_config_document``'s: when given, a
+    file it admits has its relative paths anchored at that file's directory.
 
     The file and its ``extends`` chain (``resolve_config_source``, which says
     where bases may be, or the directory ``confine_to`` names), then the
@@ -839,6 +845,7 @@ def load_config_file(
             confine=confine,
             repository_file=repository_file,
             refuse_env=refuse_env,
+            anchor_relative_paths=anchor_relative_paths,
         )
     else:
         document = resolve_config_source(
@@ -850,6 +857,7 @@ def load_config_file(
             confine=confine,
             repository_file=repository_file,
             refuse_env=refuse_env,
+            anchor_relative_paths=anchor_relative_paths,
         )
     data = document.data
     if fill:

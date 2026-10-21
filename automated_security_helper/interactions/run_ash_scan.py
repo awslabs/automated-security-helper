@@ -2334,15 +2334,20 @@ def _load_with_confinement(
     from automated_security_helper.config.resolve_config import load_config_file
 
     config_path = Path(config_path_str)
-    return load_config_file(
+    # load_config_file logs nothing on a failed load (its refusal carries the
+    # failure in the raised error), so ``log_failure`` has nothing to gate on
+    # this path; the parameter is kept for the callers that pass it alongside
+    # the thin readers' calls.
+    del log_failure
+    _, config = load_config_file(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
         permit_base=permit_base,
-        log_failure=log_failure,
         refuse_env=env_refused_for(remote_client, session_id),
         confine=confine,
         repository_file=repository_file,
     )
+    return config
 
 
 def _load_for_run_with_confinement(
@@ -2501,16 +2506,22 @@ def _host_resolved_config(opts: ScanOptions) -> Tuple["AshConfig", bool]:
     )
     from automated_security_helper.config.resolve_config import (
         apply_config_overrides,
-        load_config_file,
+        read_config_document,
+        validate_config_document,
     )
 
     env_config_path = _ash_config_file()
-    # As default_config.get_default_config loads it.
+    # As default_config.get_default_config loads it. The thin pair, so a file
+    # this caller already read ahead is not logged a second time
+    # (``log_failure`` False).
     env_config = (
-        load_config_file(
+        validate_config_document(
+            read_config_document(
+                env_config_path,
+                log_failure=False,
+                anchor_relative_paths=not_delivered_by_a_client,
+            ),
             env_config_path,
-            log_failure=False,
-            anchor_relative_paths=not_delivered_by_a_client,
         )
         if env_config_path is not None
         else None
