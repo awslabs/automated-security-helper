@@ -2286,10 +2286,10 @@ async def set_source_git(
     fails with error_type clone_timed_out. A clone that passes the archive size
     or entry limits is refused with error_type clone_too_large, which means the
     limits only: shrink the request (a smaller repository or a lower depth). A
-    clone whose tree cannot be read once git has exited is refused with
-    error_type clone_tree_unreadable, which is a server-side fault, not a size
-    to reduce. If this call is cancelled, the clone finishes or times out on the server and the session
-    reads busy until then.
+    clone whose tree cannot be read, while git runs or once it has exited, is
+    refused with error_type clone_tree_unreadable, which is a server-side
+    fault, not a size to reduce. If this call is cancelled, the clone finishes
+    or times out on the server and the session reads busy until then.
 
     Returns:
         Dict with success and source_dir, or success=False with error and
