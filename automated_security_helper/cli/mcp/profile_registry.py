@@ -229,18 +229,17 @@ def clear_profile_registry() -> None:
 # Per-session state
 # ---------------------------------------------------------------------------
 
-# Track 10.5 (#63) owns the full ``MCPSession`` shape (workspace_root,
-# disconnect cleanup, etc.). We define just the surface ``select_profile``
-# needs so its tests can exercise the binding without depending on #63.
+# ``sessions.MCPSession`` owns the session's workspace and locks. What a client
+# bound is stored here, keyed by session id, and is the only record of the
+# selected profile: ``MCPSession`` has no profile, config or patch fields.
 
 
 @dataclass
 class SessionState:
-    """Minimal per-connection state for Track 10.3.
+    """The profile a session selected, with its resolved config.
 
-    Track 10.5 will generalize this into a full ``MCPSession`` with workspace
-    + disconnect handling. Until then we hold only what binding the resolved
-    config requires.
+    This is the source of truth for a session's binding; ``sessions.MCPSession``
+    holds none of it.
 
     ``config_path`` is what makes a binding observable. ``bound_config`` is the
     resolved ``AshConfig``, and for a long time it was the only thing stored --
@@ -274,19 +273,18 @@ _session_state: Dict[str, SessionState] = {}
 DEFAULT_SESSION_ID = "__default__"
 
 
-def get_session_state(session_id: Optional[str] = None) -> SessionState:
-    """Return the SessionState for ``session_id``, creating it on first use.
+def get_session_state(session_id: Optional[str] = None) -> Optional[SessionState]:
+    """Return the SessionState bound to ``session_id``, or None if it has none.
 
-    ``None`` resolves to :data:`DEFAULT_SESSION_ID` so callers without an
-    explicit id (stdio transport, in-process tests) still get a stable slot.
+    ``None`` as the id resolves to :data:`DEFAULT_SESSION_ID` so callers without
+    an explicit id (stdio transport, in-process tests) still get a stable slot.
+
+    A lookup creates nothing: an entry for an id with no workspace is one the TTL
+    sweep and ``sessions.end_session`` never find. :func:`bind_session_config` is
+    the way to record a binding.
     """
-    sid = session_id or DEFAULT_SESSION_ID
     with _session_lock:
-        state = _session_state.get(sid)
-        if state is None:
-            state = SessionState(session_id=sid)
-            _session_state[sid] = state
-        return state
+        return _session_state.get(session_id or DEFAULT_SESSION_ID)
 
 
 #: Filename a bound config is materialized under, inside the session sandbox's
@@ -738,6 +736,17 @@ def session_client_rules(
     # Which session's config/ directory holds the files set aside for this
     # client (ClientConfigRules.session_id).
     return rules.model_copy(update={"session_id": session_id})
+
+
+def session_has_binding(session_id: Optional[str] = None) -> bool:
+    """Whether ``session_id`` has bound a profile.
+
+    ``None`` is the stdio session (``DEFAULT_SESSION_ID``), as for the other
+    accessors. A state exists only once ``bind_session_config`` created it, with a
+    profile and a config, so a state in the map is a binding.
+    """
+    with _session_lock:
+        return (session_id or DEFAULT_SESSION_ID) in _session_state
 
 
 def clear_session_state(session_id: Optional[str] = None) -> None:

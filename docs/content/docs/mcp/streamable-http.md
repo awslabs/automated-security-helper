@@ -163,7 +163,7 @@ await mcp__ash__set_source_git(
 
 The client names the URL and the server runs git, so the operator decides what git may reach:
 
-- Only hosts listed in `ASH_MCP_GIT_ALLOWED_HOSTS` (comma- or whitespace-separated host names, matched exactly and case-insensitively against the URL's host, any port) are cloned. An `ssh://` URL with `%`, `?`, `#`, `[` or `]` between `ssh://` and the path is refused with `error_type: clone_url_not_permitted`, so the host checked is the host git connects to. The list is empty by default, so every remote is refused until the operator names one: `ASH_MCP_GIT_ALLOWED_HOSTS=github.com,git.example.com`. A refusal has `error_type: clone_host_not_permitted`.
+- Only hosts listed in `ASH_MCP_GIT_ALLOWED_HOSTS` (comma- or whitespace-separated `[scheme://]host[:port]` entries; the host is matched exactly and case-insensitively against the URL's host) are cloned. A bare host allows the default port of the URL's scheme (443 for `https://`, 22 for `ssh://` and the `user@host:path` form); write `host:port` to allow another port (1 to 65535; an entry naming port 0 allows nothing, and a clone URL naming port 0 is refused with `error_type: clone_url_not_permitted`), and `https://host` or `ssh://host` to allow one scheme only. An `ssh://` URL with `%`, `?`, `#`, `[` or `]` between `ssh://` and the path is refused with `error_type: clone_url_not_permitted`, so the host checked is the host git connects to. The list is empty by default, so every remote is refused until the operator names one: `ASH_MCP_GIT_ALLOWED_HOSTS=github.com,git.example.com`. A refusal has `error_type: clone_host_not_permitted`.
 - `depth` is a positive whole number of commits; any other value is refused before anything is created for the session.
 - Each git command a delivery runs (the clone, and for a `ref` the fetch and the checkout) has 10 minutes. A command still running then is stopped together with the processes it started (ssh, `git-remote-https`), the partial tree is removed, and the call fails with `error_type: clone_timed_out`. A clone that grows the session's source directory past 500 MiB, the limit the zip channel puts on an extracted tree, is stopped the same way and fails with `error_type: clone_too_large`, which means those limits only. A tree that git wrote and the server then cannot read, once git has exited, is refused with `error_type: clone_tree_unreadable`; that is a fault on the server's side, not a size to reduce. While git is still running, a path that cannot be read (git is replacing a directory with a file at the `ref`, say) only leaves that look at the size short, and is not an error.
 - Only `https://`, `ssh://` and scp-like `user@host:path` URLs. `http://` and `git://` (no integrity protection), `file://` and plain paths (the server's own filesystem) are always refused, as are URLs that begin with `-` or use the `ext::` transport.
@@ -373,18 +373,17 @@ The session config is unchanged. The client may inspect `ash://schema/runtime-ov
 
 ## Session lifecycle
 
-Per-connection state is held in a process-local `MCPSession` keyed by FastMCP connection id (Track 10.5):
+Per-connection state is held in a process-local `MCPSession` keyed by FastMCP connection id (Track 10.5). The object carries the session's workspace path and the locks and claims that keep a scan, a change to the delivered tree and the TTL sweep from running over one another:
 
 ```
 MCPSession {
   id,
-  source_dir,
-  config,           # resolved AshConfig
-  profile_name,
-  patch_ops,        # JSON-Patch document, if any
   workspace_root,   # ASH_MCP_WORKSPACE_ROOT/<session_id>
+  created_at,
 }
 ```
+
+What a client bound to the session is not stored on that object. Both stores are keyed by the session id and are the source of truth: the delivered source directory is recorded by the source delivery module, and the selected profile, its resolved config and any JSON-Patch document by the profile registry.
 
 Workspaces live under `ASH_MCP_WORKSPACE_ROOT` (defaults to `$XDG_CACHE_HOME/ash-mcp/<session_id>/`). A session's workspace (its delivered tree, uploads in progress and the config `select_profile` materialized) and its bound profile are removed when the session ends:
 
@@ -502,6 +501,7 @@ The streamable-HTTP transport puts the MCP server on the network. A few invarian
 - **Always run behind TLS in production.** ASH does not terminate TLS itself. Use nginx, traefik, an API gateway, or a service mesh sidecar.
 - **The runtime-override allowlist defaults to disabled.** A profile must explicitly set `mcp.runtime_overrides.enabled: true` and enumerate `allowed_paths` for any client patching to succeed, through `patch_ops` or `override_yaml`. Leaving it off is the safe default — clients can still pick profiles, just not modify them.
 - **`set_source_git` clones only from hosts in `ASH_MCP_GIT_ALLOWED_HOSTS`**, which is empty by default, and never with the server account's credentials or git configuration. See [Git ref](#git-ref).
+- **Offline mode is process-wide.** A workspace or single scan run with `offline` sets `ASH_OFFLINE` for the whole server process while it runs, so an online scan that overlaps an offline one runs offline too. Its rows can read `SKIPPED` or `MISSING`, which `fail_on_incomplete_scanners` reports. Run offline and online scans on separate servers if they can overlap.
 - **Source-upload limits are per-session, not per-tenant.** A misbehaving tenant can still consume their session quota. Pair the transport with upstream rate limits if untrusted clients can connect.
 - **Workspaces are removed when the session ends, or after `--session-workspace-ttl` unused.** Don't rely on session-resident state to survive reconnects; persisted state across server restarts is explicitly out of scope (Track 10.8). See [Session lifecycle](#session-lifecycle).
 

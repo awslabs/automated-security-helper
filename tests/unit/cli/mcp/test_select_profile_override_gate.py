@@ -94,8 +94,7 @@ def _restated(document: Dict[str, Any], **changes: Any) -> str:
 
 
 def _assert_unbound(session_id: str) -> None:
-    state = get_session_state(session_id)
-    assert state.bound_config is None
+    assert get_session_state(session_id) is None
     assert resolve_session_config_path(session_id) is None
 
 
@@ -1431,6 +1430,7 @@ def test_override_yaml_changing_a_permitted_key_is_bound(tmp_path: Path) -> None
     assert overridden["success"] is True, overridden
     assert overridden["mode"] == "override"
     state = get_session_state("override")
+    assert state is not None
     assert state.override_yaml == override
     assert state.bound_config is not None
     assert state.bound_config.project_name == "renamed"
@@ -1442,6 +1442,7 @@ def test_override_yaml_changing_a_permitted_key_is_bound(tmp_path: Path) -> None
     assert materialized["sandbox"]["mode"] == "bwrap"
     # Both routes bind the same config.
     patch_state = get_session_state("patch")
+    assert patch_state is not None
     assert patch_state.bound_config is not None
     assert patch_state.bound_config.model_dump(
         mode="json"
@@ -1461,6 +1462,7 @@ def test_override_yaml_identical_to_the_profile_changes_nothing(
 
     assert result["success"] is True, result
     state = get_session_state("override")
+    assert state is not None
     assert state.bound_config is not None
     assert state.bound_config.project_name == "operator"
     assert state.bound_config.sandbox.mode == "bwrap"
@@ -1640,7 +1642,8 @@ def _s3_uploads_with_the_bound_config(
         return {}
 
     monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", stand_in)
-    bound = get_session_state(session_id).bound_config
+    state = get_session_state(session_id)
+    bound = state.bound_config if state is not None else None
     section = bound.get_plugin_config("reporter", "s3") if bound is not None else None
     if not section:
         return calls
@@ -1717,6 +1720,8 @@ def test_control_a_client_still_patches_a_built_in_reporter(tmp_path: Path) -> N
     for result in (patched, overridden):
         assert result["success"] is True, result
     for session_id in ("patch", "override"):
-        bound = get_session_state(session_id).bound_config
+        state = get_session_state(session_id)
+        assert state is not None
+        bound = state.bound_config
         assert bound is not None
         assert bound.get_plugin_config("reporter", "markdown")["enabled"] is False

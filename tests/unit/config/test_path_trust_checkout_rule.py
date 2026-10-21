@@ -551,6 +551,7 @@ def test_a_session_profile_a_client_patched_is_not_the_operators(tmp_path, patch
     # override_yaml the client sent, into the session's config/ directory. With
     # a patch in it, a tool path it names is not the operator's.
     from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.ash_config import AshConfig
 
     rules = _ops_rules(tmp_path)
     profile = tmp_path / "session" / "config" / "ash.yaml"
@@ -559,9 +560,13 @@ def test_a_session_profile_a_client_patched_is_not_the_operators(tmp_path, patch
         f"project_name: profile\nscanners:\n  checkov:\n    options:\n"
         f"      config_file: {rules.as_posix()}\n"
     )
-    state = profile_registry.get_session_state("test-patched-profile")
-    state.config_path = profile.as_posix()
-    state.patch_ops = [{"op": "add", "path": "/x", "value": 1}] if patched else None
+    profile_registry.bind_session_config(
+        "test-patched-profile",
+        config=AshConfig(),
+        profile_name="test-patched-profile",
+        patch_ops=[{"op": "add", "path": "/x", "value": 1}] if patched else None,
+        config_path=profile.as_posix(),
+    )
     try:
         target = _scanned_checkout(tmp_path)
         config = resolve_config(config_path=profile, source_dir=target)

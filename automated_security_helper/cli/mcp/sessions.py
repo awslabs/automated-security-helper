@@ -4,11 +4,15 @@
 """Per-connection MCP session lifecycle and registry.
 
 A *session* is the slice of state the MCP server holds for a single client
-connection — the working source directory, the resolved profile, the patch
-ops a client supplied at bind time, and the workspace scratch directory the
-server uses to materialize that state for a scan. Sessions are NEVER
-serialized (they hold a live ``threading.Lock``) and are NEVER shared across
-clients (the workspace_root is per-connection scratch).
+connection: its workspace scratch directory, and the locks, claims and counts
+that keep a scan, a change to the delivered tree, a write and the TTL sweep from
+running over one another. What a client bound to the session lives in two other
+stores, both keyed by the session id: the delivered source directory in
+``source_delivery`` and the selected profile, its config and its patch ops in
+``profile_registry``. Those stores are the only source of truth for a binding;
+the ``MCPSession`` object holds none of it. Sessions are NEVER serialized (they
+hold a live ``threading.Lock``) and are NEVER shared across clients (the
+workspace_root is per-connection scratch).
 
 The module exposes:
 
@@ -52,9 +56,10 @@ import os
 import shutil
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Set
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing_extensions import Self
@@ -65,9 +70,6 @@ from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
     validated_path_component,
 )
-
-if TYPE_CHECKING:
-    from automated_security_helper.config.ash_config import AshConfig
 
 
 class ScanCount:
@@ -99,6 +101,11 @@ class ScanCount:
         with self._lock:
             self._running = max(0, self._running - 1)
 
+    def is_running(self) -> bool:
+        """Whether a counted scan has not returned yet."""
+        with self._lock:
+            return self._running > 0
+
 
 #: Why :meth:`MCPSession.try_begin_write` refused: the TTL sweep is removing the
 #: session, so its state is gone once it is done.
@@ -129,13 +136,14 @@ class MCPSession(BaseModel):
 
     Fields:
         id: Stable connection identifier provided by the transport.
-        source_dir: Directory the client asked us to scan, if bound.
-        config: Resolved ``AshConfig`` for this session, if bound.
-        profile_name: Name of the profile that produced ``config``.
-        patch_ops: JSON-Patch ops the client supplied at bind time, if any.
         workspace_root: Per-session scratch directory. The disconnect hook
             rmtrees this path; do NOT place shared state here.
         created_at: UTC timestamp the session was created.
+
+    A client's binding is not a field of this model. The directory it delivered
+    is recorded by ``source_delivery`` (``get_session_source_dir``) and the profile
+    it selected, with that profile's config and patch ops, by ``profile_registry``
+    (``get_session_state``); both are keyed by ``id`` and are the source of truth.
 
     The ``_lock`` private attribute serializes scans within a single session.
     Two threads scanning the *same* session must contend on this lock; two
@@ -146,22 +154,6 @@ class MCPSession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: str = Field(description="Stable per-connection identifier.")
-    source_dir: Optional[Path] = Field(
-        default=None,
-        description="Directory the client asked us to scan, set at bind time.",
-    )
-    config: Optional["AshConfig"] = Field(
-        default=None,
-        description="Resolved AshConfig for this session, set at bind time.",
-    )
-    profile_name: Optional[str] = Field(
-        default=None,
-        description="Name of the profile that produced config.",
-    )
-    patch_ops: Optional[List[Dict[str, Any]]] = Field(
-        default=None,
-        description="JSON-Patch ops the client supplied at bind time.",
-    )
     workspace_root: Path = Field(
         description="Per-session scratch dir; disconnect rmtrees this.",
     )
@@ -188,6 +180,9 @@ class MCPSession(BaseModel):
     # Scans counted against the per-session limit and not yet returned. See
     # try_start_scan.
     _scan_count: ScanCount = PrivateAttr(default_factory=ScanCount)
+    # time.monotonic() when the registry last handed this session out. See
+    # is_idle_since.
+    _last_handed_out: float = PrivateAttr(default_factory=time.monotonic)
 
     @property
     def lock(self) -> threading.Lock:
@@ -344,16 +339,78 @@ class MCPSession(BaseModel):
         """Uncount a scan :meth:`try_start_scan` counted."""
         self._scan_count.scan_returned()
 
+    def is_idle_since(
+        self, cutoff: float, holds_binding: Callable[[str], bool]
+    ) -> bool:
+        """Whether the registry can forget this session without anyone noticing.
 
-# Resolve the ``AshConfig`` forward reference. Pydantic v2 refuses to
-# instantiate a model with an unresolved string annotation, so we rebuild at
-# import time. The bare ``AshConfig`` name must be available in this
-# module's globals so ``model_rebuild`` can resolve the string form.
-from automated_security_helper.config.ash_config import (  # noqa: E402,F401
-    AshConfig,
-)
+        True when the session was last handed out before ``cutoff`` (a
+        ``time.monotonic()`` reading), holds nothing a client bound to it, and
+        nothing runs or is claimed on it: no scan, no change, no write, no sweep.
+        A caller still holding the session from an earlier hand-out would have
+        refreshed it, or holds a claim, so a session this returns True for is
+        recreated empty by its next ``session_for``.
 
-MCPSession.model_rebuild()
+        What a client bound to the session lives outside this object: a delivered
+        tree in ``source_delivery`` and a selected profile in ``profile_registry``,
+        both keyed by the session id. ``holds_binding`` answers for those two
+        stores (:func:`_session_holds_a_binding`); the caller passes it in so that
+        a loop over many sessions imports them once.
+        """
+        if self._last_handed_out > cutoff:
+            return False
+        if holds_binding(self.id):
+            return False
+        if self._scan_count.is_running() or not self._lock.acquire(blocking=False):
+            return False
+        try:
+            # _changing and _sweeping cannot be set while the lock is held today:
+            # try_begin_change sets _changing only after taking _lock and end_change
+            # clears it before releasing it, and the one sweeper,
+            # _remove_if_still_stale, takes the change before try_begin_sweep. The
+            # terms stay so that a later caller that sets either without the lock
+            # still keeps its session.
+            with self._state_lock:
+                return not (
+                    self._claimed_scans
+                    or self._changing
+                    or self._writes
+                    or self._sweeping
+                )
+        finally:
+            self._lock.release()
+
+
+#: Sessions the registry holds before it looks for idle ones to forget. A stateless
+#: server with ``--trust-upstream-session-id`` sees one new id per client, and no
+#: end of session, so without this the map only grows (a session that never
+#: delivered anything has no workspace directory for the TTL sweep to find).
+SESSION_MAP_EVICT_ABOVE = 1024
+
+#: How long a session must have gone unrequested, and idle, to be forgotten.
+IDLE_SESSION_SECONDS = 300.0
+
+
+def _session_holds_a_binding() -> Callable[[str], bool]:
+    """The test ``MCPSession.is_idle_since`` uses for what a client bound.
+
+    Looks up the delivered source directory and the selected profile by session
+    id. Returned as a function so the two imports happen once per caller and not
+    once per session.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_has_binding,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        get_session_source_dir,
+    )
+
+    def holds_binding(session_id: str) -> bool:
+        return get_session_source_dir(session_id) is not None or session_has_binding(
+            session_id
+        )
+
+    return holds_binding
 
 
 class MCPSessionRegistry:
@@ -431,11 +488,31 @@ class MCPSessionRegistry:
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
+                existing._last_handed_out = time.monotonic()
                 return existing
+            if len(self._sessions) >= SESSION_MAP_EVICT_ABOVE:
+                self._forget_idle_sessions()
             workspace = session_directory(self._workspace_parent, session_id)
             session = MCPSession(id=session_id, workspace_root=workspace)
             self._sessions[session_id] = session
             return session
+
+    def _forget_idle_sessions(self) -> None:
+        """Drop entries nobody has asked for lately and nothing runs on.
+
+        Called with the registry lock held. Only the map entry goes: the
+        session's directory, if it has one, is the TTL sweep's, and a later
+        :meth:`session_for` of the same id makes a fresh entry.
+        """
+        cutoff = time.monotonic() - IDLE_SESSION_SECONDS
+        holds_binding = _session_holds_a_binding()
+        idle = [
+            sid
+            for sid, s in self._sessions.items()
+            if s.is_idle_since(cutoff, holds_binding)
+        ]
+        for sid in idle:
+            del self._sessions[sid]
 
     def get_or_create(self, session_id: str) -> MCPSession:
         """Return the session for ``session_id`` with its workspace directory.
@@ -469,6 +546,15 @@ class MCPSessionRegistry:
         if session is None:
             return
         self._cleanup(session)
+
+    def forget(self, session_id: str) -> None:
+        """Drop the entry for ``session_id`` and leave its workspace on disk.
+
+        Idempotent. For a caller that can't remove the directory yet (the TTL
+        sweep removes it later); :meth:`disconnect` removes both.
+        """
+        with self._lock:
+            self._sessions.pop(session_id, None)
 
     def _cleanup(self, session: MCPSession) -> None:
         """Remove a session's workspace from disk."""
@@ -934,13 +1020,17 @@ class StdioServerPresence:
     ``<workspace root>/.stdio-servers`` for its lifetime. On exit it drops its
     entry and removes the default workspace only if no other entry is still
     locked; an entry whose lock can be taken belongs to a server that died, and
-    is removed. Registration and the exit check both run under one lock file,
-    so a server starting while another exits is either counted or starts after
-    the removal.
+    is removed, at registration as well as at exit. Registration and the exit
+    check both run under one lock file, so a server starting while another exits
+    is either counted or starts after the removal. A server that cannot lock its
+    own entry does not start: ``__enter__`` raises :class:`PresenceLockError`
+    naming the entry's path.
 
     Limits: a server on another host sharing the root through a network
-    filesystem may not see this process's locks, and a root that cannot be
-    created leaves the default workspace in place.
+    filesystem may not see this process's locks, and a root where the registry
+    cannot be created or its lock file cannot be locked leaves the default
+    workspace in place (no server can register there, so none is removed
+    under).
     """
 
     def __init__(self) -> None:
@@ -963,10 +1053,18 @@ class StdioServerPresence:
             registry.mkdir(parents=True, exist_ok=True)
             with open(registry / _STDIO_SERVERS_LOCK, "a+b") as guard:
                 _lock_blocking(guard)
+                # Entries of servers that were killed are dropped here as well as
+                # on exit, so a root that only sees killed servers does not keep
+                # them. Under the guard, as the exit check is.
+                self._drop_dead_entries(registry)
                 entry = registry / f"{os.getpid()}-{uuid.uuid4().hex}"
                 handle = open(entry, "a+b")
-                # A file nobody else has opened: the lock is always free.
-                _try_lock(handle)
+                # A file nobody else has opened, so only the filesystem can refuse
+                # the lock, and asking again would get the same answer. The server
+                # then does not start: running unregistered, it would read as dead
+                # to an exiting sibling, which would remove the default workspace
+                # under it. PresenceLockError is not caught below.
+                _lock_own_entry(handle, entry, "this server's presence entry")
                 self._entry, self._handle = entry, handle
         except (OSError, RuntimeError) as exc:
             # No registry: this server is not counted, and on exit it leaves the
@@ -1015,7 +1113,16 @@ class StdioServerPresence:
             self._entry = None
 
     @staticmethod
+    def _drop_dead_entries(registry: Path) -> None:
+        """Remove the entries of servers that died, keeping the live ones.
+
+        Called under the registry's lock file, for its effect only.
+        """
+        StdioServerPresence._another_server_is_live(registry)
+
+    @staticmethod
     def _another_server_is_live(registry: Path) -> bool:
+        """True if another server's entry is locked; drops entries of dead ones."""
         live = False
         for entry in registry.iterdir():
             if entry.name == _STDIO_SERVERS_LOCK or not entry.is_file():
@@ -1085,7 +1192,9 @@ class ScanPresence:
     Nothing is registered for a session with no workspace on disk: nothing of
     the session's is there to protect, and a scan of a directory the operator
     granted creates nothing under the root. A root where the entry can't be
-    created leaves the scan unregistered rather than failing it.
+    created leaves the scan unregistered rather than failing it. A scan whose
+    entry exists but can't be locked does not start: ``__enter__`` raises
+    :class:`PresenceLockError`.
 
     Limits: as ``StdioServerPresence``, a server on another host sharing the root
     through a filesystem that does not share these locks can't see them.
@@ -1120,8 +1229,15 @@ class ScanPresence:
                 holder.mkdir(exist_ok=True)
                 entry = holder / f"{os.getpid()}-{uuid.uuid4().hex}"
                 handle = open(entry, "a+b")
-                # A file nobody else has opened: the lock is always free.
-                _try_lock(handle)
+                # A file nobody else has opened, so only the filesystem can refuse
+                # the lock. The scan then does not start, as an unlocked entry
+                # reads as dead to every other server's sweep.
+                try:
+                    _lock_own_entry(handle, entry, "this scan's presence entry")
+                except PresenceLockError:
+                    with contextlib.suppress(OSError):
+                        holder.rmdir()
+                    raise
                 self._entry, self._handle = entry, handle
         except (OSError, ValueError, RuntimeError) as exc:
             # The registry or its guard lock is out of reach: the scan runs
@@ -1255,6 +1371,9 @@ def sweep_stale_workspaces(
     Entries that are not directories, are symlinks, or do not name a single
     directory are left alone.
 
+    This is also what removes a session whose end :func:`end_session` deferred
+    for a scan in another server: that scan's end is not seen here.
+
     Returns:
         The session ids whose workspaces were removed.
     """
@@ -1364,6 +1483,7 @@ def _remove_if_still_stale(
 __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
+    "PresenceLockError",
     "SESSION_SCAN_LIMIT",
     "SESSION_WORKSPACE_BUSY",
     "ScanCount",
