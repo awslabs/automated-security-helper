@@ -1216,9 +1216,9 @@ def test_a_local_scan_takes_the_completeness_gate_from_its_resolved_config(
     calls: List[Any] = []
     real = ras._resolve_config_fail_on_incomplete_scanners
 
-    def recording(opts: Any) -> Any:
+    def recording(opts: Any, **kwargs: Any) -> Any:
         calls.append(opts)
-        return real(opts)
+        return real(opts, **kwargs)
 
     target = _server["target"]
     output = target / ".ash" / "ash_output"

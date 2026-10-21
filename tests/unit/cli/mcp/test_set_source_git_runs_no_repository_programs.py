@@ -131,7 +131,7 @@ def fixture(tmp_path, monkeypatch) -> _Fixture:
     )
     real_run_git = sd._run_git
 
-    def run_git(cmd, *, env):
+    def run_git(cmd, *, env, grows_in=None):
         result = real_run_git(cmd, env=env)
         if "clone" in cmd and result.returncode == 0:
             built.arm_the_clone(Path(cmd[-1]))

@@ -55,7 +55,7 @@ def events(monkeypatch, tmp_path) -> List[str]:
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 4242)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 4343)
     monkeypatch.setattr(rac, "_resolve_oci_runner", lambda oci_runner: "docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda revision: dockerfile)
     monkeypatch.setattr(rac, "_build_image", lambda **kwargs: None)
     monkeypatch.setattr(rac, "_get_oci_wrapper_prefix", lambda: ["env"])

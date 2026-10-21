@@ -342,7 +342,7 @@ def test_the_record_exists_when_the_runtime_starts_and_goes_when_it_ends(
     seen: dict = {}
     real_execute = module._execute_container
 
-    def spy(cmd, debug):
+    def spy(cmd, debug, env=None):
         seen["name"] = cmd[cmd.index("--name") + 1]
         seen["records"] = sorted(p.name for p in state.glob("ash-scan-*.json"))
         return real_execute(cmd, debug)
@@ -360,7 +360,7 @@ def test_a_run_ended_by_an_exception_leaves_its_record_for_the_sweep(
 ):
     stub, _ = runtime
 
-    def interrupted(cmd, debug):
+    def interrupted(cmd, debug, env=None):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(module, "_execute_container", interrupted)

@@ -128,14 +128,14 @@ def runtime(monkeypatch, tmp_path) -> Dict[str, Any]:
     monkeypatch.chdir(tmp_path)
     seen: Dict[str, Any] = {"executed": 0}
 
-    def fake_execute(cmd, debug=False):
+    def fake_execute(cmd, debug=False, env=None):
         seen["executed"] += 1
         return create_completed_process(args=list(cmd), returncode=0)
 
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
     monkeypatch.setattr(rac, "_find_runner", lambda _name: "/usr/bin/docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_execute_container", fake_execute)
     for name in ("CI", "IsCI", "ISCI", "CODEBUILD_BUILD_ID", "ASH_IMAGE_NAME"):
         monkeypatch.delenv(name, raising=False)

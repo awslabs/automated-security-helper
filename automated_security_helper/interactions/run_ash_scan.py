@@ -4502,33 +4502,6 @@ def _refuse_a_container_config_that_does_not_parse(opts: ScanOptions) -> None:
     _printed_config_refusal(3, refused)
 
 
-def _ash_config_fallback(source_dir: Path) -> Optional[str]:
-    """``ASH_CONFIG``, when a local scan of *source_dir* with no config named uses it.
-
-    A local scan falls back to ``ASH_CONFIG``'s file when it finds no config in the
-    source directory (config/default_config.py). The scan inside a container sees
-    neither the host's environment nor that file, so a one-directory container
-    scan names it explicitly as ``--config``, in that same case and no other.
-    A workspace scan does not ask this function: its caller names ``ASH_CONFIG``
-    as ``--config`` whenever it is set, as the CLI hands it over, where the
-    variable is ``--config``'s environment variable. In every case the file is
-    also handed over as the scan's base, which a local scan reads whatever names
-    the config (``run_ash_container._host_ash_config``). The rule lives in
-    ``run_ash_container._env_config_is_the_scans_config``, shared with the
-    launcher's own carry. A discovery error is left to the scan, which reports it.
-    """
-    from automated_security_helper.interactions.run_ash_container import (
-        _env_config_is_the_scans_config,
-    )
-
-    env_config = os.environ.get("ASH_CONFIG")
-    if not env_config:
-        return None
-    if _env_config_is_the_scans_config(env_config, source_dir):
-        return env_config
-    return None
-
-
 def _refuse_container_inputs(
     opts: ScanOptions,
     workspace_config: str | None,

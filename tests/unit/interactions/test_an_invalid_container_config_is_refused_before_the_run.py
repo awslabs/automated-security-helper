@@ -586,7 +586,9 @@ def test_the_exit_fields_of_a_run_with_no_config_do_not_ask_for_the_image_revisi
     asked = []
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.setattr(
-        run_ash_container, "get_ash_revision", lambda: asked.append(1) or "LOCAL"
+        run_ash_container,
+        "get_ash_revision",
+        lambda quiet=False: asked.append(1) or "LOCAL",
     )
     src = tmp_path / "repo" / "app"
     src.mkdir(parents=True)
@@ -1588,7 +1590,7 @@ class _ImageQuestionSpy:
     def __init__(self) -> None:
         self.asks: list[tuple[bool, set[str]]] = []
 
-    def __call__(self) -> str:
+    def __call__(self, quiet: bool = False) -> str:
         import inspect
 
         silenced = any(

@@ -553,9 +553,9 @@ class TestVersionIsMeasured:
         cls = _stub("late_version", _satisfied=True, _version=None)
         base_validate = cls.validate_plugin_dependencies
 
-        def _validate(self):
+        def _validate(self, **kwargs):
             self.tool_version = "7.7.7"
-            return base_validate(self)
+            return base_validate(self, **kwargs)
 
         cls.validate_plugin_dependencies = _validate
         entries = injected(cls)

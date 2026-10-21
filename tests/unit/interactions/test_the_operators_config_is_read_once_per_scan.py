@@ -193,7 +193,9 @@ def stubbed_build(monkeypatch, tmp_path):
     dockerfile = tmp_path / "build" / "Dockerfile"
     dockerfile.parent.mkdir(parents=True, exist_ok=True)
     dockerfile.write_text("FROM scratch\n", encoding="utf-8")
-    monkeypatch.setattr(run_ash_container, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(
+        run_ash_container, "get_ash_revision", lambda quiet=False: "LOCAL"
+    )
     monkeypatch.setattr(
         run_ash_container, "_find_dockerfile", lambda _revision: dockerfile
     )

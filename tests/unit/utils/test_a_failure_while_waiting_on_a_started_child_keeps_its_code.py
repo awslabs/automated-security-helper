@@ -1541,7 +1541,7 @@ def test_the_plans_cleanup_removes_a_planted_link_before_the_write(
     _source, _output, results, outside = link_layout
     if mode in ("plain-open", "plain-open-no-sweep"):
 
-        def _plain_open(path, encoding="utf-8", errors="strict", mode=0o666):
+        def _plain_open(path, encoding="utf-8", errors="strict", mode=0o666, **kwargs):
             return open(path, "w", encoding=encoding, errors=errors)
 
         monkeypatch.setattr(spu, "open_for_write", _plain_open)

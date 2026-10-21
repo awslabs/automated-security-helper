@@ -69,7 +69,7 @@ def run_reaches_the_env_file(monkeypatch):
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 4242)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 4343)
     monkeypatch.setattr(rac, "_resolve_oci_runner", lambda oci_runner: "docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_get_oci_wrapper_prefix", lambda: ["env"])
     monkeypatch.setattr(rac, "_host_ash_config", lambda: None)
     monkeypatch.setattr(
