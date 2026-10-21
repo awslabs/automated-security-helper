@@ -169,19 +169,39 @@ class SourceDeliveryBusyError(RuntimeError):
     """
 
 
+#: Worker threads the server runs clones (``set_source_git``) on, across all
+#: sessions. A clone beyond this many waits for a worker; scans do not share
+#: these, and neither do the chunk, finalize and clear tools, which have a pool of
+#: their own.
+CLONE_MAX_WORKERS = 8
+
 #: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
 SOURCE_DELIVERY_BUSY = "source_delivery_busy"
 
 
 @contextlib.contextmanager
-def _no_scan_running(session_id: str) -> Iterator[None]:
+def _no_scan_running(
+    session_id: str, *, removes_workspace: bool = True
+) -> Iterator[None]:
     """Hold the session's scan lock for a change to its tree, or refuse.
 
     Refused too for a scan that has started and not yet taken the lock
-    (``MCPSession.try_claim_scan``). Not blocking: a delivery is called on the
-    server's event loop, and waiting there for a scan to finish would stall
-    every other session. A session that ended while the change held the lock is
-    removed once it is released.
+    (``MCPSession.try_claim_scan``). Not blocking: a delivery runs on one of the
+    server's few delivery threads, and waiting there for a scan to finish would
+    hold the thread for the scan's length and queue other sessions' deliveries
+    behind it. A session that ended while the change held the lock is removed
+    once it is released.
+
+    ``removes_workspace`` is True for a change that deletes the session's whole
+    directory (``clear_source``). Such a change also excludes writes
+    (``MCPSession.try_begin_write``): it is refused while a chunk or a profile
+    binding is being written, and a write that comes meanwhile is refused. A
+    clone and a finalize pass False, so a write goes on beside them: a clone
+    replaces ``source/`` and its staging sibling and touches neither
+    ``incoming/`` nor ``config/``; a finalize replaces the same two and also
+    reads and removes its own upload's ``incoming/<id>.zip`` (it opens the zip
+    to hash and extract it, and deletes it), under the upload's lock
+    (:func:`_upload_lock`), so only a chunk of that same upload waits for it.
 
     Takes the in-memory session only: a change that is refused leaves no session
     directory, and each change that writes creates and marks the directory
@@ -193,10 +213,16 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
     )
 
     session = get_default_registry().session_for(session_id)
-    if not session.try_begin_change():
+    if not session.try_begin_change(removes_workspace=removes_workspace):
+        if removes_workspace:
+            raise SourceDeliveryBusyError(
+                "a scan of this session is running, or a chunk or a profile "
+                "selection is being written; change the delivered source after "
+                "it finishes"
+            )
         raise SourceDeliveryBusyError(
-            "a scan of this session is running; change the delivered source after "
-            "it finishes"
+            "a scan of this session is running; change the delivered source "
+            "after it finishes"
         )
     try:
         yield
@@ -208,18 +234,26 @@ def _no_scan_running(session_id: str) -> Iterator[None]:
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
-def _while_no_scan_runs(function: _F) -> _F:
-    """Run a change to a session's tree under ``_no_scan_running`` for its session."""
+def _while_no_scan_runs(*, removes_workspace: bool = True) -> Callable[[_F], _F]:
+    """Run a change to a session's tree under ``_no_scan_running`` for its session.
 
-    signature = inspect.signature(function)
+    Used as ``@_while_no_scan_runs()`` for a change that deletes the session's
+    directory, and as ``@_while_no_scan_runs(removes_workspace=False)`` for one
+    that replaces ``source/`` only; see :func:`_no_scan_running`.
+    """
 
-    @functools.wraps(function)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        session_id = signature.bind(*args, **kwargs).arguments["session_id"]
-        with _no_scan_running(session_id):
-            return function(*args, **kwargs)
+    def decorate(function: _F) -> _F:
+        signature = inspect.signature(function)
 
-    return cast(_F, wrapper)
+        @functools.wraps(function)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            session_id = signature.bind(*args, **kwargs).arguments["session_id"]
+            with _no_scan_running(session_id, removes_workspace=removes_workspace):
+                return function(*args, **kwargs)
+
+        return cast(_F, wrapper)
+
+    return decorate
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
@@ -1070,7 +1104,7 @@ def _stop_process_group(process: "subprocess.Popen[str]") -> None:
 
 
 def _run_git(
-    cmd: List[str], *, env: Dict[str, str]
+    cmd: List[str], *, env: Dict[str, str], grows_in: Optional[Path] = None
 ) -> subprocess.CompletedProcess[str]:
     """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
 
@@ -1084,6 +1118,9 @@ def _run_git(
 
     Raises:
         GitTimeoutError: when the command runs past the timeout.
+        CloneTooLargeError: when ``grows_in`` passes ``MAX_CLONE_BYTES``.
+        CloneTreeUnreadableError: when ``grows_in`` cannot be read after the
+            command exits.
     """
 
     # An if statement, not a conditional expression: mypy applies a platform
@@ -1103,8 +1140,23 @@ def _run_git(
         env=env,
         **group,
     )
+    deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
     try:
-        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, GIT_TIMEOUT_SECONDS)
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=min(GIT_POLL_SECONDS, remaining)
+                )
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            # Stopped, with its helpers, by the handler below.
+            _refuse_oversized(grows_in, running=True)
+        # A command that finished inside one poll interval was not looked at yet.
+        _refuse_oversized(grows_in)
     except subprocess.TimeoutExpired:
         _stop_process_group(process)
         with contextlib.suppress(subprocess.TimeoutExpired):
@@ -1532,7 +1584,7 @@ def set_source_git(
     )
 
 
-@_while_no_scan_runs
+@_while_no_scan_runs(removes_workspace=False)
 def _clone_into_session(
     url: str,
     ref: Optional[str],
@@ -1948,6 +2000,20 @@ def _write_next_sequence(session_dir: Path, upload_id: str, value: int) -> None:
     _meta_path(session_dir, upload_id).write_text(str(value))
 
 
+#: Locks that serialize the chunks of one upload. An upload maps to one of a fixed
+#: number of locks by its (session, upload id), so the table never grows with the
+#: number of uploads; two uploads that share a lock only take turns.
+_UPLOAD_LOCK_STRIPES = 64
+_UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
+
+
+def _upload_lock(session_id: str, upload_id: str) -> threading.Lock:
+    """The lock held while a chunk of this upload reads and moves its sequence."""
+
+    digest = hashlib.sha256(f"{session_id}\0{upload_id}".encode()).digest()
+    return _UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
+
+
 def set_source_zip_chunk(
     upload_id: str,
     sequence: int,
@@ -1980,7 +2046,7 @@ def set_source_zip_chunk(
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 
-    with writing_session_state(session_id):
+    with writing_session_state(session_id), _upload_lock(session_id, upload_id):
         return _append_zip_chunk(
             upload_id,
             sequence,
@@ -2087,7 +2153,7 @@ def _validate_zip_member(name: str) -> None:
             raise ValueError(f"path traversal in zip: {name!r}")
 
 
-@_while_no_scan_runs
+@_while_no_scan_runs(removes_workspace=False)
 def set_source_zip_finalize(
     upload_id: str,
     expected_sha256: str,
@@ -2096,6 +2162,13 @@ def set_source_zip_finalize(
     session_id: str,
 ) -> Path:
     """Finalize a chunked upload: verify checksum and extract.
+
+    Holds the upload's lock (:func:`_upload_lock`) for the whole finalize, so a
+    chunk of the same upload sent meanwhile -- a retry of its last chunk
+    included -- waits instead of renaming a new ``incoming/<id>.zip`` over the
+    path between the steps here. The checksum and the extraction also read one
+    open handle, so the bytes extracted are exactly the bytes hashed whatever
+    happens to the path; see :func:`_finalize_zip_upload`.
 
     Args:
         upload_id: Identifier matching the prior ``set_source_zip_chunk`` calls.
@@ -2136,6 +2209,24 @@ def set_source_zip_finalize(
             this is a client-side packaging error rather than corruption.
     """
 
+    with _upload_lock(session_id, upload_id):
+        return _finalize_zip_upload(
+            upload_id,
+            expected_sha256,
+            workspace_root=workspace_root,
+            session_id=session_id,
+        )
+
+
+def _finalize_zip_upload(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Path:
+    """:func:`set_source_zip_finalize`, once the upload's lock is held."""
+
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _created_session_dir(root, session_id)
     final = _final_zip_path(session_dir, upload_id)
@@ -2143,7 +2234,7 @@ def set_source_zip_finalize(
         raise UploadNotFoundError(
             f"no finalized zip for upload_id={upload_id!r} "
             f"(did the last chunk arrive with last=True?)"
-        )
+        ) from None
 
     # Hard limit on the on-disk zip size.
     actual_size = final.stat().st_size
@@ -2156,10 +2247,9 @@ def set_source_zip_finalize(
             final.unlink()
         raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
-    # Verify checksum before opening the archive.
-    digest = hashlib.sha256()
-    with final.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
+        # Verify checksum before opening the archive.
+        digest = hashlib.sha256()
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     actual_sha = digest.hexdigest()
     if actual_sha.lower() != expected_sha256.lower():
@@ -2263,7 +2353,7 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
-@_while_no_scan_runs
+@_while_no_scan_runs()
 def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
@@ -2273,7 +2363,9 @@ def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> N
     recorded ``source_dir`` is forgotten whatever the delete leaves behind.
 
     Raises:
-        SourceDeliveryBusyError: while a scan of the session runs.
+        SourceDeliveryBusyError: while a scan of the session runs, or a chunk of
+            an upload or a profile selection is being written, because this
+            removes the directory they write into.
     """
 
     if not remove_session_workspace(session_id, workspace_root=workspace_root):
