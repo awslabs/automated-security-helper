@@ -77,14 +77,23 @@ async def _fetch_initial_scan_info(
         scan_id=scan_id, **_in_session(session_id)
     )
     if not registry_info.get("success", False):
-        await ctx.error(
-            f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
+        await _safe_send(
+            True,
+            lambda: ctx.error(
+                f"Failed to get scan info: "
+                f"{registry_info.get('error', 'Unknown error')}"
+            ),
+            "Failed to send scan-info error",
         )
         return None
 
     directory_path = registry_info.get("directory_path", "")
     if not directory_path:
-        await ctx.error("Missing directory path in scan registry")
+        await _safe_send(
+            True,
+            lambda: ctx.error("Missing directory path in scan registry"),
+            "Failed to send scan-info error",
+        )
         return None
 
     directory_path_obj = Path(directory_path)
@@ -361,8 +370,15 @@ async def _run_monitor_loop(
         current_time = asyncio.get_event_loop().time()
 
         if current_time - start_time > _MAX_WAIT_SECONDS:
-            await ctx.warning(
-                f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+            # Through _safe_send under the loop's own connection_alive: after a
+            # failed send the client is known to be gone, and the timeout
+            # warning honors that instead of sending into a closed transport.
+            await _safe_send(
+                connection_alive,
+                lambda: ctx.warning(
+                    f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                ),
+                "Failed to send timeout warning",
             )
             return
 
