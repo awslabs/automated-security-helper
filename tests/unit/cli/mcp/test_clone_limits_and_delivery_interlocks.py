@@ -942,6 +942,11 @@ def test_delivery_handlers_use_their_own_bounded_executor(
     asyncio.run(mcp_server.clear_source(ctx))
 
     assert seen["thread"].startswith("ash-mcp-delivery"), seen
+    # The bound is the explicit constant, never the executor's host-dependent
+    # default (5-6 workers on a small container; 32 on a big host, since
+    # os.cpu_count ignores cgroup quotas before Python 3.13).
+    assert mcp_server._DELIVERY_EXECUTOR._max_workers == sd.DELIVERY_MAX_WORKERS
+    assert sd.DELIVERY_MAX_WORKERS == 8
 
 
 def test_a_chunk_append_completes_while_the_clone_pool_is_saturated(
