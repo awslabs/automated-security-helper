@@ -31,6 +31,7 @@ from automated_security_helper.cli.mcp.http_sessions import (
     MODE_STATEFUL,
     MODE_STATELESS,
     SessionBoundary,
+    _handshake_protocol_versions,
 )
 from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
@@ -555,7 +556,12 @@ def build_streamable_http_app(
         A Starlette application ready to hand to uvicorn.
 
     Raises:
-        RuntimeError: if MCPServer is not installed.
+        RuntimeError: if MCPServer is not installed; or, building a stateful
+            app, if the SDK's list of handshake protocol versions cannot be
+            imported. Raised here, at build time: Starlette constructs
+            middleware at the app's first ASGI call, so a read deferred to the
+            session boundary would let the build and the startup succeed and
+            then fail every served request with a 500.
         ASHValidationError: for a non-loopback ``host`` with neither
             ``allowed_hosts`` nor ``trust_upstream_host_check``, or with both.
     """
@@ -564,6 +570,11 @@ def build_streamable_http_app(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the streamable-http transport."
         )
+    # Stateful only: the SDK's handshake-version list, read at the top of the
+    # build so a missing list fails the build itself (see Raises above). A
+    # stateless boundary never reads the list, and must stay buildable
+    # without it.
+    handshake_versions = None if stateless_http else _handshake_protocol_versions()
     security = _transport_security(host, allowed_hosts, trust_upstream_host_check, port)
     # Import here to keep the stdio path zero-cost when the streamable-HTTP
     # transport is not used.
@@ -593,6 +604,9 @@ def build_streamable_http_app(
         # The same path the SDK routes its endpoint on, so only its 404 for a
         # discarded session ends one.
         endpoint_path=mount_path,
+        # Read at the top of this build; the boundary then imports nothing at
+        # its own (first-request) construction.
+        handshake_versions=handshake_versions,
     )
 
     if auth_header_name and auth_header_value:
