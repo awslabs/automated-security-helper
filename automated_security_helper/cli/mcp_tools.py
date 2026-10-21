@@ -2389,9 +2389,12 @@ def mcp_select_profile(
     client's rules against the registered profile in ``config/`` as the trusted
     base (``resolve_session_trusted_config_path``).
 
-    Refused with ``error_type`` ``session_workspace_busy`` while the server
-    removes the session's workspace for being unused longer than its time to
-    live (``sessions.writing_session_state``); select the profile again then.
+    Refused with ``error_type`` ``session_workspace_busy`` while another
+    request holds the session's workspace (``sessions.writing_session_state``):
+    the server removing a session unused longer than its time to live,
+    ``clear_source``, or the end of the session; select the profile again once
+    the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
+    progress does not refuse it.
     """
     from automated_security_helper.cli.mcp.sessions import (
         SESSION_WORKSPACE_BUSY,
@@ -2769,9 +2772,12 @@ def mcp_set_source_zip_chunk(
         ``{"success": True, "received": int, "next_sequence": int, "last": bool}``
         on success; ``{"success": False, "error": str}`` on validation
         failure (out-of-order, oversize, malformed b64), and with
-        ``error_type`` ``session_workspace_busy`` while the server removes the
-        session's workspace for being unused longer than its time to live
-        (send the upload again from its first chunk).
+        ``error_type`` ``session_workspace_busy`` while another request holds
+        the session's workspace: the server removing a session unused longer
+        than its time to live, ``clear_source``, or the end of the session.
+        The hold can end without removing the upload, so send the same chunk
+        again once it has finished; only an out-of-order answer then means the
+        upload was removed, and the upload restarts from its first chunk.
     """
     from automated_security_helper.cli.mcp.sessions import (
         SESSION_WORKSPACE_BUSY,

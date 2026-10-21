@@ -1182,9 +1182,12 @@ def set_source_zip_chunk(
     Raises:
         ValueError: on out-of-order sequence, oversize chunk, malformed b64
             payload, or duplicate ``last=True``.
-        sessions.SessionWorkspaceBusyError: while the TTL sweep removes the
-            session (``sessions.writing_session_state``). The upload is gone
-            then, so it is sent again from its first chunk.
+        sessions.SessionWorkspaceBusyError: while another request holds the
+            session's workspace (``sessions.writing_session_state``): the TTL
+            sweep, a ``clear_source``, or the end of the session. The hold can
+            end without removing the upload, so the chunk is sent again as it
+            is; only an out-of-order answer means the upload was removed, and
+            the upload is then sent again from its first chunk.
     """
     from automated_security_helper.cli.mcp.sessions import writing_session_state
 

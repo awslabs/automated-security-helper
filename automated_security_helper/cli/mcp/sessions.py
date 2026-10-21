@@ -298,8 +298,9 @@ class MCPSession(BaseModel):
             None when the write began, until :meth:`end_write`. Otherwise why it
             was refused: :data:`WRITE_REFUSED_BY_SWEEP` while the sweep holds the
             session, :data:`WRITE_REFUSED_BY_CHANGE` while a change that removes
-            the session's directory does. The two ask a client for different
-            things, see :func:`writing_session_state`.
+            the session's directory does. Either hold can end without removing
+            the upload's files, so :func:`writing_session_state` raises one
+            error with one retry rule for both.
         """
         with self._state_lock:
             if self._sweeping:
@@ -586,30 +587,22 @@ def finish_ended_session(session_id: Optional[str]) -> None:
 #: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
 SESSION_WORKSPACE_BUSY = "session_workspace_busy"
 
-#: ``error_type`` the MCP tools return for :class:`SessionChangeInProgressError`.
-SESSION_CHANGE_IN_PROGRESS = "session_change_in_progress"
-
 
 class SessionWorkspaceBusyError(RuntimeError):
-    """A write to a session's state was refused: the TTL sweep is removing it.
+    """A write to a session's state was refused: another request holds its workspace.
 
-    The session's state is gone once the removal is done, so the request is sent
-    again from the start, an upload from its first chunk.
+    The holder is the TTL sweep removing an idle session, a ``clear_source``,
+    or the end of the session. Any of them can end without removing the
+    upload's files -- the sweep re-reads the session's age while it holds it
+    and keeps a session used meanwhile, steps back while a scan on another
+    server holds the session, and stops on a read error -- so no refusal of
+    this type means the upload is gone. The one retry rule that is right in
+    every case: send the request again as it is once the hold ends. A chunk
+    keeps its sequence number, and only an out-of-order answer means the
+    upload was removed; the upload is then sent again from its first chunk.
     """
 
     error_type = SESSION_WORKSPACE_BUSY
-
-
-class SessionChangeInProgressError(SessionWorkspaceBusyError):
-    """A write to a session's state was refused: a change that deletes its directory holds it.
-
-    The change is ``clear_source`` or the end of the session. The request is sent
-    again as it is once the change is done. A chunk is sent with the same
-    sequence number; only an out-of-order answer then means that the upload was
-    removed, and the upload is sent again from its first chunk.
-    """
-
-    error_type = SESSION_CHANGE_IN_PROGRESS
 
 
 @contextlib.contextmanager
@@ -623,14 +616,14 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
     ``MCPSession.try_begin_write``.
 
     Raises:
-        SessionWorkspaceBusyError: while the sweep is removing the session, whose
-            workspace nobody used for longer than the TTL. Its state is gone once
-            the removal is done, so the request is sent again from the start: an
-            upload from its first chunk.
-        SessionChangeInProgressError: while a change that deletes the session's
-            directory (``clear_source``, the end of the session) holds it. The
-            upload's files may not be gone yet, so the chunk is sent again as it
-            is. A clone or a finalize does not refuse a write.
+        SessionWorkspaceBusyError: while another request holds the session's
+            workspace: the TTL sweep removing an idle session, a
+            ``clear_source``, or the end of the session. Any of them can end
+            without removing the upload's files, so the request is sent again
+            as it is once the hold ends; a chunk keeps its sequence number,
+            and only an out-of-order answer means the upload was removed and
+            is sent again from its first chunk. A clone or a finalize does
+            not refuse a write.
     """
     from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 
@@ -642,20 +635,14 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
     if session is None:
         yield
         return
-    refused = session.try_begin_write()
-    if refused == WRITE_REFUSED_BY_CHANGE:
-        raise SessionChangeInProgressError(
-            "the session's workspace is being cleared or ended by another "
-            "request; send this request again once that has finished. A chunk "
-            "of an upload is sent again as it is: only if the answer is an "
-            "out-of-order chunk was the upload removed, and then it is sent "
-            "again from its first chunk"
-        )
-    if refused is not None:
+    if session.try_begin_write() is not None:
         raise SessionWorkspaceBusyError(
-            "the server is removing this session's workspace, which nobody used "
-            "for longer than its time to live; send the request again, and an "
-            "upload from its first chunk"
+            "another request holds this session's workspace (the removal of "
+            "an idle session, a clear, or the end of the session), and the "
+            "hold can end without removing an upload; send this request "
+            "again as it is once it has finished. Only if the answer to a "
+            "chunk is an out-of-order chunk was the upload removed, and then "
+            "it is sent again from its first chunk"
         )
     try:
         yield
@@ -1168,9 +1155,7 @@ __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
     "SESSION_SCAN_LIMIT",
-    "SESSION_CHANGE_IN_PROGRESS",
     "SESSION_WORKSPACE_BUSY",
-    "SessionChangeInProgressError",
     "ScanCount",
     "SessionWorkspaceBusyError",
     "StdioServerPresence",

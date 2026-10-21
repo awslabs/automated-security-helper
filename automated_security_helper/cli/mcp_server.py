@@ -1673,9 +1673,16 @@ async def set_source_zip_chunk(
     Returns:
         Dict with success, received, next_sequence and last; or success=False
         and error on an out-of-order, oversize, or malformed chunk, and with
-        error_type session_workspace_busy while the server removes this
-        session's workspace for being unused longer than its time to live
-        (send the upload again from its first chunk).
+        error_type session_workspace_busy while another request holds this
+        session's workspace: the server removing a session unused longer than
+        its time to live, clear_source, or the end of the session. The hold
+        can end without removing the upload, so send the same chunk again once
+        it has finished; only if the answer is an out-of-order chunk was the
+        upload removed, and then it is sent again from its first chunk. A
+        set_source_git or set_source_zip_finalize of another upload in
+        progress does not refuse a chunk; a finalize of this upload holds the
+        upload's lock, so the chunk waits for it. If this call is cancelled,
+        the chunk finishes server-side and the session reads busy until then.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
@@ -1870,9 +1877,11 @@ async def select_profile(
         session's workspace that later scans will be handed. On failure,
         success=False and error, for an unknown profile, a denied patch op or
         override, or YAML that does not validate; with error_type
-        session_workspace_busy while the server removes this session's
-        workspace for being unused longer than its time to live (select the
-        profile again).
+        session_workspace_busy while another request holds this session's
+        workspace: the server removing a session unused longer than its time
+        to live, clear_source, or the end of the session (select the profile
+        again once the hold has ended). A set_source_git or
+        set_source_zip_finalize in progress does not refuse it.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
