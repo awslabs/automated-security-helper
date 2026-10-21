@@ -100,6 +100,30 @@ class ScanCount:
             self._running = max(0, self._running - 1)
 
 
+#: Why :meth:`MCPSession.try_begin_write` refused: the TTL sweep is removing the
+#: session, so its state is gone once it is done.
+WRITE_REFUSED_BY_SWEEP = "sweep"
+
+#: Why :meth:`MCPSession.try_begin_write` refused: a change that deletes the
+#: session's directory (``clear_source`` or the end of the session) holds it.
+#: Its removal may or may not have reached the upload's files yet.
+WRITE_REFUSED_BY_CHANGE = "change"
+
+#: Why :meth:`MCPSession.try_begin_change` refused: a scan of the session holds
+#: its lock, or has started and not yet returned (``try_claim_scan``).
+CHANGE_REFUSED_BY_SCAN = "scan"
+
+#: Why :meth:`MCPSession.try_begin_change` refused: another change holds the
+#: session (a delivery, a clear, the end of the session, or the removal of an
+#: idle session).
+CHANGE_REFUSED_BY_CHANGE = "other-change"
+
+#: Why :meth:`MCPSession.try_begin_change` refused: the change would delete the
+#: session's directory while a chunk of an upload or a profile binding is
+#: being written into it.
+CHANGE_REFUSED_BY_WRITE = "write"
+
+
 class MCPSession(BaseModel):
     """Per-connection state for an MCP client.
 
@@ -154,6 +178,9 @@ class MCPSession(BaseModel):
     _state_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
     _claimed_scans: int = PrivateAttr(default=0)
     _changing: bool = PrivateAttr(default=False)
+    # Whether the change in progress deletes the session's directory, and so
+    # excludes writes. See try_begin_change.
+    _change_removes_workspace: bool = PrivateAttr(default=False)
     # Requests writing the session's state outside a change, and whether the TTL
     # sweep holds the session; both guarded by _state_lock. See try_begin_write.
     _writes: int = PrivateAttr(default=0)
@@ -193,7 +220,7 @@ class MCPSession(BaseModel):
         with self._state_lock:
             self._claimed_scans = max(0, self._claimed_scans - 1)
 
-    def try_begin_change(self) -> bool:
+    def try_begin_change(self, *, removes_workspace: bool = True) -> Optional[str]:
         """Take the session for a change to its delivered tree, without waiting.
 
         Args:
@@ -211,26 +238,41 @@ class MCPSession(BaseModel):
                 under the upload's lock, which a chunk of that upload shares.
 
         Returns:
-            False while a scan of the session holds :attr:`lock` or is claimed
-            and not yet returned; otherwise True, holding :attr:`lock` until
-            :meth:`end_change`.
+            None when the change began, holding :attr:`lock` until
+            :meth:`end_change`. Otherwise why it was refused, as
+            :meth:`try_begin_write` answers: :data:`CHANGE_REFUSED_BY_SCAN`
+            while a scan of the session holds :attr:`lock` or is claimed and
+            not yet returned; :data:`CHANGE_REFUSED_BY_CHANGE` while another
+            change holds it; :data:`CHANGE_REFUSED_BY_WRITE`, for a change
+            that removes the workspace, while a write is in progress. The
+            holder named for a lock another thread holds is read beside the
+            acquire, not under it, so by the time a caller words a message the
+            holder can have moved on; the reason says what refused this
+            attempt, never what is still running.
         """
         if not self._lock.acquire(blocking=False):
-            return False
+            with self._state_lock:
+                changing = self._changing
+            return CHANGE_REFUSED_BY_CHANGE if changing else CHANGE_REFUSED_BY_SCAN
         with self._state_lock:
             if self._claimed_scans:
                 self._lock.release()
-                return False
+                return CHANGE_REFUSED_BY_SCAN
+            if removes_workspace and self._writes:
+                self._lock.release()
+                return CHANGE_REFUSED_BY_WRITE
             self._changing = True
-        return True
+            self._change_removes_workspace = removes_workspace
+        return None
 
     def end_change(self) -> None:
         """End a change :meth:`try_begin_change` began."""
         with self._state_lock:
             self._changing = False
+            self._change_removes_workspace = False
         self._lock.release()
 
-    def try_begin_write(self) -> bool:
+    def try_begin_write(self) -> Optional[str]:
         """Hold the session against the TTL sweep for a request writing its state.
 
         A chunk of an upload and a profile binding write the session's state
@@ -239,8 +281,13 @@ class MCPSession(BaseModel):
         for one. The sweep runs on a worker thread and holds the session
         (:meth:`try_begin_sweep`) from its last look at the session's age until
         the removal is done, and a write that comes meanwhile is refused rather
-        than accepted and then removed with the session. Writes do not exclude
-        each other.
+        than accepted and then removed with the session. A change that removes
+        the session's directory (clear, end of session; see
+        :meth:`try_begin_change`) is refused while a write is in progress, and
+        a write is refused while such a change holds the session, so a removal
+        of the workspace never runs under an append. A clone or a finalize
+        replaces ``source/`` only, and a write alongside it is not refused.
+        Writes do not exclude each other.
 
         The hold is this process's: it is on the in-memory session, so it keeps
         this server's sweep off the session. Another server sharing the
@@ -248,14 +295,19 @@ class MCPSession(BaseModel):
         (:class:`ScanPresence`), and does not see a write in progress here.
 
         Returns:
-            False while the sweep holds the session; otherwise True, until
-            :meth:`end_write`.
+            None when the write began, until :meth:`end_write`. Otherwise why it
+            was refused: :data:`WRITE_REFUSED_BY_SWEEP` while the sweep holds the
+            session, :data:`WRITE_REFUSED_BY_CHANGE` while a change that removes
+            the session's directory does. The two ask a client for different
+            things, see :func:`writing_session_state`.
         """
         with self._state_lock:
             if self._sweeping:
-                return False
+                return WRITE_REFUSED_BY_SWEEP
+            if self._changing and self._change_removes_workspace:
+                return WRITE_REFUSED_BY_CHANGE
             self._writes += 1
-            return True
+            return None
 
     def end_write(self) -> None:
         """End a write :meth:`try_begin_write` began."""
@@ -435,8 +487,11 @@ class MCPSessionRegistry:
 _default_registry: Optional[MCPSessionRegistry] = None
 _default_registry_lock = threading.Lock()
 
-#: Sessions that ended while a scan of theirs held the session lock. Their
-#: removal waits for the scan, so a scan's tree is never removed under it.
+#: Sessions that ended while a scan or a write (a chunk, a profile binding) of
+#: theirs held the session. Their removal waits for the scan or the write, so a
+#: tree a scan is reading and a file a request is appending to are never removed
+#: under it. A session is marked here before its removal is tried, and unmarked
+#: once the removal is done.
 _ended_while_scanning: Set[str] = set()
 _ended_lock = threading.Lock()
 
@@ -488,17 +543,25 @@ def end_session(session_id: str) -> bool:
     delivered-source record, its bound profile, and its registry entry. If a
     scan of the session is running, the removal waits until that scan returns
     (:func:`finish_ended_session`), because removing the tree a scan is reading
-    can turn its result into a clean one.
+    can turn its result into a clean one. It waits the same way for a write in
+    progress (a chunk of an upload, a profile binding), which the removal would
+    race.
 
     Idempotent.
 
     Returns:
-        True when everything was removed now, False when it waits for a scan.
+        True when everything was removed now, False when it waits for a scan or
+        a write.
     """
     session = get_default_registry().get(session_id)
-    if session is not None and not session.try_begin_change():
-        with _ended_lock:
-            _ended_while_scanning.add(session_id)
+    # Pending before the change is tried, and dropped once the removal is done.
+    # A scan or a write that ends between a refused try_begin_change and a later
+    # add would run finish_ended_session before the session was pending, and
+    # nothing would remove it after that. With the add first, whichever of the
+    # two finishes second finds the session pending and removes it.
+    with _ended_lock:
+        _ended_while_scanning.add(session_id)
+    if session is not None and session.try_begin_change() is not None:
         return False
     try:
         _remove_session_state(session_id)
@@ -511,7 +574,7 @@ def end_session(session_id: str) -> bool:
 
 
 def finish_ended_session(session_id: Optional[str]) -> None:
-    """Complete the removal of a session that ended while its scan ran."""
+    """Complete the removal of a session that ended while its scan or write ran."""
     if session_id is None:
         return
     with _ended_lock:
@@ -520,12 +583,33 @@ def finish_ended_session(session_id: Optional[str]) -> None:
         end_session(session_id)
 
 
-class SessionWorkspaceBusyError(RuntimeError):
-    """A write to a session's state was refused: the TTL sweep is removing it."""
-
-
 #: ``error_type`` the MCP tools return for :class:`SessionWorkspaceBusyError`.
 SESSION_WORKSPACE_BUSY = "session_workspace_busy"
+
+#: ``error_type`` the MCP tools return for :class:`SessionChangeInProgressError`.
+SESSION_CHANGE_IN_PROGRESS = "session_change_in_progress"
+
+
+class SessionWorkspaceBusyError(RuntimeError):
+    """A write to a session's state was refused: the TTL sweep is removing it.
+
+    The session's state is gone once the removal is done, so the request is sent
+    again from the start, an upload from its first chunk.
+    """
+
+    error_type = SESSION_WORKSPACE_BUSY
+
+
+class SessionChangeInProgressError(SessionWorkspaceBusyError):
+    """A write to a session's state was refused: a change that deletes its directory holds it.
+
+    The change is ``clear_source`` or the end of the session. The request is sent
+    again as it is once the change is done. A chunk is sent with the same
+    sequence number; only an out-of-order answer then means that the upload was
+    removed, and the upload is sent again from its first chunk.
+    """
+
+    error_type = SESSION_CHANGE_IN_PROGRESS
 
 
 @contextlib.contextmanager
@@ -543,6 +627,10 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
             workspace nobody used for longer than the TTL. Its state is gone once
             the removal is done, so the request is sent again from the start: an
             upload from its first chunk.
+        SessionChangeInProgressError: while a change that deletes the session's
+            directory (``clear_source``, the end of the session) holds it. The
+            upload's files may not be gone yet, so the chunk is sent again as it
+            is. A clone or a finalize does not refuse a write.
     """
     from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 
@@ -554,7 +642,16 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
     if session is None:
         yield
         return
-    if not session.try_begin_write():
+    refused = session.try_begin_write()
+    if refused == WRITE_REFUSED_BY_CHANGE:
+        raise SessionChangeInProgressError(
+            "the session's workspace is being cleared or ended by another "
+            "request; send this request again once that has finished. A chunk "
+            "of an upload is sent again as it is: only if the answer is an "
+            "out-of-order chunk was the upload removed, and then it is sent "
+            "again from its first chunk"
+        )
+    if refused is not None:
         raise SessionWorkspaceBusyError(
             "the server is removing this session's workspace, which nobody used "
             "for longer than its time to live; send the request again, and an "
@@ -564,6 +661,9 @@ def writing_session_state(session_id: Optional[str]) -> Iterator[None]:
         yield
     finally:
         session.end_write()
+        # A session that ended while this write ran was left in place by
+        # end_session; it is removed now that nothing writes.
+        finish_ended_session(session_id or DEFAULT_SESSION_ID)
 
 
 #: ``error_type`` of a scan refused because its session is at the per-session limit.
@@ -1037,7 +1137,7 @@ def _remove_if_still_stale(
     """Remove a stale session's state, unless anything holds it now."""
 
     session = get_default_registry().session_for(session_id)
-    if not session.try_begin_change():
+    if session.try_begin_change() is not None:
         return False
     try:
         # A request writing the session's state now keeps it, and one that comes
@@ -1068,7 +1168,9 @@ __all__ = [
     "MCPSession",
     "MCPSessionRegistry",
     "SESSION_SCAN_LIMIT",
+    "SESSION_CHANGE_IN_PROGRESS",
     "SESSION_WORKSPACE_BUSY",
+    "SessionChangeInProgressError",
     "ScanCount",
     "SessionWorkspaceBusyError",
     "StdioServerPresence",

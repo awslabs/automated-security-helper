@@ -162,17 +162,29 @@ def _no_scan_running(
     itself.
     """
     from automated_security_helper.cli.mcp.sessions import (
+        CHANGE_REFUSED_BY_CHANGE,
+        CHANGE_REFUSED_BY_WRITE,
         finish_ended_session,
         get_default_registry,
     )
 
     session = get_default_registry().session_for(session_id)
-    if not session.try_begin_change(removes_workspace=removes_workspace):
-        if removes_workspace:
+    refused = session.try_begin_change(removes_workspace=removes_workspace)
+    if refused is not None:
+        # The message names what refused this attempt
+        # (MCPSession.try_begin_change says why), so a client is not told to
+        # wait for a scan that does not exist.
+        if refused == CHANGE_REFUSED_BY_WRITE:
             raise SourceDeliveryBusyError(
-                "a scan of this session is running, or a chunk or a profile "
-                "selection is being written; change the delivered source after "
-                "it finishes"
+                "a chunk of an upload or a profile selection is being "
+                "written; change the delivered source after it finishes"
+            )
+        if refused == CHANGE_REFUSED_BY_CHANGE:
+            raise SourceDeliveryBusyError(
+                "another change to this session's source is in progress (a "
+                "delivery, a clear, the end of the session, or the removal "
+                "of an idle session); change the delivered source after it "
+                "finishes"
             )
         raise SourceDeliveryBusyError(
             "a scan of this session is running; change the delivered source "
