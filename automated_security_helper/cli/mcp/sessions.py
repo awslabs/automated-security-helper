@@ -548,7 +548,26 @@ def end_session(session_id: str) -> bool:
     progress (a chunk of an upload, a profile binding), which the removal would
     race.
 
-    Idempotent.
+    - A scan in this process: the removal waits until that scan returns, and
+      :func:`finish_ended_session` completes it, called as the scan's claim is
+      released.
+    - A scan in another server sharing the workspace root: nothing in this
+      process learns when that scan returns, so :func:`finish_ended_session` is
+      not called for it. The tree, the profile binding and the delivered-source
+      record stay until :func:`sweep_stale_workspaces` finds the workspace older
+      than its TTL with no scan holding it, which is the only collector.
+
+    Idempotent. The session is taken with ``session_for`` and not ``get``: the
+    registry may have forgotten the id, and a scan can recreate and claim it right
+    after a lookup that found nothing, which would leave the claim unseen by the
+    change guard. Ending an id that never existed makes an empty entry that the
+    removal drops at once, so it is still a no-op; an id that cannot name a session
+    has no entry and no state to remove.
+
+    If the scan presence lock can't be taken (a filesystem that refuses file
+    locks), nothing proves that no scan elsewhere holds the session: the tree
+    stays on disk, and the bound profile, the delivered-source record and the
+    registry entry are cleared now, with one warning naming the lock.
 
     Returns:
         True when everything was removed now, False when it waits for a scan or
@@ -565,13 +584,102 @@ def end_session(session_id: str) -> bool:
     if session is not None and session.try_begin_change() is not None:
         return False
     try:
-        _remove_session_state(session_id)
+        outcome = _remove_unless_a_scan_elsewhere_holds(session_id)
     finally:
         if session is not None:
             session.end_change()
     with _ended_lock:
-        _ended_while_scanning.discard(session_id)
-    return True
+        if outcome is False:
+            _ended_while_scanning.add(session_id)
+        else:
+            _ended_while_scanning.discard(session_id)
+    return outcome is True
+
+
+def _remove_unless_a_scan_elsewhere_holds(session_id: str) -> Optional[bool]:
+    """Remove the session's state unless a scan in any server sharing the root holds it.
+
+    Run with the session's change held, which covers scans of this process. A scan
+    in another server holds a locked entry under ``<root>/.ash-mcp-scans/<id>/``
+    (:class:`ScanPresence`); removing the tree under it can turn its result into a
+    clean one. Entries of scans that died, and the empty directory that held them,
+    are dropped with the workspace, as the TTL sweep does.
+
+    A session with no workspace directory has nothing a scan could be reading, and
+    no registry is opened for it. A reserved id (stdio's ``__default__``) never has
+    a presence entry, so it is removed without opening the registry: ending it
+    creates nothing under ``.ash-mcp-scans``.
+
+    If the presence lock cannot be taken, nothing proves that no scan holds the
+    session, so the tree on disk stays for a later sweep whose lock succeeds. The
+    server's own memory of the session (its bound profile and registry entry) is
+    cleared now, and one warning names the lock path, so a root whose filesystem
+    refuses the lock does not build up state for the life of the process.
+
+    Returns:
+        True when the state was removed, False when the removal must wait for a
+        scan, None when the lock could not be taken and only the in-memory state
+        was cleared.
+    """
+    from automated_security_helper.cli.mcp.session_identity import (
+        is_reserved_session_id,
+    )
+
+    try:
+        root = _workspace_root()
+        has_workspace = session_directory(root, session_id).is_dir()
+    except (OSError, RuntimeError, ValueError):
+        has_workspace = False
+    if not has_workspace or is_reserved_session_id(session_id):
+        _remove_session_state(session_id)
+        return True
+    holder = root / SCAN_PRESENCE_DIR / session_id
+    try:
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(_scan_presence_guard(root))
+            except OSError as exc:
+                _forget_session_in_memory(session_id)
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.warning(
+                    "Could not take the scan presence lock %s (%s), so the "
+                    "workspace of session %r stays on disk for a later sweep.",
+                    root / SCAN_PRESENCE_DIR / _SCAN_PRESENCE_LOCK,
+                    exc,
+                    session_id,
+                )
+                return None
+            if _a_scan_holds(holder):
+                return False
+            _remove_session_state(session_id)
+            with contextlib.suppress(OSError):
+                holder.rmdir()
+            return True
+    except OSError:
+        return False
+
+
+def _forget_session_in_memory(session_id: str) -> None:
+    """Drop the session's in-memory state, leaving the workspace on disk.
+
+    The bound profile, the delivered-source record and the registry entry all
+    go. The TTL sweep's lookup re-creates a registry entry, so a
+    delivered-source record left behind would make ``holds_binding`` read that
+    entry as bound: it would never be evicted, ``delivered_session_count``
+    would stay inflated by ended sessions, and the forget would be undone at
+    the next sweep.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_session_state,
+    )
+    from automated_security_helper.cli.mcp.source_delivery import (
+        _drop_session_source_dir,
+    )
+
+    clear_session_state(session_id)
+    _drop_session_source_dir(session_id)
+    get_default_registry().forget(session_id)
 
 
 def finish_ended_session(session_id: Optional[str]) -> None:
