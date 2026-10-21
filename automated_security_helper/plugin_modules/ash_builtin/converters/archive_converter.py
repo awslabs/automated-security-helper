@@ -1474,6 +1474,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             unreadable,
                             stopped,
                             budget=skipped_blocks,
+                            # The stream is already decompressed and
+                            # byte-budgeted; "r:" keeps tarfile's
+                            # compression sniff (an 8 KiB read-ahead)
+                            # off the header allowance.
+                            mode="r:",
                             encoding="utf-8",
                         ) as tar_ref:
                             # Every member is admitted against the extraction limits

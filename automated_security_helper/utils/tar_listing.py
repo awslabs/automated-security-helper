@@ -124,6 +124,7 @@ def open_tar_listing(
     unreadable: List[int],
     stopped: Optional[List[int]] = None,
     budget: Optional[SkippedBlocksBudget] = None,
+    mode: str = "r:*",
     **options: Any,
 ) -> TarFile:
     """The tar in ``handle``, compressed or not, opened from its start so that its
@@ -140,7 +141,11 @@ def open_tar_listing(
     at the block that takes the budget past its limit, or at the first one it is
     charged once the budget is spent. Read the whole listing (``getmembers``,
     ``getnames``, or to the end of an iteration) before looking at either list.
-    ``options`` go to ``tarfile.open``, such as ``encoding``.
+    ``options`` go to ``tarfile.open``, such as ``encoding``. ``mode`` is
+    tarfile's open mode: the default ``"r:*"`` sniffs the compression by
+    reading ahead, so a caller whose ``handle`` is already decompressed and
+    read through a byte-budgeted stream passes ``"r:"``, which reads plain
+    512-byte blocks and keeps the sniff's read-ahead off its budget.
 
     Raises:
         tarfile.TarError, OSError, EOFError: The tar could not be opened or read.
@@ -174,7 +179,7 @@ def open_tar_listing(
 
     handle.seek(0)
     return open_tar(
-        fileobj=handle, mode="r:*", ignore_zeros=True, tarinfo=_Recorded, **options
+        fileobj=handle, mode=mode, ignore_zeros=True, tarinfo=_Recorded, **options
     )
 
 
