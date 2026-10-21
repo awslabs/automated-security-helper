@@ -1313,7 +1313,14 @@ def _a_scan_holds(holder: Path) -> bool:
 
 
 def scan_presence_held(session_id: str) -> bool:
-    """True if a running scan of ``session_id`` in any server holds its presence."""
+    """True if a running scan of ``session_id`` in any server holds its presence.
+
+    Fails open: when the presence guard can't be taken (``OSError``) the answer
+    is False, "no scan held". The answer only reports. No code in this package
+    removes or clears anything on it; the sweep takes the guard itself and keeps
+    the session when that fails (:func:`_remove_if_still_stale`). A caller that
+    gates a deletion on this answer must not read False as permission.
+    """
 
     root = _workspace_root()
     try:
@@ -1379,7 +1386,8 @@ def sweep_stale_workspaces(
       presence registries.
 
     Entries that are not directories, are symlinks, or do not name a single
-    directory are left alone.
+    directory are left alone, and so is a name the session registry refuses
+    (``MCPSessionRegistry.session_for``): the sweep goes on to the next entry.
 
     This is also what removes a session whose end :func:`end_session` deferred
     for a scan in another server: that scan's end is not seen here.
@@ -1410,8 +1418,13 @@ def sweep_stale_workspaces(
                 continue
         except (OSError, ValueError):
             continue
-        if _remove_if_still_stale(root, session_id, entry, cutoff):
-            removed.append(session_id)
+        try:
+            if _remove_if_still_stale(root, session_id, entry, cutoff):
+                removed.append(session_id)
+        except ValueError:
+            # A name the session registry refuses is left alone, and the rest of
+            # the root is still swept.
+            continue
     return removed
 
 
