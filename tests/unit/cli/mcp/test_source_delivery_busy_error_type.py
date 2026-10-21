@@ -144,3 +144,77 @@ def test_a_clone_failure_still_has_no_busy_error_type(_server) -> None:
     assert result.get("error_type") == "git_clone_failed", result
     assert result["error_type"] != BUSY_ERROR_TYPE, result
     assert "clone failed" in result["error"], result
+
+
+# ---------------------------------------------------------------------------
+# The busy message names what refused the change, never a scan that may not
+# exist: try_begin_change answers why it refused, as try_begin_write does.
+# ---------------------------------------------------------------------------
+
+
+def _session() -> Any:
+    from automated_security_helper.cli.mcp.sessions import get_default_registry
+
+    return get_default_registry().get_or_create(SESSION)
+
+
+def test_try_begin_change_says_why_it_refused(_server) -> None:
+    from automated_security_helper.cli.mcp import sessions
+
+    session = _session()
+
+    assert session.try_begin_change() is None
+    session.end_change()
+
+    with session.lock:
+        assert session.try_begin_change() == sessions.CHANGE_REFUSED_BY_SCAN
+
+    assert session.try_claim_scan()
+    try:
+        assert session.try_begin_change() == sessions.CHANGE_REFUSED_BY_SCAN
+    finally:
+        session.release_scan()
+
+    assert session.try_begin_change() is None
+    try:
+        assert session.try_begin_change() == sessions.CHANGE_REFUSED_BY_CHANGE
+    finally:
+        session.end_change()
+
+    assert session.try_begin_write() is None
+    try:
+        assert session.try_begin_change() == sessions.CHANGE_REFUSED_BY_WRITE
+        assert session.try_begin_change(removes_workspace=False) is None
+        session.end_change()
+    finally:
+        session.end_write()
+
+
+def test_a_change_refused_by_a_write_is_not_blamed_on_a_scan(_server) -> None:
+    from automated_security_helper.cli.mcp import source_delivery
+
+    session = _session()
+    assert session.try_begin_write() is None
+    try:
+        with pytest.raises(source_delivery.SourceDeliveryBusyError) as refused:
+            source_delivery.clear_source(SESSION)
+    finally:
+        session.end_write()
+
+    assert "being written" in str(refused.value), refused.value
+    assert "a scan of this session is running" not in str(refused.value)
+
+
+def test_a_change_refused_by_another_change_is_not_blamed_on_a_scan(_server) -> None:
+    from automated_security_helper.cli import mcp_server
+    from automated_security_helper.cli.mcp import source_delivery
+
+    with source_delivery._no_scan_running(SESSION, removes_workspace=False):
+        result = asyncio.run(
+            mcp_server.set_source_git(_ctx(), url="https://example.com/repo.git")
+        )
+
+    assert result["success"] is False, result
+    assert result["error_type"] == BUSY_ERROR_TYPE, result
+    assert "another change to this session's source is in progress" in result["error"]
+    assert "a scan of this session is running" not in result["error"]
