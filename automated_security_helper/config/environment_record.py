@@ -34,14 +34,23 @@ Where
 -----
 Each reference is replaced at its own position: the path of keys at which the
 file wrote it, spelled with ``-`` or ``_`` (the record keys a built-in plugin's
-section by its field name), at any index of a list, and moved to where a
-``patch`` operation puts its value. A string elsewhere that happens to equal the
-value is left alone, so a field the file set to "us-east-1" is not recorded as
-``${AWS_REGION}`` because that variable holds the same text. At its position, a
-string the load changed after reading it (a relative path the load takes from
-the file's directory) has the part read from the environment replaced inside
-it. A position the configuration no longer holds the value at, because a later
-file or an override set it, is left as the configuration holds it.
+section by its field name), and moved to where a ``patch`` operation puts its
+value. A string equal to the value is recorded as the reference at the
+reference's own index. A string elsewhere that happens to equal the value is left
+alone, so a field the file set to "us-east-1" is not recorded as
+``${AWS_REGION}`` because that variable holds the same text, and a list entry the
+file wrote as the same text as the value of an entry beside it stays as written.
+At its own position, index included, a string the load changed after reading it
+(a relative path the load takes from the file's directory) has the part read from
+the environment replaced inside it; a neighboring entry that only contains the
+same text is left as it is. If the entry at the reference's own index no longer
+carries its value because the list is not the length the file wrote (defaults
+before it, a patch), the reference is looked for at any index of the list
+instead, in a string that is the value or a path anchored on it. A reference whose
+list index the file's layout does not give (the append of a ``patch`` operation)
+is looked for the same way. A position the configuration no longer holds the
+value at, because a later file or an override set it, is left as the
+configuration holds it.
 
 Reading a record
 ----------------
@@ -82,10 +91,31 @@ from automated_security_helper.config.ash_config import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 #: One step of a path into a configuration: a mapping key or a list index.
-PathSegment = Union[str, int]
+PathSegment = Union[str, int, "_AnyIndex"]
+
+
+class _AnyIndex:
+    """The marker for "any list position" in a path. An object of its own, never
+    a string, so no mapping key (``"*"`` included) can equal it. Paths are held in
+    memory only, so the marker is never written out."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<any index>"
+
+    def __reduce__(self) -> str:
+        # A copy (deepcopy, pickle, a pydantic deep model_copy) resolves back
+        # to the module's one sentinel instead of a new, unequal instance.
+        return "_ANY_INDEX"
+
 
 #: A list index in a normalized path: any position matches.
-_ANY_INDEX = "*"
+_ANY_INDEX = _AnyIndex()
+
+#: A list index a reference's path cannot name, such as the ``-`` of a patch
+#: operation that appends: the entry is found by the shape the load gives it.
+UNKNOWN_INDEX = _ANY_INDEX
 
 
 @dataclass(frozen=True)
@@ -103,9 +133,39 @@ class EnvironmentReference:
     resolved: str
     value: str
     key: bool = False
+    #: How many entries the innermost list the file wrote it in had, when it
+    #: wrote it in a list (as an entry, or inside a mapping that is one); None
+    #: otherwise.
+    length: Optional[int] = None
+    #: Where in ``path`` the index of that list entry sits; set with ``length``.
+    index_at: Optional[int] = None
 
     def at(self, path: Tuple[PathSegment, ...]) -> "EnvironmentReference":
-        return replace(self, path=path)
+        """The reference at an unrelated ``path``: what it says about the list the
+        file wrote it in does not carry over."""
+        return replace(self, path=path, length=None, index_at=None)
+
+    def rebase(
+        self, prefix_len: int, prefix: Tuple[PathSegment, ...]
+    ) -> "EnvironmentReference":
+        """The reference with the first ``prefix_len`` segments of its path
+        replaced by ``prefix``. The list it was written in carries over when its
+        index lies beyond the replaced part."""
+        path = (*prefix, *self.path[prefix_len:])
+        if self.index_at is None or self.index_at < prefix_len:
+            return replace(self, path=path, length=None, index_at=None)
+        return replace(
+            self, path=path, index_at=self.index_at - prefix_len + len(prefix)
+        )
+
+    @property
+    def position_unknown(self) -> bool:
+        """Whether the list index in ``path`` says nothing about where the entry
+        is: the path names an unknown index, or holds an index with no record of
+        the list it was written in."""
+        if any(isinstance(segment, _AnyIndex) for segment in self.path):
+            return True
+        return self.length is None and any(isinstance(s, int) for s in self.path)
 
 
 @dataclass(frozen=True)
@@ -196,7 +256,13 @@ def environment_references(
             found += environment_references(written_value, value, (*path, str(key)))
     elif isinstance(written, list) and isinstance(resolved, list):
         for index, (written_item, item) in enumerate(zip(written, resolved)):
-            found += environment_references(written_item, item, (*path, index))
+            entry = (*path, index)
+            for read in environment_references(written_item, item, entry):
+                # The innermost list a value was written in gives its length,
+                # whether the entry is the reference or a mapping holding it.
+                if read.length is None and not read.key:
+                    read = replace(read, length=len(written), index_at=len(path))
+                found.append(read)
     else:
         read = _reference(written, resolved, path)
         if read is not None:
@@ -205,13 +271,20 @@ def environment_references(
 
 
 def _normal(segment: PathSegment) -> PathSegment:
-    if isinstance(segment, int):
+    if isinstance(segment, (int, _AnyIndex)):
         return _ANY_INDEX
     return segment.replace("-", "_").lower()
 
 
 def _normal_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
     return tuple(_normal(segment) for segment in path)
+
+
+def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
+    """``path`` with its keys normalized and its list indices kept."""
+    return tuple(
+        segment if isinstance(segment, int) else _normal(segment) for segment in path
+    )
 
 
 def _bare(written: str) -> str:
@@ -221,16 +294,30 @@ def _bare(written: str) -> str:
     return match.group(0) if match else text
 
 
-def _recorded_string(text: str, references: Sequence[EnvironmentReference]) -> str:
-    for reference in references:
+def _anchored(text: str, reference: EnvironmentReference) -> bool:
+    """Whether ``text`` is what ``reference`` resolved to, or that after a prefix
+    the load put on it (a relative path anchored at the file's directory)."""
+    return text == reference.resolved or text.endswith(reference.resolved)
+
+
+def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:
+    """``text`` as the file wrote it, where ``candidates`` are the references that
+    apply at its position (``_Index.pending``).
+
+    A string equal to what a candidate resolved to is the reference; one that ends
+    with it has the reference in its place; any other string has the value of each
+    candidate replaced by it. A neighboring entry's reference is not a candidate,
+    since it does not write this entry.
+    """
+    for reference in candidates:
         if text == reference.resolved:
             return reference.written
-    for reference in references:
+    for reference in candidates:
         if text.endswith(reference.resolved):
             # A path the load anchored: the file's text after a prefix.
             prefix = text[: len(text) - len(reference.resolved)]
             return prefix + _without_tag(reference.written)
-    for reference in references:
+    for reference in candidates:
         if reference.value in text:
             text = text.replace(reference.value, _bare(reference.written))
     return text
@@ -242,7 +329,9 @@ def written_without_tag(written: str) -> str:
 
 
 def fill_environment_references(
-    data: Any, references: Sequence[EnvironmentReference]
+    data: Any,
+    references: Sequence[EnvironmentReference],
+    filled: Optional[List[EnvironmentReference]] = None,
 ) -> Any:
     """``data``, the document of a profile's copy a client patched, with each
     reference the operator's copy wrote read again.
@@ -254,11 +343,14 @@ def fill_environment_references(
     read there. Nothing else is read: a client that writes a reference anywhere
     else has it left as text, and one that writes it at such a position gets the
     value the operator's copy holds there, which is what the profile gives it
-    unpatched. A copy: ``data`` itself is not changed.
+    unpatched. ``filled``, when given, receives each reference at the exact
+    position it was read into ``data``, with its list length, so a record of the
+    filled document matches only where the fill wrote. A copy: ``data`` itself
+    is not changed.
     """
     if not references:
         return data
-    return _Index(references).fill(data, ())
+    return _Index(references).fill(data, (), (), filled)
 
 
 def environment_marker(written: str) -> str:
@@ -279,17 +371,95 @@ class _Index:
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.mark = mark
         self.whole_only = whole_only
+        #: The data's strings by exact position, and its lists' lengths (``scan``).
+        self.strings: Dict[Tuple[PathSegment, ...], str] = {}
+        self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
         for reference in references:
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path), []).append(reference)
 
-    def record(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
+    def scan(self, item: Any, exact: Tuple[PathSegment, ...]) -> None:
+        """Note the strings of ``item`` by exact position and the length of each
+        list, before ``record`` reads references into them."""
+        if isinstance(item, dict):
+            for key, value in item.items():
+                spelled = key if isinstance(key, str) else str(key)
+                self.scan(value, (*exact, _normal(spelled)))
+        elif isinstance(item, (list, tuple)):
+            self.lengths[exact] = len(item)
+            for index, value in enumerate(item):
+                self.scan(value, (*exact, index))
+        elif isinstance(item, str):
+            self.strings[exact] = item
+
+    def _moved(self, reference: EnvironmentReference) -> bool:
+        """Whether the entry the file wrote ``reference`` at no longer holds it.
+
+        True when the list is not the length the file wrote (defaults put before
+        the entry, a patch) and the entry at the same index is neither the value
+        nor a path the load anchored on it (``_anchored``). A list of the same
+        length whose entry changed is an entry the load or an override changed,
+        not one that moved.
+        """
+        if reference.length is None or reference.index_at is None:
+            return False
+        exact = _exact_path(reference.path)
+        text = self.strings.get(exact)
+        if text is not None and _anchored(text, reference):
+            return False
+        return self.lengths.get(exact[: reference.index_at]) != reference.length
+
+    def pending(
+        self,
+        exact: Tuple[PathSegment, ...],
+        references: List[EnvironmentReference],
+        text: str,
+    ) -> List[EnvironmentReference]:
+        """The references that may be read into ``text``, the string at ``exact``.
+
+        A list can hold ``${ASH_SCOPE}`` and ``vendor2``, or ``vendor`` and an
+        entry the load changed. The string at a reference's own index has that
+        reference read into it, whole or inside a longer string. A neighboring
+        entry that happens to start or end with the same text keeps what the file
+        wrote, and does not hide the reference an entry the load changed is read
+        from. Only when the entry at a reference's own index no longer carries its
+        value (the list was lengthened or patched) is the reference read at the
+        other indices, and then only into a string of the shape the load gives
+        its entry (``_anchored``): another entry that merely contains the text
+        is not that entry.
+
+        A reference whose list index says nothing about where its entry is
+        (``EnvironmentReference.position_unknown``: the append of a ``patch``
+        operation, or a position inside a list the record does not know the
+        length of) has no entry of its own: it is read only into a string of that
+        shape, at any index, and a base entry that merely contains the text is
+        left as the file wrote it.
+        """
+        return [
+            r
+            for r in references
+            if (
+                _anchored(text, r)
+                if r.position_unknown or self._moved(r)
+                else _exact_path(r.path) == exact
+            )
+        ]
+
+    def record(
+        self,
+        item: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Optional[Tuple[PathSegment, ...]] = None,
+    ) -> Any:
+        exact = path if exact is None else exact
         if isinstance(item, dict):
             renames = self.keys.get(path, ())
             result: Dict[Any, Any] = {}
             for key, value in item.items():
                 spelled = key if isinstance(key, str) else str(key)
-                recorded = self.record(value, (*path, _normal(spelled)))
+                recorded = self.record(
+                    value, (*path, _normal(spelled)), (*exact, _normal(spelled))
+                )
                 for reference in renames:
                     if _normal(spelled) == _normal(reference.resolved):
                         key = self._whole(reference)
@@ -297,15 +467,33 @@ class _Index:
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
-            return type(item)(self.record(value, (*path, _ANY_INDEX)) for value in item)
+            return type(item)(
+                self.record(value, (*path, _ANY_INDEX), (*exact, index))
+                for index, value in enumerate(item)
+            )
         if isinstance(item, str):
             here = self.values.get(path)
             if here:
-                return self._string(item, here)
+                # A whole string is read against the same references as a longer
+                # one: a plain entry equal to the value, beside the reference's
+                # own entry, is the file's own text and stays as written.
+                candidates = self.pending(exact, here, item)
+                return self._string(item, candidates)
         return item
 
-    def fill(self, item: Any, path: Tuple[PathSegment, ...]) -> Any:
-        """``fill_environment_references``: the inverse of ``record``."""
+    def fill(
+        self,
+        item: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...] = (),
+        filled: Optional[List[EnvironmentReference]] = None,
+        length: Optional[int] = None,
+        index_at: Optional[int] = None,
+    ) -> Any:
+        """``fill_environment_references``: the inverse of ``record``. When
+        ``filled`` is given, every reference read into the document is appended
+        to it at the EXACT position it was filled, with the enclosing list's
+        length, so the record made from the filled document matches only there."""
         if isinstance(item, dict):
             renames = self.keys.get(path, ())
             result: Dict[Any, Any] = {}
@@ -315,28 +503,54 @@ class _Index:
                         key = reference.resolved
                         break
                 spelled = key if isinstance(key, str) else str(key)
-                result[key] = self.fill(value, (*path, _normal(spelled)))
+                result[key] = self.fill(
+                    value,
+                    (*path, _normal(spelled)),
+                    (*exact, _normal(spelled)),
+                    filled,
+                    length,
+                    index_at,
+                )
             return result
         if isinstance(item, (list, tuple)):
-            return type(item)(self.fill(value, (*path, _ANY_INDEX)) for value in item)
+            return type(item)(
+                self.fill(
+                    value,
+                    (*path, _ANY_INDEX),
+                    (*exact, index),
+                    filled,
+                    len(item),
+                    len(exact),
+                )
+                for index, value in enumerate(item)
+            )
         if isinstance(item, str):
             for reference in self.values.get(path, ()):
                 if item == _without_tag(reference.written):
+                    if filled is not None:
+                        filled.append(
+                            replace(
+                                reference,
+                                path=exact,
+                                length=length,
+                                index_at=index_at,
+                            )
+                        )
                     return reference.resolved
         return item
 
     def _whole(self, reference: EnvironmentReference) -> Any:
         return reference.written if self.mark is None else self.mark(reference.written)
 
-    def _string(self, text: str, references: List[EnvironmentReference]) -> Any:
+    def _string(self, text: str, candidates: List[EnvironmentReference]) -> Any:
         if self.mark is None:
-            return _recorded_string(text, references)
-        for reference in references:
+            return _recorded_string(text, candidates)
+        for reference in candidates:
             if text == reference.resolved:
                 return self._whole(reference)
         if self.whole_only:
             return text
-        for reference in references:
+        for reference in candidates:
             if reference.value in text:
                 text = text.replace(reference.value, self.mark(reference.written))
         return text
@@ -362,7 +576,9 @@ def record_environment_references(
     """
     if not references:
         return data
-    return _Index(references, mark, whole_only).record(data, _normal_path(at))
+    index = _Index(references, mark, whole_only)
+    index.scan(data, _exact_path(at))
+    return index.record(data, _normal_path(at), _exact_path(at))
 
 
 def setting_names(

@@ -694,7 +694,9 @@ def resolve_config(
         )
     # The copy of a profile a client patched holds each value the profile read
     # from the environment as its reference; it is read from the operator's copy
-    # it was built from (cli/mcp/profile_registry.is_client_copy_of).
+    # it was built from (cli/mcp/profile_registry.is_client_copy_of). Their
+    # positions in this document are collected where the fill reads them in
+    # (below).
     fill: List[Any] = []
     if config_path is not None and trusted_config_path is not None:
         from automated_security_helper.cli.mcp.profile_registry import (
@@ -709,7 +711,6 @@ def resolve_config(
                     permit_base=permit_base,
                 ).environment_references
             )
-            references.extend(fill)
     config = _resolve_config(
         config_path,
         source_dir,
@@ -1769,12 +1770,19 @@ def _resolve_config(
                 )
 
                 # The documents too: the checks of who set what compare each
-                # file's values with the trusted base's.
-                data = fill_environment_references(data, fill)
+                # file's values with the trusted base's. The references join the
+                # record at the positions the fill READ THEM IN, never at the
+                # operator copy's own: a client document may hold the same
+                # reference text at other indices, and only the filled positions
+                # are the operator's values.
+                filled_here: List[Any] = []
+                data = fill_environment_references(data, fill, filled_here)
                 document.documents = {
-                    path: fill_environment_references(text, fill)
+                    path: fill_environment_references(text, fill, filled_here)
                     for path, text in document.documents.items()
                 }
+                if references is not None:
+                    references.extend(filled_here)
             if overlay is not None and isinstance(data, dict):
                 # A document that is not a mapping is left as it is, so its
                 # validation error is still raised rather than replaced by the
