@@ -37,6 +37,7 @@ from tests.utils.mcp_transport_harness import (
     LOOPBACK_PORT,
     STREAMABLE_HEADERS,
     StreamableHttpClient,
+    boundary_of,
     tool_payload,
 )
 
@@ -318,6 +319,164 @@ def test_a_stateful_server_ignores_a_header_it_did_not_issue_on_the_newer_protoc
     result = tool_payload(response.json())
     assert result.get("success") is False, result
     assert result.get("error_type") == "scan_target_not_permitted", result
+    assert boundary_of(app)._issued == set()
+
+
+def test_a_stateful_server_gives_an_issued_id_no_identity_on_the_newer_protocol() -> (
+    None
+):
+    """The id this server issued still names no session on the newer path.
+
+    Requests naming the 2026-07-28 protocol skip the SDK's session check, so
+    the server's record of which ids it issued is not what answers them. The
+    documented rule is that such a request carries no identity.
+    """
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "clear_source",
+            "arguments": {},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        issued, _headers = StreamableHttpClient(client).open_session()
+        assert issued, "a stateful server issues an id at initialize"
+        response = client.post(
+            "/mcp",
+            json=body,
+            headers={
+                **STREAMABLE_HEADERS,
+                "Mcp-Protocol-Version": "2026-07-28",
+                "Mcp-Session-Id": issued,
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "clear_source",
+            },
+        )
+
+    assert response.status_code == 200, response.text[:300]
+    result = tool_payload(response.json())
+    assert result.get("success") is False, result
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    # The refusal names the cause, a protocol version that is not a handshake
+    # version, so a caller on this server has something it can change.
+    assert "Mcp-Protocol-Version" in result.get("error", ""), result
+    assert "handshake" in result.get("error", ""), result
+    assert "newer protocol version" in result.get("error", ""), result
+
+
+def test_a_stateful_refusal_advises_initialize_not_an_operator_mode_change() -> None:
+    """On a stateful server the refusal tells the caller what works there.
+
+    The caller's remedy on a stateful server is a session: open one with
+    ``initialize`` and send the ``Mcp-Session-Id`` it returns. Advice to run the
+    server "without --stateless-http" is for an operator and already holds, and
+    an id this server never issued gains nothing from a version change, so the
+    refusal must not name the protocol version as the cause either. Reachable
+    only on the newer-protocol path: a handshake-version request without a
+    session is refused by the SDK before any tool runs.
+    """
+    app = build_streamable_http_app(
+        mount_path="/mcp", host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "clear_source",
+            "arguments": {},
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {},
+            },
+        },
+    }
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        response = client.post(
+            "/mcp",
+            json=body,
+            headers={
+                **STREAMABLE_HEADERS,
+                "Mcp-Protocol-Version": "2026-07-28",
+                "Mcp-Session-Id": "client-chosen",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "clear_source",
+            },
+        )
+
+    assert response.status_code == 200, response.text[:300]
+    result = tool_payload(response.json())
+    assert result.get("success") is False, result
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert "initialize" in result.get("error", ""), result
+    assert "--stateless-http" not in result.get("error", ""), result
+    assert "newer protocol version" not in result.get("error", ""), result
+
+
+def test_the_refusal_names_the_protocol_version_as_a_cause() -> None:
+    from automated_security_helper.cli.mcp.session_identity import (
+        _PROTOCOL_VERSION_IS_CAUSE,
+        UNIDENTIFIED_SESSION_ID,
+        session_identity_refusal,
+    )
+
+    token = _PROTOCOL_VERSION_IS_CAUSE.set(True)
+    try:
+        refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+    finally:
+        _PROTOCOL_VERSION_IS_CAUSE.reset(token)
+
+    assert refusal is not None
+    assert "newer protocol version" in refusal["error"], refusal
+    assert "Mcp-Protocol-Version" in refusal["error"], refusal
+
+
+def test_a_refusal_the_protocol_version_did_not_cause_does_not_name_it() -> None:
+    """A stateless caller changes nothing by changing its protocol version."""
+    app = build_streamable_http_app(
+        mount_path="/mcp", stateless_http=True, host="127.0.0.1", port=LOOPBACK_PORT
+    )
+    with TestClient(app, base_url=LOOPBACK_BASE_URL) as client:
+        http = StreamableHttpClient(client)
+        _issued, headers = http.open_session()
+        result = http.call_tool("clear_source", {}, headers)
+
+    assert result.get("error_type") == SESSION_IDENTITY_REQUIRED, result
+    assert "newer protocol version" not in result.get("error", ""), result
+    assert "Mcp-Protocol-Version" not in result.get("error", ""), result
+    assert "--trust-upstream-session-id" in result.get("error", ""), result
+
+
+def test_the_protocol_version_cause_does_not_outlive_the_request_that_set_it() -> None:
+    from automated_security_helper.cli.mcp.session_identity import (
+        _PROTOCOL_VERSION_IS_CAUSE,
+        UNIDENTIFIED_SESSION_ID,
+        resolve_caller_session_id,
+        session_identity_refusal,
+    )
+
+    class _StandIn:
+        headers = {"mcp-session-id": "tenant-a"}
+
+    token = _PROTOCOL_VERSION_IS_CAUSE.set(True)
+    try:
+        # The next resolution in this context is a different request.
+        assert resolve_caller_session_id(_StandIn()) == "tenant-a"
+        refusal = session_identity_refusal(UNIDENTIFIED_SESSION_ID, "clear_source")
+    finally:
+        _PROTOCOL_VERSION_IS_CAUSE.reset(token)
+
+    assert refusal is not None
+    assert "newer protocol version" not in refusal["error"], refusal
 
 
 def test_the_ash_command_line_forwards_the_declaration(monkeypatch) -> None:
