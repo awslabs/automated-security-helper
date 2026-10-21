@@ -146,32 +146,71 @@ def _other_home(policy: SandboxPolicy) -> Optional[Path]:
     return _distinct_home(policy.home, _passwd_home())
 
 
-def _hidden_around(root: Path, shown: Sequence[Path]) -> List[Path]:
+def _hidden_around(
+    root: Path,
+    shown: Sequence[Path],
+    homes: Sequence[Path] = (),
+    seen: Optional[Set[Path]] = None,
+) -> List[Path]:
     """What to blacklist so that ``root`` shows only ``shown`` and the way to them.
 
     firejail whitelists only inside the home and a few system directories, so a
     directory a link at the top of a home names (policy._home_link_targets) is hidden
     with --blacklist: all of it, or, where the policy grants paths inside it, every
-    entry beside the way to those paths. Links among the entries are left alone,
-    since firejail would blacklist the directory they point to.
+    entry beside the way to those paths. A link among the entries is not blacklisted
+    itself, since firejail would blacklist the directory it points to; the directory
+    (or file) it names is hidden the same way as ``root`` is, unless it is one
+    _home_link_targets leaves out or a home. The links followed are those at the top
+    of every directory that is hidden or walked here, whether it is blacklisted whole
+    or kept for a path inside it, and the ones naming a directory above ``root``
+    count too. A directory the policy grants whole is not searched for links: they
+    are inside what the policy itself reads, and neither is a path at or below one
+    it grants, so a file inside the scanned tree is not blacklisted. Nothing in /tmp is hidden, and no
+    link target in a pseudo-filesystem (``_home_link_targets`` leaves it out) is followed. ``homes``
+    are the homes ``root`` was
+    reached from; ``seen`` holds the directories already handled, each is handled
+    once, so links among directories cannot loop.
     """
-    inside = [p for p in shown if p == root or _is_within(p, root)]
-    if not inside:
-        return [root]
-    if root in inside:
+    seen = set() if seen is None else seen
+    if root in seen:
         return []
-    try:
-        entries = sorted(root.iterdir())
-    except OSError:
-        return [root]
+    seen.add(root)
+    if _is_within(root, _real(_TMP_ROOT)):
+        # /tmp is covered by --private-tmp and the /tmp whitelists, whichever link
+        # led here.
+        return []
+    if any(root == p or _is_within(root, p) for p in shown):
+        # The policy grants this path, or a directory holding it, for the scan.
+        return []
+    inside = [p for p in shown if _is_within(p, root)]
     hidden: List[Path] = []
+    # Where links are looked for: the top of each directory this call hides or walks,
+    # so that what a link inside it names is found whatever is done with the
+    # directory itself.
+    searched: List[Path] = [root]
+    entries: List[Path] = []
+    if not inside:
+        hidden.append(root)
+    else:
+        try:
+            entries = sorted(root.iterdir())
+        except OSError:
+            hidden.append(root)
     for entry in entries:
         if entry.is_symlink():
             continue
         if any(p == entry or _is_within(p, entry) for p in inside):
-            hidden += _hidden_around(entry, inside)
+            hidden += _hidden_around(entry, shown, homes, seen)
         else:
             hidden.append(entry)
+            searched.append(entry)
+    for target in _home_link_targets(searched, files=True, ancestors=True):
+        if target in seen or any(
+            target == home or home in target.parents or target in home.parents
+            for home in homes
+        ):
+            continue
+        hidden += _hidden_around(target, shown, homes, seen)
     return hidden
 
 
@@ -597,10 +636,10 @@ class FirejailBackend(SandboxBackend):
         homes = [home] + (
             [home_variable] if home_variable not in (home, Path("/")) else []
         )
-        for target in _home_link_targets(homes):
+        for target in _home_link_targets(homes, files=True):
             if _is_within(target, tmp_root):
                 continue
-            for hidden in _hidden_around(target, readable + writable):
+            for hidden in _hidden_around(target, readable + writable, homes):
                 cmd.append(f"--blacklist={hidden.as_posix()}")
         # A whitelisted path is mounted read-write whatever --read-only=/ said, so
         # every readable path is made read-only again here, and only then are the
@@ -950,7 +989,7 @@ class SandboxExecBackend(SandboxBackend):
         # And each directory a link at the top of a home names (~/.local kept on
         # another disk), which is part of that home; the policy's own paths inside
         # it are allowed again after the denies, as they are inside the homes.
-        denied = homes + _home_link_targets(homes)
+        denied = homes + _home_link_targets(homes, files=True)
         # Caches are read-only here too; see _private_caches.
         readable = " ".join(
             f"(subpath {_sbpl_string(_real(p))})"
