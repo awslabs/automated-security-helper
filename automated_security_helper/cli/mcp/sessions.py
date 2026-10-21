@@ -196,6 +196,20 @@ class MCPSession(BaseModel):
     def try_begin_change(self) -> bool:
         """Take the session for a change to its delivered tree, without waiting.
 
+        Args:
+            removes_workspace: True for a change that deletes the session's
+                directory (``clear_source``, :func:`end_session`, the TTL sweep).
+                It excludes writes (:meth:`try_begin_write`) both ways: it is
+                refused while one is in progress, and refuses one that comes
+                meanwhile, so the removal never runs under an append or a
+                profile binding. False for a change that never deletes the
+                session's directory (a clone, a finalize): a chunk lands in
+                ``incoming/`` and a profile binding in ``config/`` and
+                ``client-config/``, so neither is excluded. A clone touches
+                only ``source/`` and its staging sibling; a finalize also
+                reads and removes its own upload's ``incoming/<id>.zip``,
+                under the upload's lock, which a chunk of that upload shares.
+
         Returns:
             False while a scan of the session holds :attr:`lock` or is claimed
             and not yet returned; otherwise True, holding :attr:`lock` until
