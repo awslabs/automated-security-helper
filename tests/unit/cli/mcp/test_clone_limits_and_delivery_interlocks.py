@@ -595,26 +595,36 @@ def test_try_begin_write_says_why_it_refused(workspace) -> None:
         session.end_sweep()
 
 
-def test_a_chunk_refused_by_a_change_has_its_own_error_type(workspace) -> None:
+def test_a_chunk_refused_by_a_change_gets_the_one_type_and_retry_rule(
+    workspace,
+) -> None:
+    """One ``error_type`` and one retry rule, right whether or not the hold removed
+    the upload: send the same chunk again, and start from the first chunk only on
+    an out-of-order answer."""
+
     session = sessions.get_default_registry().session_for(SESSION)
     assert session.try_begin_change() is None
     try:
-        with pytest.raises(sessions.SessionChangeInProgressError) as refused:
+        with pytest.raises(sessions.SessionWorkspaceBusyError) as refused:
             _chunk("u1", 0, b"abc")
         result = _chunk_through_the_tool()
     finally:
         session.end_change()
 
     assert result["success"] is False, result
-    assert sessions.SESSION_CHANGE_IN_PROGRESS == "session_change_in_progress"
-    assert result["error_type"] == "session_change_in_progress"
-    assert "as it is" in str(refused.value)
+    assert sessions.SESSION_WORKSPACE_BUSY == "session_workspace_busy"
+    assert result["error_type"] == "session_workspace_busy"
+    assert "again as it is" in str(refused.value)
+    assert "out-of-order" in str(refused.value)
     assert _chunk("u1", 0, b"abc")["next_sequence"] == 1
 
 
-def test_a_chunk_refused_by_the_sweep_keeps_the_restart_advice_and_type(
+def test_a_chunk_refused_by_the_sweep_gets_the_same_type_and_retry_rule(
     workspace,
 ) -> None:
+    """The sweep's hold can end without removing anything (the age re-check keeps
+    a session used meanwhile), so its refusal never claims the upload is gone."""
+
     session = sessions.get_default_registry().session_for(SESSION)
     assert session.try_begin_sweep()
     try:
@@ -624,11 +634,11 @@ def test_a_chunk_refused_by_the_sweep_keeps_the_restart_advice_and_type(
     finally:
         session.end_sweep()
 
-    assert not isinstance(refused.value, sessions.SessionChangeInProgressError)
-    assert sessions.SESSION_WORKSPACE_BUSY == "session_workspace_busy"
     assert result["error_type"] == "session_workspace_busy"
-    assert "from its first chunk" in str(refused.value)
-    assert "as it is" not in str(refused.value)
+    assert "again as it is" in str(refused.value)
+    assert "out-of-order" in str(refused.value)
+    assert "is gone" not in str(refused.value)
+    assert _chunk("u1", 0, b"abc")["next_sequence"] == 1
 
 
 def _zip_bytes() -> bytes:
@@ -801,7 +811,7 @@ def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> 
 
 def test_a_clear_and_a_write_still_refuse_each_other(workspace) -> None:
     with sd._no_scan_running(SESSION):
-        with pytest.raises(sessions.SessionChangeInProgressError):
+        with pytest.raises(sessions.SessionWorkspaceBusyError):
             with sessions.writing_session_state(SESSION):
                 pass
 
