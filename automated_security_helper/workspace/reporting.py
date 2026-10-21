@@ -123,6 +123,7 @@ from automated_security_helper.base.reporter_plugin import (
     reporter_matches_requested_formats,
     write_report_file,
 )
+from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
@@ -184,9 +185,49 @@ class WorkspaceReportOutcome:
         Separate from ``failed_reporters`` on purpose. A reporter that raised is
         a bug in that reporter; a reporter that declared ``UNSUPPORTED`` is a
         correct statement that the operator has asked for something the format
-        cannot express. The first is logged, the second changes the exit code.
+        cannot express. The two are told apart in the log and the manifest; both
+        end the run non-zero, through :func:`exit_code_after_report_step`.
         """
         return bool(self.unsupported_reporters)
+
+    @property
+    def failed(self) -> bool:
+        """Whether the report step left something unwritten that it owed.
+
+        A reporter that raised, a report file that could not be written, a
+        manifest that could not be written, or a reporter that refused. A
+        reporter that returned no content, a per-project reporter whose artefact
+        is missing, and a reporter that was not considered are not failures of
+        this step: the manifest records each, and none owed a workspace file.
+        """
+        return bool(self.failed_reporters) or self.manifest_path is None or self.refused
+
+
+def exit_code_after_report_step(exit_code: int, outcome: WorkspaceReportOutcome) -> int:
+    """The workspace exit code once the report step has run.
+
+    A report step that left something unwritten (see
+    :attr:`WorkspaceReportOutcome.failed`) turns a run that would exit 0 or 2 into
+    ``INTERNAL_ERROR``: the operator asked for reports and some did not arrive,
+    and exit 0 would tell a CI gate they did. It ranks where
+    ``workspace_exit_code`` ranks an incomplete project, above findings (2) and
+    below an invalid project configuration (3); 4 means nothing was scanned. The
+    failure stays in the manifest and the log.
+
+    Args:
+        exit_code: What ``workspace_exit_code`` derived from the projects.
+        outcome: What the report step produced.
+
+    Returns:
+        *exit_code*, or ``INTERNAL_ERROR`` when it was ``SUCCESS`` or
+        ``ACTIONABLE_FINDINGS`` and the step failed.
+    """
+    if outcome.failed and exit_code in (
+        int(WorkspaceExitCode.SUCCESS),
+        int(WorkspaceExitCode.ACTIONABLE_FINDINGS),
+    ):
+        return int(WorkspaceExitCode.INTERNAL_ERROR)
+    return exit_code
 
 
 def _reporter_name(instance: ReporterPluginBase) -> str:
@@ -653,8 +694,9 @@ def emit_workspace_reports(
             registry, which ``prewarm_plugin_registry`` has already resolved.
 
     Returns:
-        What was written, what was withheld, and what refused. The caller folds
-        ``refused`` into the exit code; nothing here calls ``sys.exit``.
+        What was written, what was withheld, and what refused. The caller passes
+        it to :func:`exit_code_after_report_step`; nothing here calls
+        ``sys.exit``.
 
     Raises:
         ReportPathRefused: A file name a reporter here would write is not a file

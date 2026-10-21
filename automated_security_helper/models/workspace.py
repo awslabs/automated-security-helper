@@ -159,7 +159,7 @@ from __future__ import annotations
 from enum import Enum, IntEnum
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 from automated_security_helper.models.core import IgnoreFileExclusions
 
@@ -278,6 +278,15 @@ class ProjectInputNotScanned(BaseModel):
         ),
     ]
     reason: Annotated[str, Field(..., description="Why the scanner did not scan it.")]
+
+
+#: The code a scanner's rolled-up entry reads when its project's row recorded none and
+#: the scanner did not complete: it produced no target report, so ``exit_code`` was
+#: never set on the row. ASH's own stand-in for a run that did not complete (the
+#: incomplete-run member of the judged codes), never the default 0 of an unset field
+#: and never a tool's own exit. A SKIPPED scanner is a complete outcome and does not
+#: read it.
+SCANNER_EXIT_CODE_UNRECORDED = 125
 
 
 class WorkspaceProjectResult(BaseModel):
@@ -545,6 +554,29 @@ class WorkspaceProjectResult(BaseModel):
             reason=self.skip_reason,
             detail=self.skip_detail,
         )
+
+    # Carried in-process from the project run to the workspace rollup
+    # (WorkspaceAggregator.add) and never serialized: the rolled-up
+    # scanner_results entry is the public surface. A private attribute, not a
+    # field, because a declared field is listed in the published results schema
+    # even when it is excluded from dumps.
+    _scanner_exit_codes: Dict[str, Optional[int]] = PrivateAttr(default_factory=dict)
+
+    def carry_scanner_exit_codes(self, codes: Dict[str, Optional[int]]) -> None:
+        """Record the exit code each scanner's row recorded for this project.
+
+        Read from the same row as the status in ``scanners``. A scanner that did not
+        finish and whose row recorded none reads ``SCANNER_EXIT_CODE_UNRECORDED``; a
+        skipped scanner whose row recorded none reads what its own row carries
+        (``None``). Set after construction: a constructor argument is not accepted
+        into it.
+        """
+        self._scanner_exit_codes = dict(codes)
+
+    @property
+    def carried_scanner_exit_codes(self) -> Dict[str, Optional[int]]:
+        """The codes :meth:`carry_scanner_exit_codes` recorded; empty when none were."""
+        return self._scanner_exit_codes
 
 
 class WorkspaceResults(BaseModel):

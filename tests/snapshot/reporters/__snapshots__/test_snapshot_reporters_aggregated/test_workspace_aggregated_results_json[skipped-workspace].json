@@ -120,7 +120,7 @@
       "actionable_finding_count": 1,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     },
     "checkov": {
       "status": "FAILED",
@@ -128,7 +128,7 @@
       "actionable_finding_count": 1,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     },
     "npm-audit": {
       "status": "MISSING",
@@ -136,7 +136,7 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": false,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     },
     "semgrep": {
       "status": "PASSED",
@@ -144,7 +144,7 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     }
   },
   "converter_results": {},

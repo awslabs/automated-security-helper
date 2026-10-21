@@ -129,6 +129,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from automated_security_helper.core.exceptions import WorkspacePatternError
 from automated_security_helper.models.core import merged_honoring
 from automated_security_helper.models.workspace import (
+    SCANNER_EXIT_CODE_UNRECORDED,
     ProjectInputNotScanned,
     WorkspaceProjectResult,
     WorkspaceResults,
@@ -764,6 +765,15 @@ def workspace_ignore_file_exclusions(
     return aggregate
 
 
+def _larger_code(first: Optional[int], second: Optional[int]) -> Optional[int]:
+    """The larger of two rolled-up codes, where null (no code) is below any code."""
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return max(first, second)
+
+
 class WorkspaceAggregator:
     """Collects per-project runs and writes the unified workspace results file.
 
@@ -782,6 +792,7 @@ class WorkspaceAggregator:
         self._scanner_findings: Dict[str, int] = {}
         self._scanner_actionable: Dict[str, int] = {}
         self._scanner_status: Dict[str, Optional[str]] = {}
+        self._scanner_exit_code: Dict[str, Optional[int]] = {}
         self._unconvertible = 0
 
     def add(
@@ -806,9 +817,22 @@ class WorkspaceAggregator:
         self._outcomes[outcome.project] = outcome
 
         for scanner, status in (outcome.scanners or {}).items():
-            self._scanner_status[scanner] = _worse_status(
-                self._scanner_status.get(scanner), status
+            code = outcome.carried_scanner_exit_codes.get(
+                scanner, SCANNER_EXIT_CODE_UNRECORDED
             )
+            held = self._scanner_status.get(scanner)
+            worse = _worse_status(held, status)
+            # The code travels with the status it was recorded beside: a strictly
+            # worse status brings its own code, an equal one keeps the larger, a
+            # better one leaves the held code alone. One decision, so the pair
+            # cannot disagree and the order the projects arrive in does not matter.
+            if scanner not in self._scanner_exit_code or worse != held:
+                self._scanner_exit_code[scanner] = code
+            elif status == held:
+                self._scanner_exit_code[scanner] = _larger_code(
+                    self._scanner_exit_code[scanner], code
+                )
+            self._scanner_status[scanner] = worse
             self._scanner_findings.setdefault(scanner, 0)
             self._scanner_actionable.setdefault(scanner, 0)
 
@@ -912,7 +936,12 @@ class WorkspaceAggregator:
 
         Derived from the rolled-up status rather than carried separately, because
         the status is already the worst across projects and a second rollup of the
-        same fact could disagree with it.
+        same fact could disagree with it. The exit code is carried the same way: it
+        is picked in :meth:`add` by the decision that picks the status, from the row
+        the status came from, so an entry never pairs a status with another
+        project's code. A scanner no row recorded a code for reads
+        ``SCANNER_EXIT_CODE_UNRECORDED``, unless it is SKIPPED, which reads what
+        its own row carries (null).
         """
         payload: Dict[str, Dict[str, Any]] = {}
         for scanner in sorted(set(self._scanner_status) | set(self._scanner_findings)):
@@ -923,7 +952,9 @@ class WorkspaceAggregator:
                 "actionable_finding_count": self._scanner_actionable.get(scanner, 0),
                 "dependencies_satisfied": status != "MISSING",
                 "excluded": status == "SKIPPED",
-                "exit_code": 0,
+                "exit_code": self._scanner_exit_code.get(
+                    scanner, SCANNER_EXIT_CODE_UNRECORDED
+                ),
             }
         return payload
 
@@ -1116,6 +1147,60 @@ def stamp_run_record(results_path: Path, record: Dict[str, Any]) -> bool:
                             f"{json.dumps('validation_checkpoints')}: "
                             f"{json.dumps([record])},\n"
                         )
+                        break
+                    if piece.startswith('"sarif": '):
+                        raise _NotWritten
+                target.write(piece)
+                at_line_start = piece.endswith("\n")
+            shutil.copyfileobj(source, target)
+        return True
+    except (_NotWritten, OSError, TypeError, ValueError):
+        return False
+
+
+def rewrite_workspace_block(results_path: Path, payload: WorkspaceResults) -> bool:
+    """Replace the ``workspace`` block of a results file ``write`` produced.
+
+    For the one change that comes after the file is written: the report step fails
+    on a run whose projects did not already fail, and the process then exits with a
+    status the block's ``exit_code`` must also carry, so the file never holds a
+    different answer from the exit. Copied the way :func:`stamp_run_record` copies:
+    the block is one header line, replaced; every other line, SARIF runs included,
+    is unchanged and nothing is loaded whole. The copy replaces the file atomically
+    through ``fs_guard.open_for_atomic_write``.
+
+    Returns False, with the file unchanged, when it cannot be read or replaced or
+    is not one ``write`` wrote.
+    """
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        open_for_atomic_write,
+    )
+
+    class _NotWritten(Exception):
+        """Raised inside the copy, which discards the staging file."""
+
+    key = json.dumps("workspace")
+    replacement = f"{key}: {json.dumps(payload.model_dump(mode='json'))},\n"
+    try:
+        path = Path(results_path)
+        with (
+            open(path, "r", encoding="utf-8") as source,
+            open_for_atomic_write(path) as target,
+        ):
+            at_line_start = True
+            while True:
+                piece = source.readline(_STAMP_READ_LIMIT)
+                if not piece:
+                    raise _NotWritten
+                if at_line_start:
+                    if piece.startswith(f"{key}: "):
+                        # The old block is dropped unread beyond its first piece:
+                        # its line can be as long as the project list.
+                        while not piece.endswith("\n"):
+                            piece = source.readline(_STAMP_READ_LIMIT)
+                            if not piece:
+                                raise _NotWritten
+                        target.write(replacement)
                         break
                     if piece.startswith('"sarif": '):
                         raise _NotWritten

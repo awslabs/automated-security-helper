@@ -309,6 +309,26 @@
 
 ### Behavior changes
 
+- **The workspace scanner rollup reports each scanner's own exit code.** In
+  `ash_aggregated_results.json`, `scanner_results.<scanner>.exit_code` was `0` for every
+  scanner, beside a `status` that could read `ERROR` or `MISSING`. It is now the code the
+  scanner's run recorded; across projects the worse status brings its code, and equal
+  statuses keep the larger. A scanner that did not finish (`MISSING`, `ERROR` or any other
+  status outside `PASSED`, `FAILED` and `SKIPPED`), or a `PASSED` or `FAILED` row with no
+  recorded code, reads `125`, which says no code was judged, not why: read the entry's `dependencies_satisfied` (a scanner
+  whose tool is absent) to tell that apart from an incomplete run. A `SKIPPED` scanner is a
+  complete, operator-chosen outcome; with no recorded code it reads what its own row
+  carries, which is `null`, and `excluded` is `true`.
+
+- **A workspace scan whose report step fails now exits 1 instead of 0 or 2.** When a
+  workspace reporter raises, a workspace report file cannot be written, or
+  `reports/workspace-reports.json` cannot be written, a run that would exit 0 or 2
+  exits 1 and logs which, ranked as an incomplete project is. Before, the failure
+  was recorded in the manifest and the log only. An invalid project configuration
+  (3) and a workspace where nothing was scanned (4) keep their codes.
+  `workspace.exit_code` in `ash_aggregated_results.json` carries the code the
+  process exits with.
+
 - **An ignore path ending in `/` ignores the directory.** `global_settings.ignore_paths`
   entries are globs matched against a file's path below the source directory, and
   a file's path never ends in `/`, so `vendor/` matched nothing: every file there
