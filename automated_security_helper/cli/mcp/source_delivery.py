@@ -924,6 +924,136 @@ class GitTimeoutError(RuntimeError):
     """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
 
 
+#: Bytes a clone may grow the session's source directory to, the same limit the
+#: zip channel puts on the extracted tree. A command that passes it is stopped
+#: together with every process it started, and the delivery fails with
+#: :class:`CloneTooLargeError`.
+MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
+
+#: Seconds between looks at the size of the tree a git command is writing.
+GIT_POLL_SECONDS = 0.5
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
+CLONE_TOO_LARGE = "clone_too_large"
+
+
+class CloneTooLargeError(RuntimeError):
+    """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
+
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
+CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+
+
+class CloneTreeUnreadableError(RuntimeError):
+    """The tree a git command wrote could not be read once the command had exited."""
+
+
+def _walk_failed(error: OSError) -> None:
+    """``os.walk`` error handler: only a path that is gone is tolerated."""
+
+    if not isinstance(error, FileNotFoundError):
+        raise error
+
+
+def _walk_failed_during_poll(error: OSError) -> None:
+    """``os.walk`` error handler for a poll of a tree git is still writing.
+
+    Tolerates only the two shapes git's own writing produces under the walk: a
+    path that is gone (``FileNotFoundError``, git removes its lock files) and a
+    directory that became a file (``NotADirectoryError``, a checkout replaces
+    one with the other). Any other error is raised, so the poll stops the
+    command instead of leaving the subtree uncounted: this poll is the only
+    size check that runs while git writes, and a subtree it cannot read
+    (``ENAMETOOLONG``, ``EACCES``, ``EMFILE``) would otherwise not count
+    toward the limits until the command exits.
+    """
+
+    if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        raise error
+
+
+def _tree_extent(root: Path, *, running: bool = False) -> Tuple[int, int]:
+    """Bytes of the regular files under ``root`` and the count of its entries.
+
+    Links are not followed. A path that vanishes while the tree is walked (git
+    removes its lock files) is skipped, because what is left is still measured.
+
+    Args:
+        root: The directory to measure.
+        running: True for a poll while the command still writes into ``root``.
+            Git then changes the tree under the walk, so a path that vanished
+            (git removes its lock files) or a directory that became a file (a
+            checkout replaces one with the other) is skipped, and the figures
+            are a lower bound; the next poll and the check after the command
+            exits look again. Any other error is raised in both modes, because
+            a subtree that cannot be read must not count as empty: while the
+            command runs this walk is the only size check, and once it has
+            exited a tree that cannot be measured must not read as an empty
+            one.
+    """
+
+    onerror = _walk_failed_during_poll if running else _walk_failed
+    total = 0
+    entries = 0
+    for dirpath, dirnames, filenames in os.walk(
+        root, followlinks=False, onerror=onerror
+    ):
+        entries += len(dirnames) + len(filenames)
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except FileNotFoundError:
+                continue
+            except NotADirectoryError:
+                # A directory became a file under the walk: one of git's own
+                # rewrites while it runs, impossible on a still tree.
+                if not running:
+                    raise
+    return total, entries
+
+
+def _tree_bytes(root: Path) -> int:
+    """Bytes of the regular files under ``root``; see :func:`_tree_extent`."""
+
+    return _tree_extent(root)[0]
+
+
+def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past a clone limit.
+
+    The limits are ``MAX_CLONE_BYTES`` and the zip channel's ``_MAX_FILES``
+    entries. A tree that cannot be read is refused with
+    :class:`CloneTreeUnreadableError`, which is not a limit, whether the command
+    has exited or still runs: while it runs the refusal stops it, because this
+    poll is the only size check until it exits and an unreadable subtree must
+    not stay uncounted. Only a path git itself removed or rewrote under the
+    walk leaves a running poll's figures short; see :func:`_tree_extent`.
+
+    Args:
+        grows_in: The directory the command writes into, or None.
+        running: True when the command is still running, so that it is about to
+            be stopped; False when it has already exited.
+    """
+
+    if grows_in is None:
+        return
+    suffix = " and was stopped" if running else ""
+    try:
+        size, entries = _tree_extent(grows_in, running=running)
+    except OSError as exc:
+        raise CloneTreeUnreadableError(
+            f"the tree git wrote could not be read ({exc.strerror or exc}); "
+            f"the delivery was refused"
+        ) from exc
+    if size > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(f"git wrote more than {MAX_CLONE_BYTES} bytes{suffix}")
+    if entries > _MAX_FILES:
+        raise CloneTooLargeError(
+            f"git wrote more than {_MAX_FILES} files and directories{suffix}"
+        )
+
+
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
     """Kill ``process`` and every process in the group it leads."""
 
