@@ -1669,7 +1669,9 @@ def _resolve(
     # which are read below. The order decides only which of two references at
     # one position that resolved to the same text is recorded: the extending
     # file's, whose value the merge keeps.
-    state.references.extend(_measured_in(_placed_references(read, data), data))
+    measured_from = len(state.references)
+    state.references.extend(_placed_references(read, data))
+    measured_to = len(state.references)
     state.reached(real, named)
     # The file that names a base chose it, so a base is judged by the paths of
     # the files above it too, as env_refused_above carries a refusal down.
@@ -1729,6 +1731,12 @@ def _resolve(
         merged = deep_merge(merged, own, AshConfig)
         if ops is not None:
             merged = _apply_patch(merged, ops, real)
+            # The digit index of a patch pointer is measured against the
+            # post-patch document, which holds the list the operation grew;
+            # a reference that already carries its length passes through.
+            state.references[measured_from:measured_to] = _measured_in(
+                state.references[measured_from:measured_to], merged
+            )
     except ASHConfigSourceError:
         raise
     except Exception as exc:  # noqa: BLE001 -- see below
