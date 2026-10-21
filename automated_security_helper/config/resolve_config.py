@@ -3113,6 +3113,9 @@ class OperatorConfig(NamedTuple):
     named: List[Path]
     reads: Dict[Path, Any]
     environment_paths: FrozenSet[Path]
+    #: The names each chain file was reached by, by file
+    #: (``ResolvedConfigDocument.names``); the delivered-file judgment reads it.
+    names: Dict[Path, Tuple[Path, ...]] = {}
 
 
 def trusted_base_config(
@@ -3299,6 +3302,7 @@ def _load_operator_config(
         named=[Path(trusted_config_path), *document.named],
         reads=reads,
         environment_paths=frozenset(document.environment_paths),
+        names=dict(document.names),
     )
 
 
