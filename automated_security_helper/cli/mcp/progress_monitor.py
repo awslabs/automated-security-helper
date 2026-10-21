@@ -56,19 +56,6 @@ async def _safe_send(
         return False
 
 
-async def _tell_client(ctx: Context, level: str, message: str) -> None:
-    """Send ``message`` through the server's guard, which never raises.
-
-    The guard lives in ``mcp_server``, which imports this module, so it is
-    imported when called rather than at load.
-    """
-    from automated_security_helper.cli.mcp_server import (
-        _tell_client as guarded_send,
-    )
-
-    await guarded_send(ctx, level, message)
-
-
 def _in_session(session_id: Optional[str]) -> Dict[str, str]:
     """The keyword that reads the scan in the session that started it.
 
