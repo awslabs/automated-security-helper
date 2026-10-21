@@ -252,7 +252,10 @@ def test_a_permanently_refused_guard_keeps_the_tree_and_the_sweep_warns_once(
 ) -> None:
     """On a filesystem that refuses the lock for good, every sweep is refused
     the same way, so nothing removes the tree; the end_session warning says so
-    plainly, and the sweep says it once per process, not once per pass."""
+    plainly, and the sweep says it once per process, not once per pass.
+
+    end_session's own warning also names the TTL sweep, so the cell filters to
+    the sweep's message rather than any mention of it."""
     sandbox = _sandbox(root, "refused")
     monkeypatch.setattr(sessions, "_sweep_guard_warned", False)
 
@@ -272,7 +275,11 @@ def test_a_permanently_refused_guard_keeps_the_tree_and_the_sweep_warns_once(
     assert sessions.sweep_stale_workspaces(60.0, now=time.time() + 3600) == []
 
     assert (sandbox / "source" / "app.py").is_file(), "nothing can remove the tree"
-    swept = [r.getMessage() for r in ash_log if "TTL sweep" in r.getMessage()]
+    swept = [
+        r.getMessage()
+        for r in ash_log
+        if "The TTL sweep could not take" in r.getMessage()
+    ]
     assert len(swept) == 1, swept
     assert "No session workspace on this root is removed" in swept[0]
 
