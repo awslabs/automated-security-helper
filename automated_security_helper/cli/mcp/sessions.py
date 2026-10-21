@@ -671,7 +671,11 @@ def end_session(session_id: str) -> bool:
         True when everything was removed now, False when it waits for a scan or
         a write.
     """
-    session = get_default_registry().get(session_id)
+    try:
+        session = get_default_registry().session_for(session_id)
+    except ValueError:
+        # An id that cannot name a session has no entry and no state to remove.
+        session = None
     # Pending before the change is tried, and dropped once the removal is done.
     # A scan or a write that ends between a refused try_begin_change and a later
     # add would run finish_ended_session before the session was pending, and
