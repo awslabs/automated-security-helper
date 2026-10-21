@@ -670,7 +670,9 @@ def incomplete_converters_for_project(results: Any) -> Dict[str, str]:
         incomplete_converters,
     )
 
-    return dict(incomplete_converters(results))
+    # IncompleteConverter rows carry (name, reason, kinds); this mapping keeps
+    # its documented {name: reason} shape.
+    return {item.name: item.reason for item in incomplete_converters(results)}
 
 
 def no_scanner_ran_for_project(results: Any) -> bool:

@@ -3243,7 +3243,7 @@ def _print_merge_summary(
                 f"was incomplete: {len(converters)} converter(s) did not process "
                 f"the files they were given[/bold red]"
             )
-            for name, reason in converters:
+            for name, reason, *_ in converters:
                 print(
                     f"  [red]{rich_escape(inert_text(name))}: "
                     f"{rich_escape(inert_text(reason))}[/red]"
