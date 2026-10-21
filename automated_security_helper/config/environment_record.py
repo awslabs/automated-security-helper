@@ -143,9 +143,13 @@ class EnvironmentReference:
         default=None, compare=False
     )
 
-    def at(self, path: Tuple[PathSegment, ...]) -> "EnvironmentReference":
-        """The reference at an unrelated ``path``: what it says about the list the
-        file wrote it in does not carry over."""
+    def moved_to_unknown_list(
+        self, path: Tuple[PathSegment, ...]
+    ) -> "EnvironmentReference":
+        """The reference at an unrelated ``path``, with ``length`` and
+        ``index_at`` dropped: what it says about the list the file wrote it in
+        does not carry over, so an int index in ``path`` reads as an unknown
+        position until a measure step records the new list."""
         return replace(self, path=path, length=None, index_at=None)
 
     def rebase(
@@ -416,9 +420,16 @@ def _bare(written: str) -> str:
 
 
 def _anchored(text: str, reference: EnvironmentReference) -> bool:
-    """Whether ``text`` is what ``reference`` resolved to, or that after a prefix
-    the load put on it (a relative path anchored at the file's directory)."""
-    return text == reference.resolved or text.endswith(reference.resolved)
+    """Whether ``text`` is what ``reference`` resolved to, or that after a path
+    prefix the load put on it (a relative path anchored at the file's
+    directory): the prefix is empty or ends with ``/``, so a neighbor that
+    merely ends with the same characters is not the entry."""
+    if text == reference.resolved:
+        return True
+    if not text.endswith(reference.resolved):
+        return False
+    prefix = text[: len(text) - len(reference.resolved)]
+    return prefix.endswith("/")
 
 
 def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:

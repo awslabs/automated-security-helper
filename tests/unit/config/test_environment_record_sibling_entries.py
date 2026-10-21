@@ -398,7 +398,9 @@ def test_a_reference_at_an_unknown_index_is_read_into_the_anchored_entry(
     written = {"ignore_paths": [REFERENCE]}
     resolved = {"ignore_paths": ["vendor"]}
     (reference,) = _read(monkeypatch, written, resolved)
-    unknown = reference.at(("ignore_paths", environment_record.UNKNOWN_INDEX))
+    unknown = reference.moved_to_unknown_list(
+        ("ignore_paths", environment_record.UNKNOWN_INDEX)
+    )
 
     recorded = record_environment_references(
         {"ignore_paths": ["third_party/vendor_libs", "/work/cfg/vendor"]}, [unknown]
@@ -431,7 +433,9 @@ def test_an_unknown_index_still_reads_only_into_the_anchored_entry(monkeypatch):
     written = {"ignore_paths": [REFERENCE]}
     resolved = {"ignore_paths": ["vendor"]}
     (reference,) = _read(monkeypatch, written, resolved)
-    unknown = reference.at(("ignore_paths", environment_record.UNKNOWN_INDEX))
+    unknown = reference.moved_to_unknown_list(
+        ("ignore_paths", environment_record.UNKNOWN_INDEX)
+    )
 
     recorded = record_environment_references(
         {"ignore_paths": ["vendor_libs"]}, [unknown]
@@ -439,7 +443,7 @@ def test_an_unknown_index_still_reads_only_into_the_anchored_entry(monkeypatch):
 
     assert recorded == {"ignore_paths": ["vendor_libs"]}
     assert unknown.position_unknown
-    assert not reference.at(("ignore_paths", "*")).position_unknown
+    assert not reference.moved_to_unknown_list(("ignore_paths", "*")).position_unknown
 
 
 def test_a_duplicated_client_entry_is_not_written_as_the_value(monkeypatch):
