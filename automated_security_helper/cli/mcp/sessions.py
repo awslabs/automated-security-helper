@@ -855,6 +855,45 @@ STDIO_SERVERS_DIR = ".stdio-servers"
 _STDIO_SERVERS_LOCK = ".lock"
 
 
+class PresenceLockError(Exception):
+    """A stdio server or a scan could not lock its own presence entry.
+
+    Not an ``OSError``: the presence classes treat an ``OSError`` as "no registry
+    on this root" and carry on unregistered, and this is the one failure they
+    refuse to carry on from.
+    """
+
+
+def _lock_own_entry(handle: Any, entry: Path, what: str) -> None:
+    """Lock a presence entry this process just created, or refuse to go on.
+
+    The entry is a new file named for this process, so no other process holds a
+    lock on it; a refusal comes from the filesystem refusing the lock on this
+    entry after it granted the one on the registry's guard file, and asking
+    again gets the same answer, so there is no retry. On a root whose
+    filesystem refuses locks outright the guard's own blocking lock fails
+    first, and the presence classes then run unregistered with a warning
+    instead of reaching this. A server or scan that went on without a locked entry would read as dead
+    to every other server sharing the root, which would remove the workspace under
+    it. The entry is removed and nothing stays registered.
+
+    Raises:
+        PresenceLockError: naming the entry's path.
+    """
+    if _try_lock(handle):
+        return
+    handle.close()
+    with contextlib.suppress(OSError):
+        entry.unlink()
+    raise PresenceLockError(
+        f"could not take the lock on {what} {entry}: the filesystem refused it. "
+        "Without the lock other servers sharing the workspace root would read "
+        "this process as dead and remove the workspace it is using, so it does "
+        "not start. Set ASH_MCP_WORKSPACE_ROOT to a directory on a filesystem "
+        "that supports file locks."
+    )
+
+
 def _try_lock(handle: Any) -> bool:
     """Take an exclusive lock on ``handle`` without waiting; True if taken."""
     try:
@@ -929,9 +968,21 @@ class StdioServerPresence:
                 # A file nobody else has opened: the lock is always free.
                 _try_lock(handle)
                 self._entry, self._handle = entry, handle
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError) as exc:
             # No registry: this server is not counted, and on exit it leaves the
-            # default workspace alone rather than guess.
+            # default workspace alone rather than guess. Nothing can have
+            # registered there either, as the registry's own lock was refused or
+            # the directory cannot be created. Said out loud: silence here would
+            # leave an operator on such a root with no sign the registry is out
+            # of use.
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                "Could not use the stdio server presence registry (%s): this "
+                "server runs unregistered, and on exit it leaves the default "
+                "workspace in place.",
+                exc,
+            )
             self._entry = self._handle = None
         return self
 
@@ -1072,7 +1123,19 @@ class ScanPresence:
                 # A file nobody else has opened: the lock is always free.
                 _try_lock(handle)
                 self._entry, self._handle = entry, handle
-        except (OSError, ValueError, RuntimeError):
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The registry or its guard lock is out of reach: the scan runs
+            # unregistered rather than failing, and the warning is the one
+            # sign of it an operator gets.
+            from automated_security_helper.utils.log import ASH_LOGGER
+
+            ASH_LOGGER.warning(
+                "Could not use the scan presence registry (%s): this scan of "
+                "session %r runs unregistered, so another server sharing the "
+                "root cannot see it.",
+                exc,
+                session_id,
+            )
             self._entry = self._handle = None
         return self
 
