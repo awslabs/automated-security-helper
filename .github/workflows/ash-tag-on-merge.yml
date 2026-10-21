@@ -172,7 +172,11 @@ jobs:
           # A prerelease such as 4.0.0rc1 is accepted and resolves to v4 -- only the
           # major is read, and refusing one here would stop maintaining the floating
           # tag for a shape this repository has released before (v3.0.0-beta-*).
-          if [[ ! "$VERSION" =~ ^(([0-9]+)\.[0-9]+\.[0-9]+)[0-9A-Za-z.+-]*$ ]]; then
+          # The suffix cannot start with a digit: submatch assignment is up to the
+          # regex engine, and a digit-led suffix would let an engine read 3.8.10 as
+          # CORE 3.8.1 with suffix 0 -- a stable release treated as a prerelease,
+          # whose floating tag then silently does not move.
+          if [[ ! "$VERSION" =~ ^(([0-9]+)\.[0-9]+\.[0-9]+)([A-Za-z.+-][0-9A-Za-z.+-]*)?$ ]]; then
             # Fails rather than skips. The GitHub release already exists by now, so a
             # skip would leave a published release whose floating tag silently never
             # moved, on a green run.

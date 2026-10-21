@@ -502,6 +502,62 @@ class TestAMalformedVersionWritesNothing:
         )
 
 
+_VERSION_GUARD = re.compile(r'"\$VERSION"\s+=~\s+(\S+)\s+\]\]')
+
+# The X.Y.Z capture the version guard must open with, verbatim from the step.
+_CORE_PART = r"^(([0-9]+)\.[0-9]+\.[0-9]+)"
+
+
+def _version_guard_suffix() -> str:
+    """The suffix subpattern of the step's version guard, as written in the YAML."""
+    script = _floating_tag_script()
+    match = _VERSION_GUARD.search(script)
+    assert match, "the step no longer guards $VERSION with a =~ regex"
+    pattern = match.group(1)
+    assert pattern.startswith(_CORE_PART) and pattern.endswith("$"), pattern
+    return pattern[len(_CORE_PART) : -1]
+
+
+class TestTheVersionGuardSplitsACoreUnambiguously:
+    """CORE must be the whole X.Y.Z on every regex engine, so the suffix class is
+    asserted on the pattern itself.
+
+    ``[[ =~ ]]`` submatch assignment is engine-dependent. POSIX longest-submatch
+    rules (glibc, measured on this platform) read ``3.8.10`` as CORE ``3.8.10``
+    even when the suffix class admits digits, so no cell that runs the step's shell
+    can tell a digit-admitting suffix class from the current one here. On an engine
+    that assigns submatches differently, a digit-admitting class lets ``3.8.10``
+    split as CORE ``3.8.1`` with suffix ``0``: a stable release treated as a
+    prerelease, whose floating tag silently does not move on a green run. The
+    behavioral twin of that shape is the ``3.8.10`` row in
+    ``test_the_newest_release_still_moves_the_floating_tag``, which can only fire
+    on such an engine; this class fires everywhere.
+
+    The subpattern is extracted from the workflow rather than copied, so the step
+    and the assertion cannot drift apart. Both patterns here are plain EREs whose
+    meaning is the same under Python's ``re``.
+    """
+
+    def test_a_suffix_cannot_start_with_a_digit(self):
+        suffix = _version_guard_suffix()
+
+        assert re.fullmatch(suffix, "0") is None, (
+            f"the suffix class {suffix!r} admits a digit-led suffix, so an engine "
+            "that does not assign longest submatches may read VERSION 3.8.10 as "
+            "CORE 3.8.1 with suffix '0'"
+        )
+
+    def test_prerelease_suffixes_and_the_empty_suffix_are_admitted(self):
+        suffix = _version_guard_suffix()
+
+        for accepted in ("", "rc1", "-beta-20250528", ".dev1", "+build5"):
+            assert re.fullmatch(suffix, accepted) is not None, (
+                f"the suffix class {suffix!r} no longer admits {accepted!r}, a "
+                "release shape this repository has published or the bare stable "
+                "shape itself"
+            )
+
+
 class TestTheHarnessCanFail:
     """Positive controls. Every assertion above is satisfiable by a broken harness.
 
@@ -681,6 +737,11 @@ class TestTheFloatingTagNeverMovesBackward:
         [
             ("3.8.0", "v3.7.1 v3.8.0", [("PATCH", "v3")]),  # newest is itself
             ("3.10.0", "v3.9.0 v3.10.0", [("PATCH", "v3")]),
+            # A two-digit patch is one stable version, not a prerelease of the
+            # one-digit patch: an engine that read CORE as 3.8.1 with suffix 0
+            # would skip this move silently on a green run.
+            ("3.8.10", "v3.8.9 v3.8.10", [("PATCH", "v3")]),
+            ("3.8.10rc1", "v3.8.10rc1 v3.8.9", [("PATCH", "v3")]),
             ("4.0.0", "v3.9.9 v4.0.0", [("PATCH", "v4")]),  # another major is no rival
             # A prerelease still moves the tag while no stable release of its major
             # has the same or a newer core.
