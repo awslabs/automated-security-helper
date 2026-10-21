@@ -376,9 +376,9 @@ TOOL_NOTES: dict[str, dict] = {
             (
                 "Refused while a scan of this session is running, because the clone "
                 "would replace the tree and config files that scan is reading. The "
-                "response is `success: false`, `error_type: SourceDeliveryBusyError`, "
-                "and `error` set to `a scan of this session is running; deliver the "
-                "source after it finishes`. Deliver the source again once "
+                "response is `success: false`, `error_type: source_delivery_busy`, "
+                "and `error` set to `a scan of this session is running; change the "
+                "delivered source after it finishes`. Deliver the source again once "
                 "`get_scan_progress` reports a terminal status."
             ),
         ],
@@ -387,11 +387,17 @@ TOOL_NOTES: dict[str, dict] = {
         "caveats": [
             (
                 "Refused while a scan of this session is running, for the same reason as "
-                "`set_source_git`: `success: false`, `error_type: SourceDeliveryBusyError`, "
-                "and `error` set to `Error finalizing source upload: a scan of this session "
-                "is running; deliver the source after it finishes`. "
-                "`set_source_zip_chunk` is not refused, so the chunks can be sent while the "
-                "scan runs and the upload finalized after it ends."
+                "`set_source_git`: `success: false`, `error_type: source_delivery_busy`, "
+                "and `error` set to `a scan of this session is running; change the "
+                "delivered source after it finishes`. "
+                "`set_source_zip_chunk` is not refused while a scan runs, so the chunks "
+                "can be sent while the scan runs and the upload finalized after it ends; "
+                "this call holds its upload's lock, so a chunk of the upload being "
+                "finalized waits for it. A chunk is refused (`error_type: "
+                "session_workspace_busy`) only while another request holds the session's "
+                "workspace (its removal, `clear_source`, or the end of the session); send "
+                "the same chunk again then, and start again from the first chunk only if "
+                "the answer is an out-of-order chunk."
             ),
         ],
     },
