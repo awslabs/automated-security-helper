@@ -151,7 +151,7 @@ class TestSetSourceGit:
             res.stderr = ""
             return res
 
-        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             target = sd.set_source_git(
                 url="https://example.com/foo.git",
                 workspace_root=tmp_path,
@@ -190,7 +190,7 @@ class TestSetSourceGit:
             res.stderr = ""
             return res
 
-        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             sd.set_source_git(
                 url="https://example.com/foo.git",
                 ref="main",
@@ -204,7 +204,12 @@ class TestSetSourceGit:
             rest = cmd[1 + len(GIT_SAFETY_OPTIONS) :]
             subcommands.append(rest[0] if rest[0] != "-C" else rest[2])
         assert subcommands == ["clone", "fetch", "checkout"]
-        assert all(kw.get("stdin") is sd.subprocess.DEVNULL for _, kw in seen)
+        # The no-stdin rule moved inside the runner: _run_git opens every git
+        # process with stdin=subprocess.DEVNULL itself, so it is pinned at the
+        # source rather than observed at this seam.
+        import inspect
+
+        assert "stdin=subprocess.DEVNULL" in inspect.getsource(sd._run_git)
         sd.clear_source(_SESSION, workspace_root=tmp_path)
 
     def test_clone_failure_raises_runtime_error(self, tmp_path):
@@ -215,7 +220,7 @@ class TestSetSourceGit:
             res.stdout = ""
             return res
 
-        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git clone failed"):
                 sd.set_source_git(
                     url="https://bogus/repo.git",
@@ -244,7 +249,7 @@ class TestSetSourceGit:
                 res.returncode = 1
             return res
 
-        with patch.object(sd, "run_ended_with_the_server", side_effect=fake_run):
+        with patch.object(sd, "_run_git", side_effect=fake_run):
             with pytest.raises(RuntimeError, match="git checkout"):
                 sd.set_source_git(
                     url="https://example.com/foo.git",
@@ -388,7 +393,7 @@ class TestGitArgumentInjectionDefenses:
     )
     def test_option_like_url_is_rejected_before_spawning_git(self, tmp_path, bad_url):
         with (
-            patch.object(sd, "run_ended_with_the_server") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -398,7 +403,7 @@ class TestGitArgumentInjectionDefenses:
     def test_command_executing_transport_is_rejected(self, tmp_path, bad_url):
         """ext:: is matched case-insensitively; git accepts either casing."""
         with (
-            patch.object(sd, "run_ended_with_the_server") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="transport"),
         ):
             sd.set_source_git(url=bad_url, workspace_root=tmp_path, session_id=_SESSION)
@@ -407,7 +412,7 @@ class TestGitArgumentInjectionDefenses:
     @pytest.mark.parametrize("bad_ref", ["--upload-pack=touch /tmp/pwned", "-x"])
     def test_option_like_ref_is_rejected_before_spawning_git(self, tmp_path, bad_ref):
         with (
-            patch.object(sd, "run_ended_with_the_server") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError, match="must not begin with"),
         ):
             sd.set_source_git(
@@ -421,7 +426,7 @@ class TestGitArgumentInjectionDefenses:
     def test_rejection_leaves_no_session_directory_behind(self, tmp_path):
         """Validation runs before any mkdir, so a rejected call is inert."""
         with (
-            patch.object(sd, "run_ended_with_the_server") as run,
+            patch.object(sd, "_run_git") as run,
             pytest.raises(ValueError),
         ):
             sd.set_source_git(

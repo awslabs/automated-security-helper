@@ -1013,9 +1013,7 @@ class TestEveryPathParameterIsAudited:
 
         call = _AUDITED[key]
         with (
-            patch(
-                "automated_security_helper.cli.mcp.source_delivery.run_ended_with_the_server"
-            ) as git,
+            patch("automated_security_helper.cli.mcp.source_delivery._run_git") as git,
             patch("automated_security_helper.cli.mcp_tools._run_scan_async") as scan,
         ):
             result = call(mcp_server, layout)
@@ -1047,9 +1045,7 @@ class TestANamedFilesSearchDirCrossesTheRootGateToo:
         from automated_security_helper.cli import mcp_server
 
         with (
-            patch(
-                "automated_security_helper.cli.mcp.source_delivery.run_ended_with_the_server"
-            ) as git,
+            patch("automated_security_helper.cli.mcp.source_delivery._run_git") as git,
             patch("automated_security_helper.cli.mcp_tools._run_scan_async") as scan,
         ):
             result = _run(
@@ -1306,7 +1302,7 @@ class TestInsideTheRootsStillWorks:
             return res
 
         with patch(
-            "automated_security_helper.cli.mcp.source_delivery.run_ended_with_the_server",
+            "automated_security_helper.cli.mcp.source_delivery._run_git",
             side_effect=fake_run,
         ) as git:
             result = _run(
@@ -1319,9 +1315,7 @@ class TestInsideTheRootsStillWorks:
     def test_set_source_git_reports_url_rules_before_confinement(self, layout, url):
         from automated_security_helper.cli import mcp_server
 
-        with patch(
-            "automated_security_helper.cli.mcp.source_delivery.run_ended_with_the_server"
-        ) as git:
+        with patch("automated_security_helper.cli.mcp.source_delivery._run_git") as git:
             result = _run(mcp_server.set_source_git(_ctx(), url=url))
 
         assert result["success"] is False

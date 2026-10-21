@@ -163,14 +163,14 @@ def test_git_that_cannot_be_run_for_the_checkout(tmp_path, monkeypatch):
     from automated_security_helper.cli.mcp import source_delivery
 
     repo = _repo(tmp_path)
-    real_run = source_delivery.run_ended_with_the_server
+    real_run = source_delivery._run_git
 
     def run(cmd, *args, **kwargs):
         if "checkout" in cmd:
             raise FileNotFoundError(2, "No such file or directory", "git")
         return real_run(cmd, *args, **kwargs)
 
-    monkeypatch.setattr(source_delivery, "run_ended_with_the_server", run)
+    monkeypatch.setattr(source_delivery, "_run_git", run)
     result = _clone(repo.as_uri(), ref="HEAD")
 
     assert (result["success"], result.get("error_type")) == (

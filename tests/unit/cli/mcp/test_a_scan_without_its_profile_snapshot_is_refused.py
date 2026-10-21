@@ -343,8 +343,12 @@ def test_a_planned_name_the_writer_refuses_resets_the_record_and_keeps_the_file(
             patch.object(ras, "run_ash_scan", a_run_that_must_not_start),
             patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
             patch(f"{_TOOLS}._logger", logger),
-            patch.object(
-                mcp_tools, "_forget_own_scan_copy", side_effect=forgotten.append
+            # The runner discards its own scan copy through config_sources'
+            # discard_scan_copy, imported at call time, so the module of
+            # definition is the seam.
+            patch(
+                "automated_security_helper.config.config_sources.discard_scan_copy",
+                side_effect=lambda path: forgotten.append(Path(path).name),
             ),
         ):
             asyncio.run(
