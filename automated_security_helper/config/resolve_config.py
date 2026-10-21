@@ -1469,49 +1469,50 @@ def resolve_config(
             *tuple(config._environment_references or ()),
         )
     # The client config rules (tier-2): a delivered file's denied fields are
-    # refused or dropped, and every client_supplied mark is ASH's own. Run
-    # only on the client pipeline, so a plain call keeps the spine's protocol.
-    if client_config_policy is not None or client_overrides:
-        from automated_security_helper.config.client_config_policy import (
-            apply_client_config_rules,
-            clear_client_supplied_marks,
+    # refused or dropped, and every client_supplied mark is ASH's own. Run on
+    # every resolution, as a plain call: an untrusted or delivered file must
+    # reach the refusal whether or not a policy object or client overrides
+    # came with it, and with neither the call changes nothing.
+    from automated_security_helper.config.client_config_policy import (
+        apply_client_config_rules,
+        clear_client_supplied_marks,
+    )
+
+    if not chain and default_document_views:
+        # With no config file the configuration IS the ASH_CONFIG chain: a
+        # file of it under the MCP workspace root is a client's, and is
+        # checked as one named with --config is. The operator's own
+        # ASH_CONFIG is not checked. (The per-file names of that chain are
+        # not carried on this protocol; the documents are, from the one
+        # load's reads.)
+        from automated_security_helper.cli.mcp.sandbox import (
+            config_is_client_supplied,
         )
 
-        if not chain and default_document_views:
-            # With no config file the configuration IS the ASH_CONFIG chain: a
-            # file of it under the MCP workspace root is a client's, and is
-            # checked as one named with --config is. The operator's own
-            # ASH_CONFIG is not checked. (The per-file names of that chain are
-            # not carried on this protocol; the documents are, from the one
-            # load's reads.)
-            from automated_security_helper.cli.mcp.sandbox import (
-                config_is_client_supplied,
-            )
-
-            rules_chain, rules_named, _ = default_views()
-            if any(
-                config_is_client_supplied(path) for path in (*rules_chain, *rules_named)
-            ):
-                for path in rules_chain:
-                    key = Path(path).resolve()
-                    if key in reads:
-                        client_documents.setdefault(Path(path), reads[key])
-        config = clear_client_supplied_marks(config)
-        config = apply_client_config_rules(
-            config,
-            client_documents,
-            rules=client_config_policy,
-            trusted_config_path=trusted_config_path,
-            source_dir=source_dir,
-            permit_base=permit_base,
-            # The spine resolves the root before the load (the deleted-cwd
-            # fallback above), so the rules see the resolved root where the
-            # tier-2 line passed the caller's raw value.
-            scanned_root=scanned_root,
-            all_delivered=untrusted_config,
-            client_overrides=client_overrides,
-            names=client_names,
-        )
+        rules_chain, rules_named, _ = default_views()
+        if any(
+            config_is_client_supplied(path) for path in (*rules_chain, *rules_named)
+        ):
+            for path in rules_chain:
+                key = Path(path).resolve()
+                if key in reads:
+                    client_documents.setdefault(Path(path), reads[key])
+    config = clear_client_supplied_marks(config)
+    config = apply_client_config_rules(
+        config,
+        client_documents,
+        rules=client_config_policy,
+        trusted_config_path=trusted_config_path,
+        source_dir=source_dir,
+        permit_base=permit_base,
+        # The spine resolves the root before the load (the deleted-cwd
+        # fallback above), so the rules see the resolved root where the
+        # tier-2 line passed the caller's raw value.
+        scanned_root=scanned_root,
+        all_delivered=untrusted_config,
+        client_overrides=client_overrides,
+        names=client_names,
+    )
 
     # Which tool paths in the configuration the operator named, recorded on the
     # config for ``path_trust.honored_path``'s operator tier
