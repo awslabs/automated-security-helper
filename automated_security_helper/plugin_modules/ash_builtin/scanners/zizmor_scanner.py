@@ -511,7 +511,9 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             "composite actions."
         )
         self._setup_uv_tool_install_commands()
-        self.tool_version = self._get_uv_tool_version("zizmor")
+        # Deferred until the dependency check asks
+        # (resolve_deferred_tool_version), so construction runs nothing.
+        self.defer_tool_version_probe("zizmor")
         # Arguments are assembled in _execute_scan; ToolArgs is unused but kept
         # at its neutral value so _resolve_arguments is never surprised.
         self.args = ToolArgs()

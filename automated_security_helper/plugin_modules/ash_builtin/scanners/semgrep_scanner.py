@@ -129,10 +129,9 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         self.tool_type = ScannerToolType.SAST
 
         self._setup_uv_tool_install_commands()
-        # Under deferred_tool_version_probes (the scan phase's construction
-        # context) this records the probe for resolve_deferred_tool_version
-        # instead of running it, so the dependency check probes, not this.
-        self.tool_version = self._get_uv_tool_version("semgrep")
+        # Deferred until the dependency check asks
+        # (resolve_deferred_tool_version), so construction runs nothing.
+        self.defer_tool_version_probe("semgrep")
         self.args = ToolArgs(
             format_arg=None,
             format_arg_value=None,

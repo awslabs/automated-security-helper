@@ -125,15 +125,22 @@ def test_control_a_selected_scanner_is_still_probed_and_reports_its_version(
     assert seen == {"version": "9.9.9"}
 
 
-def test_a_scanner_constructed_outside_a_scan_still_probes_at_once(
+def test_a_scanner_constructed_outside_a_scan_defers_its_probe(
     probes, test_plugin_context
 ):
-    """`ash dependencies`, the MCP server and tests build scanners directly."""
+    """`ash dependencies`, the MCP server and tests build scanners directly;
+    construction names the tool (defer_tool_version_probe) and runs nothing,
+    and the first resolve runs the probe once."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
         BanditScanner,
     )
 
     scanner = BanditScanner(context=test_plugin_context)
+
+    assert scanner.tool_version is None
+    assert _probed(probes) == []
+
+    scanner.resolve_deferred_tool_version()
 
     assert scanner.tool_version == "9.9.9"
     assert _probed(probes) == ["bandit"]

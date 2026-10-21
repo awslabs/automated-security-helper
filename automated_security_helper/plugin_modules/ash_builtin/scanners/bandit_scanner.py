@@ -371,10 +371,9 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
-        # Under a scan phase the probe is deferred until the dependency check
-        # asks (uv_tool_mixin.deferred_tool_version_probes), so nothing runs
-        # here then; see resolve_deferred_tool_version.
-        self.tool_version = self._get_uv_tool_version("bandit")
+        # Deferred until the dependency check asks
+        # (resolve_deferred_tool_version), so construction runs nothing.
+        self.defer_tool_version_probe("bandit")
         self.description = "Bandit is a Python source code security analyzer."
         extra_args = [
             ToolExtraArg(

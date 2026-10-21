@@ -144,8 +144,10 @@ def deferred_tool_version_probes() -> Iterator[None]:
     environment is not cached, so a scan of one scanner reached the index for
     scanners it would never run. Constructed inside this block, a scanner keeps
     its probe for ``resolve_deferred_tool_version``, which the scan phase calls
-    only for a scanner that was selected. A scanner constructed anywhere else
-    (``ash dependencies``, the MCP server, a test) probes at once, as before.
+    only for a scanner that was selected. The built-in plugins defer at
+    construction themselves (``defer_tool_version_probe``), so this block
+    matters for a third-party plugin that still probes eagerly in its
+    ``model_post_init``.
     """
     token = _DEFER_VERSION_PROBES.set(True)
     try:
@@ -348,6 +350,22 @@ class UVToolMixin:
                 level=logging.WARNING,
             )
             return None
+
+    def defer_tool_version_probe(
+        self, tool_name: str, package_name: Optional[str] = None
+    ) -> None:
+        """Name the tool whose version ``tool_version`` is to hold, without asking.
+
+        For ``model_post_init``: a plugin is constructed whether or not it will
+        run (the scan phase builds every registered scanner, ``ash plugin list``
+        builds them all, and every unit test that builds one would otherwise
+        spawn ``uv tool run --from <spec> <tool> --version``). The probe runs
+        from :meth:`resolve_deferred_tool_version`, at the first dependency
+        check or version read. The spec is read when the probe runs, not here,
+        so a ``tool_version`` requirement set after construction is the one
+        probed.
+        """
+        self._deferred_tool_version_probe = (tool_name, package_name)
 
     def resolve_deferred_tool_version(self) -> None:
         """Run the version probe construction deferred, and record its answer.

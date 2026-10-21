@@ -417,10 +417,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
-        # Under deferred_tool_version_probes (the scan phase's construction
-        # context) this records the probe for resolve_deferred_tool_version
-        # instead of running it, so the dependency check probes, not this.
-        self.tool_version = self._get_uv_tool_version("checkov")
+        # Deferred until the dependency check asks
+        # (resolve_deferred_tool_version), so construction runs nothing.
+        self.defer_tool_version_probe("checkov")
         self.args = ToolArgs(
             format_arg="--output",
             format_arg_value="sarif",

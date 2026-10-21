@@ -244,14 +244,12 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # scope is built from.
         super().model_post_init(context)
 
-        # The probe runs nbconvert, so under a sandbox it runs sandboxed, as a
-        # scanner's version probe does. The scan phase defers it until the
-        # dependency check asks (uv_tool_mixin.deferred_tool_version_probes),
-        # so the environment is resolved only when a notebook needs nbconvert.
-        # The spec the probe resolves under is _uv_from_spec, the requirement
-        # the check reads, so it reports the version that runs.
-        with self._probe_scope():
-            self.tool_version = self._get_uv_tool_version(self.command)
+        # Deferred until the dependency check asks
+        # (resolve_deferred_tool_version), so construction runs nothing and the
+        # environment is resolved only when a notebook needs nbconvert. The
+        # spec the probe resolves under is _uv_from_spec, the requirement the
+        # check reads, so it reports the version that runs.
+        self.defer_tool_version_probe(self.command)
 
     def _probe_scope(self) -> ContextManager[None]:
         """Sandbox this converter's probes, unless a caller already confined them.
@@ -358,7 +356,10 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             return True
         # nbconvert is needed, so its version is worth asking for: `uv tool run
         # --from nbconvert`, which resolves and downloads nbconvert to answer.
-        self.resolve_deferred_tool_version()
+        # The probe runs nbconvert, so under a sandbox it runs sandboxed, as a
+        # scanner's version probe does.
+        with self._probe_scope():
+            self.resolve_deferred_tool_version()
 
         if self.use_uv_tool and not sandbox_requested(self.context):
             # Check if tool is already available (UV-installed or pre-installed)
