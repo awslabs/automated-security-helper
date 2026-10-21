@@ -1173,6 +1173,10 @@ def mcp_command(
 
     honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
 
+    # For the except clause below; imported lazily so importing this package
+    # does not pull the sessions module in.
+    from automated_security_helper.cli.mcp.sessions import PresenceLockError
+
     # Initialize and start the MCP server with comprehensive error handling
     listen_socket = None
     try:
@@ -1268,6 +1272,14 @@ def mcp_command(
             _stderr.print(
                 "[yellow]This indicates invalid configuration or parameters.[/yellow]"
             )
+        raise typer.Exit(3)
+    except PresenceLockError as e:
+        # The error's own message carries the fix (set ASH_MCP_WORKSPACE_ROOT),
+        # so print it alone: a traceback and a "check system resources" hint
+        # would bury it. Exit 3, as for the other operator-configuration errors.
+        _logger.error(str(e))
+        if not quiet:
+            _stderr.print(f"[red]{escape(str(e))}[/red]", highlight=False)
         raise typer.Exit(3)
     except Exception as e:
         _logger.exception(f"Unexpected error starting MCP server: {str(e)}")
