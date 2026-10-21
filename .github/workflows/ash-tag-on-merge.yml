@@ -112,10 +112,12 @@ jobs:
           ' CHANGELOG.md > "$NOTES_FILE"
 
           if [[ -f "$CURATED" ]]; then
-            # No release exists yet, so failing here costs a rerun after the
-            # changelog is fixed, while publishing would lose the curated notes. The
-            # tag check above accepts a tag already at the merge commit, so the rerun
-            # is not blocked by a tag an earlier attempt left behind.
+            # No release exists yet, so failing here publishes nothing, while
+            # publishing would lose the curated notes. A re-run cannot pick up a
+            # fix: the checkout is pinned to this pull request's merge commit, and a
+            # re-run replays the same event payload, so it reads the same
+            # CHANGELOG.md and fails the same way. Recovery is a new chore(release):
+            # pull request whose regenerated entry includes the file.
             if ! python3 - "$CURATED" "$NOTES_FILE" <<'PY'
           import sys
           curated = open(sys.argv[1], encoding="utf-8").read().strip()
@@ -123,7 +125,7 @@ jobs:
           sys.exit(0 if curated and curated in notes else 1)
           PY
             then
-              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file), then rerun this job."
+              echo "::error::${CURATED} exists, but the CHANGELOG.md entry for ${TAG} does not contain it. Refusing to publish ${TAG} without its curated notes. Regenerate the entry with commitizen (the template includes the file) and merge it as a new chore(release): pull request. A re-run of this job reads the same CHANGELOG.md from the same merge commit and fails the same way."
               exit 1
             fi
           fi

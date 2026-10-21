@@ -849,10 +849,14 @@ def _run_release_step(
     tmp_path: Path,
     tag_sha: str | None = None,
     tag_object: str | None = None,
+    changelog: str = "",
+    curated: str | None = None,
 ) -> Result:
-    """Run the release step's shell with gh and git stubbed, in a directory with an empty
-    changelog. ``tag_sha`` is the commit the release tag already points at on the remote,
-    or None when the tag does not exist."""
+    """Run the release step's shell with gh and git stubbed. ``tag_sha`` is the commit
+    the release tag already points at on the remote, or None when the tag does not
+    exist. ``changelog`` is the CHANGELOG.md the checkout holds (empty by default), and
+    ``curated`` the content of ``.github/release-notes/v3.8.0.md`` when that file
+    should exist."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     log = tmp_path / "gh-calls.log"
@@ -864,7 +868,11 @@ def _run_release_step(
 
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
-    (work / "CHANGELOG.md").write_text("", encoding="utf-8")
+    (work / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    if curated is not None:
+        notes_dir = work / ".github" / "release-notes"
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        (notes_dir / "v3.8.0.md").write_text(curated, encoding="utf-8")
     script_path = tmp_path / "release-step.sh"
     script_path.write_text(script, encoding="utf-8")
 
@@ -989,3 +997,55 @@ class TestAnExistingReleaseTagMustSitAtTheMergeCommit:
 
         assert result.ok, result.describe()
         assert len(self._created(result)) == 1, result.describe()
+
+
+class TestTheCuratedNotesFailureNamesTheRecovery:
+    """The failure's advice must be an action that can change the outcome.
+
+    The checkout is pinned to the pull request's merge commit, and a re-run replays
+    the same event payload, so it reads the same CHANGELOG.md and fails identically.
+    The one recovery that changes the input is a new chore(release): pull request
+    whose regenerated entry includes the curated file, and the error must direct
+    there rather than advise the re-run that cannot work.
+    """
+
+    pytestmark = _REQUIRES_BASH
+
+    CURATED = "### Breaking behavior changes\n\n- a curated note\n"
+
+    def test_the_error_directs_to_a_new_release_pull_request(self, tmp_path: Path):
+        result = _run_release_step(
+            _release_step_script(),
+            tmp_path,
+            changelog="## v3.8.0 (2026-10-02)\n\n### Feat\n\n- something\n",
+            curated=self.CURATED,
+        )
+
+        # Liveness: the step's own annotation, not a harness that failed to start.
+        assert "::error::" in result.proc.stdout, result.describe()
+        assert not result.ok, result.describe()
+        assert "chore(release)" in result.proc.stdout, (
+            "the curated-notes error must direct to a new chore(release): pull "
+            f"request, the only recovery that changes the input\n{result.describe()}"
+        )
+        assert "then rerun this job" not in result.proc.stdout, (
+            "a re-run replays the same merge commit and reads the same unfixed "
+            f"CHANGELOG.md, so advising one misdirects the operator\n"
+            f"{result.describe()}"
+        )
+
+    def test_an_entry_that_carries_the_notes_still_publishes(self, tmp_path: Path):
+        result = _run_release_step(
+            _release_step_script(),
+            tmp_path,
+            changelog=(
+                "## v3.8.0 (2026-10-02)\n\n"
+                + self.CURATED
+                + "\n### Feat\n\n- something\n"
+            ),
+            curated=self.CURATED,
+        )
+
+        assert result.ok, result.describe()
+        created = [c for c in result.calls if c.startswith("release create")]
+        assert len(created) == 1, result.describe()
