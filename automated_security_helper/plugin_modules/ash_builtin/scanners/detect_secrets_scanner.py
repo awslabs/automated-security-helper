@@ -1098,13 +1098,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     @staticmethod
     def _worker_command(request_file: Path, output_file: Path) -> List[str]:
-        """The command that runs one scan in ``utils/detect_secrets_worker.py``.
+        """The interpreter arguments that run one scan in ``utils/detect_secrets_worker.py``.
 
-        The same interpreter as ASH, so the worker sees the same detect-secrets.
-        A separate method so tests can substitute the worker.
+        Everything after the interpreter: ``python_child`` adds ASH's own, so the
+        worker sees the same detect-secrets. A separate method so tests can
+        substitute the worker.
         """
         return [
-            sys.executable,
             "-m",
             "automated_security_helper.utils.detect_secrets_worker",
             str(request_file),
