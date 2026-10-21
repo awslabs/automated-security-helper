@@ -4048,6 +4048,36 @@ def _placed_references(
     return placed
 
 
+def _measured_in(
+    references: List["EnvironmentReference"], data: Any
+) -> List["EnvironmentReference"]:
+    """Each reference whose path ends at a digit index of a list the post-patch
+    document holds, with that list's length recorded, so the index is used; a
+    path the document does not hold stays as it is."""
+    measured: List[Any] = []
+    for reference in references:
+        place = None
+        if reference.length is None:
+            for position, segment in enumerate(reference.path):
+                if isinstance(segment, int):
+                    place = position
+        if place is None:
+            measured.append(reference)
+            continue
+        container: Any = data
+        for segment in reference.path[:place]:
+            if isinstance(container, dict) and segment in container:
+                container = container[segment]
+            else:
+                container = None
+                break
+        if isinstance(container, list) and 0 <= reference.path[place] < len(container):
+            measured.append(replace(reference, length=len(container), index_at=place))
+        else:
+            measured.append(reference)
+    return measured
+
+
 def _resolve(
     path: Path,
     stack: Tuple[Path, ...],
