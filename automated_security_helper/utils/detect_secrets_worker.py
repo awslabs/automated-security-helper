@@ -20,10 +20,14 @@ it is sent. The scanner already removes the verification filter from ``settings`
 when verification may not run; this also stops a filter or plugin that verifies under
 another name. Every detect-secrets plugin's ``verify()`` uses ``requests``, and
 detect-secrets reads a failed request as "unverified", so the secret is reported.
-The scanner also starts the worker with ``ASH_DETECT_SECRETS_REFUSE_HTTP=1`` in its
-environment, which this module reads when it runs as the worker or as a pool process:
-the processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again,
-as ``__mp_main__``, rather than inherit the worker's state, and refuse too.
+``run()`` also sets ``ASH_DETECT_SECRETS_REFUSE_HTTP=1`` in its own environment before
+it scans, which this module reads when it runs as the worker or as a pool process: the
+processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again, as
+``__mp_main__``, rather than inherit the worker's state, and refuse too. ``run()``
+puts the variable back to its previous state (the old value, or absent) once the pool
+has shut down. The scanner
+sets the same variable when it starts the worker, so the worker's own import refuses
+from its first line; a caller that does not set it gets the pool refusal all the same.
 
 OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pairs in
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
@@ -46,7 +50,13 @@ REFUSE_HTTP_ENV = "ASH_DETECT_SECRETS_REFUSE_HTTP"
 
 
 def refuse_http_requests() -> None:
-    """Make every request sent through ``requests`` fail with ConnectionError."""
+    """Make every request sent through ``requests`` fail with ConnectionError.
+
+    This replaces ``requests.adapters.HTTPAdapter.send`` and nothing else. A plugin
+    or filter that opens its own socket, or uses another HTTP client, is not
+    stopped here. Under --sandbox the network policy bounds those; without a
+    sandbox nothing does.
+    """
     import requests
     from requests.adapters import HTTPAdapter
 
@@ -64,32 +74,46 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
     from detect_secrets.core.secrets_collection import SecretsCollection
     from detect_secrets.settings import transient_settings
 
-    if request.get("verify") is not True:
+    refusing = request.get("verify") is not True
+    previous = os.environ.get(REFUSE_HTTP_ENV)
+    if refusing:
+        # Set before scan_files so that spawned pool processes, which import this
+        # module again and inherit the environment, read it and refuse too. The
+        # caller does not have to have set it. It is put back below, once the pool
+        # has shut down, so a caller of run() gets its own environment back.
+        os.environ[REFUSE_HTTP_ENV] = "1"
         refuse_http_requests()
 
-    # scan_files uses a multiprocessing pool for two or more files. The scanner set
-    # 'fork' on Linux before calling it in-process; the same applies here. Elsewhere
-    # the platform default ('spawn' on macOS and Windows) is safe because this module
-    # is the __main__ of its own process and guarded below.
-    if sys.platform == "linux":
-        try:
-            multiprocessing.set_start_method("fork", force=True)
-        except RuntimeError:
-            pass
+    try:
+        # scan_files uses a multiprocessing pool for two or more files. The scanner
+        # set 'fork' on Linux before calling it in-process; the same applies here.
+        # Elsewhere the platform default ('spawn' on macOS and Windows) is safe
+        # because this module is the __main__ of its own process and guarded below.
+        if sys.platform == "linux":
+            try:
+                multiprocessing.set_start_method("fork", force=True)
+            except RuntimeError:
+                pass
 
-    baseline = request.get("baseline")
-    collection = (
-        SecretsCollection.load_from_baseline(baseline=baseline)
-        if baseline is not None
-        else SecretsCollection()
-    )
-    collection.root = request["root"]
-    with transient_settings(request["settings"]):
-        collection.scan_files(*request["paths"])
-    return [
-        [key, [secret.json() for secret in secrets]]
-        for key, secrets in collection.data.items()
-    ]
+        baseline = request.get("baseline")
+        collection = (
+            SecretsCollection.load_from_baseline(baseline=baseline)
+            if baseline is not None
+            else SecretsCollection()
+        )
+        collection.root = request["root"]
+        with transient_settings(request["settings"]):
+            collection.scan_files(*request["paths"])
+        return [
+            [key, [secret.json() for secret in secrets]]
+            for key, secrets in collection.data.items()
+        ]
+    finally:
+        if refusing:
+            if previous is None:
+                os.environ.pop(REFUSE_HTTP_ENV, None)
+            else:
+                os.environ[REFUSE_HTTP_ENV] = previous
 
 
 def main(argv: List[str]) -> int:

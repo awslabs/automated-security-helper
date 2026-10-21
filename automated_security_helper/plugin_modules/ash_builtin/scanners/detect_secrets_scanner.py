@@ -907,9 +907,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     stdout_preference="return",
                     stderr_preference="return",
                     cwd=child.cwd,
-                    env=None
-                    if verify
-                    else {**snapshot_environ(), REFUSE_HTTP_ENV: "1"},
+                    env={
+                        **{
+                            key: value
+                            for key, value in snapshot_environ().items()
+                            if key != REFUSE_HTTP_ENV
+                        },
+                        **({} if verify else {REFUSE_HTTP_ENV: "1"}),
+                    },
                     encoding="utf-8",
                     errors="replace",
                     timeout=scan_timeout,
