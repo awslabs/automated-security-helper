@@ -102,6 +102,22 @@ SESSION_IDENTITY_REQUIRED = "session_identity_required"
 #: Set while the caller is the local client; see :func:`serving_local_client`.
 _LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
 
+#: Set by :func:`resolve_caller_session_id` for the call it resolves: the caller
+#: has no identity because its request names a protocol version outside the
+#: ``initialize`` handshake versions. :func:`session_identity_refusal` reads it.
+_PROTOCOL_VERSION_IS_CAUSE: ContextVar[bool] = ContextVar(
+    "ash_mcp_protocol_version_is_cause", default=False
+)
+
+#: Set by :func:`resolve_caller_session_id` for the call it resolves: the
+#: session-boundary mode of the app the request arrived through
+#: (``http_sessions.MODE_*``), or None when no ASH-built HTTP app stamped it.
+#: :func:`session_identity_refusal` reads it, so the advice it gives holds on
+#: the server the caller actually reached.
+_SERVER_MODE: ContextVar[Optional[str]] = ContextVar(
+    "ash_mcp_server_mode", default=None
+)
+
 
 @contextlib.contextmanager
 def serving_local_client() -> Iterator[None]:
@@ -163,7 +179,9 @@ def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
     return None
 
 
-def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
+def resolve_session_id(
+    headers: Optional[Mapping[str, str]], *, refuse_reserved: bool = False
+) -> str:
     """Resolve the session id a tool call belongs to.
 
     This is the path of an in-process caller's stand-in context, reached through
@@ -188,8 +206,9 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
             single directory, per :func:`validate_path_component` -- it contains a path
             separator, is a relative-path component, carries a control character
             or a character with path meaning such as a drive-specifying ``:``,
-            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than sanitized:
-            see the module docstring.
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``; or, with
+            ``refuse_reserved``, if it names a directory ASH owns. Refused
+            rather than sanitized: see the module docstring.
 
     No headers at all (``None``, or a mapping with no entries) has no request
     behind it, so it is the default session with local trust, matching the
@@ -336,9 +355,13 @@ def resolve_caller_session_id(ctx: object) -> str:
         DEFAULT_SESSION_ID,
     )
 
+    # Every resolution states its own cause and mode, so one request's does
+    # not reach the next one's refusal.
+    _PROTOCOL_VERSION_IS_CAUSE.set(False)
+    _SERVER_MODE.set(None)
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
-        return resolve_session_id(getattr(ctx, "headers", None))
+        return resolve_session_id(getattr(ctx, "headers", None), refuse_reserved=True)
 
     try:
         request = sdk_context.request_context.request
@@ -349,7 +372,12 @@ def resolve_caller_session_id(ctx: object) -> str:
         return DEFAULT_SESSION_ID if _LOCAL_CLIENT.get() else UNIDENTIFIED_SESSION_ID
 
     caller = caller_of(getattr(request, "scope", None))
+    if caller is not None:
+        _SERVER_MODE.set(caller.server_mode)
     if caller is None or caller.session_id is None:
+        _PROTOCOL_VERSION_IS_CAUSE.set(
+            caller is not None and caller.protocol_version_is_cause
+        )
         return UNIDENTIFIED_SESSION_ID
     candidate = caller.session_id.strip()
     if not candidate:
@@ -369,6 +397,37 @@ def session_identity_refusal(
 
     if session_id != UNIDENTIFIED_SESSION_ID:
         return None
+    from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
+
+    protocol_sentence = (
+        "This request names a newer protocol version, and a request that does "
+        "names no session, whatever Mcp-Session-Id it sends, so a session tool "
+        "needs a handshake Mcp-Protocol-Version: send the protocol version the "
+        "initialize handshake negotiated. "
+        if _PROTOCOL_VERSION_IS_CAUSE.get()
+        else ""
+    )
+    if _SERVER_MODE.get() == MODE_STATEFUL:
+        # The server already issues sessions, so operator advice to change the
+        # mode would be noise; what works here is in the caller's hands.
+        error = (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. An Mcp-Session-Id header the server did not issue does not "
+            f"name one. {protocol_sentence}"
+            f"Open a session with initialize at a handshake protocol version and "
+            f"send the Mcp-Session-Id it returns with that version."
+        )
+    else:
+        error = (
+            f"{operation} needs a session, and this call carries none the server "
+            f"issued. A stateless streamable-HTTP server issues no session, and an "
+            f"Mcp-Session-Id header the server did not issue does not name one. "
+            f"{protocol_sentence}"
+            f"To serve sessions at all, use a stateful server (without "
+            f"--stateless-http), or, when a platform in front of ASH issues and "
+            f"authenticates Mcp-Session-Id, start a stateless server with "
+            f"--trust-upstream-session-id."
+        )
     return {
         "success": False,
         "operation": operation,
