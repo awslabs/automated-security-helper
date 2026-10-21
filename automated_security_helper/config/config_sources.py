@@ -216,7 +216,7 @@ import re
 import stat
 import types
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -1527,6 +1527,36 @@ def _placed_references(
     return placed
 
 
+def _measured_in(
+    references: List["EnvironmentReference"], data: Any
+) -> List["EnvironmentReference"]:
+    """Each reference whose path ends at a digit index of a list the post-patch
+    document holds, with that list's length recorded, so the index is used; a
+    path the document does not hold stays as it is."""
+    measured: List[Any] = []
+    for reference in references:
+        place = None
+        if reference.length is None:
+            for position, segment in enumerate(reference.path):
+                if isinstance(segment, int):
+                    place = position
+        if place is None:
+            measured.append(reference)
+            continue
+        container: Any = data
+        for segment in reference.path[:place]:
+            if isinstance(container, dict) and segment in container:
+                container = container[segment]
+            else:
+                container = None
+                break
+        if isinstance(container, list) and 0 <= reference.path[place] < len(container):
+            measured.append(replace(reference, length=len(container), index_at=place))
+        else:
+            measured.append(reference)
+    return measured
+
+
 def _resolve(
     path: Path,
     stack: Tuple[Path, ...],
@@ -1639,7 +1669,7 @@ def _resolve(
     # which are read below. The order decides only which of two references at
     # one position that resolved to the same text is recorded: the extending
     # file's, whose value the merge keeps.
-    state.references.extend(_placed_references(read, data))
+    state.references.extend(_measured_in(_placed_references(read, data), data))
     state.reached(real, named)
     # The file that names a base chose it, so a base is judged by the paths of
     # the files above it too, as env_refused_above carries a refusal down.
