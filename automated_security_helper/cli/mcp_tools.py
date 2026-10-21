@@ -69,6 +69,11 @@ CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
 CONFIG_FIELD_DENIED = "config_field_denied"
 #: ``error_type`` for a client-delivered config whose policy cannot be established.
 CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
+#: ``error_type`` for a scan refused because the check of the config sources in
+#: its target could not finish (an unreadable entry, a link loop). The config is
+#: not known to be outside the permitted roots, so this is not
+#: ``CONFIG_INPUT_NOT_PERMITTED``.
+CONFIG_CHECK_FAILED = "config_check_failed"
 
 #: ``error_type`` of the refusal of a config an MCP client delivered that uses
 #: ``!ENV``, which such a file may not (``ASHConfigEnvNotResolvedError``).
@@ -99,8 +104,15 @@ def _config_load_failure(error: Exception, path: Optional[Path]) -> Dict[str, An
     )
 
 
+class ConfigCheckFailedError(MCPResourceError):
+    """The check of a scan target's config sources could not finish."""
+
+
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
+
+    A check that could not finish is ``CONFIG_CHECK_FAILED`` instead: it did not
+    find the config outside the roots, so the fix for that refusal does not apply.
 
     No ``context`` key, unlike ``create_error_response``: it would carry the
     resolved path, and the caller's own spelling in ``error`` already identifies
@@ -110,7 +122,11 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
         "success": False,
         "operation": operation,
         "error": str(error),
-        "error_type": CONFIG_INPUT_NOT_PERMITTED,
+        "error_type": (
+            CONFIG_CHECK_FAILED
+            if isinstance(error, ConfigCheckFailedError)
+            else CONFIG_INPUT_NOT_PERMITTED
+        ),
         "error_category": error.context["error_category"],
     }
 
@@ -156,6 +172,8 @@ def _discovered_config_refusal(
     it finds (``validate_config_input``), before anything reads it, and the
     refusal names it as found. The scan's own resolution refuses it the same
     way (``config_sources.check_discovered_source``).
+
+    A check of the candidates that fails for any other reason is a refusal too.
     """
     from automated_security_helper.cli.mcp.sandbox import (
         config_base_gate,
@@ -175,6 +193,19 @@ def _discovered_config_refusal(
         check_discovery_candidates(target, permit)
     except ASHConfigInputNotPermittedError as exc:
         return config_chain_refusal(target, exc)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        # Not left to the scan: this check decides whether a source in the
+        # target may be read at all, so one that cannot finish stops the scan
+        # here, as a refusal the caller can read.
+        _logger.warning(f"Config sources not checked before the scan: {exc}")
+        return ConfigCheckFailedError(
+            f"The configuration found in {target.as_posix()} could not be checked "
+            f"against the permitted roots: {type(exc).__name__}",
+            context={
+                "directory_path": str(target),
+                "error_category": ErrorCategory.INVALID_PATH.value,
+            },
+        )
     try:
         # Under the gate again: a source can change after the check above.
         selected = discover_config_source(target, permit=permit).selected
@@ -331,7 +362,22 @@ def _client_config_denial(
         ASHConfigPolicyUnreadableError,
     )
 
-    rules = _session_client_rules(session_id)
+    try:
+        rules = _session_client_rules(session_id)
+    except Exception as exc:  # noqa: BLE001 -- rules that cannot be read refuse
+        # The scan reads the same rules and refuses on the same failure
+        # (``_run_scan_async``); refused here too, as a response the caller can
+        # read rather than an exception out of the tool.
+        _logger.warning(f"Session config rules not read before the scan: {exc}")
+        return {
+            "success": False,
+            "operation": operation,
+            "error": (
+                "The config could not be checked against this session's "
+                f"runtime-override policy: {exc}"
+            ),
+            "error_type": CONFIG_POLICY_UNREADABLE,
+        }
     permit_base = config_base_gate(session_id)
     # A named path the client chose is the client's wherever it is, as the scan
     # reads it (resolve_config's untrusted_config).
@@ -624,54 +670,64 @@ async def mcp_scan_directory(
     # MCPSession.try_claim_scan. The claim is on the in-memory session: a scan
     # creates nothing under the workspace root, so it starts even when that root
     # can't be created.
+    #
+    # The block below begins before the claim, so that whatever raises after it
+    # reaches the ``finally``, which releases the claim and the count. A name is
+    # bound to ``claimed_session`` only once the claim is held, and to
+    # ``counted`` only once the scan is counted, so the ``finally`` releases
+    # exactly what was taken.
     claimed_session = None
-    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
-        from automated_security_helper.cli.mcp.sessions import (
-            get_default_registry as _get_session_registry,
-        )
-        from automated_security_helper.cli.mcp.source_delivery import (
-            SOURCE_DELIVERY_BUSY,
-        )
-
-        claimed_session = _get_session_registry().session_for(session_id)
-        if not claimed_session.try_claim_scan():
-            return {
-                "success": False,
-                "operation": "scan_directory",
-                "error_type": SOURCE_DELIVERY_BUSY,
-                "error": (
-                    "the delivered source of this session is being changed; start "
-                    "the scan after the change finishes"
-                ),
-            }
-    # Counted against the operator's per-session limit from here until the scan
-    # returns; the task uncounts it. A limited caller with no session counts on
-    # the count all such callers share. See sessions.per_session_scan_limit.
-    from automated_security_helper.cli.mcp.sessions import (
-        per_session_scan_limit,
-        session_scan_limit_refusal,
-        sessionless_scan_count,
-    )
-
     counted: Optional[Any] = None
-    limit = per_session_scan_limit(session_id)
-    if claimed_session is not None:
-        if limit is None:
-            # No limit applies, and with none try_start_scan always counts. The
-            # scan is counted anyway, so a limit set later sees it running.
-            claimed_session.try_start_scan(None)
-        elif not claimed_session.try_start_scan(limit):
-            claimed_session.release_scan()
-            return session_scan_limit_refusal("scan_directory", limit)
-        counted = claimed_session
-    elif limit is not None:
-        shared = sessionless_scan_count()
-        if not shared.try_start_scan(limit):
-            return session_scan_limit_refusal("scan_directory", limit, shared=True)
-        counted = shared
     scan_task_started = False
 
     try:
+        if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+            from automated_security_helper.cli.mcp.sessions import (
+                get_default_registry as _get_session_registry,
+            )
+            from automated_security_helper.cli.mcp.source_delivery import (
+                SOURCE_DELIVERY_BUSY,
+            )
+
+            session = _get_session_registry().session_for(session_id)
+            if not session.try_claim_scan():
+                return {
+                    "success": False,
+                    "operation": "scan_directory",
+                    "error_type": SOURCE_DELIVERY_BUSY,
+                    "error": (
+                        "the delivered source of this session is being changed; "
+                        "start the scan after the change finishes"
+                    ),
+                }
+            claimed_session = session
+        # Counted against the operator's per-session limit from here until the
+        # scan returns; the task uncounts it. A limited caller with no session
+        # counts on the count all such callers share. See
+        # sessions.per_session_scan_limit.
+        from automated_security_helper.cli.mcp.sessions import (
+            per_session_scan_limit,
+            session_scan_limit_refusal,
+            sessionless_scan_count,
+        )
+
+        limit = per_session_scan_limit(session_id)
+        if claimed_session is not None:
+            if limit is None:
+                # No limit applies, and with none try_start_scan always counts.
+                # The scan is counted anyway, so a limit set later sees it
+                # running.
+                claimed_session.try_start_scan(None)
+            elif not claimed_session.try_start_scan(limit):
+                # Refused: the ``finally`` releases the claim.
+                return session_scan_limit_refusal("scan_directory", limit)
+            counted = claimed_session
+        elif limit is not None:
+            shared = sessionless_scan_count()
+            if not shared.try_start_scan(limit):
+                return session_scan_limit_refusal("scan_directory", limit, shared=True)
+            counted = shared
+
         # Create a unique scan ID
         scan_id = str(uuid.uuid4())
 
