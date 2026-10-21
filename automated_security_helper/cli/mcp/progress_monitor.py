@@ -87,7 +87,11 @@ async def _fetch_initial_scan_info(
 
     directory_path = registry_info.get("directory_path", "")
     if not directory_path:
-        await ctx.error("Missing directory path in scan registry")
+        await _safe_send(
+            True,
+            lambda: ctx.error("Missing directory path in scan registry"),
+            "Failed to send scan-info error",
+        )
         return None
 
     directory_path_obj = Path(directory_path)

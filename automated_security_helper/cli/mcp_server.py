@@ -428,6 +428,54 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     )
 
 
+#: The context's log methods. ``_tell_client`` refuses any other name before it
+#: touches the context, so a mistyped level is a loud coding mistake instead of
+#: a message that silently never arrives.
+_CLIENT_LOG_LEVELS = frozenset(("debug", "info", "warning", "error"))
+
+
+async def _tell_client(
+    ctx: Context,
+    level: Literal["debug", "info", "warning", "error"],
+    message: str,
+) -> None:
+    """Send ``message`` to the client at ``level``, without a failed send raising.
+
+    ``level`` is the name of the context's log method: ``debug``, ``info``,
+    ``warning`` or ``error``. Every log a tool sends goes through here.
+
+    The log is a courtesy: the result a tool returns is what the client acts on.
+    A client whose transport has closed makes every send raise, whatever its
+    level, and that must not replace the tool's own result with an exception. It
+    must not turn a success into a failure either: a scan that has started stays
+    reported with its scan_id, so the client can follow and cancel it.
+
+    A mistyped ``level`` is not a failed send, it is a coding mistake, so it is
+    checked and the method looked up before the guard: swallowed with the failed
+    sends, the message would never reach the client and nothing would name the
+    mistake.
+    """
+    if level not in _CLIENT_LOG_LEVELS:
+        raise ValueError(
+            f"Unknown client log level {level!r}; expected one of "
+            f"{sorted(_CLIENT_LOG_LEVELS)}"
+        )
+    send = getattr(ctx, level)
+    try:
+        await send(message)
+    except Exception:
+        # A closed transport is the expected condition here: one line at warning
+        # names the lost send, and the traceback stays at debug, matching the
+        # monitor's _safe_send instead of an ERROR traceback per send.
+        logger.warning(f"Failed to send {level} message to client: {message}")
+        logger.debug(f"The {level} send that failed, with why:", exc_info=True)
+
+
+async def _tell_client_error(ctx: Context, message: str) -> None:
+    """Send ``message`` to the client as an error log, without ever raising."""
+    await _tell_client(ctx, "error", message)
+
+
 @mcp.tool()
 async def run_ash_scan(
     ctx: Context,
