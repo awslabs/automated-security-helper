@@ -43,9 +43,8 @@ Each session lives under ``<workspace_root>/<session_id>/``. ``clear_source``
 recursively removes that directory.
 
 The session ↔ source_dir binding is persisted in a process-local registry
-(``_SESSION_SOURCE_DIRS``); when the larger session-state class lands
-(Track 10.3 / cascade-73), this dict is meant to be replaced by an attribute
-on the per-session object.
+(``_SESSION_SOURCE_DIRS``), the single source of truth for it; ``MCPSession``
+deliberately holds no ``source_dir`` field.
 """
 
 from __future__ import annotations
@@ -105,9 +104,11 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 # ---------------------------------------------------------------------------
 # Per-process session → source_dir registry.
 #
-# Track 10.3 (cascade-73) is expected to land an MCPSession class; when that
-# happens, this dict should move onto that object as ``session.source_dir``.
-# Until then, we keep a process-local mapping keyed by session id.
+# The single source of truth for a session's delivered source directory.
+# ``MCPSession`` deliberately holds no ``source_dir`` field (test_sessions.py
+# pins the model's fields), so do not grow one there: a second copy of this
+# state drifts, and a scan would read a different tree than the delivery
+# recorded.
 # ---------------------------------------------------------------------------
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}

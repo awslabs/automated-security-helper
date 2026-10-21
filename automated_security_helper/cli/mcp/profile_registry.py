@@ -12,11 +12,14 @@ selection modes:
 * **Full override** — replace the resolved config with a YAML string, still
   validated through :class:`AshConfig`.
 
-The session state object here is intentionally minimal — Track 10.5 (#63) owns
-the full ``MCPSession`` lifecycle and disconnect cleanup. We expose enough
-surface (``bound_config``, ``profile_name``, ``patch_ops``, ``override_yaml``)
-for downstream tools (``run_ash_scan``, ``mcp_validate_config``, etc.) to
-prefer a session-bound config over an explicit ``config_path``.
+The session state here is the single source of truth for a session's bound
+profile. The session lifecycle (``MCPSession``, disconnect cleanup, the TTL
+sweep) lives in :mod:`automated_security_helper.cli.mcp.sessions`, and its
+session model deliberately holds no binding fields, so do not grow a copy of
+this state there. We expose enough surface (``bound_config``,
+``profile_name``, ``patch_ops``, ``override_yaml``) for downstream tools
+(``run_ash_scan``, ``mcp_validate_config``, etc.) to prefer a session-bound
+config over an explicit ``config_path``.
 """
 
 from __future__ import annotations
