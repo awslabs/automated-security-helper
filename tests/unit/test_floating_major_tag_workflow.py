@@ -836,6 +836,27 @@ class TestTheRemoteTagListMustBeUsable:
             f"{result.describe()}"
         )
         assert result.refs_written == [], result.describe()
+        self._the_error_names_no_cause_it_cannot_know(result)
+
+    # The step cannot tell an incomplete listing from a release that has no tag:
+    # the release step exits 0 once `gh release view` finds a release, and a draft
+    # release, or one whose tag was deleted, has none. So the error must name those
+    # possibilities and must not direct the operator to move the floating tag by
+    # hand -- with no release tag on the remote there is nothing to move it to.
+    @staticmethod
+    def _the_error_names_no_cause_it_cannot_know(result: Result) -> None:
+        assert "draft" in result.proc.stdout, (
+            "the error must say what a missing tag can mean (a draft release, or a "
+            f"deleted tag)\n{result.describe()}"
+        )
+        assert "by hand" not in result.proc.stdout, (
+            "the error must not direct the operator to move the floating tag by "
+            f"hand: there is no release tag to move it to\n{result.describe()}"
+        )
+        assert "release step created it" not in result.proc.stdout, (
+            "the error must not claim this run created the tag; the release step "
+            f"exits 0 for a release that has no tag at all\n{result.describe()}"
+        )
 
     def test_a_prerelease_missing_from_the_remote_list_fails_the_step(
         self, tmp_path: Path
@@ -861,6 +882,7 @@ class TestTheRemoteTagListMustBeUsable:
             f"{result.describe()}"
         )
         assert result.refs_written == [], result.describe()
+        self._the_error_names_no_cause_it_cannot_know(result)
 
     def test_a_prerelease_listed_on_the_remote_proceeds(self, tmp_path: Path):
         result = _run(
@@ -873,6 +895,7 @@ class TestTheRemoteTagListMustBeUsable:
 
         assert result.ok, result.describe()
         assert result.refs_written == ["v4"], result.describe()
+        assert "::error::" not in result.proc.stdout, result.describe()
 
     def test_the_stub_honors_the_ls_remote_pattern(self, tmp_path: Path):
         """Control: a tag outside the asked-for pattern must not be listed.

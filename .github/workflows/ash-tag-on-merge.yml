@@ -204,14 +204,17 @@ jobs:
           # The remote is read in its own assignment so that a failing `git ls-remote`
           # stops the step under `bash -e`: inside a pipeline its status is lost to the
           # last command, and an empty list would read as "no newer release". Whatever
-          # its shape, VERSION must find its own tag in the listing, because the
-          # release step above created refs/tags/v${VERSION}; the check runs on the
-          # unfiltered listing, before the stable filter, so an incomplete list stops
-          # prerelease runs too.
+          # its shape, VERSION must find its own tag in the listing; the check runs on
+          # the unfiltered listing, before the stable filter, so an incomplete list
+          # stops prerelease runs too. The cause is not knowable from here: the
+          # release step exits 0 once `gh release view` finds a release, and a draft
+          # release, or one whose tag was deleted (GitHub turns it into a draft), has
+          # no tag -- so the error below names the possibilities instead of claiming
+          # this run created the tag.
           REMOTE_REFS=$(git ls-remote --tags --refs origin "refs/tags/v${MAJOR}.*")
           if ! printf '%s\n' "$REMOTE_REFS" | sed 's|.*refs/tags/||' \
             | grep -qxF "v${VERSION}"; then
-            echo "::error::The remote lists no tag v${VERSION}, although this run's release step created it. Refusing to compare against an incomplete tag list. The release itself was created; move ${FLOATING} by hand if needed."
+            echo "::error::v${VERSION} is not on the remote: the release may be a draft, or its tag may have been deleted, and neither leaves a tag for ${FLOATING} to follow. Refusing to compare against a tag list that lacks this release."
             exit 1
           fi
           STABLE_TAGS=$(printf '%s\n' "$REMOTE_REFS" \
