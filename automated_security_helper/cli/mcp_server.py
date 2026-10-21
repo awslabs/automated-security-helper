@@ -10,6 +10,8 @@ the MCP protocol for ASH security scanning.
 """
 
 import asyncio
+import contextvars
+import functools
 import json
 import logging
 import os
@@ -125,6 +127,54 @@ from automated_security_helper.utils.log import (
 from automated_security_helper.utils.subprocess_utils import kill_running_groups
 
 logger = ASH_LOGGER
+
+#: Runs ``set_source_git``. A scan or any other ``asyncio.to_thread`` caller shares
+#: the loop's default executor, so a clone that waits on a slow remote would take
+#: a worker a scan needs; clones get their own, bounded. A clone holds a worker for
+#: up to three git commands of 10 minutes each, so this pool is kept apart from
+#: the one the quick deliveries use: sessions are cheap to open, and
+#: ``CLONE_MAX_WORKERS`` cloning sessions fill it without delaying a chunk, a
+#: clear or a finalize of any tenant.
+_CLONE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=CLONE_MAX_WORKERS, thread_name_prefix="ash-mcp-clone"
+)
+
+#: Runs the other three source-delivery tools: appending a chunk, finalizing an
+#: upload and clearing a session. They have their own pool so that no number of
+#: clones queues them, at ``DELIVERY_MAX_WORKERS`` rather than the executor's
+#: host-dependent default; see that constant.
+_DELIVERY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=DELIVERY_MAX_WORKERS, thread_name_prefix="ash-mcp-delivery"
+)
+
+
+async def _run_on(
+    executor: ThreadPoolExecutor, function: Callable[..., Any], kwargs: Dict[str, Any]
+) -> Any:
+    """Run ``function(**kwargs)`` on ``executor``, keeping the caller's context.
+
+    Context variables are kept as ``asyncio.to_thread`` keeps them. Awaiting this
+    and then cancelling does not stop the thread: the delivery finishes or times
+    out server-side, and the session reads busy until then.
+    """
+
+    context = contextvars.copy_context()
+    return await asyncio.get_running_loop().run_in_executor(
+        executor, functools.partial(context.run, function, **kwargs)
+    )
+
+
+async def _run_clone(function: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Run ``set_source_git``'s implementation on ``_CLONE_EXECUTOR``."""
+
+    return await _run_on(_CLONE_EXECUTOR, function, kwargs)
+
+
+async def _run_delivery(function: Callable[..., Any], /, **kwargs: Any) -> Any:
+    """Run a chunk, finalize or clear implementation on ``_DELIVERY_EXECUTOR``."""
+
+    return await _run_on(_DELIVERY_EXECUTOR, function, kwargs)
+
 
 # Backward-compatible private-name aliases (tests import these by name).
 _filter_summary = filter_summary
@@ -2233,7 +2283,13 @@ async def set_source_git(
 
     Each git command (the clone, and for a ref the fetch and the checkout) has
     10 minutes. One that runs longer is stopped, nothing is kept, and the call
-    fails with error_type clone_timed_out.
+    fails with error_type clone_timed_out. A clone that passes the archive size
+    or entry limits is refused with error_type clone_too_large, which means the
+    limits only: shrink the request (a smaller repository or a lower depth). A
+    clone whose tree cannot be read once git has exited is refused with
+    error_type clone_tree_unreadable, which is a server-side fault, not a size
+    to reduce. If this call is cancelled, the clone finishes or times out on the server and the session
+    reads busy until then.
 
     Returns:
         Dict with success and source_dir, or success=False with error and
@@ -2280,7 +2336,10 @@ async def set_source_git(
         return refusal
 
     try:
-        result = mcp_set_source_git(
+        # Off the event loop: a clone takes as long as the remote makes it, and
+        # every other session's calls share the loop.
+        result = await _run_clone(
+            mcp_set_source_git,
             url=url,
             ref=ref,
             ssh_key_id=ssh_key_id,
@@ -2348,7 +2407,8 @@ async def set_source_zip_chunk(
 
     try:
         return _with_session(
-            mcp_set_source_zip_chunk(
+            await _run_delivery(
+                mcp_set_source_zip_chunk,
                 upload_id=upload_id,
                 sequence=sequence,
                 data_b64=data_b64,
@@ -2380,7 +2440,9 @@ async def set_source_zip_finalize(
     '..' components, or symlinks are refused before anything is extracted, and
     the archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
     entries. After this returns, call run_ash_scan() with no source_dir. Refused
-    while a scan of this session runs (error_type source_delivery_busy).
+    while a scan of this session runs (error_type source_delivery_busy); chunks
+    of other uploads may be sent meanwhile. If this call is cancelled, the extraction
+    finishes or fails server-side and the session reads busy until then.
 
     Args:
         upload_id: The identifier used for the preceding chunk calls.
@@ -2413,7 +2475,8 @@ async def set_source_zip_finalize(
         return refusal
 
     try:
-        result = mcp_set_source_zip_finalize(
+        result = await _run_delivery(
+            mcp_set_source_zip_finalize,
             upload_id=upload_id,
             expected_sha256=expected_sha256,
             session_id=session_id,
@@ -2445,8 +2508,10 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
 
     Idempotent: a session that delivered nothing still succeeds. Call this to
     reclaim space or before delivering a different tree. Refused while a scan of
-    this session runs (error_type source_delivery_busy); call it again once the
-    scan has finished.
+    this session runs or a chunk is being written (error_type
+    source_delivery_busy); call it again once that has finished. If this call is
+    cancelled, the clear finishes server-side and the session reads busy until
+    then.
 
     Returns:
         Dict with success.
@@ -2464,7 +2529,7 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         return refusal
 
     try:
-        result = mcp_clear_source(session_id=session_id)
+        result = await _run_delivery(mcp_clear_source, session_id=session_id)
     except Exception as e:
         log_unexpected_error(logger, e, "Error in clear_source")
         return {
