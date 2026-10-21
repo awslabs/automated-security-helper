@@ -272,6 +272,10 @@ class SessionBoundary:
         RuntimeError: building a stateful boundary without ``handshake_versions``,
             if the SDK's list of handshake protocol versions cannot be imported.
 
+    Raises:
+        RuntimeError: building a stateful boundary, if the SDK's list of
+            handshake protocol versions cannot be imported.
+
     A session's workspace and bound profile are removed
     (``sessions.end_session``) when this app sees the session end: a stateful
     session's ``DELETE``, answered only after the removal is complete; the SDK

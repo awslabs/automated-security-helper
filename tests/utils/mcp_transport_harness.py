@@ -89,6 +89,17 @@ def tool_payload(message: Any) -> Any:
     raise AssertionError(f"no tool value in result: {message!r}")
 
 
+def boundary_of(app: Any) -> Any:
+    """The ``SessionBoundary`` layer of a built app, once it has served a request."""
+    from automated_security_helper.cli.mcp.http_sessions import SessionBoundary
+
+    layer = app.middleware_stack
+    while layer is not None and not isinstance(layer, SessionBoundary):
+        layer = getattr(layer, "app", None)
+    assert isinstance(layer, SessionBoundary), "the app has no SessionBoundary layer"
+    return layer
+
+
 # ---------------------------------------------------------------------------
 # streamable-HTTP
 # ---------------------------------------------------------------------------
