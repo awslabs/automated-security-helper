@@ -582,7 +582,7 @@ def test_try_begin_write_says_why_it_refused(workspace) -> None:
     assert session.try_begin_write() is None
     session.end_write()
 
-    assert session.try_begin_change()
+    assert session.try_begin_change() is None
     try:
         assert session.try_begin_write() == sessions.WRITE_REFUSED_BY_CHANGE
     finally:
@@ -597,7 +597,7 @@ def test_try_begin_write_says_why_it_refused(workspace) -> None:
 
 def test_a_chunk_refused_by_a_change_has_its_own_error_type(workspace) -> None:
     session = sessions.get_default_registry().session_for(SESSION)
-    assert session.try_begin_change()
+    assert session.try_begin_change() is None
     try:
         with pytest.raises(sessions.SessionChangeInProgressError) as refused:
             _chunk("u1", 0, b"abc")
@@ -831,12 +831,12 @@ def test_a_write_that_ends_between_the_refused_change_and_the_pending_mark(
     real = sessions.MCPSession.try_begin_change
     write_ended: List[str] = []
 
-    def interleaved(self: Any, *args: Any, **kwargs: Any) -> bool:
-        granted = real(self, *args, **kwargs)
-        if not granted and not write_ended:
+    def interleaved(self: Any, *args: Any, **kwargs: Any) -> Any:
+        refused = real(self, *args, **kwargs)
+        if refused is not None and not write_ended:
             write_ended.append("ended")
             write.__exit__(None, None, None)
-        return granted
+        return refused
 
     monkeypatch.setattr(sessions.MCPSession, "try_begin_change", interleaved)
 
