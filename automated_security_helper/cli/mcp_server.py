@@ -578,7 +578,7 @@ async def run_ash_scan(
         # A scan is followed with get_scan_progress and stopped with cancel_scan,
         # and both need a session. A caller the server could not identify would
         # start a scan it can neither follow nor stop, so it starts none.
-        refusal = session_identity_refusal(session_id, "run_ash_scan")
+        refusal = session_identity_refusal(session_id, "run_ash_scan", ctx)
         if refusal is not None:
             await ctx.error(raw_controls_on_one_line(refusal["error"]))
             return refusal
@@ -1210,7 +1210,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "get_scan_progress")
+    refusal = session_identity_refusal(session_id, "get_scan_progress", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -1775,7 +1775,7 @@ async def list_active_scans(ctx: Context) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "list_active_scans")
+    refusal = session_identity_refusal(session_id, "list_active_scans", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -1834,7 +1834,7 @@ async def cancel_scan(ctx: Context, scan_id: str) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "cancel_scan")
+    refusal = session_identity_refusal(session_id, "cancel_scan", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2378,7 +2378,7 @@ async def set_source_git(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "set_source_git")
+    refusal = session_identity_refusal(session_id, "set_source_git", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2448,7 +2448,7 @@ async def set_source_zip_chunk(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "set_source_zip_chunk")
+    refusal = session_identity_refusal(session_id, "set_source_zip_chunk", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2517,7 +2517,7 @@ async def set_source_zip_finalize(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "set_source_zip_finalize")
+    refusal = session_identity_refusal(session_id, "set_source_zip_finalize", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2571,7 +2571,7 @@ async def clear_source(ctx: Context) -> Dict[str, Any]:
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "clear_source")
+    refusal = session_identity_refusal(session_id, "clear_source", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
@@ -2685,7 +2685,7 @@ async def select_profile(
         return _session_error(e)
 
     # Needs a session: its result belongs to one, and this call may carry none.
-    refusal = session_identity_refusal(session_id, "select_profile")
+    refusal = session_identity_refusal(session_id, "select_profile", ctx)
     if refusal is not None:
         await ctx.error(raw_controls_on_one_line(refusal["error"]))
         return refusal
