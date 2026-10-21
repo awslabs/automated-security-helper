@@ -172,7 +172,11 @@ HEAD_SHA = "fedcba9876543210fedcba9876543210fedcba98"  # pragma: allowlist secre
 # that tag, as the real repository would: the tag is created server-side after the
 # checkout, so a local `rev-list` without the fetch finds nothing. Without this a step
 # that dropped the fetch line would still read FAKE_SHA and pass. `ls-remote` lists the
-# tags named in STUB_REMOTE_TAGS, one per word, standing in for the remote's tags.
+# tags named in STUB_REMOTE_TAGS, one per word, standing in for the remote's tags --
+# but only those that match the ref pattern it was given (the last argument), as the
+# real command does. Without that filter a cell could pass on a listing a real
+# `git ls-remote origin "refs/tags/v4.*"` can never return, such as a lone v3.9.9
+# answered to a 4.x run.
 GIT_STUB = f"""#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GIT_CALL_LOG"
 if [ "$1" = "rev-parse" ]; then echo "{HEAD_SHA}"; exit 0; fi
@@ -181,7 +185,12 @@ if [ "$1" = "ls-remote" ]; then
   if [ "${{STUB_LS_REMOTE_FAILS:-0}}" = "1" ]; then
     echo "harness: ls-remote fails like an unreachable remote" >&2; exit 2
   fi
-  for t in ${{STUB_REMOTE_TAGS:-}}; do printf '%s\\trefs/tags/%s\\n' "{FAKE_SHA}" "$t"; done
+  pattern="${{@: -1}}"
+  for t in ${{STUB_REMOTE_TAGS:-}}; do
+    case "refs/tags/$t" in
+      $pattern) printf '%s\\trefs/tags/%s\\n' "{FAKE_SHA}" "$t";;
+    esac
+  done
   exit 0
 fi
 if [ "$1" = "rev-list" ] && [ "$2" = "-n1" ]; then
@@ -675,7 +684,9 @@ class TestTheFloatingTagNeverMovesBackward:
             ("4.0.0", "v3.9.9 v4.0.0", [("PATCH", "v4")]),  # another major is no rival
             # A prerelease still moves the tag while no stable release of its major
             # has the same or a newer core.
-            ("4.0.0rc1", "", [("PATCH", "v4")]),  # no stable tag listed at all
+            # No stable tag listed at all, only the run's own prerelease tag --
+            # which must be listed, like every run's own tag.
+            ("4.0.0rc1", "v4.0.0rc1", [("PATCH", "v4")]),
             ("4.0.0rc1", "v4.0.0rc1 v3.9.9", [("PATCH", "v4")]),
             ("4.1.0rc1", "v4.1.0rc1 v4.0.0", [("PATCH", "v4")]),
             # The newest prerelease of a core is not a backward move over its own
@@ -712,8 +723,10 @@ class TestTheRemoteTagListMustBeUsable:
 
     pytestmark = _REQUIRES_BASH
 
-    # The prerelease row is the one that isolates the ls-remote status: a stable version
-    # also fails on the empty list a hidden failure leaves behind, a prerelease does not.
+    # Every version now fails on the empty list a hidden failure would leave behind
+    # too (its own tag must be in it), so what these rows add is the exit status
+    # itself: the stub fails like an unreachable remote, and `bash -e` must stop the
+    # step at the assignment rather than go on to read an empty list.
     @pytest.mark.parametrize("version", ["3.8.0", "4.0.0rc1"])
     def test_a_failing_ls_remote_fails_the_step(self, version: str, tmp_path: Path):
         result = _run(
@@ -763,18 +776,68 @@ class TestTheRemoteTagListMustBeUsable:
         )
         assert result.refs_written == [], result.describe()
 
-    def test_a_prerelease_may_be_absent_from_the_stable_list(self, tmp_path: Path):
-        """The list holds stable tags only, so a prerelease never has to appear in it."""
+    def test_a_prerelease_missing_from_the_remote_list_fails_the_step(
+        self, tmp_path: Path
+    ):
+        """A prerelease run's own tag was just created too, so a listing without it
+        is as incomplete as a stable run's, and comparing against it is refused the
+        same way. The check reads the unfiltered listing: the stable filter would
+        drop the prerelease tag before the comparison."""
         result = _run(
             _floating_tag_script(),
             "4.0.0rc1",
             tmp_path,
             tag_exists=True,
-            remote_tags="v3.9.9",
+            remote_tags="v4.0.0",
+        )
+
+        assert any(call.startswith("ls-remote") for call in result.git_calls), (
+            f"the step never listed the remote's release tags\n{result.describe()}"
+        )
+        assert "::error::" in result.proc.stdout, result.describe()
+        assert not result.ok, (
+            "a tag list without v4.0.0rc1 must not be compared against\n"
+            f"{result.describe()}"
+        )
+        assert result.refs_written == [], result.describe()
+
+    def test_a_prerelease_listed_on_the_remote_proceeds(self, tmp_path: Path):
+        result = _run(
+            _floating_tag_script(),
+            "4.0.0rc1",
+            tmp_path,
+            tag_exists=True,
+            remote_tags="v4.0.0rc1",
         )
 
         assert result.ok, result.describe()
         assert result.refs_written == ["v4"], result.describe()
+
+    def test_the_stub_honors_the_ls_remote_pattern(self, tmp_path: Path):
+        """Control: a tag outside the asked-for pattern must not be listed.
+
+        The step asks for `refs/tags/v${MAJOR}.*`. A stub that answers with every
+        tag in STUB_REMOTE_TAGS lets cells pass on listings a real remote can never
+        return -- a lone v3.9.9 answered to a 4.x run was exactly how the old
+        prerelease-absent cell went green.
+        """
+        result = _run(
+            'git ls-remote --tags --refs origin "refs/tags/v4.*"\n',
+            "4.0.0",
+            tmp_path,
+            tag_exists=True,
+            remote_tags="v3.9.9 v4.0.0",
+        )
+
+        assert result.ok, result.describe()
+        assert "refs/tags/v4.0.0" in result.proc.stdout, (
+            f"the stub dropped a tag inside the pattern\n{result.describe()}"
+        )
+        assert "v3.9.9" not in result.proc.stdout, (
+            "the git stub listed a tag outside the requested pattern, so cells "
+            "could pass on remote listings a real `git ls-remote` can never "
+            f"return\n{result.describe()}"
+        )
 
 
 class TestReleaseRunsAreSerialized:
