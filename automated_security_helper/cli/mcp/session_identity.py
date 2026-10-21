@@ -76,6 +76,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Dict, Iterator, Mapping, Optional, cast
 
 if TYPE_CHECKING:
+    from automated_security_helper.cli.mcp.http_sessions import HttpCaller
     from mcp.server.mcpserver import Context as SdkContext
 
 # Lowercase because HTTP header names are case-insensitive and this is compared
@@ -94,22 +95,6 @@ SESSION_IDENTITY_REQUIRED = "session_identity_required"
 
 #: Set while the caller is the local client; see :func:`serving_local_client`.
 _LOCAL_CLIENT: ContextVar[bool] = ContextVar("ash_mcp_local_client", default=False)
-
-#: Set by :func:`resolve_caller_session_id` for the call it resolves: the caller
-#: has no identity because its request names a protocol version outside the
-#: ``initialize`` handshake versions. :func:`session_identity_refusal` reads it.
-_PROTOCOL_VERSION_IS_CAUSE: ContextVar[bool] = ContextVar(
-    "ash_mcp_protocol_version_is_cause", default=False
-)
-
-#: Set by :func:`resolve_caller_session_id` for the call it resolves: the
-#: session-boundary mode of the app the request arrived through
-#: (``http_sessions.MODE_*``), or None when no ASH-built HTTP app stamped it.
-#: :func:`session_identity_refusal` reads it, so the advice it gives holds on
-#: the server the caller actually reached.
-_SERVER_MODE: ContextVar[Optional[str]] = ContextVar(
-    "ash_mcp_server_mode", default=None
-)
 
 
 @contextlib.contextmanager
@@ -314,10 +299,6 @@ def resolve_caller_session_id(ctx: object) -> str:
         DEFAULT_SESSION_ID,
     )
 
-    # Every resolution states its own cause and mode, so one request's does
-    # not reach the next one's refusal.
-    _PROTOCOL_VERSION_IS_CAUSE.set(False)
-    _SERVER_MODE.set(None)
     sdk_context = _as_sdk_context(ctx)
     if sdk_context is None:
         return resolve_session_id(getattr(ctx, "headers", None), refuse_reserved=True)
@@ -331,12 +312,7 @@ def resolve_caller_session_id(ctx: object) -> str:
         return DEFAULT_SESSION_ID if _LOCAL_CLIENT.get() else UNIDENTIFIED_SESSION_ID
 
     caller = caller_of(getattr(request, "scope", None))
-    if caller is not None:
-        _SERVER_MODE.set(caller.server_mode)
     if caller is None or caller.session_id is None:
-        _PROTOCOL_VERSION_IS_CAUSE.set(
-            caller is not None and caller.protocol_version_is_cause
-        )
         return UNIDENTIFIED_SESSION_ID
     candidate = caller.session_id.strip()
     if not candidate:
@@ -344,27 +320,54 @@ def resolve_caller_session_id(ctx: object) -> str:
     return _validated_header_session(candidate)
 
 
+def _caller_behind(ctx: object) -> Optional["HttpCaller"]:
+    """The :class:`HttpCaller` stamped on the request behind ``ctx``, or None.
+
+    Read from the request's own scope, so it is a fact about one request and
+    nothing else: no resolution order, no task-local state. A ``ctx`` that
+    carries no request -- a stand-in, a Context used outside a request -- has
+    no stamp.
+    """
+
+    from automated_security_helper.cli.mcp.http_sessions import caller_of
+
+    try:
+        request = getattr(getattr(ctx, "request_context", None), "request", None)
+    except ValueError:
+        # A Context used outside a request has no transport behind it.
+        return None
+    return caller_of(getattr(request, "scope", None))
+
+
 def session_identity_refusal(
-    session_id: str, operation: str
+    session_id: str, operation: str, ctx: object = None
 ) -> Optional[Dict[str, Any]]:
     """The refusal a session-dependent tool returns for an unidentified caller.
 
     Returns None when ``session_id`` names a session.
+
+    ``ctx`` is the refused call's context. Whether the protocol version is the
+    cause, and which server mode the advice holds on, are read from the stamp
+    on the request behind it, so the text depends only on the request being
+    refused, never on whichever resolution ran last in the same task. A
+    refusal built without ``ctx`` -- an id another tool resolved and passed
+    down -- claims no cause and gives the mode-less advice.
     """
 
     if session_id != UNIDENTIFIED_SESSION_ID:
         return None
     from automated_security_helper.cli.mcp.http_sessions import MODE_STATEFUL
 
+    caller = _caller_behind(ctx) if ctx is not None else None
     protocol_sentence = (
         "This request names a newer protocol version, and a request that does "
         "names no session, whatever Mcp-Session-Id it sends, so a session tool "
         "needs a handshake Mcp-Protocol-Version: send the protocol version the "
         "initialize handshake negotiated. "
-        if _PROTOCOL_VERSION_IS_CAUSE.get()
+        if caller is not None and caller.protocol_version_is_cause
         else ""
     )
-    if _SERVER_MODE.get() == MODE_STATEFUL:
+    if caller is not None and caller.server_mode == MODE_STATEFUL:
         # The server already issues sessions, so operator advice to change the
         # mode would be noise; what works here is in the caller's hands.
         error = (
