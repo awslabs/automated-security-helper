@@ -60,8 +60,10 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     [
         pytest.param("valid.yaml", 0, id="valid"),
         pytest.param("invalid.yaml", 1, id="invalid"),
-        pytest.param("broken.yaml", 1, id="broken"),
-        pytest.param("missing.yaml", 1, id="missing"),
+        # 3, as `ash scan` exits on a config it cannot load: broken and missing
+        # are not configs with problems (1) but files that do not load.
+        pytest.param("broken.yaml", 3, id="broken"),
+        pytest.param("missing.yaml", 3, id="missing"),
     ],
 )
 def test_config_validate(config, exit_code, project_dir, text_snapshot):

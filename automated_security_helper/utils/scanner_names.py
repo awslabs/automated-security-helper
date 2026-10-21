@@ -114,27 +114,33 @@ the cycle it exists to route around.
 
 from __future__ import annotations
 
-from typing import FrozenSet
+from typing import FrozenSet, Mapping
+
+#: The tool type (a ``ScannerToolType`` value) of every scanner ASH ships, by
+#: config name. A scanner sets its ``tool_type`` in ``model_post_init``, so the
+#: class does not carry it, and instantiating a scanner probes its tool version;
+#: utils/scanner_tool_types.py reads the type from here instead.
+#: tests/unit/utils/test_scanner_tool_types.py checks each entry against the
+#: scanner's own ``tool_type``. Kept sorted so a diff adding one is a single line.
+SCANNER_TOOL_TYPES: Mapping[str, str] = {
+    "bandit": "SAST",
+    "cdk-nag": "IAC",
+    "cfn-nag": "IAC",
+    "checkov": "IAC",
+    "detect-secrets": "SECRETS",
+    "ferret-scan": "SECRETS",
+    "grype": "SCA",
+    "npm-audit": "SCA",
+    "opengrep": "SAST",
+    "semgrep": "SAST",
+    "snyk-code": "SAST",
+    "syft": "SBOM",
+    "trivy-repo": "SAST",
+}
 
 #: Scanner config names for every scanner ASH ships, as they appear in SARIF
-#: result tags. Kept sorted so a diff adding one is a single line.
+#: result tags.
 #:
 #: Derived-and-compared by tests/unit/utils/test_scanner_names_registry_agreement.py.
 #: Add a scanner to the registry without adding it here and that test fails.
-SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
-    {
-        "bandit",
-        "cdk-nag",
-        "cfn-nag",
-        "checkov",
-        "detect-secrets",
-        "ferret-scan",
-        "grype",
-        "npm-audit",
-        "opengrep",
-        "semgrep",
-        "snyk-code",
-        "syft",
-        "trivy-repo",
-    }
-)
+SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)

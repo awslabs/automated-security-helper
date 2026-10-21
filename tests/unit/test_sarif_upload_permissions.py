@@ -136,12 +136,29 @@ def test_upload_reads_what_the_scan_writes(scan, upload):
     ]
     assert download_step["with"]["name"] == artifact_step["with"]["name"]
     # The artifact root is the scan's output-dir, so the report sits at the same
-    # relative path the scan workflow's own upload step reads.
-    assert artifact_step["with"]["path"] == "${{ inputs.output-dir }}"
-    (scan_sarif_step,) = _steps_using(scan["jobs"]["ash"], UPLOAD_SARIF_ACTION)
+    # relative path the scan workflow's own upload step reads. The step uploads two
+    # paths under output-dir (reports/ and ash_aggregated_results.json), and with
+    # more than one path upload-artifact roots the artifact at their least common
+    # ancestor, which is output-dir itself.
+    paths = [
+        line.strip()
+        for line in str(artifact_step["with"]["path"]).splitlines()
+        if line.strip()
+    ]
+    assert len(paths) >= 2, paths
+    assert all(p.startswith("${{ inputs.output-dir }}/") for p in paths), paths
+    assert "${{ inputs.output-dir }}/reports" in paths, paths
+    # In the reporting job, which downloads the scan job's artifact into the same
+    # output-dir, so the path relative to output-dir is still the scan's.
+    (scan_sarif_step,) = [
+        s
+        for job in scan["jobs"].values()
+        for s in _steps_using(job, UPLOAD_SARIF_ACTION)
+    ]
     relative = scan_sarif_step["with"]["sarif_file"].removeprefix(
         "${{ inputs.output-dir }}/"
     )
+    assert relative.startswith("reports/"), "the SARIF file is outside the artifact"
     (upload_sarif_step,) = [
         s
         for job in upload["jobs"].values()

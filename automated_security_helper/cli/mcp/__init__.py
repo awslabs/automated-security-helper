@@ -17,17 +17,28 @@ supports multiple transports:
 
 from __future__ import annotations
 
+import os
+import stat
+from pathlib import Path
 from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
+from rich.markup import escape
 
+from automated_security_helper.cli.mcp.http_sessions import (
+    DEFAULT_SESSION_WORKSPACE_TTL_SECONDS,
+    MODE_SSE,
+    MODE_STATEFUL,
+    MODE_STATELESS,
+    SessionBoundary,
+)
 from automated_security_helper.cli.mcp.profile_registry import (
     register_profiles,
     set_profile_registry,
 )
-from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
+from automated_security_helper.utils.ash_install import ash_reinstall_command
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import set_environ
 
@@ -53,6 +64,16 @@ _stderr = Console(stderr=True)
 # Valid --transport values. Kept as a tuple so typer can render help cleanly
 # without forcing an Enum class on the public CLI surface.
 _VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
+
+#: Exit code for an invocation the server can't run with: a usage error, apart
+#: from 3, which reports a config that can't be used. An unknown
+#: ``ASH_MCP_TRANSPORT`` exits with it.
+_EXIT_USAGE = 5
+
+#: Bind addresses for which the MCP SDK turns its Host and Origin check on by
+#: itself. Exactly the SDK's literal list: ``127.0.0.2`` is loopback too, but the
+#: SDK leaves the check off for it, so it is treated like any other address.
+_SDK_PROTECTED_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
 def validate_log_options(
@@ -84,6 +105,152 @@ def validate_command_options(verbose: bool, debug: bool, quiet: bool) -> None:
     """
     if quiet and (verbose or debug):
         raise ASHValidationError("Cannot use --quiet with --verbose or --debug options")
+
+
+#: The longest auth header value read from a file or a descriptor. HTTP servers
+#: refuse header lines far shorter than this, so a longer read is a wrong file.
+_AUTH_VALUE_MAX_BYTES = 16 * 1024
+
+
+def _auth_value_from_bytes(data: bytes, source: str) -> str:
+    """The header value in ``data`` (one trailing newline dropped), or refuse.
+
+    Decoded as latin-1, so the value's latin-1 encoding is the file's bytes: the
+    auth middleware compares the header's wire bytes against exactly those.
+    """
+    if len(data) > _AUTH_VALUE_MAX_BYTES:
+        raise ASHValidationError(
+            f"{source} holds more than {_AUTH_VALUE_MAX_BYTES} bytes, which no "
+            f"header value is"
+        )
+    if data.endswith(b"\r\n"):
+        data = data[:-2]
+    elif data.endswith(b"\n"):
+        data = data[:-1]
+    if not data:
+        raise ASHValidationError(f"{source} holds no auth header value")
+    if any(byte in data for byte in (b"\r", b"\n", b"\x00")):
+        raise ASHValidationError(
+            f"{source} holds a line break or NUL, which a header value can't contain"
+        )
+    return data.decode("latin-1")
+
+
+def _read_bounded(fd: int) -> bytes:
+    chunks: List[bytes] = []
+    size = 0
+    while size <= _AUTH_VALUE_MAX_BYTES:
+        chunk = os.read(fd, _AUTH_VALUE_MAX_BYTES + 1 - size)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks)
+
+
+def _auth_value_from_file(path: Path) -> str:
+    """Read the auth header value from a private regular file.
+
+    Refused: a symlink, anything but a regular file, and (on POSIX) a file with
+    any permission bit for its group or other users. Opened without following a
+    link and without blocking, and checked again on the open descriptor, so a
+    file swapped in between is refused too.
+    """
+    source = f"--auth-header-value-file {path}"
+    try:
+        named = os.lstat(path)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    if stat.S_ISLNK(named.st_mode):
+        raise ASHValidationError(f"{source} is a symlink; name the file itself")
+    if not stat.S_ISREG(named.st_mode):
+        raise ASHValidationError(f"{source} is not a regular file")
+    if os.name != "nt" and named.st_mode & 0o077:
+        raise ASHValidationError(
+            f"{source} has mode {stat.S_IMODE(named.st_mode):04o}, which lets other "
+            f"users read or change it; make it readable by its owner only "
+            f"(chmod 600)"
+        )
+    flags = os.O_RDONLY
+    for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_BINARY"):
+        flags |= getattr(os, name, 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+            named.st_dev,
+            named.st_ino,
+        ):
+            raise ASHValidationError(f"{source} changed while it was opened")
+        data = _read_bounded(fd)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    finally:
+        os.close(fd)
+    return _auth_value_from_bytes(data, source)
+
+
+def _auth_value_from_fd(fd: int) -> str:
+    """Read the auth header value from an inherited descriptor, then close it.
+
+    A regular file (a memfd, say) is read from its start; a pipe from where it is.
+    0, 1 and 2 are the server's own standard streams and are refused.
+    """
+    source = f"--auth-header-value-fd {fd}"
+    if fd < 3:
+        raise ASHValidationError(
+            f"{source} is not a descriptor the server can take: 0, 1 and 2 are its "
+            f"standard streams"
+        )
+    try:
+        info = os.fstat(fd)
+    except OSError as exc:
+        raise ASHValidationError(
+            f"{source} is not an open descriptor: {exc.strerror}"
+        ) from None
+    try:
+        if stat.S_ISREG(info.st_mode):
+            os.lseek(fd, 0, os.SEEK_SET)
+        elif not stat.S_ISFIFO(info.st_mode):
+            raise ASHValidationError(f"{source} is neither a file nor a pipe")
+        data = _read_bounded(fd)
+    except OSError as exc:
+        raise ASHValidationError(f"{source} can't be read: {exc.strerror}") from None
+    finally:
+        os.close(fd)
+    return _auth_value_from_bytes(data, source)
+
+
+def _resolve_auth_header_value(
+    auth_header_value: Optional[str],
+    auth_header_value_file: Optional[Path],
+    auth_header_value_fd: Optional[int],
+) -> Optional[str]:
+    """The auth header value from whichever one of its three forms was given.
+
+    Raises:
+        ASHValidationError: for more than one form, or a file or descriptor that
+            holds no usable value.
+    """
+    given = [
+        name
+        for name, value in (
+            ("--auth-header-value", auth_header_value),
+            ("--auth-header-value-file", auth_header_value_file),
+            ("--auth-header-value-fd", auth_header_value_fd),
+        )
+        if value is not None
+    ]
+    if len(given) > 1:
+        raise ASHValidationError(f"pass only one of {' and '.join(given)}")
+    if auth_header_value_file is not None:
+        return _auth_value_from_file(Path(auth_header_value_file))
+    if auth_header_value_fd is not None:
+        return _auth_value_from_fd(int(auth_header_value_fd))
+    return auth_header_value
 
 
 def _validate_auth_options(
@@ -122,6 +289,152 @@ def _validate_stateless_http(transport: str, stateless_http: bool) -> None:
             f"sse holds an open connection per client, so neither has a session to "
             f"make stateless."
         )
+
+
+def _validate_trust_upstream_session_id(
+    transport: str, stateless_http: bool, trust_upstream_session_id: bool
+) -> None:
+    """Reject ``--trust-upstream-session-id`` where the server issues the session.
+
+    Only a stateless streamable-HTTP server has no session of its own. On a
+    stateful server and on sse the server issues the session id, and stdio has
+    one client, so the flag would claim something about a header nothing reads.
+    Refused rather than ignored, for the reason ``_validate_stateless_http`` gives.
+
+    Raises:
+        ASHValidationError: if the flag is set anywhere but stateless
+            streamable-HTTP.
+    """
+    if trust_upstream_session_id and not (
+        transport == "streamable-http" and stateless_http
+    ):
+        raise ASHValidationError(
+            "--trust-upstream-session-id only applies to '--transport "
+            "streamable-http --stateless-http'. A stateful server and an sse server "
+            "issue their own session ids, and stdio has a single client."
+        )
+
+
+def _validate_bind(
+    host: str,
+    allowed_hosts: Optional[List[str]],
+    trust_upstream_host_check: bool,
+) -> None:
+    """Refuse an HTTP bind that would serve any Host and any Origin.
+
+    The MCP SDK checks Host and Origin (its DNS-rebinding protection) only when
+    the app is built for one of :data:`_SDK_PROTECTED_HOSTS`. Building for any
+    other address without an explicit allowlist leaves both headers unchecked,
+    so how Host is checked is a decision the operator states, not a default:
+    ``--allowed-host`` keeps the check on with the names clients use, and
+    ``--trust-upstream-host-check`` says a proxy or platform in front of ASH
+    checks Host and Origin instead.
+
+    On a loopback host the SDK protects, ASH accepts only its own origin
+    (``_transport_security``), and ``--trust-upstream-host-check`` would turn that
+    off. A proxy on the same host that forwards another Host name keeps the check
+    with ``--allowed-host`` for that name, so the flag is refused there.
+
+    Raises:
+        ASHValidationError: for a non-loopback host with neither option, for
+            both options, which contradict each other, and for
+            ``--trust-upstream-host-check`` on a loopback host.
+    """
+    if allowed_hosts and trust_upstream_host_check:
+        raise ASHValidationError(
+            "--allowed-host and --trust-upstream-host-check contradict each other: "
+            "the first keeps ASH's Host check on for the names given, the second "
+            "turns it off because something in front of ASH checks Host. Pass one."
+        )
+    if trust_upstream_host_check and host in _SDK_PROTECTED_HOSTS:
+        raise ASHValidationError(
+            f"--trust-upstream-host-check does not apply to --host {host}: a "
+            f"loopback server accepts only its own origin, and the flag would turn "
+            f"that check off. If a proxy on this host forwards another Host name, "
+            f"pass --allowed-host with that name instead."
+        )
+    if allowed_hosts or trust_upstream_host_check or host in _SDK_PROTECTED_HOSTS:
+        return
+    raise ASHValidationError(
+        f"--host {host} is not a loopback name the MCP SDK protects, and no "
+        f"--allowed-host was given, so the server would answer any Host and any "
+        f"Origin header. Pass --allowed-host with each host name clients use to "
+        f"reach the server (repeatable), or --trust-upstream-host-check if a proxy "
+        f"or platform in front of ASH checks Host and Origin."
+    )
+
+
+#: How a loopback server's own address is spelled in a Host header.
+_LOOPBACK_HOST_NAMES = ("127.0.0.1", "localhost", "[::1]")
+
+
+def _transport_security(
+    host: str,
+    allowed_hosts: Optional[List[str]],
+    trust_upstream_host_check: bool,
+    port: Optional[int],
+):
+    """The ``transport_security`` to build an app with.
+
+    On a loopback bind with no allowlist the SDK's own check accepts a
+    ``localhost`` origin on any port. This server accepts its
+    own origin only: Host ``127.0.0.1``, ``localhost`` or ``[::1]`` with the
+    port it is bound to, and the same as ``http://`` origins. On port 80 the
+    names without a port are accepted too, because clients and browsers leave
+    the default port out of Host and Origin.
+
+    Raises:
+        ASHValidationError: per :func:`_validate_bind`, and on a loopback bind
+            with no allowlist when ``port`` is None or 0: an app built for a
+            port other than the one it listens on answers 421 to every request.
+    """
+    _validate_bind(host, allowed_hosts, trust_upstream_host_check)
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    if allowed_hosts:
+        # Supplying transport_security suppresses the SDK's host-based autodetect
+        # entirely, so this is the only branch that can keep protection on while
+        # accepting a non-loopback name. allowed_origins is left empty rather than
+        # mirroring allowed_hosts: Origin is a browser-supplied header, and an MCP
+        # server reached through a proxy has no reason to trust one.
+        return TransportSecuritySettings(
+            allowed_hosts=list(allowed_hosts),
+            allowed_origins=[],
+        )
+    if trust_upstream_host_check:
+        # Stated explicitly rather than left to the SDK's default for a
+        # non-loopback host, so the decision is visible here.
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    if port is None or int(port) == 0:
+        raise ASHValidationError(
+            "A loopback server without allowed_hosts accepts only its own address, "
+            "port included, so it has to be built with the port it listens on. "
+            "Pass port= the bound port; when the system picks the port, bind the "
+            "socket first and pass the port it got."
+        )
+    own = [f"{name}:{int(port)}" for name in _LOOPBACK_HOST_NAMES]
+    if int(port) == 80:
+        own.extend(_LOOPBACK_HOST_NAMES)
+    return TransportSecuritySettings(
+        allowed_hosts=own,
+        allowed_origins=[f"http://{name}" for name in own],
+    )
+
+
+def _workspace_ttl(session_workspace_ttl: Optional[int]) -> int:
+    """The session workspace TTL to build with: the given one, or the default.
+
+    Raises:
+        ASHValidationError: for a value that is not a positive integer.
+    """
+    if session_workspace_ttl is None:
+        return DEFAULT_SESSION_WORKSPACE_TTL_SECONDS
+    if isinstance(session_workspace_ttl, bool) or session_workspace_ttl <= 0:
+        raise ASHValidationError(
+            f"--session-workspace-ttl must be a positive number of seconds, got "
+            f"{session_workspace_ttl!r}"
+        )
+    return int(session_workspace_ttl)
 
 
 def _build_auth_middleware(header_name: str, header_value: str):
@@ -180,6 +493,10 @@ def build_streamable_http_app(
     stateless_http: bool = False,
     host: str = "127.0.0.1",
     allowed_hosts: Optional[List[str]] = None,
+    trust_upstream_session_id: bool = False,
+    trust_upstream_host_check: bool = False,
+    session_workspace_ttl: Optional[int] = None,
+    port: Optional[int] = None,
 ):
     """Build the MCPServer streamable-HTTP ASGI app, optionally guarded by auth.
 
@@ -200,6 +517,22 @@ def build_streamable_http_app(
         allowed_hosts: Explicit Host-header allowlist. When given, DNS-rebinding
             protection stays on and accepts exactly these hosts, which is the
             right posture behind a proxy whose hostname is known.
+        trust_upstream_session_id: Stateless only. Take the ``Mcp-Session-Id``
+            header as the caller's session identity, because a platform in front
+            of ASH issues and authenticates it. Without it a stateless server
+            identifies no session, and the tools that need one refuse; see
+            ``cli/mcp/http_sessions.py``.
+        trust_upstream_host_check: A proxy or platform in front of ASH checks
+            Host and Origin, so the app checks neither. Required for a
+            non-loopback ``host`` without ``allowed_hosts``; refused with them.
+        session_workspace_ttl: Seconds a session workspace may go unused before
+            it is swept; None is the default, 24 hours. See
+            ``http_sessions.SessionBoundary`` for when sessions end.
+        port: The port the server listens on, the same value handed to
+            uvicorn. Required on a loopback ``host`` without ``allowed_hosts``
+            or ``trust_upstream_host_check``, where the server accepts only its
+            own origin, port included (see :func:`_transport_security`); unused
+            otherwise. Not 0: bind first and pass the port the system chose.
 
     The host argument is load-bearing, not cosmetic
     ----------------------------------------------
@@ -213,17 +546,25 @@ def build_streamable_http_app(
     every request from another machine. Passing the real bind address is what
     makes the app's security match the socket's reachability.
 
+    It also means a non-loopback ``host`` builds an app with no Host or Origin
+    check at all, so that combination is refused unless ``allowed_hosts`` or
+    ``trust_upstream_host_check`` says how Host is checked; see
+    :func:`_validate_bind`.
+
     Returns:
         A Starlette application ready to hand to uvicorn.
 
     Raises:
         RuntimeError: if MCPServer is not installed.
+        ASHValidationError: for a non-loopback ``host`` with neither
+            ``allowed_hosts`` nor ``trust_upstream_host_check``, or with both.
     """
     if MCPServer is None:
         raise RuntimeError(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the streamable-http transport."
         )
+    security = _transport_security(host, allowed_hosts, trust_upstream_host_check, port)
     # Import here to keep the stdio path zero-cost when the streamable-HTTP
     # transport is not used.
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
@@ -239,19 +580,20 @@ def build_streamable_http_app(
         "stateless_http": stateless_http,
         "host": host,
     }
-    if allowed_hosts:
-        # Supplying transport_security suppresses the SDK's host-based autodetect
-        # entirely, so this is the only branch that can keep protection on while
-        # accepting a non-loopback name. allowed_origins is left empty rather than
-        # mirroring allowed_hosts: Origin is a browser-supplied header, and an MCP
-        # server reached through a proxy has no reason to trust one.
-        from mcp.server.transport_security import TransportSecuritySettings
-
-        app_kwargs["transport_security"] = TransportSecuritySettings(
-            allowed_hosts=list(allowed_hosts),
-            allowed_origins=[],
-        )
+    app_kwargs["transport_security"] = security
     app = _mcp_instance.streamable_http_app(**app_kwargs)
+    # Decides which session each request belongs to from what this app issued,
+    # never from a header alone. Added before the auth middleware so an
+    # unauthenticated request is refused before it is identified.
+    app.add_middleware(
+        SessionBoundary,
+        mode=MODE_STATELESS if stateless_http else MODE_STATEFUL,
+        trust_upstream_session_id=trust_upstream_session_id,
+        session_workspace_ttl=_workspace_ttl(session_workspace_ttl),
+        # The same path the SDK routes its endpoint on, so only its 404 for a
+        # discarded session ends one.
+        endpoint_path=mount_path,
+    )
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -266,6 +608,9 @@ def build_sse_app(
     auth_header_value: Optional[str] = None,
     host: str = "127.0.0.1",
     allowed_hosts: Optional[List[str]] = None,
+    trust_upstream_host_check: bool = False,
+    session_workspace_ttl: Optional[int] = None,
+    port: Optional[int] = None,
 ):
     """Build the MCPServer SSE ASGI app (legacy).
 
@@ -278,6 +623,10 @@ def build_sse_app(
             reason it is on the streamable-HTTP path -- see below.
         allowed_hosts: Explicit Host-header allowlist. When given, DNS-rebinding
             protection stays on and accepts exactly these hosts.
+        trust_upstream_host_check: A proxy or platform in front of ASH checks
+            Host and Origin; as on the streamable-HTTP path.
+        session_workspace_ttl: As on the streamable-HTTP path.
+        port: As on the streamable-HTTP path.
 
     Why sse_app gets host and allowed_hosts too
     -------------------------------------------
@@ -305,29 +654,28 @@ def build_sse_app(
 
     Raises:
         RuntimeError: if MCPServer is not installed.
+        ASHValidationError: for the bind :func:`_validate_bind` refuses.
     """
     if MCPServer is None:
         raise RuntimeError(
             "MCPServer is not installed. The 'mcp' package is required for "
             "the sse transport."
         )
+    security = _transport_security(host, allowed_hosts, trust_upstream_host_check, port)
     from automated_security_helper.cli.mcp_server import mcp as _mcp_instance
 
     # Same v2 change as the streamable-HTTP path above: sse_path is a keyword
     # argument on sse_app() rather than a Settings field.
     app_kwargs = {"sse_path": mount_path, "host": host}
-    if allowed_hosts:
-        # Supplying transport_security suppresses the SDK's host-based autodetect
-        # entirely, exactly as on the streamable-HTTP path. allowed_origins is
-        # left empty for the same reason: Origin is browser-supplied, and a
-        # server reached through a proxy has no reason to trust one.
-        from mcp.server.transport_security import TransportSecuritySettings
-
-        app_kwargs["transport_security"] = TransportSecuritySettings(
-            allowed_hosts=list(allowed_hosts),
-            allowed_origins=[],
-        )
+    app_kwargs["transport_security"] = security
     app = _mcp_instance.sse_app(**app_kwargs)
+    # The session of an sse request is the one the server issued for its event
+    # stream; a header on a message POST is ignored.
+    app.add_middleware(
+        SessionBoundary,
+        mode=MODE_SSE,
+        session_workspace_ttl=_workspace_ttl(session_workspace_ttl),
+    )
 
     if auth_header_name and auth_header_value:
         middleware_cls = _build_auth_middleware(auth_header_name, auth_header_value)
@@ -348,8 +696,34 @@ def _ash_log_level_to_uvicorn(level: AshLogLevel) -> str:
     return "info"
 
 
-def _run_uvicorn(app, host: str, port: int, log_level: AshLogLevel) -> None:
-    """Run an ASGI app via uvicorn, blocking until shutdown."""
+def _bind_listen_socket(host: str):
+    """Bind ``host`` on a port the system chooses, the way uvicorn binds a host.
+
+    Used for ``--port 0``: the app has to be built for the port it listens on
+    (see :func:`_transport_security`), and that port is known only once bound.
+    """
+    import socket
+
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    listen_socket = socket.socket(family=family)
+    try:
+        listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen_socket.bind((host, 0))
+    except OSError:
+        listen_socket.close()
+        raise
+    listen_socket.set_inheritable(True)
+    return listen_socket
+
+
+def _run_uvicorn(
+    app, host: str, port: int, log_level: AshLogLevel, listen_socket=None
+) -> None:
+    """Run an ASGI app via uvicorn, blocking until shutdown.
+
+    ``listen_socket`` is an already bound socket to serve on instead of binding
+    ``host`` and ``port`` (see :func:`_bind_listen_socket`).
+    """
     import uvicorn
 
     config = uvicorn.Config(
@@ -360,7 +734,44 @@ def _run_uvicorn(app, host: str, port: int, log_level: AshLogLevel) -> None:
         access_log=False,
     )
     server = uvicorn.Server(config)
-    server.run()
+    server.run(sockets=None if listen_socket is None else [listen_socket])
+
+
+def _ash_config_refusal() -> Optional[str]:
+    """Why ``ASH_CONFIG`` can't be the server's policy, or None when it can.
+
+    ``ASH_CONFIG`` is the operator's explicit policy for every scan that names no
+    config of its own, so the server loads it at startup with
+    :meth:`AshConfig.from_file`, as it loads each ``--profile``. A path that
+    names nothing or a directory, a file the server can't read, and a file that
+    fails to parse or validate are each refused here, before anything is served.
+
+    The path is checked with ``stat`` rather than ``Path.is_file``. For a path
+    under a directory the server can't search, ``is_file`` raises on some Python
+    versions and returns False on others; ``stat`` raises ``PermissionError`` on
+    all of them.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+
+    value = os.environ.get("ASH_CONFIG")
+    if not value:
+        return None
+    path = Path(value)
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return f"ASH_CONFIG={value} names no config file."
+    except OSError as exc:
+        return f"ASH_CONFIG={value} could not be read: {exc}"
+    if not stat.S_ISREG(mode):
+        return f"ASH_CONFIG={value} names no config file."
+    try:
+        AshConfig.from_file(path)
+    except Exception as exc:
+        # The same breadth as register_profiles: OSError, YAML and JSON errors,
+        # pydantic's ValidationError, and the ValueError an extends chain raises.
+        return f"ASH_CONFIG={value} could not be loaded: {exc}"
+    return None
 
 
 def mcp_command(
@@ -413,7 +824,26 @@ def mcp_command(
         Optional[str],
         typer.Option(
             "--auth-header-value",
-            help="Expected value of --auth-header-name.",
+            help="Expected value of --auth-header-name. Visible to other local "
+            "users on the command line; prefer --auth-header-value-file or "
+            "--auth-header-value-fd.",
+        ),
+    ] = None,
+    auth_header_value_file: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--auth-header-value-file",
+            help="Read the expected value of --auth-header-name from this file, "
+            "once at startup: a regular file, not a symlink, readable by its owner "
+            "only. One trailing newline is dropped.",
+        ),
+    ] = None,
+    auth_header_value_fd: Annotated[
+        Optional[int],
+        typer.Option(
+            "--auth-header-value-fd",
+            help="Read the expected value of --auth-header-name from this inherited "
+            "file descriptor (3 or above), once at startup, then close it.",
         ),
     ] = None,
     stateless_http: Annotated[
@@ -427,16 +857,47 @@ def mcp_command(
             "with --transport streamable-http.",
         ),
     ] = False,
+    trust_upstream_session_id: Annotated[
+        bool,
+        typer.Option(
+            "--trust-upstream-session-id",
+            help="Stateless streamable-HTTP only. Declare that a platform in front "
+            "of ASH issues and authenticates the Mcp-Session-Id header, so it can "
+            "name the caller's session. Without it a stateless server identifies "
+            "no session, and tools that need one (source delivery, profiles, the "
+            "scan registry) refuse.",
+        ),
+    ] = False,
     allowed_host: Annotated[
         Optional[List[str]],
         typer.Option(
             "--allowed-host",
             help="Host header value to accept, repeatable. Keeps DNS-rebinding "
             "protection enabled while allowing a known proxy or load balancer "
-            "hostname. Without this, protection is enabled only when --host is "
-            "loopback, matching the MCP SDK's own default.",
+            "hostname. Required with a non-loopback --host unless "
+            "--trust-upstream-host-check is given.",
         ),
     ] = None,
+    session_workspace_ttl: Annotated[
+        Optional[int],
+        typer.Option(
+            "--session-workspace-ttl",
+            help="HTTP transports only. Seconds a session workspace (delivered "
+            "source, uploads, bound profile) may go unused before it is removed. "
+            "Covers sessions whose end the server cannot see, such as every "
+            "stateless one. Default: 86400 (24 hours).",
+        ),
+    ] = None,
+    trust_upstream_host_check: Annotated[
+        bool,
+        typer.Option(
+            "--trust-upstream-host-check",
+            help="HTTP transports only. Declare that a proxy or platform in front "
+            "of ASH checks the Host and Origin headers, so ASH serves any. Without "
+            "it, a non-loopback --host needs --allowed-host or the server refuses "
+            "to start. Cannot be combined with --allowed-host.",
+        ),
+    ] = False,
     profile: Annotated[
         Optional[List[str]],
         typer.Option(
@@ -478,14 +939,27 @@ def mcp_command(
         _stderr.print(
             "MCP support is included by default in ASH v3. Try reinstalling ASH:"
         )
-        # Reinstall from git, which is how ASH is distributed. This hint used to
-        # read "pip install --force-reinstall automated-security-helper", which
-        # is an unrelated project's name on PyPI -- so following it replaced the
-        # user's working ASH install with a stranger's package.
+        # Reinstall from where the running ASH was installed from: its git
+        # commit, its checkout, or its archive. ASH's distribution name on its
+        # own ("pip install --force-reinstall automated-security-helper", the
+        # earlier text) is not a reinstall of ASH: on PyPI that name belongs to
+        # an unrelated project. The command is escaped because a path can hold
+        # a "[" that rich would read as markup.
+        # soft_wrap keeps it on one line: stderr is rarely a terminal here, rich
+        # then wraps at 80 columns, and a command split before its source is a
+        # pip install with no requirement.
         _stderr.print(
-            f"  [cyan]pip install --force-reinstall 'git+{ASH_REPO_URL}.git'[/cyan]"
+            f"  [cyan]{escape(ash_reinstall_command())}[/cyan]",
+            soft_wrap=True,
         )
-        _stderr.print("  [cyan]uv sync --reinstall[/cyan]")
+        # For a checkout, the MCP testing guide's sync. --inexact keeps the extras
+        # installed there; a plain `uv sync` is exact and removes them.
+        _stderr.print(
+            "  uv sync --inexact --reinstall-package automated-security-helper",
+            style="cyan",
+            markup=False,
+            soft_wrap=True,
+        )
         _stderr.print()
         _stderr.print(
             "If the issue persists, check your Python environment and ASH installation."
@@ -496,17 +970,70 @@ def mcp_command(
     if not quiet:
         _stderr.print("[green]MCP dependencies found. Starting MCP server...[/green]")
 
-    # Validate command options for consistency
+    # Validate command options for consistency. The auth header value is read
+    # here, once, from whichever form carries it; a file or descriptor that holds
+    # no usable value stops startup like any other bad option.
     try:
         validate_command_options(verbose, debug, quiet)
+        argv_auth_value = auth_header_value is not None
+        auth_header_value = _resolve_auth_header_value(
+            auth_header_value, auth_header_value_file, auth_header_value_fd
+        )
         _validate_auth_options(auth_header_name, auth_header_value)
     except ASHValidationError as e:
-        _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
+        _stderr.print(f"[red]Validation Error: {escape(str(e))}[/red]", highlight=False)
         raise typer.Exit(3)
+    if argv_auth_value:
+        # Not gated on --quiet: the value is already on the command line, where
+        # every local user can read it, and this is the one place that says so.
+        _stderr.print(
+            "[yellow]Warning: --auth-header-value puts the value on this "
+            "process's command line, which other local users can read. Pass it "
+            "with --auth-header-value-file or --auth-header-value-fd "
+            "instead.[/yellow]",
+            highlight=False,
+        )
+
+    # ASH_MCP_TRANSPORT is the operator's override that makes every caller
+    # remote. A value that names no transport (a typo such as "http") would leave
+    # the override in an unknown state, so the server refuses to start. The
+    # value is part of how the server was invoked, not a config file, so the
+    # refusal is a usage error, exit 5, where a config that can't be used is 3.
+    #
+    # Before the --transport check: the container entrypoint (ash-mcp-serve)
+    # passes this variable's value as --transport too, and the variable is the
+    # operator's mistake to report.
+    from automated_security_helper.cli.mcp.sandbox import (
+        ASH_MCP_TRANSPORT_ENV,
+        KNOWN_TRANSPORTS,
+        unknown_transport_override,
+    )
+
+    unknown = unknown_transport_override()
+    if unknown is not None:
+        _stderr.print(
+            f"[red]Validation Error: {ASH_MCP_TRANSPORT_ENV}={escape(repr(unknown))} "
+            f"names no transport; use one of {sorted(KNOWN_TRANSPORTS)} (any case), "
+            f"or unset it.[/red]",
+            highlight=False,
+        )
+        raise typer.Exit(_EXIT_USAGE)
 
     if transport not in _VALID_TRANSPORTS:
         _stderr.print(
             f"[red]Validation Error: --transport must be one of {_VALID_TRANSPORTS}, got '{transport}'.[/red]"
+        )
+        raise typer.Exit(3)
+
+    # A value the server can't load would leave every scan that names no config
+    # on the built-in default, so the server refuses to start instead.
+    refusal = _ash_config_refusal()
+    if refusal is not None:
+        _stderr.print(
+            f"[red]Validation Error: {escape(refusal)} "
+            f"Point ASH_CONFIG at the operator's config file, or unset it to scan "
+            f"with the built-in default.[/red]",
+            highlight=False,
         )
         raise typer.Exit(3)
 
@@ -515,14 +1042,34 @@ def mcp_command(
     # transport, which is the operator's actual mistake.
     try:
         _validate_stateless_http(transport, stateless_http)
+        _validate_trust_upstream_session_id(
+            transport, stateless_http, trust_upstream_session_id
+        )
+        if transport == "stdio":
+            if trust_upstream_host_check:
+                raise ASHValidationError(
+                    "--trust-upstream-host-check only applies to the HTTP "
+                    "transports; stdio has no Host header to check."
+                )
+            if session_workspace_ttl is not None:
+                raise ASHValidationError(
+                    "--session-workspace-ttl only applies to the HTTP transports; "
+                    "a stdio server removes its session workspace when it exits."
+                )
+        else:
+            _workspace_ttl(session_workspace_ttl)
+            # Before anything is built or bound: a refused bind must never
+            # reach the socket.
+            _validate_bind(host, allowed_host, trust_upstream_host_check)
     except ASHValidationError as e:
         _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
         raise typer.Exit(3)
 
     # Deliberately NOT recording the transport here. The scan-target and
     # config-input boundaries decide "is this caller remote" per call, from the
-    # session id the transport supplied -- see cli/mcp/sandbox.py::caller_is_remote
-    # -- which is request-scoped and needs nothing from this function.
+    # session the transport supplied -- cli/mcp/http_sessions.py stamps each HTTP
+    # request with it, per app -- which is request-scoped and needs nothing from
+    # this function.
     #
     # An earlier version did set it, and process-wide state turned out to be the
     # wrong shape: the value outlives the server object, so a process that ran this
@@ -531,10 +1078,9 @@ def mcp_command(
     # accepts -- 32 tests, none of them about transports -- but a boundary whose
     # answer depends on what ran earlier in the process is not one worth having.
     #
-    # ASH_MCP_TRANSPORT remains available as an operator override for the one gap
-    # the session-id signal leaves (an HTTP client that sends no session header at
-    # all). Like ASH_MCP_ALLOWED_ROOTS it is read and never written, which is what
-    # keeps it from leaking.
+    # ASH_MCP_TRANSPORT remains available as an operator override that makes every
+    # caller remote. Like ASH_MCP_ALLOWED_ROOTS it is read and never written, which
+    # is what keeps it from leaking.
 
     # Load and validate every --profile now, so an operator's typo fails startup
     # with a message about the profile rather than surfacing later as a scan that
@@ -560,8 +1106,23 @@ def mcp_command(
         f"Starting MCP server with transport={transport}, log level={log_level_value}"
     )
 
+    # Before any transport starts: MCP scans never run a tool from inside a scanned
+    # tree, whatever ASH_ALLOW_IN_TREE_TOOLS says. See MCP_HONORS_IN_TREE_OPT_IN.
+    from automated_security_helper.cli.mcp_server import MCP_HONORS_IN_TREE_OPT_IN
+    from automated_security_helper.utils.subprocess_utils import honor_in_tree_opt_in
+
+    honor_in_tree_opt_in(MCP_HONORS_IN_TREE_OPT_IN)
+
     # Initialize and start the MCP server with comprehensive error handling
+    listen_socket = None
     try:
+        if transport != "stdio" and port == 0:
+            # A loopback app accepts only its own port, so it is built for the
+            # port the system chose: bind first. The bind is checked before
+            # anything is bound.
+            _validate_bind(host, allowed_host, trust_upstream_host_check)
+            listen_socket = _bind_listen_socket(host)
+            port = listen_socket.getsockname()[1]
         if transport == "stdio":
             # Import and run the stdio MCP server implementation here to avoid
             # circular imports.
@@ -579,13 +1140,23 @@ def mcp_command(
                 # exists to prevent.
                 host=host,
                 allowed_hosts=allowed_host,
+                trust_upstream_session_id=trust_upstream_session_id,
+                trust_upstream_host_check=trust_upstream_host_check,
+                session_workspace_ttl=session_workspace_ttl,
+                port=port,
             )
             if not quiet:
                 _stderr.print(
                     f"[green]Streamable-HTTP MCP server listening on "
                     f"http://{host}:{port}{mount_path}[/green]"
                 )
-            _run_uvicorn(app, host=host, port=port, log_level=log_level_value)
+            _run_uvicorn(
+                app,
+                host=host,
+                port=port,
+                log_level=log_level_value,
+                listen_socket=listen_socket,
+            )
         elif transport == "sse":
             # The mount-path default is /mcp, but SSE conventionally lives at
             # /sse. Honor whatever the user passed; only override if they kept
@@ -601,13 +1172,22 @@ def mcp_command(
                 # uvicorn binds makes the app answer 421 to every proxied request.
                 host=host,
                 allowed_hosts=allowed_host,
+                trust_upstream_host_check=trust_upstream_host_check,
+                session_workspace_ttl=session_workspace_ttl,
+                port=port,
             )
             if not quiet:
                 _stderr.print(
                     f"[green]SSE MCP server listening on "
                     f"http://{host}:{port}{sse_path}[/green]"
                 )
-            _run_uvicorn(app, host=host, port=port, log_level=log_level_value)
+            _run_uvicorn(
+                app,
+                host=host,
+                port=port,
+                log_level=log_level_value,
+                listen_socket=listen_socket,
+            )
     except KeyboardInterrupt:
         _logger.info("MCP server shutdown requested by user")
         if not quiet:
@@ -638,3 +1218,6 @@ def mcp_command(
                 "[yellow]Please check system resources and ASH installation.[/yellow]"
             )
         raise typer.Exit(1)
+    finally:
+        if listen_socket is not None:
+            listen_socket.close()

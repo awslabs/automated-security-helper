@@ -55,6 +55,97 @@ class IgnorePathWithReason(BaseModel):
         return _path_pattern_matches(file_path, self.path)
 
 
+class IgnoreFileExclusions(BaseModel):
+    """What the scanned repository's ignore files took out of one scan set.
+
+    ASH leaves out every file a ``.gitignore`` or ``.ignore`` in the scanned tree
+    matches, unless the operator turned that off with ``honor_ignore_files: false``
+    or ``--no-honor-ignore-files``. A scanner that read fewer files cannot say so in
+    its own results, so the scan records it here and the summaries print it.
+    """
+
+    honored: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether the scanned repository's .gitignore and .ignore files "
+                "decided which files were scanned. False when the operator set "
+                "honor_ignore_files: false or passed --no-honor-ignore-files."
+            )
+        ),
+    ]
+    excluded_file_count: Annotated[
+        int,
+        Field(
+            ge=0,
+            description=(
+                "How many files the ignore files removed from the scan set: the sum "
+                "of by_ignore_file. Files ASH leaves out on its own (.git, CDK "
+                "assets, the bundled aws-cdk tree, its own output directory) are "
+                "not counted. 0 when the ignore files were not honored."
+            ),
+        ),
+    ] = 0
+    by_ignore_file: Annotated[
+        Dict[str, int],
+        Field(
+            default_factory=dict,
+            description=(
+                "Each ignore file whose rules were applied, by its path relative to "
+                "the scan root (relative to the workspace root in a workspace "
+                "scan's merged results), mapped to the number of files it removed. "
+                "An ignore file that removed nothing is listed with 0. Files under "
+                "a directory the root .gitignore excluded count for the root "
+                ".gitignore, and ignore files inside that directory are not read."
+            ),
+        ),
+    ]
+
+    output_dir_file_count: Annotated[
+        int,
+        Field(
+            ge=0,
+            description=(
+                "How many files were already in ASH's own output directory when "
+                "the scan set was built, when that directory is inside the scanned "
+                "tree. ASH leaves its output directory out of the scan set whatever "
+                "honor_ignore_files says, so these files were not scanned either; "
+                "they are files from an earlier run, or repository files that sit "
+                "where ASH writes. This run's own log files are not counted."
+            ),
+        ),
+    ] = 0
+
+    def summary_text(self) -> str:
+        """The sentence the text and markdown summaries print for this record."""
+        files = "file" if self.excluded_file_count == 1 else "files"
+        if self.honored:
+            text = (
+                "the scanned repository's .gitignore and .ignore files excluded "
+                f"{self.excluded_file_count} {files} from ASH's scan set"
+            )
+        else:
+            # "ASH's scan set" and not more: semgrep and opengrep walk the tree
+            # themselves and still skip what git ignores in a checkout.
+            text = (
+                "not honored for this scan (honor_ignore_files: false), so the scanned "
+                "repository's .gitignore and .ignore files excluded no files from "
+                "ASH's scan set"
+            )
+            if self.excluded_file_count:
+                text += (
+                    f"; ignore files named by the caller excluded "
+                    f"{self.excluded_file_count} {files}"
+                )
+        if self.output_dir_file_count:
+            found = self.output_dir_file_count
+            text += (
+                f"; {found} {'file' if found == 1 else 'files'} already in ASH's "
+                f"output directory {'was' if found == 1 else 'were'} left out as well"
+            )
+        return text
+
+
 def ignore_paths_that_skip_scanning(
     ignore_paths: "List[IgnorePathWithReason] | None",
     *,

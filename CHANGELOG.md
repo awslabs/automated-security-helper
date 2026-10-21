@@ -62,21 +62,97 @@
     when `sandbox.network_scanners` names it, because the settings that enable it
     can come from the scanned repository.
 
-  `sandbox.network_scanners` and `sandbox.extra_read_paths` grant access, so a config
-  file inside the scanned tree (discovered, `--config`, an `extends` base, or
-  `ASH_CONFIG`) cannot set them; they come from `--config-overrides` or a config
-  file outside the tree. Such a file's `network_scanners` can still remove network,
-  and its `sandbox.mode` applies only when nothing trusted turned the sandbox on.
-  The tree is the outermost enclosing checkout, not only the scanned directory, and
-  when nothing outside the tree sets a sandbox mode, the operator's mode holds even
-  when the operator's own file is in the tree. In workspace mode, an operator
-  `--config` that does not validate is now refused (exit 3) even for projects that
-  have their own config file, because the sandbox mode is read from it.
+  `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`
+  and `sandbox.env_scanners` grant access, so they come only from `--config-overrides`
+  or a config file outside every git checkout. **A config file inside any git
+  checkout cannot set them**, whether ASH discovered it, it was passed with
+  `--config`, it is an `extends` base, or `ASH_CONFIG` names it. That includes a
+  trusted config kept in an ops or dotfiles repository: its grants are dropped with a
+  warning naming the file and the setting, and have to be passed with
+  `--config-overrides`. A config file outside every checkout that extends one inside
+  it, such as an operator's `--config` built on the repository's own config, keeps
+  the sandbox settings it writes itself, `mode` included, and loses what it inherits
+  from any base and what it changes with `patch`. An `extends` base is judged by the
+  path its entry names as well as by the file it resolves to. For a
+  scanned directory outside any checkout, a config file
+  inside that directory cannot set them either. Such a file's `network_scanners` can
+  still remove network. `sandbox.mode` is a floor: when `--sandbox`, `ASH_CONFIG` or
+  the operator's config turns the sandbox on, no repository config can turn it off or
+  switch backends. A plugin scanner whose options ask for extra read paths or
+  environment variables declares them with `read_paths_require_grant` or
+  `env_requires_grant` and gets them only when `sandbox.read_path_scanners` or
+  `sandbox.env_scanners` names it; none of the scanners ASH ships declares either.
+  In workspace mode, an operator `--config` that does not validate is now refused
+  (exit 3) even for projects that have their own config file, because the sandbox
+  mode is read from it. Under a sandbox, a detect-secrets `baseline_file` outside the
+  source tree is read only when `sandbox.read_path_scanners` names detect-secrets
+  and the file is inside a `sandbox.extra_read_paths` entry,
+  and a scanner whose config section is renamed to another scanner's name is not run
+  sandboxed.
+
+  Under sandbox-exec, no program runs from the source tree, the output directory or
+  the results directory, apart from a tool path inside one (the virtualenv ASH runs
+  from, say) and the spawn's own private uv cache. That holds for checkov and
+  ferret-scan too, which run from the filesystem root.
+
+  An offline sandboxed semgrep or opengrep scan reads its rules from the directory
+  `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names: the sandbox mounts it
+  read-only for that scanner, wherever it is (the documented `$HOME/.cache/ash/...`
+  included), and under sandbox-exec no program runs from it. Before, no grant
+  covered it, so semgrep exited 7
+  ("unable to find a config") behind ASH's own cache check, which had already passed.
+  Only the variable in ASH's environment grants it; a rules path in the scanner's
+  options does not, an empty variable grants nothing, and one naming `/`, `$HOME` or a
+  directory above `$HOME` is not mounted.
+
+  Converters are covered too. Under a sandbox the jupyter converter installs nothing
+  (it used to install nbconvert when it was missing and ASH was online) and runs
+  nbconvert, its version probe and its dependency check sandboxed, with a scanner's
+  confinement: only `<output>/converted/jupyter/` writable, no network unless
+  `sandbox.network_scanners` names `jupyter`. nbconvert reads a staged copy of the
+  notebook and its tools, not the source tree or the output directory; under
+  Landlock and firejail a tree inside a directory those backends show (such as
+  `/opt`) stays readable. The convert phase applies the same
+  scope to every converter. A notebook the sandbox refused (no backend can be used,
+  or the backend cannot plan its run) is listed in the converter's `refused_inputs`;
+  that notebook and one nbconvert failed on are listed in its `failed_inputs`, and
+  any converter process the sandbox refused is named in the converter row's
+  `failure`, so the scan exits 1 while `fail_on_incomplete_scanners` is on. A
+  notebook nbconvert fails on (one that is not JSON, a timeout, a run that writes no
+  output) counts this way with or without a sandbox; under a sandbox its reason says
+  so, and a conversion that raises is recorded by the exception's type, not its
+  message, which can quote the notebook. Exclude a notebook that is malformed on
+  purpose with `ignore_paths`. A scanner's own version probe at construction,
+  which a sandboxed scan refused with a misleading "renamed by a config file" reason,
+  now runs sandboxed as documented. A probe the sandbox refused never ran, so its
+  outcome is not remembered for the rest of the process: uv's availability, a
+  tool's version, and the check of a pre-installed tool against the scan's
+  requirement are probed again by the next check that asks.
+
+  ASH's own writes below the output directory (`ash.log` and `ash.log.jsonl`, worker
+  request files, stream logs, results files, reports, the aggregated results,
+  extracted archive members) no longer follow a symlink, with or without a sandbox;
+  a link at `ash.log` stops the scan with exit 3 before it starts. The default
+  output directory is inside the scanned tree, so a link committed at one of those
+  paths used to redirect the write when the sandbox was off. A link at any
+  component of the path now stops the write (`OutputLinkRefused`) and the scanner is
+  `ERROR`; under a sandbox, a link already below a results directory when its
+  scanner starts is refused the same way, where the sweep after the spawn used to
+  remove it. A file at one of those paths that another name also refers to (a hard
+  link, which an archive can carry) is refused too (`OutputHardLinkRefused`), before
+  it is truncated: the file was opened with `O_TRUNC`, so a hard link to a file
+  elsewhere on the filesystem was emptied and overwritten. On Windows, where these
+  writes were plain `open()` calls, each component is now checked by name first
+  (symlinks and reparse points such as junctions), so a link already in place is
+  refused; one created between that check and the open is not.
 
   If a sandbox was requested and cannot be provided, the scanner is recorded
   `MISSING` with the reason and the scan exits 1. ASH never falls back to running it
   unsandboxed. `auto` picks bubblewrap, then firejail, then Landlock on Linux, and
   sandbox-exec on macOS. There is no Windows backend: use WSL2 or container mode.
+  Landlock needs ABI 3 (Linux 6.2) or later, because older ABIs cannot stop a
+  scanner from truncating files it may only read; below that it counts as
+  unavailable.
   firejail counts as available only when a test command it runs lands in a sandbox:
   inside a container with its own PID namespace firejail runs commands without one,
   so there it is unavailable and `auto` moves on to Landlock.
@@ -95,13 +171,489 @@
 
 ### Behavior changes
 
+- **A scan uses only the plugin modules it names.** A scan's converters,
+  scanners, reporters and event handlers are ASH's built-in ones plus those of the
+  modules its own `ash_plugin_modules` and `--ash-plugin-modules` name. This holds in
+  a process that runs several scans, the MCP server included: a module named for an
+  earlier scan, whether by a repository's config, the operator or one MCP session's
+  profile, or loaded by the `list_scanners` tool, takes no part in a later scan that
+  does not name it.
+  - Embedding code that registers plugin classes itself should define them in a
+    module inside the plugin namespace (a package named `ash_plugins` or ending in
+    `_ash_plugins`) and name that module in the scan's `ash_plugin_modules`. A class
+    registered from a module the scan does not name is not used by it.
+  - Event handlers the embedding program subscribes from outside the plugin
+    namespace are still notified in every scan it runs.
+- **The AWS reporters are disabled by default.** The Security Hub, CloudWatch
+  Logs, S3 and Bedrock summary reporters shipped `enabled: true`, so loading
+  `ash_aws_plugins` (by any earlier scan in the process, an MCP server, or a config
+  naming it) was enough for a scan to build each of them and run its dependency
+  check, which contacts AWS with the host's credentials: Security Hub called
+  `DescribeHub`, the others STS. Each now ships `enabled: false`; turn one on with
+  `enabled: true` in its section of your config or with `--config-overrides`.
+  - A run logs one warning for each of these reporters whose config section sets
+    options but not `enabled`, naming the reporter and the key to set
+    (`reporters.<name>.enabled: true`). It names no option value, changes
+    nothing, and is not logged when the requested `--output-formats` leave the
+    reporter out. `ash merge` names the operator's `--config` sections the same
+    way.
+  - A reporter's dependency check now runs only for the reporters a run will use:
+    the requested `--output-formats` are applied first, so `-f sarif` checks no AWS
+    reporter, and workspace reporting no longer checks a per-project reporter at
+    workspace level.
+  - `ash report --format <aws reporter>` refuses a reporter that is not enabled and
+    exits 1, instead of sending the stored findings.
+  - `ash merge` runs an AWS reporter only when the operator's own `--config`
+    (new) enables it, and builds it from that config. The configuration the
+    shards recorded is ignored for these reporters in both directions, with a
+    warning where it disagrees: it came with the shard results, not from the
+    operator of the merge, and the reporter would send the merged findings with
+    the collector host's credentials.
+  - A reporter class declares `sends_off_host = True` when it sends findings to
+    a remote service, as the four AWS reporters now do. Such a reporter runs in
+    a scan, `ash report` or a workspace report step only when its config section
+    sets `enabled: true`, whatever its own default. `ash report` used to
+    recognize these reporters by their package name.
+  - A workspace scan's `reports/workspace-reports.json` lists the per-project
+    reports of a per-project reporter that ASH's default config leaves off (S3,
+    CloudWatch Logs) wherever a project's config enabled it, instead of recording
+    it as `skipped: disabled`.
+  - The AWS reporters read `AWS_REGION`, `AWS_PROFILE` and Bedrock's
+    `ASH_BEDROCK_*` variables when their config is built, not when the module is
+    imported, so a process whose environment changes after the import (an MCP
+    server, a test) gets the current values.
+
+- **The archive converter enforces extraction limits, and an archive over one makes
+  the scan incomplete.** `converters.archive.options` gains `max_members` (100000),
+  `max_member_bytes` (256 MiB), `max_total_bytes` (1 GiB) and
+  `max_compression_ratio` (100, checked once the members declare more than 512 KiB
+  in all), inclusive maximums checked against what every member of an archive
+  declares before anything is written, each member counted as at least 512 bytes.
+  All the archives of one scan share a budget of four times `max_members` and four
+  times `max_total_bytes`. An archive over any of them is
+  not extracted at all, is recorded in `converter_results.archive.refused_inputs`
+  with the limit named in `limit`, and counts as incomplete conversion: with
+  `fail_on_incomplete_scanners` on (the default) the scan exits 1 and names the
+  archive and the limit. No member is written past the size it declares, on either
+  tar extraction path; a sparse tar member whose map reaches past its size is
+  refused. A config file in the scanned tree, a workspace project's own config and a
+  config an MCP client supplied can lower these limits but not raise them (a higher
+  value is replaced by the trusted one, with a warning), and MCP runtime overrides
+  of them are refused: they are in the default `runtime_overrides.denied_paths`,
+  and refused on top of it when a profile sets its own `denied_paths`, so a
+  profile's list no longer lets a client raise them and a whole-config write at the
+  root pointer is refused even with an empty list. Raise them
+  with `--config-overrides` or a config file outside the tree.
+
+- **A workspace project counts incomplete conversion as a single-directory scan
+  does.** A project whose converter crashed, whose converter tool was absent with
+  inputs to convert (a missing nbconvert with notebooks in the project, for
+  example), or whose archive was refused for an extraction limit used to pass inside
+  a workspace while `ash --source-dir <project>` exited 1 on it. It is now
+  `scan_incomplete` under `fail_on_incomplete_scanners` and names the converter in
+  `incomplete_converters`, in the unified results, the workspace reports and the MCP
+  workspace tools' project coverage.
+
+- **Parsing a tar's headers is bounded.** tarfile reads an extended header, a GNU
+  long name or a sparse map into memory while parsing the header, before the
+  extraction limits can be checked. The tar stream is now read through a reader that
+  refuses any single read over 1 MiB and bounds the header pass to 4 MiB plus 2 KiB
+  per member; the decompressor is chosen from the archive's leading bytes. An
+  archive over either is a failed input, as an unreadable archive is, and a sparse
+  member whose map entries overlap or are out of order is refused.
+
+- **An archive the converter cannot read makes the scan incomplete.** A `.zip`,
+  `.tar` or `.gz` that zipfile and tarfile cannot read (a bad CRC, a truncated or
+  damaged stream, an empty file) used to leave a log line, and a zip that failed part
+  way left its first members on disk, where the scanners read them. A tar cut off
+  between members or inside a header, or with a damaged header after the first, was
+  read as a shorter archive: its first members were extracted and nothing was
+  recorded. A tar's members must now end at an end-of-archive block, which GNU tar,
+  bsdtar, `git archive` and Python's tarfile all write. An archive with a file member
+  named like a directory an earlier member made was dropped as "skipping directory",
+  leaving the members before it on disk. Two archives whose names fold to one
+  target directory (`a b.zip` and `a-b.zip`) shared it, so the second one's partial
+  output was not removed when it failed; each archive now gets a directory of its
+  own. Each of these is now
+  recorded in `converter_results.archive.failed_inputs` (the record a converter's
+  input that could not be converted gets); anything written from it is removed; and
+  with `fail_on_incomplete_scanners` on the scan exits 1 naming it. The summaries,
+  `ash.flat.json` and `ash.sarif` list failed inputs with the refusals.
+
+- **A single-file `.gz` is decompressed and scanned.** A `.gz` that is one compressed
+  file rather than a tarball, such as `data.json.gz`, used to be passed over. It is
+  decompressed to `data.json` within the extraction limits and the scan's budget,
+  and scanned. A `.tar.gz` that holds no tar is a failed input. This changes the
+  verdict for a large single-file gzip with a scannable inner name, such as
+  `dump.sql.gz` or `data.csv.gz`: one that decompresses to more than a limit
+  (256 MiB for `max_member_bytes` by default) was passed over before, and is now
+  refused for that limit, which fails a default scan. Raise the limit with
+  `--config-overrides converters.archive.options.max_member_bytes=<bytes>`, or leave
+  the file out with `global_settings.ignore_paths`.
+
+- **A Git LFS pointer named like an archive is reported, not failed.** A checkout
+  without its LFS objects holds a pointer file where each LFS-tracked `.zip` or
+  `.tar.gz` should be. It is recorded as a refused input naming the file and the
+  remedy (fetch the LFS objects before the scan), and does not fail the
+  completeness gate. Only a whole file in the LFS pointer format counts.
+
+- **An archive inside an archive is recorded as not scanned.** Extraction is one level
+  deep, as before, but a member named as an archive or compressed file (`.zip`,
+  `.tar`, `.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`, `.jar`, `.whl`, `.7z`, `.rar` and the
+  like, in any case) used to be left out without a trace. It is now a refused member
+  of its archive, with a warning, and does not change the exit code. Past the first
+  20 refusals of a reason in one archive, the rest are counted in one record
+  (`unlisted_members`) rather than listed. The list also covers `.tar.Z`, `.lz4`,
+  `.tzst`, `.apk`, `.deb`, `.rpm`, `.nupkg` and other package formats, and a name
+  with a trailing dot (`lib.zip.`).
+
+- **An archive in the tree that is not extracted is recorded.** Only `.zip`, `.tar`
+  and `.gz` files are extracted. A `.tgz`, `.tar.bz2`, `.tar.xz`, `.7z`, `.jar` or
+  `.whl` in the scanned tree used to get no record at all, so a tree whose only
+  archive was `release.tgz` reported no archives. Each is now a refused input that
+  says it was not extracted, with a warning; it does not change the exit code.
+
+- **Every input a converter did not read is in the reports.** The console summary,
+  `ash.summary.txt`, `ash.summary.md`, `ash.flat.json` (`converter_refusals`, always
+  present) and `ash.sarif` (one execution notification per input, `error` for an
+  archive over a limit, `warning` otherwise) list them; before, they were in `ash.log`
+  and `ash_aggregated_results.json` only. Names from the archive are shown as inert
+  text: a code span per refusal in `ash.summary.md`, and control and
+  bidirectional-formatting characters escaped in the text summary, on the console
+  and in the log.
+
+- **npm-audit's package managers read none of the scanned repository's settings
+  files, and run no file it names.** npm, pnpm and yarn ran in the package's
+  directory, so the repository's `.npmrc` (and, for pnpm, `pnpm-workspace.yaml`),
+  `.yarnrc` and `.yarnrc.yml` chose the registry the dependency list was sent to, the
+  proxy, TLS settings and cache; and yarn ran the JavaScript file a `yarn-path` or
+  `yarnPath` names in place of itself, ASH's own `yarn --version` included (measured
+  with npm 10.9.4, pnpm 12.6.0 and yarn 1.22.22). npm and pnpm now run from a private
+  copy of the package's `package.json` and lockfile, whose audit requests were
+  identical to the in-tree ones, workspaces included; yarn runs from a copy outside
+  the scanned tree of its lockfile and every `package.json` below it, with
+  `YARN_IGNORE_PATH=1`. Your own `~/.npmrc`, global npmrc and `~/.yarnrc` still apply,
+  so private registries and their credentials are unaffected. Under `--sandbox`,
+  where the tool's home is private, yarn runs in place reading no settings file. A
+  `pnpm.auditConfig` advisory ignore list in the repository's `package.json` counts
+  as a repository suppression: it applies, and `--ignore-suppressions` removes it.
+  Offline npm-audit still runs no package manager.
+
+- **npm-audit does not audit a package whose files link out of the scanned tree.**
+  ASH found a lockfile by name and npm, pnpm and yarn follow links, so a
+  `package-lock.json` linking to a file elsewhere on the host, next to a real
+  `package.json`, was read by each (measured offline under bwrap: npm counted its
+  packages, pnpm parsed it, yarn quoted it in an error). Every file the tool reads
+  from the package (`package.json`, its lockfiles including `npm-shrinkwrap.json`,
+  and for yarn every workspace `package.json`) now has to resolve inside the scanned
+  tree and be a regular file. A package with any other is not audited: the file is
+  listed as not scanned ("link leaves the scanned tree") and npm-audit is ERROR, so
+  the scan exits 1, as when an audit fails. Links within the scanned tree are
+  followed as before, and a linked workspace member inside the tree is now copied
+  for yarn, where it used to be left out.
+
+- **A workspace with an incomplete project exits 1, even when another project has
+  findings.** A project that failed, or whose scanners did not all complete
+  (`scan_incomplete`), now ranks above actionable findings, as in a
+  single-directory scan, so `ash --source-dir P` and P inside a workspace give the
+  same code. A workspace that exited 2 with one project over its threshold and
+  another incomplete now exits 1. Findings are still in each project's
+  `exceeds_threshold` and counts, and in every summary; a gate that has to block on
+  findings whatever else happened should read them there. A misconfigured project
+  (3) still ranks first.
+- **trivy-repo and syft read no config file from the scanned tree, online or
+  offline.** A `trivy.yaml` in the scanned repository
+  could turn on a VEX repository download or client/server mode, and a `.syft.yaml`
+  remote license and package lookups; both reached the network with every offline flag
+  ASH passed, and online both decided what was reported. trivy now always gets
+  `--config` naming `TRIVY_CONFIG` when that is outside the tree, or an empty config
+  ASH ships, and syft runs from outside the tree and is given only a `config_file`
+  outside it. A repository that tuned trivy or syft through those files gets their
+  defaults; put the settings in a file outside the tree (`TRIVY_CONFIG`,
+  `scanners.syft.options.config_file`). Offline, trivy's version check and telemetry
+  are turned off by `TRIVY_SKIP_VERSION_CHECK` and `TRIVY_DISABLE_TELEMETRY`, which an
+  older trivy ignores, rather than by flags it would refuse.
+
+- **Offline, npm-audit audits nothing, says so, and is MISSING instead of PASSED.**
+  npm, pnpm and yarn audit only against the registry's advisory service: offline,
+  `npm audit --json --offline` on a lockfile pinning a version with known advisories
+  exited 0 with none, `pnpm audit --offline` sent the dependency list to the registry
+  anyway, and `yarn npm audit` has no offline mode. npm-audit was graded PASSED with
+  zero findings, and only a log line said a pnpm or yarn 2+ lockfile went unaudited.
+  Offline, npm-audit now starts no package manager; every lockfile it would have
+  audited is recorded as not scanned, with the reason, in the scanner's
+  `inputs_not_scanned` in `ash_aggregated_results.json`, on the console after the
+  summary table, and in a new "Inputs not scanned" section of `ash.summary.md` and
+  `ash.summary.txt`. A workspace scan lists every project's, with workspace-relative
+  paths: in a new `inputs_not_scanned` list on each project's entry in the workspace
+  results, in the merged summaries, and after the per-project lines of the workspace
+  console summary, whose line for an incomplete project now reads FAIL with the
+  scanners that did not complete rather than `pass`. When there was a lockfile to audit, the scanner is MISSING, as
+  snyk-code is offline, so an offline scan of a Node.js project now fails under the
+  default completeness gate (`fail_on_incomplete_scanners`) with exit code 1. Pass
+  `--exclude-scanners npm-audit` to scan offline without it. A project with no
+  lockfile has nothing to audit and is SKIPPED. The same applies when
+  `scanners.npm-audit.options.offline` is true with ASH online: npm-audit no longer
+  runs `npm audit --offline` against a local cache.
+
+- **Offline, trivy-repo does not run trivy's Terraform checks.** trivy downloads the
+  source of every `module` block in the scanned Terraform, from the registry, with the
+  host's `git` and its credentials, or over HTTPS, whatever offline flags it is given;
+  in an offline scan with the trivy plugin enabled that was the only request left.
+  Offline, ASH now passes `--misconfig-scanners` with the installed trivy's default
+  list minus `terraform` (or, when that list cannot be read, leaves `misconfig` out),
+  and logs a warning. checkov still checks Terraform. Any `git` a scanner tool runs
+  offline gets `GIT_ALLOW_PROTOCOL=file`. See
+  [What offline mode turns off](docs/content/docs/advanced-usage.md#what-offline-mode-turns-off).
+
+- **detect-secrets verifies secrets only when the operator turns it on, and never
+  offline.** Verification sends each candidate secret to the service that issued it;
+  for an AWS key that is a request to `sts.amazonaws.com` signed with the key pair
+  found in the scanned file. Its filter came from whatever settings the scan used, so
+  a repository's `.secrets.baseline` (which `detect-secrets scan` fills with the
+  filter), its `.ash/.ash.yaml`, a workspace project's config, an MCP client's config,
+  or a `baseline_file` outside the tree named by any of them made the scanning host
+  contact the issuer, and `--offline` did not stop it without `--sandbox`. Now the
+  filter is kept only from the operator's own configuration (a config file outside the
+  scanned tree and every git checkout, `--config-overrides`, the MCP session's
+  profile, or a baseline such a config names outside the tree and the git checkout
+  holding it, which may sit in another checkout), and only online;
+  from any other source ASH removes it and logs a warning naming the source, and when
+  verification is off the detect-secrets worker refuses every HTTP request. Candidates
+  the issuer would have rejected are now reported, so a repository whose own baseline
+  verified can show more detect-secrets findings. An MCP client's runtime overrides
+  (`select_profile` patches and override YAML, workspace `config_overrides`) cannot set
+  detect-secrets' `filters_used`, `plugins_used` or `baseline_file` either: the shipped
+  `runtime_overrides.denied_paths` deny them, as they deny the sandbox and
+  `ash_plugin_modules`. The same rule now decides which plugin and filter files
+  detect-secrets imports: a `file://` entry in `plugins_used` or `filters_used` from a
+  repository's config, its `.secrets.baseline`, an MCP client's config or a baseline
+  any of them names is removed with a warning, wherever the file is (one outside the
+  tree is any file on the host, and the worker imports it); the operator's own entries
+  are kept. An operator's `--config-overrides` naming a baseline outside the tree and its checkout
+  verifies beside a repository's own config, and an operator's verification filter is
+  kept when the tree's `.secrets.baseline` supplies the plugins and other filters. To
+  keep verifying, name the filter with its `min_level` in
+  `scanners.detect-secrets.options.scan_settings.filters_used` of your own config:
+  `{path: detect_secrets.filters.common.is_ignored_due_to_verification_policies,
+  min_level: 2}`. detect-secrets reads `min_level` and the scan fails without it. See
+  [Secret verification](docs/content/docs/configuration-guide.md#secret-verification).
+
+- **Container mode builds ASH's own Dockerfile, never one in the working directory.**
+  `ash --mode container` and `ash build-image` used to build a `Dockerfile` in the
+  directory they were started from (with a `pyproject.toml` beside it, for an ASH
+  installed from git), or the nearest such pair above it, with that directory as the
+  build context, and tag the result as ASH's image. A pinned revision now always
+  builds the packaged Dockerfile. A `LOCAL` revision builds the Dockerfile at the root
+  of the ASH source tree the running package was installed from, found from the
+  package itself or from the installer's `direct_url.json`; an installation with no
+  such tree (for example, one from a wheel file) is refused with what to do instead.
+  An installed package (in `site-packages`, or with its dist-info beside it) is not
+  taken for a clone whatever files sit beside it (a `Dockerfile`, `docs/`, `tests/`
+  and the like).
+  See [Which Dockerfile ASH builds](docs/content/docs/building-your-own-image.md#which-dockerfile-ash-builds).
+- **Container mode always mounts the source directory read-only.** `ash --mode
+  container`, `./ash` and `Invoke-ASH` used to mount `/src` read-write whenever the
+  output directory was inside the source directory, which the default
+  `.ash/ash_output` is, and the test was a string prefix, so a sibling such as
+  `<src>-out` counted as inside too (`Invoke-ASH` matched a substring anywhere in the
+  path). The output directory has its own mount at `/out`, so `/src` is now read-only
+  in every case. See [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+- **CI variables no longer select the root `ci` image stage.** `ash --mode container`
+  and `ash build-image` built and ran the `ci` stage, which runs as root, whenever
+  `CI`, `IsCI`, `ISCI` or `CODEBUILD_BUILD_ID` was set to anything (`CI=false` and an
+  empty value included), overriding an explicit `--build-target non-root`; `Invoke-ASH`
+  defaulted to `ci` under `CI`, `IsCI` or `CODEBUILD_BUILD_ID` the same way. The stage
+  is now the one `--build-target` (`-BuildTarget`) names, and `non-root` when none is
+  given (`ci` on Windows, for `ash build-image`, `ash --mode container` and
+  `Invoke-ASH` alike; `ash build-image` used to force `ci` there over an explicit
+  `--build-target`, and `ash --mode container` built `non-root`). `ci` is also built
+  on request and under `--custom-containerfile`. **What this changes for CI jobs:** a job
+  that did not pass `--build-target` now gets the `non-root` image (and the
+  `automated-security-helper:non-root` tag, and its own layer-cache scope on GitHub
+  Actions). A job that runs as root (AWS CodeBuild, container-based GitLab or Jenkins
+  jobs) cannot build `non-root`, whose user would get UID 0, and is refused before the
+  build with that explanation (exit 3): pass `--build-target ci` there. `./ash` refuses
+  it the same way, and so does `Invoke-ASH`, run as root or given `-ContainerUID 0`
+  (exit 3, naming `-BuildTarget ci`); any spelling of zero such as `00` counts. A GID
+  of 0, root's group, is refused for a `non-root` build in the same three places. A
+  `--container-uid` or `--container-gid` holding anything but the digits 0-9 (`²`, `1x`)
+  is refused as not numeric, by `./ash` and `Invoke-ASH` as well. All three refusals
+  exit 3 from all three entry points; `ash --mode container` and `./ash` used to exit 1
+  for them. See the breaking
+  change above. This repository's
+  validate-container action now passes `--build-target ci` to every build and scan.
+- **Container mode refuses an output directory that is the source directory or above
+  it.** `/out` is mounted read-write and `/src` read-only, so an `--output-dir` equal
+  to `--source-dir`, or one of its parents, held the source tree writable through
+  `/out`. `ash --mode container`, `./ash` and `Invoke-ASH` now refuse it with exit 3
+  before anything is built or mounted, by real path. An output directory inside the
+  source, such as the default `.ash/ash_output`, or outside it works as before; a run
+  with `--no-run` mounts nothing and is not refused.
+- **Container mode refuses an output directory that is a symlink or is reached through
+  one.** The output directory is mounted read-write at `/out`, so with a linked one the
+  scan inside the container wrote wherever the link led, and a repository committing
+  `.ash -> /some/host/dir` chose that directory for the default `.ash/ash_output`.
+  `ash --mode container`, `./ash` and `Invoke-ASH` now refuse, with exit 3, an output
+  directory that is a symlink, wherever it is, and any symlink between the source
+  directory and it, before the directory is created, written or mounted. That includes
+  `--no-run`, since the output directory is created and `ash --mode container` opens
+  `ash.log` in it either way. The source directory counts under the name it was given
+  and its real path; links at or above it are your own spelling and are not examined.
+  This is the rule a sandboxed local scan already applies.
+- **The image pipeline's MCP container keeps the auth header value out of the
+  environment.** `ash-container-init` exported the value it read from Secrets Manager
+  as `ASH_MCP_AUTH_HEADER_VALUE`, so `ash mcp` and every process it started inherited
+  it, and a config reference such as `${ASH_MCP_AUTH_HEADER_VALUE:}` copied it into the
+  effective config. It now hands the value over in an in-memory file named by
+  `ASH_MCP_AUTH_HEADER_VALUE_FD`; `ash-mcp-serve` reads and closes it, and removes that
+  variable and a directly set `ASH_MCP_AUTH_HEADER_VALUE` before it starts `ash mcp`.
+  A custom command run in place of `ash-mcp-serve` with `ASH_MCP_AUTH_SECRET_ARN` set
+  gets the descriptor instead of the variable.
+- **An explicit runner path is now used as given.** `Invoke-ASH -OCIRunner
+  /path/to/podman` kept only the name `podman` and ran whichever `podman` came first on
+  `PATH`. It now runs the file at the path, passed to `Invoke-Expression` by name like
+  every other path, so a path with spaces or `$(...)` in it is that path. A bare name
+  is looked up on `PATH` as before. `./ash` (`OCI_RUNNER`) and `ash --mode container`
+  (`--oci-runner`) already ran the path they were given, and now have tests that
+  pin it.
+- **A container workspace scan refuses a `--config` the repository could have written.**
+  A one-directory container scan marks a config from outside `--source-dir` that is in
+  a git checkout (`--config-from-scanned-repository`), and the scan inside limits it as
+  repository-written. A workspace scan inside the container refuses that mark, so in
+  workspace mode the host passed such a config unmarked, and the scan inside gave it
+  the operator's grants (`sandbox.extra_read_paths` and the other sandbox settings).
+  `ash --mode container --workspace` now refuses it with exit 3 before anything is
+  built, mounted or cleared: a config in the scanned checkout or another one, or named
+  through a link to such a file, outside the workspace root. Keep `--config` outside
+  the checkout, or inside the workspace. A config inside the workspace root, read
+  through `/src`, and one outside every checkout are used as before. `./ash` and
+  `Invoke-ASH`, which scan one directory and hand the scan inside `--source-dir /src`,
+  now refuse a `--workspace` passed through with exit 3 instead of starting a
+  container that refused it.
+- **`./ash` and `Invoke-ASH` mark a `--config` reached through a link in a checkout.**
+  A local scan, and `ash --mode container`, count a config as repository-written
+  when a symlink its path follows sits in the scanned tree or in any git checkout,
+  even though neither the path given nor the file it resolves to is in one: whoever
+  wrote the link chose the file. The two wrappers checked only the path given and
+  the resolved file, so a config named `ops/cfg.yaml`, linked to a link in the
+  scanned checkout that leads to a file outside it, went to the scan inside unmarked
+  and kept its sandbox grants there. Both wrappers now follow the path one component
+  at a time, at most 40 links, and pass `--config-from-scanned-repository` when any
+  link on the way sits in the scanned tree or a checkout. A chain of links outside
+  every checkout is used as before.
+- **`Invoke-ASH` builds the non-root user with the caller's IDs on Linux and macOS.**
+  Without `-ContainerUID` and `-ContainerGID` it built the Dockerfile's default UID 500
+  and GID 100, which cannot write an output directory the caller owns, and checked
+  only the IDs it was given. It now takes the caller's own (`id -u`, `id -g`), as
+  `./ash` and `ash --mode container` do, and refuses a UID or GID of 0 from either
+  source the same way, so a root caller with `-ContainerUID 1000` and GID 0 is refused
+  too. Windows keeps the Dockerfile's defaults.
+- **On Windows, container mode and `ash build-image` default to the `ci` stage.** The
+  output directory is bind-mounted into the container, and on Windows the runtime does
+  not map write permissions onto that mount, so the `non-root` user could not write
+  its reports and logs there. With no `--build-target`, `ash --mode container`, `ash
+  build-image` and `Invoke-ASH` therefore build `ci` on Windows (`ash --mode container`
+  built `non-root` there before). An explicit `--build-target non-root` still builds
+  `non-root` on Windows, and `ash build-image --build-target non-root`, which used to
+  build `ci` there regardless, now builds what it names.
+- **Container mode reads the config file you named.** `--config` (or `ASH_CONFIG`) was
+  handed to the scan inside the container as the host path, which names nothing there,
+  so that scan ran with the default config: none of the file's suppressions, scanner
+  settings or thresholds applied. The file is now mounted read-only (with its `extends`
+  chain, for one outside the source directory) and the inner scan is given the path it
+  has in the container; one that is not an existing file refuses the scan with exit 3,
+  as does an `extends` entry that names a base by absolute path, which inside the
+  container is not the same file, a config named inside the scanned tree whose real
+  path is outside it, a config file ASH cannot read, and a config outside
+  `--source-dir` that extends a file inside it, or whose chain has a file of the
+  scanned checkout extending a file outside it, or an entry whose written path would
+  place its base outside `/ash-config` (one that leaves the config's directory and
+  comes back by name, or climbs with `..` after a link to a directory at another
+  depth; a local scan accepts such an entry). `./ash` and `Invoke-ASH`, which mount
+  a config from outside the source directory without the files it extends, refuse one
+  with an `extends` entry with exit 3.
+  A config inside a git checkout (the scanned one or another) but outside
+  `--source-dir` keeps the limits a local scan gives a repository-written config: the
+  host decides with the local scan's rule, and passes the scan inside
+  `--config-from-scanned-repository`, since it sees that file only at `/ash-config`.
+  The same holds for `./ash --config` and `Invoke-ASH -Config`, which also honor
+  `ASH_CONFIG` now, and for `run_ash_scan(mode=container)` called with no `config`,
+  which hands `ASH_CONFIG`'s file to the container when the source directory has no
+  config of its own, as a local scan uses it. In workspace mode, a `--workspace-config` policy outside the
+  workspace root was not passed to the container at all, so its ceiling and policy
+  scanners did not apply there; it is mounted and forwarded the same way, and a
+  policy file named inside the workspace's tree whose real path is outside it, such as
+  an `ash-workspace.yaml` that is a symbolic link out of the workspace, is refused with
+  exit 3. A
+  `config_base_gate` passed to `run_ash_scan` with container or nix mode is refused,
+  because the ASH those modes run would read the config without it. See
+  [Running a scan in a container](docs/content/docs/cli-reference.md#running-a-scan-in-a-container).
+- **Container mode refuses a mounted path that `--mount` cannot carry.** A comma, a
+  double quote, a carriage return or a line feed in the source or output directory, the
+  config file or a file it extends, or the workspace policy now refuses the run with
+  exit 3 before anything is built. `--mount` reads its value as comma-separated
+  fields, so such a character was read as part of the mount options.
+  The same holds for `./ash` and `Invoke-ASH`.
+- **A container scan refused for its inputs keeps the previous run's output.** A
+  `--config` that could not be handed to the container, or a path `--mount` cannot
+  carry, refused the scan with exit 3 only after the previous run's results and reports
+  had been cleared from the output directory. The inputs are now checked first.
+- **`Invoke-ASH` refuses by throwing with `$LASTEXITCODE` set to 3, and passes each path
+  as written.** Its refusals wrote their message with `Write-Error` and then ran
+  `exit 3`. Under `$ErrorActionPreference = 'Stop'` (every `pwsh` step on GitHub
+  Actions) the `Write-Error` ended the script with exit 1 first, and in a script that
+  dot-sources `utils/ash_helpers.ps1` the `exit` ended that whole script before it
+  could handle the refusal. Every refusal now sets `$LASTEXITCODE` (3, or 1 when no OCI
+  runner is found) and throws; nothing in the helpers calls `exit`, so a caller can
+  catch the error and go on, and a `-NoExit` session stays open. Any other error
+  `Invoke-ASH` raises leaves `$LASTEXITCODE` non-zero too. Uncaught, `pwsh -File`
+  exits 1, as PowerShell does for any uncaught error, so a CI step that needs exit 3
+  wraps the call: `try { Invoke-ASH ... } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }`,
+  and on GitHub Actions runs with `shell: pwsh -File {0}`, since the built-in
+  `shell: pwsh` reports every non-zero exit as 1 (the CLI reference gives the full
+  step). This repository's run-scan-test action does.
+  It refuses a non-root build when it runs as root (`id -u` is 0) without
+  `-ContainerUID`, or with `-ContainerUID 0` or `-ContainerGID 0`, exit 3, naming
+  `-BuildTarget ci`; a `-ContainerUID` or `-ContainerGID` that is not a number, exit 3;
+  and a `-Config` outside the source directory with an `extends` entry, exit 3, since
+  it mounts such a config without the files it extends. The build and run commands it hands to
+  `Invoke-Expression` had the source, output and config paths, the image name and the
+  other values spliced into the string, which PowerShell parses. They are now passed
+  by name, so each reaches the runner as written, `$(...)` included.
+- **`./ash` mounts the directory you named, or stops.** A `--source-dir` it could not
+  enter (one that does not exist) left the working directory in its place, and that
+  was mounted and scanned; it now exits 1, as `ash --source-dir` does, and so does an
+  `--output-dir` it cannot create. It also exits 1, before building, for a `non-root`
+  build whose UID or GID would be 0 and for a `--container-uid` or `--container-gid`
+  that is not a number. A config, source or output path starting with `-` is
+  no longer read as options by `dirname`, `basename`, `readlink`, `cd` or `mkdir`, which
+  resolved it to the wrong file or to none.
+- **The container image no longer has directories every user can write.** `/deps`,
+  the grype database cache and the offline semgrep and opengrep rule caches under it
+  were mode 777, and `/.ash/bin`, first on `PATH`, was `chmod -R 777`. They are
+  root-owned and writable by root only. The grype database
+  cache is owned by the user the image runs as (root in `ci`, the unprivileged user in
+  `non-root`), because its update writes it at scan time; in an offline image, which never
+  updates it, it stays root's. A `non-root` image started under another UID than it
+  was built with can therefore no longer update grype's database, and grype reports
+  ERROR, failing the scan, where it used to write the shared cache. `/src` and `/out` stay
+  writable by every user in the `ci` stage, now with the sticky bit. Files an
+  installer left writable by every user elsewhere in the image (uv's lock files at 666,
+  some gems' files under `/var/lib/gems` at 777) lose group and other write too. See
+  [Who can write to the image's directories](docs/content/docs/building-your-own-image.md#who-can-write-to-the-images-directories).
+- **`--log-level` is passed to the scan inside the container.** It was dropped; only
+  the levels the host also expresses as `--debug`, `--verbose` or `--simple` got
+  through, so `--log-level ERROR`, `QUIET` or `TRACE` left the inner scan at INFO.
 - **`--ignore-suppressions` lifts `ignore_paths` for every scanner.** With the
   flag, the files under an ignore path are converted and read by every scanner,
   and their findings are reported. Before, the flag lifted ignore paths only in
   the results: a scanner that reads the whole directory, such as bandit, reported
   those findings, while a scanner ASH hands a file list, such as detect-secrets,
   never read the files, so the verdict on the same file depended on the scanner.
-  Container mode now passes the flag to the scan inside the container. A scanner
+  Container mode now passes the flag to the scan inside the container, which
+  applies the suppressions; before, suppressed findings stayed out of the reports
+  and out of the exit code the host computes from them. A scanner
   from a plugin module is passed an empty `global_ignore_paths` under the flag.
   Findings located in ASH's own output directory, outside its `converted` work
   directory, stay out of the results with the flag, as they do without it;
@@ -269,10 +821,11 @@
   and `sha256`, the AWS reporters' destinations and credentials, and the GitLab
   SAST reporter's `exclude_suppressed`. Left at its default, each still scans.
 
-- **A config file inside the scanned tree can no longer choose where ASH installs
-  a tool from, what it imports, or what it hands a scanner as its own
-  configuration.** It applies to a discovered `.ash/.ash.yaml`, a `--config`
-  inside the tree, an `extends` base, or `ASH_CONFIG`:
+- **A repository-written config file can no longer choose where ASH installs a
+  tool from, what it imports, or what it hands a scanner as its own
+  configuration.** It applies to a discovered `.ash/.ash.yaml`, a `--config` path,
+  an `extends` base, or `ASH_CONFIG`, when the file is repository-written (defined
+  below):
   - `tool_version` (bandit, checkov, semgrep, ferret-scan, the jupyter converter)
     must be a PEP 440 version specifier set such as `>=1.2,<2`, from any source.
     Any other value is replaced by the default, with a warning naming the key.
@@ -289,11 +842,12 @@
     value. To pin a version for a scan, set it with `--config-overrides` or in
     the operator's `--config`.
   - `ash_plugin_modules` entries such a file adds are imported only when they name
-    an installed module outside the tree. `--ash-plugin-modules`,
-    `--config-overrides` and a config file outside the tree are unaffected.
+    an installed module in a location that is not repository-written.
+    `--ash-plugin-modules`, `--config-overrides` and a config file that is not
+    repository-written are unaffected.
   - checkov's and ferret-scan's `config_file`, the `.checkov.yaml` and `ferret.yaml`
     files they find by name, and detect-secrets plugins and filters that name a
-    file are passed to the tool only when the file is outside the scanned tree.
+    file are passed to the tool by the rule below.
     checkov and ferret-scan now run from the filesystem root, because each reads
     its config file from its working directory itself, and ferret-scan always
     gets a `--config`; the paths in their findings are unchanged.
@@ -301,8 +855,8 @@
     scanned repository, either of which could remove findings from the report. It
     gets an explicit `--ignorefile` and `--secret-config`: the
     `scanners.trivy-repo.options.ignore_file` / `secret_config_file` options, or
-    `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`, when that file is outside the scanned
-    tree, otherwise one that sets nothing. A repository that relied on either file
+    `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`, by the rule below, otherwise one that
+    sets nothing. A repository that relied on either file
     now sees those findings, with a warning naming the file. Under `--sandbox`, an
     operator file outside the system paths also has to be listed in
     `sandbox.extra_read_paths`.
@@ -456,10 +1010,32 @@
     `\` or NUL, or one that is `.` or `..`, is replaced by the option's default,
     with a warning naming the key.
 
+  For these checks and the sandbox grants alike, a file is repository-written when it
+  is inside any git checkout, by its own path or its resolved path, or inside the
+  source directory when that is outside a checkout. "The scanned tree" is narrower:
+  the source directory, or the outermost git checkout holding it. A tool config or
+  ignore file a setting names (checkov's and ferret-scan's `config_file`,
+  detect-secrets `file://` plugins and filters, trivy-repo's `ignore_file` and
+  `secret_config_file`, `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`) is judged by
+  who named it. One the operator named, with `--config-overrides`, in a config file
+  outside the scanned tree, or through `TRIVY_IGNOREFILE` or `TRIVY_SECRET_CONFIG`,
+  is passed unless it is inside the scanned tree or an MCP client delivered it, so
+  one kept in an ops repository works. One a config inside the scanned tree names
+  has to be outside every git checkout as well. When the operator's config file extends one
+  inside the tree, only the paths the operator's file writes itself count as the
+  operator's. An MCP client's `config_overrides`, and a session profile its
+  `select_profile` patch changed, are the client's, not the operator's. A
+  virtualenv inside a git checkout counts as
+  inside it for `ash_plugin_modules`, and the warning names the module's location
+  and the checkout. A file a setting names is judged by the path as written, by the
+  file it resolves to, and by every symlink resolving it follows, so a symlink the
+  scanned repository planted counts as inside the tree wherever it points, and so
+  does a path of the operator's that leads through one.
+
   Under the MCP server, a config a client delivered is limited the same way, and a
   file any MCP client delivered (under the MCP workspace root, except the profile
-  files the server writes in each session's `config/` directory) counts as inside
-  the scanned tree for these checks, as
+  files the server writes in each session's `config/` directory) counts as
+  repository-written for these checks, as
   does a config path a client names outside the directories
   `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. So does a `--config` or `ASH_CONFIG`
   naming a file under the MCP workspace root on the CLI, while scanning any
@@ -467,7 +1043,8 @@
   `ASH_CONFIG`: the built-in defaults are the trusted config instead. Such a file
   is also checked against that policy as a delivered config is, so on the CLI one
   that changes a denied field, such as `fail_on_findings`, stops the run with
-  exit 3. The workspace tools' `config_overrides` are checked against the session config's
+  exit 3. A detect-secrets baseline a client delivered, named or found by name, is
+  not read. The workspace tools' `config_overrides` are checked against the session config's
   `runtime_overrides` allowlist, as `select_profile`'s `patch_ops` and
   `override_yaml` are, and are refused while runtime overrides are off (the
   default). Each override is checked by the key it names, so one whose value the
@@ -522,14 +1099,96 @@
 
 - **The Jupyter converter runs nbconvert outside the scanned tree, with an exporter
   ASH chooses.** nbconvert runs in a directory that holds only a copy of the
-  notebook, so files in the scanned tree are not on its import path and its
-  `jupyter_nbconvert_config` files are not read from there. The exporter is
+  notebook, so files in the scanned tree are not on its import path (nbconvert puts
+  its working directory first on `sys.path`). The exporter is
   `python` for a Python notebook (or one that names no language) and `script`
   otherwise, and `language_info.nbconvert_exporter` is removed from the copy, so the
   notebook's metadata does not choose the exporter class. A Python notebook whose
   metadata named no exporter used to go through nbconvert's generic script template;
   it now goes through the Python exporter, which adds `# In[ ]:` cell markers to the
-  converted file.
+  converted file. Running outside the tree also keeps nbconvert from using templates
+  found there (`extra_template_basedirs` defaults to its working directory). The copy
+  is named `notebook.ipynb`, because nbconvert expands its notebook argument as a glob
+  pattern and formats its output name with `str.format`, so notebooks named
+  `[x].ipynb` or `{a,b}.ipynb` convert. The converted file is named after the
+  original notebook, and a non-Python notebook's keeps the extension nbconvert gives
+  it, such as `.r`. `language_info.file_extension` is kept in the copy only when it
+  is a plain extension. When uv cannot run nbconvert, ASH runs `jupyter-nbconvert` by
+  the absolute path it found for it. uv reporting that it cannot resolve nbconvert,
+  as when offline with nbconvert not in its cache, counts as uv not running it.
+
+- **A notebook or archive a converter could not convert counts as incomplete
+  conversion.** A notebook nbconvert exits non-zero on, times out on or writes no
+  output for, and an archive that cannot be extracted, are each recorded under
+  `converter_results.<name>.failed_inputs` in `ash_aggregated_results.json` with the
+  reason. With `fail_on_incomplete_scanners` on (the default) the scan exits 1
+  naming the converter and the files, as it does for a converter that crashed. A
+  `.gz` that is a single compressed file, such as `data.json.gz`, is decompressed
+  and scanned, and is a failed input only when it cannot be decompressed. The
+  progress line and the convert-complete event say how many
+  files could not be converted. `ash merge` combines every shard's converter row
+  (failures, failed and refused inputs, missing tools), and workspace mode applies
+  the same converter check to each project, which gains `incomplete_converters`.
+
+- **cfn-nag is given its staged template copy under a fixed name**: `template.json`
+  for a `.json` template, `template.yml` for `.yml`, and `template.yaml` otherwise,
+  so the `cfn_nag_scan` command line is the same whatever the template is called,
+  including on Windows, where `cfn_nag_scan` is a `.bat` wrapper. Findings name the
+  template itself.
+
+- **ASH refuses an output directory reached through a symlink, whatever the sandbox
+  mode.** Before a scan, ASH clears the `analysis`, `reports`, `scanners` and
+  `converted` directories under the output directory, writes its logs and results
+  there, and a sandbox mounts it. The scan stops, before anything is written, when
+  any of these is a symlink or a directory junction (detected on every supported
+  Python version): the output directory itself; a directory inside the scanned tree
+  on the way to it, however either path is spelled, or an in-tree output directory
+  whose real path is outside the tree; one of those four directories; or a file ASH
+  writes there by a fixed name (`ash.log`, `ash.log.jsonl`,
+  `ash_aggregated_results.json`, `ash-ignore-report.txt`,
+  `ash-scan-set-files-list.txt`). In workspace mode a link at `projects/` or
+  `.workspace-spool` stops the whole run, and a link at a project's
+  `projects/<key>`, or in that project's own output tree, fails that project with
+  the reason. The error names the link and says to pass `--output-dir`, and the exit
+  code is 3, the same whichever check refuses it: container mode's own rule, the
+  general check, or the log file's open. This holds in local, container, nix,
+  workspace and MCP scans, and `ash report` and `ash merge` refuse the same links
+  below the current directory, also with exit 3. An MCP scan whose
+  `.ash` or `.ash/ash_output` is a link is refused up front with `error_type`
+  `output_dir_not_permitted`; a link at a working directory or a fixed-name file
+  fails the scan with `ASH exited with code 3:`, the reason and a remedy for the MCP
+  caller. ASH opens the logs, the scan-set lists, the workspace results and the
+  reports it writes in place without following a link at their names. Links above
+  an output directory outside the scanned tree, such as `/tmp` on macOS, are
+  allowed.
+
+- **ASH does not start tools from its working directory or from the directory it
+  scans.** Tool lookup searches anchored PATH entries (absolute, with a drive on
+  Windows) and ASH's own bin directories only, and a program the operating system
+  would start from the working directory, or a path like `./tool`, is refused and
+  reported as a command that could not start. While a scan runs, a tool inside the
+  scanned directory is refused too, however its path is spelled, and the next copy on
+  PATH is used: under `uv run ash scan .` (which puts the repository's `.venv/bin`
+  first on PATH) or `npm run` (`node_modules/.bin`), a project-installed scanner is
+  skipped. With no other copy the scanner is MISSING, and its row's new
+  `missing_reason` and the incomplete-scan message name the in-tree path. The YAML
+  reporter and `ash report --format yaml` print `missing_reason` on every scanner row,
+  `null` where it does not apply. Programs ASH and its scanners start get a PATH
+  without the scanned directory's entries, unless in-tree tools are allowed, so a
+  `#!/usr/bin/env node` or a binstub cannot reach them either; that includes the shell
+  nix mode starts, where the inner scan is the running ASH's own interpreter, started
+  by absolute path. To run in-tree tools, pass `--allow-in-tree-tools` (also the
+  `allow_in_tree_tools` key of `--cli-json-input`) or set `ASH_ALLOW_IN_TREE_TOOLS` to
+  `1`, `true`, `yes` or `on`; each one is then logged by path. That covers the
+  programs the scanner sandbox starts (`bwrap`, `firejail`, `readlink`, `true`) too. A
+  repository's config cannot set it, and `ash mcp` never honors it, so install
+  scanners outside the repository for MCP use. Tools on anchored PATH entries are
+  found by the path the entry gives: system package managers, Homebrew, nix profiles,
+  uv and pipx shims, asdf and mise shims, conda, and on Windows Program Files,
+  `%LOCALAPPDATA%`, scoop and Chocolatey, with `.exe`, `.cmd` and `.bat` names. git
+  (for `--changed-files-only` and MCP source delivery), the Jupyter converter's direct
+  `jupyter-nbconvert`, the `node` cdk-nag's jsii runtime starts, and the sandbox's own
+  programs are run by absolute path.
 
 - **`ash dependencies install --tool` selects the archive converter as `archive`.**
   Every plugin is now listed and selected by its config key. The archive converter
@@ -538,6 +1197,32 @@
   they had. The old name `ArchiveConverter` is deprecated: it still selects the
   archive converter, with the same result and exit code, and prints a warning to
   stderr naming `archive`.
+
+- **Plugin install commands start in an empty directory.** `ash dependencies install`
+  takes the current directory as the source tree, and it used to run every plugin's
+  install commands there, so a package manager read the repository's settings: npm a
+  project `.npmrc`, `gem install -g` the Gemfile, Bundler `.bundle/config`, and
+  `python -m pip` or a `python -c` script a `pip/` or `automated_security_helper/`
+  package. Each command now starts in a new empty directory that is removed when it
+  ends. Your own settings, in your home directory or set globally, still apply.
+  - For plugin authors: an install command, from `get_installation_commands`,
+    `custom_install_commands` or `uv_tool_install_commands`, can no longer rely on
+    starting in the current directory. Name files by absolute path; a relative path,
+    or an `npm install` into the repository's `node_modules`, now refers to the empty
+    directory.
+  - A command that starts ASH's own interpreter with `-m` or `-c` also gets `-P` on
+    Python 3.11 and later. The detect-secrets worker starts the same way, in an
+    empty directory under its work directory, instead of in the scanner's results
+    directory.
+  - A uv command other than `uv tool` or `uvx` also gets `UV_NO_PROJECT=1` and
+    `UV_PYTHON` set to ASH's interpreter, because uv looks for a project and a
+    `.venv` in every parent directory too. A command that names `--project`,
+    `--python`, `-p` or `--system` keeps its own choice, and so does a `UV_PYTHON` or
+    `UV_SYSTEM_PYTHON` you set.
+  - `ASH_BIN_PATH` is made absolute where ASH reads it, so a relative value names
+    the same directory for every command. An empty value now counts as unset; it
+    used to mean the current directory. `--bin-path` shows its default as
+    `~/.ash/bin`.
 
 - **grype, opengrep, syft and trivy are bumped to v0.120.1, v1.30.2, v1.54.1 and
   v0.75.0** (from v0.111.0, v1.15.1, v1.42.4 and v0.69.3), with every archive and
@@ -667,13 +1352,9 @@
   affected are the ones where it mattered most: a container or air-gapped host that
   can run one scanner out of ten was reporting success for scanning almost nothing.
 
-  **What this does not reach.** The gate selects on scanner status, so it covers a
-  failure only once that failure has reached the status. A tool that exits non-zero
-  and writes an empty report is still graded `PASSED` from its zero findings, and
-  this default is the same exit code on, off or unset for that case — the empty
-  results branch in `base/scanner_plugin.py` returns a successful empty report
-  without consulting the exit code. That is a separate defect, not fixed here, and
-  turning this default on should not be read as having fixed it.
+  The gate selects on scanner status, so it covers a failure once that failure has
+  reached the status. A tool that exits with a code its scanner does not accept now
+  does: see the entry below on rejected exit codes.
 
   To keep the previous exit codes, set `fail_on_incomplete_scanners: false` or pass
   `--no-fail-on-incomplete-scanners`. Prefer `--exclude-scanners` for a tool you do
@@ -703,6 +1384,76 @@
 
   `--no-fail-on-incomplete-scanners`, or `fail_on_incomplete_scanners: false`, turns
   off all of them together.
+
+- **A scanner whose tool exits with a code it does not accept is `ERROR`, whatever
+  its results file holds.** Each scanner accepts the exit codes its tool uses for a
+  completed run (0, and the code some tools use for "findings found"). A tool that
+  fails can still leave a results file: semgrep exits 7 and writes SARIF holding only
+  error notifications when it cannot read its rules, and grype exits 1 and writes a
+  zero-byte report when it cannot load its database. That file was read and graded,
+  so both were `PASSED` with no findings and the scan exited 0, even with
+  `--fail-on-findings` and the completeness gate on. The results file of such a run
+  is no longer graded; the row is `ERROR`, keeps the exit code, and its error names the
+  code, the accepted set and the tool's stderr, and quotes the error-level
+  notifications the results file holds (semgrep reports an unreadable rule file only
+  there) or names the files the tool wrote. Each target is judged by its own
+  run's exit code, and its row reports that code: a target the scanner returns from
+  before its tool runs (an empty converted tree, missing dependencies, or a target
+  the sandbox refused) reports 0, where it had reported the previous target's code,
+  and cfn-nag's and npm-audit's invocations record the largest code of that target's
+  runs alone. The scanner's row in `scanner_results`, which stands for all its
+  targets, now carries a code too, where it was always 0: the largest code among
+  its `ERROR` targets, else the largest of any target. A tool a signal ended is recorded as `128 + N`, as a shell
+  reports it; its absolute value had put SIGHUP, SIGINT and SIGQUIT inside common
+  success sets. A run ASH itself failed to carry out (an error in its own runner,
+  not the tool's) is recorded as 127, like a tool that could not start, where it had
+  been 1, which most scanners accept. The accepted codes per scanner, with their sources, are in
+  [A Scanner Is ERROR With an Exit Code It Does Not Accept](docs/content/docs/troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+
+  The same rule now holds for the scanners that run their tool outside the template:
+  trivy-repo, syft, ferret-scan and snyk-code. trivy-repo and syft accept only 0, where
+  they accepted 0 and 1: neither tool has a "findings found" code, and 1 is how both
+  report an error. As a result, an `exit-code` setting in the config file
+  `TRIVY_CONFIG` names, or in `TRIVY_EXIT_CODE`, turns a trivy-repo run with findings
+  into `ERROR`, since that exit cannot be told apart from trivy's own error exit; leave
+  it unset. A `trivy.yaml` in the scanned directory is not read. snyk-code, which raised on every non-zero code, now accepts 1 ("issues
+  found"), so a snyk run with findings reports them instead of failing, and its row
+  and invocation keep the 1, which snyk-code used to reset to 0. ferret-scan's 3,
+  which it exits with under `fail_on_incomplete` when a file could not be fully
+  scanned, still reports the partial findings, and now counts the target as failed,
+  so the row is `ERROR` and the completeness gate fails the scan, where the run had
+  been graded like a complete one.
+
+  More shapes that read as a clean scan are `ERROR` now, even with an accepted exit
+  code. An empty results file (or JSON `null`) and SARIF with no run were graded
+  `PASSED` with no findings; bandit, checkov and semgrep write one run even when
+  there is nothing to scan (measured), and grype's and opengrep's SARIF writers
+  always add one. A results file the template reads as JSON but not as SARIF was
+  returned as it was and graded `PASSED` with no findings; a scanner that overrides
+  `scan()` could return its tool's JSON the same way (ferret-scan and syft do when it
+  does not parse). A result with no `status`, `severity_counts` or `findings` is no
+  longer graded, nor is a result whose `status` is not `passed`, `completed`,
+  `success` or `ok` (it used to take exactly `failed` to make the row `ERROR`), nor
+  a result of a type the executor does not read (a list, a string or a number from
+  a `scan()` override). The no-run check reads the report as the tool wrote it, so
+  grype's run-less SARIF is `ERROR` too; grype's scanner used to add an empty run
+  first. A results file whose SARIF ASH's schema rejects is affected too: its
+  findings were dropped silently, and the scanner is now `ERROR` and says so.
+
+  A scanner whose tool reports that its content database does not exist (grype's
+  `database does not exist`, trivy with no `VulnerabilityDB`, an offline rules
+  directory with no rules files) is `ERROR` too, under `content_db_staleness: fail`
+  and `warn` alike. Measured: grype with an empty cache was `PASSED` with 0 findings,
+  and with `--allow-stale-content-db` the scan exited 0. `warn` relaxes the age bound
+  for a database that exists; it no longer makes a missing one acceptable. A
+  trivy-repo scan whose `scanners` list names scanners but not `vuln` reads no
+  trivy-db, so it is no longer held to that database's age or existence; an empty
+  list leaves the choice to trivy, whose default includes `vuln`, and is held.
+
+  **A scan that exited 0 can now exit 1.** That is a scanner whose tool was failing
+  all along. With `fail_on_incomplete_scanners: false` the `ERROR` row does not fail
+  the scan and the exit code comes from the findings alone, so such a scan still
+  exits 0; that is what turning the gate off means.
 
 - **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
   its input.** The flag selected on scanner status, and a scanner that failed on
@@ -880,8 +1631,84 @@
   were the file's contents. It now prints `Invalid configuration: could not parse
   <path>: <error>` and exits 3, the code for an invalid configuration and the one it
   already used for a file that parses but does not validate. With no configuration
-  file at all it still prints the defaults. `ash scan` is unchanged: it still falls
-  back to the defaults and records a warning.
+  file at all it still prints the defaults. A named file that does not exist, and
+  a discovered source discovery cannot read, now exit 3 too (they exited 1, the
+  latter with a traceback, as `ash plugin list` did). `ash scan` now refuses such
+  a file the same way; see the next entry. `ash config get` also takes
+  `--config`/`-c` and reads `ASH_CONFIG`, as `ash scan` does, so
+  `ash config get --config <missing>` exits 3 as `ash scan --config <missing>`
+  does. It used to reject the option (exit 2, `No such option`) although the CLI
+  reference showed it, and it printed the discovered file even when `ASH_CONFIG`
+  named another one. The positional path still works and wins over
+  `ASH_CONFIG`; a positional path and a different `--config` on one command line
+  exit 2. `ash config validate` and `ash config lint` also exit 3, not 1, for a
+  file that cannot be loaded at all (missing, a directory, unreadable, not UTF-8,
+  not valid YAML, JSON or TOML, or using a YAML alias) and when discovery refuses
+  a source; 1 still means a file that loads has problems. They, and
+  `ash config update`, read the file as a scan does, so a FIFO at the config name
+  is refused at once instead of blocking the command.
+
+- **A config file that cannot be loaded stops the scan with exit 3 instead of
+  being replaced by the default configuration.** A file named by `--config`,
+  `ASH_CONFIG`, `run_ash_scan(config=...)` or an MCP `config_path` that does not
+  exist, an empty `--config ""`, and a named or discovered file that is not valid
+  YAML or JSON, is not UTF-8, cannot be read, or is a dangling symbolic link (for
+  example `.ash/.ash.yaml` linked to a file that is not checked out) used to be
+  logged and scanned with the defaults: no suppressions, no ignore paths,
+  `fail_on_findings` on and the sandbox off, and the scan reported completed.
+  `ASH_CONFIG` naming an unparseable file crashed with a traceback (exit 1). Each
+  now exits 3 before any scanner runs, with a message naming the file, as a TOML
+  syntax error and a schema error already did. A `pyproject.toml` that cannot be
+  read is refused when it would be the source used. The defaults apply only when
+  there is no config file at all; an empty `ASH_CONFIG` counts as unset. A config
+  file is now opened without blocking and read only when it is a regular file, up
+  to 1 MiB, so a FIFO or a device at a config name is refused at once instead of
+  stalling the scan or exhausting memory, and a JSON config with a UTF-8 byte order
+  mark is read as YAML and TOML already were. **YAML aliases (`*name`) are refused
+  in every YAML ASH reads as configuration** (config files, `extends` bases,
+  workspace policy files, MCP `--profile` files and `select_profile`'s
+  `override_yaml`): a few hundred bytes of nested aliases expanded to gigabytes when
+  the config was written into the results or returned by MCP `get_config`. The
+  refusal names the alias and its line; an anchor nothing refers to still parses.
+  Discovery tells a `pyproject.toml`
+  that is not a regular file by its type and does not open it, and no config file
+  is opened in a way that could make a tty the controlling terminal. Under the MCP
+  server, a config source found in the scanned directory that is a symbolic link
+  out of the session's config roots (a `pyproject.toml`, a config file or a linked
+  `.ash/`) is refused before discovery opens it, by `scan_directory` before a scan
+  starts and by the scan's own discovery, with the same response whether the
+  target is missing, unreadable or readable; discovery used to open it, so a
+  missing or unreadable target refused the scan and a readable one did not. A
+  config name ASH cannot look for (one inside an `.ash/` directory that cannot be
+  searched) is refused too; it used to count as no config, and the scan ran with
+  the defaults. The same refusal applies to `ash report`, `ash plugin list` and `ash dependencies install`
+  (each exits 3), to workspace mode (planning, `--dry-run` included, and execution;
+  `--config` is now passed to planning and must name an existing file even when
+  every project has its own config; the workspace execution settings read from the
+  workspace root's config no longer fall back to their defaults), and to the MCP
+  server, where `scan_directory` refuses the file (and an empty `config_path`)
+  before starting a scan, including one that parses and does not validate (it
+  used to start a scan that then failed), and `get_config` returns an error instead of the default
+  configuration, also with `raw` and when discovery itself refuses; `raw` now
+  parses a `.json` file as JSON, as a scan does, where it used to parse it as
+  YAML (a tab-indented file failed, and `1e3` came back as a string). A config
+  source that discovery found and ignored is now also reported as a
+  `config_warning` in the scan's results and summary, since its settings are not
+  applied. **A CI job that set `ASH_CONFIG` to a file it only sometimes writes now
+  fails when the file is absent; unset the variable instead.** `ash config wizard`
+  on a file it cannot load (or a link to nothing) exits 3 and leaves it alone; it
+  used to start from the defaults and write them over the file. A results file
+  that records no configuration (`"ash_config": null`) now loads with none,
+  instead of with the defaults or the file `ASH_CONFIG` names in the process
+  re-rendering it; the CloudWatch Logs and S3 payloads then carry
+  `"ash_config": null`, and a recorded configuration with no settings set is sent
+  as `{}`, never as the defaults. `ash merge` refuses a shard whose results record
+  no configuration (exit 1), since the merged verdict and suppressions are read
+  from it. The per-scanner severity threshold in reports and summary tables is
+  read from the recorded configuration only; with none recorded, or one that
+  cannot be read, it is the built-in threshold and its source is shown as
+  `unavailable` (workspace results show `MEDIUM (unavailable)` where they showed
+  `MEDIUM (global)`), never the threshold of the file `ASH_CONFIG` names.
 
 - **A `**` at either end of a multi-segment `ignore_paths` or `suppressions` pattern
   now takes effect.** The matcher anchored the first and last segments of a pattern
@@ -1018,6 +1845,23 @@
   path.
 
 ### Breaking changes
+
+- **A config that sets S3, CloudWatch Logs, Security Hub or Bedrock summary
+  reporter options but not `enabled` stops uploading** until `enabled: true` is
+  set in the operator's config, or with `--config-overrides` such as
+  `reporters.s3.enabled=true`, because these reporters are now disabled by default
+  (see Behavior changes).
+- **A container scan that runs as root builds the root image only when asked.**
+  `ash --mode container`, `ash build-image`, `./ash` and `Invoke-ASH` build the
+  `non-root` stage by default, CI or not, and refuse that build before it starts when
+  its user would get UID 0 or GID 0, which is what a job running as root gives it
+  (AWS CodeBuild, container-based GitLab and Jenkins jobs). The refusal exits 3 from all
+  three entry points and names the opt-in: `--build-target ci` (`-BuildTarget ci` for
+  `Invoke-ASH`), the stage that runs as root. Another `--container-uid` and
+  `--container-gid` work only when the output directory is writable by that UID. In AWS
+  CodeBuild:
+  `ash --mode container --build-target ci`. An unprivileged user, such as a
+  GitHub-hosted runner's, builds `non-root` as before.
 
 - **A relative path in the operator's settings is taken from where it was set,
   not from the source directory being scanned.** In a config file outside the tree (`--config`,
@@ -1238,6 +2082,26 @@
   (descriptor `ASH-CONTENT-DB-STALE`) on the scanner's invocation in `ash.sarif`, and
   the `content_databases` list in `ash.flat.json`. The CLI flag wins over the config in
   both directions; an MCP runtime patch cannot change it.
+
+  **Which database is checked.** ASH resolves each tool's cache directory the way the
+  tool does on the host: `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR`, else
+  `$XDG_CACHE_HOME` when it is an absolute path (trivy reads it only on Linux, and
+  uses `$TMPDIR/trivy` for a relative one), else `~/.cache` on Linux,
+  `~/Library/Caches` on macOS and the local application-data directory on Windows
+  (its `cache` subdirectory for grype). In every run, sandboxed or not, it names that one directory
+  to the scan, to the age check and to the database update it runs before a
+  sandboxed online scan, so all three read the same database. The age check and the update run from a directory
+  outside the scanned tree with an empty config file ASH ships, so a `trivy.yaml` or
+  grype config in the scanned repository cannot point them at another database. The
+  scan gets the directory as `GRYPE_DB_CACHE_DIR` or `--cache-dir`, which beat a
+  config file, so a `db.cache-dir` in a grype config is not used, and ASH logs a
+  warning naming the file; set `GRYPE_DB_CACHE_DIR` to move the database. A
+  `cache.dir` in a `trivy.yaml` is overridden the same way, without a warning; set
+  `TRIVY_CACHE_DIR`.
+  trivy-repo keeps its scan cache in memory (`--cache-backend=memory`) in every run,
+  so a scan that does not update the database itself (offline, or sandboxed) also
+  works from a cache it may only read, such as one shared between jobs or baked into
+  an image.
 
 - **A rule's CVSS base score is now authoritative over a scanner's SARIF `level`,
   for every scanner, and this changes gate outcomes with nothing to opt into.**
@@ -1469,6 +2333,111 @@
     either; `enabled: true`, and removing `enabled`, are still refused there.
 
 ### Fixes
+
+- **A scanner the run does not select is not resolved against the package index.**
+  The scan phase builds every registered scanner to learn its name, and bandit,
+  checkov and semgrep ran `uv tool run --from <spec> <tool> --version` while being
+  built, so `ash scan --scanners detect-secrets` online had uv resolve three scanners
+  it never ran, and an excluded scanner was resolved too. Those version probes now
+  wait until a scanner is selected and run just before its dependency check, so a
+  selected scanner's version still reaches its report. A scanner built outside a scan
+  (`ash dependencies`, the MCP server) probes as before.
+- **Two offline scans overlapping in one process both stay offline, and the process
+  is online again after them.** An offline scan set `ASH_OFFLINE=YES` and put back the
+  value it had seen when it ended. With two overlapping (two MCP sessions, or two
+  `run_ash_scan(offline=True)` threads), the first to end put back "unset" while the
+  other was still running, so the rest of that scan ran online: secret verification
+  permitted, none of the offline tool variables on its spawns, trivy's Terraform checks
+  on, npm-audit auditing against the registry. The last to end put back "YES", so every
+  later scan in the process ran offline. Offline scans now hold the variable, and the
+  last one to end restores what the process started with.
+
+- **A profile's own `runtime_overrides.denied_paths` no longer drops the shipped
+  denials that trust depends on.** A list set in a profile replaced the default list
+  whole, so an operator who added one entry let MCP clients turn on detect-secrets
+  verification (the client's override is then replayed as the operator's setting, and
+  a candidate secret found in the project was sent to its issuer), import a plugin or
+  filter from a file, switch off the scanner sandbox, or load `ash_plugin_modules`.
+  Those entries (`ALWAYS_DENIED_PATHS` in `config/ash_config.py`) are now added to any
+  list, so a profile can add denials but not remove them. A root-pointer replace is
+  now always refused, even with an empty list, since it writes every one of them.
+  The reporters that send results off the host are in that set as whole sections
+  (`/reporters/s3/**`, `/reporters/aws-security-hub/**`, `/reporters/cloudwatch-logs/**`
+  and `/reporters/bedrock-summary-reporter/**`), so a client cannot turn one on or
+  choose where it sends, whatever a profile's list says; the default list now holds
+  all four whole. So are the scanners that send data off the host:
+  `/scanners/snyk-code/**` (uploads the source), `/scanners/npm-audit/**` and
+  `/scanners/trivy-repo/**` (dependency lists), `/scanners/detect-secrets/**`
+  (candidate secrets, when verifying) and `/scanners/semgrep/**` and
+  `/scanners/opengrep/**` (usage metrics). A client can no longer turn one of them
+  on or off or change any of its options; an operator's own configuration and scans
+  are unchanged.
+
+- **snyk-code on a tree with no file Snyk supports is SKIPPED, not ERROR.**
+  `snyk code test` exits 3 when the target holds no file it reads ("no supported
+  projects detected"), for example a Terraform-only tree. scan() raised on every
+  exit code but 0, so snyk-code was recorded ERROR and the default completeness gate
+  failed the scan. Exit 3 now records that nothing was evaluated, which is SKIPPED;
+  exit 2 is still ERROR. The plugin README and `snyk-plugin.md` also say what offline
+  mode does: snyk-code is MISSING, the scan exits 1, and `--exclude-scanners
+  snyk-code` leaves it out.
+
+- **Every built-in plugin group registers, whichever ASH module a process imports
+  first.** Importing the results model loads the built-in plugins, and those import
+  core modules back. When one of those core modules was the first ASH module
+  imported, it was still empty when its plugins imported it, and the whole group was
+  dropped for the rest of the process. Measured over the package's 211 modules, seven
+  orders lost a group: `from automated_security_helper.interactions.run_ash_scan
+  import run_ash_scan` as a script's first import ran scans with no reporters (0 of
+  15), and `utils.suppression_matcher` first lost every group. `load_internal_plugins`
+  now imports a failed group again once that first import has finished; a group that
+  fails for another reason, such as a missing optional dependency, still fails and is
+  still reported MISSING.
+
+- **A scanner that turns out MISSING while it runs stays MISSING.** A scanner whose
+  scan finds a dependency unavailable (its `scan()` returns False, or its sandbox
+  cannot be set up) is recorded MISSING per target. Consolidating the results then
+  rebuilt its `scanner_results` row with `dependencies_satisfied: true`, and every
+  later reader, the exit-code gate included, takes that row first. So when another
+  of its targets evaluated nothing, the scanner was reported SKIPPED, which the
+  completeness gate lets through. The consolidated row now says
+  `dependencies_satisfied: false` for a MISSING scanner, in
+  `ash_aggregated_results.json` and the S3 and CloudWatch payloads, and `ash.flat.json`
+  says `dependencies_missing: true`.
+
+- **An excluded scanner's results row says it was excluded.** Consolidating the
+  results rebuilt each `scanner_results` row from the unified metrics alone, so every
+  field they do not compute was dropped: a scanner left out by `--exclude-scanners`,
+  `--scanners` or a disabled config was reported `excluded: false`, the same as a
+  scanner that ran with nothing to scan, and `exit_code` and any extra field were
+  lost. The row is now built from the existing one with only the status, counts and
+  duration replaced, so an excluded scanner says `excluded: true` in
+  `ash_aggregated_results.json` and the S3 and CloudWatch payloads.
+
+- **Offline mode turns off the scanner tools' own update, version and telemetry
+  checks.** Measured with a refusing proxy and empty tool caches, an `--offline` scan
+  still contacted check.trivy.dev (trivy's version check; `--skip-check-update` only
+  skips the checks bundle), semgrep.dev (semgrep's version check, in `semgrep scan` and
+  in the `semgrep --version` probe), pypi.org (checkov's update check, which runs on
+  every checkov command) and registry.npmjs.org (npm's update notifier, with
+  `--offline`). Offline, every process ASH starts now gets the variables that turn
+  those checks off, and the syft and grype settings that look things up over the
+  network, trivy's version check and telemetry included whatever `disable_telemetry`
+  says (offline npm-audit now starts no npm at all; see Behavior changes). On a Go
+  module,
+  offline syft no longer runs the Go toolchain on PATH (`golang.use-packages-lib`
+  was on by default), and the toolchain grype runs gets `GOPROXY=off` and
+  `GOTOOLCHAIN=local`, so neither can download modules or a toolchain. See
+  [What offline mode turns off](docs/content/docs/advanced-usage.md#what-offline-mode-turns-off).
+
+- **detect-secrets finds its baseline in the source directory.** A relative
+  `scanners.detect-secrets.options.baseline_file`, and the default
+  `.ash/.secrets.baseline` and `.secrets.baseline`, were looked up from ASH's working
+  directory, although the option's description says the source directory. So
+  `ash --source-dir repo` run from elsewhere missed the repository's baseline, and
+  used one in the working directory if there was one. They are now taken from the
+  source directory. A baseline that is not a regular file is skipped with a
+  warning.
 
 - Scanners and the other tools ASH starts get an empty standard input. They used to
   inherit ASH's own: under `ash mcp` over stdio that is the client's message stream,
@@ -1827,6 +2796,13 @@
   `finch`, `nerdctl` and `podman` on PATH, as `./ash` falls back when `OCI_RUNNER`
   is empty.
 
+- **The container image installs cfn-nag's gems from the committed `Gemfile.lock`.**
+  The Dockerfile copied only `automated_security_helper/assets/Gemfile`, so every build
+  resolved cfn-nag's dependencies again and could install gem versions the lockfile does
+  not list. It now copies the lockfile beside the Gemfile and runs Bundler with
+  `BUNDLE_FROZEN=true`, so a build installs exactly the locked gems and fails when the
+  Gemfile and the lockfile disagree.
+
 ### Reporting changes
 
 - **Reports now carry the age of every content database a scan used.** Additive:
@@ -1865,6 +2841,108 @@
     `warning`/`informational`. The actionable counts do not move here because those
     15 were already suppressed; on a tree where they are not, the scanner's
     high-severity count drops by however many of its rules raised.
+
+- **No secret value a finding exposes reaches a report.** Masking used to cover
+  one field: the message of a bandit B105, B106 or B107 finding. The same values
+  were written in plain text to the SARIF snippets (`region.snippet`,
+  `contextRegion.snippet`), the flat JSON and CSV `code_snippet` and `raw_data`,
+  GitLab SAST `details`, YAML, the markdown summary, the Bedrock summary and
+  `ash_aggregated_results.json`, and a non-secret finding's context could hold a
+  secret from a neighboring line. The results are now masked once, after the
+  scanners' results are merged and before any reporter runs, by location (every
+  snippet line at a line a secret finding reports) and by value (each value a
+  secret finding's message quotes, wherever it recurs). Snippets without a secret
+  are unchanged. The B105-B107 message is now masked in every output, not only the
+  flat model's `description`. Secret findings include semgrep's and opengrep's
+  `generic.secrets.*` rules, recognized by the CWE-798, CWE-259 or CWE-321 tag their
+  rules carry or by the `secrets` segment in their id. See "Secret values in reports" in
+  docs/content/docs/output-formats.md.
+
+- **Stored results are masked when they are read back.** `ash report`,
+  `ash scan --use-existing`, `ash merge`, the MCP tools that read an existing
+  `ash_aggregated_results.json`, the findings browser and a workspace's unified
+  reports now mask secret values as the file is loaded, so a results file written
+  without masking (by an earlier ASH or another producer) no longer passes its
+  values on to the reports and responses rendered from it. `ash merge` masks the
+  merged results against every shard's secret findings before it writes them.
+
+- **Secret masking misses fixed.**
+  - A form feed, vertical tab, NEL, U+2028 or U+2029 in a snippet shifted every
+    later line number, so the secret line was written in clear while a
+    neighboring line was masked. Lines are now counted at `\n`, `\r\n` and `\r`
+    only, and a snippet holding one of the other characters, or a lone `\r`, in a
+    file with a secret finding is masked whole.
+  - A private key reported on its BEGIN line (detect-secrets) is masked through
+    its END line in every snippet.
+  - A value holding its own quote character (`'ab'cd...'`) is masked to the last
+    quote of the message, not the first.
+  - A secret finding's own snippets are masked whole, whatever line numbers the
+    tool's context carries.
+  - A raw value holding a `*` is no longer mistaken for one the scanner already
+    masked.
+  - A percent-encoded URI (`my%20app/settings.py`) matches the same file written
+    plainly.
+  - A line with an unterminated quote and many backslashes no longer stalls the
+    masking (and an MCP server with it), and a secret region ending at line
+    3,000,000 no longer allocates one entry per line.
+
+- **The findings browser masks the source lines it reads from disk.** For a
+  finding with no snippet, `ash inspect findings` shows the five lines either side
+  of it from the file, which were not masked: a secret on a neighboring line was
+  shown in clear. Those lines are now masked as the results' snippets are.
+
+- **checkov's and cfn-nag's hard-coded credential rules are secret findings.**
+  checkov's `CKV_AWS_41`, `CKV_AWS_45`, `CKV_AWS_46` and the other "hard-coded"
+  checks, and cfn-nag's "... must not be a plaintext string" password rules, were
+  not recognized, so the credentials checkov puts in every snippet of the
+  resource (a Lambda's environment, say) stayed in clear in every finding about
+  it. They are now recognized by what their message or rule description says.
+
+- **Ordinary words a password check quotes are no longer masked everywhere.**
+  A B105 on `FIELD = "password"` masked every `password` in the results: rule
+  descriptions, tags, other findings' messages (which changed their IDs) and SBOM
+  entries. A value is now masked beyond its own finding only when it looks like a
+  secret (eight characters or more, not letters alone, not a template
+  placeholder, not repetitive), and only in what findings report, never in rule
+  metadata, tags or identifiers. A secret finding that quotes no value (semgrep's
+  and opengrep's `generic.secrets.*`) gives the value its own region matched.
+  Any value, whatever it looks like, is also masked in every finding whose region
+  or context covers a line the secret finding reports, so a second scanner's
+  finding on that line no longer quotes it. A short or all-letter secret is still
+  left as it is in findings on other lines and in other files.
+
+- **A value one project or shard exposes is masked in the others' findings.**
+  Each workspace project and each `ash merge` shard was masked against its own
+  secret findings only, so a value project A's B105 reported stayed in clear where
+  project B's finding showed it, in B's files and in the unified results and
+  reports. A workspace scan now masks every project's `projects/<key>/` results
+  and reports, and the unified results, again with the values every project
+  exposed. Results files now record, under `secret_value_shapes`, the visible
+  prefix, visible suffix and length of each value they masked, never the value,
+  and `ash merge` masks every token of those shapes in every shard. Masking by
+  shape can also mask a different token with the same visible characters and
+  length.
+
+- **ferret-scan's bundled profiles no longer turn on `show_match`.** The
+  `comprehensive`, `json-api`, `debug`, `person-name`, `enhanced-metadata` and
+  `social-media` profiles in the bundled `ferret-config.yaml` set it to `true`, so
+  choosing one of them wrote every matched value into ferret-scan's own results
+  file. All of them now set it to `false`. With `show_match` turned on explicitly,
+  the matched values are still masked in ASH's reports (see above); they remain in
+  ferret-scan's own output under `scanners/ferret-scan/`.
+
+- **The Bedrock summary reporter recognizes secrets-scanner findings.** Its
+  `exclude_scanner_types` compared a `scanner_type` property that no scanner
+  writes, and its default `SECRET` did not match the `SECRETS` tool type, so
+  detect-secrets and ferret-scan findings were sent to the model as ordinary
+  findings. A finding's type is now its scanner's tool type, looked up from the
+  scanner's name, or a `tool_type::` tag in either spelling, and `SECRET` and
+  `SECRETS` both match. With the secrets type excluded, findings from rules that
+  detect a credential or key are counted too, such as semgrep's and opengrep's
+  `generic.secrets.*` (CWE-798). A finding whose scanner type cannot be determined
+  is sent without its snippets. With `include_code_snippets` off (the default),
+  `reports/ash.bedrock.summary.md` no longer carries snippets in its "Raw JSON"
+  blocks.
 
 ### Configuration sources
 

@@ -7,11 +7,13 @@ from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     confined_report_path,
+    off_host_reporter_refused,
     reporter_companion_file_names,
     reporter_file_name,
     reporter_file_names,
     reporter_format_name,
     reporter_matches_requested_formats,
+    warn_off_host_section_without_enabled,
 )
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -24,6 +26,7 @@ from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
     refuse_report_names_outside,
 )
+from automated_security_helper.utils.secret_masking import mask_secrets_in_results
 
 #: The reporter for this format is switched off in configuration. This is the
 #: common case and the one an operator can fix in a line: ``yaml`` and ``spdx``
@@ -211,6 +214,18 @@ def _log_unsatisfied_output_formats(unsatisfied: Dict[str, str]) -> None:
         )
 
 
+def _disable(plugin_instance) -> bool:
+    """Set a reporter's config to disabled; False when its config cannot be set."""
+    config = getattr(plugin_instance, "config", None)
+    if config is None or not hasattr(config, "enabled"):
+        return False
+    try:
+        config.enabled = False
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return getattr(config, "enabled", None) is False
+
+
 class ReportPhase(EnginePhase):
     """Implementation of the Report phase."""
 
@@ -237,6 +252,11 @@ class ReportPhase(EnginePhase):
         ASH_LOGGER.debug("Entering: ReportPhase._execute_phase()")
         ensure_reports_dir(report_dir)
 
+        # Every reporter reads the same results, so the secret values findings
+        # expose are masked once, here, before any of them runs; see
+        # utils/secret_masking.py.
+        mask_secrets_in_results(aggregated_results)
+
         # Initialize progress
         self.initialize_progress("Starting report generation...")
 
@@ -262,6 +282,13 @@ class ReportPhase(EnginePhase):
 
         # Create all reporter instances upfront, then filter via the shared helper.
         all_reporter_instances = []
+        # A reporter that sends findings off the host and whose config section
+        # does not set enabled: true is disabled, whatever its own default: the
+        # shared filter below then drops it as disabled, before any dependency
+        # check, and a requested format it would have satisfied is reported as
+        # disabled, not missing. Only an instance whose config cannot be set
+        # disabled is held back here instead.
+        off_host_refused = set()
         for plugin_class in reporter_classes:
             try:
                 plugin_config = (
@@ -277,18 +304,28 @@ class ReportPhase(EnginePhase):
                     config=plugin_config,
                 )
                 all_reporter_instances.append(plugin_instance)
+                if off_host_reporter_refused(plugin_class, plugin_config):
+                    # A section with options and no enabled is a config written
+                    # for when these reporters shipped on: name it, if the run
+                    # would otherwise use the reporter.
+                    if reporter_matches_requested_formats(
+                        plugin_instance, output_formats
+                    ):
+                        warn_off_host_section_without_enabled(
+                            plugin_class, plugin_config
+                        )
+                    if not _disable(plugin_instance):
+                        off_host_refused.add(id(plugin_instance))
             except Exception as e:
                 ASH_LOGGER.error(
                     f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
                 )
 
-        base_filtered = self.filter_enabled_plugins(
-            plugin_instances=all_reporter_instances,
-            plugin_context=self.plugin_context,
-            python_only=python_based_plugins_only,
-        )
-
-        # Apply the format filter on top of the base enabled/deps/python check.
+        # The format filter runs first, then the enabled/python/dependency check
+        # on what is left. A reporter's dependency check can contact a remote
+        # service (Security Hub calls DescribeHub, the other AWS reporters STS),
+        # so it runs only for the reporters this run will use: `-f sarif` checks
+        # nothing else.
         #
         # Matched on the reporter's configured name, not on its extension. The
         # extension is a filename suffix and the requested formats are format
@@ -296,32 +333,42 @@ class ReportPhase(EnginePhase):
         # strings coincide and silently skipped the rest. See
         # reporter_matches_requested_formats for the full account and for why
         # renaming the extensions instead was rejected.
-        enabled_reporters: List[object] = []
-        enabled_reporter_names = []
-        for plugin_instance in base_filtered:
-            display_name = plugin_instance.__class__.__name__
-            if hasattr(plugin_instance, "config") and hasattr(
-                plugin_instance.config, "name"
-            ):
-                display_name = plugin_instance.config.name
+        def _display_name(plugin_instance) -> str:
+            name = getattr(getattr(plugin_instance, "config", None), "name", None)
+            return name or plugin_instance.__class__.__name__
 
+        requested_reporters: List[object] = []
+        for plugin_instance in all_reporter_instances:
+            if id(plugin_instance) in off_host_refused:
+                ASH_LOGGER.debug(
+                    f"Reporter {_display_name(plugin_instance)} sends findings off "
+                    "the host and its config does not enable it, skipping"
+                )
+                continue
             if not reporter_matches_requested_formats(plugin_instance, output_formats):
                 ASH_LOGGER.debug(
-                    f"Reporter {display_name} format "
+                    f"Reporter {_display_name(plugin_instance)} format "
                     f"'{reporter_format_name(plugin_instance)}' not in requested "
                     f"formats {output_formats}, skipping"
                 )
                 continue
+            requested_reporters.append(plugin_instance)
 
-            enabled_reporters.append(plugin_instance)
-            enabled_reporter_names.append(display_name)
+        enabled_reporters: List[object] = self.filter_enabled_plugins(
+            plugin_instances=requested_reporters,
+            plugin_context=self.plugin_context,
+            python_only=python_based_plugins_only,
+        )
+        enabled_reporter_names = [
+            _display_name(plugin_instance) for plugin_instance in enabled_reporters
+        ]
 
         ASH_LOGGER.verbose(
             f"Prepared {len(enabled_reporter_names)} enabled reporters: {enabled_reporter_names}"
         )
 
         # Account for every requested format that will produce nothing. Checked
-        # against all_reporter_instances rather than base_filtered so that a
+        # against all_reporter_instances rather than enabled_reporters so that a
         # reporter which exists but is disabled is reported as disabled instead of
         # as nonexistent.
         _log_unsatisfied_output_formats(

@@ -2,8 +2,9 @@
 
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, ClassVar, List, Literal, Set
 
 from pydantic import Field, model_validator
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
@@ -25,6 +26,11 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDX
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
+from automated_security_helper.config.path_trust import (
+    cwd_outside_scanned_tree,
+    honored_path,
+)
+from automated_security_helper.utils.link_exclusions import syft_excludes
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
@@ -41,7 +47,7 @@ class SyftScannerConfigOptions(ScannerOptionsBase):
     exclude: Annotated[
         List[IgnorePathWithReason],
         Field(
-            description='Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying "dir1" will skip any directory or subdirectory named "dir1". Ignored with -f. Can be specified multiple times.',
+            description='Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with "./", "*/" or "**/", and syft fails the scan on any other. "*" does not match across "/" and "**" does: "./dir1/**" skips the top-level "dir1", and "**/dir1/**" skips every directory named "dir1".',
         ),
     ] = []
     additional_outputs: Annotated[
@@ -89,6 +95,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    # syft exits 0 for a completed run; cmd/syft/main.go runs clio, whose Run exits 1
+    # on any error, and syft installs no other exit-code mapping. An SBOM has no
+    # "findings found" code.
+    success_exit_codes: ClassVar[Set[int]] = {0}
 
     # Env vars to layer onto the subprocess. Populated in model_post_init when
     # offline mode is active. Kept local to the scanner instance so concurrent
@@ -149,19 +160,34 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # .syft.yaml for the probe to find. It is the same defect grype hit -- and
         # fixing grype while leaving the identical probe here is how the bug comes
         # back the first time anyone adds a syft config.
+        #
+        # A config inside the scanned tree is never passed (see
+        # config/path_trust.py), and syft runs from outside the tree so it does not
+        # find one there itself (_working_directory): a .syft.yaml can turn on remote
+        # license and package lookups, which contacted proxy.golang.org and
+        # github.com in an offline scan, and change what is reported.
         source_dir = Path(self.context.source_dir)
-        for conf_path in possible_config_paths:
+        for index, conf_path in enumerate(possible_config_paths):
             candidate = Path(conf_path)
             if not candidate.is_absolute():
                 candidate = source_dir / candidate
-            if candidate.exists():
-                self.args.extra_args.append(
-                    ToolExtraArg(
-                        key="--config",
-                        value=candidate.resolve().as_posix(),
-                    )
-                )
-                break
+            if not candidate.exists():
+                continue
+            configured = index == 0 and self.config.options.config_file is not None
+            honored = honored_path(
+                conf_path,
+                source_dir=source_dir,
+                config=getattr(self.context, "config", None),
+                key="scanners.syft.options.config_file"
+                if configured
+                else f"syft config file {conf_path}",
+            )
+            if honored is None:
+                continue
+            self.args.extra_args.append(
+                ToolExtraArg(key="--config", value=honored.as_posix())
+            )
+            break
 
         for item in self.config.options.exclude:
             ASH_LOGGER.debug(
@@ -175,6 +201,19 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             )
 
         return super()._process_config_options()
+
+    def _working_directory(self, target: Path, results_dir: Path) -> Path:
+        """A working directory outside the scanned tree, online and offline.
+
+        syft reads ``.syft.yaml`` (and ``.syft/config.yaml``) from its working
+        directory. See _process_config_options for why that matters.
+        """
+        return cwd_outside_scanned_tree(
+            target,
+            results_dir=results_dir,
+            source_dir=self.context.source_dir,
+            config=getattr(self.context, "config", None),
+        )
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — SyftScanner overrides scan() directly; this is unreachable."""
@@ -202,6 +241,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Per target; see ScannerPluginBase.scan().
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -239,7 +280,12 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             return False
 
         try:
-            target_results_dir = Path(self.results_dir).joinpath(target_type)
+            # Absolute, because syft runs from outside the source directory
+            # (_working_directory), where a relative path names something else.
+            target = Path(os.path.abspath(target))
+            target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
+                target_type
+            )
             target_results_dir.mkdir(parents=True, exist_ok=True)
             results_file = target_results_dir.joinpath("syft.cdx.json")
             self.args = ToolArgs(
@@ -248,7 +294,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 scan_path_arg=None,
                 extra_args=[
                     ToolExtraArg(
-                        key="--base-path", value=self.context.source_dir.as_posix()
+                        key="--base-path",
+                        value=Path(os.path.abspath(self.context.source_dir)).as_posix(),
                     ),
                 ],
             )
@@ -262,6 +309,13 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 self.args.extra_args.append(
                     ToolExtraArg(key="--config", value=empty.as_posix())
                 )
+            # Each link leaving this target; syft follows none of them. Rebuilt
+            # with the arguments above for every target. See
+            # utils/link_exclusions.py.
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=pattern)
+                for pattern in syft_excludes(target)
+            )
             conf: SyftScannerConfig = self.config
             opts: SyftScannerConfigOptions = conf.options
             for out in opts.additional_outputs:
@@ -283,9 +337,10 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None
             )
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
+                cwd=self._working_directory(target, target_results_dir),
                 env=subprocess_env,
                 timeout=self._effective_scan_timeout(),
             )
@@ -294,6 +349,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 target=target,
                 target_type=target_type,
             )
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             syft_results = {}
             with open(results_file, mode="r", encoding="utf-8") as f:

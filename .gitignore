@@ -303,3 +303,9 @@ $RECYCLE.BIN/
 
 # Snyk Cache
 .dccache
+
+# Core dumps (core.<pid>) that a crashing process leaves in its working directory,
+# such as tests/integration/sandbox/test_landlock_timeout.py's SIGSEGV probe on a host
+# whose core_pattern is a bare "core". core.[0-9]* rather than core.*, which would
+# also hide a new core.py or core.json.
+core.[0-9]*

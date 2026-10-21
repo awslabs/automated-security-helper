@@ -121,6 +121,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.ash_workspace_config import (
     AshWorkspaceConfig,
     WorkspacePolicyConfig,
@@ -293,9 +294,10 @@ def normalise_scanner_name(name: str) -> str:
 def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object:
     """Parse the policy file at ``path``, refusing anything unreadable.
 
-    Uses ``yaml.safe_load`` rather than ``AshConfig``'s ``!ENV``-aware loader.
+    Uses ``load_config_yaml`` rather than ``AshConfig``'s ``!ENV``-aware loader.
     See "No ``!ENV`` substitution" in ``config/ash_workspace_config.py``: a
-    ceiling an environment variable can loosen is not a ceiling.
+    ceiling an environment variable can loosen is not a ceiling. YAML aliases are
+    refused, as in every ASH config file.
 
     A refusal names ``named``, the path the file was reached by. Without
     ``quote_values`` it says where the parser stopped but not the text there,
@@ -314,7 +316,7 @@ def _read_policy_document(path: Path, named: Path, quote_values: bool) -> object
     try:
         if path.suffix.lower() == ".json":
             return json.loads(raw)
-        return yaml.safe_load(raw)
+        return load_config_yaml(raw)
     except (yaml.YAMLError, json.JSONDecodeError) as exc:
         if quote_values:
             raise _refuse(f"{label} could not be parsed: {exc}") from exc
@@ -431,6 +433,30 @@ def discover_workspace_policy_file(root: PathLike) -> Path | None:
         )
 
     return Path(os.path.abspath(candidates[0]))
+
+
+def named_workspace_policy_path(
+    root: PathLike, explicit: PathLike | None = None
+) -> Path | None:
+    """The policy file's path as it was named, made absolute, with no link followed.
+
+    ``--workspace-config`` as given, or else the one candidate discovery finds in
+    *root* or ``root/.ash``. :func:`discover_workspace_policy_file` and
+    :func:`resolve_workspace_policy` return the resolved path, which is the file
+    read; container mode needs the name too, to refuse a policy named inside the
+    workspace's tree that is a link to a file outside it. Call it after
+    :func:`resolve_workspace_policy` has accepted the policy: with several
+    candidates this returns the first, and that call has already refused them.
+    """
+    if explicit is not None:
+        return Path(os.path.abspath(explicit))
+    directory = Path(root)
+    for parent in (directory, directory / _POLICY_SUBDIR):
+        for name in WORKSPACE_POLICY_FILE_NAMES:
+            candidate = parent / name
+            if candidate.is_file():
+                return Path(os.path.abspath(candidate))
+    return None
 
 
 def _refuse_project_config_as_policy(

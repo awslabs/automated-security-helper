@@ -1,8 +1,35 @@
 """Helper functions for ASH tests."""
 
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
+
+#: Set in the CI job that installs every scanner (sandbox-scanner-parity in
+#: ash-unified-ci.yml), so the tests that run a real scanner fail there when the
+#: tool is missing instead of skipping, as ASH_REQUIRE_SYMBOLS_EXTRA does for the
+#: symbol tests. Elsewhere a missing tool skips them.
+REQUIRE_REAL_SCANNERS = "ASH_REQUIRE_REAL_SCANNER_TESTS"
+
+
+def require_scanner_binary(name: str) -> str:
+    """The path of the scanner ``name`` on PATH; skip without it, or fail when required."""
+    import pytest
+
+    found = shutil.which(name)
+    if found:
+        return found
+    if os.environ.get(REQUIRE_REAL_SCANNERS, "").strip().upper() in (
+        "1",
+        "YES",
+        "TRUE",
+    ):
+        pytest.fail(
+            f"{REQUIRE_REAL_SCANNERS} is set but {name} is not on PATH. This test "
+            "must run in that CI job, not skip."
+        )
+    pytest.skip(f"needs a {name} binary on PATH")
+
 
 #: Root of the tests' own scratch area, inside the repository and gitignored.
 #:

@@ -228,7 +228,7 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. |
 | `allow_missing_projects` | boolean | `false` | Skip absent or unreadable project directories rather than refusing the workspace. |
 | `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides. |
-| `output_dir` | string \| null | `null` | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. |
+| `output_dir` | string \| null | `null` | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. Refused when it, a directory or file ASH writes in it, or a project's `projects/<key>` is a symlink. |
 | `scanners` | array \| null | `null` | Restrict every project to these scanner names. |
 | `excluded_scanners` | array \| null | `null` | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
@@ -251,9 +251,9 @@ Clone a repository into this session's workspace and make it the scan target.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `url` | string | *required* | Repository URL |
+| `url` | string | *required* | Repository URL: `https://`, `ssh://` or `user@host:path`, on a host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS` |
 | `ref` | string \| null | default branch | Branch, tag, or commit |
-| `ssh_key_id` | string \| null | none | Operator-registered key id for private repos |
+| `ssh_key_id` | string \| null | none | Must be omitted: the server registers no ssh keys |
 | `depth` | integer | `1` | Clone depth; `0` for a full clone |
 
 Refused while a scan of this session is running, because the clone would replace the tree and config files that scan is reading. The response is `success: false`, `error_type: SourceDeliveryBusyError`, and `error` set to `a scan of this session is running; deliver the source after it finishes`. Deliver the source again once `get_scan_progress` reports a terminal status.

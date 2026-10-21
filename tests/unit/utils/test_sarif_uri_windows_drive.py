@@ -75,7 +75,7 @@ on POSIX returns ``'/C:/proj/src/a.py'`` -- drive separator intact, the exact
 defect this module exists to correct. ``url2pathname`` resolves a URL written on
 *this* host, so being platform-specific is right for it and wrong here, where a
 Windows-shaped SARIF URI can arrive on a POSIX reader. Compare
-``cdk_nag_scanner._local_path_from_file_url``, which has the former contract and
+``ash_install._local_path_from_file_url``, which has the former contract and
 correctly uses ``url2pathname``.
 
 If the UNC case is ever revisited, assert the invariant rather than the rendering

@@ -247,9 +247,10 @@ variable "ash_scan_extra_args" {
   description = <<-EOT
     Extra arguments appended to the `ash scan` command line, split on whitespace.
 
-    `--changed-files-only` together with `--base-ref` is worth considering here:
-    it scales scan time with the size of the change rather than the size of the
-    repository, which is what makes the 900 second ceiling reachable.
+    Options the gate owns are refused, and so is anything that narrows what gets
+    scanned or what counts (refused: `--changed-files-only` and `--base-ref`
+    among them): the gate would then report a pass about less than the whole
+    tree. A refused option ends every pull request in outcome "error".
   EOT
   type        = string
   default     = ""
@@ -262,7 +263,7 @@ variable "ash_offline_mode" {
 }
 
 variable "base_config_ssm_parameter_name" {
-  description = "Contract name: AshBaseConfigYaml (indirect). SSM parameter the entrypoint reads to write .ash/.ash.yaml. Pass the ash-image-pipeline output."
+  description = "Contract name: AshBaseConfigYaml (indirect). SSM parameter the entrypoint reads to write .ash/.ash.yaml, which the gate passes to ash scan with --config. Without one the gate passes {} (ASH's defaults), so a pull request's own config is never read. Pass the ash-image-pipeline output."
   type        = string
   default     = null
 }
@@ -390,8 +391,9 @@ variable "scan_egress_cidr" {
     function may reach on TCP 443 once it is in a VPC; it is the security group's
     only egress rule.
 
-    The function calls CodeCommit (the API and git-codecommit) and Systems Manager
-    for its config parameter. The Lambda service, not the function's network
+    The function calls CodeCommit (the API and git-codecommit) and, when
+    base_config_ssm_parameter_name is set, Systems Manager for its config
+    parameter. The Lambda service, not the function's network
     interfaces, pulls the image and delivers its logs. With ash_offline_mode false
     the scanners also download rules and vulnerability databases from public hosts
     outside AWS. So: your VPC CIDR for an offline image with interface endpoints

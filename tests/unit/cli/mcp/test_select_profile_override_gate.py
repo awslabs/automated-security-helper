@@ -110,7 +110,7 @@ def _both_routes(
 
 
 # ---------------------------------------------------------------------------
-# The three sandbox fields
+# Every sandbox field
 # ---------------------------------------------------------------------------
 
 _SANDBOX_CASES = {
@@ -125,6 +125,14 @@ _SANDBOX_CASES = {
     "network_scanners": (
         {"op": "replace", "path": "/sandbox/network_scanners", "value": ["checkov"]},
         {"mode": "bwrap", "network_scanners": ["checkov"]},
+    ),
+    "read_path_scanners": (
+        {"op": "add", "path": "/sandbox/read_path_scanners/-", "value": "zizmor"},
+        {"mode": "bwrap", "read_path_scanners": ["zizmor"]},
+    ),
+    "env_scanners": (
+        {"op": "add", "path": "/sandbox/env_scanners/-", "value": "zizmor"},
+        {"mode": "bwrap", "env_scanners": ["zizmor"]},
     ),
 }
 
@@ -258,6 +266,13 @@ _SUPPRESS_ALL = {"path": "**", "reason": "silence everything"}
 
 # Keyed by the shipped denied_paths entry each case is refused under. The value
 # is the patch op and the top-level keys the override changes.
+
+_VERIFICATION_FILTER = {
+    "path": "detect_secrets.filters.common.is_ignored_due_to_verification_policies",
+    "min_level": 2,
+}
+_PLUGIN_FROM_A_FILE = {"path": "file:///opt/any/module.py"}
+
 _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
     "/fail_on_findings": (
         {"op": "replace", "path": "/fail_on_findings", "value": False},
@@ -270,6 +285,10 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
     "/content_db_staleness": (
         {"op": "replace", "path": "/content_db_staleness", "value": "warn"},
         {"content_db_staleness": "warn"},
+    ),
+    "/honor_ignore_files": (
+        {"op": "replace", "path": "/honor_ignore_files", "value": False},
+        {"honor_ignore_files": False},
     ),
     "/content_db_staleness_overrides": (
         {
@@ -363,18 +382,6 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
         },
         {"scanners": {"semgrep": {"options": {"exclude_rule": ["some.rule.id"]}}}},
     ),
-    "/scanners/detect-secrets/options/baseline_file": (
-        {
-            "op": "replace",
-            "path": "/scanners/detect-secrets/options/baseline_file",
-            "value": ".secrets.baseline",
-        },
-        {
-            "scanners": {
-                "detect-secrets": {"options": {"baseline_file": ".secrets.baseline"}}
-            }
-        },
-    ),
     "/reporters/bedrock-summary-reporter/options/aws_*": (
         {
             "op": "add",
@@ -408,6 +415,185 @@ _DENIED_CASES: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {
             }
         },
     ),
+    "/reporters/aws-security-hub/**": (
+        {
+            "op": "add",
+            "path": "/reporters/aws-security-hub",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"reporters": {"aws-security-hub": {"enabled": True, "options": {}}}},
+    ),
+    "/reporters/s3/**": (
+        {
+            "op": "add",
+            "path": "/reporters/s3",
+            "value": {"enabled": True, "options": {"bucket_name": "other-bucket"}},
+        },
+        {
+            "reporters": {
+                "s3": {"enabled": True, "options": {"bucket_name": "other-bucket"}}
+            }
+        },
+    ),
+    # Adding the section also writes its aws_* options, so the aws_* entry, listed
+    # first, is the one named; test_a_client_cannot_turn_on_an_off_host_reporter
+    # covers a write only the whole-section entry refuses.
+    "/reporters/bedrock-summary-reporter/**": (
+        {
+            "op": "add",
+            "path": "/reporters/bedrock-summary-reporter",
+            "value": {"enabled": True, "options": {"model_id": "other-model"}},
+        },
+        {
+            "reporters": {
+                "bedrock-summary-reporter": {
+                    "enabled": True,
+                    "options": {"model_id": "other-model"},
+                }
+            }
+        },
+    ),
+    # The scanners that send data off the host, each refused whole: an option the
+    # narrower detect-secrets entries leave open, metrics turned on, a scanner
+    # turned off, and an add-on scanner's section added.
+    "/scanners/detect-secrets/**": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/skip_generated_lockfiles",
+            "value": False,
+        },
+        {
+            "scanners": {
+                "detect-secrets": {"options": {"skip_generated_lockfiles": False}}
+            }
+        },
+    ),
+    "/scanners/npm-audit/**": (
+        {"op": "replace", "path": "/scanners/npm_audit/enabled", "value": False},
+        {"scanners": {"npm-audit": {"enabled": False}}},
+    ),
+    "/scanners/opengrep/**": (
+        {"op": "replace", "path": "/scanners/opengrep/options/metrics", "value": "on"},
+        {"scanners": {"opengrep": {"options": {"metrics": "on"}}}},
+    ),
+    "/scanners/semgrep/**": (
+        {"op": "replace", "path": "/scanners/semgrep/options/metrics", "value": "on"},
+        {"scanners": {"semgrep": {"options": {"metrics": "on"}}}},
+    ),
+    "/scanners/snyk-code/**": (
+        {
+            "op": "add",
+            "path": "/scanners/snyk-code",
+            "value": {"enabled": True, "options": {}},
+        },
+        {"scanners": {"snyk-code": {"enabled": True, "options": {}}}},
+    ),
+    "/scanners/trivy-repo/**": (
+        {
+            "op": "add",
+            "path": "/scanners/trivy-repo",
+            "value": {"enabled": True, "options": {"disable_telemetry": False}},
+        },
+        {
+            "scanners": {
+                "trivy-repo": {"enabled": True, "options": {"disable_telemetry": False}}
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/filters_used": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/scan_settings/filters_used",
+            "value": [_VERIFICATION_FILTER],
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"filters_used": [_VERIFICATION_FILTER]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/filters_used/**": (
+        {
+            "op": "add",
+            "path": "/scanners/detect_secrets/options/scan_settings/filters_used/-",
+            "value": _VERIFICATION_FILTER,
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"filters_used": [_VERIFICATION_FILTER]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/plugins_used": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/scan_settings/plugins_used",
+            "value": [_PLUGIN_FROM_A_FILE],
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"plugins_used": [_PLUGIN_FROM_A_FILE]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/scan_settings/plugins_used/**": (
+        {
+            "op": "add",
+            "path": "/scanners/detect_secrets/options/scan_settings/plugins_used/-",
+            "value": _PLUGIN_FROM_A_FILE,
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {
+                        "scan_settings": {"plugins_used": [_PLUGIN_FROM_A_FILE]}
+                    }
+                }
+            }
+        },
+    ),
+    "/scanners/detect-secrets/options/baseline_file": (
+        {
+            "op": "replace",
+            "path": "/scanners/detect_secrets/options/baseline_file",
+            "value": "/srv/shared/verifying.baseline",
+        },
+        {
+            "scanners": {
+                "detect-secrets": {
+                    "options": {"baseline_file": "/srv/shared/verifying.baseline"}
+                }
+            }
+        },
+    ),
+    **{
+        f"/converters/archive/options/{limit}": (
+            {
+                "op": "replace",
+                "path": f"/converters/archive/options/{limit}",
+                "value": 10**15,
+            },
+            {"converters": {"archive": {"options": {limit: 10**15}}}},
+        )
+        for limit in (
+            "max_members",
+            "max_member_bytes",
+            "max_total_bytes",
+            "max_compression_ratio",
+        )
+    },
 }
 
 
@@ -961,7 +1147,13 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     covering = next(
         (
             prefix
-            for prefix in ("/sandbox", "/ash_plugin_modules", "/global_settings/mcp")
+            for prefix in (
+                "/sandbox",
+                "/ash_plugin_modules",
+                "/global_settings/mcp",
+                "/scanners/detect-secrets/options/scan_settings/filters_used",
+                "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            )
             if entry.startswith(prefix)
         ),
         entry,
@@ -993,6 +1185,34 @@ def test_override_yaml_is_refused_by_every_shipped_denied_path(
     covering_override = first_denied_under(section) if plugin_section else covering
     assert f"entry {covering!r}" in patched["error"], patched["error"]
     assert f"entry {covering_override!r}" in overridden["error"], overridden["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
+@pytest.mark.parametrize(
+    "reporter",
+    ["aws-security-hub", "bedrock-summary-reporter", "cloudwatch-logs", "s3"],
+)
+def test_a_client_cannot_turn_on_an_off_host_reporter(
+    tmp_path: Path, reporter: str
+) -> None:
+    """The profile configures the reporter off; turning it on is refused on both
+    routes by the reporter's whole-section entry, which no profile can drop."""
+    document = _profile(allowed_paths=["/**"], denied_paths=[])
+    document["reporters"] = {reporter: {"enabled": False, "options": {}}}
+    _install(tmp_path, document)
+    restated = yaml.safe_load(yaml.safe_dump(document))
+    restated["reporters"][reporter]["enabled"] = True
+
+    patched, overridden = _both_routes(
+        {"op": "replace", "path": f"/reporters/{reporter}/enabled", "value": True},
+        yaml.safe_dump(restated),
+    )
+
+    entry = f"/reporters/{reporter}/**"
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert f"denied_paths entry {entry!r}" in result["error"], result["error"]
     _assert_unbound("patch")
     _assert_unbound("override")
 

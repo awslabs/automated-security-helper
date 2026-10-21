@@ -59,10 +59,9 @@ come apart: replacing ``Optional["AshConfig"]`` with ``Optional[Any]`` leaves
 checked too.
 
 *Asserting the type is not enough on its own.* ``validate_ash_config``
-(``asharp_model.py``) swallows every exception and falls back to
-``get_default_config()``, which also returns an ``AshConfig`` -- so under an
-``Optional[Any]`` annotation the deserialized value is still an ``AshConfig``.
-Measured, not assumed. The annotation check is what closes that hole; the type
+(``asharp_model.py``) passes every value other than None through
+``AshConfig.model_validate``, which returns an ``AshConfig`` -- so under an
+``Optional[Any]`` annotation the deserialized value is still an ``AshConfig``. The annotation check is what closes that hole; the type
 check is what catches the field or its validator being gutted.
 
 *The output is sentinel-bracketed.* Comparing the whole of stdout couples this

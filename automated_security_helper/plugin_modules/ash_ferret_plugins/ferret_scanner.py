@@ -40,8 +40,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -149,6 +151,37 @@ UNSUPPORTED_FERRET_OPTIONS = {
     "pre_commit_mode": "Pre-commit mode is not applicable in ASH integration. ASH manages output formatting and exit codes centrally. Use ASH's own pre-commit hook instead.",
     "list_profiles": "List-profiles mode only prints available profiles and exits; it produces no scan results. Run 'ferret-scan --list-profiles' directly.",
 }
+
+
+#: Characters ferret-scan's ``--exclude`` value cannot carry in a literal path: it is
+#: split on commas and its entries are glob patterns.
+_FERRET_EXCLUDE_UNSAFE = frozenset(",*?[]{}\\")
+
+
+def _link_exclude_patterns(target: Path) -> List[str]:
+    """``--exclude`` patterns for each link to a file whose target leaves ``target``.
+
+    ferret-scan walks the directory it is given. How it treats a link was not
+    measured (it is not installed where this was written), so every link to a file
+    whose target, every link resolved, leaves ``target`` is excluded: found by
+    ``file_links_leaving_tree``, which does not descend links to directories and
+    ignores ignore files, and passed as its path relative to ``target``, the form
+    the configured ``exclude_patterns`` take (``node_modules/**``).
+
+    Raises:
+        ScannerError: Naming the first such link whose path holds a comma or a glob
+            character, which the ``--exclude`` value cannot carry. ferret-scan is
+            then not run on ``target``, rather than read the file it points at.
+    """
+    links = file_links_leaving_tree(target)
+    for relative in links:
+        if any(character in relative for character in _FERRET_EXCLUDE_UNSAFE):
+            raise ScannerError(
+                f"Not running ferret-scan on {Path(target).as_posix()}: {relative!r}: "
+                f"{REASON_LINK_LEAVES_TREE}, and ferret-scan's --exclude cannot carry "
+                "its path, so ferret-scan might read the file it points at."
+            )
+    return links
 
 
 def parse_version(version_str: str) -> Tuple[int, ...]:
@@ -383,9 +416,9 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
             description="Pass '--fail-on-incomplete' so ferret-scan exits 3 when a file "
             "could not be fully scanned (coverage cut short by a timeout/budget, or the "
             "file could not be opened). Findings may be missing in that case. The plugin "
-            "still returns the (partial) SARIF; exit 3 is recorded as an unsuccessful, "
-            "incomplete invocation rather than a hard error. Off by default to match "
-            "ferret-scan, which otherwise only warns on stderr."
+            "still reports the (partial) findings, and counts the target as failed, so "
+            "the scanner's row is ERROR and the completeness gate fails the scan. Off by "
+            "default to match ferret-scan, which otherwise only warns on stderr."
         ),
     ] = False
 
@@ -838,9 +871,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         # Show match (tool-specific behavior option)
         if options.show_match:
             self._plugin_log(
-                "show_match is enabled — matched sensitive data (credit cards, SSNs, "
-                "API keys, etc.) will appear in SARIF output and log files. "
-                "Disable this option in production environments.",
+                "show_match is enabled: ferret-scan writes each matched value into "
+                "its own results file under scanners/ferret-scan/ and its log output. "
+                "ASH masks the values in its reports. Disable this option unless "
+                "that directory is protected.",
                 level=logging.WARNING,
             )
             self.args.extra_args.append(ToolExtraArg(key="--show-match", value=None))
@@ -1099,6 +1133,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Per target; see ScannerPluginBase.scan(). No target claim unless this run
+        # lost coverage (exit 3, below).
+        self.exit_code = 0
+        self.targets_attempted = None
+        self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or (target.is_dir() and not any(target.iterdir())):
             message = (
@@ -1143,6 +1182,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             for ignore_path in global_ignore_paths:
                 if hasattr(ignore_path, "path"):
                     exclude_patterns.append(str(ignore_path.path))
+            exclude_patterns.extend(_link_exclude_patterns(target))
 
             # Temporarily swap in the extended list for argument resolution
             original_patterns = self.config.options.exclude_patterns
@@ -1162,7 +1202,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             # Run ferret-scan with output to file
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 stdout_preference="write",
@@ -1173,11 +1213,17 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             self._post_scan(target=target, target_type=target_type)
+            # Exit 1 is ferret-scan's error code; see success_exit_codes.
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code(results_file)
 
             # --fail-on-incomplete makes ferret-scan exit 3 when coverage was cut short.
-            # The SARIF is still valid (partial); surface it as a warning so missing
-            # findings are not silent.
+            # The SARIF is still valid (partial) and is graded, but the target counts
+            # as failed, which the completeness gate reads: the row is ERROR with its
+            # findings, rather than PASSED over files that were not fully scanned.
             if self.exit_code == 3:
+                self.targets_attempted = 1
+                self.targets_failed = 1
                 self._plugin_log(
                     "ferret-scan reported incomplete coverage (exit 3, "
                     "--fail-on-incomplete): some files were not fully scanned and "

@@ -10,9 +10,20 @@ list under ``transient_settings``.
 Usage: ``python -m automated_security_helper.utils.detect_secrets_worker REQUEST OUTPUT``
 
 REQUEST is a JSON file with ``root`` (str), ``baseline`` (the parsed baseline document,
-or null), ``settings`` (the dict handed to ``transient_settings``) and ``paths`` (the
-absolute file names to scan). The file list goes in a file rather than on the command
-line because a large repository's list exceeds the Windows command-line limit.
+or null), ``settings`` (the dict handed to ``transient_settings``), ``paths`` (the
+absolute file names to scan) and ``verify`` (whether candidate secrets may be sent to
+their issuers; missing means no). The file list goes in a file rather than on the
+command line because a large repository's list exceeds the Windows command-line limit.
+
+Unless ``verify`` is true, every HTTP request made through ``requests`` fails before
+it is sent. The scanner already removes the verification filter from ``settings``
+when verification may not run; this also stops a filter or plugin that verifies under
+another name. Every detect-secrets plugin's ``verify()`` uses ``requests``, and
+detect-secrets reads a failed request as "unverified", so the secret is reported.
+The scanner also starts the worker with ``ASH_DETECT_SECRETS_REFUSE_HTTP=1`` in its
+environment, which this module reads when it runs as the worker or as a pool process:
+the processes of a ``spawn`` multiprocessing pool (macOS, Windows) import it again,
+as ``__mp_main__``, rather than inherit the worker's state, and refuse too.
 
 OUTPUT is written only on success, as a JSON list of ``[key, [secret, ...]]`` pairs in
 the collection's own key order, each secret in ``PotentialSecret.json()`` form. The key
@@ -26,13 +37,35 @@ so starting it does not load the plugin registry.
 
 import json
 import multiprocessing
+import os
 import sys
 from typing import Any, Dict, List
+
+#: Set to "1" in the worker's environment when requests are refused; see above.
+REFUSE_HTTP_ENV = "ASH_DETECT_SECRETS_REFUSE_HTTP"
+
+
+def refuse_http_requests() -> None:
+    """Make every request sent through ``requests`` fail with ConnectionError."""
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    def refuse(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        raise requests.exceptions.ConnectionError(
+            "secret verification is off for this scan, so no request is sent to "
+            f"{request.url}",
+            request=request,
+        )
+
+    setattr(HTTPAdapter, "send", refuse)
 
 
 def run(request: Dict[str, Any]) -> List[List[Any]]:
     from detect_secrets.core.secrets_collection import SecretsCollection
     from detect_secrets.settings import transient_settings
+
+    if request.get("verify") is not True:
+        refuse_http_requests()
 
     # scan_files uses a multiprocessing pool for two or more files. The scanner set
     # 'fork' on Linux before calling it in-process; the same applies here. Elsewhere
@@ -70,10 +103,18 @@ def main(argv: List[str]) -> int:
     with open(request_path, encoding="utf-8") as f:
         request = json.load(f)
     result = run(request)
-    with open(output_path, "w", encoding="utf-8") as f:
+    # Created, never opened: ASH removes the path before it starts the worker, so
+    # anything there now, a symlink included, was put there by something else.
+    with open(output_path, "x", encoding="utf-8") as f:
         json.dump(result, f)
     return 0
 
+
+# Only as the worker itself (``python -m``) or as a spawned pool process, which
+# imports the worker as ``__mp_main__``. ASH imports this module for REFUSE_HTTP_ENV,
+# and the variable must not turn off HTTP in ASH's own process.
+if __name__ in ("__main__", "__mp_main__") and os.environ.get(REFUSE_HTTP_ENV) == "1":
+    refuse_http_requests()
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

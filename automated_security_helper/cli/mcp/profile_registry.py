@@ -401,12 +401,26 @@ def materialize_session_config(
 
     from automated_security_helper.cli.mcp.sandbox import session_sandbox
 
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+    )
+
+    if session_id == UNIDENTIFIED_SESSION_ID:
+        raise RuntimeError(
+            "cannot materialize a session config: this caller has no session the "
+            "server issued, so it has no session workspace to hold one"
+        )
     sandbox = session_sandbox(session_id or DEFAULT_SESSION_ID)
     if sandbox.root is None:
         raise RuntimeError(
             "cannot materialize a session config: no MCP workspace root could "
             "be resolved. Set ASH_MCP_WORKSPACE_ROOT."
         )
+    from automated_security_helper.cli.mcp.session_paths import (
+        mark_session_workspace,
+    )
+
+    mark_session_workspace(sandbox.root)
     config_dir = sandbox.client_config_dir if client_patched else sandbox.config_dir
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / filename
@@ -540,6 +554,11 @@ def session_config_was_patched(config_path: Union[str, Path]) -> bool:
     named and as resolved, as that function is: a link to a patched profile
     counts, wherever the link is. The unit is the file: a profile any client
     patch touched is the client's as a whole.
+
+    Also True for a file a session's recorded binding names as its config when
+    that binding carries ``patch_ops`` or ``override_yaml``, wherever the file
+    is: a client's patch is in it, so a tool config path it names is not the
+    operator's (``config/path_trust.py``).
     """
     from automated_security_helper.cli.mcp.sandbox import (
         CLIENT_CONFIG_DIR_NAME,
@@ -548,14 +567,33 @@ def session_config_was_patched(config_path: Union[str, Path]) -> bool:
     )
 
     shared = shared_workspace_root()
-    if shared is None:
+    if shared is not None:
+        for candidate in (
+            Path(os.path.abspath(config_path)),
+            Path(config_path).resolve(),
+        ):
+            parts = _parts_below(candidate, shared)
+            if (
+                parts is not None
+                and len(parts) >= 3
+                and parts[1] == CLIENT_CONFIG_DIR_NAME
+            ):
+                return True
+    try:
+        target = Path(config_path).resolve()
+    except OSError:
         return False
-    for candidate in (
-        Path(os.path.abspath(config_path)),
-        Path(config_path).resolve(),
-    ):
-        parts = _parts_below(candidate, shared)
-        if parts is not None and len(parts) >= 3 and parts[1] == CLIENT_CONFIG_DIR_NAME:
+    with _session_lock:
+        states = list(_session_state.values())
+    for state in states:
+        if state.config_path is None:
+            continue
+        try:
+            if Path(state.config_path).resolve() != target:
+                continue
+        except OSError:
+            continue
+        if state.patch_ops is not None or state.override_yaml is not None:
             return True
     return False
 
@@ -648,8 +686,8 @@ def session_client_rules(
 def clear_session_state(session_id: Optional[str] = None) -> None:
     """Drop the SessionState for ``session_id`` (or every state if None).
 
-    Track 10.5 will hook this into ``on_disconnect``; for Track 10.3 it
-    exists so tests can scrub between cases.
+    ``sessions.end_session`` calls this when a session ends, so its bound
+    profile goes with its workspace; tests also use it to scrub between cases.
     """
     with _session_lock:
         if session_id is None:

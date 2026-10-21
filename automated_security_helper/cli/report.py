@@ -13,9 +13,11 @@ import typer
 # reasons about this exact import form.
 from rich import print, print_json  # noqa: A004
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
+    off_host_reporter_refused,
     reporter_companion_file_names,
 )
 from automated_security_helper.config.plugin_module_trust import (
@@ -30,8 +32,15 @@ from automated_security_helper.core.enums import AshLogLevel, ExportFormat
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.plugins.loader import (
+    PluginModuleError,
+    load_plugins,
+)
+from automated_security_helper.utils.log import escape_markup, get_logger
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 from automated_security_helper.utils.report_path_links import (
     refuse_linked_report_paths,
     refuse_report_names_outside,
@@ -162,6 +171,14 @@ def report_command(
         output_dir = Path.cwd().joinpath(".ash", "ash_output").as_posix()
     results_file = None
     output_dir_path = Path(output_dir)
+    # Reporters write into reports/ here without the scan's clean-up first, so a
+    # link at the output directory or reports/ is refused as a scan refuses it.
+    try:
+        refuse_linked_output_dir(Path.cwd(), output_dir_path)
+    except OutputDirLinkRefused as refusal:
+        print(f"[red]{escape_markup(str(refusal))}[/red]")
+        # 3, as a scan exits for the same refusal (OUTPUT_DIR_REFUSED_EXIT_CODE).
+        raise typer.Exit(3)
     results_file_paths = [
         output_dir_path.joinpath(".ash", "ash_output", "ash_aggregated_results.json"),
         output_dir_path.joinpath("ash_output", "ash_aggregated_results.json"),
@@ -194,7 +211,14 @@ def report_command(
 
     # Set the plugin context for the plugin manager
     ash_plugin_manager.set_context(plugin_context)
-    load_plugins(plugin_context=plugin_context)
+    try:
+        load_plugins(plugin_context=plugin_context)
+    except PluginModuleError as e:
+        # A plugin module outside the plugin namespace, refused before import, or
+        # a named module that does not import. Escaped: the message quotes the
+        # configured name, which may hold markup characters.
+        print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
+        raise typer.Exit(3)
 
     # Load the results file
     #
@@ -260,11 +284,25 @@ def report_command(
                 ASH_LOGGER.trace(e)
         raise typer.Exit(1)
 
+    # A reporter that sends findings off the host runs only when the operator's
+    # config enables it, as it would in a scan. Naming it with --format is not
+    # enough: it would send the stored findings with whatever credentials the
+    # host has.
+    plugin_config = ash_config.get_plugin_config(
+        plugin_type="reporter", plugin_name=report_format
+    )
+    if off_host_reporter_refused(reporter_class, plugin_config):
+        name = reporter_plugin.config.name
+        print(
+            f"[red]Error: reporter '{name}' sends findings off the host and is not "
+            "enabled in the configuration. Enable it in an operator config "
+            f"(reporters.{name}.enabled: true) or with --config-overrides "
+            f"reporters.{name}.enabled=true.[/red]"
+        )
+        raise typer.Exit(1)
+
     # Generate the report
     try:
-        plugin_config = ash_config.get_plugin_config(
-            plugin_type="reporter", plugin_name=report_format
-        )
         if plugin_config is not None and reporter_class is not None:
             # get_plugin_config returns the section as a plain dict. Assigning
             # that to reporter.config left a dict where every reporter reads

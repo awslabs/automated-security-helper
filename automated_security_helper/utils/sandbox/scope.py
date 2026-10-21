@@ -2,10 +2,13 @@
 
 The scanner executor enters :func:`sandbox_scope` around each ``scanner.scan()`` call.
 The scope lives in a context variable, so it is per thread: scanners run in parallel
-threads, each with its own policy, and spawns ASH makes outside a scanner (``git``,
-converters, the container runtime) see no scope and are left alone.
-:func:`prepare_spawn` is called by every spawn helper in ``utils/subprocess_utils.py``;
-it is the single place a command line is rewritten for a sandbox.
+threads, each with its own policy, and spawns ASH makes for itself (``git``, the
+container runtime) see no scope and are left alone. A converter's tool reads the
+scanned tree as a scanner's does, so the convert phase and the jupyter converter
+enter the same kind of scope around what a converter runs (:func:`converter_run_scope`,
+:func:`plugin_probe_scope`). :func:`prepare_spawn` is called by every spawn helper in
+``utils/subprocess_utils.py``; it is the single place a command line is rewritten for a
+sandbox.
 
 A scanner that starts a process from a thread it created itself would not inherit the
 scope. No builtin scanner does; ``tests/unit/utils/test_sandbox_choke_point.py`` keeps
@@ -33,6 +36,8 @@ from automated_security_helper.utils.sandbox.backends import (
 )
 from automated_security_helper.utils.sandbox.fs_guard import (
     register_writable_root,
+    release_with_holder,
+    release_writable_root,
     sweep_writable,
 )
 from automated_security_helper.utils.sandbox.policy import (
@@ -60,6 +65,12 @@ class SandboxScope:
     network_scanners: Optional[List[str]] = None
     extra_read_paths: List[str] = field(default_factory=list)
     network_limit: Optional[List[str]] = None
+    read_path_scanners: List[str] = field(default_factory=list)
+    env_scanners: List[str] = field(default_factory=list)
+    #: Spawns this scope refused (the backend could not plan them), and why the last
+    #: one was. A converter's row reads them: a refused spawn converted nothing.
+    refused_spawns: int = 0
+    last_refusal: Optional[str] = None
 
 
 @dataclass
@@ -72,6 +83,9 @@ class RefusingScope:
 
     scanner_name: str
     reason: str
+    #: Spawns refused under this scope; see ``SandboxScope.refused_spawns``.
+    refused_spawns: int = 0
+    last_refusal: Optional[str] = None
 
 
 _ACTIVE: contextvars.ContextVar["SandboxScope | RefusingScope | None"] = (
@@ -79,7 +93,10 @@ _ACTIVE: contextvars.ContextVar["SandboxScope | RefusingScope | None"] = (
 )
 
 _probe_lock = threading.Lock()
-_resolved: Dict[str, "SandboxBackend | SandboxUnavailable"] = {}
+# Keyed by mode and by the scanned-tree scope: which bwrap or firejail a probe finds
+# depends on the trees being scanned and the in-tree opt-in, so a scan of one tree
+# must not reuse a backend another scan's lookup chose.
+_resolved: Dict[Any, "SandboxBackend | SandboxUnavailable"] = {}
 
 
 def clear_backend_cache() -> None:
@@ -102,11 +119,14 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
     Probed once per process and mode, under a lock, because parallel scanner threads
     ask at the same moment and each probe starts a process.
     """
+    from automated_security_helper.utils.subprocess_utils import tree_scope_key
+
     mode_value = SandboxMode(mode).value
     if mode_value == SandboxMode.off.value:
         raise ValueError("resolve_backend called for sandbox mode 'off'")
+    cache_key = (mode_value, tree_scope_key())
     with _probe_lock:
-        cached = _resolved.get(mode_value)
+        cached = _resolved.get(cache_key)
         if cached is None:
             try:
                 if mode_value == SandboxMode.auto.value:
@@ -118,7 +138,7 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 )
             except SandboxUnavailable as e:
                 cached = e
-            _resolved[mode_value] = cached
+            _resolved[cache_key] = cached
     if isinstance(cached, SandboxUnavailable):
         raise cached
     return cached
@@ -174,6 +194,23 @@ def scanner_sandbox_scope(
         return None
 
     name = _plugin_name(scanner_plugin)
+    declared, declared_config = _declared_identity(scanner_plugin)
+    config = getattr(scanner_plugin, "config", None)
+    # A class (the phases pass one while constructing a plugin) has no config yet,
+    # so nothing has renamed it; only an instance's config can.
+    if declared is not None and (
+        declared != name
+        or (
+            declared_config is not None
+            and config is not None
+            and not isinstance(config, declared_config)
+        )
+    ):
+        raise SandboxUnavailable(
+            f"{name}: the config names this scanner {name!r}, but its own name is "
+            f"{declared!r}. Sandbox grants follow a scanner's own name, so a "
+            "scanner renamed by a config file is not run sandboxed."
+        )
     requirements = getattr(scanner_plugin, "sandbox_requirements", None)
     if not isinstance(requirements, SandboxRequirements):
         requirements = SandboxRequirements()
@@ -187,8 +224,8 @@ def scanner_sandbox_scope(
     refuse_symlinked_output_dir(Path(context.source_dir), Path(context.output_dir))
     _refuse_symlinked_results_dir(Path(context.output_dir), Path(results_dir))
     # Registered before the scanner runs anything, so even ASH's first write
-    # there (a worker's request file) is guarded.
-    register_writable_root(results_dir)
+    # there (a worker's request file) is guarded, and released with the scope.
+    results_root = register_writable_root(results_dir)
     network_scanners = getattr(settings, "network_scanners", None)
     if (
         requirements.network
@@ -200,9 +237,35 @@ def scanner_sandbox_scope(
             f"{name}'s settings ask for a network, and those settings can come from "
             "the scanned repository, so the sandbox does not grant it. To allow it, "
             f"add {name} to sandbox.network_scanners with --config-overrides or a "
-            "config file outside the scanned tree."
+            "config file outside every git checkout and the scanned directory."
         )
-    return SandboxScope(
+    read_path_scanners = list(getattr(settings, "read_path_scanners", []) or [])
+    env_scanners = list(getattr(settings, "env_scanners", []) or [])
+    for withheld, key in (
+        (
+            (requirements.read_paths or requirements.cache_paths)
+            and requirements.read_paths_require_grant
+            and name not in read_path_scanners,
+            "read_path_scanners",
+        ),
+        (
+            (requirements.env_prefixes or requirements.env_names)
+            and requirements.env_requires_grant
+            and name not in env_scanners,
+            "env_scanners",
+        ),
+    ):
+        if withheld:
+            ASH_LOGGER.warning(
+                f"{name}'s settings ask for "
+                f"{'host paths' if key == 'read_path_scanners' else 'environment variables'}"
+                " the default policy does not allow, and those settings can come "
+                "from the scanned repository, so the sandbox does not grant them. "
+                f"To allow them, add {name} to sandbox.{key} with "
+                "--config-overrides or a config file outside every git checkout "
+                "and the scanned directory."
+            )
+    scope = SandboxScope(
         backend=backend,
         scanner_name=name,
         requirements=requirements,
@@ -218,7 +281,12 @@ def scanner_sandbox_scope(
         network_limit=list(settings.network_limit)
         if settings.network_limit is not None
         else None,
+        read_path_scanners=read_path_scanners,
+        env_scanners=env_scanners,
     )
+    # Released when the scope is collected, or when the scan ends (run_roots).
+    release_with_holder(scope, results_root)
+    return scope
 
 
 @contextmanager
@@ -233,7 +301,55 @@ def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
 
     A scanner that cannot be sandboxed gets a refusing scope, so its probes fail
     rather than run unsandboxed, and it is recorded MISSING later with the reason.
+
+    A scanner that runs offline while ASH does not (its own ``options.offline:
+    true``) gets the offline tool variables on these probes as well, sandbox or not,
+    as its scan command does: ``semgrep --version`` checks semgrep.dev and
+    ``checkov --version`` pypi.org without them.
     """
+    from automated_security_helper.utils.offline_tool_env import offline_tool_scope
+
+    with offline_tool_scope(_probe_offline(plugin, context)):
+        with _sandboxed_probe_scope(plugin, context):
+            yield
+
+
+def _probe_offline(plugin: Any, context: Any) -> bool:
+    """Whether the scanner a probe scope covers runs offline by its own option.
+
+    An instance answers for itself (``_scanner_offline``). A class, probed before it
+    is constructed, has its option read from the run's config, the way ScanPhase
+    builds it. False when neither says so; ASH's own offline mode is read where the
+    variables are added (``offline_tool_environment``).
+    """
+    if not isinstance(plugin, type):
+        check = getattr(plugin, "_scanner_offline", None)
+        return bool(check()) if callable(check) else False
+    config = getattr(context, "config", None)
+    get_plugin_config = getattr(config, "get_plugin_config", None)
+    if not callable(get_plugin_config):
+        return False
+    from automated_security_helper.base.plugin_config import plugin_config_key
+
+    plugin_config = get_plugin_config(
+        plugin_type="scanner", plugin_name=plugin_config_key(plugin)
+    )
+    options = (
+        plugin_config.get("options")
+        if isinstance(plugin_config, dict)
+        else getattr(plugin_config, "options", None)
+    )
+    offline = (
+        options.get("offline")
+        if isinstance(options, dict)
+        else getattr(options, "offline", False)
+    )
+    return offline is True
+
+
+@contextmanager
+def _sandboxed_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
+    """The sandbox half of :func:`plugin_probe_scope`."""
     import shutil
     import tempfile
 
@@ -260,13 +376,83 @@ def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
         shutil.rmtree(probe_dir, ignore_errors=True)
 
 
+def sandbox_requested(context: Any) -> bool:
+    """Whether the run's ``sandbox.mode`` is anything but ``off``."""
+    settings = _sandbox_settings(context)
+    return settings is not None and SandboxMode(settings.mode) != SandboxMode.off
+
+
+@contextmanager
+def converter_run_scope(
+    converter: Any, context: Any
+) -> "Iterator[SandboxScope | RefusingScope | None]":
+    """Sandbox what a converter's ``convert()`` runs, as a scanner's ``scan()`` is.
+
+    A converter's tool reads the scanned tree like a scanner's, so under a sandbox its
+    spawns get a scanner's policy, with the converter's results directory as the one
+    writable place. When the sandbox cannot be provided the scope refuses every spawn,
+    so a tool never runs unsandboxed. Yields the scope, None with the sandbox off: its
+    ``refused_spawns`` says whether the converter lost inputs to a refusal.
+    """
+    if not sandbox_requested(context):
+        yield None
+        return
+    scope: "SandboxScope | RefusingScope"
+    try:
+        scope = scanner_sandbox_scope(converter, context, None) or RefusingScope(
+            _plugin_name(converter), "no sandbox scope"
+        )
+    except SandboxUnavailable as refusal:
+        scope = RefusingScope(_plugin_name(converter), str(refusal))
+    scope_reset = _ACTIVE.set(scope)
+    try:
+        yield scope
+    finally:
+        _ACTIVE.reset(scope_reset)
+
+
 def _plugin_name(plugin: Any) -> str:
     name = str(getattr(getattr(plugin, "config", None), "name", "") or "")
     if name:
         return name
     if isinstance(plugin, type):
-        return plugin.__name__
+        # The name its config class declares, which is what an instance of it is
+        # called and what grants are looked up by.
+        from automated_security_helper.base.plugin_config import declared_plugin_name
+
+        return declared_plugin_name(plugin) or plugin.__name__
     return plugin.__class__.__name__
+
+
+def _declared_identity(plugin: Any) -> "tuple[Optional[str], Optional[type]]":
+    """The name and config class a scanner's own code declares, or (None, None).
+
+    A config file can set ``name`` on a plugin's section, and a plugin whose section
+    AshConfig does not type falls back to the generic config class when its own
+    class rejects that name. Grants are looked up by name, so both are read from
+    the plugin class, never from the config instance.
+    """
+    import typing
+
+    from automated_security_helper.base.plugin_config import declared_plugin_name
+
+    plugin_class = plugin if isinstance(plugin, type) else type(plugin)
+    name = declared_plugin_name(plugin_class)
+    if name is not None:
+        field = getattr(plugin_class, "model_fields")["config"]
+        for candidate in typing.get_args(field.annotation) or (field.annotation,):
+            name_field = (getattr(candidate, "model_fields", None) or {}).get("name")
+            if getattr(name_field, "default", None) == name:
+                return name, candidate
+        return name, None
+    # Not a pydantic plugin class: read the config class's own default.
+    config = getattr(plugin, "config", None)
+    fields = getattr(type(config), "model_fields", None)
+    if isinstance(fields, dict) and "name" in fields:
+        default = fields["name"].default
+        if isinstance(default, str) and default:
+            return default, type(config)
+    return None, None
 
 
 @contextmanager
@@ -309,10 +495,25 @@ def prepare_spawn(
     scope = _ACTIVE.get()
     if scope is None:
         return None
-    if isinstance(scope, RefusingScope):
-        raise SandboxUnavailable(
-            f"{scope.scanner_name} cannot be sandboxed as requested: {scope.reason}"
-        )
+    try:
+        if isinstance(scope, RefusingScope):
+            raise SandboxUnavailable(
+                f"{scope.scanner_name} cannot be sandboxed as requested: {scope.reason}"
+            )
+        return _plan_spawn(scope, argv, env, cwd)
+    except SandboxUnavailable as refusal:
+        scope.refused_spawns += 1
+        scope.last_refusal = str(refusal)
+        raise
+
+
+def _plan_spawn(
+    scope: SandboxScope,
+    argv: Sequence[str],
+    env: Optional[Mapping[str, str]],
+    cwd: "str | Path | None",
+) -> SpawnPlan:
+    """``prepare_spawn`` for an active scope: the policy, then the backend's plan."""
     # A snapshot rather than os.environ: scanner threads mutate the environment while
     # others spawn (see utils/process_env.py).
     base_env = dict(env) if env is not None else snapshot_environ()
@@ -329,20 +530,26 @@ def prepare_spawn(
         network_scanners=scope.network_scanners,
         extra_read_paths=scope.extra_read_paths,
         network_limit=scope.network_limit,
+        read_path_scanners=scope.read_path_scanners,
+        env_scanners=scope.env_scanners,
         # This thread's scanner run's own config files, and no other run's.
         tool_config_dir=active_tool_config_dir(),
     )
     plan = scope.backend.plan(list(argv), base_env, policy)
     # First in line once the process has exited: nothing ASH writes into the
     # results directory afterwards may follow a link the scanner left there.
-    writable = list(policy.writable)
-    for path in writable:
-        register_writable_root(path)
+    writable = [register_writable_root(path) for path in policy.writable]
 
     def sweep() -> None:
         sweep_writable(writable)
 
+    def release() -> None:
+        # This spawn's registrations; its scope's and the output directory's stay.
+        for root in writable:
+            release_writable_root(root)
+
     plan.cleanup.insert(0, sweep)
+    plan.cleanup.insert(1, release)
     ASH_LOGGER.debug(
         f"Scanner sandbox ({scope.backend.name}, network={'yes' if policy.network else 'no'}) "
         f"for {scope.scanner_name}: {' '.join(plan.argv)}"

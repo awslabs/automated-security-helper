@@ -82,6 +82,8 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
     # value is not asserted here -- this test is about argv -- but a stub that
     # refused the keyword would fail on the signature rather than on the property.
     def _fake_run(argv, cwd=None, env=None):
+        if list(argv) == ["ash", "scan", "--help"]:
+            return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -121,17 +123,26 @@ def _resolve_scan_params(argv: list[str]) -> dict[str, Any]:
     return scan_command.make_context("scan", argv[2:], resilient_parsing=False).params
 
 
+#: What the gate's probe of ``ash scan --help`` is answered with: an ASH that has
+#: the completeness option. test_codecommit_gate_completeness_probe.py covers the
+#: other answers.
+SCAN_HELP = "  --fail-on-incomplete-scanners / --no-fail-on-incomplete-scanners\n"
+
+
 def _capture_argv(gate, monkeypatch, tmp_path) -> list[list[str]]:
-    """Point the gate's subprocess runner at a list, and return that list."""
+    """Point the gate's subprocess runner at a list, and return that list.
+
+    The help probe is answered and not recorded: it is not a scan.
+    """
     captured: list[list[str]] = []
-    monkeypatch.setattr(
-        gate,
-        "_run",
-        lambda argv, cwd=None, env=None: (
-            captured.append(list(argv))
-            or SimpleNamespace(returncode=0, stdout="", stderr="")
-        ),
-    )
+
+    def _fake_run(argv, cwd=None, env=None):
+        if list(argv) == ["ash", "scan", "--help"]:
+            return SimpleNamespace(returncode=0, stdout=SCAN_HELP, stderr="")
+        captured.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate, "_run", _fake_run)
     monkeypatch.setattr(gate, "WORK_ROOT", tmp_path / "ash-gate")
     return captured
 

@@ -35,9 +35,13 @@ confinement wrong -- ``test_an_unconfigured_policy_does_not_refuse_an_ordinary_w
 has pinned that since workspace mode landed.
 
 "Remote" is decided per call by :func:`caller_is_remote`, from the session id
-rather than from recorded server state. That function carries the reasoning; the
-short version is that process-wide transport state outlives the server object and
-made the answer depend on what ran earlier in the process.
+rather than from recorded server state. The session id is in turn decided by the
+transport the call arrived on (``session_identity.resolve_caller_session_id``):
+every network caller resolves to a server-issued id or to
+``UNIDENTIFIED_SESSION_ID``, never to stdio's default, so it is remote whatever
+headers it sends. That function carries the reasoning; the short version is that
+process-wide transport state outlives the server object and would make the
+answer depend on what ran earlier in the process.
 
 **Ambient rather than capability.** Authority was whatever the launching process
 happened to have. A :class:`SessionSandbox` is an object resolved for a named
@@ -75,17 +79,16 @@ refusal message names the variable to set.
 
 Failure modes and known limitations
 -----------------------------------
-* Isolation is only as strong as two callers' session ids differing. The id comes
-  from a client-supplied header and is a namespace, never an identity assertion
-  -- see ``session_identity.py``. On AgentCore that is the platform's job; on a
-  self-hosted deployment it is the fronting proxy's. This module guarantees that
-  an id names one directory and not a path, and that one id cannot reach
-  another's, and nothing about who may claim an id.
-* "Remote" is inferred from the session id, so a streamable-HTTP client that
-  sends no ``Mcp-Session-Id`` at all is treated as local. The MCP spec has the
-  server assign one at ``initialize`` and AgentCore injects one, so this is not
-  the normal case; ``ASH_MCP_TRANSPORT=streamable-http`` closes it explicitly, and
-  so does any ``ASH_MCP_ALLOWED_ROOTS`` grant.
+* Isolation is only as strong as two callers' session ids differing. On sse and
+  stateful streamable-HTTP the server issues the id; on a stateless server the id
+  is the ``Mcp-Session-Id`` header only when the operator declared, with
+  ``--trust-upstream-session-id``, that a platform in front issues and
+  authenticates it, and then isolation is the platform's job. This module
+  guarantees that an id names one directory and not a path, and that one id
+  cannot reach another's.
+* A network caller with no session identity resolves to
+  ``UNIDENTIFIED_SESSION_ID``: remote, with no sandbox of its own, so the
+  operator's grants are all it can reach.
 * A caller that reaches these functions with no session id at all gets the local
   default. That is deliberate -- an in-process caller of the tool functions is not
   a server, and importing this module must not tighten behavior for it -- but it
@@ -154,6 +157,9 @@ CLIENT_CONFIG_DIR_NAME = "client-config"
 #: Transports that carry callers the server does not otherwise trust.
 _NETWORKED_TRANSPORTS = frozenset({"streamable-http", "sse"})
 
+#: Every value ``ASH_MCP_TRANSPORT`` may hold, once stripped and lower-cased.
+KNOWN_TRANSPORTS = frozenset({"stdio"}) | _NETWORKED_TRANSPORTS
+
 #: Which transport this process serves. Held in the environment rather than in a
 #: module global, for two reasons that a global got wrong.
 #:
@@ -189,19 +195,37 @@ def set_server_transport(name: str) -> None:
 
 
 def get_server_transport() -> str:
-    """Return the transport this process serves, or the default if unset."""
+    """Return ``ASH_MCP_TRANSPORT`` stripped and lower-cased, or the default if unset.
 
-    return os.environ.get(ASH_MCP_TRANSPORT_ENV) or DEFAULT_TRANSPORT
+    Normalized because the variable is typed by an operator: ``Streamable-HTTP``
+    or a trailing newline from a secrets file names the same transport.
+    """
+
+    return (os.environ.get(ASH_MCP_TRANSPORT_ENV) or "").strip().lower() or (
+        DEFAULT_TRANSPORT
+    )
 
 
 def transport_is_networked() -> bool:
-    """True when ``ASH_MCP_TRANSPORT`` explicitly names a networked transport.
+    """True unless ``ASH_MCP_TRANSPORT`` is unset or names stdio.
 
     An operator override, and the secondary signal. :func:`caller_is_remote` is
-    the primary one, because it is request-scoped and this is not.
+    the primary one, because it is request-scoped and this is not. A value that
+    names no known transport counts as networked: the operator set the variable
+    to say something about trust, and the safe reading of a typo is the
+    stricter one. ``ash mcp`` refuses to start with such a value
+    (:func:`unknown_transport_override`).
     """
 
-    return get_server_transport() in _NETWORKED_TRANSPORTS
+    return get_server_transport() != DEFAULT_TRANSPORT
+
+
+def unknown_transport_override() -> Optional[str]:
+    """The raw ``ASH_MCP_TRANSPORT`` value when it names no known transport."""
+
+    if get_server_transport() in KNOWN_TRANSPORTS:
+        return None
+    return os.environ.get(ASH_MCP_TRANSPORT_ENV)
 
 
 def caller_is_remote(session_id: Optional[str]) -> bool:
@@ -224,12 +248,11 @@ def caller_is_remote(session_id: Optional[str]) -> bool:
     and 31 other tests with it -- but it was still wrong, and a boundary whose
     answer depends on what ran earlier in the process is not one worth having.
 
-    The env var is kept as a second trigger, ORed in, for the gap this leaves: a
-    streamable-HTTP client that sends no session header at all resolves to the
-    sentinel and would otherwise get the local default. The MCP spec has the
-    server assign an id at ``initialize`` and AgentCore injects one, so that
-    combination is not the normal case -- but "not normal" is not "impossible", and
-    an operator can close it explicitly.
+    A network caller never resolves to the sentinel: the transport supplies a
+    server-issued id or ``UNIDENTIFIED_SESSION_ID`` (see
+    ``session_identity.resolve_caller_session_id``), and both are remote. The
+    env var is kept as an operator override, ORed in, that makes every caller
+    remote, in-process ones included.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
@@ -586,8 +609,14 @@ def session_sandbox(session_id: Optional[str] = None) -> SessionSandbox:
             directory.
     """
 
+    from automated_security_helper.cli.mcp.session_identity import (
+        UNIDENTIFIED_SESSION_ID,
+    )
+
     root: Optional[Path] = None
-    if session_id:
+    # A caller the server could not identify owns no sandbox: it is remote, and
+    # the operator's grant is all it may reach.
+    if session_id and session_id != UNIDENTIFIED_SESSION_ID:
         _validated_session_component(session_id)
         shared = shared_workspace_root()
         if shared is not None:
@@ -893,8 +922,9 @@ def validate_config_chain(
     resolved under :func:`config_base_gate`, with the confinement root a scan of
     ``source_dir`` would use, so a refusal is reported before a scan starts rather
     than as a failed scan. Any other chain error (a cycle, a missing base, a
-    malformed ``patch``) is left to the caller's own resolution, which reports it
-    as it always has.
+    malformed ``patch``) or a file that does not parse is left to
+    :func:`config_load_error`, which reports it as a config that cannot be
+    loaded rather than as a refusal.
 
     Args:
         config_path: Caller-supplied path to a config file.
@@ -905,27 +935,60 @@ def validate_config_chain(
         None if permitted, otherwise an :class:`MCPResourceError`.
     """
 
-    refusal = validate_config_input(config_path, session_id=session_id)
-    if refusal is not None:
-        return refusal
+    return check_config_input(config_path, session_id, source_dir).refusal
+
+
+@dataclass(frozen=True)
+class ConfigInputCheck:
+    """What :func:`check_config_input` found: a refusal, a load error, or neither.
+
+    ``env_error`` is the ``ASHConfigEnvNotResolvedError`` for a file that may
+    not use ``!ENV`` and does (``config_sources.env_refused_for``), which a
+    caller reports as ``config_env_not_resolved``.
+    """
+
+    refusal: Optional[MCPResourceError] = None
+    load_error: Optional[MCPResourceError] = None
+    env_error: Optional[Exception] = None
+
+
+def check_config_input(
+    config_path: str | Path,
+    session_id: Optional[str] = None,
+    source_dir: Optional[str | Path] = None,
+) -> ConfigInputCheck:
+    """:func:`validate_config_chain` and :func:`config_load_error`, reading the file once.
+
+    The file goes through :func:`validate_config_input` first and is not read
+    when that refuses it. Otherwise it and its ``extends`` chain are read and
+    validated as the scan reads them (``resolve_config.load_config_file``), under
+    :func:`config_base_gate` and against the confinement root a scan of
+    ``source_dir`` would use. A base outside the grant is a ``refusal``; a file or
+    chain that does not load, or does not validate, is a ``load_error``. Each
+    check used to parse the file on its own, on the event loop every session
+    shares.
+    """
 
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
         env_refused_for,
-        resolve_config_document,
     )
+    from automated_security_helper.config.resolve_config import load_config_file
     from automated_security_helper.core.exceptions import (
+        ASHConfigEnvNotResolvedError,
         ASHConfigInputNotPermittedError,
+        ASHConfigValidationError,
     )
 
+    refusal = validate_config_input(config_path, session_id=session_id)
+    if refusal is not None:
+        return ConfigInputCheck(refusal=refusal)
     path = Path(config_path)
-    if not path.is_file():
-        return None
     try:
         # Read as the scan reads it, so a file that may not use !ENV is refused
         # for that before an `extends` whose value !ENV would choose is followed:
         # the refusal must not depend on the server's environment.
-        resolve_config_document(
+        load_config_file(
             path,
             confine_to=default_confinement_root(
                 path, Path(source_dir) if source_dir is not None else None
@@ -934,10 +997,42 @@ def validate_config_chain(
             refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
         )
     except ASHConfigInputNotPermittedError as exc:
-        return config_chain_refusal(config_path, exc)
-    except Exception as exc:  # noqa: BLE001 -- reported by the caller's own read
-        _logger.debug("MCP sandbox: config chain not resolved here (%s)", exc)
-    return None
+        return ConfigInputCheck(refusal=config_chain_refusal(config_path, exc))
+    except ASHConfigEnvNotResolvedError as exc:
+        # Before the arm below, which would catch it: it is an
+        # ASHConfigSourceError. Reported as config_env_not_resolved, not as a
+        # file that does not load.
+        return ConfigInputCheck(env_error=exc)
+    except ASHConfigValidationError as exc:
+        return ConfigInputCheck(load_error=_config_load_error(config_path, exc))
+    except BaseException as exc:
+        # As resolve_config refuses it: pydantic-core reports a Rust panic as
+        # pyo3's PanicException, a BaseException, which would otherwise reach
+        # the event loop every session shares. Anything else propagates.
+        if (
+            type(exc).__name__ != "PanicException"
+            or type(exc).__module__ != "pyo3_runtime"
+        ):
+            raise
+        return ConfigInputCheck(
+            load_error=_config_load_error(
+                config_path,
+                f"The configuration could not be resolved: {type(exc).__name__}: {exc}",
+            )
+        )
+    return ConfigInputCheck()
+
+
+def _config_load_error(config_path: object, reason: object) -> MCPResourceError:
+    """The error for a config file at ``config_path`` that does not load."""
+
+    return MCPResourceError(
+        f"Configuration file {config_path} cannot be loaded: {reason}",
+        context={
+            "config_path": str(config_path),
+            "error_category": ErrorCategory.INVALID_FORMAT.value,
+        },
+    )
 
 
 def config_chain_refusal(config_path: object, exc: Exception) -> MCPResourceError:
@@ -956,6 +1051,37 @@ def config_chain_refusal(config_path: object, exc: Exception) -> MCPResourceErro
             "error_category": ErrorCategory.INVALID_PATH.value,
         },
     )
+
+
+def config_load_error(
+    config_path: str | Path,
+    session_id: Optional[str] = None,
+    source_dir: Optional[str | Path] = None,
+) -> Optional[MCPResourceError]:
+    """Why a scan could not load the config file at ``config_path``, or None.
+
+    The file and its ``extends`` chain are read as the scan reads them
+    (``resolve_config.read_config_document``), against the confinement root
+    :func:`validate_config_chain` uses. A file that cannot be read or parsed, and
+    a chain that does not resolve, are reported here, before a scan is
+    registered: the scan's own resolution refuses them, so starting one would only
+    turn a configuration error into a failed scan. Call it after
+    :func:`validate_config_chain`, which reports a file or a base outside the
+    session's grant as a refusal; that case is not reported again here, and a file
+    the session may not read is not read here either, so its contents cannot
+    shape this answer.
+
+    Args:
+        config_path: Caller-supplied path to a config file.
+        session_id: The session this call acts for.
+        source_dir: The scan target the config will be resolved against, if any.
+
+    Returns:
+        None if the config loads and validates, otherwise an
+        :class:`MCPResourceError`.
+    """
+
+    return check_config_input(config_path, session_id, source_dir).load_error
 
 
 # ---------------------------------------------------------------------------
@@ -1020,12 +1146,17 @@ __all__ = [
     "CLIENT_CONFIG_DIR_NAME",
     "CONFIG_DIR_NAME",
     "SOURCE_DIR_NAME",
+    "ConfigInputCheck",
     "SessionSandbox",
+    "check_config_input",
     "config_base_gate",
     "config_chain_refusal",
     "client_named_config_is_untrusted",
     "config_is_client_supplied",
+    "config_load_error",
     "get_server_transport",
+    "KNOWN_TRANSPORTS",
+    "unknown_transport_override",
     "operator_config_roots",
     "operator_scan_roots",
     "session_sandbox",

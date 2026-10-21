@@ -9,12 +9,15 @@ from typing import Callable, List, Optional, Tuple
 
 import yaml
 
+from automated_security_helper.config.ash_config import load_config_yaml
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
     config_is_client_delivered,
     default_confinement_root,
     describe_config_path,
+    named_text_stream,
+    read_config_bytes,
     read_config_file,
     resolve_config_document,
 )
@@ -68,6 +71,7 @@ class ConfigValidator:
         "fail_on_incomplete_scanners",
         "content_db_staleness",
         "content_db_staleness_overrides",
+        "honor_ignore_files",
         "sandbox",
         "ash_plugin_modules",
         "external_reports_to_include",
@@ -123,6 +127,7 @@ class ConfigValidator:
         errors = []
         config_path = Path(config_path)
         is_toml = config_path.name.endswith(".toml")
+        raw_content = ""
 
         try:
             delivered = (refuse_env or config_is_client_delivered)(config_path)
@@ -142,11 +147,19 @@ class ConfigValidator:
                     errors.append(f"TOML error: {e}")
                     return False, errors
             else:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    if str(config_path).endswith(".json"):
-                        config_data = json.load(f)
-                    else:
-                        config_data = yaml.safe_load(f)
+                # Read as a scan reads it: without blocking on a FIFO, only a
+                # regular file, and at most ASH_CONFIG_MAX_FILE_BYTES.
+                data = read_config_bytes(config_path)
+                if str(config_path).endswith(".json"):
+                    # utf-8-sig, as the loader reads JSON: a byte order mark is
+                    # dropped.
+                    raw_content = data.decode("utf-8-sig")
+                    config_data = json.loads(raw_content)
+                else:
+                    raw_content = data.decode("utf-8")
+                    config_data = load_config_yaml(
+                        named_text_stream(raw_content, config_path)
+                    )
 
             if not isinstance(config_data, dict):
                 errors.append(
@@ -200,8 +213,9 @@ class ConfigValidator:
 
             # Check for duplicate field definitions (YAML allows this but causes
             # issues). TOML rejects a duplicate key when it parses, and its
-            # `key = value` lines would not be recognized here anyway.
-            raw_content = "" if is_toml else config_path.read_text()
+            # `key = value` lines would not be recognized here anyway, so for TOML
+            # raw_content stays empty. The text is the one parsed above, not a
+            # second read of the name.
             top_level_fields = {}
             for line in raw_content.split("\n"):
                 stripped = line.strip()
@@ -259,6 +273,12 @@ class ConfigValidator:
                                     f"this should not be in user configs"
                                 )
 
+            # The names a scan refuses with exit 3, checked the same way and, like
+            # the scan's check, without importing anything.
+            plugin_modules_error = cls._plugin_modules_refusal(resolved_data)
+            if plugin_modules_error is not None:
+                errors.append(plugin_modules_error)
+
             # Validate ignore_paths and suppression paths for directory-without-glob issues
             warnings = cls._check_path_patterns(config_path, resolved_data, source_dir)
             errors.extend(warnings)
@@ -274,6 +294,36 @@ class ConfigValidator:
         except Exception as e:
             errors.append(f"Unexpected error during validation: {str(e)}")
             return False, errors
+
+    #: Prefix of the error for ``ash_plugin_modules`` names a scan refuses.
+    PLUGIN_MODULES_ERROR_PREFIX = "Invalid ash_plugin_modules: "
+
+    @classmethod
+    def _plugin_modules_refusal(cls, config_data: dict) -> Optional[str]:
+        """The scan's refusal of the config's ``ash_plugin_modules``, or None.
+
+        Entries are split on commas and stripped the way a scan reads them, then
+        given to ``plugins.loader.refuse_plugin_modules_outside_namespace``, which
+        imports nothing. Whether an accepted name imports is not checked here.
+        """
+        from automated_security_helper.config.plugin_module_trust import (
+            split_plugin_modules,
+        )
+        from automated_security_helper.plugins.loader import (
+            PluginModuleError,
+            refuse_plugin_modules_outside_namespace,
+        )
+
+        entries = config_data.get("ash_plugin_modules")
+        if isinstance(entries, str):
+            entries = [entries]
+        if not isinstance(entries, (list, tuple)):
+            return None
+        try:
+            refuse_plugin_modules_outside_namespace(split_plugin_modules(entries))
+        except PluginModuleError as e:
+            return f"{cls.PLUGIN_MODULES_ERROR_PREFIX}{e}"
+        return None
 
     @classmethod
     def resolve_source_chain(

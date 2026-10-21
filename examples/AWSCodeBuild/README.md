@@ -62,5 +62,9 @@ You can customize the ASH execution by modifying the `ash` command in the build 
 ```yaml
 build:
   commands:
-    - ash --mode container --no-progress --scanners bandit,semgrep
+    - ash --mode container --build-target ci --no-progress --scanners bandit,semgrep
 ```
+
+CodeBuild runs the build as root, so the example asks for the `ci` image stage, which
+runs as root. The default `non-root` stage would give its user UID 0, and ASH refuses
+that build before it starts.

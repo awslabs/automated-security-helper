@@ -103,19 +103,23 @@ class CloudWatchLogsReporterConfig(ReporterPluginConfigBase):
             description="File extension for CloudWatch Logs output files",
         ),
     ] = "cwlog.json"
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
     enabled: Annotated[
         bool,
         Field(
-            default=True,
+            default=False,
             description="Whether the CloudWatch Logs reporter is enabled",
         ),
-    ] = True
+    ] = False
+    # A factory, so the environment defaults are read when the config is built.
     options: Annotated[
         CloudWatchLogsReporterConfigOptions,
         Field(
+            default_factory=CloudWatchLogsReporterConfigOptions,
             description="Configuration options for CloudWatch Logs reporter",
         ),
-    ] = CloudWatchLogsReporterConfigOptions()
+    ]
 
 
 @ash_reporter_plugin
@@ -150,6 +154,8 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
     destination_options = (
         "aws_region",
         "log_group_name",

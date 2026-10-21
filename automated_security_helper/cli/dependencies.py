@@ -4,6 +4,7 @@
 """CLI command for installing dependencies for ASH plugins."""
 
 import logging
+import os
 import platform
 import sys
 from dataclasses import dataclass, field
@@ -32,13 +33,23 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_SOURCES_DESCRIPTION,
     ASH_WORK_DIR_NAME,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.plugins.loader import (
+    PluginModuleError,
+    load_plugins,
+)
 from automated_security_helper.utils.download_utils import (
     pinned_install_already_satisfied,
 )
 from automated_security_helper.utils.log import get_logger
-from automated_security_helper.utils.process_env import set_environ
+from automated_security_helper.utils.process_env import set_environ, snapshot_environ
+from automated_security_helper.utils.python_child import (
+    empty_directory,
+    python_child,
+    runs_module_or_code,
+    uv_child_overrides,
+)
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
     find_executable,
@@ -60,6 +71,24 @@ err_console = Console(stderr=True)
 EXIT_OK = 0
 EXIT_INSTALL_FAILED = 1
 EXIT_BAD_SELECTION = 2
+# The code every ASH command uses for a configuration that cannot be used.
+EXIT_INVALID_CONFIG = 3
+
+# Set to exactly `skip`, a `--tool` name that no plugin of this ASH has, of any type,
+# is named and skipped rather than refused. ASH's own required check sets it, because
+# it installs ASH from an older commit than the workflow that asks for the tools: a
+# tool that ASH has no plugin for is not run by it either, so the scan needs nothing
+# from that tool. Unset, the refusal stands, which is what catches a typo.
+UNKNOWN_TOOLS_SETTING = "ASH_DEPENDENCIES_UNKNOWN_TOOLS"
+
+# The plugin registry's kinds, which --plugin-type selects among.
+PLUGIN_KINDS = ("converter", "scanner", "reporter")
+
+
+def _plugin_kind(plugin_type: str) -> str:
+    """The registry kind a --plugin-type value selects; anything else means scanner."""
+    return plugin_type if plugin_type in ("converter", "reporter") else "scanner"
+
 
 # `--tool` names that stopped working when this command began building each plugin
 # from its own config section (#766), mapped to the config key that replaced them.
@@ -188,11 +217,41 @@ def get_architecture() -> str:
 
 
 def run_command(args: List[str], shell: bool = False):
-    """Run a command and return the exit code."""
+    """Run a command and return the exit code.
+
+    Every command starts in an empty directory of its own, not the current
+    directory, which this command treats as the source tree. Run from there, a
+    package manager read the repository's settings: npm its ``.npmrc``, ``gem
+    install -g`` its Gemfile, Bundler its ``.bundle/config``. The user's own
+    settings still apply. A command that starts ASH's interpreter with ``-m`` or
+    ``-c`` (``python -m pip install``, the pinned-tool install script) also gets
+    ``-P`` where Python has it, so it imports no ``pip/`` or
+    ``automated_security_helper/`` from where it starts; see
+    ``utils/python_child.py``. A uv command also gets the environment
+    :func:`uv_child_overrides` gives it.
+    """
     from automated_security_helper.utils.subprocess_utils import run_command as run_cmd
 
     try:
-        result = run_cmd(args=args, shell=shell, check=False, log_level=logging.INFO)  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+        if not shell and runs_module_or_code(args):
+            with python_child(*args[1:]) as child:
+                result = run_cmd(  # nosec B603 - argv list built by plugins, no shell
+                    args=child.argv,
+                    cwd=child.cwd,
+                    check=False,
+                    log_level=logging.INFO,
+                )
+        else:
+            overrides = {} if shell else uv_child_overrides(args)
+            with empty_directory() as start:
+                result = run_cmd(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
+                    args=args,
+                    cwd=start,
+                    env={**snapshot_environ(), **overrides} if overrides else None,
+                    shell=shell,
+                    check=False,
+                    log_level=logging.INFO,
+                )
         # The child's output is not markup. pip alone prints `[notice]` lines and
         # echoes extras such as `ash[sarif,toml]`, which rich would otherwise
         # consume as tags and delete from the log.
@@ -210,7 +269,12 @@ def run_command(args: List[str], shell: bool = False):
 @dependencies_app.command(name="install")
 def install_dependencies(
     bin_path: Optional[Path] = typer.Option(
-        ASH_BIN_PATH,
+        # As the docs write it, and expanded below. The default used to be
+        # core.constants.ASH_BIN_PATH, the absolute home directory (or the
+        # variable's value) read at import, so the help said where this machine's
+        # home was and wrapped differently on every machine. typer reads
+        # ASH_BIN_PATH itself through envvar, and the help says so.
+        "~/.ash/bin",
         "--bin-path",
         "-b",
         help="Path to install binaries to.",
@@ -272,10 +336,14 @@ def install_dependencies(
         use_color=color,
     )
 
-    # Use provided bin path or default if bin_path was null
-    target_bin_path = bin_path or ASH_BIN_PATH
+    # Use provided bin path or default if bin_path was null. expanduser for the
+    # default's "~", and for a "~" a shell left unexpanded.
+    target_bin_path = Path(bin_path).expanduser() if bin_path else ASH_BIN_PATH
     # Create target_bin_path directory if it doesn't exist
     target_bin_path.mkdir(parents=True, exist_ok=True)
+    # Exported absolute, because the install commands that read it back do not all
+    # start in this directory: a Python one starts in an empty directory of its own.
+    target_bin_path = target_bin_path.absolute()
     # Set the ASH_BIN_PATH environment variable to override the default
     set_environ("ASH_BIN_PATH", str(target_bin_path))
 
@@ -305,11 +373,17 @@ def install_dependencies(
     # `ash dependencies install --config .ash/.ash_community_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
-    resolved_config = resolve_config(
-        config_path=config,
-        source_dir=source_dir,
-        config_overrides=config_overrides,
-    )
+    try:
+        resolved_config = resolve_config(
+            config_path=config,
+            source_dir=source_dir,
+            config_overrides=config_overrides,
+        )
+    except ASHConfigValidationError as e:
+        # Installing for the built-in plugin set instead would report success for
+        # a config whose own plugins got nothing.
+        print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
+        raise typer.Exit(EXIT_INVALID_CONFIG)
 
     # Import the plugin modules the config names before enumerating anything.
     #
@@ -323,26 +397,27 @@ def install_dependencies(
     # load_plugins is what the scan path already uses for this. Calling it here means
     # a config that adds scanners also adds their dependencies, and `--tool
     # trivy-repo` resolves instead of being rejected as an unknown name.
-    load_plugins(
-        PluginContext(
-            source_dir=source_dir,
-            output_dir=output_dir,
-            work_dir=work_dir,
-            config=resolved_config,
+    try:
+        load_plugins(
+            PluginContext(
+                source_dir=source_dir,
+                output_dir=output_dir,
+                work_dir=work_dir,
+                config=resolved_config,
+            )
         )
-    )
+    except PluginModuleError as e:
+        # A plugin module outside the plugin namespace, or one that does not
+        # import: refused before anything is installed, with a scan's
+        # invalid-configuration code.
+        print(f"[red]Invalid configuration: {escape(str(e))}[/red]")
+        raise typer.Exit(3)
 
-    outcomes: List[PluginInstallOutcome] = []
-    construction_failures: List[PluginInstallOutcome] = []
-    discovered: List[tuple] = []
-    for plugin_type in plugin_types:
-        plugin_module_input = (
-            "converter"
-            if plugin_type == "converter"
-            else "reporter"
-            if plugin_type == "reporter"
-            else "scanner"
-        )
+    def discover(plugin_type: str, warn: bool = True):
+        """The plugins of one type, each built from its own section of the config."""
+        found: List[tuple] = []
+        failed: List[PluginInstallOutcome] = []
+        plugin_module_input = _plugin_kind(plugin_type)
         for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
             try:
                 # The plugin's own section of the resolved config, looked up the way
@@ -372,16 +447,17 @@ def install_dependencies(
                     getattr(plugin_instance.config, "name", None)
                     or plugin_class.__name__
                 )
-                discovered.append((plugin_type, plugin_name, plugin_instance))
+                found.append((plugin_type, plugin_name, plugin_instance))
             except Exception as e:
                 # Reported as a warning here and weighed by the verdict later, because
                 # whether it is fatal depends on the run: a --tool run answers only for
                 # what it was asked about, so an unrelated plugin that will not
                 # construct is information rather than this run's failure.
-                print(
-                    f"[bold yellow]Plugin {escape(plugin_class.__name__)} could not "
-                    f"be loaded: {escape(str(e))}[/bold yellow]",
-                )
+                if warn:
+                    print(
+                        f"[bold yellow]Plugin {escape(plugin_class.__name__)} could "
+                        f"not be loaded: {escape(str(e))}[/bold yellow]",
+                    )
                 # Held aside rather than added to `outcomes` directly. `outcomes` is
                 # what the verdict is computed from, and a plugin that failed to
                 # construct is unrelated to a `--tool` request for a different one --
@@ -389,13 +465,22 @@ def install_dependencies(
                 # `ash dependencies install --tool trivy-repo` exit 1 because some
                 # other community plugin would not import, and name that other plugin
                 # in the failure panel.
-                construction_failures.append(
+                failed.append(
                     PluginInstallOutcome(
                         name=plugin_class.__name__,
                         plugin_type=plugin_type,
                         errors=[str(e)],
                     )
                 )
+        return found, failed
+
+    outcomes: List[PluginInstallOutcome] = []
+    construction_failures: List[PluginInstallOutcome] = []
+    discovered: List[tuple] = []
+    for plugin_type in plugin_types:
+        found, failed = discover(plugin_type)
+        discovered += found
+        construction_failures += failed
 
     # --tool selection. Validated against the names actually discovered rather than
     # a hardcoded list, so it cannot drift from the plugin registry. An unknown name
@@ -414,19 +499,89 @@ def install_dependencies(
             for typed, resolved_name in tool_resolution.items()
             if resolved_name not in available
         ]
+        # A name missing from the selected types may still be a plugin of a type that
+        # --plugin-type left out. That name is not unknown to this ASH, so it is never
+        # skipped as unknown, and the refusal says which type it is.
+        selected_kinds = {_plugin_kind(t) for t in plugin_types}
+        elsewhere: dict = {}
+        lookup_failures: List[PluginInstallOutcome] = []
+        if unknown:
+            for kind in PLUGIN_KINDS:
+                if kind in selected_kinds:
+                    continue
+                found, failed = discover(kind, warn=False)
+                lookup_failures += failed
+                names = {name for _, name, _ in found}
+                for typed in unknown:
+                    if tool_resolution[typed] in names:
+                        elsewhere.setdefault(typed, []).append(kind)
+        if elsewhere:
+            # Every name the request got wrong, not only those of another type, so one
+            # run shows all of them.
+            nowhere = sorted(t for t in unknown if t not in elsewhere)
+            console.print(
+                Panel(
+                    "[bold red]Not of the selected plugin type "
+                    f"(--plugin-type {escape(' '.join(plugin_types))}):[/bold red]\n"
+                    + "\n".join(
+                        f"{escape(typed)} is a {escape(' and '.join(kinds))} plugin"
+                        for typed, kinds in sorted(elsewhere.items())
+                    )
+                    + "\nAdd its --plugin-type, or leave --plugin-type out."
+                    + (
+                        "\n[bold red]Unknown tool(s):[/bold red] "
+                        + escape(", ".join(nowhere))
+                        if nowhere
+                        else ""
+                    ),
+                    title="Nothing installed",
+                    expand=False,
+                )
+            )
+            raise typer.Exit(EXIT_BAD_SELECTION)
+        # Exactly `skip`, as the docs say: not a value that only strips to it.
+        skip_unknown = os.environ.get(UNKNOWN_TOOLS_SETTING, "") == "skip"
+        if (
+            unknown
+            and skip_unknown
+            and not construction_failures
+            and not lookup_failures
+        ):
+            # Named, not silent: the reader sees which requested tools this ASH lacks.
+            # Not when a plugin failed to load, of any type: the unknown name could be
+            # that plugin's, and skipping it would skip a tool this ASH does have.
+            console.print(
+                Panel(
+                    "[yellow]Not known to this ASH (no converter, scanner or reporter "
+                    "plugin has these names), so not installed:[/yellow] "
+                    f"{escape(', '.join(sorted(unknown)))}\n"
+                    f"{UNKNOWN_TOOLS_SETTING}=skip is set, and nothing this ASH runs "
+                    "needs a tool it has no plugin for.",
+                    title="Skipped",
+                    expand=False,
+                )
+            )
+            requested_names = [name for name in requested_names if name in available]
+            if not requested_names:
+                print(
+                    "Nothing to install: none of the requested tools is known to this ASH."
+                )
+                raise typer.Exit(EXIT_OK)
+            unknown = []
         if unknown:
             # A plugin that failed to construct has no config, so its declared name is
             # unknowable here -- only its class name is. Rather than claim a match that
             # cannot be established, say that some plugins failed to load, so a
             # requested name missing for that reason is not misreported as a typo.
+            failed_to_load = construction_failures + lookup_failures
             broken_note = (
                 ""
-                if not construction_failures
+                if not failed_to_load
                 else (
                     "\n[yellow]Note:[/yellow] "
-                    f"{len(construction_failures)} plugin(s) failed to load and are "
+                    f"{len(failed_to_load)} plugin(s) failed to load and are "
                     "absent from that list: "
-                    + escape(", ".join(sorted(o.name for o in construction_failures)))
+                    + escape(", ".join(sorted(o.name for o in failed_to_load)))
                 )
             )
             console.print(

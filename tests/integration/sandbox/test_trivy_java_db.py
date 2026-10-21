@@ -3,15 +3,15 @@
 
 """A sandboxed online trivy-repo scan of a tree with a jar matches the unsandboxed one.
 
-The sandbox mounts trivy's cache read-only and ASH updates trivy's vulnerability
-database outside it first (utils/content_db_refresh.py). The Java database is not
+The sandbox mounts trivy's cache read-only and ASH updates trivy's database outside
+it first (utils/content_db_refresh.py). The Java database is not
 updated: ``trivy repository`` does not analyze JAR, WAR or EAR files and never reads
 it (measured with trivy 0.75), and it is about 935 MiB. This pins both halves: with
 a stale Java database in the cache, a tree holding a jar and a pom.xml gives the
 same findings sandboxed and unsandboxed, and neither run touches the Java database.
 
-Needs trivy and a network (the first run downloads trivy's vulnerability database
-into a cache of its own). Skipped where trivy is not installed, and per backend where that
+Needs trivy and a network (the first run downloads trivy's database into a cache
+of its own). Skipped where trivy is not installed, and per backend where that
 backend does not work.
 """
 

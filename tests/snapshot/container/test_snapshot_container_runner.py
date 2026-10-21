@@ -19,7 +19,7 @@ SCAN = ["scan", "--mode", "container", "--no-progress", "--source-dir", "src"]
 
 
 @pytest.fixture(autouse=True)
-def _src(in_tmp, local_checkout, monkeypatch):
+def _src(in_tmp, project_build_files_in_cwd, monkeypatch):
     (in_tmp / "src").mkdir()
     # "Container Error Output" reprints the runner's stderr through rich, and a
     # refusal's stderr can be an absolute path whose length is the machine's: at 100
@@ -79,8 +79,8 @@ class TestRefusals:
 class TestDockerfileLookup:
     def test_no_build_outside_a_checkout(self, run_cli, snapshot, fake_docker, in_tmp):
         # ASH is installed from a checkout (revision LOCAL) and the working directory
-        # is outside it, so there is no Dockerfile to find. --no-build does not need
-        # one: it goes straight to running the image. The fake run leaves no results
+        # is outside it and holds no Dockerfile. --no-build does not look one up at
+        # all: it goes straight to running the image. The fake run leaves no results
         # file, which is what the read-back then reports.
         (in_tmp / "Dockerfile").unlink()
         assert run_cli([*SCAN, "--no-build", "--output-dir", "out"]) == snapshot

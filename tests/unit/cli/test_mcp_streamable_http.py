@@ -28,6 +28,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app as ash_app
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
+from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
 
 def _free_port() -> int:
@@ -120,8 +121,7 @@ class _ResilientFalseCtx:
 def test_build_streamable_http_app_rejects_missing_header() -> None:
     """The auth middleware returns 401 when the configured header is absent."""
     app = build_streamable_http_app(
-        auth_header_name="X-ASH-Auth",
-        auth_header_value="secret",
+        auth_header_name="X-ASH-Auth", auth_header_value="secret", port=LOOPBACK_PORT
     )
     # Use Starlette TestClient via httpx so we don't need a live server.
     from starlette.testclient import TestClient
@@ -135,8 +135,7 @@ def test_build_streamable_http_app_rejects_missing_header() -> None:
 def test_build_streamable_http_app_rejects_wrong_value() -> None:
     """Wrong header value also gets 401."""
     app = build_streamable_http_app(
-        auth_header_name="X-ASH-Auth",
-        auth_header_value="secret",
+        auth_header_name="X-ASH-Auth", auth_header_value="secret", port=LOOPBACK_PORT
     )
     from starlette.testclient import TestClient
 
@@ -152,8 +151,7 @@ def test_build_streamable_http_app_rejects_wrong_value() -> None:
 def test_build_streamable_http_app_no_auth_when_not_configured() -> None:
     """If no header is configured, the auth middleware is not installed."""
     app = build_streamable_http_app(
-        auth_header_name=None,
-        auth_header_value=None,
+        auth_header_name=None, auth_header_value=None, port=LOOPBACK_PORT
     )
     middleware_names = {m.cls.__name__ for m in app.user_middleware}
     assert "_StaticHeaderAuth" not in middleware_names
@@ -162,8 +160,7 @@ def test_build_streamable_http_app_no_auth_when_not_configured() -> None:
 def test_build_streamable_http_app_installs_auth_middleware() -> None:
     """When both auth options are set, the middleware is on the app."""
     app = build_streamable_http_app(
-        auth_header_name="X-ASH-Auth",
-        auth_header_value="secret",
+        auth_header_name="X-ASH-Auth", auth_header_value="secret", port=LOOPBACK_PORT
     )
     middleware_names = {m.cls.__name__ for m in app.user_middleware}
     assert "_StaticHeaderAuth" in middleware_names

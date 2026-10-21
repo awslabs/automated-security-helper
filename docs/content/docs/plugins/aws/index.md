@@ -25,8 +25,9 @@ AWS plugins provide:
 
 ASH loads only its built-in plugins by default. The four AWS reporters are in the
 `automated_security_helper.plugin_modules.ash_aws_plugins` package, and once it is
-loaded they are enabled and send findings to AWS with the credentials of whoever runs
-ASH. So only the operator running ASH can load it, in one of these ways:
+loaded each one that is enabled (see [Enabling the AWS reporters](#enabling-the-aws-reporters))
+sends findings to AWS with the credentials of whoever runs ASH. So only the operator
+running ASH can load it, in one of these ways:
 
 - `--ash-plugin-modules automated_security_helper.plugin_modules.ash_aws_plugins`
 - the `ASH_PLUGIN_MODULES` environment variable, set to the same module name
@@ -45,6 +46,31 @@ that is not is named in a warning.
 Under the MCP server, list the package in `ash_plugin_modules` of a profile registered
 with `ash mcp --profile NAME=path/to/ash.yaml`; scans in a session bound to that
 profile with `select_profile` load it. A config an MCP client delivered cannot add it.
+
+## Enabling the AWS reporters
+
+All four AWS reporters are **disabled by default**. Each sends findings to an AWS
+service with the credentials of the host running ASH, so it runs only when your
+configuration turns it on: `enabled: true` in its section of a config file you pass
+with `--config` or `ASH_CONFIG`, or `--config-overrides
+reporters.<name>.enabled=true`.
+
+- An enabled AWS reporter runs in a scan that passes no `--output-formats`.
+  `--output-formats` (`-f`) takes only the formats `ash scan --help` lists, and
+  none of them is an AWS reporter, so a scan that passes it neither checks nor
+  runs any AWS reporter. A reporter's dependency check (STS, Security Hub's
+  `DescribeHub`, Bedrock's model list) runs only for a reporter the scan will run.
+- A section that sets a reporter's options but not `enabled`, as a config written
+  when these reporters were on by default does, leaves the reporter off. A scan
+  or `ash merge` that would otherwise run it logs one warning naming the reporter
+  and the key to set; the warning names no option value and changes nothing.
+- `ash report --format <name>` refuses an AWS reporter that is not enabled, and
+  exits 1 with the setting to change.
+- `ash merge` runs an AWS reporter only when the operator's own `--config`
+  enables it, whatever the shards' recorded config says, in either direction.
+- A reporter plugin that sends findings off the host declares
+  `sends_off_host = True` on its class. ASH then runs it only when its section of
+  the config sets `enabled: true`, whatever its own default is.
 
 ## Settings only the operator can set
 
@@ -127,9 +153,10 @@ See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mc
          aws_region: "us-east-1"
    ```
 
-3. **Run a scan with that config**:
+3. **Run a scan with that config** (no `--output-formats`, so every enabled
+   reporter runs):
    ```bash
-   ash --source-dir /path/to/code --config /etc/ash/aws-reporters.yml
+   ash scan --source-dir /path/to/code --config /etc/ash/aws-reporters.yml
    ```
 
 ### Enterprise Setup

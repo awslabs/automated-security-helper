@@ -10,6 +10,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from automated_security_helper.utils.subprocess_utils import SPAWN_FAILURE_RETURNCODE
+
+
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    These tests replace the process boundary and pass it programs that are not
+    installed. On Windows ASH refuses such a name before spawning it
+    (subprocess_utils._refuse_unresolved_on_windows); these tests are about what
+    happens after the spawn, so that decision is set aside here.
+    """
+    from automated_security_helper.utils import subprocess_utils as _subprocess_utils
+
+    monkeypatch.setattr(_subprocess_utils, "_refuse_unresolved_on_windows", False)
+
 
 class TestBug4TimeoutExpiredReturnType:
     """PR#274 Bug #3: run_command must return CompletedProcess when TimeoutExpired is caught."""
@@ -227,7 +243,8 @@ class TestBug48PopenOrphanedOnException:
 
         mock_process.kill.assert_called_once()
         mock_process.wait.assert_called()
-        assert result == 1
+        # ASH's own failure: not 1, which most scanners accept.
+        assert result == SPAWN_FAILURE_RETURNCODE
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",
@@ -248,7 +265,7 @@ class TestBug48PopenOrphanedOnException:
         result = run_command_stream_output(["some", "cmd"])
 
         mock_process.kill.assert_not_called()
-        assert result == 1
+        assert result == SPAWN_FAILURE_RETURNCODE
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",

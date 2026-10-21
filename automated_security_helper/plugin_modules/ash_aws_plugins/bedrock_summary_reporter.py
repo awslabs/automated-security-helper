@@ -22,6 +22,15 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanner_tool_types import (
+    SECRETS_TOOL_TYPE,
+    normalize_tool_type,
+    result_tool_types,
+)
+from automated_security_helper.utils.secret_masking import (
+    is_secret_detection,
+    secret_detection_rule_ids,
+)
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
@@ -39,39 +48,52 @@ if TYPE_CHECKING:
 
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
+    # The environment defaults are read when the options are built, not when this
+    # module is imported, so a config built later sees the run's environment.
     aws_region: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+            ),
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
             description="AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+    ]
     aws_profile: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS profile to use for Bedrock. If not specified, the default profile will be used.",
         ),
-    ] = os.environ.get("AWS_PROFILE", None)
+    ]
     model_id: Annotated[
         str,
         Field(
+            default_factory=lambda: os.environ.get(
+                "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            ),
             description="Bedrock model ID to use for generating summaries.",
         ),
-    ] = os.environ.get(
-        "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-    )
+    ]
     temperature: Annotated[
         float,
         Field(
+            default_factory=lambda: float(
+                os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5")
+            ),
             description="Temperature parameter for the Bedrock model. Higher values make output more random.",
         ),
-    ] = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
+    ]
     max_tokens: Annotated[
         int,
         Field(
+            default_factory=lambda: int(
+                os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000")
+            ),
             description="Maximum number of tokens to generate in the response.",
         ),
-    ] = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
+    ]
     top_p: Annotated[
         float,
         Field(
@@ -204,7 +226,14 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     exclude_scanner_types: Annotated[
         List[str],
         Field(
-            description="List of scanner types to exclude from detailed analysis (e.g., 'SECRET').",
+            description=(
+                "Scanner tool types whose findings are counted but not sent to the "
+                "model (e.g., 'SECRETS'). A finding's type is its scanner's tool "
+                "type, looked up from the scanner's name, or a tool_type:: tag on "
+                "the finding; 'SECRET' and 'SECRETS' both name the secrets type. A "
+                "finding whose type cannot be determined is sent without its code "
+                "snippets."
+            ),
         ),
     ] = ["SECRET"]
     # Include only actionable findings (not suppressed, above severity threshold)
@@ -267,11 +296,34 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     ] = False
 
 
+#: Keys of a SARIF result that hold source code: snippets of a region or context
+#: region, and the content a fix would insert.
+_CODE_KEYS = frozenset({"snippet", "insertedContent"})
+
+
+def _without_snippets(value: Any) -> Any:
+    """A copy of a SARIF result dict (or part of one) without any code it holds."""
+    if isinstance(value, dict):
+        return {
+            key: _without_snippets(item)
+            for key, item in value.items()
+            if key not in _CODE_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_snippets(item) for item in value]
+    return value
+
+
 class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
     name: Literal["bedrock-summary-reporter"] = "bedrock-summary-reporter"
     extension: str = "bedrock.summary.md"
-    enabled: bool = True
-    options: BedrockSummaryReporterConfigOptions = BedrockSummaryReporterConfigOptions()
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
+    enabled: bool = False
+    # A factory, so the environment defaults are read when the config is built.
+    options: BedrockSummaryReporterConfigOptions = Field(
+        default_factory=BedrockSummaryReporterConfigOptions
+    )
 
 
 @ash_reporter_plugin
@@ -293,6 +345,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
     destination_options = (
         "aws_region",
         "aws_profile",
@@ -527,15 +581,23 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         sarif_results = model.sarif.get_all_results()
         if not sarif_results:
             return all_findings, secret_findings, indexed_findings
+        detection_rule_ids = secret_detection_rule_ids(model.sarif)
 
         for i, result in enumerate(sarif_results):
             finding_dict = result.model_dump(
                 by_alias=True, exclude_defaults=True, exclude_unset=True, mode="json"
             )
+            # A finding from a scanner of unknown type might be a secret finding the
+            # exclusion cannot recognize, so its code is not sent or written.
+            if not result_tool_types(finding_dict):
+                finding_dict = _without_snippets(finding_dict)
             finding_dict["index"] = i + 1
             indexed_findings.append(self._make_indexed_finding(i + 1, finding_dict))
 
-            is_secret = self._is_secret_scanner(finding_dict)
+            is_secret = self._is_secret_scanner(finding_dict) or (
+                self._excludes_secrets()
+                and is_secret_detection(result, detection_rule_ids)
+            )
             is_actionable = self._is_actionable(finding_dict)
 
             if is_secret:
@@ -580,8 +642,33 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         }
 
     def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
-        props = finding_dict.get("properties", {})
-        return props.get("scanner_type") in self.config.options.exclude_scanner_types
+        """Whether the finding's scanner type is one ``exclude_scanner_types`` names.
+
+        The type comes from the scanner, looked up by the ``scanner_name`` the
+        engine writes on every result, and from ``tool_type::`` tags
+        (utils/scanner_tool_types.py). No scanner writes a ``scanner_type``
+        property.
+        """
+        excluded = {
+            normalize_tool_type(name)
+            for name in self.config.options.exclude_scanner_types
+        }
+        excluded.discard(None)
+        return bool(result_tool_types(finding_dict) & excluded)
+
+    def _excludes_secrets(self) -> bool:
+        """Whether ``exclude_scanner_types`` names the secrets type.
+
+        Then a finding from any rule that detects a credential or key is counted,
+        not sent: semgrep's and opengrep's ``generic.secrets.*`` findings come from
+        SAST scanners, so only the finding's rule says what it is
+        (utils/secret_masking.is_secret_detection). A hard-coded password check
+        such as bandit's B105 is sent, its value masked like every other.
+        """
+        return SECRETS_TOOL_TYPE in {
+            normalize_tool_type(name)
+            for name in self.config.options.exclude_scanner_types
+        }
 
     def _is_actionable(self, finding_dict: Dict[str, Any]) -> bool:
         if not self.config.options.actionable_only:
@@ -871,6 +958,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         report += f"**Code Snippet**:\n```\n{snippet_text}\n```\n\n"
 
             if original:
+                if not self.config.options.include_code_snippets:
+                    original = _without_snippets(original)
                 report += "<details>\n<summary>Raw JSON</summary>\n\n```json\n"
                 report += json.dumps(original, indent=2)
             report += "\n```\n</details>\n\n"

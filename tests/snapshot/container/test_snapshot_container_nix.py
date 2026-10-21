@@ -111,30 +111,43 @@ def scan(run_cli, monkeypatch):
     return _scan
 
 
-def _command(cmd: list[str]) -> list[str]:
-    """The recorded command, with this machine's interpreter path made constant.
+def _normalized(command: list[str]) -> list[str]:
+    """The command with this interpreter's path and its safe-path flags as placeholders.
 
-    The inner run is started with the host ASH's own interpreter
-    (run_ash_nix.inner_ash_command), whose path is the machine's.
+    The inner scan runs on this interpreter, whose path differs between hosts, and
+    the flags that keep the working directory off sys.path differ between Python
+    versions (``-P`` exists from 3.11). The placeholder stands for exactly this
+    version's flags, so a command that left them out would not match.
     """
-    from automated_security_helper.interactions.run_ash_nix import (
-        INNER_ASH_BOOTSTRAP,
-    )
+    from automated_security_helper.utils.python_child import _SAFE_PATH_FLAGS
 
-    replaced = {sys.executable: "<python>", INNER_ASH_BOOTSTRAP: "<start this ASH>"}
-    return [replaced.get(part, part) for part in cmd]
+    out: list[str] = []
+    i = 0
+    while i < len(command):
+        part = command[i]
+        i += 1
+        if part != sys.executable:
+            out.append(part)
+            continue
+        out.append("<PYTHON>")
+        if command[i : i + len(_SAFE_PATH_FLAGS)] == _SAFE_PATH_FLAGS:
+            out.append("<SAFE_PATH_FLAGS>")
+            i += len(_SAFE_PATH_FLAGS)
+    return out
 
 
 def _seen(result, shell: FakeNixShell) -> dict:
+    # The printed output names the interpreter too, whose path is the machine's.
     printed = {
-        stream: result[stream].replace(sys.executable, "<python>")
+        stream: result[stream].replace(sys.executable, "<PYTHON>")
         for stream in ("stdout", "stderr")
         if isinstance(result.get(stream), str)
     }
+    commands = [_normalized(command) for command in shell.commands]
     return {
         **result,
         **printed,
-        "nix_commands": [_command(cmd) for cmd in shell.commands],
+        "nix_commands": commands,
         "ASH_IN_NIX": [env.get("ASH_IN_NIX") for env in shell.environments],
         "ASH_OFFLINE": [env.get("ASH_OFFLINE") for env in shell.environments],
     }

@@ -1319,83 +1319,129 @@ class TestRunAshScanPlumbing:
         )
 
 
-class TestTheGateCannotSeeAHardFailureGradedPassed:
-    """The limit of this gate, and therefore the limit of its default.
+class TestAHardFailureReachesTheGate:
+    """A tool's hard failure reaches this gate as an ERROR row, whatever it wrote.
 
-    This gate selects on STATUS. It follows that a scanner whose hard failure
-    never reaches its status is invisible to it, no matter which way the default
-    points -- and one such path exists today.
+    This gate selects on STATUS, so a scanner whose hard failure never reaches its
+    status is invisible to it, whichever way the default points. Measured on grype
+    with an empty-but-writable cache and its update endpoint refused: grype logs
+    that it failed to load its database (the database does not exist), exits 1 and
+    writes a zero-byte report. Graded on that report, the row would read ``grype ...
+    0 findings ... PASSED``, and the scan would exit 0 with ``--min-severity low
+    --fail-on-findings --fail-on-incomplete-scanners`` all passed.
 
-    ``base/scanner_plugin.py:608-621`` handles an existing-but-empty results file
-    by interpolating ``self.exit_code`` into a warning string and then
-    ``return self._handle_empty_results()``. The return is a normal one, so
-    ``_inject_invocation`` at ``:626`` -- the only place that computes
-    ``executionSuccessful=(self.exit_code in success_codes)`` -- is never reached.
-    The tool's failure survives as log text and in nothing a consumer reads.
-    The branch is in the shared template, so every template-method scanner
-    inherits it. Reproduced at its own source in
-    ``tests/unit/base/test_scanner_template_method.py``:
-    ``TestNonZeroExitWithAnEmptyResultsFile``.
-
-    Measured on grype with an empty-but-writable cache and its update endpoint
-    refused: grype logs ``failed to load vulnerability db: database does not
-    exist``, exits 1, writes a zero-byte report; ASH reports
-    ``grype ... 0 findings ... PASSED`` and exits 0 with
-    ``--min-severity low --fail-on-findings --fail-on-incomplete-scanners`` all
-    passed. The flag was already on for that measurement, which is the whole
-    point of pinning it here: the default moving to True does not change it.
-
-    Not fixed here. The fix is to the shared template, which is a different
-    change with a different blast radius, and folding it into a default flip
-    would make both unreviewable.
+    Required: the scanner's row is ERROR (grype's success set is ``{0, 2}``, so 1 is
+    a failure), and the scan therefore exits 1 with the gate on or defaulted. With
+    the gate explicitly off the scan exits 0 although a scanner failed; that is the
+    documented effect of turning the gate off, pinned here so the behavior is
+    stated rather than assumed. The same rule for every results-file shape is in
+    ``tests/unit/core/phases/test_scanner_executor_rejected_exit_codes.py``.
     """
 
-    def test_determine_status_grades_a_nonzero_exit_as_passed(self):
-        """MEASURED, not assumed, and the measurement is the wrong answer.
+    #: The report the failed tool leaves: grype's measured zero-byte one, and a
+    #: well-formed one-run report, with which the rejected exit code is the only
+    #: thing that makes the row ERROR.
+    REPORTS = pytest.mark.parametrize(
+        "report",
+        [
+            "",
+            (
+                '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": '
+                '"grype"}}, "results": []}]}'
+            ),
+        ],
+        ids=["zero-byte-report", "one-run-report"],
+    )
 
-        Asserts the CURRENT behavior so the defect is recorded rather than
-        described. ``exit_code`` is a field on the very object being graded --
-        ``ScanResultsContainer.exit_code``, defaulting to 0 -- and
-        ``determine_status`` does not read it. Its three inputs are
-        ``targets_attempted``, ``targets_failed`` and ``severity_counts`` against
-        the threshold, so a scanner that tracks no targets and reported no
-        findings reaches the severity gate and clears it.
+    @staticmethod
+    def _hard_failure_row(tmp_path, report=""):
+        """grype's measured failure through ScannerExecutor: exit 1, ``report`` left."""
+        from typing import ClassVar, Literal
 
-        Reddens when the grading learns about the exit code, which is the right
-        alarm: whoever fixes that should find this test and the xfail in
-        ``test_scanner_template_method.py`` together.
-        """
-        from automated_security_helper.core.enums import ScannerStatus as _Status
-        from automated_security_helper.models.scan_results_container import (
-            ScanResultsContainer,
+        from automated_security_helper.base.plugin_context import PluginContext
+        from automated_security_helper.base.scanner_plugin import (
+            ScannerPluginBase,
+            ScannerPluginConfigBase,
+        )
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+        from automated_security_helper.core.enums import (
+            OfflineStrategy,
+            ScannerToolType,
+        )
+        from automated_security_helper.core.phases.scanner_executor import (
+            ScannerExecutor,
         )
 
-        container = ScanResultsContainer(scanner_name="grype")
-        container.exit_code = 1
+        class GrypeShapedConfig(ScannerPluginConfigBase):
+            name: Literal["grype"] = "grype"
 
-        assert container.targets_attempted is None, (
-            "the fixture must not track targets, or the ERROR guard decides this "
-            "and the severity gate is never reached"
+        class GrypeShapedScanner(ScannerPluginBase):
+            offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+            success_exit_codes: ClassVar[set] = {0, 2}
+
+            def model_post_init(self, context):
+                self.command = "grype"
+                self.tool_type = ScannerToolType.SCA
+                super().model_post_init(context)
+
+            def validate_plugin_dependencies(self) -> bool:
+                return True
+
+            def _execute_scan(self, target, target_type, global_ignore_paths):
+                results_dir = self.results_dir / target_type
+                results_dir.mkdir(parents=True, exist_ok=True)
+                results_file = results_dir / "results_sarif.sarif"
+                results_file.write_text(report, encoding="utf-8")
+                return ["grype", "dir:."], results_file, None
+
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "package.json").write_text("{}\n")
+        output = tmp_path / "out"
+        (output / ASH_WORK_DIR_NAME).mkdir(parents=True)
+        context = PluginContext(
+            source_dir=source,
+            output_dir=output,
+            work_dir=output / ASH_WORK_DIR_NAME,
+            config=AshConfig(project_name="test"),
         )
-        assert container.determine_status("MEDIUM") is _Status.PASSED, (
-            "a scanner that exited non-zero and reported nothing is graded PASSED. "
-            "If this now returns ERROR, determine_status was taught to read "
-            "exit_code -- update this test and drop the xfail on "
-            "test_a_failed_tool_is_not_reported_as_a_successful_execution"
+        scanner = GrypeShapedScanner(config=GrypeShapedConfig(), context=context)
+
+        def tool(*args, **kwargs):
+            scanner.exit_code = 1
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "failed to load the database: database does not exist",
+            }
+
+        executor = ScannerExecutor(
+            plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
+        )
+        with patch.object(scanner, "_run_subprocess", side_effect=tool):
+            (row,) = executor._execute_scanner(
+                "grype", scanner, [{"path": source, "type": "source"}]
+            )
+        return row
+
+    @REPORTS
+    def test_a_rejected_exit_code_is_graded_error(self, tmp_path, report):
+        row = self._hard_failure_row(tmp_path, report)
+
+        assert row.exit_code == 1
+        assert row.status == ScannerStatus.ERROR, (
+            "grype exited 1, outside its success set {0, 2}, and wrote an empty "
+            f"report; the row was graded {row.status.value}, which the gate reads "
+            "as a scanner that completed"
         )
 
-    def test_the_default_flip_does_not_change_the_verdict_for_this_case(self, tmp_path):
-        """The claim-limiting test: same exit code with the gate off, on, and default.
-
-        A PASSED scanner with no target counters gives ``incomplete_scanners``
-        nothing to report, so all three paths return 0. Asserted as three arms in
-        one test rather than three tests, because what matters is that they AGREE
-        -- any description of this flip that says it catches hard scanner failures
-        is contradicted by these three values being equal.
-        """
-        from automated_security_helper.interactions.run_ash_scan import (
-            incomplete_scanners,
-        )
+    @REPORTS
+    def test_the_error_row_fails_the_scan_unless_the_gate_is_off(
+        self, tmp_path, report
+    ):
+        """The row the executor produced, as the gate reads it, in all three positions."""
+        row = self._hard_failure_row(tmp_path, report)
 
         results = MagicMock()
         results.sarif = MagicMock()
@@ -1404,18 +1450,17 @@ class TestTheGateCannotSeeAHardFailureGradedPassed:
         results.ash_config = MagicMock()
         results.ash_config.global_settings.severity_threshold = "MEDIUM"
         results.ash_config.get_plugin_config.return_value = None
-        # No counter keys at all, which is how ScanResultProcessor serializes a
-        # scanner that does not track targets -- dumped with exclude_unset=True.
+        # No counter keys, which is how ScanResultProcessor serializes a scanner
+        # that does not track targets -- dumped with exclude_unset=True.
         results.additional_reports = {
             "grype": {
-                "source": {"scanner_name": "grype", "status": "PASSED", "duration": 1.0}
+                "source": {
+                    "scanner_name": "grype",
+                    "status": row.status.value,
+                    "duration": 1.0,
+                }
             }
         }
-
-        assert incomplete_scanners(results) == [], (
-            "the gate reads status and target counters; a PASSED row with neither "
-            "counter is not incomplete by either arm"
-        )
 
         defaulted = _compute_exit_code(results, _opts(tmp_path))
         opted_in = _compute_exit_code(
@@ -1425,8 +1470,11 @@ class TestTheGateCannotSeeAHardFailureGradedPassed:
             results, _opts(tmp_path, fail_on_incomplete_scanners=False)
         )
 
-        assert defaulted == opted_in == opted_out == 0, (
-            "this case is invisible to the flag in every position, so the default "
-            "flip neither fixes nor worsens it; got "
-            f"default={defaulted} on={opted_in} off={opted_out}"
+        assert (defaulted, opted_in) == (1, 1), (
+            "a scanner whose tool failed makes the scan incomplete; got "
+            f"default={defaulted} on={opted_in} for a {row.status.value} row"
+        )
+        assert opted_out == 0, (
+            "with the gate off an incomplete scan is not failed for it; got "
+            f"off={opted_out}"
         )

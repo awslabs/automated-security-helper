@@ -46,6 +46,7 @@ rather than just its plumbing:
 
 import base64
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -2326,3 +2327,168 @@ def test_the_debug_log_does_not_dump_the_template(cdk_doubles, template_file, ou
     messages = [r.getMessage() for r in records]
     assert not any(SCANNED_TREE_MARKER.lower() in m for m in messages), messages
     assert any("2 resource(s)" in m for m in messages), messages
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs symlinks")
+def test_a_link_left_at_the_copys_name_is_not_written_through(
+    cdk_doubles, include_contents, template_file, outdir, tmp_path
+):
+    """The copy for CfnInclude is created fresh, never through what is at its name."""
+    other = tmp_path / "elsewhere.yaml"
+    other.write_text("unchanged\n", encoding="utf-8")
+    synth_dir = outdir.joinpath(
+        re.sub(
+            r"(\/|\\|\.)+",
+            "--",
+            str(cdk_nag_wrapper.get_shortest_name(input=template_file)).lstrip("/"),
+        )
+    )
+    synth_dir.mkdir(parents=True)
+    (synth_dir / ".ash-cfn-include.yaml").symlink_to(other)
+    cdk_doubles.report_text = _one_violation_report()
+
+    _run(template_file, outdir, scan_root=template_file.parent)
+
+    assert other.read_text(encoding="utf-8") == "unchanged\n"
+    assert include_contents == [TEMPLATE_YAML]
+
+
+# ---------------------------------------------------------------------------
+# The node jsii starts
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def jsii_node_during_the_call(monkeypatch):
+    """What JSII_NODE was while the wrapper ran, read where the packs are built."""
+    import os
+
+    seen: list = []
+    build = cdk_nag_wrapper._build_nag_pack
+
+    def recording_build(pack_name):
+        seen.append(os.environ.get("JSII_NODE"))
+        return build(pack_name)
+
+    monkeypatch.setattr(cdk_nag_wrapper, "_build_nag_pack", recording_build)
+    return seen
+
+
+def _fake_node(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    node = directory / ("node.exe" if sys.platform == "win32" else "node")
+    node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    node.chmod(0o755)
+    return node
+
+
+@pytest.fixture
+def hermetic_lookup(monkeypatch, tmp_path):
+    from automated_security_helper.utils import subprocess_utils
+
+    monkeypatch.delenv("JSII_NODE", raising=False)
+    monkeypatch.setattr(
+        subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+    )
+    subprocess_utils.clear_find_executable_cache()
+    yield
+    subprocess_utils.clear_find_executable_cache()
+
+
+def test_jsii_is_given_the_node_ash_resolved(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """By absolute path: jsii starts "node" by name otherwise, which Windows looks
+    for in the working directory first."""
+    import os
+
+    node = _fake_node(tmp_path / "installed" / "bin")
+    monkeypatch.setenv("PATH", str(node.parent))
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == [str(node)]
+    assert "JSII_NODE" not in os.environ, "restored after the call"
+
+
+def test_an_operators_jsii_node_is_kept(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    _fake_node(tmp_path / "installed" / "bin")
+    monkeypatch.setenv("PATH", str(tmp_path / "installed" / "bin"))
+    monkeypatch.setenv("JSII_NODE", "/opt/node-20/bin/node")
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == ["/opt/node-20/bin/node"]
+
+
+def test_a_node_reached_only_through_the_working_directory_is_refused(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    repo = tmp_path / "repo"
+    _fake_node(repo / "bin")
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("PATH", "bin")
+
+    with pytest.raises(RuntimeError, match="through the working directory"):
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == [], "cdk-nag started anyway"
+
+
+def test_with_no_node_anywhere_jsii_is_left_to_report_it(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert jsii_node_during_the_call == [None]
+
+
+def test_a_node_found_only_in_the_tree_is_refused(
+    cdk_doubles,
+    template_file,
+    outdir,
+    tmp_path,
+    monkeypatch,
+    hermetic_lookup,
+    jsii_node_during_the_call,
+):
+    """Not left to jsii, which would start "node" by name and find that copy."""
+    monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
+    tree = tmp_path / "repo"
+    node = _fake_node(tree / "node_modules" / ".bin")
+    monkeypatch.setenv("PATH", str(node.parent))
+
+    with pytest.raises(RuntimeError, match="found only inside the scanned tree"):
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"], scan_root=tree)
+
+    assert jsii_node_during_the_call == []

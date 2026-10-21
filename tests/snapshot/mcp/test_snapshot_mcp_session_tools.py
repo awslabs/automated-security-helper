@@ -93,13 +93,15 @@ def fake_git(monkeypatch):
             cmd, behavior["returncode"], "", behavior["stderr"]
         )
 
-    monkeypatch.setattr(source_delivery.subprocess, "run", fake_run)
+    monkeypatch.setattr(source_delivery, "_run_git", fake_run)
     behavior["calls"] = calls
     return behavior
 
 
 @pytest.mark.asyncio
-async def test_set_source_git(fake_git, snapshot):
+async def test_set_source_git(fake_git, snapshot, monkeypatch):
+    # The tool clones only from hosts the operator lists.
+    monkeypatch.setenv("ASH_MCP_GIT_ALLOWED_HOSTS", "example.com")
     cloned = await _call(
         "set_source_git", url="https://example.com/org/repo.git", headers=_SESSION
     )

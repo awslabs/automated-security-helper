@@ -248,10 +248,11 @@ version = "3.7.0"
 # resolves the ref, so a wrong tag is a wrong ASH and a deleted tag is a hard
 # failure.
 #
-# The three docs/ entries are the same failure again, and they are the reason
-# this list is not the only guard. Each holds a paste-in install command that
-# nothing rewrote: cli-reference.md and mcp-performance-scalability.md sat three
-# minor releases behind, and trivy-plugin.md six. They were missed because the
+# cli-reference.md, mcp-performance-scalability.md and trivy-plugin.md are the
+# same failure again, and they are the reason this list is not the only guard.
+# Each holds a paste-in install command that nothing rewrote: cli-reference.md
+# and mcp-performance-scalability.md sat three minor releases behind, and
+# trivy-plugin.md six. They were missed because the
 # repository had three separate hand-maintained lists of files that pin the
 # version -- this one, scripts/version_template_manager.py's target_files, and
 # the test's own list -- and a file absent from all three is invisible to every
@@ -259,6 +260,15 @@ version = "3.7.0"
 # tree for install refs instead of consulting a list, so the next omission fails
 # a test rather than shipping. Adding a pin here without adding it there is
 # safe; the reverse is what this comment exists to prevent.
+#
+# building-your-own-image.md and examples/ash_plugins_example/pyproject.toml
+# joined when their install commands stopped naming ASH's distribution bare,
+# which PyPI resolves to an unrelated project, and started naming the git tag
+# instead. The example pins it as a poetry `tag = "v..."`, which the tree walk's
+# `@v` patterns do not see, so this entry is its only maintenance.
+# suppressions.md is not listed: its install commands ask for the `symbols`
+# extra, which no tag up to v3.7.1 defines, so they name `main` until a release
+# has it.
 #
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
@@ -284,6 +294,8 @@ version_files = [
     "docs/content/docs/cli-reference.md:automated-security-helper@",
     "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
     "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
+    "docs/content/docs/building-your-own-image.md:automated-security-helper.git@",
+    "examples/ash_plugins_example/pyproject.toml:automated-security-helper.git",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-

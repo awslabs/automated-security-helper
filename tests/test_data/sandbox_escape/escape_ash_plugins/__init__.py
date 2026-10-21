@@ -1,11 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A fixture scanner plugin whose tool is the malicious escape_probe.py.
+"""A fixture scanner plugin whose tool is escape_probe.py.
 
 Loaded through ``ash_plugin_modules`` exactly like a third-party plugin, and spawns
 its tool through ``_run_subprocess`` exactly like a builtin scanner, so the escape test
-exercises the real spawn path rather than calling the sandbox directly. The attack
+exercises the real spawn path rather than calling the sandbox directly. The probe's
 spec is read from the file ASH_SANDBOX_ESCAPE_SPEC names, set by the test.
 """
 

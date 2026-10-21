@@ -23,7 +23,11 @@ from typing import List, Optional
 from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.python_child import python_code_argv
+from automated_security_helper.utils.subprocess_utils import (
+    child_environ,
+    find_executable,
+)
 
 # Recursion guard, following the existing ASH_IN_CONTAINER precedent. The inner invocation
 # is rewritten to --mode local, so this should never be observed as already set; it is
@@ -139,6 +143,26 @@ def rewrite_mode_args(argv: List[str]) -> List[str]:
     return out
 
 
+#: How the shell starts the inner scan: this interpreter, by absolute path, running
+#: the same entry point as the ``ash`` script, so the inner scan is the ASH that is
+#: running now. ``sys.argv[0]`` is set so its messages name ``ash``, not ``-c``.
+_INNER_ENTRY_POINT = (
+    "import sys; sys.argv[0] = 'ash'; "
+    "from automated_security_helper.cli.entrypoint import main; main()"
+)
+
+
+def _this_ash() -> List[str]:
+    """The command that runs the ASH running now.
+
+    ``nix develop --command`` starts it in the scan's own directory, which ``-c``
+    puts first on ``sys.path``: an ``automated_security_helper/`` there would run in
+    place of ASH. The directory is left as it is, and the command drops that entry
+    (``utils/python_child.python_code_argv``).
+    """
+    return python_code_argv(_INNER_ENTRY_POINT)
+
+
 #: What the inner run executes: this ASH's command line, started by this ASH's own
 #: interpreter. Python puts the working directory first on ``sys.path`` for ``-c``,
 #: and the working directory is usually the scanned repository, so it is removed
@@ -177,7 +201,7 @@ def build_nix_command(
         "develop",
         flake_ref,
         "--command",
-        *inner_ash_command(),
+        *_this_ash(),
         *inner_args,
     ]
 
@@ -220,7 +244,11 @@ def run_ash_nix(
     inner_args = rewrite_mode_args(list(argv if argv is not None else sys.argv[1:]))
     cmd = build_nix_command(resolved_ref, inner_args, nix_executable)
 
-    env = os.environ.copy()
+    # The environment every child of a scan gets, copied under ENVIRON_LOCK
+    # (utils/process_env.snapshot_environ, through child_environ): no PATH entry
+    # inside the scanned tree unless the operator allowed in-tree tools. nix
+    # develop prepends the shell's packages to this PATH.
+    env = child_environ()
     env[ASH_IN_NIX_ENV_VAR] = "1"
     # The flake already supplies every scanner, so stop the thirteen scanners that prefer
     # `uv tool install` from fetching their own copies and shadowing the pinned ones.

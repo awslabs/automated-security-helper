@@ -60,18 +60,36 @@ Failure modes
 * A build time that cannot be read (the tool printed nothing parseable, the metadata is
   missing) counts as stale, with the reason in the message. An unmeasurable database is not
   evidence of a fresh one, and treating it as fresh would reopen the silent case.
+* A database the tool reports does not exist at all is ``absent``, which is more than
+  stale: the scanner had nothing to match against, so the executor records it ERROR
+  whatever the policy says. ``warn`` relaxes the age bound for a database that exists.
 * The offline rulesets carry no build time of their own. The Dockerfile records the download
   time in ``RULESET_FETCHED_AT_FILE``; without it the oldest rules file's mtime is used, which
   an ordinary ``cp`` resets to the copy time and so can only under-state the age. The record
   says which source it used.
 * Only scanners that return a SARIF report are measured. A scanner that failed outright is
   already reported as ERROR or MISSING, and its database contributed nothing.
+
+What the probes read
+--------------------
+grype's and trivy's probes read the cache the scan read, and nothing the scanned
+repository wrote. Measured with trivy 0.75.0 and grype 0.120.1: run from a directory
+holding a ``trivy.yaml`` with ``cache.dir`` (or a ``.grype.yaml`` or
+``.grype/config.yaml`` with ``db.cache-dir``) naming a planted database, ``trivy version``
+and ``grype db status`` reported the planted database's time (2099-01-01), so a
+repository scanned with ``cd repo && ash --offline`` could carry a stale database past
+this check. So each probe runs from ``ProbeContext.cwd``, outside the scanned tree, passes
+``content_db_refresh.EMPTY_TOOL_CONFIG`` as its config file (neither tool then looks for
+one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
+with the flag or variable that beats any config file (``--cache-dir``,
+``GRYPE_DB_CACHE_DIR``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -86,6 +104,7 @@ from typing import (
     Sequence,
 )
 
+from automated_security_helper.utils.content_db_refresh import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
     DEFAULT_STALENESS_POLICY,
@@ -106,6 +125,12 @@ if TYPE_CHECKING:
     from automated_security_helper.schemas.sarif_schema_model import Notification
 
 STALE_NOTIFICATION_ID = "ASH-CONTENT-DB-STALE"
+
+
+class ContentDatabaseAbsent(ValueError):
+    """The tool reports that the database does not exist, not only that it is unread."""
+
+
 INVOCATION_PROPERTY = "ash_content_databases"
 OPT_OUT_HINT = (
     "To scan against it anyway, pass --allow-stale-content-db or set "
@@ -135,6 +160,9 @@ class ContentDbAgeRecord:
     #: ``to_dict`` when unset, so a scan with no overrides records exactly what it did
     #: before the field existed.
     policy_source: Optional[str] = None
+    #: The tool reports that the database does not exist (see "Failure modes" in the
+    #: module docstring). Omitted from ``to_dict`` when False, like ``policy_source``.
+    absent: bool = False
 
     @property
     def age(self) -> Optional[timedelta]:
@@ -157,6 +185,13 @@ class ContentDbAgeRecord:
         return self.stale and self.policy == STALENESS_FAIL
 
     def message(self) -> str:
+        if self.absent:
+            return (
+                f"Content database {self.name} ({self.scanner}) does not exist "
+                f"({self.error or 'the tool reports no database'}). The scanner had "
+                "nothing to match against, so it is recorded ERROR whatever "
+                f"content_db_staleness says. To create it, {self.refresh}."
+            )
         bound = go_duration(self.max_age)
         whose = (
             f"{self.scanner}'s own bound"
@@ -215,6 +250,7 @@ class ContentDbAgeRecord:
             "error": self.error,
             "timestamp_label": self.timestamp_label,
             **({"policy_source": self.policy_source} if self.policy_source else {}),
+            **({"absent": True} if self.absent else {}),
         }
 
     @classmethod
@@ -234,6 +270,7 @@ class ContentDbAgeRecord:
             error=data.get("error"),
             timestamp_label=str(data.get("timestamp_label") or "built"),
             policy_source=data.get("policy_source") or None,
+            absent=data.get("absent") is True,
         )
 
 
@@ -336,10 +373,25 @@ class ProbeContext:
 
     env: Dict[str, str]
     executable: Optional[str] = None
+    #: The database's directory as the scan used it: grype's and trivy's cache
+    #: (``content_db_refresh.default_cache_dir``), or the offline rules directory.
+    #: For grype and trivy, None leaves the choice to the tool, with ``env``.
     cache_dir: Optional[str] = None
+    #: Where a probe runs: outside the scanned tree
+    #: (``path_trust.cwd_outside_scanned_tree``). None runs it from the filesystem
+    #: root of the temporary directory, which no repository writes.
+    cwd: Optional[str] = None
 
 
-def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
+def _probe_cwd(ctx: ProbeContext) -> str:
+    if ctx.cwd:
+        return ctx.cwd
+    import tempfile
+
+    return Path(os.path.abspath(tempfile.gettempdir())).anchor
+
+
+def _run_json(command: List[str], env: Mapping[str, str], cwd: str) -> Any:
     """Run a tool's status command and parse its stdout as JSON, whatever it exits with.
 
     ``grype db status`` exits 1 when it considers the database invalid -- including when it
@@ -350,6 +402,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
         capture_output=True,
         text=True,
         env=dict(env),
+        cwd=cwd,
         timeout=_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
@@ -365,9 +418,32 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
 def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.executable:
         raise ValueError("grype executable not found")
-    status = _run_json([ctx.executable, "db", "status", "-o", "json"], ctx.env)
+    env = dict(ctx.env)
+    if ctx.cache_dir:
+        env["GRYPE_DB_CACHE_DIR"] = ctx.cache_dir
+    status = _run_json(
+        [
+            ctx.executable,
+            "db",
+            "status",
+            "-o",
+            "json",
+            "-c",
+            EMPTY_TOOL_CONFIG.as_posix(),
+        ],
+        env,
+        _probe_cwd(ctx),
+    )
     built = status.get("built") if isinstance(status, dict) else None
     if not built:
+        error = str(status.get("error") or "") if isinstance(status, dict) else ""
+        path = status.get("path") if isinstance(status, dict) else None
+        if "does not exist" in error or (
+            isinstance(path, str) and path and not Path(path).exists()
+        ):
+            raise ContentDatabaseAbsent(
+                f"`grype db status` reports no database at {path}: {error}"[:300]
+            )
         raise ValueError(f"`grype db status` reported no build time: {status!r}"[:300])
     return parse_timestamp(str(built)), "`built` in `grype db status -o json`"
 
@@ -375,11 +451,23 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
 def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.executable:
         raise ValueError("trivy executable not found")
-    version = _run_json([ctx.executable, "version", "--format", "json"], ctx.env)
+    version = _run_json(
+        [
+            ctx.executable,
+            "version",
+            "--format",
+            "json",
+            "--config",
+            EMPTY_TOOL_CONFIG.as_posix(),
+            *(["--cache-dir", ctx.cache_dir] if ctx.cache_dir else []),
+        ],
+        ctx.env,
+        _probe_cwd(ctx),
+    )
     db = version.get("VulnerabilityDB") if isinstance(version, dict) else None
     updated = db.get("UpdatedAt") if isinstance(db, dict) else None
     if not updated:
-        raise ValueError(
+        raise ContentDatabaseAbsent(
             "`trivy version --format json` reported no VulnerabilityDB.UpdatedAt; "
             "no trivy database was found in the cache directory trivy reads"
         )
@@ -391,7 +479,7 @@ def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
 
 def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.cache_dir:
-        raise ValueError("no offline rules cache directory is configured")
+        raise ContentDatabaseAbsent("no offline rules cache directory is configured")
     cache = Path(ctx.cache_dir)
     manifest = cache / RULESET_FETCHED_AT_FILE
     if manifest.is_file():
@@ -403,7 +491,7 @@ def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
         p for p in cache.rglob("*") if p.is_file() and p.suffix in {".yml", ".yaml"}
     ]
     if not rules:
-        raise ValueError(f"no rules files found in {cache.as_posix()}")
+        raise ContentDatabaseAbsent(f"no rules files found in {cache.as_posix()}")
     oldest = min(p.stat().st_mtime for p in rules)
     return (
         datetime.fromtimestamp(oldest, timezone.utc),
@@ -435,11 +523,13 @@ def measure(
     built: Optional[datetime] = None
     measured_by = entry.age_source
     error: Optional[str] = None
+    absent = False
     try:
         measurer = MEASURERS[entry.name]
         built, measured_by = measurer(ctx)
     except Exception as exc:  # noqa: BLE001 - recorded, and counted as stale
         error = f"{type(exc).__name__}: {exc}"
+        absent = isinstance(exc, ContentDatabaseAbsent)
     return ContentDbAgeRecord(
         name=entry.name,
         scanner=entry.scanner,
@@ -453,6 +543,7 @@ def measure(
         refresh=entry.refresh,
         error=error,
         timestamp_label=entry.timestamp_label,
+        absent=absent,
     )
 
 

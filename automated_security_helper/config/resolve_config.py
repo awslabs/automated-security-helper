@@ -1,6 +1,8 @@
+import errno
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 from types import UnionType
 from typing import (
@@ -20,7 +22,8 @@ from typing import (
 
 from pydantic import ValidationError
 import yaml
-from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.archive_limits import confine_archive_limits
+from automated_security_helper.config.ash_config import AshConfig, SandboxConfig
 from automated_security_helper.config.client_config_policy import (
     ClientConfigRules,
     apply_client_config_rules,
@@ -38,17 +41,26 @@ from automated_security_helper.config.config_sources import (
     default_confinement_root,
     describe_config_path,
     discover_config_source,
+    discovery_warnings,
     env_refused_for,
     log_config_discovery,
+    read_config_file,
     resolve_config_document,
 )
 from automated_security_helper.config.default_config import (
+    default_config_chain,
     default_config_document,
+    default_config_names,
     get_default_config,
 )
 from automated_security_helper.config.operator_paths import (
     anchor_override_paths,
     the_operators_files,
+)
+from automated_security_helper.config.path_trust import (
+    OperatorPaths,
+    operator_reason,
+    parse_overrides,
 )
 from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
@@ -61,11 +73,29 @@ from automated_security_helper.config.tool_config_trust import (
     confine_tool_versions,
 )
 from automated_security_helper.config.sandbox_grants import (
+    REPOSITORY_WRITTEN,
     confine_sandbox_grants,
     files_inside,
     is_within,
+    repository_written,
     scanned_trees,
     tree_holding,
+)
+from automated_security_helper.config.secret_verification_trust import (
+    confine_detect_secrets_settings,
+)
+
+#: Why a config an MCP client supplied may not grant, for the confinement warning.
+CLIENT_SUPPLIED = "an MCP client supplied the file, not the operator"
+from automated_security_helper.core.constants import (
+    ASH_CONFIG_FILE_NAMES,
+    ASH_PYPROJECT_FILE_NAME,
+    ASH_RC_FILE_NAMES,
+)
+from automated_security_helper.core.exceptions import (
+    ASHConfigFileNotFoundError,
+    ASHConfigSourceError,
+    ASHConfigValidationError,
 )
 from automated_security_helper.config.staleness_trust import (
     confine_content_db_staleness,
@@ -74,11 +104,18 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
-from automated_security_helper.core.exceptions import (
-    ASHConfigSourceError,
-    ASHConfigValidationError,
-)
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+class LoggedResolutionWarning(str):
+    """A resolution warning resolve_config has already logged.
+
+    Every resolution warning is reported with a scan's results; the orchestrator
+    also logs each one, except these, so that none is logged twice. The sources
+    discovery ignored are logged by discovery when resolve_config discovers.
+    """
+
+    __slots__ = ()
 
 
 def find_config_file(
@@ -97,6 +134,177 @@ def find_config_file(
         search_dir = Path.cwd()
     selected = discover_config_source(search_dir, permit=permit).selected
     return selected.path if selected is not None else None
+
+
+def _empty_config_path() -> ASHConfigSourceError:
+    # Path("") is the working directory, so an empty path is named as what it is
+    # rather than reported as a directory that cannot be read.
+    return ASHConfigSourceError(
+        "The configuration file path is empty. Name a config file, or leave the "
+        "path unset to use the configuration ASH discovers in the source directory."
+    )
+
+
+def _config_file_not_loadable(config_path: Path) -> ASHConfigSourceError:
+    """The refusal for a config path that is missing or is not a regular file.
+
+    Classified from ``os.stat`` alone; nothing at the path is opened.
+    """
+    where = describe_config_path(config_path)
+    try:
+        os.stat(config_path)
+    except FileNotFoundError:
+        if os.path.islink(config_path):
+            return ASHConfigFileNotFoundError(
+                f"Configuration file not found: {where} is a symbolic link to a "
+                "file that does not exist."
+            )
+        return ASHConfigFileNotFoundError(f"Configuration file not found: {where}")
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return ASHConfigSourceError(
+                f"Configuration file {where} is a symbolic link that leads back to "
+                "itself, so it cannot be read."
+            )
+        return ASHConfigSourceError(
+            f"Configuration file {where} cannot be read: {exc.strerror}"
+        )
+    return ASHConfigSourceError(
+        f"Configuration file {where} is not a regular file, so it cannot be read."
+    )
+
+
+def check_config_path(config_path: Path | str) -> Path:
+    """``config_path`` as a Path, refused when it is empty or not a regular file.
+
+    The checks ``read_config_document`` makes before reading, for a caller that
+    reads the file some other way (MCP ``get_config`` with ``raw``).
+    """
+    if isinstance(config_path, str) and not config_path.strip():
+        raise _empty_config_path()
+    path = Path(config_path)
+    # os.stat, not Path.is_file: before Python 3.14 is_file raises for an error
+    # other than "not found" (a directory above that cannot be searched).
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except OSError:
+        regular = False
+    if not regular:
+        raise _config_file_not_loadable(path)
+    return path
+
+
+def read_config_document(
+    config_path: Path | str,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    *,
+    log_failure: bool = True,
+    refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
+) -> ResolvedConfigDocument:
+    """``resolve_config_document``, refusing a config file that does not load.
+
+    ``resolve_config_document`` raises ``ASHConfigSourceError`` for a TOML file
+    and for anything wrong in an ``extends`` chain, but lets the root YAML or JSON
+    file's own read and parse errors through as the reader raised them. Here a
+    named file that is missing or not a regular file, and one that cannot be read
+    or parsed (including one that is not UTF-8), raise ``ASHConfigSourceError``
+    too. Every config file a scan reads comes through here, so none of them is
+    ever replaced by the default config, which would scan with that file's
+    suppressions, ignore paths and settings switched off and still report
+    success.
+
+    ``log_failure`` False leaves out the "Failed to load configuration file" log
+    line, for a caller that reads the file ahead of the resolution that reports
+    the same failure. ``refuse_env`` and ``anchor_relative_paths`` are passed to
+    ``resolve_config_document``.
+    """
+    path = check_config_path(config_path)
+    try:
+        return resolve_config_document(
+            path,
+            confine_to=confine_to,
+            permit_base=permit_base,
+            refuse_env=refuse_env,
+            anchor_relative_paths=anchor_relative_paths,
+        )
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, json.JSONDecodeError) as e:
+        # json.JSONDecodeError and UnicodeDecodeError are ValueErrors, but a bare
+        # ValueError is not caught: pydantic's ValidationError is one too.
+        if log_failure:
+            ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
+        verb = "read" if isinstance(e, OSError) else "parse"
+        raise ASHConfigSourceError(
+            f"could not {verb} {describe_config_path(path)}: {e}"
+        ) from e
+
+
+def _warnings_when_discovered(
+    config_path: Path, source_dir: Path, permit_base=None
+) -> List[str]:
+    """Discovery's warnings for ``source_dir`` when ``config_path`` is the source it selects.
+
+    ``ash scan`` and workspace mode run discovery themselves and pass the file it
+    selected as the config path, so the sources it ignored are reported for
+    them as they are when resolve_config discovers. Discovery is run again only
+    for a file at one of its locations, and the ignored sources are not logged
+    again: the caller that discovered them already did.
+    """
+    names = {*ASH_CONFIG_FILE_NAMES, *ASH_RC_FILE_NAMES, ASH_PYPROJECT_FILE_NAME}
+    if config_path.name not in names:
+        return []
+    # Both sides resolved: a .ash that is a symbolic link resolves to its target.
+    root = source_dir.resolve()
+    if config_path.parent.resolve() not in (root, (root / ".ash").resolve()):
+        return []
+    try:
+        discovery = discover_config_source(source_dir, permit=permit_base)
+    except ASHConfigValidationError:
+        return []
+    selected = discovery.selected
+    if selected is None or selected.path.resolve() != config_path.resolve():
+        return []
+    return discovery_warnings(discovery)
+
+
+def _validate_config_document(
+    document: ResolvedConfigDocument, config_path: Path | str
+) -> AshConfig:
+    try:
+        return AshConfig.model_validate(document.data, strict=True)
+    except ValidationError as e:
+        raise ASHConfigValidationError(
+            f"Configuration validation failed for "
+            f"'{describe_config_path(Path(config_path))}': {str(e)}. "
+            "Run 'ash config lint' to identify and fix issues."
+        ) from e
+
+
+def load_config_file(
+    config_path: Path | str,
+    confine_to: Optional[Path] = None,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    *,
+    log_failure: bool = True,
+    refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
+) -> AshConfig:
+    """``AshConfig.from_file``, with every way the file can fail to load refused.
+
+    A missing, unreadable or unparseable file raises ``ASHConfigSourceError``
+    (see ``read_config_document``) and one that does not validate raises
+    ``ASHConfigValidationError``, both exit 3 from ``ash scan``.
+    """
+    document = read_config_document(
+        config_path,
+        confine_to=confine_to,
+        permit_base=permit_base,
+        log_failure=log_failure,
+        refuse_env=refuse_env,
+        anchor_relative_paths=anchor_relative_paths,
+    )
+    return _validate_config_document(document, config_path)
 
 
 def _apply_config_override(
@@ -255,6 +463,7 @@ def resolve_config(
     scanned_root: Path | str | None = None,
     trusted_config_path: Path | str | None = None,
     untrusted_config: bool = False,
+    client_overrides: bool = False,
     client_config_policy: Optional[ClientConfigRules] = None,
     remote_client: bool = False,
     overlay_config_path: Path | str | None = None,
@@ -262,10 +471,18 @@ def resolve_config(
     """
     Load configuration from file or return default configuration.
 
+    The default configuration is returned only when there is no config file at
+    all: none named and none discovered. A file that is named (``config_path``,
+    ``ASH_CONFIG``) or discovered and cannot be loaded -- missing, a dangling
+    link, not a regular file, unreadable, not UTF-8, not valid YAML, JSON or
+    TOML, or not a valid config -- raises instead, whatever
+    ``fallback_to_default`` says.
+
     Args:
         config_path: Path to the configuration file
         source_dir: Source directory to search for configuration files
-        fallback_to_default: Whether to fall back to default configuration if no config file is found
+        fallback_to_default: Whether to return the default configuration when no
+            config file is named or found. When False, that case raises too.
         config_overrides: List of configuration overrides in the format 'key.path=value'
         permit_base: Optional check every ``extends`` base must also pass. The
             MCP server passes the calling session's; see
@@ -289,7 +506,16 @@ def resolve_config(
             and its ``sandbox.mode`` cannot turn off or replace a mode the
             trusted base sets. Its ``ash_plugin_modules`` are limited the same way
             as an in-tree file's (``config/plugin_module_trust.py``), and so are
-            its reporter destinations (``config/reporter_trust.py``).
+            its reporter destinations (``config/reporter_trust.py``), detect-secrets'
+            secret verification and the plugin and filter files it imports
+            (``config/secret_verification_trust.py``), and its
+            ``honor_ignore_files`` is replaced by the trusted value
+            (:func:`confine_honor_ignore_files`), and so are its archive extraction
+            limits (``config/archive_limits.py``).
+        client_overrides: ``config_overrides`` came from an MCP client (a
+            workspace tool's), not the operator, so a tool path they name is not
+            the operator's (``path_trust.OperatorPaths``). Implied when
+            ``client_config_policy`` is set and there are overrides.
         client_config_policy: The rules a file of the chain that an MCP client
             delivered is checked against; see ``config/client_config_policy.py``.
             None takes the trusted base's. When set, ``config_overrides`` are the
@@ -338,6 +564,11 @@ def resolve_config(
 
     Returns:
         The resolved AshConfig object
+
+    Raises:
+        ASHConfigValidationError: The config could not be resolved (exit 3 from
+            ``ash scan``). ``ASHConfigSourceError``, a subclass, when a config file
+            could not be loaded at all.
     """
     from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
 
@@ -345,13 +576,22 @@ def resolve_config(
         # untrusted_config treats every file of the chain as the caller's, which
         # would include the overlay, the operator's own file.
         raise ValueError("overlay_config_path cannot be combined with untrusted_config")
-    if client_config_policy is None and config_overrides:
+    # Under the MCP server the overrides come from the client, held to the
+    # session's allowlist; see operator_overrides below. A caller that passes
+    # client_overrides says the same of a workspace tool's overrides.
+    client_overrides = client_overrides or (
+        client_config_policy is not None and bool(config_overrides)
+    )
+    if not client_overrides and client_config_policy is None and config_overrides:
         # The operator's --config-overrides: a relative path in one is taken from
         # the working directory ASH runs in, not the scanned tree
         # (config/operator_paths.py). Anchored once here, so the config and every
         # replay onto the trusted base below read the same value.
         config_overrides = anchor_override_paths(config_overrides, Path.cwd())
     chain: List[Path] = []
+    named: List[Path] = []
+    spelled: List[Path] = []
+    merged: List[Any] = []
     documents: Dict[Path, Any] = {}
     names: Dict[Path, Tuple[Path, ...]] = {}
     refuse_env = env_refused_for(
@@ -393,6 +633,9 @@ def resolve_config(
         names=names,
         untrusted_config=untrusted_config,
         anchor_paths=None if untrusted_config else operators_files,
+        named=named,
+        spelled=spelled,
+        merged=merged,
     )
     if config is None:
         return config
@@ -408,9 +651,6 @@ def resolve_config(
         if any(delivered(path) for path in default_document.documents):
             documents.update(default_document.documents)
             names.update(default_names)
-    # Under the MCP server the overrides come from the client, held to the
-    # session's allowlist; see operator_overrides below.
-    client_overrides = client_config_policy is not None and bool(config_overrides)
     config = clear_client_supplied_marks(config)
     config = apply_client_config_rules(
         config,
@@ -426,14 +666,44 @@ def resolve_config(
     )
     if scanned_root is None:
         scanned_root = source_dir if source_dir is not None else Path.cwd()
-    default_in_tree = _not_the_operators(default_chain, trees, default_names)
+    root = Path(scanned_root)
+    ash_config = os.environ.get("ASH_CONFIG")
+    ash_config_named = [Path(ash_config)] if ash_config else []
+    # Every file of a chain is judged by its resolved path and by the names that
+    # reached it, the bases' extends entries included (ResolvedConfigDocument.named).
+    default_spelled = [*ash_config_named, *default_config_names()]
+    config._operator_paths = _operator_paths(
+        chain or default_chain,
+        [*named, *spelled] if chain else default_spelled,
+        named if chain else ash_config_named,
+        root,
+        merged[0] if merged else None,
+        untrusted=untrusted_config,
+        overrides=[] if client_overrides else config_overrides,
+    )
+    # A file is not the operator's when the scanned repository could have written
+    # it (repository_written: inside any git checkout or the scan root, under any
+    # name), and when it is inside the scanned tree or an MCP client delivered it
+    # (_not_the_operators). Either rule makes it untrusted.
+    default_written = repository_written(default_chain, root, default_spelled)
+    default_in_tree = default_written + [
+        path
+        for path in _not_the_operators(default_chain, trees, default_names)
+        if path not in default_written
+    ]
     if chain:
-        in_tree = (
-            list(chain) if untrusted_config else _not_the_operators(chain, trees, names)
-        )
+        if untrusted_config:
+            in_tree = list(chain)
+        else:
+            written = repository_written(chain, root, [*named, *spelled])
+            in_tree = written + [
+                path
+                for path in _not_the_operators(chain, trees, names)
+                if path not in written
+            ]
     else:
         # With no config file, the config is get_default_config(): ASH_CONFIG's
-        # file when that variable names one, which can be inside the tree too.
+        # file when that variable names one, which can be untrusted too.
         in_tree = default_in_tree
     if client_overrides:
         # Named in the warnings as the source of what is confined.
@@ -443,14 +713,41 @@ def resolve_config(
     operator = _load_operator_config(
         trusted_config_path, source_dir, permit_base, operators_files
     )
-    if operator is not None and not _not_the_operators(operator[1], trees, operator[2]):
+    own_mode = False
+    if (
+        operator is not None
+        and not repository_written(
+            operator[1], root, [Path(trusted_config_path), *operator[2]]
+        )
+        and not _not_the_operators(operator[1], trees, operator[3])
+    ):
         trusted = operator[0]
     else:
         trusted = AshConfig() if default_in_tree else get_default_config()
+        # A file that may grant, made untrusted only by a base it extends, keeps
+        # the sandbox settings it writes itself.
+        if default_in_tree and default_config_chain():
+            trusted, wrote_mode = _with_own_sandbox(
+                trusted, default_config_chain()[-1], root, ash_config_named
+            )
+            # ASH_CONFIG's own mode is the floor only when no operator file sets
+            # one: below, the floor is the operator file's mode when there is one.
+            own_mode = own_mode or (wrote_mode and operator is None)
+        if operator is not None:
+            trusted, wrote_mode = _with_own_sandbox(
+                trusted, operator[1][-1], root, [Path(trusted_config_path)]
+            )
+            own_mode = own_mode or wrote_mode
+    # The same for the config file the scan selected: an operator's --config
+    # outside every checkout that extends a base inside one.
+    if chain and not untrusted_config:
+        trusted, wrote_mode = _with_own_sandbox(trusted, chain[-1], root, named)
+        own_mode = own_mode or wrote_mode
     # The operator's mode is a floor wherever its file lives: a mode other than off
     # grants nothing, so an operator file in the tree may still turn the sandbox on.
-    # Before the overrides, so `--sandbox off` still turns it off.
-    if trusted.sandbox.mode == "off":
+    # Before the overrides, so `--sandbox off` still turns it off. A mode a file
+    # that may grant writes itself is the operator's choice, `off` included.
+    if trusted.sandbox.mode == "off" and not own_mode:
         trusted.sandbox.mode = (
             operator[0].sandbox.mode
             if operator is not None
@@ -462,7 +759,9 @@ def resolve_config(
     # session's allowlist. An allowlist that lets a client change a field does
     # not make the client's value the operator's, so none is replayed there.
     operator_overrides = (
-        list(config_overrides or []) if client_config_policy is None else []
+        list(config_overrides or [])
+        if client_config_policy is None and not client_overrides
+        else []
     )
     confine_to_trusted_base(
         config,
@@ -475,6 +774,13 @@ def resolve_config(
     # Not one of confine_to_trusted_base's steps: ash merge takes the verdict
     # settings, these among them, from the shards (cli/merge.py).
     confine_content_db_staleness(config, trusted, operator_overrides, in_tree)
+    # Nor these: a scan's own settings, which no merge reads.
+    reason = CLIENT_SUPPLIED if untrusted_config else REPOSITORY_WRITTEN
+    confine_detect_secrets_settings(
+        config, trusted, operator_overrides, in_tree, reason
+    )
+    confine_honor_ignore_files(config, trusted, operator_overrides, in_tree, reason)
+    confine_archive_limits(config, trusted, operator_overrides, in_tree)
     return config
 
 
@@ -713,34 +1019,170 @@ def _not_the_operators(
     return inside + [path for path in paths if path not in inside and delivered(path)]
 
 
+def confine_honor_ignore_files(
+    config: AshConfig,
+    trusted: AshConfig,
+    config_overrides: Optional[List[str]],
+    in_tree: List[Path],
+    reason: str = REPOSITORY_WRITTEN,
+) -> None:
+    """Take ``honor_ignore_files`` from the trusted base, never from an untrusted file.
+
+    The setting decides whether the scanned repository's own ``.gitignore`` and
+    ``.ignore`` files shrink the scan set, so the repository must not choose it in
+    either direction. Its value comes from the trusted base (the defaults, or the
+    operator's config outside the tree) with the ``--config-overrides`` entries for
+    it replayed on top, the way the sandbox grants and ``ash_plugin_modules`` are
+    decided. A different value in the in-tree file is replaced, with one warning
+    naming the key and the file.
+
+    Args:
+        config: The resolved AshConfig, changed in place.
+        trusted: The trusted base ``resolve_config`` built.
+        config_overrides: ``--config-overrides``; only the entries for this key are
+            replayed.
+        in_tree: The repository-written config files (or the MCP client's
+            upload), named in the warning.
+        reason: Why those files may not choose it, for the warning.
+    """
+    key_overrides = [
+        override
+        for override in config_overrides or []
+        if override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        == "honor_ignore_files"
+    ]
+    if key_overrides:
+        trusted = apply_config_overrides(trusted, key_overrides)
+    if config.honor_ignore_files == trusted.honor_ignore_files:
+        return
+    config.honor_ignore_files = trusted.honor_ignore_files
+    files = ", ".join(describe_config_path(path) for path in in_tree)
+    ASH_LOGGER.warning(
+        f"Ignoring honor_ignore_files from {files}: {reason}, and whether the "
+        "scanned repository's own .gitignore and .ignore files are honored is the "
+        "operator's choice. Using honor_ignore_files: "
+        f"{str(trusted.honor_ignore_files).lower()}. Set it with "
+        "--no-honor-ignore-files, --config-overrides or a config file outside every "
+        "git checkout."
+    )
+
+
+def _operator_paths(
+    chain: List[Path],
+    names: List[Path],
+    root_names: List[Path],
+    scan_root: Path,
+    document: Any,
+    *,
+    untrusted: bool,
+    overrides: Optional[List[str]],
+) -> OperatorPaths:
+    """Which tool paths in the config the operator named; see path_trust.
+
+    The chain's merged ``document`` (or, with no config file, the default
+    config's) when no file of the chain is inside the scanned tree or an MCP
+    client's (``path_trust.operator_reason``, under every name); only the selected
+    file's own document when that file is the operator's and a base it extends is
+    not; and what ``overrides`` set.
+    """
+    record = OperatorPaths(overrides=parse_overrides(overrides))
+    if untrusted:
+        return record
+    if all(operator_reason(path, scan_root) is None for path in [*chain, *names]):
+        if document is None:
+            document = get_default_config().model_dump()
+        record.documents = [document]
+    elif chain and all(
+        operator_reason(path, scan_root) is None for path in [chain[-1], *root_names]
+    ):
+        try:
+            own = read_config_file(chain[-1])
+        except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
+            own = None
+        if isinstance(own, dict):
+            record.documents = [own]
+    return record
+
+
+def _own_sandbox_settings(path: Path) -> Dict[str, Any]:
+    """The ``sandbox`` settings ``path`` writes itself, without its ``extends`` bases.
+
+    Read from the file alone, so neither a base nor the file's own ``patch``
+    operations, which edit what its bases gave it, contribute.
+    """
+    try:
+        data = read_config_file(path)
+    except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
+        return {}
+    section = data.get("sandbox") if isinstance(data, dict) else None
+    return dict(section) if isinstance(section, dict) else {}
+
+
+def _with_own_sandbox(
+    trusted: AshConfig, path: Path, scan_root: Path, lexical: List[Path]
+) -> Tuple[AshConfig, bool]:
+    """``trusted`` with the sandbox settings ``path`` writes, when ``path`` may grant.
+
+    ``path`` is one file of a chain that ``repository_written`` found untrusted
+    because of a base: an operator's file outside every checkout that extends one
+    inside. Its own settings are the operator's, and the base's are not, so only
+    the file's own ``sandbox`` section joins the trusted settings. Judged by its
+    resolved path and by ``lexical``, the names it was given.
+
+    Returns the settings and whether the file wrote its own ``mode``. A section
+    that does not validate on its own (one the file's ``patch`` repairs, say) adds
+    nothing, so the file then keeps no grants, as before this rule.
+    """
+    if repository_written([path], scan_root, lexical):
+        return trusted, False
+    own = _own_sandbox_settings(path)
+    if not own:
+        return trusted, False
+    current = trusted.sandbox.model_dump()
+    try:
+        # deep_merge spells each key the way the trusted settings do, as merging
+        # the chain did (`network-scanners` is `network_scanners`).
+        sandbox = SandboxConfig.model_validate(deep_merge(current, own), strict=True)
+    except ValidationError:
+        return trusted, False
+    keys = dict.fromkeys(current)
+    wrote_mode = any(_resolve_dict_key(keys, key) == "mode" for key in own)
+    updated = trusted.model_copy()
+    updated.sandbox = sandbox
+    return updated, wrote_mode
+
+
 def _load_operator_config(
     trusted_config_path: Path | str | None,
     source_dir: Path | str | None,
     permit_base: Optional[Callable[[Path], bool]],
     anchor_paths: Optional[AnchorPaths] = None,
-) -> Optional[Tuple[AshConfig, List[Path], Dict[Path, Tuple[Path, ...]]]]:
-    """The operator's config file, the files it was built from, and their names, or None.
+) -> Optional[Tuple[AshConfig, List[Path], List[Path], Dict[Path, Tuple[Path, ...]]]]:
+    """The operator's config file, the files it was built from, and their names.
 
-    Loaded the way _resolve_config loads a config file, and refused the same way
-    when it does not validate.
+    The names twice: as a list in the chain's order (``ResolvedConfigDocument.named``)
+    and by file (``ResolvedConfigDocument.names``).
+
+    None only when no operator config was named. One that was named is loaded
+    the way _resolve_config loads a config file, and refused the same way when it
+    is missing, does not load or does not validate: dropping it would take the
+    sandbox grants from the defaults instead of from the file the operator named.
     """
-    if trusted_config_path is None or not Path(trusted_config_path).is_file():
+    if trusted_config_path is None:
         return None
     path = Path(trusted_config_path)
-    document = resolve_config_document(
+    document = read_config_document(
         path,
         confine_to=default_confinement_root(path, source_dir),
         permit_base=permit_base,
         anchor_relative_paths=anchor_paths,
     )
-    try:
-        config = AshConfig.model_validate(document.data, strict=True)
-    except ValidationError as e:
-        raise ASHConfigValidationError(
-            f"Configuration validation failed for '{describe_config_path(path)}': "
-            f"{str(e)}. Run 'ash config lint' to identify and fix issues."
-        ) from e
-    return config, list(document.chain), dict(document.names)
+    return (
+        _validate_config_document(document, path),
+        list(document.chain),
+        list(document.named),
+        dict(document.names),
+    )
 
 
 def _load_overlay(
@@ -913,11 +1355,18 @@ def _resolve_config(
     names: Optional[Dict[Path, Tuple[Path, ...]]] = None,
     untrusted_config: bool = False,
     anchor_paths: Optional[AnchorPaths] = None,
+    named: Optional[List[Path]] = None,
+    spelled: Optional[List[Path]] = None,
+    merged: Optional[List[Any]] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
-    Appends every file read to ``chain``, each file's parsed document to
-    ``documents``, and the paths each was reached by to ``names``.
+    Appends every file read to ``chain``, resolved, each file's parsed document to
+    ``documents``, and the paths each was reached by to ``names``. It also
+    appends the root config file's path as it was named (passed or discovered)
+    to ``named``, every file read by the path that named it
+    (``ResolvedConfigDocument.named``) to ``spelled``, and the merged document,
+    before any override, to ``merged``.
     ``anchor_paths`` accepts the files whose relative paths are taken from their
     own directory (``config/operator_paths.py``).
     ``refuse_env`` decides which files of the chain resolve no ``!ENV``
@@ -976,12 +1425,18 @@ def _resolve_config(
         # why sources are selected rather than merged, is documented in
         # config/config_sources.py.
         confine_to = None
+        # The sources discovery found and did not use. Their settings are not
+        # applied, so they are reported with the scan's results as well as logged.
+        ignored_sources: List[str] = []
         if config_path is None:
             ASH_LOGGER.verbose(
                 "No configuration file provided, checking for default paths"
             )
-            discovery = discover_config_source(source_dir)
-            log_config_discovery(discovery)
+            discovery = discover_config_source(source_dir, permit=permit_base)
+            ignored_sources = [
+                LoggedResolutionWarning(message)
+                for message in log_config_discovery(discovery)
+            ]
             if discovery.selected is not None:
                 config_path = discovery.selected.path
                 # A caller's gate covers the file found too: it may be a link
@@ -1005,6 +1460,12 @@ def _resolve_config(
             else:
                 raise ValueError("Configuration file not found or provided")
 
+        # A config file that was named or discovered and cannot be loaded refuses
+        # resolution (read_config_document below); only "no config file at all"
+        # above falls back to the defaults.
+        if isinstance(config_path, str) and not config_path.strip():
+            raise _empty_config_path()
+
         # Process config file
         try:
             config_path = (
@@ -1012,23 +1473,17 @@ def _resolve_config(
             )
             ASH_LOGGER.debug(f"Loading configuration from {config_path.as_posix()}")
 
-            if not config_path.exists():
-                ASH_LOGGER.warning(
-                    f"Configuration file not found: {config_path.as_posix()}"
-                )
-                config = fallback(config)
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    return apply_config_overrides(config, config_overrides)
-                return config  # Return default config if specified file doesn't exist
-
             ASH_LOGGER.debug("Validating file config")
             if confine_to is None:
                 confine_to = default_confinement_root(
                     config_path, confinement_source_dir
                 )
+                if confinement_source_dir is not None:
+                    ignored_sources = _warnings_when_discovered(
+                        config_path, source_dir, permit_base
+                    )
             # AshConfig.from_file, keeping the list of files the config came from.
-            document = resolve_config_document(
+            document = read_config_document(
                 Path(config_path),
                 confine_to=confine_to,
                 permit_base=permit_base,
@@ -1055,48 +1510,28 @@ def _resolve_config(
             documents.update(document.documents)
             if names is not None:
                 names.update(document.names)
+            if named is not None:
+                named.append(Path(config_path))
+            if spelled is not None:
+                spelled.extend(document.named)
+            if merged is not None:
+                # What the config was validated from: the overlay merged in.
+                merged.append(data)
             if overlay is not None:
                 chain.extend(overlay.chain)
                 documents.update(overlay.documents)
                 if names is not None:
                     names.update(overlay.names)
+                if spelled is not None:
+                    spelled.extend(overlay.named)
             ASH_LOGGER.debug(f"Loaded config from file: {config_path}")
 
             # Apply config overrides if provided
             if config_overrides:
                 config = apply_config_overrides(config, config_overrides)
 
+            config._resolution_warnings.extend(ignored_sources)
             return config
-
-        except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-            # A parser's message can quote the line it stopped at; for a
-            # client's file that is text the client may not have written.
-            problem = (
-                _unquoted_load_error(config_path, e)
-                if untrusted_config or _is_a_client_file(config_path)
-                else str(e)
-            )
-            ASH_LOGGER.error(f"Failed to load configuration file: {problem}")
-            if fallback_to_default:
-                ASH_LOGGER.warning("Using default configuration due to file load error")
-                config = fallback(config)
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    config = apply_config_overrides(config, config_overrides)
-                config._resolution_warnings.append(
-                    f"Failed to load configuration file: {problem}. "
-                    + (
-                        "Using default configuration — suppressions and custom "
-                        "settings are NOT active."
-                        if overlay is None
-                        else f"Using {describe_config_path(overlay.chain[-1])} "
-                        "alone — the file's own suppressions and settings are NOT "
-                        "active."
-                    )
-                )
-                return config  # Return default config on file error
-            else:
-                raise e
 
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
@@ -1116,12 +1551,21 @@ def _resolve_config(
     except ASHConfigValidationError:
         raise
     except Exception as e:
-        # Always return a valid config, even in case of unexpected errors
-        if fallback_to_default:
-            ASH_LOGGER.error(f"Unexpected error in resolve_config: {str(e)}")
-            config = fallback(get_default_config())
-            # Apply overrides to default config if provided
-            if config_overrides:
-                return apply_config_overrides(config, config_overrides)
-            return config
-        raise e
+        if not fallback_to_default:
+            raise e
+        # Refused, never answered with the default config: a scan with the
+        # defaults in place of a config that failed to resolve runs with that
+        # config's suppressions and settings switched off and reports success.
+        ASH_LOGGER.error(f"Unexpected error in resolve_config: {str(e)}")
+        raise ASHConfigValidationError(
+            f"The configuration could not be resolved: {type(e).__name__}: {e}"
+        ) from e
+    except BaseException as e:
+        # pydantic-core reports a Rust panic as pyo3's PanicException, which is
+        # a BaseException and so passes `except Exception`. Refused the same way;
+        # anything else (KeyboardInterrupt, SystemExit) propagates.
+        if type(e).__name__ != "PanicException" or type(e).__module__ != "pyo3_runtime":
+            raise
+        raise ASHConfigValidationError(
+            f"The configuration could not be resolved: {type(e).__name__}: {e}"
+        ) from e

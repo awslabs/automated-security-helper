@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Resolve the absolute path of the parent of the script directory (ASH repo root)
-export ASH_ROOT_DIR="$(cd "$(dirname "$0")"; pwd)"
+export ASH_ROOT_DIR="$(cd -- "$(dirname -- "$0")"; pwd)"
 export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 
 # Set local variables
@@ -23,6 +23,8 @@ OFFLINE="NO"
 OFFLINE_SEMGREP_RULESETS="p/ci"
 TARGET_STAGE="non-root"
 INSTALL_ASH_REVISION="LOCAL"
+CONFIG_GIVEN="NO"
+CONFIG_PATH=""
 # Parse arguments
 while (("$#")); do
   case $1 in
@@ -84,6 +86,15 @@ while (("$#")); do
       shift
       INSTALL_ASH_REVISION="$1"
       ;;
+    --config)
+      shift
+      CONFIG_GIVEN="YES"
+      CONFIG_PATH="$1"
+      ;;
+    --config=*)
+      CONFIG_GIVEN="YES"
+      CONFIG_PATH="${1#--config=}"
+      ;;
     --help | -h)
       python -m automated_security_helper.cli.main --help
       exit 0
@@ -96,11 +107,30 @@ while (("$#")); do
       COLOR_OUTPUT="false"
       ASH_ARGS="${ASH_ARGS} --no-color"
       ;;
+    --workspace | --workspace=*)
+      WORKSPACE_GIVEN="YES"
+      ASH_ARGS="${ASH_ARGS} $1"
+      ;;
     *)
       ASH_ARGS="${ASH_ARGS} $1"
   esac
   shift
 done
+
+# ./ash scans one directory: it hands the scan inside --source-dir /src, which that
+# scan refuses next to --workspace, after the container has started. It also cannot
+# tell the scan inside that a workspace's --config was written by the repository
+# (a workspace scan refuses --config-from-scanned-repository), so a config in the
+# checkout but outside the workspace would be read there as the operator's. Refused
+# with exit 3 before anything is built or mounted.
+if [[ "${WORKSPACE_GIVEN:-NO}" = "YES" ]]; then
+  echo "ERROR: ./ash scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead." >&2
+  exit 3
+fi
+
+# The build reads stage names in any case, so --build-target NON-ROOT is non-root:
+# lower-cased once, here, so every check below and the image tag see that name.
+TARGET_STAGE="$(printf '%s' "${TARGET_STAGE}" | tr '[:upper:]' '[:lower:]')"
 
 export ASH_IMAGE_NAME=${ASH_IMAGE_NAME:-"automated-security-helper:${TARGET_STAGE}"}
 
@@ -109,16 +139,281 @@ if [ "${SOURCE_DIR}" = "" ]; then
   SOURCE_DIR="$(pwd)"
 fi
 
-# Resolve the absolute paths
-SOURCE_DIR="$(cd "$SOURCE_DIR"; pwd)"
-mkdir -p "${OUTPUT_DIR}"
-OUTPUT_DIR="$(cd "$OUTPUT_DIR"; pwd)"
+# Resolve the absolute paths. `--` before each path, so one starting with `-` is not
+# read as options; and a directory that cannot be entered ends the run, as the
+# Python CLI does, rather than leaving the working directory in its place.
+if ! resolved="$(cd -- "${SOURCE_DIR}" && pwd)"; then
+  echo "ERROR: Source directory does not exist: '${SOURCE_DIR}'. Check --source-dir." >&2
+  exit 1
+fi
+SOURCE_DIR="${resolved}"
+SOURCE_PHYSICAL="$(cd -- "${SOURCE_DIR}" && pwd -P)"
+
+# /out is mounted read-write and /src read-only: an output directory that is the
+# source directory or above it would hold the source tree, writable, at /out.
+# Compared by physical path, so a link to the source counts. One that does not exist
+# yet cannot hold the source, so this runs before the directory is created.
+if [[ "${NO_RUN}" = "NO" && -d "${OUTPUT_DIR}" ]]; then
+  OUTPUT_NAMED="$(cd -- "${OUTPUT_DIR}" && pwd)"
+  OUTPUT_PHYSICAL="$(cd -- "${OUTPUT_DIR}" && pwd -P)"
+  case "${SOURCE_PHYSICAL%/}/" in
+    "${OUTPUT_PHYSICAL%/}"/*)
+      echo "ERROR: The output directory '${OUTPUT_NAMED}' is the source directory '${SOURCE_DIR}' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it." >&2
+      exit 3
+      ;;
+  esac
+fi
+
+# The same /out mount is why a linked output directory is refused: the scan inside
+# would write wherever the link leads, and a repository that commits
+# `.ash -> /some/host/dir` would choose that directory. Refused with exit 3: the
+# output directory when it is a symlink, wherever it is, and any symlink from below
+# the source directory down to it, with the source taken under its name and its
+# physical path. Links at or above the source are the operator's own spelling. The
+# path is walked as written, `..` included, and before the directory is created,
+# because creating it through a linked `.ash` already writes where the link points;
+# so --no-run, which creates it too, is refused as well. `ash --mode container` and
+# Invoke-ASH apply the same rule.
+refuse_linked_output_dir() {
+  local spelled="$1" rest part current="" link=""
+  case "${spelled}" in
+    /*) ;;
+    *) spelled="$(pwd)/${spelled}" ;;
+  esac
+  rest="${spelled#/}"
+  while [ -n "${rest}" ]; do
+    part="${rest%%/*}"
+    if [ "${part}" = "${rest}" ]; then rest=""; else rest="${rest#*/}"; fi
+    case "${part}" in
+      "" | .) continue ;;
+      ..) current="${current%/*}"; continue ;;
+    esac
+    current="${current}/${part}"
+    case "${current}" in
+      "${SOURCE_DIR%/}"/* | "${SOURCE_PHYSICAL%/}"/*)
+        if [ -L "${current}" ]; then link="${current}"; break; fi
+        ;;
+    esac
+  done
+  if [ -z "${link}" ] && [ -n "${current}" ] && [ -L "${current}" ]; then
+    link="${current}"
+  fi
+  if [ -n "${link}" ]; then
+    echo "ERROR: Refusing the output directory '$1': the output directory path '${link}' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory." >&2
+    exit 3
+  fi
+}
+refuse_linked_output_dir "${OUTPUT_DIR}"
+
+if ! resolved="$(mkdir -p -- "${OUTPUT_DIR}" && cd -- "${OUTPUT_DIR}" && pwd)"; then
+  echo "ERROR: Output directory cannot be created: '${OUTPUT_DIR}'. Check --output-dir." >&2
+  exit 1
+fi
+OUTPUT_DIR="${resolved}"
+
+# --mount reads its value as comma-separated fields, so a comma in a host path starts
+# a field of its own (a,b), a double quote starts CSV quoting, and a line
+# break ends the argument. A path holding one is refused before anything is built or
+# run, with exit 3.
+require_mountable() {
+  case "$2" in
+    *,* | *\"* | *$'\n'* | *$'\r'*)
+      echo "ERROR: The $1 '$2' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path." >&2
+      exit 3
+      ;;
+  esac
+}
+if [[ "${NO_RUN}" = "NO" ]]; then
+  require_mountable "source directory" "${SOURCE_DIR}"
+  require_mountable "output directory" "${OUTPUT_DIR}"
+fi
+
+# The file's path with every symlink followed: the link's target is what is read.
+resolve_file() {
+  local path="$1" target dir
+  while [ -L "${path}" ]; do
+    target="$(readlink -- "${path}")"
+    case "${target}" in
+      /*) path="${target}" ;;
+      *) path="$(dirname -- "${path}")/${target}" ;;
+    esac
+  done
+  dir="$(cd -- "$(dirname -- "${path}")" && pwd -P)" || return 1
+  printf '%s/%s\n' "${dir}" "$(basename -- "${path}")"
+}
+
+# Whether the directory, or one above it, holds a .git entry: is it in a git
+# checkout.
+in_a_checkout() {
+  local dir="$1"
+  while :; do
+    if [ -e "${dir}/.git" ]; then return 0; fi
+    if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then return 1; fi
+    dir="$(dirname -- "${dir}")"
+  done
+}
+
+# Whether a symlink the path follows sits inside the scanned tree (TREES, below) or
+# any git checkout. The path is resolved one component at a time, as the kernel
+# resolves it, so a link reached only through another link counts too: whoever
+# writes the directory a link sits in chooses where it leads
+# (config/sandbox_grants.links_followed). At most 40 links are followed, the
+# kernel's own limit, so a cycle of links ends.
+follows_a_link_in_a_checkout() {
+  local rest="${1#/}" walked="" part target tree hops=0
+  while [ -n "${rest}" ]; do
+    part="${rest%%/*}"
+    if [ "${part}" = "${rest}" ]; then rest=""; else rest="${rest#*/}"; fi
+    case "${part}" in
+      "" | .) continue ;;
+      ..) walked="${walked%/*}"; continue ;;
+    esac
+    if [ ! -L "${walked}/${part}" ]; then
+      walked="${walked}/${part}"
+      continue
+    fi
+    hops=$((hops + 1))
+    if [ "${hops}" -gt 40 ]; then return 1; fi
+    for tree in "${TREES[@]}"; do
+      case "${walked}/" in "${tree%/}"/*) return 0 ;; esac
+    done
+    if in_a_checkout "${walked:-/}"; then return 0; fi
+    target="$(readlink -- "${walked}/${part}")" || return 1
+    case "${target}" in
+      /*) walked=""; rest="${target#/}${rest:+/${rest}}" ;;
+      *) rest="${target}${rest:+/${rest}}" ;;
+    esac
+  done
+  return 1
+}
+
+# The config file, --config or else ASH_CONFIG, is read by the scan inside the
+# container, which sees the host only through its mounts: the host path itself
+# names nothing there. A config inside the source dir is read through the
+# read-only /src mount, with every extends base it can name; one outside it is
+# mounted read-only on its own at /ash-config. Refused before any build when it
+# is not an existing file, with exit 3 as for any unusable config.
+CONFIG_RUN_ARGS=()
+CONFIG_ASH_ARGS=()
+if [[ "${CONFIG_GIVEN}" = "NO" ]]; then
+  CONFIG_PATH="${ASH_CONFIG:-}"
+fi
+if [[ "${NO_RUN}" = "NO" && ( "${CONFIG_GIVEN}" = "YES" || -n "${CONFIG_PATH}" ) ]]; then
+  if [[ -z "${CONFIG_PATH}" || ! -f "${CONFIG_PATH}" ]]; then
+    echo "ERROR: Config file not found: ${CONFIG_PATH}. --config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container." >&2
+    exit 3
+  fi
+  # The runner mounts with its own rights, which can be wider than this user's.
+  if [[ ! -r "${CONFIG_PATH}" ]]; then
+    echo "ERROR: Config file cannot be read: ${CONFIG_PATH}. ASH does not hand the container runner a file it cannot read itself." >&2
+    exit 3
+  fi
+  CONFIG_REAL="$(resolve_file "${CONFIG_PATH}")"
+  CONFIG_NAMED="$(cd -- "$(dirname -- "${CONFIG_PATH}")" && pwd -L)/$(basename -- "${CONFIG_PATH}")"
+  require_mountable "config file" "${CONFIG_REAL}"
+  SOURCE_REAL="$(cd -- "${SOURCE_DIR}" && pwd -P)"
+  # The scanned tree, as a local scan defines it: the outermost directory at or
+  # above the source dir holding a .git entry, under its logical and physical names.
+  TREES=()
+  for start in "${SOURCE_DIR}" "${SOURCE_REAL}"; do
+    dir="${start}"
+    checkout="${start}"
+    while :; do
+      if [ -e "${dir}/.git" ]; then checkout="${dir}"; fi
+      if [ "${dir}" = "/" ] || [ -z "${dir}" ]; then break; fi
+      dir="$(dirname -- "${dir}")"
+    done
+    TREES+=("${checkout}" "$(cd -- "${checkout}" && pwd -P)")
+  done
+  named_in_tree="NO"
+  real_in_tree="NO"
+  for tree in "${TREES[@]}"; do
+    case "${CONFIG_NAMED}" in "${tree%/}"/*) named_in_tree="YES" ;; esac
+    case "${CONFIG_REAL}" in "${tree%/}"/*) real_in_tree="YES" ;; esac
+  done
+  # A config named inside the tree is mounted only when its real path, every link
+  # on the way resolved, is inside the tree too; otherwise the run is refused.
+  if [[ "${named_in_tree}" = "YES" && "${real_in_tree}" = "NO" ]]; then
+    echo "ERROR: The config file '${CONFIG_PATH}' is inside the scanned tree but is a link, or is reached through one, to '${CONFIG_REAL}', which is outside it. ASH does not mount a file the repository being scanned points it at." >&2
+    exit 3
+  fi
+  case "${CONFIG_REAL}" in
+    "${SOURCE_REAL%/}"/*)
+      CONFIG_ASH_ARGS=(--config "/src/${CONFIG_REAL#"${SOURCE_REAL%/}"/}")
+      ;;
+    *)
+      # Mounted on its own, without the files it extends, so a config with an
+      # extends entry would not resolve inside the container. Refused, as is every
+      # chain `ash --mode container` cannot mount whole. This script cannot parse
+      # YAML, JSON or TOML, so it errs toward refusing: the key followed by ':' or
+      # '=' anywhere in the text with line breaks read as spaces (a JSON key and its
+      # ':' on two lines, TOML's '=', YAML's '? extends' key), and any quoted key
+      # holding a backslash, which may spell the name with an escape.
+      CONFIG_FLAT="$(tr '\r\n' '  ' < "${CONFIG_REAL}")"
+      if printf '%s' "${CONFIG_FLAT}" | grep -Eq '(^|[[:space:]{,])["'"'"']?extends["'"'"']?[[:space:]]*[:=]' \
+        || grep -Eq '"[^"]*\\[^"]*"[[:space:]]*:' -- "${CONFIG_REAL}"; then
+        echo "ERROR: The config file '${CONFIG_PATH}' is outside the source directory and has an extends entry. ./ash mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory." >&2
+        exit 3
+      fi
+      CONFIG_RUN_ARGS=(--mount "type=bind,source=${CONFIG_REAL},destination=/ash-config/$(basename -- "${CONFIG_REAL}"),readonly")
+      CONFIG_ASH_ARGS=(--config "/ash-config/$(basename -- "${CONFIG_REAL}")")
+      # A config elsewhere in the scanned tree, inside any other git checkout by
+      # its named or real path, or reached through a link that sits in one, is one
+      # a local scan counts as repository-written
+      # (config/sandbox_grants.repository_written). The scan inside sees it only at
+      # /ash-config, outside its own tree, so it is told.
+      in_checkout="NO"
+      for start in "$(dirname -- "${CONFIG_NAMED}")" "$(dirname -- "${CONFIG_REAL}")"; do
+        if in_a_checkout "${start}"; then in_checkout="YES"; fi
+      done
+      if [[ "${real_in_tree}" = "YES" || "${in_checkout}" = "YES" ]] \
+        || follows_a_link_in_a_checkout "${CONFIG_NAMED}"; then
+        CONFIG_ASH_ARGS+=(--config-from-scanned-repository)
+      fi
+      ;;
+  esac
+fi
 
 #
 # Gather the UID and GID of the caller
 #
 HOST_UID=$(id -u)
 HOST_GID=$(id -g)
+
+# --container-uid and --container-gid become build arguments, read as numbers.
+for id_flag in UID GID; do
+  id_given="CONTAINER_${id_flag}_SPECIFIED"
+  id_value="CONTAINER_${id_flag}"
+  if [[ "${!id_given}" = "YES" && ! "${!id_value}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Container ${id_flag} must be a numeric value: '${!id_value}'." >&2
+    exit 3
+  fi
+done
+
+# The non-root stage creates its user with `adduser --uid <UID> --gid <GID>`. UID 0 is
+# root, which already exists: that build fails at that step, after the whole core stage
+# has been built. GID 0 is root's group, which would give the unprivileged user root's
+# group rights over the image. Either is refused before building, with exit 3, as
+# `ash --mode container`, `ash build-image` and Invoke-ASH refuse it. Any spelling of
+# zero counts, since the build reads UID=00 as 0 too.
+if [[ "${NO_BUILD}" = "NO" && "${TARGET_STAGE}" = "non-root" ]]; then
+  BUILD_UID="${HOST_UID}"
+  BUILD_GID="${HOST_GID}"
+  if [[ "${CONTAINER_UID_SPECIFIED}" = "YES" ]]; then
+    BUILD_UID="${CONTAINER_UID}"
+  fi
+  if [[ "${CONTAINER_GID_SPECIFIED}" = "YES" ]]; then
+    BUILD_GID="${CONTAINER_GID}"
+  fi
+  if [[ "${BUILD_UID}" =~ ^0+$ ]]; then
+    echo "ERROR: The non-root image stage creates a user with UID 0, which is root: ASH is running as root, or --container-uid 0 was given. Pass --build-target ci to build the image that runs as root. Another --container-uid and --container-gid work only when the output directory is writable by that UID: the container runs as that user and writes its reports there." >&2
+    exit 3
+  fi
+  if [[ "${BUILD_GID}" =~ ^0+$ ]]; then
+    echo "ERROR: The non-root image stage gives its user GID 0, which is root's group: ASH is running with GID 0, or --container-gid 0 was given. Pass --build-target ci to build the image that runs as root. Another --container-gid works only when the output directory is writable by the container's user, which writes its reports there." >&2
+    exit 3
+  fi
+fi
 
 # Resolve any offline mode flags
 if [[ "${OFFLINE}" == "YES" ]]; then
@@ -129,7 +424,7 @@ fi
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
 # The runtime's own name, before any wrapper is prefixed, for the few decisions that differ by
 # runtime.
-OCI_RUNNER_NAME="$(basename "${RESOLVED_OCI_RUNNER:-none}")"
+OCI_RUNNER_NAME="$(basename -- "${RESOLVED_OCI_RUNNER:-none}")"
 # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
 # Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo
 if [[ -n "${OCI_RUNNER_WRAPPER:-}" ]]; then
@@ -207,7 +502,7 @@ else
         ${CONTAINER_UID_OPTION} \
         ${CONTAINER_GID_OPTION} \
         ${BASE_IMAGE_OPTION} \
-        --tag ${ASH_IMAGE_NAME} \
+        --tag "${ASH_IMAGE_NAME}" \
         --target ${TARGET_STAGE} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
         --build-arg OFFLINE="${OFFLINE}" \
@@ -235,16 +530,11 @@ else
     # Run the image if the --no-run flag is not set
     RC=0
     if [ "${NO_RUN}" = "NO" ]; then
+      # The source dir is mounted read-only wherever the output dir is. The output
+      # dir has its own mount at /out and the scan inside writes there, so nothing
+      # writes through /src, also when OUTPUT_DIR is inside SOURCE_DIR (the default
+      # .ash/ash_output is).
 
-
-      # Only make source dir readonly if output dir is not a subdirectory of source
-      # dir, otherwise writing to the output dir will fail due to attempting to write
-      # to a readonly fs.
-      SOURCE_READONLY=""
-      if [[ "${OUTPUT_DIR}" != "${SOURCE_DIR}"* ]]; then
-        # add readonly source mount when --output-dir is outside source dir
-        SOURCE_READONLY=",readonly"
-      fi
       # Capture terminal size if tput is available so the container experience can be improved
       if command -v tput >/dev/null 2>&1 && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -e COLUMNS=$(tput cols) -e LINES=$(tput lines)"
@@ -259,14 +549,15 @@ else
           -e "ASH_ACTUAL_OUTPUT_DIR=${OUTPUT_DIR}" \
           -e "ASH_DEBUG=${DEBUG}" \
           -e "ASH_OUTPUT_FORMAT=${OUTPUT_FORMAT}" \
-          --mount source="${SOURCE_DIR}",type=bind,destination=/src${SOURCE_READONLY} \
+          --mount source="${SOURCE_DIR}",type=bind,destination=/src,readonly \
           --mount source="${OUTPUT_DIR}",type=bind,destination=/out \
-          ${MOUNT_OUTPUT_DIR} \
+          "${CONFIG_RUN_ARGS[@]}" \
           ${DOCKER_RUN_EXTRA_ARGS} \
-          ${ASH_IMAGE_NAME} \
+          "${ASH_IMAGE_NAME}" \
             ash \
               --source-dir /src \
               --output-dir /out \
+              "${CONFIG_ASH_ARGS[@]}" \
               $ASH_ARGS
       RC=$?
     fi

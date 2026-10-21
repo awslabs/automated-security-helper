@@ -369,6 +369,12 @@ def scan_complete_handler(**kwargs):
 ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, scan_complete_handler)
 ```
 
+Where the handler is defined decides which scans notify it. A handler defined in your
+own program, outside ASH's plugin namespace, is notified in every scan that program
+runs. A handler defined in a plugin package is notified only in scans whose
+`ash_plugin_modules` name that package, and only when the package defines, imports or
+lists it (see [Using Custom Plugin Packages](#using-custom-plugin-packages)).
+
 ## Plugin Configuration
 
 Plugins are configured through the ASH configuration file:
@@ -455,8 +461,43 @@ ash_plugin_modules:
 Or specify via command line:
 
 ```bash
-ash --plugin-modules my_ash_plugins
+ash --ash-plugin-modules my_ash_plugins
 ```
+
+The package name has to be inside ASH's plugin namespace, which `my_ash_plugins` is
+because it ends in `_ash_plugins`; a name outside it refuses the scan with exit code 3
+(see [Custom Plugin Modules](../configuration-guide.md#custom-plugin-modules)).
+
+A scan that names your package uses three kinds of plugin from it: those defined in
+the package's own `__init__.py`, the classes and functions `__init__.py` imports into
+its namespace (as in the example above), and those it lists in `ASH_SCANNERS`,
+`ASH_REPORTERS`, `ASH_CONVERTERS` or `ASH_EVENT_HANDLERS`. A plugin defined only in a
+submodule, such as a class in `my_ash_plugins/scanners.py` that `__init__.py` neither
+imports nor lists, is not used through the package; the scan uses it only if it names
+that submodule (`my_ash_plugins.scanners`) itself. The same holds for a plugin defined
+in another package, for example a helper library whose classes carry
+`@ash_scanner_plugin`: `from helper_lib import HelperScanner` in `__init__.py` makes
+the scan use it, and `import helper_lib` alone does not, though the class registers
+either way. The scan logs how many registered plugins it leaves out ("... registered
+plugin(s) not used by this scan"), in the console and in `ash.log` in the output
+directory. Run it with `--debug` to have the console list them, in a line starting
+"Registered plugins not used by this scan". `ash.log` keeps only the count, because in
+a process that runs several scans, such as the MCP server, the plugins one scan leaves
+out are often the ones other scans named.
+
+Plugin classes are registered by module and class name, so your class may share its
+name with a class in another plugin package or with one of ASH's built-in plugins.
+Each one registers, neither replaces the other, and each takes part in the scans that
+select it.
+
+A process that runs several scans, such as the MCP server or a program calling
+`run_ash_scan` more than once, keeps every plugin module any of them imported
+registered, but each scan still uses only the modules it names. A module the operator
+named for one scan, for example in one MCP session's profile, takes no part in a later
+scan that does not name it. If your own program registers plugin classes itself
+instead of shipping them in a package, define them in a module inside the plugin
+namespace and name that module in each scan's `ash_plugin_modules`: a class registered
+from a module the scan does not name is not used by that scan.
 
 ## Best Practices
 

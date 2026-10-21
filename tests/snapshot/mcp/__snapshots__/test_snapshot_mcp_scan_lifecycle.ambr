@@ -290,6 +290,7 @@
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
       'scan_id': 'scan-20260115120000',
@@ -1184,6 +1185,7 @@
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
       'scan_id': 'scan-20260115120000',
@@ -1474,6 +1476,7 @@
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
       'scan_id': 'scan-20260115120000',
@@ -1552,6 +1555,7 @@
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
       'scan_id': 'scan-20260115120000',
@@ -1615,6 +1619,7 @@
       'metadata': dict({
         'ash_version': '0.0.0+snapshot-fixture',
         'generated_at': '2026-01-02T03:04:05+00:00',
+        'ignore_file_exclusions': None,
         'scan_duration_seconds': 0.0,
       }),
       'scan_id': 'scan-20260115120000',
@@ -2686,7 +2691,7 @@
         'aggregated_results': dict({
           'exists': True,
           'path': '<TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
-          'size_bytes': 7139,
+          'size_bytes': 7207,
         }),
         'csv': dict({
           'exists': False,

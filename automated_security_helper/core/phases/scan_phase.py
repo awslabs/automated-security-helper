@@ -1,5 +1,6 @@
 """Implementation of the Scan phase."""
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Any, Tuple
 
@@ -16,7 +17,11 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
+from automated_security_helper.utils.subprocess_utils import (
+    recording_in_tree_refusals,
+)
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -139,7 +144,12 @@ class ScanPhase(EnginePhase):
     """Implementation of the Scan phase."""
 
     def __init__(
-        self, plugin_context, plugins=None, progress_display=None, asharp_model=None
+        self,
+        plugin_context,
+        plugins=None,
+        progress_display=None,
+        asharp_model=None,
+        plugin_filter=None,
     ):
         """Initialize the ScanPhase with validation manager.
 
@@ -148,8 +158,15 @@ class ScanPhase(EnginePhase):
             plugins: List of plugins to use
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
+            plugin_filter: The event handlers this phase's notifications reach
         """
-        super().__init__(plugin_context, plugins or [], progress_display, asharp_model)
+        super().__init__(
+            plugin_context,
+            plugins or [],
+            progress_display,
+            asharp_model,
+            plugin_filter=plugin_filter,
+        )
         self.validation_manager = ScannerValidationManager(plugin_context)
         # Set when this run is one shard of several; read by the caller to stamp
         # provenance onto the results so `ash merge` can verify coverage.
@@ -346,7 +363,14 @@ class ScanPhase(EnginePhase):
 
                         # Create scanner instance. Under a sandbox, the tool probes
                         # some scanners run while they are constructed run sandboxed.
-                        with plugin_probe_scope(plugin_class, self.plugin_context):
+                        # Their `uv tool run` version probes are deferred until the
+                        # scanner is selected (see the dependency check below): a
+                        # scanner this run will not execute must not be resolved
+                        # against the package index.
+                        with (
+                            plugin_probe_scope(plugin_class, self.plugin_context),
+                            deferred_tool_version_probes(),
+                        ):
                             plugin_instance = plugin_class(
                                 config=plugin_config,
                                 context=self.plugin_context,
@@ -756,23 +780,42 @@ class ScanPhase(EnginePhase):
 
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
-                        with plugin_probe_scope(plugin_instance, self.plugin_context):
+                        # Whatever tool lookups the check makes, a refused in-tree
+                        # copy is what the MISSING row says, with its path and the
+                        # remedy, rather than "Dependencies not satisfied". Read here
+                        # so every scanner's own validate_plugin_dependencies counts.
+                        with (
+                            plugin_probe_scope(plugin_instance, self.plugin_context),
+                            recording_in_tree_refusals() as in_tree_reasons,
+                        ):
+                            # The version probe construction deferred, now that this
+                            # scanner is selected. getattr: a scanner plugin need not
+                            # inherit PluginBase (see unsupported_platform_reason above).
+                            resolve_version = getattr(
+                                plugin_instance, "resolve_deferred_tool_version", None
+                            )
+                            if callable(resolve_version):
+                                resolve_version()
                             plugin_instance.dependencies_satisfied = (
                                 plugin_instance.validate_plugin_dependencies()
                             )
                         if not plugin_instance.dependencies_satisfied:
+                            missing_reason = "; ".join(in_tree_reasons)
                             ASH_LOGGER.warning(
                                 f"Scanner {display_name} dependencies are not satisfied, marking as MISSING"
+                                + (f": {missing_reason}" if missing_reason else "")
                             )
                             # Track dependency error for validation
                             dependency_error_scanners[display_name] = [
-                                "Dependencies not satisfied"
+                                missing_reason or "Dependencies not satisfied"
                             ]
 
                             # Create a ScanResultsContainer with dependencies_satisfied=False
                             results_container = ScanResultsContainer.for_missing_deps(
                                 display_name
                             )
+                            if missing_reason:
+                                results_container.add_error(missing_reason)
 
                             # Process the container through _process_results to store duration info
                             aggregated_results = self._process_results(
@@ -788,6 +831,11 @@ class ScanPhase(EnginePhase):
                                     status=ScannerStatus.MISSING,
                                     dependencies_satisfied=False,
                                     excluded=False,
+                                    **(
+                                        {"missing_reason": missing_reason}
+                                        if missing_reason
+                                        else {}
+                                    ),
                                 )
                             )
 
@@ -1556,7 +1604,10 @@ class ScanPhase(EnginePhase):
                     completed=10,
                     description=f"[blue]({scanner_name}) Queued scan...",
                 )
+                # With a copy of this context, which carries the scanned-tree scope
+                # (utils/subprocess_utils.scanning_tree) into the scanner's thread.
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     self._safe_execute_scanner,
                     scanner_name,
                     scanner_plugin,

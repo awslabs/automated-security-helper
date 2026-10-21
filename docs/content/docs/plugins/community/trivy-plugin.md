@@ -192,6 +192,15 @@ scanners:
 
 The Trivy plugin integrates with ASH's unified reporting system, producing results in SARIF format that can be converted to various output formats.
 
+trivy-repo accepts only exit code 0 as a completed run. trivy exits 0 whether or not
+it found anything and 1 on an error, so a run that exits 1 is recorded `ERROR` and its
+results file is not graded. An `exit-code` setting in the config file `TRIVY_CONFIG`
+names, or in `TRIVY_EXIT_CODE`, makes a run with findings exit with that code; the
+scanner is then `ERROR` instead of reporting them. ASH decides the scan's exit code
+from the findings, so leave `exit-code` unset. A `trivy.yaml` in the scanned
+directory is not read, so a setting there has no effect. See
+[A Scanner Is ERROR With an Exit Code It Does Not Accept](../../troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+
 ### Available Output Formats
 
 - **SARIF**: Machine-readable results for CI/CD integration
@@ -1388,10 +1397,17 @@ jobs:
           ash --scanners trivy-repo --reporters sarif,html
       
       - name: Upload Results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: security-results
-          path: .ash/ash_output/
+          # Not the whole output directory: scanners/ and converted/ hold each
+          # tool's raw output, which is not masked.
+          path: |
+            .ash/ash_output/reports
+            .ash/ash_output/ash_aggregated_results.json
 ```
 
 #### GitLab CI
@@ -1407,7 +1423,8 @@ security-scan:
     reports:
       sast: .ash/ash_output/reports/ash_aggregated_results.sarif
     paths:
-      - .ash/ash_output/
+      - .ash/ash_output/reports
+      - .ash/ash_output/ash_aggregated_results.json
 ```
 
 ### Pre-commit Hook
@@ -1480,6 +1497,26 @@ export TRIVY_CACHE_DIR=/opt/trivy-cache
 export TRIVY_OFFLINE_SCAN=true
 ash --scanners trivy-repo
 ```
+
+In offline mode (`--offline`, `ASH_OFFLINE`, or `options.offline: true`) ASH passes
+`--skip-db-update`, `--skip-java-db-update`, `--offline-scan` and `--skip-check-update`,
+and sets `TRIVY_SKIP_VERSION_CHECK=true` and `TRIVY_DISABLE_TELEMETRY=true`: trivy's
+version check and telemetry contact check.trivy.dev, and `--skip-check-update` covers
+only the checks bundle. Variables rather than flags, because a trivy too old to know
+the flags refuses the command, while it ignores the variables.
+
+Online and offline, ASH passes `--config`: `TRIVY_CONFIG` when that names a file
+outside the scanned tree, otherwise an empty config ASH ships, so a `trivy.yaml` in
+the scanned repository is never read. Its settings can reach the network (a VEX
+repository, client/server mode) or change what is reported.
+
+Offline, trivy's Terraform checks do not run. trivy downloads the source of every
+`module` block it evaluates (a registry module from registry.terraform.io, a `git::`
+source with the host's `git`, an `https://` archive), whatever offline flags it is
+given, so ASH passes `--misconfig-scanners` with the installed trivy's default list
+minus `terraform`, read from `trivy repository --help`. When that list cannot be read,
+the `misconfig` scanner is left out of the offline scan, with a warning. checkov
+still checks Terraform offline.
 
 The copied database has to be current. After the scan ASH reads its `UpdatedAt`
 (from `trivy version --format json`) and exits 1 once it is more than 24 hours old,

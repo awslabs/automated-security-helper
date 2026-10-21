@@ -26,10 +26,11 @@
  *    Lambda's 900-second ceiling
  *    (https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
  *    so the bootstrap would time out on exactly the slow builds that matter.
- * 3. WHAT IS IMPLEMENTED: a Lambda starts the build, passing CloudFormation's
- *    own response URL into the build as an environment variable, and does not
- *    respond. The buildspec's `post_build` phase sends the CloudFormation
- *    response itself. CodeBuild's timeout, not Lambda's, becomes the bound.
+ * 3. WHAT IS IMPLEMENTED: a Lambda starts the build, handing CloudFormation's
+ *    own response URL to the build, and does not respond. The buildspec's
+ *    `post_build` phase sends the CloudFormation response itself. CodeBuild's
+ *    timeout, not Lambda's, becomes the bound. How the URL is handed over is in
+ *    `addBootstrap`: through a SecureString parameter, never in the clear.
  *
  * FAILURE MODE OF DESIGN 3, STATED PLAINLY: if the build is *stopped* or exceeds
  * the project timeout, `post_build` may not run, nothing answers CloudFormation,
@@ -60,7 +61,7 @@
  * source configuration.
  */
 
-import { Aws, CfnCondition, CfnParameter, CustomResource, Duration, Fn, RemovalPolicy } from 'aws-cdk-lib';
+import { Aws, CfnCondition, CfnParameter, CustomResource, Duration, Fn, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import * as codebuild from 'aws-cdk-lib/aws-codebuild';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -547,10 +548,10 @@ export class AshImageBuild extends Construct {
       runtime: lambda.Runtime.PYTHON_3_14,
       timeout: Duration.minutes(1),
       description:
-        'Starts the ASH image build during stack creation and hands CloudFormation’s ' +
-        'response URL to the build, which answers once the image exists.',
-      environment: { PROJECT_NAME: this.project.projectName },
-      // Encrypts PROJECT_NAME at rest with the adopter's key when one was
+        'Starts the ASH image build during stack creation; the build answers ' +
+        'CloudFormation once the image exists.',
+      environment: { PROJECT_NAME: this.project.projectName, KEY_ARN: props.encryptionKey.keyArn },
+      // Encrypts the two variables at rest with the adopter's key when one was
       // supplied, and disappears when it was not. See `AshCustomerKey`.
       environmentEncryption: props.customerKey.key,
       /*
@@ -580,6 +581,63 @@ export class AshImageBuild extends Construct {
       }),
     );
 
+    /*
+     * CLOUDFORMATION'S RESPONSE URL REACHES THE BUILD THROUGH A SECURESTRING PARAMETER.
+     *
+     * The URL is what answers CloudFormation for this resource, so it stays out of the
+     * build record. A PLAINTEXT override is stored with the build and returned by
+     * `codebuild:BatchGetBuilds` and the console for as long as the record exists.
+     * The starter writes the URL to one SecureString parameter per project, encrypted
+     * with this stack's own key, and passes the parameter's NAME as a PARAMETER_STORE
+     * override, which CodeBuild resolves with the project's role. The build record
+     * holds the name only, and reading the value takes `kms:Decrypt` on that key,
+     * which read-only access does not carry. Each Create or Update overwrites the parameter; a Delete removes it.
+     *
+     * The name is derived from the project name in the handler and in the ARNs below,
+     * from the one constant, so the two cannot drift. The project's role already holds
+     * `kms:Decrypt` on the key for its own artifacts; it gets the parameter read here,
+     * as a policy of its own rather than through the per-service split, whose cdk-nag
+     * reason map would otherwise need an entry, and its bytes, in three templates.
+     *
+     * REJECTED: Secrets Manager. It would keep the value out of `ssm:GetParameter`
+     * readers without a key, but a secret per bootstrap costs money every month and
+     * a deleted secret is held for a recovery window, so the name could not be reused
+     * on the next Create.
+     */
+    const responseParameterArn = Stack.of(this).formatArn({
+      service: 'ssm',
+      resource: 'parameter',
+      resourceName: `${BOOTSTRAP_PARAMETER_PREFIX}/${this.project.projectName}`,
+    });
+    starter.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:PutParameter', 'ssm:DeleteParameter'],
+        resources: [responseParameterArn],
+      }),
+    );
+    // Systems Manager passes the parameter's ARN as the encryption context, so the
+    // key serves this role only for encrypting a bootstrap parameter. A pattern
+    // rather than the exact ARN: spelling the ARN out again costs AshAgentCore
+    // about 400 bytes of its inline template budget.
+    starter.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['kms:Encrypt'],
+        resources: [props.encryptionKey.keyArn],
+        conditions: {
+          StringLike: { 'kms:EncryptionContext:PARAMETER_ARN': `*:parameter/${BOOTSTRAP_PARAMETER_PREFIX}/*` },
+        },
+      }),
+    );
+    const responseParameterRead = new iam.Policy(this, 'BootstrapSsmAccess', {
+      roles: [this.project.role!],
+      statements: [
+        new iam.PolicyStatement({
+          actions: ['ssm:GetParameters'],
+          resources: [responseParameterArn],
+        }),
+      ],
+    });
+
     suppressLambdaLogWildcard(starterRole);
     suppressGuardRule(
       starter,
@@ -587,7 +645,7 @@ export class AshImageBuild extends Construct {
       'Custom-resource responder: one codebuild:StartBuild call, no inbound path, no data.',
     );
 
-    return new CustomResource(this, 'BootstrapBuild', {
+    const bootstrap = new CustomResource(this, 'BootstrapBuild', {
       serviceToken: starter.functionArn,
       resourceType: 'Custom::AshImageBootstrap',
       properties: {
@@ -601,6 +659,10 @@ export class AshImageBuild extends Construct {
         Flavors: props.flavors.join(' '),
       },
     });
+    // The build reads the parameter as it starts, so the read grant must exist
+    // before the bootstrap starts it.
+    bootstrap.node.addDependency(responseParameterRead);
+    return bootstrap;
   }
 
   private buildSpecObject(flavors: AshImageFlavor[]): Record<string, unknown> {
@@ -613,9 +675,17 @@ export class AshImageBuild extends Construct {
           commands: [
             'echo "Building ASH ${ASH_VERSION} for ${ASH_BUILD_PLATFORM}: ${ASH_BUILD_FLAVORS}"',
             `aws ecr get-login-password --region ${Aws.REGION} | docker login --username AWS --password-stdin ${Aws.ACCOUNT_ID}.dkr.ecr.${Aws.REGION}.${Aws.URL_SUFFIX}`,
-            // Shallow, single-ref clone of the public repository. No credential
+            // Shallow fetch of one ref of the public repository. No credential
             // needed, which is the whole reason the project takes no source.
-            'git clone --depth 1 --branch "${ASH_VERSION}" "${ASH_REPOSITORY_URL}" ash-src',
+            //
+            // `git fetch <ref>` and not `git clone --branch <ref>`: clone takes a
+            // tag or a branch and refuses a commit SHA ("Remote branch <sha> not
+            // found"), and a commit is the one value that pins an exact build. The
+            // Terraform image pipeline fetches the same way.
+            //
+            // `--` ends git's options before the repository and the ref, so git
+            // takes an AshVersion that starts with '-' as a refspec.
+            'git init -q ash-src && git -C ash-src fetch -q --depth 1 -- "${ASH_REPOSITORY_URL}" "${ASH_VERSION}" && git -C ash-src checkout -q FETCH_HEAD',
           ],
         },
         build: {
@@ -634,13 +704,19 @@ export class AshImageBuild extends Construct {
             // explicit even though the compute already matches, so a build on the
             // wrong fleet fails loudly instead of producing an image AgentCore
             // will refuse.
+            //
+            // INSTALL_ASH_REVISION=LOCAL builds the tree fetched above. Any other
+            // value makes the Dockerfile clone again with `git clone --branch`,
+            // which cannot take a commit SHA and whose failure the Dockerfile
+            // swallows with `|| echo` (Dockerfile:99-103), so with it a SHA pin
+            // would not build the commit it names.
             ...targetsNeeded.map(
               (target) =>
                 'docker build ' +
                 '--platform "linux/${ASH_BUILD_PLATFORM}" ' +
                 `--target ${target} ` +
                 '--build-arg "OFFLINE=${ASH_OFFLINE}" ' +
-                '--build-arg "INSTALL_ASH_REVISION=${ASH_VERSION}" ' +
+                '--build-arg INSTALL_ASH_REVISION=LOCAL ' +
                 `-t "ash-base-${target}:local" ash-src`,
             ),
 
@@ -663,7 +739,7 @@ export class AshImageBuild extends Construct {
    *
    * WHY THIS EXISTS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
    * ------------------------------------------------------
-   * `AshVersion` is a git ref handed to `git clone --branch`, and branch refs
+   * `AshVersion` is a git ref handed to `git fetch`, and branch refs
    * routinely contain a `/`, which a Docker tag may not. Deployed with
    * `AshVersion=feat/distributed-execute-and-collect`, a CodeBuild run built the
    * image successfully and then died on the version-qualified tag:
@@ -724,13 +800,14 @@ export class AshImageBuild extends Construct {
     const longestTag = Math.max(...flavors.map((f) => this.tagForFlavor(f).length));
     const refBudget = DOCKER_TAG_MAX_LENGTH - longestTag - REF_DIGEST_LENGTH - 2;
 
+    // The digest is what keeps two refs that fold to the same string on separate
+    // tags. A pipeline reports only its last command's status, so a missing
+    // sha256sum would leave it empty and let one build overwrite another's audit
+    // tag. The length check fails the build instead. (A TypeScript comment, not a
+    // shell one: this command is inlined into every committed template.)
     return [
       `ASH_SAFE_REF="$(printf '%s' "\${ASH_VERSION}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-${refBudget})"`,
       `ASH_REF_DIGEST="$(printf '%s' "\${ASH_VERSION}" | sha256sum | cut -c1-${REF_DIGEST_LENGTH})"`,
-      '# The digest is what keeps two refs that fold to the same string on separate',
-      '# tags. A pipeline reports only its last command\'s status, so a missing',
-      '# sha256sum would leave it empty and let one build overwrite another\'s audit',
-      '# tag. Fail here instead.',
       `[ \${#ASH_REF_DIGEST} -eq ${REF_DIGEST_LENGTH} ] || { echo "cannot digest ASH_VERSION" >&2; exit 1; }`,
       'ASH_VERSION_TAG_SUFFIX="${ASH_SAFE_REF}-${ASH_REF_DIGEST}"',
       'echo "version-qualified audit tag suffix: ${ASH_VERSION_TAG_SUFFIX}"',
@@ -783,15 +860,17 @@ export class AshImageBuild extends Construct {
           'ash-src/Dockerfile.mcp',
           [
             `FROM ${base}`,
-            '# The ASH stage already dropped to UID 500; step back up to install.',
+            // The ASH stage already dropped to UID 500; step back up to install.
             'USER root',
             'COPY ash-mcp-entrypoint.sh /usr/local/bin/ash-mcp-entrypoint.sh',
             'RUN chmod 0755 /usr/local/bin/ash-mcp-entrypoint.sh',
             `ENV ASH_CONFIG=${ASH_MATERIALIZED_CONFIG_PATH}`,
-            '# 500:100 are the ASH Dockerfile UID/GID defaults, and this build',
-            '# overrides neither.',
+            // 500:100 are the ASH Dockerfile UID/GID defaults, and this build
+            // overrides neither.
             'USER 500:100',
-            '# Documentation only; AgentCore fixes the port at 8000 regardless.',
+            // Documentation only; AgentCore fixes the port at 8000 regardless.
+            // TypeScript comments, not Dockerfile ones, for the same template-size
+            // reason as the gate's Dockerfile below.
             'EXPOSE 8000',
             'ENTRYPOINT ["/usr/local/bin/ash-mcp-entrypoint.sh"]',
           ].join('\n'),
@@ -892,6 +971,12 @@ const CFN_SIGNAL_COMMAND = `if [ -n "\${CFN_RESPONSE_URL:-}" ]; then
 fi`;
 
 /**
+ * The first path segment of the parameter the starter hands the response URL
+ * through. The handler appends the project name; so do the ARNs in `addBootstrap`.
+ */
+const BOOTSTRAP_PARAMETER_PREFIX = 'ash-bootstrap';
+
+/**
  * Inline handler that starts the build and stays silent on success.
  *
  * Kept small on purpose: `lambda.Code.fromInline` writes into the template's
@@ -903,45 +988,37 @@ import urllib.request
 
 import boto3
 
+# The URL reaches the build by parameter name; see ash-image-build.ts.
+PARAMETER = "/${BOOTSTRAP_PARAMETER_PREFIX}/" + os.environ["PROJECT_NAME"]
+IDS = (("STACK_ID", "StackId"), ("REQUEST_ID", "RequestId"), ("LOGICAL_ID", "LogicalResourceId"))
+
 
 def send(event, status, reason):
-    body = json.dumps({
-        "Status": status,
-        "Reason": reason,
-        "PhysicalResourceId": event["LogicalResourceId"],
-        "StackId": event["StackId"],
-        "RequestId": event["RequestId"],
-        "LogicalResourceId": event["LogicalResourceId"],
-        "Data": {},
-    }).encode()
+    body = json.dumps(dict({k: event[k] for _, k in IDS}, Status=status, Reason=reason,
+                           PhysicalResourceId=event["LogicalResourceId"], Data={})).encode()
     urllib.request.urlopen(urllib.request.Request(
         event["ResponseURL"], data=body, method="PUT",
         headers={"content-type": "", "content-length": str(len(body))}))
 
 
 def handler(event, context):
-    # Never block a teardown on an image build.
-    if event["RequestType"] == "Delete":
-        send(event, "SUCCESS", "Nothing to undo")
-        return
+    ssm = boto3.client("ssm")
+    if event["RequestType"] == "Delete":  # never block a teardown on a build
+        try:
+            ssm.delete_parameter(Name=PARAMETER)
+        except Exception as exc:
+            print("could not delete %s: %s" % (PARAMETER, exc))
+        return send(event, "SUCCESS", "Nothing to undo")
     try:
+        ssm.put_parameter(Name=PARAMETER, Value=event["ResponseURL"], Type="SecureString",
+                          KeyId=os.environ["KEY_ARN"], Overwrite=True)
         boto3.client("codebuild").start_build(
             projectName=os.environ["PROJECT_NAME"],
             environmentVariablesOverride=[
-                {"name": "CFN_RESPONSE_URL", "value": event["ResponseURL"], "type": "PLAINTEXT"},
-                {"name": "CFN_STACK_ID", "value": event["StackId"], "type": "PLAINTEXT"},
-                {"name": "CFN_REQUEST_ID", "value": event["RequestId"], "type": "PLAINTEXT"},
-                {"name": "CFN_LOGICAL_ID", "value": event["LogicalResourceId"], "type": "PLAINTEXT"},
-            ],
-        )
-    except Exception as exc:
-        # The build never started, so nothing else will ever answer. The most
-        # likely cause is a scheduled rebuild holding the project's only
-        # concurrent build slot, which is why the reason says so: retrying the
-        # stack operation once the rebuild finishes is safe.
-        send(event, "FAILED", "Could not start the ASH image build. A scheduled "
-             "rebuild may hold the project's only build slot; retrying is safe. "
-             "Cause: %s" % exc)
-    # Success path is silent by design: the build itself responds when the image
-    # exists. Responding here would let the workload be created too early.
+                {"name": "CFN_RESPONSE_URL", "value": PARAMETER, "type": "PARAMETER_STORE"}
+            ] + [{"name": "CFN_" + n, "value": event[k], "type": "PLAINTEXT"} for n, k in IDS])
+    except Exception as exc:  # nothing else will answer
+        send(event, "FAILED", "Could not start the ASH image build. A scheduled rebuild "
+             "may hold the project's only build slot; retrying is safe. Cause: %s" % exc)
+    # Silent on success: the build answers once the image exists.
 `;

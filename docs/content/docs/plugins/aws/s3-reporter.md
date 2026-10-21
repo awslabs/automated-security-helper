@@ -14,6 +14,8 @@ The S3 Reporter provides:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml
@@ -249,6 +251,11 @@ The S3 reporter uploads ASH aggregated results in the specified format (JSON or 
 - **Findings**: Security issues discovered by scanners
 - **Summary statistics**: Counts by severity level
 - **Scanner details**: Information about which scanners were run
+
+Its `ash_config` is the configuration the results record, as the settings that
+were set. When the results record no configuration, `ash_config` is `null`. ASH's
+defaults, or the file `ASH_CONFIG` names where `ash report` runs, are never put in
+its place.
 
 ### File Naming
 

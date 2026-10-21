@@ -52,11 +52,6 @@ module "ash_pr_gate" {
   # ignoring low and medium findings entirely.
   min_severity = "low"
 
-  # Scan only what the pull request changes. This is what keeps a real repository
-  # inside Lambda's hard 900 second ceiling, since it scales with the size of the
-  # change rather than the size of the repository.
-  ash_scan_extra_args = "--changed-files-only --base-ref origin/main"
-
   # One scan per pull-request push, so an active repository cannot fan out into
   # an unbounded number of concurrent CPU-heavy invocations.
   reserved_concurrent_executions = 5

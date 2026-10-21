@@ -18,7 +18,9 @@ classifiers = [
 [tool.poetry.dependencies]
 python = "^3.10"
 automated-security-helper = {path = "../../", develop = true}
-# automated-security-helper = "*"
+# Outside this repository, depend on ASH from git. ASH is not published on
+# PyPI, and the PyPI project with its name is unrelated:
+# automated-security-helper = {git = "https://github.com/awslabs/automated-security-helper.git", tag = "v3.7.0"}
 
 [build-system]
 requires = ["poetry-core>=1.0"]

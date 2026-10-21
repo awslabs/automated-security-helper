@@ -29,6 +29,13 @@ Anything else that fronts the load balancer — a Route 53 alias, a CloudFront
 distribution, a custom domain on the certificate — has to be added through
 `mcp_allowed_host`. The effective list is the `allowed_hosts` output.
 
+The module also sets `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=false`. The launcher's
+default is AgentCore's (`true`), which passes `--trust-upstream-host-check` whenever
+the allowlist is empty and lets ASH serve any Host. Behind a load balancer, an
+empty allowlist has to make ASH refuse to start on `0.0.0.0` instead. It does not
+set `ASH_MCP_TRUST_UPSTREAM_SESSION_ID`: a load balancer issues no `Mcp-Session-Id`,
+so a stateless service has no session identity, and the tools that need one refuse.
+
 ## Health checks, and an honest limitation
 
 ASH's MCP server exposes **no** health endpoint. It builds a Starlette app that
@@ -81,7 +88,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-mcp"` | Max 25 characters; ALB and target group names derive from it. |
 | `container_command` | — | `list(string)` | MCP launcher | Override for an image not built by `ash-image-pipeline`. |
-| `internal` | — | `bool` | `true` | Internet exposure should be deliberate. |
+| `internal` | — | `bool` | `true` | Internet exposure should be deliberate. `false` is refused at plan time unless `mcp_auth_header_name` (not blank), `mcp_auth_header_value` and `certificate_arn` are all set, whatever `ingress_cidr_blocks` lists; `allow_plaintext_auth_header` does not lift the certificate requirement there. |
 | `certificate_arn` | — | `string` | `null` | Set to get an HTTPS listener. |
 | `allow_plaintext_auth_header` | — | `bool` | `false` | Opt out of the TLS requirement above. |
 | `ssl_policy` | — | `string` | TLS 1.3 policy | HTTPS listeners only. |

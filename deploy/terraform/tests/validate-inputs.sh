@@ -66,11 +66,13 @@
 #
 # WHAT THE CASE COUNT MEANS, AND WHY IT IS EASY TO OVERSTATE
 # ----------------------------------------------------------
-# There are 43 validation blocks across the five modules -- agentcore 4,
-# ash-image-pipeline 11, codecommit-gate 12, codepipeline-executor 8, fargate 8 --
+# There are 46 validation blocks across the five modules -- agentcore 4,
+# ash-image-pipeline 11, codecommit-gate 14, codepipeline-executor 8, fargate 9 --
 # and every one now has a `must` case proven to fire it.
 #
-# It reached 42 from 10 (43 since the codecommit-gate VPC rule), and the interesting part is that it was first reported as
+# It reached 42 from 10 (43 since the codecommit-gate VPC rule, 45 with the two
+# scan_egress_cidr rules, 46 since the fargate rule that an internet-facing load
+# balancer needs auth), and the interesting part is that it was first reported as
 # 13. Three rules were counted as covered on the strength of an error_message
 # appearing in some case's output, when the case that produced it was exercising a
 # DIFFERENT rule:
@@ -202,7 +204,8 @@ run_case() {
     # mustnot plans on a runner with no credentials: that text carries no
     # module's error_message, and none of the four VAR_STAGE_ERROR strings.
     # Mutation-measured rather than argued, once per rule -- each of the 43
-    # rules across the five modules was rewritten to a tautology that still
+    # rules counted when this was written, and the fargate internet-facing rule
+    # when it was added, was rewritten to a tautology that still
     # references its variable (`var.X == var.X`, because terraform rejects a
     # validation condition that does not refer to var.<self>, so a bare `true`
     # would not load), and every case flipped PASS -> FAIL, including both cases
@@ -283,6 +286,59 @@ run_case "auth header + explicit opt-out -> allowed" mustnot \
 run_case "auth header + certificate -> allowed" mustnot \
   "mcp_auth_header_value is set but the listener would be plain HTTP" \
   "$MODULES/fargate" "${FARGATE_BASE[@]}" -var mcp_auth_header_value=placeholder \
+  -var certificate_arn=arn:aws:acm:us-east-1:0:certificate/placeholder
+
+echo
+echo "### fargate: an internet-facing load balancer needs ASH-level auth"
+# internal = false puts the MCP endpoint, which accepts source code and returns
+# findings about it, on a listener the internet can route to. Without an auth header
+# nothing but the security group stands between it and every caller, and a CIDR
+# list is no guard: 0.0.0.0/0 can be written as two /1 halves, and any public range
+# is a population the operator does not control. So the scheme decides, not the
+# CIDR: an internet-facing load balancer without mcp_auth_header_value is refused at
+# plan time, whatever ingress it lists. An internal one is unchanged.
+run_case "internet-facing + 0.0.0.0/0 + no auth -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["0.0.0.0/0"]'
+run_case "internet-facing + 0.0.0.0/0 as two /1 halves + no auth -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false \
+  -var 'ingress_cidr_blocks=["0.0.0.0/1","128.0.0.0/1"]'
+run_case "internet-facing + one public /24 + no auth -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["203.0.113.0/24"]'
+run_case "internet-facing + no ingress yet + no auth -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false
+run_case "internet-facing + auth header + certificate -> allowed" mustnot \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["0.0.0.0/0"]' \
+  -var mcp_auth_header_name=X-ASH-Auth -var mcp_auth_header_value=placeholder \
+  -var certificate_arn=arn:aws:acm:us-east-1:0:certificate/placeholder
+run_case "internal + 0.0.0.0/0 + no auth -> allowed (not internet-facing)" mustnot \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var 'ingress_cidr_blocks=["0.0.0.0/0"]'
+# The shared header is a bearer secret, so on an internet-facing listener it must
+# travel over TLS: allow_plaintext_auth_header does not lift the certificate
+# requirement there.
+run_case "internet-facing + auth header + plaintext opt-out, no certificate -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["0.0.0.0/0"]' \
+  -var mcp_auth_header_name=X-ASH-Auth -var mcp_auth_header_value=placeholder \
+  -var allow_plaintext_auth_header=true
+# A blank header name is no header: the container refuses to start without one,
+# and the plan should say so first.
+run_case "internet-facing + blank header name + certificate -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["10.0.0.0/8"]' \
+  -var 'mcp_auth_header_name= ' -var mcp_auth_header_value=placeholder \
+  -var certificate_arn=arn:aws:acm:us-east-1:0:certificate/placeholder
+# The value alone authenticates nothing: with no header name the module passes no
+# auth flag to ASH, so the rule requires both.
+run_case "internet-facing + auth value but no header name -> refused" must \
+  "internal = false requires mcp_auth_header_value" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var internal=false -var 'ingress_cidr_blocks=["10.0.0.0/8"]' \
+  -var mcp_auth_header_value=placeholder \
   -var certificate_arn=arn:aws:acm:us-east-1:0:certificate/placeholder
 
 echo

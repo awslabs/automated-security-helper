@@ -451,8 +451,8 @@ def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     """The resolved argv names one template, not the containing directory.
 
     The path is a copy of the text ASH read and checked, kept under the template's
-    results directory with the template's file name, and removed afterwards; see
-    ``_stage_cfn_nag_input``.
+    results directory under a fixed name with the template's extension, and removed
+    afterwards; see ``_stage_cfn_nag_input``.
     """
     template = scanner.context.work_dir / "role.yaml"
     template.write_text(CFN_TEMPLATE)
@@ -472,7 +472,7 @@ def test_each_template_is_passed_to_the_subprocess_as_the_input_path(
     assert command[0] == "cfn_nag_scan"
     assert "--input-path" in command
     ((staged, text),) = given
-    assert staged.name == template.name
+    assert staged.name == "template.yaml"
     assert staged != template
     assert text == CFN_TEMPLATE
     assert not staged.exists(), "the copy is removed once cfn_nag_scan has run"
@@ -625,8 +625,14 @@ def test_execution_successful_treats_zero_and_one_as_success(
 ):
     """cfn_nag exits 1 when it finds violations, so 1 is still a success."""
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
-    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif())
-    scanner.exit_code = exit_code
+
+    def run(self, **kwargs):
+        # The code is recorded as the real _run_subprocess records it.
+        response = {"stdout": cfn_nag_sarif(), "stderr": "", "returncode": exit_code}
+        self._process_command_response(response)
+        return response
+
+    subprocess_double.side_effect = run
 
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
@@ -681,7 +687,9 @@ def test_source_target_type_scans_the_source_tree(
         call.kwargs["command"][call.kwargs["command"].index("--input-path") + 1]
         for call in subprocess_double.call_args_list
     ]
-    assert any(path.endswith("role.yaml") for path in scanned), (
+    # The copy cfn_nag reads has a fixed name; the directory it sits in is named
+    # after the template.
+    assert any("role__yaml" in path for path in scanned), (
         f"the source template was never scanned; scanned={scanned}"
     )
     assert not any("should-not-be-scanned" in path for path in scanned), (

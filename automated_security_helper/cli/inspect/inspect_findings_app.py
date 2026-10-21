@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, Callable, Optional
 
 import typer
 from textual.app import App, ComposeResult
@@ -30,6 +30,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.schemas.sarif_schema_model import Result
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import source_snippet_masker
 
 
 class SuppressDialog(ModalScreen[bool]):
@@ -358,10 +359,16 @@ class FindingsExplorerApp(App):
         findings,
         title="ASH Security Findings",
         config_path: Path | None = None,
+        mask_source: Optional[Callable[[Any, Optional[int], str], str]] = None,
     ):
         super().__init__()
         self.title = title
         self.config_path = config_path or Path.cwd() / ".ash.yaml"
+        # Masks the lines read from a finding's file when the results hold no
+        # snippet for it, as the results' own snippets are masked
+        # (utils/secret_masking.source_snippet_masker). findings_command builds it
+        # from the results it shows.
+        self.mask_source = mask_source
         self.findings = findings
         self.filtered_findings = findings
         self.current_filter = "all"
@@ -599,45 +606,57 @@ class FindingsExplorerApp(App):
                     f"Has code snippet: {bool(finding.get('code_snippet'))}"
                 )
 
-                # Try to extract code snippet if not already present
-                if (
-                    not finding.get("code_snippet")
-                    and finding.get("file")
-                    and finding.get("line")
-                ):
-                    try:
-                        file_path = Path(finding["file"])
-                        ASH_LOGGER.debug(
-                            f"Looking for file: {file_path}, exists: {file_path.exists()}"
-                        )
-
-                        if file_path.exists():
-                            with open(file_path, mode="r", encoding="utf-8") as f:
-                                lines = f.readlines()
-
-                            # Get line number (adjust for 0-based indexing)
-                            line_num = int(finding["line"]) - 1
-
-                            # Get context (5 lines before and after)
-                            start_line = max(0, line_num - 5)
-                            end_line = min(len(lines), line_num + 6)
-
-                            # Extract the snippet with line numbers
-                            snippet_lines = []
-                            for i in range(start_line, end_line):
-                                prefix = "→ " if i == line_num else "  "
-                                snippet_lines.append(f"{prefix}{i + 1}: {lines[i]}")
-
-                            finding["code_snippet"] = "".join(snippet_lines)
-                            ASH_LOGGER.debug(
-                                f"Extracted code snippet of length: {len(finding['code_snippet'])}"
-                            )
-                        else:
-                            ASH_LOGGER.debug(f"File not found: {file_path}")
-                    except Exception as e:
-                        ASH_LOGGER.debug(f"Failed to extract code snippet: {e}")
-
+                self._add_snippet_from_source(finding)
                 self.push_screen(FindingDetailScreen(finding))
+
+    def _add_snippet_from_source(self, finding: dict) -> None:
+        """Give a finding with no snippet the lines around it, read from its file.
+
+        Five lines either side, numbered, with the finding's own line marked. They
+        are masked as the results' own snippets are (``mask_source``), since they
+        come from disk and not from the masked results.
+        """
+        if (
+            finding.get("code_snippet")
+            or not finding.get("file")
+            or not finding.get("line")
+        ):
+            return
+        try:
+            file_path = Path(finding["file"])
+            ASH_LOGGER.debug(
+                f"Looking for file: {file_path}, exists: {file_path.exists()}"
+            )
+            if not file_path.exists():
+                ASH_LOGGER.debug(f"File not found: {file_path}")
+                return
+            with open(file_path, mode="r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            # Get line number (adjust for 0-based indexing)
+            line_num = int(finding["line"]) - 1
+
+            # Get context (5 lines before and after)
+            start_line = max(0, line_num - 5)
+            end_line = min(len(lines), line_num + 6)
+
+            text = "".join(lines[start_line:end_line])
+            if self.mask_source is not None:
+                text = self.mask_source(finding["file"], start_line + 1, text)
+
+            # Extract the snippet with line numbers
+            snippet_lines = []
+            for offset, line in enumerate(text.splitlines(keepends=True)):
+                i = start_line + offset
+                prefix = "→ " if i == line_num else "  "
+                snippet_lines.append(f"{prefix}{i + 1}: {line}")
+
+            finding["code_snippet"] = "".join(snippet_lines)
+            ASH_LOGGER.debug(
+                f"Extracted code snippet of length: {len(finding['code_snippet'])}"
+            )
+        except Exception as e:
+            ASH_LOGGER.debug(f"Failed to extract code snippet: {e}")
 
     def on_data_table_row_selected(self, event) -> None:
         """Handle row selection in the findings table."""
@@ -651,44 +670,7 @@ class FindingsExplorerApp(App):
         ASH_LOGGER.debug(f"File: {finding.get('file')}, Line: {finding.get('line')}")
         ASH_LOGGER.debug(f"Has code snippet: {bool(finding.get('code_snippet'))}")
 
-        # Try to extract code snippet if not already present
-        if (
-            not finding.get("code_snippet")
-            and finding.get("file")
-            and finding.get("line")
-        ):
-            try:
-                file_path = Path(finding["file"])
-                ASH_LOGGER.debug(
-                    f"Looking for file: {file_path}, exists: {file_path.exists()}"
-                )
-
-                if file_path.exists():
-                    with open(file_path, mode="r", encoding="utf-8") as f:
-                        lines = f.readlines()
-
-                    # Get line number (adjust for 0-based indexing)
-                    line_num = int(finding["line"]) - 1
-
-                    # Get context (5 lines before and after)
-                    start_line = max(0, line_num - 5)
-                    end_line = min(len(lines), line_num + 6)
-
-                    # Extract the snippet with line numbers
-                    snippet_lines = []
-                    for i in range(start_line, end_line):
-                        prefix = "→ " if i == line_num else "  "
-                        snippet_lines.append(f"{prefix}{i + 1}: {lines[i]}")
-
-                    finding["code_snippet"] = "".join(snippet_lines)
-                    ASH_LOGGER.debug(
-                        f"Extracted code snippet of length: {len(finding['code_snippet'])}"
-                    )
-                else:
-                    ASH_LOGGER.debug(f"File not found: {file_path}")
-            except Exception as e:
-                ASH_LOGGER.debug(f"Failed to extract code snippet: {e}")
-
+        self._add_snippet_from_source(finding)
         self.push_screen(FindingDetailScreen(finding))
 
     def on_select_changed(self, event) -> None:
@@ -1085,7 +1067,11 @@ def findings_command(
         config_path = _resolve_suppression_config_path(config)
 
         # Launch the Textual app
-        app = FindingsExplorerApp(findings, config_path=config_path)
+        app = FindingsExplorerApp(
+            findings,
+            config_path=config_path,
+            mask_source=source_snippet_masker(model),
+        )
         app.run()
     except Exception as e:
         typer.secho(f"Error loading model or report: {e}", fg="red")

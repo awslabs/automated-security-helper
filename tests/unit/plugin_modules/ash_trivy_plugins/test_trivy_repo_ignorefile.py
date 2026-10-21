@@ -175,9 +175,15 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
         scanner.scan(target=source, target_type="source")
     argv = run.call_args.kwargs["command"]
     assert argv[:2] == ["trivy", "repository"]
-    assert argv[2].startswith("--ignorefile=")
-    assert argv[3].startswith("--secret-config=")
-    assert argv[4:] == resolved[2:]
+    # The scan cache in memory, in every run: the cache may be read-only.
+    assert argv[2] == "--cache-backend=memory"
+    assert argv[3].startswith("--ignorefile=")
+    assert argv[4].startswith("--secret-config=")
+    # The cache the scan, the refresh and the staleness check all read.
+    assert argv[5].startswith("--cache-dir=")
+    # A config file ASH chose, so trivy reads no trivy.yaml from the scanned tree.
+    assert argv[6].startswith("--config=")
+    assert argv[7:] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(
@@ -217,5 +223,6 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     subcommand_at = argv.index("repository")
     target_at = max(i for i, a in enumerate(argv) if Path(a) == source)
     ignore_at = next(i for i, a in enumerate(argv) if a.startswith("--ignorefile="))
-    for at in [*(argv.index(flag) for flag in flags), ignore_at]:
+    cache_at = next(i for i, a in enumerate(argv) if a.startswith("--cache-dir="))
+    for at in [*(argv.index(flag) for flag in flags), ignore_at, cache_at]:
         assert subcommand_at < at < target_at, argv

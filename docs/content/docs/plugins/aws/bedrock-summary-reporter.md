@@ -18,6 +18,8 @@ The Bedrock Summary Reporter leverages Amazon Bedrock to:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml
@@ -50,6 +52,29 @@ reporters:
       max_delay: 30.0     # Default: 60.0 seconds, at most 60
       enable_fallback_models: true
 ```
+
+### What is sent to Bedrock
+
+The reporter receives results ASH has already masked: secret values that findings
+expose are masked in every snippet and message before any reporter runs (see
+"Secret values in reports" in the output formats page). On top of that:
+
+- **Findings from secrets scanners are counted, not sent.** `exclude_scanner_types`
+  (default `["SECRET"]`) names scanner tool types whose findings go into the
+  prompts only as a count ("Secret findings: N"). A finding's type is its scanner's
+  tool type, looked up from the scanner's name (detect-secrets and ferret-scan are
+  `SECRETS`), or a `tool_type::` tag on the finding. `SECRET` and `SECRETS` both
+  name the secrets type. With the secrets type excluded, a finding from any rule
+  that detects a credential or key is counted too: semgrep's and opengrep's
+  `generic.secrets.*` rules, checkov's `CKV_SECRET_*`, and rules tagged `secret`,
+  `secrets`, CWE-798 or CWE-321. A hard-coded password check such as bandit's B105
+  (CWE-259) is sent, with the value masked.
+- **A finding whose scanner type cannot be determined is sent without its code.**
+  Its message and location are sent, its snippets are not, and they are left out of
+  the local summary too.
+- **`include_code_snippets` decides whether code is sent or written.** With it off
+  (the default), no prompt holds a snippet, and the "Raw JSON" blocks in
+  `reports/ash.bedrock.summary.md` are written without the result's snippets.
 
 ### Environment Variables
 

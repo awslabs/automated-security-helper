@@ -21,7 +21,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
 
 # Windows refuses to replace a file another process or thread has open, and a progress
@@ -35,21 +34,24 @@ _REPLACE_BACKOFF_SECONDS = 0.05
 def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> None:
     """Write ``content`` to ``path`` so that readers see the old file or the new one.
 
-    The staging file is created in the target's own directory, because ``os.replace``
-    is only atomic within one filesystem. It is created with ``open(..., "x")`` rather
-    than ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain write
-    would: ``mkstemp`` creates 0600, which would stop a host user reading results a
-    container wrote.
+    fs_guard.open_for_atomic_write does the writing: a staging file created
+    exclusively in the target's own directory, because ``os.replace`` is only atomic
+    within one filesystem, then renamed over ``path``. Created exclusively rather
+    than with ``tempfile.mkstemp`` so it gets the same umask-derived mode a plain
+    write would: ``mkstemp`` creates 0600, which would stop a host user reading
+    results a container wrote.
+
+    Below a registered output directory (``fs_guard``), the directory is opened
+    without following a link at any component, and the staging file is created and
+    renamed relative to that descriptor: a link on the way to ``path``, or at
+    ``path`` itself, raises ``OutputLinkRefused``, and a file at ``path`` that
+    another name refers to raises ``OutputHardLinkRefused``.
     """
-    path = Path(path)
-    staging = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(staging, mode="x", encoding=encoding) as handle:
-            handle.write(content)
-        _replace(staging, path)
-    except BaseException:
-        staging.unlink(missing_ok=True)
-        raise
+    # Not at the top: fs_guard imports the sandbox package. Do not hoist.
+    from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
+
+    with open_for_atomic_write(path, encoding=encoding) as handle:
+        handle.write(content)
 
 
 def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
@@ -79,6 +81,11 @@ def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
 
 
 def _replace(staging: Path, target: Path) -> None:
+    """Rename ``staging`` over ``target`` by name; fs_guard's rename without a dir_fd.
+
+    On Windows a ``PermissionError`` from a reader holding ``target`` open is
+    retried for the bounded time above.
+    """
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
             os.replace(staging, target)

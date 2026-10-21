@@ -35,8 +35,6 @@ does with each outcome.
 from __future__ import annotations
 
 import json
-
-import logging
 import os
 import re
 import time
@@ -249,21 +247,37 @@ class TestResolveWorkspaceExecutionConfig:
 
         assert config.max_parallel_projects == 2
 
-    def test_an_unreadable_config_falls_back_rather_than_refusing_the_scan(
-        self, tmp_path, caplog
-    ):
-        """These are scheduling knobs; refusing to scan over one would be a poor trade."""
+    def test_an_unparseable_config_refuses_the_scan(self, tmp_path):
+        """The same file refuses a single-directory scan, so it refuses this one,
+        rather than scanning the workspace without the settings it is there to
+        apply."""
         (tmp_path / ".ash.yaml").write_text(
             "workspace: [this: is: not: valid\n", encoding="utf-8"
         )
 
-        with caplog.at_level(logging.WARNING):
-            config = _resolve_workspace_execution_config(
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml"):
+            _resolve_workspace_execution_config(
                 ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
             )
 
-        assert config.max_parallel_projects is None
-        assert "using defaults" in caplog.text
+    def test_a_named_config_that_does_not_exist_refuses_the_scan(self, tmp_path):
+        with pytest.raises(ASHConfigValidationError, match="profile.yaml"):
+            _resolve_workspace_execution_config(
+                ScanOptions(
+                    source_dir=tmp_path,
+                    output_dir=tmp_path / "out",
+                    config=(tmp_path / "profile.yaml").as_posix(),
+                )
+            )
+
+    def test_a_root_whose_only_source_cannot_be_read_refuses_the_scan(self, tmp_path):
+        """Discovery itself refuses here, before any file is loaded."""
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+
+        with pytest.raises(ASHConfigValidationError, match="pyproject.toml"):
+            _resolve_workspace_execution_config(
+                ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +459,27 @@ class TestRunWorkspaceModeSettings:
         settings = recorded["settings"][0]
         assert settings.max_parallel_projects == 2
         assert settings.project_timeout == 60.0
+
+    def test_a_root_whose_discovery_refuses_exits_3_and_scans_no_project(
+        self, recorded_workspace_execution, logger, tmp_path
+    ):
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+        (tmp_path / "api").mkdir()
+        (tmp_path / "api" / ".ash.yaml").write_text(
+            "project_name: api\n", encoding="utf-8"
+        )
+        recorded = recorded_workspace_execution(result=_run_result(tmp_path))
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_workspace_mode(opts, logger)
+
+        assert excinfo.value.code == 3
+        assert recorded["plans"] == []
 
     def test_an_empty_phase_list_falls_back_to_the_standard_three(
         self, recorded_workspace_execution, logger, tmp_path

@@ -17,6 +17,7 @@ from automated_security_helper.utils.content_db_staleness import (
     content_db_records,
     stale_content_databases,
 )
+from automated_security_helper.utils.converter_refusals import converter_refusals
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -119,6 +120,14 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
                 entry["enforced"] = stale[record.name].enforced
             databases.append(entry)
         report_data["content_databases"] = databases
+
+        # Every input a converter did not read, with scan_incomplete=true for an
+        # archive refused whole for an extraction limit, which is what failed the
+        # completeness gate. Always present, like content_databases, so an empty
+        # list says nothing was refused.
+        report_data["converter_refusals"] = [
+            refusal.to_dict() for refusal in converter_refusals(model)
+        ]
 
         # Add top hotspots
         report_data["top_hotspots"] = emitter.get_top_hotspots(10)

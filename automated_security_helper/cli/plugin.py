@@ -21,7 +21,11 @@ from automated_security_helper.config.resolve_config import (
     resolve_config,
 )
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
-from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.plugins.loader import (
+    PluginModuleError,
+    load_plugins,
+)
 from automated_security_helper.utils.log import get_logger
 
 plugin_app = typer.Typer(
@@ -102,15 +106,16 @@ def list_plugins(
         use_color=color,
     )
 
-    if config is None:
-        found = find_config_file()
-        if found is not None:
-            logger.info(f"Using config file found at: {found.as_posix()}")
-            config = found.as_posix()
-    else:
-        logger.info(f"Using config file specified at: {config}")
-
     try:
+        # Inside the try: discovery refuses a source it cannot read (exit 3).
+        if config is None:
+            found = find_config_file()
+            if found is not None:
+                logger.info(f"Using config file found at: {found.as_posix()}")
+                config = found.as_posix()
+        else:
+            logger.info(f"Using config file specified at: {config}")
+
         console = Console()
         ash_config = resolve_config(
             config_path=config, config_overrides=config_overrides
@@ -290,6 +295,18 @@ def list_plugins(
                         table.add_row(*[str(cell) for cell in error_row])
 
             console.print(table)
+    except PluginModuleError as e:
+        # Exit 3, invalid configuration, as a scan with the same config exits:
+        # ash_plugin_modules names a module outside the plugin namespace, and
+        # nothing was imported, or a module that does not import.
+        typer.secho(f"Invalid configuration: {e}", err=True)
+        raise typer.Exit(3)
+    except ASHConfigValidationError as e:
+        # Exit 3, the code every ASH command uses for an unusable configuration:
+        # listing the plugins of the default config instead would describe a
+        # configuration other than the one named or found.
+        typer.secho(f"Invalid configuration: {e}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(3)
     except Exception as e:
         typer.secho(
             f"Error: {e}",

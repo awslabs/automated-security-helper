@@ -51,8 +51,8 @@ def test_a_results_subdirectory_replaced_after_the_spawn_is_not_followed(
     scanner_dir = output / "scanners" / "probe"
     target_dir = scanner_dir / "source"
     target_dir.mkdir(parents=True)
-    victim = tmp_path / "victim"
-    victim.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
 
     original = subprocess_utils._write_stream_log
     swapped = []
@@ -60,7 +60,7 @@ def test_a_results_subdirectory_replaced_after_the_spawn_is_not_followed(
     def swap_then_write(results_dir, *args, **kwargs):
         if not swapped:
             shutil.rmtree(target_dir)
-            os.symlink(victim, target_dir, target_is_directory=True)
+            os.symlink(elsewhere, target_dir, target_is_directory=True)
             swapped.append(True)
         return original(results_dir, *args, **kwargs)
 
@@ -84,4 +84,4 @@ def test_a_results_subdirectory_replaced_after_the_spawn_is_not_followed(
             class_name="Probe",
         )
     assert swapped, "the harness never reached the stream-log write"
-    assert list(victim.iterdir()) == [], "ASH wrote through the replaced directory"
+    assert list(elsewhere.iterdir()) == [], "ASH wrote through the replaced directory"

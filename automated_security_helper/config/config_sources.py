@@ -110,6 +110,13 @@ consulted before the confinement root, and its refusal,
 ``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
 not the path it resolved to. Without a predicate the rules above are unchanged.
 
+Discovery takes the same predicate (``discover_config_source(..., permit=)``).
+A source found in the scanned directory can be a symbolic link to any file, and
+discovery reads ``pyproject.toml`` to look for its table, so every source that
+exists is checked by the path it resolves to before anything opens it. A refused
+one raises ``ASHConfigInputNotPermittedError`` naming the source as found, so the
+refusal reads the same whether its target is missing, unreadable or readable.
+
 The same predicate is applied to the file discovery selects, when a caller
 passes one (``check_discovered_source``). The directory searched is one the
 caller may read, but a file found there may be a symlink to a file elsewhere,
@@ -121,6 +128,12 @@ whether it has a ``[tool.ash]`` table, before the check.
 
 Bounds
 ------
+Every config file is opened without blocking and read only when the opened file
+is a regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES`` of it
+(``read_config_bytes``). A FIFO or a device at a config name, including one
+swapped in after a caller checked the name, is refused rather than blocking the
+scan or being read until memory runs out.
+
 A file that appears twice on its own chain is a cycle and fails with the chain
 printed. The same file reached on two branches (a diamond) is not a cycle. A
 chain deeper than ``ASH_CONFIG_EXTENDS_MAX_DEPTH`` fails, and so does reading
@@ -174,19 +187,33 @@ reads keeps ``!ENV`` exactly as before.
 Failure
 -------
 Every failure here raises ``ASHConfigSourceError``, which ``resolve_config``
-re-raises instead of falling back to the default config. A root config file
-that fails to parse as YAML or JSON keeps its existing behavior (default config
-plus a resolution warning); a base that fails to parse is an error, because the
-file that names it was not loaded as written.
+re-raises instead of falling back to the default config. A root YAML or JSON
+file that cannot be read or parsed raises what the reader raised;
+``resolve_config.read_config_document`` turns that into an
+``ASHConfigSourceError`` too, so a root file that does not load refuses the
+scan just as a base that does not load does. Neither is replaced by the
+defaults, which would scan with the file's suppressions and settings off.
+
+Discovery selects a config name that exists, not only one that is a regular
+file: a dangling symbolic link or a directory at ``.ash/.ash.yaml`` is selected
+and then refused when it is read, rather than skipped as though the repository
+had no config. A ``pyproject.toml`` that cannot be read refuses the same way
+when it would be the selected source, because whether it holds a ``[tool.ash]``
+table cannot be told. Discovery opens ``pyproject.toml`` to look for that table
+only when it is a regular file; one that is not is told by its type and never
+opened (``_pyproject_is_a_source``).
 """
 
 from __future__ import annotations
 
 import copy
+import errno
 import functools
+import io
 import json
 import os
 import re
+import stat
 import types
 import typing
 from dataclasses import dataclass, field
@@ -212,11 +239,13 @@ from automated_security_helper.core.constants import (
     ASH_CONFIG_EXTENDS_MAX_DEPTH,
     ASH_CONFIG_EXTENDS_MAX_FILES,
     ASH_CONFIG_FILE_NAMES,
+    ASH_CONFIG_MAX_FILE_BYTES,
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigEnvNotResolvedError,
+    ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
 )
@@ -312,17 +341,102 @@ def is_pyproject(path: Path) -> bool:
     return Path(path).name == ASH_PYPROJECT_FILE_NAME
 
 
-def _read_toml_text(path: Path) -> str:
+def is_regular_file(path: Path) -> bool:
+    """Whether `path` leads to a regular file; False for any error.
+
+    os.stat rather than Path.is_file: before Python 3.14, is_file raises for an
+    error other than "not found" (a directory above that cannot be searched),
+    which let a bare OSError out of a check that only meant to ask.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        # ValueError: a path with a NUL in it.
+        return False
+
+
+FileIdentity = Tuple[int, int]
+
+
+def file_identity(path: Path) -> Optional[FileIdentity]:
+    """(device, inode) of the file `path` leads to now, or None when it leads nowhere.
+
+    Taken when a caller checks a config path, and handed to ``read_config_bytes``
+    as ``expect``, so the file read is the file that was checked.
+    """
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return info.st_dev, info.st_ino
+
+
+def read_config_bytes(path: Path, expect: Optional[FileIdentity] = None) -> bytes:
+    """A config file's bytes; see "Bounds" in the module docstring.
+
+    Opened with ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and
+    ``O_NOCTTY``, so a tty swapped in at the name cannot become the controlling
+    terminal of a process that has none (a daemonized MCP server). Checked with
+    ``fstat`` on the open descriptor, so what is read is the regular file that was
+    opened and not whatever the name pointed at when a caller checked it. With
+    ``expect`` (from ``file_identity`` at the caller's check), the opened file's
+    device and inode must be those, so a file replaced between a check and this
+    read is refused rather than read. Raises ``OSError`` for anything else, and
+    ``ASHConfigSourceError`` for a file longer than ``ASH_CONFIG_MAX_FILE_BYTES``.
+    """
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY | nonblock | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
+    )
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", os.fspath(path))
+        if expect is not None and (opened.st_dev, opened.st_ino) != expect:
+            raise OSError(
+                errno.ESTALE,
+                "changed after it was checked, so it is not read",
+                os.fspath(path),
+            )
+        if nonblock:
+            # O_NONBLOCK was for the open. A regular file is then read normally:
+            # on some filesystems a non-blocking read of one can return early.
+            os.set_blocking(fd, True)
+        limit = ASH_CONFIG_MAX_FILE_BYTES
+        chunks: List[bytes] = []
+        remaining = limit + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(remaining, 1 << 20))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    finally:
+        os.close(fd)
+    if remaining <= 0:
+        raise ASHConfigSourceError(
+            f"{Path(path).as_posix()} is larger than {limit} bytes, the most ASH "
+            "reads from one config file."
+        )
+    return b"".join(chunks)
+
+
+def _read_toml_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
     """A TOML file's text. A leading UTF-8 byte order mark is dropped, since
     tomllib rejects it and editors on some platforms write one."""
-    text = Path(path).read_text(encoding="utf-8")
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
     return text.removeprefix("\ufeff")
 
 
 def _tool_ash_line(path: Path) -> Optional[int]:
+    # Only a regular file is read: this names a file in messages, including the
+    # one that says a path is not a regular file.
+    if not is_regular_file(path):
+        return None
     try:
         text = _read_toml_text(path)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return None
     match = _TOOL_ASH_PATTERN.search(text)
     if match is None:
@@ -352,10 +466,18 @@ class ConfigSource:
 
 @dataclass
 class ConfigDiscovery:
-    """The source discovery selected, and every other source it found."""
+    """The source discovery selected, and every other source it found.
+
+    ``notes`` are what discovery could not use behind the selected source, such
+    as a pyproject.toml it could not read. They are reported with the ignored
+    sources (``discovery_warnings``), so they are logged once per scan and
+    recorded with its results, rather than logged by each of the several readers
+    that run discovery.
+    """
 
     selected: Optional[ConfigSource] = None
     ignored: List[ConfigSource] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
 
 
 def pyproject_has_ash_table(path: Path) -> bool:
@@ -370,7 +492,7 @@ def pyproject_has_ash_table(path: Path) -> bool:
         text = _read_toml_text(path)
     except UnicodeDecodeError as exc:
         # Latin-1 decodes any byte string, which is all the pattern needs.
-        if _TOOL_ASH_PATTERN.search(Path(path).read_bytes().decode("latin-1")):
+        if _TOOL_ASH_PATTERN.search(read_config_bytes(path).decode("latin-1")):
             raise ASHConfigSourceError(
                 f"{describe_config_path(path)} declares an ASH configuration but "
                 f"is not valid UTF-8, which TOML requires: {exc}"
@@ -401,70 +523,192 @@ def pyproject_has_ash_table(path: Path) -> bool:
     return True
 
 
-def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool:
+def _unreadable_pyproject(
+    path: Path, found_before: List[ConfigSource], exc: OSError, notes: List[str]
+) -> bool:
+    """Refuse a pyproject.toml that could not be read, or note it behind a source."""
+    if not found_before:
+        refusal = (
+            ASHConfigFileNotFoundError
+            if isinstance(exc, FileNotFoundError)
+            else ASHConfigSourceError
+        )
+        raise refusal(
+            f"Could not read {path.as_posix()} ({exc}), so ASH cannot tell "
+            "whether it holds a [tool.ash] table. Make it readable, remove "
+            "it, or name a config file with --config."
+        ) from exc
+    notes.append(
+        f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
+        "config source."
+    )
+    return False
+
+
+def _pyproject_is_a_source(
+    path: Path, found_before: List[ConfigSource], notes: List[str]
+) -> bool:
     """Probe pyproject.toml without letting it break an unrelated config.
 
     When a higher-precedence source already exists, pyproject.toml is probed
     only to report it as ignored, so nothing about it may fail the load: before
     #313 a repository with .ash/.ash.yaml was unaffected by whatever its
     pyproject.toml held. When it would be the selected source, a pyproject that
-    declares [tool.ash] but cannot be parsed fails closed. One that cannot be
-    read at all is skipped with a warning either way, because there is no way
-    to tell whether it configures ASH, and most pyproject.toml files do not.
+    declares [tool.ash] but cannot be parsed fails closed, and so does one that
+    cannot be read at all (a dangling link, a directory, no permission): there
+    is no way to tell whether it configures ASH, and skipping it would scan with
+    the defaults while its [tool.ash] table, if it has one, sat unread.
+
+    Only a regular file is opened. Discovery runs on whatever a cloned
+    repository holds, and opening a device can act on it even when nothing is
+    read: a watchdog arms, a tape rewinds. So a FIFO, a device or a directory at
+    this name is told by its type, from ``stat``, and refused or ignored unopened.
+
+    What cannot be used behind a higher-precedence source is appended to
+    ``notes`` rather than logged; see ``ConfigDiscovery``.
     """
+    # Classified from os.stat and its errno, so each name that cannot be followed
+    # is reported for what it is.
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except FileNotFoundError:
+        # The name exists (discovery found it) but leads nowhere.
+        missing = FileNotFoundError(
+            errno.ENOENT, "a symbolic link to nothing", os.fspath(path)
+        )
+        return _unreadable_pyproject(path, found_before, missing, notes)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            exc = OSError(
+                errno.ELOOP,
+                "a symbolic link that leads back to itself",
+                os.fspath(path),
+            )
+        return _unreadable_pyproject(path, found_before, exc, notes)
+    if not regular:
+        return _unreadable_pyproject(
+            path,
+            found_before,
+            OSError(errno.EINVAL, "not a regular file", os.fspath(path)),
+            notes,
+        )
     try:
         return pyproject_has_ash_table(path)
     except OSError as exc:
-        ASH_LOGGER.warning(
-            f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
-            "config source."
-        )
-        return False
+        return _unreadable_pyproject(path, found_before, exc, notes)
     except ASHConfigSourceError as exc:
         if not found_before:
             raise
-        ASH_LOGGER.warning(
+        notes.append(
             f"Ignoring {path.as_posix()}: {found_before[0].label} takes precedence, "
             f"and the [tool.ash] table there could not be read ({exc})."
         )
         return False
 
 
-def _candidate_paths(search_dir: Path) -> List[Path]:
-    """Every name discovery looks at in `search_dir`, in precedence order."""
-    candidates: List[Path] = []
+def _name_exists(path: Path) -> bool:
+    """Whether a config name exists, as ``os.path.lexists`` says, but never guessed.
+
+    ``lexists`` answers False for any error, so a ``.ash/`` directory that cannot
+    be searched hid the config inside it and the scan ran with the defaults.
+    Only "no such file" and "a path component is not a directory" mean absent;
+    any other error refuses, since whether the repository has a config there
+    cannot be told.
+    """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        raise ASHConfigSourceError(
+            f"Could not look for a config file at {Path(path).as_posix()} "
+            f"({exc.strerror}), so ASH cannot tell whether one is there. Make the "
+            "directory readable, or name a config file with --config."
+        ) from exc
+    return True
+
+
+def _not_permitted(found: Path) -> ASHConfigInputNotPermittedError:
+    # Names the source as found, never what it resolves to, so the refusal reads
+    # the same whether that target is missing, unreadable or readable.
+    return ASHConfigInputNotPermittedError(
+        f"{found.as_posix()}, a config source found in the scanned directory, "
+        "reaches a file outside the directories this caller may read config from."
+    )
+
+
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _is_a_link(path: Path) -> bool:
+    """Whether `path` is a symbolic link or, on Windows, any reparse point."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(getattr(info, "st_file_attributes", 0) & reparse)
+
+
+def _permitted(path: Path, permit: PermitBase) -> bool:
+    if _on_windows() and _is_a_link(path):
+        # Resolving a link on Windows can open a connection to the host a UNC
+        # target names, so a linked source is refused unresolved, as an extends
+        # base whose spelling leaves the root is (_resolve_base_path).
+        return False
+    # realpath reads links and opens nothing, and does not raise on a loop.
+    return permit(Path(os.path.realpath(path)))
+
+
+def _existing_candidates(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> List[ConfigSource]:
+    """Every config name in `search_dir` that exists, in precedence order, unopened.
+
+    Under ``permit`` a ``.ash`` that is a link out of the grant is refused before
+    anything looks inside it: whether a name exists there would otherwise answer
+    whether a file exists in a directory the caller may not read.
+    """
+    dot_ash = search_dir / ".ash"
+    if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
+        raise _not_permitted(dot_ash)
+    candidates: List[ConfigSource] = []
     for name in ASH_CONFIG_FILE_NAMES:
-        candidates.extend((search_dir / name, search_dir / ".ash" / name))
-    candidates.extend(search_dir / name for name in ASH_RC_FILE_NAMES)
-    candidates.append(search_dir / ASH_PYPROJECT_FILE_NAME)
+        for candidate in (search_dir / name, dot_ash / name):
+            if _name_exists(candidate):
+                candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
+    for name in ASH_RC_FILE_NAMES:
+        candidate = search_dir / name
+        if _name_exists(candidate):
+            candidates.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
+    pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
+    if _name_exists(pyproject):
+        candidates.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
     return candidates
+
+
+def _check_candidates(
+    candidates: List[ConfigSource], permit: Optional[PermitBase]
+) -> None:
+    if permit is None:
+        return
+    for candidate in candidates:
+        if not _permitted(candidate.path, permit):
+            raise _not_permitted(candidate.path)
 
 
 def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
     """Refuse `search_dir` when a config source in it resolves outside `permit`.
 
     The check ``discover_config_source(search_dir, permit=permit)`` makes before
-    it opens anything. Every name that exists, as a file or as a link whatever it
-    reaches, is checked by the path it resolves to (``os.path.realpath``, which
-    opens nothing), and so is the ``.ash`` directory when it is a link. A refusal
-    names the source as found, so it reads the same whether the target is
-    missing, unreadable or readable. Nothing is checked without ``permit``.
+    it opens anything, for a caller that refuses before a scan starts (MCP
+    ``scan_directory``). Opens nothing itself.
     """
-    if permit is None:
-        return
     search_dir = Path(search_dir)
-    ash_dir = search_dir / ".ash"
-    checked = [ash_dir] if os.path.islink(ash_dir) else []
-    checked.extend(
-        path for path in _candidate_paths(search_dir) if os.path.lexists(path)
-    )
-    for path in checked:
-        if not permit(Path(os.path.realpath(path))):
-            raise ASHConfigInputNotPermittedError(
-                f"{path.as_posix()}, a config source found in the scanned "
-                "directory, reaches a file outside the directories this caller "
-                "may read config from."
-            )
+    _check_candidates(_existing_candidates(search_dir, permit), permit)
 
 
 def discover_config_source(
@@ -472,28 +716,29 @@ def discover_config_source(
 ) -> ConfigDiscovery:
     """Find every config source in `search_dir` and select one by precedence.
 
+    A name counts when it exists, whatever it is; see "Failure" in the module
+    docstring for why a dangling link is selected rather than skipped.
+
     ``permit`` is the caller's predicate for the files it may read config from,
-    as for an ``extends`` base. Every source is checked against it before any is
-    opened (``check_discovery_candidates``), since discovery reads a
-    ``pyproject.toml`` to look for its table. Without it nothing is checked.
+    as for an ``extends`` base. Every source that exists -- the one selected and
+    the ones ignored, which are reported and, for ``pyproject.toml``, read -- is
+    checked by the path it resolves to before anything opens it, and one the
+    predicate refuses raises ``ASHConfigInputNotPermittedError`` naming the
+    source as found. Without it nothing is checked.
     """
     search_dir = Path(search_dir)
-    check_discovery_candidates(search_dir, permit)
+    candidates = _existing_candidates(search_dir, permit)
+    _check_candidates(candidates, permit)
     found: List[ConfigSource] = []
-    for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in (search_dir / name, search_dir / ".ash" / name):
-            if candidate.is_file():
-                found.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
-    for name in ASH_RC_FILE_NAMES:
-        candidate = search_dir / name
-        if candidate.is_file():
-            found.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
-    pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
-    if pyproject.is_file() and _pyproject_is_a_source(pyproject, found):
-        found.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
+    notes: List[str] = []
+    for candidate in candidates:
+        if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
+            candidate.path, found, notes
+        ):
+            found.append(candidate)
     if not found:
         return ConfigDiscovery()
-    return ConfigDiscovery(selected=found[0], ignored=found[1:])
+    return ConfigDiscovery(selected=found[0], ignored=found[1:], notes=notes)
 
 
 def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> None:
@@ -511,19 +756,18 @@ def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> No
     )
 
 
-def log_config_discovery(
-    discovery: ConfigDiscovery, announce_selected: bool = True
-) -> None:
-    """Say which source is used and which were found but ignored.
+def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
+    """One warning per source discovery found and did not select, then its notes.
 
-    ``announce_selected`` is False for a caller that reports the selected file
-    through its own logger; the ignored sources are always reported here.
+    The settings in an ignored source are not applied, so a scan reports these
+    with its results as well as in the log; see ``log_config_discovery`` and
+    ``resolve_config``. A note says what discovery could not use behind the
+    selected source (``ConfigDiscovery.notes``).
     """
     selected = discovery.selected
     if selected is None:
-        return
-    if announce_selected:
-        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+        return []
+    warnings: List[str] = []
     for other in discovery.ignored:
         message = (
             f"Ignoring ASH configuration at {other.label}: {selected.label} takes "
@@ -540,7 +784,29 @@ def log_config_discovery(
                 f"{ASH_PYPROJECT_FILE_NAME}. Move the settings into one source "
                 "and delete the other."
             )
+        warnings.append(message)
+    warnings.extend(discovery.notes)
+    return warnings
+
+
+def log_config_discovery(
+    discovery: ConfigDiscovery, announce_selected: bool = True
+) -> List[str]:
+    """Say which source is used and which were found but ignored.
+
+    ``announce_selected`` is False for a caller that reports the selected file
+    through its own logger; the ignored sources are always reported here.
+    Returns the warnings logged, ``discovery_warnings(discovery)``.
+    """
+    selected = discovery.selected
+    if selected is None:
+        return []
+    if announce_selected:
+        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+    warnings = discovery_warnings(discovery)
+    for message in warnings:
         ASH_LOGGER.warning(message)
+    return warnings
 
 
 def _resolve_toml_env(value: Any) -> Any:
@@ -626,7 +892,11 @@ def _env_not_resolved(path: Path, where: str) -> ASHConfigEnvNotResolvedError:
     )
 
 
-def read_config_file(path: Path, refuse_env: Optional[RefuseEnv] = None) -> Any:
+def read_config_file(
+    path: Path,
+    expect: Optional[FileIdentity] = None,
+    refuse_env: Optional[RefuseEnv] = None,
+) -> Any:
     """Parse one config file, without resolving its `extends`.
 
     A ``pyproject.toml`` yields its ``[tool.ash]`` table; any other ``.toml``
@@ -634,15 +904,17 @@ def read_config_file(path: Path, refuse_env: Optional[RefuseEnv] = None) -> Any:
     ``AshConfig.from_file`` always read them, except that a YAML or TOML file
     ``refuse_env`` refuses (by default, one an MCP client delivered) is refused
     if it uses ``!ENV``; see "Environment variables". JSON has no ``!ENV``.
+    ``expect`` is passed to ``read_config_bytes``.
     """
     path = Path(path)
     if path.name.endswith(".json"):
-        with open(path, mode="r", encoding="utf-8") as f:
-            return json.load(f)
+        # utf-8-sig: a leading byte order mark is dropped, as YAML and TOML drop
+        # it; Windows PowerShell 5 writes one.
+        return json.loads(read_config_bytes(path, expect=expect).decode("utf-8-sig"))
     delivered = (refuse_env or config_is_client_delivered)(path)
     if path.name.endswith(".toml"):
         try:
-            text = _read_toml_text(path)
+            text = _read_toml_text(path, expect=expect)
         except UnicodeDecodeError as exc:
             raise ASHConfigSourceError(
                 f"{describe_config_path(path)} is not valid UTF-8, which TOML "
@@ -674,11 +946,27 @@ def read_config_file(path: Path, refuse_env: Optional[RefuseEnv] = None) -> Any:
                 raise _env_not_resolved(path, f"key {key}")
             return document
         return _resolve_toml_env(document)
-    with open(path, mode="r", encoding="utf-8") as f:
-        try:
-            return load_yaml_config(f, env="refuse" if delivered else "resolve")
-        except EnvReferenceNotResolved as exc:
-            raise _env_not_resolved(path, f"line {exc.line}") from exc
+    try:
+        return load_yaml_config(
+            named_text_stream(
+                read_config_bytes(path, expect=expect).decode("utf-8"), path
+            ),
+            env="refuse" if delivered else "resolve",
+        )
+    except EnvReferenceNotResolved as exc:
+        raise _env_not_resolved(path, f"line {exc.line}") from exc
+
+
+def named_text_stream(text: str, path: Path) -> io.StringIO:
+    """`text` as a stream named `path`, for a YAML parser.
+
+    A parse error then names the file and gives its line and column, as it did
+    when the parser read the open file, rather than "<unicode string>" followed
+    by a copy of the offending line.
+    """
+    stream = io.StringIO(text)
+    stream.name = os.fspath(path)
+    return stream
 
 
 def default_confinement_root(
@@ -729,7 +1017,12 @@ class ResolvedConfigDocument:
 
     ``chain`` lists every file read, in merge order: bases before the files that
     extend them, the root config last. A file reached on two branches appears
-    twice, because it was merged twice. ``documents`` holds each file's document
+    twice, because it was merged twice. ``named`` lists the same files, in the same
+    order, by the path that named them before any symlink was followed: the root
+    as the caller gave it, and each base as its ``extends`` entry spells it from
+    the file that extends it. A base that is a symlink is judged by that name too
+    (``config/sandbox_grants.py``), since whoever can write the link chooses the
+    file it reaches. ``documents`` holds each file's document
     as it was parsed, before its ``extends`` and ``patch`` were applied, so a
     caller checking what a file sets checks what was read rather than reading the
     file again.
@@ -748,6 +1041,7 @@ class ResolvedConfigDocument:
     data: Any
     chain: List[Path] = field(default_factory=list)
     root: Optional[Path] = None
+    named: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
     names: Dict[Path, Tuple[Path, ...]] = field(default_factory=dict)
 
@@ -782,6 +1076,7 @@ class _ChainState:
     anchor_relative_paths: Optional[AnchorPaths] = None
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
+    named: List[Path] = field(default_factory=list)
     documents: Dict[Path, Any] = field(default_factory=dict)
     names: Dict[Path, List[Path]] = field(default_factory=dict)
     #: For each base, the paths of the files above it in the chain.
@@ -847,7 +1142,12 @@ def _resolve_base_path(
     extending: Path,
     root: Path,
     permit_base: Optional[PermitBase] = None,
-) -> Path:
+) -> Tuple[Path, Optional[FileIdentity]]:
+    """The base `ref` names, resolved and checked, and the identity checked.
+
+    The identity is the file the resolved path led to when the checks ran; the
+    read of the base must open that same file (``read_config_bytes(expect=)``).
+    """
     if _URL_PATTERN.match(ref):
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} looks like "
@@ -882,6 +1182,7 @@ def _resolve_base_path(
             f"must stay inside ({root.as_posix()})."
         )
     resolved = candidate.resolve()
+    checked = file_identity(resolved)
     # Ahead of the root check, whose message names the resolved target: this
     # refusal must read the same whether or not that target exists.
     if permit_base is not None and not permit_base(resolved):
@@ -895,7 +1196,7 @@ def _resolve_base_path(
             f"{how} to {resolved.as_posix()}, which is outside the directory "
             f"config bases must stay inside ({root.as_posix()})."
         )
-    return resolved
+    return resolved, checked
 
 
 @dataclass(frozen=True)
@@ -1110,6 +1411,7 @@ def _resolve(
     env_refused_above: bool = False,
     named: Optional[Path] = None,
     above: Tuple[Path, ...] = (),
+    expect: Optional[FileIdentity] = None,
 ) -> Any:
     real = path.resolve()
     named = path if named is None else named
@@ -1131,14 +1433,15 @@ def _resolve(
         )
 
     if not stack:
-        # The root config: parse errors behave exactly as they always have.
+        # The root config: a read or parse error propagates as the reader raised
+        # it, and resolve_config.read_config_document refuses it.
         # Read and judged as named rather than as `real`, so a refusal names the
         # path the caller gave and not the target of a symlink.
         env_refused = state.refuse_env(path)
-        data = read_config_file(path, refuse_env=_env_rule(env_refused))
+        data = read_config_file(path, expect=expect, refuse_env=_env_rule(env_refused))
     else:
         extending = stack[-1]
-        if not real.is_file():
+        if not is_regular_file(real):
             raise ASHConfigSourceError(
                 f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
                 f"{real.as_posix()}, which does not exist or is not a file"
@@ -1149,7 +1452,9 @@ def _resolve(
             env_refused_above or state.refuse_env(named) or state.refuse_env(real)
         )
         try:
-            data = read_config_file(real, refuse_env=_env_rule(env_refused))
+            data = read_config_file(
+                real, expect=expect, refuse_env=_env_rule(env_refused)
+            )
         except ASHConfigSourceError:
             raise
         except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
@@ -1186,6 +1491,7 @@ def _resolve(
         EXTENDS_KEY not in data and PATCH_KEY not in data
     ):
         state.order.append(real)
+        state.named.append(named)
         return data
 
     try:
@@ -1200,9 +1506,11 @@ def _resolve(
             ops = anchor_patch_operations(ops, real.parent)
         merged: Any = {}
         for base_ref in refs:
-            base_path = _resolve_base_path(
+            base_path, checked = _resolve_base_path(
                 base_ref, real, state.root, state.permit_base
             )
+            # The base as its entry spells it, before any symlink is followed:
+            # relative to the resolved file that extends it, as base_path is.
             spelled = Path(base_ref)
             base_named = spelled if spelled.is_absolute() else real.parent / spelled
             merged = deep_merge(
@@ -1215,6 +1523,7 @@ def _resolve(
                     env_refused,
                     base_named,
                     (real, named, *above),
+                    expect=checked,
                 ),
                 AshConfig,
             )
@@ -1233,6 +1542,7 @@ def _resolve(
             f"{describe_config_path(real)}: {type(exc).__name__}: {exc}"
         ) from exc
     state.order.append(real)
+    state.named.append(named)
     return merged
 
 
@@ -1268,11 +1578,14 @@ def resolve_config_document(
         refuse_env=refuse_env or config_is_client_delivered,
         anchor_relative_paths=anchor_relative_paths,
     )
-    data = _resolve(config_path, (), state)
+    # The root is read as the file the name leads to now, when its caller has
+    # just checked it; one swapped in before the open is refused.
+    data = _resolve(config_path, (), state, expect=file_identity(config_path))
     return ResolvedConfigDocument(
         data=data,
         chain=state.order,
         root=root,
+        named=state.named,
         documents=state.documents,
         names=state.all_names(),
     )

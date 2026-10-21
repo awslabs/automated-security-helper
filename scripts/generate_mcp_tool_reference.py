@@ -359,11 +359,16 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "set_source_git": {
         "params": {
-            "url": {"notes": "Repository URL"},
+            "url": {
+                "notes": (
+                    "Repository URL: `https://`, `ssh://` or `user@host:path`, on a "
+                    "host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS`"
+                )
+            },
             "ref": {"default": "default branch", "notes": "Branch, tag, or commit"},
             "ssh_key_id": {
                 "default": "none",
-                "notes": "Operator-registered key id for private repos",
+                "notes": "Must be omitted: the server registers no ssh keys",
             },
             "depth": {"notes": "Clone depth; `0` for a full clone"},
         },

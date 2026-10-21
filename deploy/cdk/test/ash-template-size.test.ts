@@ -132,6 +132,10 @@
  *   of those, entries no rule consults        99 -> 17
  *   reasons cdk-nag base64-encoded            53 -> 0
  *
+ * Five of those 17 went later with the grants they sat on: the shard and merge roles no
+ * longer receive `GetSecretValue` on an auth secret nothing in that stack reads, so their
+ * `SecretsmanagerAccess` policies are gone, leaving 85 entries and 12 unconsulted.
+ *
  * lib/ash-nag-suppressions.ts has the mechanism and the per-helper reasoning. Higher
  * entry counts appear in this branch's intermediate states; 129 is the number a
  * reviewer sees.
@@ -181,8 +185,8 @@
  * bytes per 3 and reaches the adopter as an opaque blob. `.ash/.ash.yaml` records the
  * empty population from the other side.
  *
- * WHAT THE FIVE TEMPLATES MEASURE NOW, against a 51,200-byte cap, with `main` beside
- * each for the diff a reviewer reads:
+ * WHAT THE FIVE TEMPLATES MEASURED when the per-policy reasons landed, against a
+ * 51,200-byte cap, with the `main` of that time beside each:
  *
  *                            bytes    margin        on main    margin on main
  *   AshAgentCore            48,809    under 2,391    50,934     under     266
@@ -190,6 +194,16 @@
  *   AshDistributedPipeline 154,630    over  103,430 148,394     over  97,194
  *   AshFargate              68,502    over   17,302  76,674     over  25,474
  *   AshImagePipeline        61,183    over    9,983  68,435     over  17,235
+ *
+ * AND WHAT THEY MEASURE NOW, with the gate's config and completeness checks, the MCP
+ * entrypoint's Host and session decisions and the bootstrap's response-URL parameter:
+ *
+ *                            bytes    margin
+ *   AshAgentCore            50,400    under    800  (288 under the budget below)
+ *   AshCodeCommitGate       61,225    over  10,025
+ *   AshDistributedPipeline 151,117    over  99,917
+ *   AshFargate              71,538    over  20,338
+ *   AshImagePipeline        66,674    over  15,474
  *
  * AshCodeCommitGate HAS SINCE MOVED TO S3-ONLY. The optional VPC placement for its scan
  * function (two parameters, a condition, a Rule, a conditional inline role policy and its
@@ -209,7 +223,8 @@
  * AshImagePipeline -1,778. Sixteen distinct IAM5 reasons now ship where five did, over the
  * same 77 entries on the same 77 policies.
  *
- * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING: 2,391 bytes, 4.7% of the cap, on a
+ * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING: 2,391 bytes, 4.7% of the cap, when
+ * that table was taken, and 800 bytes (288 under the budget this file asserts) now, on a
  * stack whose suppression metadata grows with every resource added. An indented entry costs
  * 71 bytes of structure plus its reason -- about 390 at the 321-character mean across the
  * five templates, 357 for AshAgentCore's eight -- and a new suppressed resource brings its
@@ -225,7 +240,7 @@
  *
  * The answer when the AgentCore margin runs out is NOT to unindent -- that is the trivy
  * panic above. Prose-tightening is close to spent: the fan-out is gone and the reasons are
- * already one-shape-per-policy. The remaining honest moves are narrowing the 17 entries no
+ * already one-shape-per-policy. The remaining honest moves are narrowing the 12 entries no
  * rule consults (all of them in AshDistributedPipeline, so they buy AshAgentCore nothing;
  * the helper header says why they are pinned rather than removed) or reclassifying
  * AshAgentCore as S3-only. Reclassifying costs the inline set half its members and is a
@@ -314,7 +329,7 @@ const MAX_BYTES_PER_LINE = 512;
  *
  * Pinned per stack rather than only in total, so a regression names the template it
  * landed in. See the header: against `main` this is 129 -> 89, and 99 -> 17 of them
- * unconsulted.
+ * unconsulted; 85 and 12 since the shard and merge roles lost their unused secret grant.
  *
  * WHAT BREAKS THIS, and it is the point of pinning it at all: reintroducing
  * `applyToChildren: true` on any helper in lib/ash-nag-suppressions.ts. That walks the
@@ -325,18 +340,18 @@ const MAX_BYTES_PER_LINE = 512;
  *
  * Adding a resource that genuinely needs a suppression is expected to change a number
  * here. Re-run `npm run synth`, put the new count in, and the diff makes the review
- * question visible: does the new entry get consulted, or is it an 18th inert one?
+ * question visible: does the new entry get consulted, or is it a 13th inert one?
  */
 const SUPPRESSION_ENTRIES: Record<string, number> = {
   AshAgentCore: 10,
   AshCodeCommitGate: 8,
-  AshDistributedPipeline: 55,
+  AshDistributedPipeline: 50,
   AshFargate: 9,
   AshImagePipeline: 8,
 };
 
-/** 90, spelled out so the total is asserted and not merely derived from the map. */
-const SUPPRESSION_ENTRIES_TOTAL = 90;
+/** 85, spelled out so the total is asserted and not merely derived from the map. */
+const SUPPRESSION_ENTRIES_TOTAL = 85;
 
 /**
  * The entries no cdk-nag rule consults, named so the next reader can tell a known
@@ -361,15 +376,10 @@ const SUPPRESSION_ENTRIES_TOTAL = 90;
  */
 const KNOWN_INERT_SUPPRESSIONS = [
   'Shard0ProjectRoleSsmAccess',
-  'Shard0ProjectRoleSecretsmanagerAccess',
   'Shard1ProjectRoleSsmAccess',
-  'Shard1ProjectRoleSecretsmanagerAccess',
   'Shard2ProjectRoleSsmAccess',
-  'Shard2ProjectRoleSecretsmanagerAccess',
   'Shard3ProjectRoleSsmAccess',
-  'Shard3ProjectRoleSecretsmanagerAccess',
   'MergeProjectRoleSsmAccess',
-  'MergeProjectRoleSecretsmanagerAccess',
   'PipelineRoleStsAccess',
   'PipelineBuildImageBuildAshImageCodePipelineActionRoleDefaultPolicy',
   'PipelineScanShard0CodePipelineActionRoleDefaultPolicy',
@@ -521,7 +531,7 @@ describe('the shipped cdk-nag suppression population', () => {
     },
   );
 
-  test('the five templates ship 90 suppression entries between them', () => {
+  test('the five templates ship 85 suppression entries between them', () => {
     const total = ALL_STACKS.reduce((n, stack) => n + suppressionEntries(stack).length, 0);
     expect(total).toBe(SUPPRESSION_ENTRIES_TOTAL);
     // Non-vacuity for the map above: a typo that made every count 0 would satisfy
@@ -849,10 +859,10 @@ describe('every shipped reason is true of the policy it lands on', () => {
     // `suppressPipelineActionRoleWildcards` would produce if a statement were added to one
     // of those roles after the suppression is applied, which is why that helper's comment
     // points here. A policy that IS clean and does not say so is the other half: those are
-    // the 17 entries no rule consults, kept deliberately, and what makes keeping them
+    // the 12 entries no rule consults, kept deliberately, and what makes keeping them
     // honest is that they describe themselves rather than describing wildcards they lack.
     //
-    // WHAT BREAKS THIS: granting a wildcard inside `SsmAccess`, `SecretsmanagerAccess`,
+    // WHAT BREAKS THIS: granting a wildcard inside `SsmAccess`,
     // `PipelineRole/StsAccess` or a CodePipeline action role; or writing a new per-policy
     // reason for a clean policy without the claim in it.
     const wrong: string[] = [];
@@ -873,7 +883,9 @@ describe('every shipped reason is true of the policy it lands on', () => {
       }
     }
     expect(wrong).toEqual([]);
-    expect(checked).toBeGreaterThanOrEqual(77);
+    // 73 measured: five fewer than before the shard and merge roles lost their unused
+    // `SecretsmanagerAccess` policies, which were five of the clean ones checked here.
+    expect(checked).toBeGreaterThanOrEqual(73);
   });
 
   test('no reason names an IAM action its policy does not grant', () => {
@@ -903,8 +915,11 @@ describe('every shipped reason is true of the policy it lands on', () => {
     expect(wrong).toEqual([]);
     // Lower than the 205 the union reasons produced, because a per-policy reason names
     // fewer actions. It is the count of claims made, so a reason that named no action at
-    // all would be caught only by the assertion above.
-    expect(checked).toBeGreaterThanOrEqual(100);
+    // all would be caught only by the assertion above. 98 measured: the five
+    // `SecretsmanagerAccess` reasons named two actions each and went with their grants, and
+    // the four shard `S3Access` reasons name no s3:DeleteObject*, which a shard is not
+    // granted.
+    expect(checked).toBeGreaterThanOrEqual(98);
   });
 
   test('no reason claims a resource-wildcard shape its policy lacks', () => {
@@ -934,8 +949,8 @@ describe('every shipped reason is true of the policy it lands on', () => {
 });
 
 describe('the entries no rule consults are the known ones', () => {
-  test('there are exactly 17, all in AshDistributedPipeline', () => {
-    expect(KNOWN_INERT_SUPPRESSIONS).toHaveLength(17);
+  test('there are exactly 12, all in AshDistributedPipeline', () => {
+    expect(KNOWN_INERT_SUPPRESSIONS).toHaveLength(12);
     // Each prefix has to match exactly one resource carrying exactly one IAM5 entry.
     // A prefix that stopped matching would silently shrink the pinned set, so this
     // asserts the match rather than filtering by it.
@@ -951,7 +966,7 @@ describe('the entries no rule consults are the known ones', () => {
 
   test('no other stack ships an entry matching a known-inert prefix', () => {
     // A guard on the SCOPE of the claim above rather than a detector for a defect: the
-    // "all 17 are in AshDistributedPipeline" statement is only true while these
+    // "all 12 are in AshDistributedPipeline" statement is only true while these
     // pipeline-shaped prefixes match nothing in the other four templates. No change to
     // this app trips it -- it would take a construct in another stack being named to
     // collide -- and it is kept because the count above would then be understating

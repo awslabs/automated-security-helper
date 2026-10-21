@@ -1,9 +1,14 @@
 name: Docs Build & Deploy
 on:
+  # No tags. A tag push ran deploy-docs, which holds contents: write and publishes
+  # the site from the tagged commit, and with `tags: ["*"]` any tag on any commit
+  # did that. Release tags do not need it: ash-tag-on-merge.yml creates them through
+  # the API with GITHUB_TOKEN, which starts no workflow, and the release PR's merge
+  # to main already published the site. A narrower tag filter would bind only
+  # commits that carry it; a tag pushed on an older commit runs that commit's copy
+  # of this file, which a tag ruleset has to cover (DEVELOPMENT.md, Releasing).
   push:
     branches:
-      - "*"
-    tags:
       - "*"
   pull_request:
     branches:
@@ -23,7 +28,7 @@ concurrency:
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
   # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push/tag runs feed docs and releases.
+  # queue loses its verdict, and push runs feed the docs.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -41,9 +46,9 @@ jobs:
       # uv's cache is restored here and saved by deploy-docs on a push to main, the
       # only job in this workflow that runs there. setup-uv's own `enable-cache:
       # true` restored on every event and saved from every ref, pull requests
-      # included; this job now writes nothing to the cache. The `if:` above admits
-      # tag pushes too (a tag ref is not refs/heads/main), so the restore is
-      # skipped on a tag push: a tag run reads no cache entry.
+      # included; this job now writes nothing to the cache. Tag pushes no longer
+      # start this workflow; the restore still skips a tag ref, so a tag run, if
+      # one is ever added, reads no cache entry.
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -90,13 +95,15 @@ jobs:
     permissions:
       #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
       contents: write
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    # A push to main only, so a tag trigger added back to this file later would
+    # still start no deploy.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # No cache restore in this job. It publishes the site with `contents: write`,
-      # on main and on tag pushes, so nothing a cache entry carries may reach it.
+      # No cache restore in this job. It publishes the site with `contents: write`
+      # on a push to main, so nothing a cache entry carries may reach it.
       # It still saves uv's cache on a push to main, for build-docs to restore:
       # what it saves is what its own `uv sync` just resolved from uv.lock.
       - name: Install uv

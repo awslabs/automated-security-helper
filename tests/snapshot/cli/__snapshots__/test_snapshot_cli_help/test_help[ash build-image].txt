@@ -38,10 +38,13 @@
 │                                                                         independently of         │
 │                                                                         --offline.               │
 │                                                                         [default: bridge]        │
-│ --build-target                                <non-root|ci>             Specify the target stage │
-│                                                                         of the ASH image to      │
-│                                                                         build                    │
-│                                                                         [default: non-root]      │
+│ --build-target                                <non-root|ci>             The ASH image stage to   │
+│                                                                         build: 'non-root' (an    │
+│                                                                         unprivileged user, the   │
+│                                                                         default) or 'ci' (root,  │
+│                                                                         the default on Windows). │
+│                                                                         CI environment variables │
+│                                                                         do not change it.        │
 │ --offline-semgrep-rules…                      <str>                     Specify Semgrep rulesets │
 │                                                                         for use in ASH offline   │
 │                                                                         mode                     │

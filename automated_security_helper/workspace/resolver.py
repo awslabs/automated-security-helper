@@ -126,7 +126,7 @@ from __future__ import annotations
 import os
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_config_policy import ClientConfigRules
@@ -922,6 +922,27 @@ def _apply_workspace_policy(
     return source
 
 
+def _refuse_missing_default_config(default_config: Optional[PathLike]) -> None:
+    """Refuse a named default config that is not a file, before any project is read.
+
+    Checked here, not only where a project falls back to it, because every project
+    may have its own config, and the file is also the trusted base those projects'
+    sandbox grants come from. A missing one used to be skipped without a word, so
+    the plan, and ``--dry-run``, described a run with the built-in defaults where
+    the operator had named a file. Whether the file parses is left to the
+    projects' own resolution, which reads it with the confinement a scan uses.
+    """
+    if default_config is None:
+        return
+    if not str(default_config).strip() or not Path(default_config).is_file():
+        raise ASHConfigValidationError(
+            f"The default configuration file '{default_config}' (--config, or the "
+            "profile bound to the MCP session) does not exist or is not a regular "
+            "file. Name an existing config file, or omit it so that projects "
+            "without their own config use ASH's built-in defaults."
+        )
+
+
 def resolve_workspace(
     workspace_file: PathLike,
     *,
@@ -929,6 +950,7 @@ def resolve_workspace(
     workspace_config: Optional[PathLike] = None,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[PathLike] = None,
+    project_gate: Optional[Callable[[Sequence[Tuple[str, Path]]], None]] = None,
     client_config_rules: Optional[ClientConfigRules] = None,
     trusted_config: Optional[PathLike] = None,
     remote_client: bool = False,
@@ -966,6 +988,11 @@ def resolve_workspace(
             with ``select_profile``; see :func:`_resolve_project_config` for the
             precedence, and on why the same value has to reach
             ``ProjectScanSettings.default_config_path`` as well.
+        project_gate: Called with ``(key, resolved directory)`` for every
+            project that will be scanned, after the definition's own checks and
+            before any project's config is read; it raises to refuse the
+            workspace. The MCP server passes its scan-root confinement here, so
+            a config outside the permitted roots is never read.
         client_config_rules: The rules a config an MCP client delivered is
             checked against (``config/client_config_policy.py``).
         trusted_config: The operator's config the trust checks take as the
@@ -996,7 +1023,9 @@ def resolve_workspace(
             key, or pins a scanner version irreconcilable with another project's.
             The message names every offending entry.
         ASHConfigValidationError: Exit code 3. The workspace is fine but one
-            project's own config is invalid. The message names the project.
+            project's own config is invalid, or cannot be loaded, or
+            ``default_config`` names a file that does not exist. The message
+            names the project or the file.
     """
     definition = load_workspace_file(workspace_file)
 
@@ -1004,6 +1033,7 @@ def resolve_workspace(
     _validate_no_overlap(definition, candidates)
     _validate_unique_keys(definition, candidates)
     _apply_existence_checks(definition, candidates, allow_missing_projects)
+    _refuse_missing_default_config(default_config)
 
     if all(candidate.skipped for candidate in candidates):
         raise WorkspaceDefinitionError(
@@ -1011,6 +1041,9 @@ def resolve_workspace(
             f"scan: every folder it lists was skipped. Exiting 0 here would "
             f"report a clean result for a workspace nothing examined."
         )
+
+    if project_gate is not None:
+        project_gate([(c.key, c.resolved) for c in candidates if not c.skipped])
 
     operator = _operator_config(
         Path(default_config) if default_config else None,
@@ -1063,7 +1096,9 @@ def resolve_workspace(
                 display_label=label,
                 # By the path the project holds it at, not the file a link there
                 # reaches: execution re-resolves from it, and a file is judged by
-                # every path it was reached by (config_sources, "Base paths").
+                # every path it was reached by (config_sources, "Base paths"). The
+                # sandbox check needs the config's own name too, and a symlinked
+                # .ash.yaml resolves out of the project.
                 config_source=_as_named(config_path),
                 operator_config=_as_named(operator_config),
                 operator_config_digest=operator_digest if operator_config else None,

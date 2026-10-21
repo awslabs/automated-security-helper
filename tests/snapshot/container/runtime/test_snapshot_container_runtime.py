@@ -13,8 +13,10 @@ same snapshots. Locally: build the image, then
         --run-container-snapshots --no-cov -n 0
 
 Inputs: ``OCI_RUNNER`` (default ``docker``), ``OCI_RUNNER_WRAPPER`` (``sudo`` for
-finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, which
-is what every CI leg builds). ``pwsh`` must be on PATH for the PowerShell wrapper
+finch in CI) and ``ASH_IMAGE_NAME`` (default ``automated-security-helper:ci``, the
+tag of the ``ci`` stage: every leg that runs this module builds its image with
+``--build-target ci``, and the scans below ask for that stage, since CI variables
+do not select it). ``pwsh`` must be on PATH for the PowerShell wrapper
 tests; it is on the hosted Linux runners these legs use.
 
 A scan through the image prints the inner ASH's whole log first, and that log
@@ -48,6 +50,8 @@ pytestmark = [
     pytest.mark.snapshot_masking(mask_durations=True),
 ]
 
+# The ``ci`` stage's tag, which every leg running this module builds with an explicit
+# ``--build-target ci``; see the module docstring.
 IMAGE = os.environ.get("ASH_IMAGE_NAME") or "automated-security-helper:ci"
 RUNNER = os.environ.get("OCI_RUNNER") or "docker"
 RUNNER_PREFIX = [
@@ -115,7 +119,9 @@ def test_build_image_help_in_image(text_snapshot):
     assert result["stdout"] == text_snapshot("txt")
 
 
-def test_container_scan_of_the_fixture(run_cli, snapshot, fixture_repo, local_checkout):
+def test_container_scan_of_the_fixture(
+    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
+):
     result = run_cli(
         [
             "scan",
@@ -140,7 +146,7 @@ def test_container_scan_of_the_fixture(run_cli, snapshot, fixture_repo, local_ch
 
 
 def test_container_exit_status_for_an_invalid_config(
-    run_cli, snapshot, fixture_repo, local_checkout
+    run_cli, snapshot, fixture_repo, project_build_files_in_cwd
 ):
     (fixture_repo / ".ash" / ".ash.yaml").write_text(BAD_CONFIG, encoding="utf-8")
     result = run_cli(
@@ -239,8 +245,12 @@ def test_powershell_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
 def test_powershell_wrapper_without_a_runner(snapshot, in_tmp):
     (in_tmp / "src").mkdir()
     env = {**_wrapper_env(), "ASH_OCI_RUNNER": "no-such-oci-runner"}
+    # The refusal throws with $LASTEXITCODE set; this is the wrapper the CLI reference
+    # gives a CI step, which prints the error record and exits with the code.
     result = _pwsh(
-        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out; exit $LASTEXITCODE",
+        "try { Invoke-ASH -NoBuild -SourceDir src -OutputDir out } catch { "
+        "Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }",
         in_tmp,
         env,
     )

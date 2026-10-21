@@ -176,6 +176,7 @@ def _opts(tmp_path: Path) -> ScanOptions:
         # and project_timeout and breaks two unrelated entries in the table.
         config=str(root / ".ash.yaml"),
         config_overrides=["global_settings.severity_threshold=HIGH"],
+        client_overrides=True,
         offline=True,
         strategy=ExecutionStrategy.SEQUENTIAL,
         scanners=["bandit", "semgrep"],
@@ -233,6 +234,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "excluded_scanners": ("cdk-nag",),
         "output_formats": ("csv", "html"),
         "config_overrides": ("global_settings.severity_threshold=HIGH",),
+        "client_overrides": True,
         "ash_plugin_modules": ("my_plugins",),
         "strategy": "sequential",
         "offline": True,
@@ -527,20 +529,19 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         assert settings.max_parallel_projects == 4
         assert settings.project_timeout is None
 
-    def test_an_unreadable_config_falls_back_rather_than_raising(
-        self, tmp_path, monkeypatch
-    ):
-        """These are scheduling knobs, so a bad config must not refuse the scan.
+    def test_a_config_that_does_not_load_is_refused_as_a_config_error(self, tmp_path):
+        """A bad config refuses the run, as the same file refuses a single scan.
 
-        ``_resolve_workspace_execution_config`` warns and uses the defaults. The
-        builder inherits that, and the MCP path depends on it: raising here would
-        be an exception with no workspace-level meaning, which the exit-code
-        mapping would have to report as an internal error for what is really a
-        typo in a config file.
-
-        CPU count patched for the same reason as the test above.
+        The builder raises ``ASHConfigValidationError`` rather than running the
+        workspace without the settings the file is there to apply, and the MCP
+        path maps that class to exit code 3, an invalid configuration, not to an
+        internal error.
         """
-        monkeypatch.setattr("os.cpu_count", lambda: 8)
+        from automated_security_helper.cli.mcp.workspace import _exit_code_for
+        from automated_security_helper.core.exceptions import (
+            ASHConfigValidationError,
+        )
+
         root = tmp_path / "broken"
         root.mkdir()
         (root / ".ash.yaml").write_text(
@@ -548,10 +549,10 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         )
         opts = _opts(tmp_path).model_copy(update={"source_dir": root, "config": None})
 
-        settings = _builder()(opts)
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml") as excinfo:
+            _builder()(opts)
 
-        assert settings.max_parallel_projects == 4
-        assert settings.project_timeout is None
+        assert _exit_code_for(excinfo.value) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -686,3 +687,33 @@ class TestBothCallersUseTheSharedBuilder:
             "the MCP workspace tool built its own ProjectScanSettings instead "
             "of calling build_project_scan_settings"
         )
+
+
+def test_an_mcp_workspace_scans_overrides_are_marked_as_the_clients(tmp_path):
+    # A tool path a client's config_overrides name is not the operator's
+    # (config/path_trust.py), so the MCP path marks them.
+    from automated_security_helper.workspace.plan import WorkspacePlan
+
+    module = importlib.import_module(MODULE_UNDER_TEST)
+    # Only workspace_root is read; the rest of a plan is beside the point here.
+    plan = WorkspacePlan.model_construct(workspace_root=str(tmp_path))
+    opts = module._scan_options(
+        plan,
+        output_dir=None,
+        config_overrides=["scanners.checkov.options.config_file=/x.yaml"],
+        scanners=None,
+        excluded_scanners=None,
+        offline=False,
+        allow_missing_projects=False,
+    )
+    assert opts.client_overrides is True
+    none = module._scan_options(
+        plan,
+        output_dir=None,
+        config_overrides=None,
+        scanners=None,
+        excluded_scanners=None,
+        offline=False,
+        allow_missing_projects=False,
+    )
+    assert none.client_overrides is False
