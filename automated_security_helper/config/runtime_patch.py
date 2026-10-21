@@ -1194,7 +1194,7 @@ def check_runtime_ops(
     patch_ops: List[Dict[str, Any]],
     *,
     allowlist: RuntimeOverridesConfig,
-    config: AshConfig | None,
+    config: AshConfig | None = None,
 ) -> None:
     """Enforce the runtime allowlist on JSON-Patch ops without applying them.
 

@@ -8,6 +8,8 @@ import pytest
 from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from tests.utils.env_assertions import differing_names
 
+pytestmark = pytest.mark.live_tool_probes
+
 
 class FakePlugin(UVToolMixin):
     """Minimal stub that satisfies the attributes UVToolMixin reads from PluginBase."""

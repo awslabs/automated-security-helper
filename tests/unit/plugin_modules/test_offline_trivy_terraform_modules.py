@@ -47,6 +47,8 @@ from tests.utils.refusing_proxy import (
     scrub_cloud_credentials,
 )
 
+pytestmark = pytest.mark.live_tool_probes
+
 #: The --misconfig-scanners line of `trivy repository --help`, trivy 0.75.0.
 TRIVY_HELP = (
     "      --misconfig-scanners strings        comma-separated list of misconfig "

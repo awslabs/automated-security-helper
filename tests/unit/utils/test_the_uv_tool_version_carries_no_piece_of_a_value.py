@@ -31,6 +31,8 @@ from tests.unit.base.test_failure_lines_carry_no_environment_value import _conte
 from tests.unit.base.test_scanner_plugin_coverage import _scanner
 from tests.unit.base.test_uv_tool_mixin import FakePlugin
 
+pytestmark = pytest.mark.live_tool_probes
+
 HEAD = "ASH_CANARY_Zq7Kx9LmHead"
 TAIL = "ASH_CANARY_Pw4Nv2RtTail"
 

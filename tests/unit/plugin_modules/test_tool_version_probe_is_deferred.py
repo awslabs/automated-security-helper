@@ -56,6 +56,8 @@ from tests.utils.stand_in_uv import (
     stand_in_env,
 )
 
+pytestmark = pytest.mark.live_tool_probes
+
 
 def _shipped_plugin_classes():
     """Every scanner and converter class the shipped plugin packages register.

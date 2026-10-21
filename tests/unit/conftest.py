@@ -278,6 +278,63 @@ def no_tool_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(OpengrepScanner, "_get_opengrep_version", lambda self: None)
 
 
+@pytest.fixture(autouse=True)
+def _stubbed_tool_probes(request, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every unit test answers ASH's tool probes without a process, unless marked.
+
+    The probes ASH runs while building, validating and running scanners each
+    start a tool to answer a question most tests do not ask, and the autouse
+    tool guard records the start: the uv and tool version reads ``no_tool_probes``
+    documents, trivy's content-database age read (``content_db_staleness.
+    _built_from_trivy``, a ``trivy version`` subprocess) and trivy's default
+    misconfiguration-scanner listing (``trivy <subcommands> --help``). This
+    fixture answers all of them the way ``no_tool_probes`` does — the version
+    reads report ``PINNED_TOOL_VERSION`` with no process, the trivy age read
+    answers as a host without trivy, and the misconfiguration listing is
+    unknown, which its caller fails closed on.
+
+    A test that measures a probe itself opts out with
+    ``@pytest.mark.live_tool_probes`` (usually as a module's ``pytestmark``)
+    and arranges its own stand-ins. ``no_tool_probes`` stays for explicit use;
+    under this fixture it is a no-op repeat of the same arrangement.
+    """
+    if request.node.get_closest_marker("live_tool_probes"):
+        return
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+    )
+    from automated_security_helper.utils import content_db_staleness, uv_tool_runner
+    from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+
+    monkeypatch.setattr(UVToolRunner, "uv_availability", lambda self: (True, None))
+    monkeypatch.setattr(
+        UVToolRunner,
+        "get_tool_version",
+        lambda self, tool_name, package_name=None, *args, **kwargs: PINNED_TOOL_VERSION,
+    )
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: None)
+    monkeypatch.setattr(uv_tool_runner, "_uv_command_cache", {})
+    monkeypatch.setattr(uv_tool_runner, "_uv_command_binary", {})
+    monkeypatch.setattr(OpengrepScanner, "_get_opengrep_version", lambda self: None)
+
+    # The build-time measurers are dispatched through the MEASURERS dict, which
+    # binds the functions at import, so the seam is the subprocess helper they
+    # share; a raise here is the shape the measurers themselves use for a tool
+    # that is not there, and their caller records it per database entry.
+    def _no_probe_process(*args, **kwargs):
+        raise ValueError("tool probes are stubbed in unit tests")
+
+    monkeypatch.setattr(content_db_staleness, "_run_json", _no_probe_process)
+    monkeypatch.setattr(
+        _trivy_scanner_base,
+        "trivy_default_misconfig_scanners",
+        lambda binary, subcommands: None,
+    )
+
+
 @pytest.fixture
 def no_checkout_above_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """git, and ASH's own search for a repository, look at nothing above tmp_path.

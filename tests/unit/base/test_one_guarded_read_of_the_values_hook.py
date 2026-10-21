@@ -29,6 +29,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
 )
 from tests.unit.base.test_uv_tool_mixin import FakePlugin
 
+pytestmark = pytest.mark.live_tool_probes
+
 PluginContext.model_rebuild()
 
 #: Long enough to clear the redaction length floor, so a split into characters
