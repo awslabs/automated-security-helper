@@ -90,7 +90,7 @@ CHECKED_HERE = (
 )
 FIXED_FORM = (
     "a value whose form the tool that reports it fixes: a container image id "
-    "(sha256:<hex>), a git mode or object type"
+    "(sha256:<hex>), a git object id, a git mode or object type"
 )
 #: The two judgments. Neither is allowed in a workflow other repositories call.
 OWN_TREE = (
@@ -318,12 +318,27 @@ ALLOWED: dict[tuple[str, str, str], dict[str, str]] = {
         ".github/workflows/ash-tag-on-merge.yml",
         "tag-and-release",
         "Create tag and GitHub Release",
-    ): {"CURATED": OWN_TREE, "TAG": OWN_TREE},
+    ): {
+        "CURATED": OWN_TREE,
+        "TAG": OWN_TREE,
+        # `git ls-remote ... | tail -n1 | cut -f1`: a git object id of 40 hex
+        # digits, or empty, and the step prints it only on its non-empty arm.
+        "TAG_SHA": FIXED_FORM,
+        # The event payload's merge_commit_sha: a git object id of 40 hex digits.
+        "MERGE_SHA": FIXED_FORM,
+    },
     (
         ".github/workflows/ash-tag-on-merge.yml",
         "tag-and-release",
         "Update floating major tag",
-    ): {"VERSION": OWN_TREE},
+    ): {
+        "VERSION": OWN_TREE,
+        # "v" and the digits of a major that the step's version pattern matched.
+        "FLOATING": FIXED_FORM,
+        # A remote tag that packaging.version parsed: PEP 440 admits no control
+        # character, colon or bracket.
+        "NEWEST": FIXED_FORM,
+    },
     (
         ".github/workflows/ash-typescript-ci.yml",
         "typescript-tests",

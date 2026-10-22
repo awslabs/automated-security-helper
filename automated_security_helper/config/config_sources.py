@@ -1557,7 +1557,15 @@ def _measured_in(
             else:
                 container = None
                 break
-        if isinstance(container, list) and 0 <= reference.path[place] < len(container):
+        # ``place`` was found with isinstance(segment, int) above, so the
+        # segment is an int; the isinstance here is the narrowing mypy needs
+        # to admit the comparison, not a new condition.
+        index = reference.path[place]
+        if (
+            isinstance(index, int)
+            and isinstance(container, list)
+            and 0 <= index < len(container)
+        ):
             measured.append(replace(reference, length=len(container), index_at=place))
         else:
             measured.append(reference)

@@ -286,7 +286,7 @@ ACCEPTED = {
     "a dotted release branch": "release/2026.10",
     "a full ref": "refs/tags/v1",
     "punctuation git allows": "feature/a-b_c",
-    "a full commit id": "0123456789abcdef0123456789abcdef01234567",
+    "a full commit id": "0123456789abcdef0123456789abcdef01234567",  # pragma: allowlist secret
     "a short commit id": "0123abc",
     "one step back": "HEAD~1",
     "a parent": "HEAD^",

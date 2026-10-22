@@ -50,7 +50,7 @@ from tests.utils.bare_install_names import find_bare_installs, normalize
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-COMMIT = "0123456789abcdef0123456789abcdef01234567"
+COMMIT = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 GIT_INSTALL = {
     "url": "https://github.com/awslabs/automated-security-helper.git",
     "vcs_info": {"vcs": "git", "commit_id": COMMIT, "requested_revision": "main"},
@@ -148,7 +148,7 @@ class TestReinstallNamesWhereThisAshCameFrom:
         "recorded, printed",
         [
             (
-                "https://user:token@github.example/ash.git",
+                "https://user:token@github.example/ash.git",  # pragma: allowlist secret
                 "https://github.example/ash.git",
             ),
             (
@@ -594,8 +594,14 @@ class TestTheSymbolsHint:
         # The exact text, quoted for a shell: every requirement holds `<` or `>`,
         # which an unquoted command turns into a redirection.
         assert command == shlex.join([*UV_PIP, *declared]), command
-        assert "automated-security-helper" not in command
-        assert "@v" not in command
+        # Only the requirement words may be checked for the distribution name:
+        # UV_PIP embeds sys.executable, and on a CI runner that interpreter sits
+        # under a checkout path that itself contains "automated-security-helper".
+        requirements = _words(command)[len(UV_PIP) :]
+        assert all("automated-security-helper" not in word for word in requirements), (
+            command
+        )
+        assert all("@v" not in word for word in requirements), command
         assert find_bare_installs(command) == []
 
     def test_without_readable_metadata_it_falls_back_to_this_install(self, monkeypatch):

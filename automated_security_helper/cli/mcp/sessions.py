@@ -260,7 +260,7 @@ class MCPSession(BaseModel):
                 changing = self._changing
             return CHANGE_REFUSED_BY_CHANGE if changing else CHANGE_REFUSED_BY_SCAN
         with self._state_lock:
-            if self._claimed_scans or (removes_workspace and self._writes):
+            if self._claimed_scans:
                 self._lock.release()
                 return CHANGE_REFUSED_BY_SCAN
             if removes_workspace and self._writes:
@@ -1472,7 +1472,28 @@ def _remove_if_still_stale(
 
     A presence guard the filesystem refuses skips the removal and warns once
     per process (:func:`_warn_once_sweep_guard_refused`).
+
+    When nothing was removed, the end of a session that was left pending is
+    finished here: a DELETE whose :func:`end_session` this sweep's change refused
+    relies on whichever of the two finishes second to remove the session, and
+    the sweep that keeps the session (no longer stale, a write or a scan holds
+    it, the presence guard is refused) is that second party. The change is
+    released first, because the end of the session takes it.
+
+    Returns:
+        True when the sweep removed the session's state.
     """
+
+    if _remove_stale_session_state(root, session_id, sandbox, cutoff):
+        return True
+    finish_ended_session(session_id)
+    return False
+
+
+def _remove_stale_session_state(
+    root: Path, session_id: str, sandbox: Path, cutoff: float
+) -> bool:
+    """:func:`_remove_if_still_stale`, up to the release of the sweep's change."""
 
     session = get_default_registry().session_for(session_id)
     if session.try_begin_change() is not None:

@@ -36,7 +36,7 @@ const ACCEPTED = [
   'main',
   'feature/x',
   'users/name/topic-1',
-  'eddfeecf9adb672023ab7998688d54199b0a0441',
+  'eddfeecf9adb672023ab7998688d54199b0a0441', // pragma: allowlist secret
 ];
 
 /** Refs the checks refuse. The first two start with '-'. */

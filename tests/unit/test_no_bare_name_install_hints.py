@@ -53,6 +53,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -65,6 +66,11 @@ from tests.utils.bare_install_names import (
     find_in_file,
 )
 from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, iter_repo_files
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -798,8 +804,6 @@ def test_the_example_plugin_package_pins_the_packaged_release():
     `[tool.commitizen] version_files` is the only thing that keeps it current:
     the version-pin walk's ``@v`` patterns do not read poetry's ``tag = "v..."``.
     """
-    import tomllib
-
     pyproject = tomllib.loads(
         (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )

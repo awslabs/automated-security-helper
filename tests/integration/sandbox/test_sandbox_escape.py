@@ -186,7 +186,7 @@ def _run_escape(
     *,
     online: bool = False,
     output_in_source: "str | None" = None,
-    passwd_home_files: "Dict[str, Path] | None" = None,
+    passwd_home_files: "Dict[str, Path] | None" = None,  # pragma: allowlist secret
 ) -> "tuple[Dict[str, str], Dict[str, str]]":
     """The probe's attempts, and what it found still working (``works``)."""
     outcomes, works, result = _scan(
@@ -225,7 +225,7 @@ def _scan(
     online: bool = False,
     output_in_source: "str | None" = None,
     plant: "Callable[[Path], None] | None" = None,
-    passwd_home_files: "Dict[str, Path] | None" = None,
+    passwd_home_files: "Dict[str, Path] | None" = None,  # pragma: allowlist secret
 ) -> "tuple[Dict[str, str] | None, Dict[str, str] | None, subprocess.CompletedProcess]":
     """Run the probe through a real scan.
 
