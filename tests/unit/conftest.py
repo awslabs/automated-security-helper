@@ -333,6 +333,19 @@ def _stubbed_tool_probes(request, monkeypatch: pytest.MonkeyPatch) -> None:
         "trivy_default_misconfig_scanners",
         lambda binary, subcommands: None,
     )
+    # trivy_repo_scanner imports the same function into its own module and
+    # calls it through that binding, so the base-module patch above does not
+    # reach it; patch the alias too, or TrivyRepoScanner's validate still runs
+    # `trivy repository --help` through subprocess_utils.
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
+
+    monkeypatch.setattr(
+        trivy_repo_scanner,
+        "trivy_default_misconfig_scanners",
+        lambda binary, subcommands: None,
+    )
 
 
 @pytest.fixture
