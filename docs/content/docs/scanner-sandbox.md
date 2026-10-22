@@ -325,15 +325,12 @@ The community scanners declare theirs:
 - trivy-repo shares the builtin trivy's declaration: a network, the database cache and
   the `TRIVY_` variables.
 - ferret-scan asks only for its `FERRET_` variables.
-- hadolint and GuardDog take the strict default. hadolint's `HADOLINT_*` variables
-  and user-level config are not passed in, and GuardDog's `verify` runs without a
-  network.
 
 A file outside the source tree that a scanner option names is not mounted (cfn-guard's
 `rules_paths` needs no mount: ASH copies those rules into the scanner run's own
 directory above): a
 `config_file` of actionlint, gitleaks, cfn-lint,
-zizmor, trivy, trivy-repo or hadolint, gitleaks' `baseline_path`, trivy's `ignore_file`, a
+zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
 `secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or a
 path-valued actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
 zizmor's GitHub token reach a sandbox. Grants derived from options or the environment

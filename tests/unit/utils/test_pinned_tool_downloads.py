@@ -1153,7 +1153,6 @@ class TestAssetResolution:
             "cfn-guard",
             "gitleaks",
             "grype",
-            "hadolint",
             "opengrep",
             "syft",
             "trivy",
@@ -1360,44 +1359,40 @@ class TestAssetResolution:
 
 
 class TestBareBinaryAssets:
-    """hadolint publishes the executable itself; there is no archive to open.
+    """opengrep publishes the executable itself; there is no archive to open.
 
     The pinned digest then covers the bytes that will run, so the install has to
     verify them, put exactly them at the target, and record that same digest as
     the installed one.
     """
 
-    BINARY = b"\x7fELF fake hadolint executable"
+    BINARY = b"\x7fELF fake opengrep executable"
 
     def _filename(self) -> str:
-        return _ASSET_TABLES["hadolint"][("linux", "amd64")]
+        return _ASSET_TABLES["opengrep"][("linux", "amd64")]
 
     def test_the_asset_is_marked_unarchived(self):
-        asset = get_tool_asset("hadolint", "linux", "amd64")
+        asset = get_tool_asset("opengrep", "linux", "amd64")
         assert asset.archive is False
-        assert asset.install_as == "hadolint"
-        assert get_tool_asset("hadolint", "windows", "amd64").install_as == (
-            "hadolint.exe"
+        assert asset.install_as == "opengrep"
+        assert get_tool_asset("opengrep", "windows", "amd64").install_as == (
+            "opengrep.exe"
         )
         assert get_tool_asset("grype", "linux", "amd64").archive is True
-
-    def test_windows_arm64_is_refused_not_approximated(self):
-        with pytest.raises(ToolNotProvisionableError, match="publishes no release"):
-            get_tool_asset("hadolint", "windows", "arm64")
 
     def test_matching_pin_installs_the_bytes_verbatim(self, tmp_path):
         digest = hashlib.sha256(self.BINARY).hexdigest()
         bin_dir = tmp_path / "bin"
         with _pin(self._filename(), digest), _serve(self.BINARY):
-            installed = install_pinned_tool("hadolint", "linux", "amd64", bin_dir)
-        assert installed == bin_dir / "hadolint"
+            installed = install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        assert installed == bin_dir / "opengrep"
         assert installed.read_bytes() == self.BINARY
         if os.name != "nt":
             assert os.access(installed, os.X_OK)
-        receipt = read_receipt(bin_dir, "hadolint")
+        receipt = read_receipt(bin_dir, "opengrep")
         assert receipt["sha256"] == digest
         assert receipt["installed_sha256"] == digest
-        assert receipt["version"] == TOOL_VERSIONS["hadolint"]
+        assert receipt["version"] == TOOL_VERSIONS["opengrep"]
 
     def test_corrupted_pin_is_rejected_and_installs_nothing(self, tmp_path):
         bin_dir = tmp_path / "bin"
@@ -1406,31 +1401,31 @@ class TestBareBinaryAssets:
             _serve(self.BINARY),
             pytest.raises(ToolDownloadIntegrityError, match="Refusing to install"),
         ):
-            install_pinned_tool("hadolint", "linux", "amd64", bin_dir)
-        assert not (bin_dir / "hadolint").exists()
-        assert read_receipt(bin_dir, "hadolint") is None
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        assert not (bin_dir / "opengrep").exists()
+        assert read_receipt(bin_dir, "opengrep") is None
 
     def test_second_install_does_not_download(self, tmp_path):
         digest = hashlib.sha256(self.BINARY).hexdigest()
         bin_dir = tmp_path / "bin"
         with _pin(self._filename(), digest), _serve(self.BINARY):
-            install_pinned_tool("hadolint", "linux", "amd64", bin_dir)
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
         exploding = patch(
             "automated_security_helper.utils.download_utils.download_file",
             side_effect=AssertionError("re-downloaded an already-installed tool"),
         )
         with _pin(self._filename(), digest), exploding:
-            install_pinned_tool("hadolint", "linux", "amd64", bin_dir)
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
 
     def test_a_substituted_binary_is_reinstalled_not_trusted(self, tmp_path):
         digest = hashlib.sha256(self.BINARY).hexdigest()
         bin_dir = tmp_path / "bin"
         with _pin(self._filename(), digest), _serve(self.BINARY):
-            install_pinned_tool("hadolint", "linux", "amd64", bin_dir)
-        (bin_dir / "hadolint").write_bytes(b"substituted")
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        (bin_dir / "opengrep").write_bytes(b"substituted")
         with _pin(self._filename(), digest), _serve(self.BINARY):
-            install_pinned_tool("hadolint", "linux", "amd64", bin_dir)
-        assert (bin_dir / "hadolint").read_bytes() == self.BINARY
+            install_pinned_tool("opengrep", "linux", "amd64", bin_dir)
+        assert (bin_dir / "opengrep").read_bytes() == self.BINARY
 
 
 class TestReleaseAssetCache:

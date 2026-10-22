@@ -160,8 +160,6 @@ PLANTED_TOOLS = (
     "finch",
     "gitleaks",
     "grype",
-    "guarddog",
-    "hadolint",
     "nerdctl",
     "node",
     "npm",

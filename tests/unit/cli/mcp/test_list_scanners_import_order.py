@@ -62,15 +62,11 @@ def _tool_writes_stay_in_tmp_path(tmp_path, monkeypatch):
 
 VENDORED_SCANNER_NAMES = {
     "ferret_scan",
-    "guarddog",
-    "hadolint",
     "snyk_code",
     "trivy_repo",
 }
 VENDORED_SCANNER_CLASSES = {
     "FerretScanScanner",
-    "GuardDogScanner",
-    "HadolintScanner",
     "SnykCodeScanner",
     "TrivyRepoScanner",
 }
@@ -186,8 +182,6 @@ class TestLoadedScannerClasses:
         """
         leaves = {
             "ash_ferret_plugins": "ferret_scanner",
-            "ash_guarddog_plugins": "guarddog_scanner",
-            "ash_hadolint_plugins": "hadolint_scanner",
             "ash_snyk_plugins": "snyk_code_scanner",
             "ash_trivy_plugins": "trivy_repo_scanner",
         }
