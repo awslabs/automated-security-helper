@@ -700,8 +700,13 @@ def archives_extracted_whole(context: object) -> FrozenSet[str]:
 
 
 def is_archive_name(name: str) -> bool:
-    """Whether the converter opens the file *name* as an archive, by its extension."""
-    return name.strip().split(".")[-1].lower() in ARCHIVE_EXTENSIONS
+    """Whether the converter opens the file *name* as an archive, by its extension.
+
+    The extension is read through ``_archive_suffix``, so ``_base_name`` is the
+    spelling authority: trailing dots and spaces are part of the name on disk
+    but not of the suffix (Windows drops them), as the suffix constants say.
+    """
+    return _archive_suffix(name) in ARCHIVE_EXTENSIONS
 
 
 def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]:
@@ -712,13 +717,15 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
 
     convert() extracts by this, and snyk-code's copy of the source leaves out each
     file it accepts: the members reach Snyk with the converted files, where ignore
-    paths apply to them one by one. The handle is left at its start.
+    paths apply to them one by one. The handle is left at its start. Names are
+    read through ``_base_name``, the spelling authority, so a trailing dot or
+    space does not change the kind.
     """
     try:
         if not is_archive_name(name):
             return None
         handle.seek(0)
-        if name.strip().lower().endswith(".zip") and zipfile.is_zipfile(handle):
+        if _base_name(name).lower().endswith(".zip") and zipfile.is_zipfile(handle):
             return "zip"
         handle.seek(0)
         return "tar" if tarfile.is_tarfile(handle) else None
@@ -729,8 +736,9 @@ def archive_kind(name: str, handle: BinaryIO) -> Optional[Literal["zip", "tar"]]
 def _named_kind(name: str) -> Optional[str]:
     """The archive *name* is named as, for one archive_kind could not read: a .zip
     is extracted as a zip or a tar, and a .tar or .tar.gz as a tar. None for any
-    other name the converter opens, a .gz of one file."""
-    lowered = name.strip().lower()
+    other name the converter opens, a .gz of one file. The name is read through
+    ``_base_name``, the spelling authority, as archive_kind reads it."""
+    lowered = _base_name(name).lower()
     if lowered.endswith(".zip"):
         return "a zip"
     if lowered.endswith((".tar", ".tar.gz")):
@@ -1220,7 +1228,9 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 archive, member_name, ignore_paths, kind
             )
             nested = _is_archive_name(member_name)
-            member_ext = member_name.split(".")[-1]
+            # Through _archive_suffix (the spelling authority), so a member's
+            # trailing dot or case does not hide a scannable file.
+            member_ext = _archive_suffix(member_name)
             if not nested and member_ext not in KNOWN_SCANNABLE_EXTENSIONS:
                 if ignored_by is None and unscannable is not None:
                     unscannable.append(member_name)
@@ -1535,13 +1545,15 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         # holds neither a zip nor a tar): none of it is read, and
                         # snyk-code's copy holds it back, so its results row says
                         # that no scanner reads it. A .gz of one file is no such
-                        # name, and is left to the scanners as it is.
-                        self.record_refused_input(
-                            TreeInputRefused(
-                                archive_display,
-                                f"it is named as {_named_kind(archive_file)} but "
-                                "could not be read as one",
-                            )
+                        # name, and is left to the scanners as it is. Recorded as
+                        # a FAILED input, not a refusal: the completeness gate
+                        # reads failed_inputs, and an archive that could not be
+                        # read is coverage lost; a refusal without a limit is
+                        # invisible to it.
+                        self.record_failed_input(
+                            archive_display,
+                            f"it is named as {_named_kind(archive_file)} but "
+                            "could not be read as one",
                         )
                         continue
                     else:
