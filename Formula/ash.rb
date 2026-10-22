@@ -45,7 +45,10 @@ class Ash < Formula
     ENV["UV_NO_CONFIG"] = "1"
     ENV["UV_CACHE_DIR"] = (buildpath/".uv-cache").to_s
     ENV["UV_LINK_MODE"] = "copy"
+    # orjson builds from source: Homebrew's install-linkage fixup cannot change
+    # the dylib ID of the prebuilt orjson wheel's extension on macOS.
     system "uv", "sync", "--frozen", "--no-dev", "--no-editable", "--extra", "cdk",
+           "--no-binary-package", "orjson",
            "--python", (venv.root/"bin/python").to_s
 
     # uv records the directory it built ASH from in the dist-info's direct_url.json.
