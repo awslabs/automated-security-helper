@@ -131,8 +131,8 @@ def fixture(tmp_path, monkeypatch) -> _Fixture:
     )
     real_run_git = sd._run_git
 
-    def run_git(cmd, *, env):
-        result = real_run_git(cmd, env=env)
+    def run_git(cmd, *, env, grows_in=None):
+        result = real_run_git(cmd, env=env, grows_in=grows_in)
         if "clone" in cmd and result.returncode == 0:
             built.arm_the_clone(Path(cmd[-1]))
         return result
@@ -199,9 +199,9 @@ def test_the_options_precede_every_subcommand_and_stay_off_the_clone(
     seen: List[List[str]] = []
     run_git = sd._run_git
 
-    def recording(cmd, *, env):
+    def recording(cmd, *, env, grows_in=None):
         seen.append(list(cmd))
-        return run_git(cmd, env=env)
+        return run_git(cmd, env=env, grows_in=grows_in)
 
     monkeypatch.setattr(sd, "_run_git", recording)
 
