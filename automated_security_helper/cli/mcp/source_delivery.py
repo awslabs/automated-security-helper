@@ -1446,6 +1446,27 @@ def set_source_zip_finalize(
         )
 
 
+class _ZipRefused(Exception):
+    """A finalized zip the finalize refuses before it extracts anything.
+
+    Raised inside the ``with`` that holds the zip open, so the zip is removed and
+    the refusal raised as a ``ValueError`` only after the handle is closed:
+    Windows does not delete a file that is open.
+    """
+
+
+@contextlib.contextmanager
+def _refusing_after_close(handle: Any, final: Path) -> Iterator[None]:
+    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, remove ``final``, refuse."""
+
+    try:
+        with handle:
+            yield
+    except _ZipRefused as refused:
+        final.unlink(missing_ok=True)
+        raise ValueError(str(refused)) from None
+
+
 def _finalize_zip_upload(
     upload_id: str,
     expected_sha256: str,
@@ -1470,12 +1491,14 @@ def _finalize_zip_upload(
     # A handle names the bytes it was opened on, so what is extracted below is
     # exactly what was hashed, even if the path is unlinked or renamed over
     # meanwhile.
-    with handle:
+    #
+    # A refusal raises _ZipRefused inside the block; _refusing_after_close removes
+    # the zip and raises the ValueError once the handle is closed.
+    with _refusing_after_close(handle, final):
         # Hard limit on the on-disk zip size.
         actual_size = os.fstat(handle.fileno()).st_size
         if actual_size > _MAX_ZIP_BYTES:
-            final.unlink(missing_ok=True)
-            raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
+            raise _ZipRefused(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
         # Verify checksum before opening the archive.
         digest = hashlib.sha256()
@@ -1483,8 +1506,7 @@ def _finalize_zip_upload(
             digest.update(block)
         actual_sha = digest.hexdigest()
         if actual_sha.lower() != expected_sha256.lower():
-            final.unlink(missing_ok=True)
-            raise ValueError(
+            raise _ZipRefused(
                 f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
             )
 
