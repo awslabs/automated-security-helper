@@ -25,6 +25,7 @@
     "base": [
       "--source-dir",
       "--output-dir",
+      "--config",
       "--no-progress",
       "--simple",
       "--compact-report"
