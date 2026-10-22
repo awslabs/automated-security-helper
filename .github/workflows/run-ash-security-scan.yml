@@ -905,7 +905,13 @@ jobs:
           if config_file.name.endswith(".json"):
               document = json.loads(text)
           elif config_file.name.endswith(".toml"):
-              import tomllib
+              # tomllib is stdlib only from Python 3.11, and this environment is
+              # ASH plus its runtime dependencies, which support 3.10: fall back
+              # to ASH's declared `toml` dependency, as config_sources.py does.
+              try:
+                  import tomllib
+              except ModuleNotFoundError:
+                  import toml as tomllib
 
               document = tomllib.loads(text)
               if config_file.name == "pyproject.toml":
