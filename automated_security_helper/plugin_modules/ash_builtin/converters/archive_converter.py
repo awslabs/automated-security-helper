@@ -41,7 +41,6 @@ from automated_security_helper.base.converter_plugin import (
     ConverterPluginConfigBase,
 )
 from automated_security_helper.base.options import ConverterOptionsBase
-from automated_security_helper.models.asharp_model import RefusedInputInfo
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.converter_refusals import inert_text
@@ -1141,13 +1140,12 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 f"Archive '{archive}' was extracted only in part: {detail}"
             )
         )
-        self.refused_inputs.append(
-            RefusedInputInfo(
-                path=archive,
-                member=None,
-                reason=f"it was extracted only in part: {detail}",
-            )
-        )
+        # One record per archive, in the category the completeness gate reads:
+        # the unextracted remainder is tried-and-could-not coverage lost, so it
+        # is a FAILED input (a refusal without a limit is invisible to the
+        # gate). The extracted members stay, and archives_extracted_whole
+        # holds the archive back from whole-archive consumers.
+        self.record_failed_input(archive, f"it was extracted only in part: {detail}")
 
     def inspect_members(
         self,

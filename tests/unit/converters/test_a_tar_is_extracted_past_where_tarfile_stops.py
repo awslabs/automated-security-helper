@@ -119,10 +119,10 @@ def test_a_damaged_middle_header_makes_the_archive_extracted_only_in_part(
 
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
     assert _extracted(converter) == ["after.js", "ok.js"]
-    assert [(r.path, r.member) for r in converter.refused_inputs] == [
-        (f"lib/{name}", None)
-    ]
-    reason = converter.refused_inputs[0].reason
+    # One record per archive, in the category the completeness gate reads.
+    assert [r.path for r in converter.failed_inputs] == [f"lib/{name}"]
+    assert converter.refused_inputs == []
+    reason = converter.failed_inputs[0].reason
     assert "extracted only in part" in reason, reason
     assert f"byte {offset}" in reason, reason
     (warning,) = _partly_warnings(caplog)
@@ -437,7 +437,7 @@ def test_the_tars_of_one_conversion_share_a_budget_of_skipped_blocks(
         test_plugin_context, monkeypatch, _past_the_limit_in_bz2(), count
     )
 
-    rows = converter.refused_inputs
+    rows = converter.failed_inputs
     assert [row.path for row in rows] == [f"lib/a{i:03}.tar" for i in range(count)]
     assert all("extracted only in part" in row.reason for row in rows)
     # Each member's header and data are the archive's first 1024 bytes.
