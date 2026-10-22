@@ -594,12 +594,12 @@ global_settings:
     #
     # Every other bandit finding in this repository is being FIXED rather than
     # suppressed — a bare `except: pass` in shipped code is a defect whatever a
-    # scanner thinks of it. These eight files are the exception, and each is listed
+    # scanner thinks of it. The files below are the exception, and each is listed
     # individually rather than behind a `tests/**` glob so that a new test cannot
     # inherit a suppression nobody looked at. That also matches the only bandit
     # precedent already in this file, which names a single path.
     #
-    # B104 — two files, 13 findings. Both are tests OF host binding, so the
+    # B104 — five files, 24 findings. All are tests OF host binding, so the
     # literal `0.0.0.0` is the value under test, not a careless default. AgentCore
     # requires the MCP server to bind `0.0.0.0` (see the comment on
     # `mcpEnvironment()` in deploy/cdk/lib/ash-runtime-config.ts, which pins
@@ -620,6 +620,25 @@ global_settings:
         Same as test_mcp_sse_host_binding.py: asserts the streamable-http app is
         built with the host AgentCore requires. The address is the value under
         test.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+      reason: >-
+        NON_LOOPBACK_HOSTS opens with "0.0.0.0" because this file exists to prove
+        `ash mcp` refuses such a bind unless --allowed-host or the documented
+        opt-out is given. The address is the input being refused, so the finding
+        is unfixable by construction.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
+      reason: >-
+        Builds apps on host "0.0.0.0" to assert the Origin check still refuses
+        foreign origins on a non-loopback bind. The address is the condition
+        under test, not a default anything binds by accident.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_upstream_host_check.py
+      reason: >-
+        Covers --trust-upstream-host-check, the opt-out that only exists for
+        non-loopback binds behind a trusted proxy. Every "0.0.0.0" here is the
+        bind the opt-out is being tested against.
     # B105 — four files, five findings, all of them bandit's keyword heuristic
     # firing on a variable NAME while the value is harmless. Verified by reading
     # each line rather than by assuming, because "hardcoded password" in a public
@@ -654,9 +673,10 @@ global_settings:
         message to prove ASH's own SARIF post-processor masks the password body to
         asterisks — the test at line 722 asserts the literal never survives into the
         output. The heuristic flags the fixture that exists to verify the heuristic.
-    # B108 — two files, 11 findings. In the first, the hardcoded /tmp is a path
-    # INSIDE the build container, the same shape as the codecommit-gate entry above.
-    # In the second, /tmp is the input under test and no file is ever opened there.
+    # B108 — six files, 18 findings. In buildspec_extraction.py and
+    # test_deploy_pipeline_config_source.py the hardcoded /tmp is a path INSIDE a
+    # container, the same shape as the codecommit-gate entry above. In the others,
+    # /tmp is a value under test and no file is ever opened there.
     - rule_id: B108
       path: tests/unit/deploy/buildspec_extraction.py
       reason: >-
@@ -674,6 +694,56 @@ global_settings:
         file is created, opened or written under any of them. Writing the literal
         some other way would only hide it from bandit; the test needs that exact
         string.
+    - rule_id: B108
+      path: tests/snapshot/container/runtime/test_container_image_permissions.py
+      reason: >-
+        PRUNED lists /tmp and /var/tmp among the directories the in-container
+        permissions probe skips. They are paths inside the image under test; the
+        test process never creates or opens anything under them.
+    - rule_id: B108
+      path: tests/unit/test_container_permissions_probe_covers_the_image.py
+      reason: >-
+        Repeats the probe's PRUNED set to assert the local copy stays equal to
+        the snapshot test's. The same strings as the entry above; nothing is
+        created or opened under them.
+    - rule_id: B108
+      path: tests/unit/test_dockerfile_directory_permissions.py
+      reason: >-
+        Asserts the Dockerfile's permission sweep prunes /proc, /sys, /dev, /tmp,
+        /var/tmp and /run/lock. The literals have to match the `-path` arguments
+        the Dockerfile emits, and no file is opened there by the test.
+    - rule_id: B108
+      path: tests/unit/deploy/test_deploy_pipeline_config_source.py
+      reason: >-
+        CDK_CONFIG_PATH is the /tmp path the CDK projects give ASH_CONFIG inside
+        the container, so the constant has to match what the templates emit. The
+        comment above it records that each test moves it into its own per-test
+        directory before any file is written.
+    # B103 — two files. Each sets the permissive mode on purpose, as the
+    # condition the code under test has to detect or refuse; a stricter mask
+    # would test nothing.
+    - rule_id: B103
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: >-
+        `os.lchmod(link, 0o777)` makes the symlink fixture permissive to prove
+        the installer's permission handling covers links too. The mask is the
+        fixture, and the call is wrapped to skip where lchmod is unsupported.
+    - rule_id: B103
+      path: tests/unit/utils/test_tool_config_dir.py
+      reason: >-
+        `os.chmod(tree.outside, 0o777)` builds the world-writable directory the
+        test expects tool_config_scope to REFUSE as a TMPDIR. The permissive mask
+        is the input being refused.
+    # B301 — one file. The pickle round-trip IS the subject: worker processes
+    # hand refusal exceptions back to the parent pickled, so the test proves each
+    # exception type survives that trip.
+    - rule_id: B301
+      path: tests/unit/utils/test_link_refusal_family.py
+      reason: >-
+        `pickle.loads(pickle.dumps(refusal))` round-trips ASH's own refusal
+        exceptions the way multiprocessing does. The bytes come from pickle.dumps
+        of the test's own object in the same process; nothing untrusted is ever
+        deserialized.
     # === bandit subprocess family: unfixable in a tool that runs other tools ===
     #
     # B404 fires on `import subprocess` itself, before any call is examined. ASH's
