@@ -211,8 +211,9 @@ def _no_scan_running(
     replaces ``source/`` and its staging sibling and touches neither
     ``incoming/`` nor ``config/``; a finalize replaces the same two and also
     reads and removes its own upload's ``incoming/<id>.zip`` (it opens the zip
-    to hash and extract it, and deletes it), under the upload's lock
-    (:func:`_upload_lock`), so only a chunk of that same upload waits for it.
+    under the upload's lock (:func:`_upload_lock`), hashes and extracts the open
+    handle without the lock, and deletes the path under the lock again), so
+    only a chunk of that same upload waits for either step.
 
     Takes the in-memory session only: a change that is refused leaves no session
     directory, and each change that writes creates and marks the directory
@@ -2344,12 +2345,14 @@ def set_source_zip_finalize(
 ) -> Path:
     """Finalize a chunked upload: verify checksum and extract.
 
-    Holds the upload's lock (:func:`_upload_lock`) for the whole finalize, so a
-    chunk of the same upload sent meanwhile -- a retry of its last chunk
-    included -- waits instead of renaming a new ``incoming/<id>.zip`` over the
-    path between the steps here. The checksum and the extraction also read one
-    open handle, so the bytes extracted are exactly the bytes hashed whatever
-    happens to the path; see :func:`_finalize_zip_upload`.
+    Holds the upload's lock (:func:`_upload_lock`) only to open the zip and to
+    remove its path afterwards, not while the zip is hashed and extracted: the
+    lock is one of 64 shared by every session, and holding it across up to the
+    size limit of work would starve the delivery pool. The checksum and the
+    extraction read one open handle, so the bytes extracted are exactly the bytes
+    hashed whatever happens to the path meanwhile, and the removal deletes the
+    path only while it still names the file that was read, so a zip a chunk
+    assembled over it meanwhile is kept; see :func:`_finalize_zip_upload`.
 
     Args:
         upload_id: Identifier matching the prior ``set_source_zip_chunk`` calls.
@@ -2390,13 +2393,12 @@ def set_source_zip_finalize(
             this is a client-side packaging error rather than corruption.
     """
 
-    with _upload_lock(session_id, upload_id):
-        return _finalize_zip_upload(
-            upload_id,
-            expected_sha256,
-            workspace_root=workspace_root,
-            session_id=session_id,
-        )
+    return _finalize_zip_upload(
+        upload_id,
+        expected_sha256,
+        workspace_root=workspace_root,
+        session_id=session_id,
+    )
 
 
 class _ZipRefused(Exception):
@@ -2409,15 +2411,35 @@ class _ZipRefused(Exception):
 
 
 @contextlib.contextmanager
-def _refusing_after_close(handle: Any, final: Path) -> Iterator[None]:
-    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, remove ``final``, refuse."""
+def _refusing_after_close(
+    handle: Any, remove_zip: Callable[[], None]
+) -> Iterator[None]:
+    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, ``remove_zip()``, refuse."""
 
     try:
         with handle:
             yield
     except _ZipRefused as refused:
-        final.unlink(missing_ok=True)
+        remove_zip()
         raise ValueError(str(refused)) from None
+
+
+def _remove_zip_still_at(
+    final: Path, opened: os.stat_result, session_id: str, upload_id: str
+) -> None:
+    """Remove ``final`` if it still names the file ``opened`` describes.
+
+    Under the upload's lock, so no chunk of the upload assembles a zip over the
+    path between the comparison and the removal. A zip a chunk assembled over the
+    path while the finalize ran is a different file and is kept.
+    """
+
+    with _upload_lock(session_id, upload_id):
+        try:
+            if os.path.samestat(opened, final.stat()):
+                final.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
 
 
 def _finalize_zip_upload(
@@ -2427,7 +2449,7 @@ def _finalize_zip_upload(
     workspace_root: Optional[Path],
     session_id: str,
 ) -> Path:
-    """:func:`set_source_zip_finalize`, once the upload's lock is held."""
+    """:func:`set_source_zip_finalize`: the work behind its docstring."""
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = _created_session_dir(root, session_id)

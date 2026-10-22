@@ -810,10 +810,15 @@ def test_a_finalize_extracts_the_bytes_it_hashed_when_the_path_is_renamed_over(
     )
 
 
-def test_a_finalize_holds_its_uploads_lock_while_it_works(
+def test_a_finalize_releases_its_uploads_lock_while_it_extracts(
     workspace, monkeypatch
 ) -> None:
-    """A chunk of the same upload takes the same lock, so it waits, never races."""
+    """The lock covers the open and the removal of the zip, not the extraction.
+
+    The lock is one of 64 shared by every session, so holding it across the hash
+    and the extraction would block unrelated uploads' chunks on the delivery pool.
+    The handle the finalize reads names the bytes it hashed, so nothing needs it.
+    """
     import hashlib
 
     data = _zip_with("locked")
@@ -831,7 +836,7 @@ def test_a_finalize_holds_its_uploads_lock_while_it_works(
         "u-lock", hashlib.sha256(data).hexdigest(), session_id=SESSION
     )
 
-    assert seen.get("held") is True, "finalize ran without the upload's lock"
+    assert seen.get("held") is False, "finalize extracted under the upload's lock"
 
 
 def test_a_profile_selection_and_a_clone_do_not_refuse_each_other(workspace) -> None:
