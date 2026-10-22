@@ -1,5 +1,5 @@
 Package: ca-certificates
-Version: 20250419~deb12u1
+Version: 20250419~deb12u2
 Architecture: all
 
 Package: curl
