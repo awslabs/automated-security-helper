@@ -1870,6 +1870,17 @@ def _remove_if_still_stale(
     process-wide latch (:func:`_warn_guard_refused_once`).
     """
 
+    if _remove_stale_session_state(root, session_id, sandbox, cutoff):
+        return True
+    finish_ended_session(session_id)
+    return False
+
+
+def _remove_stale_session_state(
+    root: Path, session_id: str, sandbox: Path, cutoff: float
+) -> bool:
+    """:func:`_remove_if_still_stale`, up to the release of the sweep's change."""
+
     session = get_default_registry().session_for(session_id)
     if session.try_begin_change() is not None:
         return False
