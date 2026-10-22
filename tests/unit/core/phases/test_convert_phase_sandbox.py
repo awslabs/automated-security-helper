@@ -214,7 +214,7 @@ class TestRefusedSpawnsAreLostCoverage:
 
         assert "convert" not in _ran()
         listed = incomplete_converters(results)
-        assert [name for name, _ in listed] == ["spawning"], listed
+        assert [row.name for row in listed] == ["spawning"], listed
         assert "refused" in listed[0][1]
 
     def test_a_converter_whose_spawns_ran_is_complete(self, tmp_path, backend):
