@@ -353,6 +353,7 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
             pytest.param("no-such-ref", id="matches nothing"),
             pytest.param("--upload-pack=touch", id="starts with a dash"),
             pytest.param("0123abc", id="abbreviated commit id, shortest"),
+            # pragma: allowlist nextline secret
             pytest.param("0123456789abcdef0123456789abcdef0123456", id="39 hex digits"),
         ],
     )
