@@ -43,7 +43,12 @@ pytestmark = pytest.mark.integration
 
 FIXTURE = Path(__file__).resolve().parents[2] / "test_data" / "sandbox_escape"
 CANARY = "ash-sandbox-canary-7b9e2f"
-BACKENDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
+BACKENDS = [
+    pytest.param("bwrap", marks=pytest.mark.requires_userns),
+    "firejail",
+    "landlock",
+    "sandbox-exec",
+]
 
 
 def _required() -> set:

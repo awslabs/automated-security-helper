@@ -938,20 +938,25 @@ jobs:
           bwrap --version
           firejail --version | head -1
       # Ubuntu 23.10+ restricts unprivileged user namespaces through AppArmor. The
-      # packaged bwrap is meant to be allowed by its profile, but the hosted runner
-      # image has been seen to refuse it. Lifting the restriction is runner setup,
-      # the same thing docs/content/docs/scanner-sandbox.md tells a user to do; the
-      # tests themselves are unchanged and still require bwrap to work.
-      - name: Let bwrap create user namespaces
+      # packaged bwrap carries a profile the restriction can allow while a plain
+      # unshare is still refused, so a bwrap-only probe passes on a runner where
+      # the suite's namespace-dependent cells fail. Probe the capability itself
+      # and lift the restriction when it is refused: runner setup, the same thing
+      # docs/content/docs/scanner-sandbox.md tells a user to do; the tests are
+      # unchanged and still require the backends to work. The step runs under
+      # bash -e, so a failed sysctl or a still-refused re-probe turns this step
+      # red instead of failing the suite dozens of cells deep.
+      - name: Let unprivileged user namespaces be created
         if: runner.os == 'Linux'
         run: |
-          if bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
-            echo "bwrap can create a sandbox as-is"
+          if unshare --user --map-root-user --net true; then
+            echo "user namespaces can be created as-is"
           else
-            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+            echo "::notice::user-namespace creation refused by the AppArmor userns restriction; lifting it for this runner"
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
           fi
+          unshare --user --map-root-user --net true
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
       - name: Install dependencies
         run: uv sync
       - name: Run the sandbox escape and unit suites
@@ -1021,11 +1026,20 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q bubblewrap
-          if ! bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
-            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+      # Same capability lift as the sandbox job: the restriction can allow the
+      # packaged bwrap while refusing every other namespace use, so the probe is
+      # the capability itself, and a failed sysctl or re-probe fails this step.
+      - name: Let unprivileged user namespaces be created
+        if: runner.os == 'Linux'
+        run: |
+          if unshare --user --map-root-user --net true; then
+            echo "user namespaces can be created as-is"
+          else
+            echo "::notice::user-namespace creation refused by the AppArmor userns restriction; lifting it for this runner"
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
           fi
+          unshare --user --map-root-user --net true
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
       - name: Install ASH with the cdk extra, and every scanner
         run: |
           pip install ".[cdk]"

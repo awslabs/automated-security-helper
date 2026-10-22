@@ -146,7 +146,10 @@ def _source(tmp_path: Path) -> Path:
     return source
 
 
-@pytest.mark.parametrize("sandbox", ["off", "bwrap"])
+@pytest.mark.parametrize(
+    "sandbox",
+    ["off", pytest.param("bwrap", marks=pytest.mark.requires_userns)],
+)
 def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path, sandbox):
     _require("semgrep")
     if sandbox != "off":
@@ -173,6 +176,7 @@ def test_a_semgrep_run_with_a_rejected_rule_file_fails_the_scan(tmp_path, sandbo
     )
 
 
+@pytest.mark.requires_userns
 def test_an_offline_sandboxed_scan_reads_the_operators_rule_cache(tmp_path):
     _require("semgrep")
     _require_bwrap()
@@ -277,6 +281,7 @@ def _notebook_scan(tmp_path: Path, sandbox: str):
     return converted, _recorded(marker)
 
 
+@pytest.mark.requires_userns
 def test_nbconvert_runs_inside_the_sandbox(tmp_path):
     _require("semgrep")
     _require("jupyter-nbconvert")
@@ -312,7 +317,10 @@ def test_without_a_sandbox_nbconvert_runs_on_the_host(tmp_path):
     assert converted
 
 
-@pytest.mark.parametrize("sandbox", ["bwrap", "off"])
+@pytest.mark.parametrize(
+    "sandbox",
+    [pytest.param("bwrap", marks=pytest.mark.requires_userns), "off"],
+)
 def test_the_converter_runs_nbconvert_in_its_own_namespace(
     tmp_path, monkeypatch, sandbox
 ):
@@ -371,6 +379,7 @@ def test_the_converter_runs_nbconvert_in_its_own_namespace(
         )
 
 
+@pytest.mark.requires_userns
 def test_bwrap_hides_a_tree_inside_a_mounted_directory_from_a_staged_tool(
     tmp_path, monkeypatch
 ):

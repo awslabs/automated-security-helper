@@ -41,7 +41,12 @@ from tests.utils.stand_in_uv import (
 
 pytestmark = pytest.mark.integration
 
-BACKENDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
+BACKENDS = [
+    pytest.param("bwrap", marks=pytest.mark.requires_userns),
+    "firejail",
+    "landlock",
+    "sandbox-exec",
+]
 
 STAND_IN = """#!/bin/sh
 # Stand-in for the Snyk CLI. It writes, next to its SARIF output (a path every
