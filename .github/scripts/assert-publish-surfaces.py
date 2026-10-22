@@ -406,19 +406,25 @@ ALLOWLIST: tuple[Entry, ...] = (
             "${{ inputs.config-file }}${{ inputs.oci-runner && "
             "format('-{0}', inputs.oci-runner) || '' }}"
             "${{ inputs.offline == 'true' && '-offline' || '' }} "
-            "path=.ash/ash_output"
+            "path=.ash/ash_output/reports|.ash/ash_output/ash_aggregated_results.json"
         ),
         reason=(
             "Scan reports -- SARIF, JSON, HTML -- from scanning this repository's "
             "own tree with the build under test. Findings about public code, not "
-            "an executable."
+            "an executable. Narrowed to reports/ and the aggregated results: "
+            "scanners/ and converted/ hold each tool's raw, unmasked output."
         ),
     ),
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
-        publishes="name=ash_output path=${{ inputs.output-dir }}",
+        publishes=(
+            "name=ash_output path=${{ inputs.output-dir }}/reports"
+            "|${{ inputs.output-dir }}/ash_aggregated_results.json"
+            "|${{ inputs.output-dir }}/projects/*/reports"
+            "|${{ inputs.output-dir }}/projects/*/ash_aggregated_results.json"
+        ),
         reason=(
             "Scan reports, in the reusable workflow consumers call. The bytes "
             "belong to the calling repository's scan and are published into the "
