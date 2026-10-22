@@ -125,6 +125,7 @@ def open_tar_listing(
     stopped: Optional[List[int]] = None,
     budget: Optional[SkippedBlocksBudget] = None,
     mode: str = "r:*",
+    ended: Optional[List[int]] = None,
     **options: Any,
 ) -> TarFile:
     """The tar in ``handle``, compressed or not, opened from its start so that its
@@ -146,6 +147,12 @@ def open_tar_listing(
     reading ahead, so a caller whose ``handle`` is already decompressed and
     read through a byte-budgeted stream passes ``"r:"``, which reads plain
     512-byte blocks and keeps the sniff's read-ahead off its budget.
+    With ``ended``, a listing that read at least one member and reached the
+    end of the bytes WITHOUT an end-of-archive zero block before it has that
+    byte appended: a tar cut exactly at a block boundary presents no damaged
+    header and no stop, and this is its one signal. An ordinary end (zero
+    blocks before the end, a tar of end blocks only, a concatenated tar whose
+    last blocks are zeros) appends nothing.
 
     Raises:
         tarfile.TarError, OSError, EOFError: The tar could not be opened or read.
@@ -156,6 +163,12 @@ def open_tar_listing(
     # classified, so skips are charged to this listing's own budgets and
     # never to the handle's header allowance.
     credit = getattr(handle, "allow_skipped_blocks", None)
+    # Whether any member was read, and whether the LAST header event before
+    # the current one was a zero block: at the end of the bytes these two
+    # tell an ordinary end (zeros, then the end) from a tar cut at a block
+    # boundary, which presents no damaged header and no stop.
+    read_any = [False]
+    last_zero = [False]
 
     class _Recorded(TarInfo):
         @classmethod
@@ -163,12 +176,23 @@ def open_tar_listing(
             # Where the header about to be read starts, in the (decompressed) tar.
             offset = tarfile.fileobj.tell()
             try:
-                return super().fromtarfile(tarfile)
+                member = super().fromtarfile(tarfile)
             except _END_OF_DATA:
+                # The bytes genuinely end here (a limit stop raises its own
+                # _END_OF_DATA outside this try). An end right after a member,
+                # with no end-of-archive zero block between, means what
+                # followed is unknowable; the byte is recorded for the
+                # caller's extracted-in-part row.
+                if ended is not None and not ended and read_any[0] and not last_zero[0]:
+                    ended.append(offset)
                 raise
             except HeaderError as error:
-                if not isinstance(error, _ZERO_BLOCK) and not unreadable:
-                    unreadable.append(offset)
+                if isinstance(error, _ZERO_BLOCK):
+                    last_zero[0] = True
+                else:
+                    last_zero[0] = False
+                    if not unreadable:
+                        unreadable.append(offset)
                 skipped[0] += _BLOCK
                 if credit is not None:
                     credit(_BLOCK)
@@ -183,6 +207,10 @@ def open_tar_listing(
                 if stopped is not None and not stopped:
                     stopped.append(offset)
                 raise _END_OF_DATA("the listing skipped its limit of blocks") from None
+            else:
+                read_any[0] = True
+                last_zero[0] = False
+                return member
 
     handle.seek(0)
     return open_tar(

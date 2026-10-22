@@ -1102,6 +1102,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
         unreadable: List[int],
         stopped: List[int],
         budget_spent: bool = False,
+        ended: Optional[List[int]] = None,
     ) -> None:
         """Record ``archive``, a tar, as extracted only in part. Where the header at
         byte ``unreadable[0]`` (the first that could not be read) named a member,
@@ -1133,6 +1134,14 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 f"its listing stopped at byte {stopped[0]}, past more than "
                 f"{SKIPPED_BYTES_LIMIT} bytes of blocks that hold no member, so what "
                 "follows was not extracted"
+            )
+        if ended:
+            # The honest uncertainty: an out-of-spec-but-complete tar reads
+            # the same as a truncated one, and silence would leave a
+            # truncation class unreported.
+            parts.append(
+                "it ends without an end-of-archive block, so members past "
+                f"byte {ended[0]} may be missing"
             )
         detail = "; ".join(parts)
         ASH_LOGGER.warning(
@@ -1480,6 +1489,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                     elif kind == "tar":
                         unreadable: List[int] = []
                         stopped: List[int] = []
+                        ended: List[int] = []
                         tar_stream = stack.enter_context(_tar_stream(archive_handle))
                         # The blocks the listing skips are read through the
                         # bounded stream; the listing credits each one back
@@ -1497,6 +1507,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             # compression sniff (an 8 KiB read-ahead)
                             # off the header allowance.
                             mode="r:",
+                            ended=ended,
                             encoding="utf-8",
                         ) as tar_ref:
                             # Every member is admitted against the extraction limits
@@ -1531,7 +1542,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 )
                             else:
                                 _copy_tar_members(tar_ref, safe_members, target_path)
-                        if unreadable or stopped:
+                        if unreadable or stopped or ended:
                             # Nothing is charged after a listing stops, and a spent
                             # budget stops a listing well before its own limit, so
                             # for a listing that stopped, a spent budget is what
@@ -1541,6 +1552,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                                 unreadable,
                                 stopped,
                                 budget_spent=skipped_blocks.spent,
+                                ended=ended,
                             )
                     elif _named_kind(archive_file) is not None:
                         # Named as an archive the converter extracts, and none can
