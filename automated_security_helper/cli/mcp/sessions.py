@@ -263,7 +263,7 @@ class MCPSession(BaseModel):
                 changing = self._changing
             return CHANGE_REFUSED_BY_CHANGE if changing else CHANGE_REFUSED_BY_SCAN
         with self._state_lock:
-            if self._claimed_scans or (removes_workspace and self._writes):
+            if self._claimed_scans:
                 self._lock.release()
                 return CHANGE_REFUSED_BY_SCAN
             if removes_workspace and self._writes:

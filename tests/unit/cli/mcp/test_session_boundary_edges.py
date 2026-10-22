@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import sys
 import uuid
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -92,19 +91,17 @@ def test_the_guards_do_not_refuse_valid_arguments() -> None:
     SessionBoundary(_noop_app, mode=MODE_SSE, session_workspace_ttl=0.5)
 
 
-# -- the SDK version list can not be read -----------------------------------------
+# -- the SDK session path needs the path and the hoisted version check ------------
+# The version list itself is read when the app is built (see
+# test_stateful_issued_sessions.test_the_app_build_itself_fails_without_the_sdks_version_list);
+# this function only combines the route match with that hoisted check's answer.
 
 
-def test_no_request_is_on_the_sdk_session_path_without_the_version_list(
-    monkeypatch,
-) -> None:
+def test_the_sdk_session_path_needs_the_path_and_the_version_check() -> None:
     scope = {"path": "/mcp", "root_path": "", "headers": []}
-    assert _on_the_sdk_session_path(scope, "/mcp") is True
-
-    # A None entry makes ``from mcp_types.version import ...`` raise ImportError.
-    monkeypatch.setitem(sys.modules, "mcp_types.version", None)
-
-    assert _on_the_sdk_session_path(scope, "/mcp") is False
+    assert _on_the_sdk_session_path(scope, "/mcp", True) is True
+    assert _on_the_sdk_session_path(scope, "/mcp", False) is False
+    assert _on_the_sdk_session_path(scope, "/other", True) is False
 
 
 # -- sse session ids ------------------------------------------------------------
@@ -178,9 +175,9 @@ def test_a_well_formed_session_id_nobody_issued_carries_no_identity() -> None:
     forged = uuid.uuid4().hex
     boundary._issued.add(issued)
 
-    assert boundary._identify(_sse_scope(issued)) == HttpCaller(SSE, issued)
-    assert boundary._identify(_sse_scope(forged)) == HttpCaller(SSE, None)
-    assert boundary._identify(_sse_scope("-" * 32)) == HttpCaller(SSE, None)
+    assert boundary._identify(_sse_scope(issued), True) == HttpCaller(SSE, issued)
+    assert boundary._identify(_sse_scope(forged), True) == HttpCaller(SSE, None)
+    assert boundary._identify(_sse_scope("-" * 32), True) == HttpCaller(SSE, None)
 
 
 # -- other scope types ----------------------------------------------------------
@@ -270,7 +267,7 @@ def test_a_trusted_upstream_header_of_whitespace_carries_no_identity(header) -> 
     )
     scope = {"type": "http", "headers": [(b"mcp-session-id", header)]}
 
-    assert boundary._identify(scope) == HttpCaller(STREAMABLE_HTTP, None)
+    assert boundary._identify(scope, True) == HttpCaller(STREAMABLE_HTTP, None)
 
 
 def test_a_trusted_upstream_header_is_taken_without_its_padding() -> None:
@@ -279,4 +276,4 @@ def test_a_trusted_upstream_header_is_taken_without_its_padding() -> None:
     )
     scope = {"type": "http", "headers": [(b"mcp-session-id", b"  plat-1 ")]}
 
-    assert boundary._identify(scope) == HttpCaller(STREAMABLE_HTTP, "plat-1")
+    assert boundary._identify(scope, True) == HttpCaller(STREAMABLE_HTTP, "plat-1")
