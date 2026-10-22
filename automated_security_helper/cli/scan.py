@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import contextlib
 import os
 
 # `print` shadows the builtin on purpose: this is rich's documented import
@@ -31,6 +32,7 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_scan import (
+    resolve_workspace_execution_config,
     run_ash_scan,
 )
 from automated_security_helper.core.enums import ExportFormat
@@ -41,6 +43,10 @@ from automated_security_helper.utils.content_databases import (
     go_duration,
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
+from automated_security_helper.utils.get_scan_set import (
+    InvalidBaseRefError,
+    validate_base_ref,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
 from automated_security_helper.workspace.workspace_file import (
@@ -52,6 +58,40 @@ from automated_security_helper.workspace.workspace_file import (
 def _from_environment(ctx: typer.Context, param: str) -> bool:
     """Whether click took *param*'s value from its ``envvar``."""
     return getattr(ctx.get_parameter_source(param), "name", None) == "ENVIRONMENT"
+
+
+def _fail_config_mark(message: str) -> NoReturn:
+    """A usage error in container mode's marks for the scan inside: exit 3."""
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(3)
+
+
+def _marked_outside_the_chain(configs: List[Path], marked: List[str]) -> List[str]:
+    """The paths of *marked* that are not files of the extends chain of any of
+    *configs*: ``--config`` and the file ``ASH_CONFIG`` names.
+
+    Container mode names each file it marks by its path inside the container, so a
+    name that misses both chains would leave that file's grants in place
+    unnoticed; it is refused instead. A chain that does not load is left for the
+    scan to report, with its own exit code.
+    """
+    if not marked:
+        return []
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+    )
+    from automated_security_helper.config.resolve_config import read_config_document
+
+    files: set[Path] = set()
+    for config in configs:
+        try:
+            chain = read_config_document(
+                config, confine_to=default_confinement_root(config), log_failure=False
+            ).chain
+        except Exception:  # noqa: BLE001 - the scan reports a config that does not load
+            return []
+        files.update(Path(os.path.realpath(path)) for path in chain)
+    return [path for path in marked if Path(os.path.realpath(path)) not in files]
 
 
 def _fail_workspace(
@@ -142,6 +182,7 @@ def _handle_workspace_mode(
     dry_run: bool,
     workspace_config: str | None = None,
     config_overrides: tuple[str, ...] = (),
+    config: str | None = None,
 ) -> "WorkspacePlan":
     """Resolve a workspace and return the plan, or exit.
 
@@ -159,6 +200,11 @@ def _handle_workspace_mode(
     Argument validation happens before any filesystem work, so an operator who
     passed a contradictory pair of flags is told that rather than being sent to
     debug their workspace file first.
+
+    ``config`` is ``--config`` (or ``ASH_CONFIG``). The fields it sets are final
+    for every project, so it has to reach resolution as well as the scan, which
+    gets it as ``ProjectScanSettings.default_config_path``: resolved without it,
+    the plan and ``--dry-run`` would report each project's own values for them.
     """
     if source_dir is not None:
         _fail_workspace(
@@ -185,9 +231,22 @@ def _handle_workspace_mode(
             # reflects an override. The ceiling applies to that, and --dry-run
             # prints the value the scan will actually enforce.
             config_overrides=config_overrides,
+            # The same reason, for the operator's config file. Resolved here as
+            # the scan resolves it, so a missing or broken file is refused at
+            # planning, --dry-run included, and the plan's thresholds are the
+            # ones the scan applies.
+            default_config=Path(config) if config else None,
         )
     except WorkspaceDefinitionError as exc:
         _fail_workspace(str(exc))
+    except ASHConfigValidationError as exc:
+        _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
+
+    # The workspace root's own config sets how the run executes (parallelism,
+    # timeouts), and the run refuses one that cannot be loaded with exit 3. Read
+    # here too, so --dry-run does not report a plan the run would refuse.
+    try:
+        resolve_workspace_execution_config(Path(plan.workspace_root), config)
     except ASHConfigValidationError as exc:
         _fail_workspace(str(exc), code=WorkspaceExitCode.INVALID_PROJECT_CONFIG)
 
@@ -388,9 +447,12 @@ def run_ash_scan_cli_command(
                 "Exit 1 when a selected scanner did not complete -- ERROR (ran and "
                 "failed) or MISSING (dependencies unavailable, so it never ran). "
                 "Without this, a run where nothing ran exits 0, the same code as a "
-                "clean scan, because no scanner produced any finding. SKIPPED "
-                "scanners are ones you did not select and never trip it, so "
-                "--scanners and --exclude-scanners both narrow what is gated. "
+                "clean scan, because no scanner produced any finding. A SKIPPED "
+                "scanner, one you did not select or one with nothing of its kind "
+                "to scan, does not trip it by itself, so --scanners and "
+                "--exclude-scanners both narrow what is gated; but a run in which "
+                "every scanner is SKIPPED, such as one where no selected scanner "
+                "had a file to scan, exits 1. "
                 "Independent of --fail-on-findings, and takes precedence over it "
                 "when both would fail: a partial scan's findings are real but its "
                 "clean bill of health is not. Defaults to unset, which prefers the "
@@ -409,9 +471,11 @@ def run_ash_scan_cli_command(
                 "trivy's vulnerability database, the offline semgrep/opengrep "
                 "rulesets) is older than its declared bound -- for grype, "
                 f"{go_duration(get_content_database('grype-db').max_age)} after the "
-                "database was built. Without it such a scan exits 1. With it the "
-                "scan proceeds and the warning is recorded in the log and in the "
-                "reports. --no-allow-stale-content-db forces the default failure. "
+                "database was built. Without it such a scan exits 1, except for "
+                "trivy's database in an image built with OFFLINE=YES, which warns by "
+                "default. With it the scan proceeds and the warning is recorded in the "
+                "log and in the reports. --no-allow-stale-content-db forces the "
+                "failure, for that database too. "
                 "Defaults to unset, which prefers the `content_db_staleness` config "
                 "value and then 'fail'; either form of the flag takes precedence over "
                 "the config."
@@ -430,6 +494,23 @@ def run_ash_scan_cli_command(
             help="Ignore all suppression rules and report all findings regardless of suppression status."
         ),
     ] = False,
+    honor_ignore_files: Annotated[
+        bool | None,
+        typer.Option(
+            help=(
+                "Whether the .gitignore and .ignore files in the scanned tree decide "
+                "which files are left out of ASH's scan set (the files "
+                "detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, "
+                "zizmor, npm-audit and the converters read). --no-honor-ignore-files scans the files they match too; "
+                "ASH's own exclusions such as .git still apply. Defaults to unset, "
+                "which prefers the operator's `honor_ignore_files` config value and "
+                "then honoring them. Either form takes precedence over the config. "
+                "A config file inside the scanned tree cannot set it. The results "
+                "and summaries record whether the ignore files were honored and how "
+                "many files they excluded."
+            )
+        ),
+    ] = None,
     min_severity: Annotated[
         str,
         typer.Option(
@@ -459,6 +540,13 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    allow_in_tree_tools: Annotated[
+        bool,
+        typer.Option(
+            "--allow-in-tree-tools",
+            help="Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does.",
+        ),
+    ] = False,
     shard_index: Annotated[
         Optional[int],
         typer.Option(
@@ -473,6 +561,30 @@ def run_ash_scan_cli_command(
             "--shard-count",
             help="Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner.",
             envvar="ASH_SHARD_COUNT",
+        ),
+    ] = None,
+    config_from_scanned_repository: Annotated[
+        bool,
+        typer.Option(
+            "--config-from-scanned-repository",
+            hidden=True,
+            help="Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it. In a workspace scan it marks the --config file that is layered over every project's own config and used alone by a project without one, from planning on.",
+        ),
+    ] = False,
+    config_file_from_scanned_repository: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--config-file-from-scanned-repository",
+            hidden=True,
+            help="Apply the limits ASH puts on a repository-written config file to this one file of the extends chain of the --config file or of the file ASH_CONFIG names. Container mode passes it, once per file, for each file the config extends that is inside a git checkout when the config itself is not, so the config keeps the sandbox settings it writes itself, as on the host, and for each file of ASH_CONFIG's chain that is inside one. Refused for a file that is in neither chain.",
+        ),
+    ] = None,
+    ash_config_from_host: Annotated[
+        Optional[str],
+        typer.Option(
+            "--ash-config-from-host",
+            hidden=True,
+            help="Read this file as the file ASH_CONFIG names, for the whole command. Container mode passes it to the scan inside the container, with the path there of the file the host's ASH_CONFIG names, which a local scan reads as its base whatever names the config. Not --config, whose environment variable ASH_CONFIG is.",
         ),
     ] = None,
     ### WORKSPACE-RELATED OPTIONS
@@ -545,7 +657,7 @@ def run_ash_scan_cli_command(
         BuildTarget | None,
         typer.Option(
             "--build-target",
-            help="Specify the target stage of the ASH image to build",
+            help="The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it; --custom-containerfile builds on 'ci'.",
             case_sensitive=False,
         ),
     ] = None,
@@ -610,6 +722,28 @@ def run_ash_scan_cli_command(
 
     _validate_shard_options(shard_index, shard_count, workspace)
 
+    # Through the environment rather than a parameter, so that every lookup in this
+    # process and in the processes it starts (the cdk-nag worker, a container, a
+    # nix shell) sees the same answer; see utils/subprocess_utils.in_tree_tools_allowed.
+    if allow_in_tree_tools:
+        from automated_security_helper.utils.process_env import (
+            apply_environ_overrides,
+        )
+        from automated_security_helper.utils.subprocess_utils import (
+            ALLOW_IN_TREE_TOOLS_ENV,
+        )
+
+        apply_environ_overrides({ALLOW_IN_TREE_TOOLS_ENV: "1"})
+
+    # With --changed-files-only the base ref goes to `git diff`, so it is refused
+    # here, before any git process starts, when git could read it as anything but
+    # a revision. Without the flag no diff runs and the value is not used.
+    if changed_files_only:
+        try:
+            validate_base_ref(base_ref)
+        except InvalidBaseRefError as exc:
+            _fail_usage(f"{exc} The value comes from --base-ref or ASH_BASE_REF.")
+
     # Workspace mode is handled before any cwd-based default is applied, because
     # --workspace and --source-dir are mutually exclusive and defaulting
     # source_dir first would make every invocation look like it had both.
@@ -663,6 +797,80 @@ def run_ash_scan_cli_command(
     if sandbox is not None:
         config_overrides.append(f"sandbox.mode={SandboxMode(sandbox).value}")
 
+    # The same route again. As an override it is operator input, which a config
+    # file inside the scanned tree cannot outvote (resolve_config's
+    # confine_honor_ignore_files), and the container runs it unchanged.
+    if honor_ignore_files is not None:
+        config_overrides.append(
+            f"honor_ignore_files={'true' if honor_ignore_files else 'false'}"
+        )
+
+    # Container mode's marks for the scan inside, which cannot see where the host
+    # found the --config it mounted at /ash-config: --config-from-scanned-repository
+    # for a --config in a git checkout or the scanned directory, with every file it
+    # extends, and --config-file-from-scanned-repository for each file the config
+    # extends that is in one when the config itself is not. Every scan holds them,
+    # one-directory and workspace alike, for the whole command, from planning on
+    # (sandbox_grants.marked_repository_written, marked_files_repository_written).
+    # Neither is resolve_config's untrusted_config, which is for a file an MCP
+    # client delivered and holds it to the client's rules. The scan inside runs in
+    # local mode with a --config; any other scan cannot apply them, so they are a
+    # usage error with exit 3 rather than run_ash_scan's ValueError.
+    #
+    # --ash-config-from-host is the file the host's ASH_CONFIG names, mounted at
+    # /ash-env-config: set as ASH_CONFIG here, after click has read --config, so
+    # it is the base the scan reads (default_config.get_default_config), as on the
+    # host, and not the --config it would be as the option's environment variable.
+    # A file of its chain the host counts as repository-written comes marked with
+    # --config-file-from-scanned-repository.
+    marked_files = list(config_file_from_scanned_repository or [])
+    if config_from_scanned_repository or marked_files or ash_config_from_host:
+        if (mode or RunMode.local) != RunMode.local:
+            _fail_config_mark(
+                "--config-from-scanned-repository, "
+                "--config-file-from-scanned-repository and --ash-config-from-host "
+                "are passed by container mode to the scan inside the container and "
+                "apply only to a scan in local mode. Leave them out: container mode "
+                "decides them on the host."
+            )
+        from automated_security_helper.config.sandbox_grants import (
+            marked_files_repository_written,
+            marked_repository_written,
+        )
+        from automated_security_helper.utils.process_env import environ_overrides
+
+        marks = contextlib.ExitStack()
+        ctx.call_on_close(marks.close)
+        if ash_config_from_host is not None:
+            marks.enter_context(environ_overrides({"ASH_CONFIG": ash_config_from_host}))
+        chains = [Path(path) for path in (config, ash_config_from_host) if path]
+        if (config_from_scanned_repository or marked_files) and not chains:
+            _fail_config_mark(
+                "--config-from-scanned-repository and "
+                "--config-file-from-scanned-repository mark the --config file and the "
+                "files it extends, and this scan has none. Leave them out: container "
+                "mode decides them on the host."
+            )
+        if config_from_scanned_repository and config is None:
+            _fail_config_mark(
+                "--config-from-scanned-repository marks the --config file and every "
+                "file it extends, and this scan has none. Leave it out: container "
+                "mode decides it on the host."
+            )
+        outside = _marked_outside_the_chain(chains, marked_files)
+        if outside:
+            _fail_config_mark(
+                f"--config-file-from-scanned-repository names {', '.join(outside)}, "
+                "which is not a file of the chain of --config or of the file "
+                "ASH_CONFIG names."
+            )
+        if config_from_scanned_repository and config is not None:
+            marks.enter_context(marked_repository_written(Path(config)))
+        if marked_files:
+            marks.enter_context(
+                marked_files_repository_written(Path(path) for path in marked_files)
+            )
+
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:
         workspace_plan = _handle_workspace_mode(
@@ -672,6 +880,7 @@ def run_ash_scan_cli_command(
             dry_run=dry_run,
             workspace_config=workspace_config,
             config_overrides=tuple(config_overrides),
+            config=config,
         )
         # The workspace root is the scan root: it is what container mode mounts at
         # /src, and what every workspace-relative finding path is relative to.
@@ -827,4 +1036,5 @@ def run_ash_scan_cli_command(
         custom_build_arg=custom_build_arg,
         workspace_plan=workspace_plan,
         allow_missing_projects=allow_missing_projects,
+        workspace_config_as_named=workspace_config,
     )

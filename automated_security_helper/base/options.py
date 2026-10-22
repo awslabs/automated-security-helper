@@ -39,10 +39,12 @@ def release_tag(key: str) -> WrapValidator:
         value = handler(value)
         if isinstance(value, str) and _RELEASE_TAG.fullmatch(value):
             return value
+        # The key and the rule, not the value: a value can be one read from the
+        # environment, and the warning goes to the console and ash.log.
         _warn_once(
             key,
             str(value),
-            f"Ignoring {key}: {value!r} is not a release tag such as 'v1.2.3'. "
+            f"Ignoring {key}: the value is not a release tag such as 'v1.2.3'. "
             "Using the pinned version instead.",
         )
         raise PydanticUseDefault from None
@@ -78,13 +80,47 @@ def tool_version_constraint(key: str) -> WrapValidator:
         value = handler(value)
         try:
             return validate_version_constraint(value)
-        except ValueError as error:
+        except ValueError:
+            # Not the check's message, which quotes the value; see release_tag.
             _warn_once(
                 key,
                 str(value),
-                f"Ignoring {key}: {error}. Using the default constraint instead.",
+                f"Ignoring {key}: the value is not a version constraint; use PEP 440 "
+                "specifiers such as '>=1.2.0,<2.0.0' or '==1.4.1'. Using the default "
+                "constraint instead.",
             )
             raise PydanticUseDefault from None
+
+    return WrapValidator(_validate)
+
+
+def report_file_name(key: str) -> WrapValidator:
+    """Validator for an option that names a file in the reports directory, named ``key``.
+
+    A reporter writes such a file directly inside the reports directory, so only a
+    single path component is accepted, from any source: a value with ``/``, ``\\``
+    or NUL, or one that is ``.`` or ``..``, is replaced by the option's default,
+    with one warning naming ``key``.
+    """
+
+    def _validate(value: Any, handler: ValidatorFunctionWrapHandler, _info: Any) -> Any:
+        from automated_security_helper.utils.report_path_links import (
+            is_report_file_name,
+        )
+
+        value = handler(value)
+        if is_report_file_name(value):
+            return value
+        # The key and the rule, not the value; see release_tag.
+        _warn_once(
+            key,
+            str(value),
+            f"Ignoring {key}: the value is not a file name such as 'summary.md'. "
+            "The file is written directly inside the reports directory, so the name "
+            "cannot contain '/', '\\' or NUL, or be '.' or '..'. Using the default "
+            "instead.",
+        )
+        raise PydanticUseDefault from None
 
     return WrapValidator(_validate)
 
@@ -92,13 +128,22 @@ def tool_version_constraint(key: str) -> WrapValidator:
 class BuilderOptionsBase(BaseModel):
     """Base class for builder options."""
 
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="allow", arbitrary_types_allowed=True, hide_input_in_errors=True
+    )
 
 
 class PluginOptionsBase(BaseModel):
     """Base class for plugin options."""
 
-    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="allow",
+        arbitrary_types_allowed=True,
+        # A refused value can be a secret read from the environment, and an
+        # error's text goes wherever the error is shown. Every options class
+        # inherits this, as pydantic merges a subclass's settings with its base's.
+        hide_input_in_errors=True,
+    )
 
 
 class ConverterOptionsBase(PluginOptionsBase):

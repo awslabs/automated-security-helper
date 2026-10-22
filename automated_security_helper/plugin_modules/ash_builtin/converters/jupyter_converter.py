@@ -3,14 +3,19 @@
 
 """Module containing the JupyterConverter implementation."""
 
+import glob
 import json
-import subprocess  # nosec B404 — required for fallback when uv tool unavailable
+import re
+import shutil
+import subprocess  # nosec B404 — CalledProcessError and TimeoutExpired; spawns go through spawn_run
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, ClassVar, ContextManager, List, Literal, Optional, Tuple
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
+from automated_security_helper.models.core import ignore_paths_that_skip_scanning
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
     ConverterPluginConfigBase,
@@ -21,18 +26,45 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.plugins.decorators import ash_converter_plugin
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
-from automated_security_helper.utils.suppression_matcher import (
-    file_path_matches as path_matches_pattern,
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
+from automated_security_helper.utils.sandbox.policy import SandboxRequirements
+from automated_security_helper.utils.sandbox.scope import (
+    SandboxUnavailable,
+    active_scope,
+    plugin_probe_scope,
+    sandbox_requested,
+    sandbox_scope,
+    scanner_sandbox_scope,
 )
-from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.scanned_tree import (
     TreeInputRefused,
     refusal_reason,
+    relative_display,
 )
+from automated_security_helper.utils.subprocess_utils import (
+    child_environ,
+    lookup_for_scan,
+    spawn_run,
+)
+
+#: The name nbconvert is given the staged copy under, and the name it writes its
+#: output under. Not the notebook's own name: nbconvert expands each notebook
+#: argument with ``glob.glob``, so ``[x].ipynb`` matches only ``x.ipynb``, and it
+#: passes the output name through ``str.format``, which a ``{`` in it breaks. ASH
+#: names the converted file after the original notebook itself.
+_STAGED_NAME = "notebook"
+
+#: A ``language_info.file_extension`` the copy keeps. nbconvert's generic script
+#: exporter appends the notebook's value to the output name, so one holding a path
+#: separator or ``..`` would place the output outside the directory it was given.
+_PLAIN_EXTENSION = re.compile(r"\.[A-Za-z0-9_+-]{1,16}")
 
 
 class JupyterConverterConfigOptions(ConverterOptionsBase):
@@ -60,9 +92,43 @@ class JupyterConverterConfig(ConverterPluginConfigBase):
     ] = JupyterConverterConfigOptions()
 
 
+def _is_uv_error(stderr: object) -> bool:
+    """Whether ``uv tool run`` failed itself, before nbconvert ran.
+
+    uv reports its own errors on stderr either as ``error: ...`` or, for a tool it
+    cannot resolve (offline with nbconvert not in its cache, for one), as a
+    diagnostic that starts with ``×``. nbconvert's own failures start with a
+    traceback or ``[NbConvertApp]``. Judged by the first line that is not blank.
+    """
+    if not isinstance(stderr, str):
+        return False
+    first = next((line.strip() for line in stderr.splitlines() if line.strip()), "")
+    return first.startswith(("error:", "\u00d7"))
+
+
+class _NbconvertNotRun(FileNotFoundError):
+    """No nbconvert could be run for a notebook.
+
+    Its message is ASH's own and quotes nothing from the notebook, so the failed
+    input records it in full, where any other error is recorded by its type only.
+    """
+
+
 @ash_converter_plugin
 class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
     """Converter implementation for Jupyter notebooks security scanning."""
+
+    # The jupyter-nbconvert executable for a direct run, once looked up, and when
+    # it is None because an in-tree copy was refused, the reason.
+    _direct_nbconvert: Optional[Tuple[Optional[str], Optional[str]]] = PrivateAttr(
+        default=None
+    )
+
+    # nbconvert converts a staged copy of one notebook, so under a sandbox it may not
+    # read the scanned tree or the output directory, only that copy and its tools.
+    sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
+        staged_input_only=True
+    )
 
     def model_post_init(self, context):
         if self.config is None:
@@ -75,12 +141,30 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # Set up explicit UV tool installation commands
         self._setup_uv_tool_install_commands()
 
-        # Update tool version detection to work with explicit installation
-        self.tool_version = self._get_uv_tool_version(
-            self.command, self.uv_tool_package_name
-        )
+        # First, so the version probe below has the results directory a sandbox
+        # scope is built from.
+        super().model_post_init(context)
 
-        return super().model_post_init(context)
+        # Update tool version detection to work with explicit installation. The
+        # probe runs nbconvert, so under a sandbox it runs sandboxed, as a scanner's
+        # version probe does.
+        with self._probe_scope():
+            self.tool_version = self._get_uv_tool_version(
+                self.command, self.uv_tool_package_name
+            )
+
+    def _probe_scope(self) -> ContextManager[None]:
+        """Sandbox this converter's probes, unless a caller already confined them.
+
+        nbconvert is a third-party tool, and its version probe and dependency check
+        start it. ``plugin_probe_scope`` runs those sandboxed under a sandbox, writing
+        only to a throwaway directory, and refuses them when the sandbox cannot be
+        provided. The convert phase enters the same scope around this converter; one
+        entered here as well would only add a second throwaway directory.
+        """
+        if active_scope() is not None:
+            return nullcontext()
+        return plugin_probe_scope(self, self.context)
 
     def _get_tool_version_constraint(self) -> Optional[str]:
         """Get version constraint for nbconvert installation.
@@ -117,9 +201,17 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         4. Falls back to existing validation methods
         5. Provides comprehensive logging for troubleshooting
 
+        Under a sandbox (``sandbox.mode`` other than ``off``) nothing is installed,
+        as for the scanners, and every check runs sandboxed.
+
         Returns:
             True if converter is ready to use, False otherwise
         """
+        with self._probe_scope():
+            return self._validate_dependencies()
+
+    def _validate_dependencies(self) -> bool:
+        """``validate_plugin_dependencies`` without the scope it runs in."""
         if self.use_uv_tool:
             # Check if tool is already available (UV-installed or pre-installed)
             installation_info = self._get_tool_installation_info()
@@ -135,10 +227,19 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     )
                 return True
 
-            # Tool not available, attempt installation
-            installation_success = self._install_uv_tool(
-                timeout=self.config.options.install_timeout
-            )
+            if sandbox_requested(self.context):
+                # Installing runs the package's build code outside any sandbox and
+                # writes uv's tool directory. A sandboxed scan installs no tool.
+                ASH_LOGGER.warning(
+                    f"{self.command} is not installed, and a sandboxed scan does not "
+                    "install tools. Run `ash dependencies install` first."
+                )
+                installation_success = False
+            else:
+                # Tool not available, attempt installation
+                installation_success = self._install_uv_tool(
+                    timeout=self.config.options.install_timeout
+                )
 
             if installation_success:
                 ASH_LOGGER.debug(f"UV tool installation successful for {self.command}")
@@ -152,24 +253,27 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     f"UV tool installation failed for {self.command}, attempting fallback validation"
                 )
 
-        # Fallback to checking if jupyter command is available via direct execution
-        try:
-            result = subprocess.run(  # nosec B603 B607 — list args, validated jupyter executable
-                ["jupyter", "nbconvert", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                env=snapshot_environ(),
-            )
-            if result.returncode == 0:
-                ASH_LOGGER.debug("Found jupyter nbconvert via direct execution")
-                return True
-        except (
-            subprocess.TimeoutExpired,
-            FileNotFoundError,
-            subprocess.SubprocessError,
-        ):
-            pass
+        # Fallback: an installed jupyter-nbconvert, run directly by its absolute path,
+        # in an empty directory like the conversion itself.
+        nbconvert = self._nbconvert_for_direct_run()
+        if nbconvert is not None:
+            try:
+                with tempfile.TemporaryDirectory(prefix="ash-nbconvert-cwd-") as empty:
+                    result = spawn_run(  # nosec B603 — list args, absolute path from find_executable_for_scan
+                        [nbconvert, "--version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        cwd=empty,
+                        env=child_environ(),
+                    )
+                if result.returncode == 0:
+                    ASH_LOGGER.debug(f"Found jupyter-nbconvert at {nbconvert}")
+                    return True
+            except (subprocess.SubprocessError, OSError):
+                # OSError covers a missing executable and a sandbox that refused the
+                # spawn (SandboxUnavailable).
+                pass
 
         ASH_LOGGER.warning(
             f"Converter {self.command} is not available. "
@@ -185,13 +289,24 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         Args:
             cmd: Command list to execute (should start with 'jupyter')
             timeout: Timeout in seconds
-            cwd: Working directory for nbconvert. It must not be the scanned tree:
-                nbconvert puts its working directory first on ``sys.path`` and reads
-                ``jupyter_nbconvert_config`` files from it. With no value, an empty
-                temporary directory is used.
+            cwd: Working directory for nbconvert. It must not be the scanned tree.
+                ``NbConvertApp.init_syspath`` puts the working directory first on
+                ``sys.path``, so a module there is importable by the exporter name a
+                notebook gives, and ``TemplateExporter.extra_template_basedirs``
+                defaults to it, so a ``python/`` or ``script/`` directory there
+                replaces the template nbconvert renders the output with. With no
+                value, an empty temporary directory is used.
 
         Returns:
-            True if execution succeeded, False otherwise
+            True if nbconvert succeeded, False if uv could not run it at all: uv is
+            unavailable, the runner raised, or the process did not start. Only then
+            does the caller fall back to running nbconvert directly; running it a
+            second time after it failed on the notebook would double the time and
+            report the second failure's reason.
+
+        Raises:
+            subprocess.CalledProcessError: nbconvert ran under uv and exited non-zero.
+            subprocess.TimeoutExpired: nbconvert ran under uv and did not finish.
         """
         if cwd is None:
             with tempfile.TemporaryDirectory(prefix="ash-nbconvert-cwd-") as empty:
@@ -208,7 +323,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
             # Check UV availability
             if not uv_runner.is_uv_available():
-                ASH_LOGGER.debug("UV is not available for nbconvert execution")
+                ASH_LOGGER.debug(
+                    f"{uv_runner.unavailable_reason()} for nbconvert execution"
+                )
                 return False
 
             # Extract jupyter arguments (skip 'jupyter')
@@ -234,19 +351,35 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 timeout=timeout,
             )
 
+            from automated_security_helper.utils.subprocess_utils import (
+                SpawnFailedProcess,
+                TimedOutProcess,
+            )
+
             if result.returncode == 0:
                 ASH_LOGGER.debug("jupyter execution via UV succeeded")
                 return True
-            else:
-                ASH_LOGGER.warning(
-                    f"jupyter execution via UV failed with exit code {result.returncode}"
-                )
-                if result.stderr:
-                    ASH_LOGGER.debug(
-                        f"jupyter stderr: {result.stderr}", extra=NO_MARKUP
-                    )
+            if isinstance(result, SpawnFailedProcess):
+                ASH_LOGGER.warning(f"uv could not be started: {result.stderr}")
                 return False
+            if _is_uv_error(result.stderr):
+                # uv's own failure (it prints "error: ..."), such as an environment
+                # it could not provide offline: nbconvert never ran.
+                ASH_LOGGER.warning(
+                    f"uv could not run nbconvert: {str(result.stderr).strip()}"
+                )
+                return False
+            if isinstance(result, TimedOutProcess):
+                raise subprocess.TimeoutExpired(
+                    result.args, timeout, result.stdout, result.stderr
+                )
+            raise subprocess.CalledProcessError(
+                result.returncode, result.args, result.stdout, result.stderr
+            )
 
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # nbconvert's own verdict on the notebook, not uv failing to start.
+            raise
         except UVToolRunnerError as e:
             ASH_LOGGER.warning(f"UV tool runner error for jupyter: {e}")
             return False
@@ -269,6 +402,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         ipynb_files = scan_set(
             source=self.context.source_dir,
             output=self.context.output_dir,
+            honor_ignore_files=honors_ignore_files(self.context.config),
         )
         return [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
 
@@ -312,10 +446,12 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
 
         The exporter is ASH's choice, by the notebook's language: ``python`` for a
         Python notebook or one that names no language, and nbconvert's generic
-        ``script`` otherwise. ``language_info.nbconvert_exporter`` is removed from the
-        copy, because nbconvert imports whatever class that names, and the notebook
-        is tree content. Content that is not a JSON object is copied unchanged and
-        left for nbconvert to reject.
+        ``script`` otherwise. Two ``language_info`` keys are removed from the copy,
+        because the notebook is tree content: ``nbconvert_exporter``, since nbconvert
+        imports whatever class it names, and ``file_extension`` unless it is a plain
+        extension, since the script exporter appends it to the output name. Content
+        that is not a JSON object is copied unchanged and left for nbconvert to
+        reject.
 
         Returns:
             The ``--to`` value to run nbconvert with.
@@ -334,35 +470,59 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 language = language_info.get("name")
                 if isinstance(language, str) and language.lower() not in ("", "python"):
                     exporter = "script"
-                if "nbconvert_exporter" in language_info:
-                    del language_info["nbconvert_exporter"]
+                removed = "nbconvert_exporter" in language_info
+                language_info.pop("nbconvert_exporter", None)
+                extension = language_info.get("file_extension")
+                if extension is not None and not (
+                    isinstance(extension, str) and _PLAIN_EXTENSION.fullmatch(extension)
+                ):
+                    del language_info["file_extension"]
+                    removed = True
+                if removed:
                     content = json.dumps(notebook).encode("utf-8")
         staged.write_bytes(content)
         return exporter
 
+    def _nbconvert_for_direct_run(self) -> Optional[str]:
+        """The ``jupyter-nbconvert`` to run when uv cannot run nbconvert, or None.
+
+        Looked up once, by :func:`find_executable_for_scan`, and run by that absolute
+        path: ``jupyter-nbconvert`` itself, so ASH's lookup is the only one. A copy
+        inside the scanned tree is refused here unless the operator allowed it.
+        """
+        if self._direct_nbconvert is None:
+            self._direct_nbconvert = lookup_for_scan(
+                self.command, self.context.source_dir
+            )
+        return self._direct_nbconvert[0]
+
     def _run_nbconvert(
         self,
         notebook: Path,
-        target_path: Path,
+        output_dir: Path,
         display: str,
         exporter: str = "python",
     ) -> None:
-        """Run nbconvert on ``notebook``, writing ``target_path``.
+        """Run nbconvert on ``notebook``, writing its output into ``output_dir``.
 
         nbconvert runs in the staged notebook's directory, which holds nothing but the
-        copy: it puts its working directory first on ``sys.path`` and reads
-        ``jupyter_nbconvert_config`` files from there, so it must not run in the
-        scanned tree.
+        copy. It must not run in the scanned tree: ``NbConvertApp.init_syspath`` puts
+        the working directory first on ``sys.path``, and
+        ``TemplateExporter.extra_template_basedirs`` defaults to it, so a module or a
+        template directory there would be used.
 
         Args:
             notebook: The staged copy to convert.
-            target_path: Where the converted script goes; nbconvert adds the suffix.
+            output_dir: An empty directory for nbconvert to write into. The output is
+                named after the copy, ``notebook`` plus the exporter's extension.
             display: The original notebook's path, for messages.
             exporter: The ``--to`` exporter, as :meth:`_stage_notebook` chose it.
 
         Raises:
             subprocess.CalledProcessError: nbconvert exited non-zero.
             subprocess.TimeoutExpired: nbconvert did not finish in time.
+            FileNotFoundError: uv could not run nbconvert and no jupyter-nbconvert
+                was found to run it with.
         """
         run_dir = notebook.parent
         cmd = [
@@ -372,32 +532,128 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             "WARN",
             "--to",
             exporter,
-            str(notebook),
+            # nbconvert expands each notebook argument with glob.glob. The name is
+            # fixed, but the staging directory's path comes from TMPDIR.
+            glob.escape(str(notebook)),
             "--output",
-            # Absolute, because nbconvert no longer runs in ASH's working directory.
-            # nbconvert adds the .py itself.
-            str(target_path.with_suffix("").absolute()),
+            notebook.stem,
+            "--output-dir",
+            str(output_dir),
         ]
 
+        # Under a sandbox, nbconvert's own entry point, run directly: the executable
+        # the dependency check found. `uv tool run` writes uv's tools directory, which
+        # the sandbox mounts read-only (measured with uv 0.12: "Could not create
+        # temporary file"), and `uv tool install nbconvert` installs no `jupyter`
+        # launcher.
+        sandboxed = sandbox_requested(self.context)
         # Execute using UV tool runner if available, otherwise direct execution
-        if self.use_uv_tool:
+        if not sandboxed and self.use_uv_tool:
             if self._execute_nbconvert_via_uv(cmd, timeout=60, cwd=run_dir):
                 return
             ASH_LOGGER.warning(
                 f"UV tool execution failed for {display}, trying direct execution"
             )
-        result = subprocess.run(  # nosec B603 — list args from validated nbconvert command
-            cmd,
+        nbconvert = self._nbconvert_for_direct_run()
+        if nbconvert is None:
+            refusal = self._direct_nbconvert[1] if self._direct_nbconvert else None
+            reason = refusal or "no jupyter-nbconvert executable was found on PATH"
+            raise _NbconvertNotRun(
+                reason if sandboxed else f"uv could not run nbconvert, and {reason}"
+            )
+        direct = [nbconvert, *cmd[2:]]
+        result = spawn_run(  # nosec B603 — list args, absolute path from find_executable_for_scan
+            direct,
             capture_output=True,
             text=True,
             timeout=60,
             cwd=run_dir,
-            env=snapshot_environ(),
+            env=child_environ(),
         )
         if result.returncode != 0:
             raise subprocess.CalledProcessError(
-                result.returncode, cmd, result.stdout, result.stderr
+                result.returncode, direct, result.stdout, result.stderr
             )
+
+    @staticmethod
+    def _move_output(output_dir: Path, target_base: Path) -> Optional[Path]:
+        """Move nbconvert's output to ``target_base`` plus its extension.
+
+        nbconvert names its output after the staged copy: ``notebook.py`` from the
+        python exporter, and from the script exporter ``notebook`` plus the
+        notebook's ``file_extension`` (``.r`` for R). The extension is kept, so the
+        converted file of an R notebook is ``<name>-converted.r``, as it was when
+        nbconvert wrote it there itself.
+
+        Returns:
+            The converted file, or None when nbconvert did not write exactly one.
+        """
+        written = [
+            entry
+            for entry in output_dir.iterdir()
+            if (entry.name == _STAGED_NAME or entry.name.startswith(f"{_STAGED_NAME}."))
+            and entry.is_file()
+            and not entry.is_symlink()
+        ]
+        if len(written) != 1:
+            return None
+        (produced,) = written
+        target = target_base.with_name(
+            target_base.name + produced.name[len(_STAGED_NAME) :]
+        )
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Created fresh and never through a link: anything already at the name is
+        # removed, O_EXCL refuses whatever appears in its place, and fs_guard
+        # follows no link at a directory below the output directory either.
+        target.unlink(missing_ok=True)
+        with (
+            open_for_write(target, binary=True, mode=0o644, exclusive=True) as out,
+            produced.open("rb") as source,
+        ):
+            shutil.copyfileobj(source, out)
+        return target
+
+    def _conversion_scope(self, staging_dir: Path) -> ContextManager[None]:
+        """Where one notebook's nbconvert runs: sandboxed like a scanner, or as is.
+
+        Under a sandbox, nbconvert gets a scanner's policy: no network unless
+        ``sandbox.network_scanners`` names this converter, the environment allowlist,
+        the staged copy and the tool readable, and only this converter's results
+        directory writable. ``staging_dir`` is the scan target, so the copy is
+        readable; ``sandbox_requirements`` leaves the source and output directories
+        out of the read paths.
+
+        Raises:
+            SandboxUnavailable: A sandbox was requested and cannot be provided.
+        """
+        if not sandbox_requested(self.context):
+            return nullcontext()
+        return sandbox_scope(scanner_sandbox_scope(self, self.context, staging_dir))
+
+    def _refuse_unconfinable(self, ipynb_file: str, reason: str) -> None:
+        """Record a notebook nbconvert was not run on because it could not be confined.
+
+        The sandbox refused it: no backend could be used, or the backend could not
+        plan this one spawn. Kept with the other refused inputs on the converter's
+        row, and as a failed input, which the completeness gate counts as lost
+        coverage, as it counts a scanner that cannot be sandboxed.
+        """
+        display = relative_display(ipynb_file, self.context.source_dir)
+        why = f"nbconvert was not run on it, the scanner sandbox refused it: {reason}"
+        self.record_refused_input(TreeInputRefused(display, why))
+        self.record_failed_input(ipynb_file, why)
+
+    def _record_failure(self, ipynb_file: str, reason: str) -> None:
+        """Record a notebook nbconvert ran on and did not convert.
+
+        Recorded with or without a sandbox, and the completeness gate counts it as
+        lost coverage either way: its contents reached no scanner. Under a sandbox
+        the reason says so, since the confinement can be the cause.
+        """
+        where = " under the scanner sandbox" if sandbox_requested(self.context) else ""
+        self.record_failed_input(ipynb_file, f"{reason}{where}")
 
     def convert(self) -> List[Path]:
         """Converts Jupyter notebooks (.ipynb files) in the source_dir to Python files using CLI.
@@ -431,13 +687,16 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     ASH_LOGGER.debug(f"Skipping directory: {ipynb_file}")
                     skip_item = True
                 else:
-                    for ignore_path in self.context.config.global_settings.ignore_paths:
+                    for ignore_path in ignore_paths_that_skip_scanning(
+                        self.context.config.global_settings.ignore_paths,
+                        ignore_suppressions=self.context.ignore_suppressions,
+                    ):
                         rel_path = (
                             Path(ipynb_file)
                             .relative_to(self.context.source_dir)
                             .as_posix()
                         )
-                        if path_matches_pattern(rel_path, ignore_path.path):
+                        if ignore_path_matches(rel_path, ignore_path.path):
                             ASH_LOGGER.debug(
                                 f"Skipping conversion of ignored path: {ipynb_file} due to global ignore_path '{ignore_path.path}' with reason '{ignore_path.reason}'"
                             )
@@ -449,13 +708,13 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 ASH_LOGGER.debug(f"Converting {ipynb_file} to .py")
                 short_ipynb_file = get_shortest_name(ipynb_file)
                 normalized_ipynb_file = get_normalized_filename(short_ipynb_file)
-                # Ensure the target path has a .py extension (remove .ipynb and add -converted.py)
+                # The converted file is <name>-converted plus the exporter's extension,
+                # .py for a Python notebook; see _move_output.
                 filename_base = normalized_ipynb_file.replace(".ipynb", "")
-                target_path = self.results_dir.joinpath(f"{filename_base}-converted.py")
-                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_base = self.results_dir.joinpath(f"{filename_base}-converted")
 
                 ASH_LOGGER.verbose(
-                    f"Converting {ipynb_file} to target_path: {Path(target_path).as_posix()}"
+                    f"Converting {ipynb_file} to target_path: {target_base.as_posix()}"
                 )
 
                 # Opened under the scanned-tree rule. nbconvert is given a copy made
@@ -467,37 +726,64 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     self.record_refused_input(refused)
                     continue
 
+                # The copy is staged as run/notebook.ipynb in a private directory
+                # outside the tree, and nbconvert, run in run/, which holds nothing
+                # but the copy, writes into a fresh directory under the converter's
+                # results directory: the one place a scanner sandbox lets it write.
+                self.results_dir.mkdir(parents=True, exist_ok=True)
                 with (
                     notebook_handle,
                     tempfile.TemporaryDirectory(prefix="ash-nbconvert-") as staging_dir,
+                    tempfile.TemporaryDirectory(
+                        prefix=".ash-nbconvert-out-", dir=self.results_dir
+                    ) as nbconvert_out,
                 ):
-                    staged_notebook = Path(staging_dir).joinpath(Path(ipynb_file).name)
+                    confinement = self._conversion_scope(Path(staging_dir))
+                    run_dir = Path(staging_dir).joinpath("run")
+                    run_dir.mkdir()
+                    output_dir = Path(nbconvert_out)
+                    staged_notebook = run_dir.joinpath(f"{_STAGED_NAME}.ipynb")
                     exporter = self._stage_notebook(
                         notebook_handle.read(), staged_notebook
                     )
-                    self._run_nbconvert(
-                        staged_notebook, target_path, ipynb_file, exporter
-                    )
+                    with confinement:
+                        self._run_nbconvert(
+                            staged_notebook, output_dir, ipynb_file, exporter
+                        )
+                    converted = self._move_output(output_dir, target_base)
 
-                # Check if the converted file was created
-                if target_path.exists():
-                    results.append(target_path)
-                    ASH_LOGGER.debug(
-                        f"Successfully converted {ipynb_file} to {target_path}"
+                if converted is None:
+                    self._record_failure(
+                        ipynb_file, "nbconvert exited 0 but wrote no output"
                     )
-                else:
-                    ASH_LOGGER.warning(
-                        f"Conversion completed but output file not found: {target_path}"
-                    )
+                    continue
+                results.append(converted)
+                ASH_LOGGER.debug(f"Successfully converted {ipynb_file} to {converted}")
 
-            except subprocess.TimeoutExpired:
-                ASH_LOGGER.error(f"Timeout converting {ipynb_file}")
+            # The scope could not be built, or the backend refused the spawn.
+            except SandboxUnavailable as refusal:
+                self._refuse_unconfinable(ipynb_file, str(refusal))
+            # Every failure is recorded, not only logged: the completeness gate reads
+            # failed_inputs, and a notebook that was not converted is coverage lost.
+            except _NbconvertNotRun as e:
+                self._record_failure(ipynb_file, f"FileNotFoundError: {e}")
+            except subprocess.TimeoutExpired as e:
+                self._record_failure(
+                    ipynb_file, f"nbconvert did not finish within {e.timeout}s"
+                )
             except subprocess.CalledProcessError as e:
-                ASH_LOGGER.error(f"Error converting {ipynb_file}: {e}")
+                self._record_failure(
+                    ipynb_file, f"nbconvert exited with code {e.returncode}"
+                )
                 if e.stderr:
                     ASH_LOGGER.debug(f"nbconvert stderr: {e.stderr}", extra=NO_MARKUP)
             except Exception as e:
-                ASH_LOGGER.error(f"Unexpected error converting {ipynb_file}: {e}")
+                # The type only: the message of an error raised reading the
+                # notebook can quote its content, and a failed input's reason is
+                # recorded without the input's content.
+                self._record_failure(
+                    ipynb_file, f"conversion raised {type(e).__name__}"
+                )
                 import traceback
 
                 ASH_LOGGER.debug(

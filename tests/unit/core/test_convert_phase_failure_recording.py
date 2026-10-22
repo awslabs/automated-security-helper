@@ -426,3 +426,107 @@ class TestEveryConstructedConverterAppears:
             "disabled-converter",
             "_UnconstructableConverter",
         }
+
+
+class _FailingInputsConverterConfig(ConverterPluginConfigBase):
+    name: Literal["failing-inputs-converter"] = "failing-inputs-converter"
+
+
+class _FailingInputsConverter(ConverterPluginBase[_FailingInputsConverterConfig]):
+    """Ran, but could not convert any of its inputs: what nbconvert failing looks like."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _FailingInputsConverterConfig()
+        return super().model_post_init(context)
+
+    def convert(self, target: Path | str | None = None) -> List[Path]:
+        self.record_failed_input(self.context.source_dir / "a.ipynb", "exited 1")
+        self.record_failed_input(self.context.source_dir / "b.ipynb", "timed out")
+        return []
+
+
+class _PartlyFailingConverterConfig(ConverterPluginConfigBase):
+    name: Literal["partly-failing-converter"] = "partly-failing-converter"
+
+
+class _PartlyFailingConverter(ConverterPluginBase[_PartlyFailingConverterConfig]):
+    """Converted one input and could not convert another."""
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _PartlyFailingConverterConfig()
+        return super().model_post_init(context)
+
+    def convert(self, target: Path | str | None = None) -> List[Path]:
+        self.record_failed_input(self.context.source_dir / "b.ipynb", "timed out")
+        return [Path("converted/a.py")]
+
+
+class TestFailedInputsAreNotReportedAsNothingToConvert:
+    """A converter whose inputs failed did have files to convert; the messages say so."""
+
+    @staticmethod
+    def _run_observed(plugin_context, plugins):
+        progress = _progress_stub()
+        agg = AshAggregatedResults(
+            name="test", description="test", ash_config=plugin_context.config
+        )
+        phase = ConvertPhase(
+            plugins=plugins,
+            plugin_context=plugin_context,
+            progress_display=progress,
+            asharp_model=agg,
+        )
+        events: list = []
+        phase.notify_event = lambda event, **kwargs: events.append((event, kwargs))
+        phase.execute(aggregated_results=agg)
+        descriptions = [
+            call.kwargs.get("description", "")
+            for call in progress.update_task.call_args_list
+        ]
+        complete = [
+            kwargs["message"]
+            for event, kwargs in events
+            if str(event).endswith("CONVERT_COMPLETE")
+        ]
+        return descriptions, complete
+
+    def test_every_input_failing(self, plugin_context):
+        descriptions, complete = self._run_observed(
+            plugin_context, [_FailingInputsConverter]
+        )
+
+        mine = [d for d in descriptions if "failing-inputs-converter" in d]
+        assert mine and all("No files to convert" not in d for d in mine), mine
+        assert any("2 files could not be converted" in d for d in mine), mine
+        assert complete == [
+            (
+                "Converter failing-inputs-converter completed: 2 files could not be "
+                "converted"
+            )
+        ]
+
+    def test_some_inputs_failing(self, plugin_context):
+        descriptions, complete = self._run_observed(
+            plugin_context, [_PartlyFailingConverter]
+        )
+
+        mine = [d for d in descriptions if "partly-failing-converter" in d]
+        assert any(
+            "Converted 1 files" in d and "1 file could not be converted" in d
+            for d in mine
+        ), mine
+        assert complete == [
+            (
+                "Converter partly-failing-converter completed: 1 files converted, "
+                "1 file could not be converted"
+            )
+        ]
+
+    def test_nothing_to_convert_still_says_so(self, plugin_context):
+        """The positive control: an empty run keeps its message."""
+        descriptions, complete = self._run_observed(plugin_context, [_EmptyConverter])
+
+        assert any("No files to convert" in d for d in descriptions), descriptions
+        assert complete == ["Converter empty-converter completed: no files to convert"]

@@ -25,6 +25,9 @@ additional_reports:
     source:
       duration: 0.25
       end_time: '2026-01-15T12:00:18.500000Z'
+      errors:
+      - 'infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation
+        template'
       finding_count: 0
       metadata:
         scanner_version: 0.8.10
@@ -123,12 +126,17 @@ ash_config:
   ash_plugin_modules: []
   build: null
   content_db_staleness: fail
+  content_db_staleness_offline_image_default: true
   content_db_staleness_overrides: []
   converters:
     archive:
       enabled: true
       name: archive
-      options: {}
+      options:
+        max_compression_ratio: 100
+        max_member_bytes: 268435456
+        max_members: 100000
+        max_total_bytes: 1073741824
     jupyter:
       enabled: true
       name: jupyter
@@ -148,19 +156,111 @@ ash_config:
         - /fail_on_incomplete_scanners
         - /content_db_staleness
         - /content_db_staleness_overrides
+        - /honor_ignore_files
+        - /content_db_staleness_offline_image_default
         - /sandbox
         - /sandbox/**
         - /ash_plugin_modules
         - /ash_plugin_modules/**
+        - /scanners/detect-secrets/options/scan_settings/filters_used
+        - /scanners/detect-secrets/options/scan_settings/filters_used/**
+        - /scanners/detect-secrets/options/scan_settings/plugins_used
+        - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+        - /scanners/detect-secrets/options/baseline_file
         - /global_settings/ignore_paths
         - /global_settings/suppressions
+        - /global_settings/mcp
+        - /global_settings/mcp/**
+        - /scanners/opengrep/options/exclude_rule
+        - /scanners/semgrep/options/exclude_rule
+        - /scanners/bandit/options/confidence_level
+        - /scanners/checkov/options/frameworks
+        - /scanners/checkov/options/skip_frameworks
+        - /scanners/opengrep/options/config
+        - /scanners/opengrep/options/patterns
+        - /scanners/opengrep/options/severity
+        - /scanners/semgrep/options/config
+        - /scanners/semgrep/options/severity
+        - /scanners/detect-secrets/options/scan_settings
+        - /scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks
+        - /scanners/ferret-scan/options/checks
+        - /scanners/ferret-scan/options/confidence_levels
+        - /scanners/ferret-scan/options/disable_ip_types
+        - /scanners/ferret-scan/options/enable_preprocessors
+        - /scanners/ferret-scan/options/finding_limit
+        - /scanners/ferret-scan/options/profile
+        - /scanners/ferret-scan/options/recursive
+        - /scanners/ferret-scan/options/respect_gitignore
+        - /scanners/ferret-scan/options/use_default_config
+        - /scanners/ferret-scan/options/validator_budget
+        - /scanners/trivy-repo/options/license_full
+        - /scanners/trivy-repo/options/scanners
+        - /scanners/cfn-guard/options/rule_sets
+        - /scanners/cfn-lint/options/ignore_checks
+        - /scanners/cfn-lint/options/regions
+        - /scanners/gitleaks/options/baseline_path
+        - /scanners/trivy/options/scanners
+        - /scanners/trivy/options/ignore_unfixed
+        - /scanners/*/options/offline
+        - /scanners/ferret-scan/options/max_live_bytes
+        - /scanners/gitleaks/options/max_target_megabytes
+        - /scanners/bandit/options/config_file
+        - /scanners/checkov/options/config_file
+        - /scanners/ferret-scan/options/config_file
+        - /scanners/grype/options/config_file
+        - /scanners/syft/options/config_file
+        - /scanners/trivy-repo/options/secret_config_file
+        - /scanners/trivy-repo/options/config_file
+        - /scanners/trivy-repo/options/module_dir
+        - /scanners/trivy/options/config_file
+        - /scanners/trivy/options/secret_config_file
+        - /scanners/actionlint/options/config_file
+        - /scanners/actionlint/options/shellcheck
+        - /scanners/actionlint/options/pyflakes
+        - /scanners/cfn-guard/options/rules_paths
+        - /scanners/cfn-lint/options/config_file
+        - /scanners/gitleaks/options/config_file
+        - /scanners/zizmor/options/config_file
+        - /scanners/zizmor/options/online_audits
+        - /scanners/snyk-code/options/honor_tree_exclusions
+        - /scanners/cfn-lint/options/honor_inline_ignores
+        - /scanners/gitleaks/options/honor_inline_ignores
+        - /scanners/zizmor/options/honor_inline_ignores
+        - /scanners/*/options/tool_version
+        - /converters/jupyter/options/tool_version
+        - /scanners/opengrep/options/version
+        - /scanners/opengrep/options/sha256
+        - /scanners/opengrep/options/metrics
+        - /scanners/semgrep/options/metrics
         - /reporters/bedrock-summary-reporter/options/aws_*
         - /reporters/cloudwatch-logs/**
+        - /reporters/aws-security-hub/**
+        - /reporters/bedrock-summary-reporter/options/model_id
+        - /reporters/bedrock-summary-reporter/options/output_file
+        - /reporters/bedrock-summary-reporter/options/output_executive_file
+        - /reporters/bedrock-summary-reporter/options/output_technical_file
+        - /reporters/s3/**
+        - /reporters/bedrock-summary-reporter/**
+        - /reporters/gitlab-sast/options/exclude_suppressed
+        - /scanners/detect-secrets/**
+        - /scanners/npm-audit/**
+        - /scanners/opengrep/**
+        - /scanners/semgrep/**
+        - /scanners/snyk-code/**
+        - /scanners/trivy-repo/**
+        - /scanners/trivy/**
+        - /scanners/zizmor/**
+        - /converters/archive/options/max_members
+        - /converters/archive/options/max_member_bytes
+        - /converters/archive/options/max_total_bytes
+        - /converters/archive/options/max_compression_ratio
         denied_value_patterns: {}
         enabled: false
+        replace_default_denied_paths: false
     severity_threshold: MEDIUM
     suppressions:
-    - expiration: null
+    - client_supplied: false
+      expiration: null
       line_end: 5
       line_start: 5
       package_name: null
@@ -170,7 +270,8 @@ ash_config:
       reason: Fixture placeholder credential, not a real secret
       rule_id: SECRET-SECRET-KEYWORD
       symbol: null
-    - expiration: '2099-12-31'
+    - client_supplied: false
+      expiration: '2099-12-31'
       line_end: null
       line_start: null
       package_name: null
@@ -180,12 +281,14 @@ ash_config:
       reason: Stale suppression for a check that no longer exists
       rule_id: CKV_AWS_999
       symbol: null
+  honor_ignore_files: true
   mcp-resource-management:
     enable_health_checks: true
     enable_resource_logging: true
     health_check_interval_seconds: 60
     log_resource_operations: false
     max_concurrent_scans: 3
+    max_concurrent_scans_per_session: 2
     max_concurrent_tasks: 20
     max_directory_size_mb: 1000
     max_message_size_bytes: 10485760
@@ -298,10 +401,21 @@ ash_config:
       name: yaml
       options: {}
   sandbox:
+    env_scanners: []
     extra_read_paths: []
     mode: 'off'
     network_scanners: null
+    read_path_scanners: []
   scanners:
+    actionlint:
+      enabled: true
+      name: actionlint
+      options:
+        config_file: null
+        pyflakes: null
+        scan_timeout: 1800
+        severity_threshold: null
+        shellcheck: null
     bandit:
       enabled: true
       name: bandit
@@ -328,6 +442,28 @@ ash_config:
           PCIDSS321Checks: false
         scan_timeout: 1800
         severity_threshold: null
+    cfn-guard:
+      enabled: true
+      name: cfn-guard
+      options:
+        rule_sets:
+        - wa-Security-Pillar
+        rules_paths: []
+        scan_timeout: 1800
+        severity_threshold: null
+    cfn-lint:
+      enabled: true
+      name: cfn-lint
+      options:
+        config_file: null
+        honor_inline_ignores: false
+        ignore_checks: []
+        include_checks: []
+        install_timeout: 300
+        regions: []
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.43.3,<2.0.0'
     cfn-nag:
       enabled: true
       name: cfn-nag
@@ -365,6 +501,16 @@ ash_config:
         scan_timeout: 1800
         severity_threshold: null
         skip_generated_lockfiles: true
+    gitleaks:
+      enabled: true
+      name: gitleaks
+      options:
+        baseline_path: null
+        config_file: null
+        honor_inline_ignores: false
+        max_target_megabytes: null
+        scan_timeout: 1800
+        severity_threshold: null
     grype:
       enabled: true
       name: grype
@@ -424,6 +570,33 @@ ash_config:
         offline: false
         scan_timeout: 1800
         severity_threshold: null
+    trivy:
+      enabled: true
+      name: trivy
+      options:
+        config_file: null
+        disable_telemetry: true
+        ignore_file: null
+        ignore_unfixed: false
+        license_full: false
+        offline: false
+        scan_timeout: 1800
+        scanners:
+        - vuln
+        secret_config_file: null
+        severity_threshold: null
+    zizmor:
+      enabled: true
+      name: zizmor
+      options:
+        config_file: null
+        honor_inline_ignores: false
+        install_timeout: 300
+        online_audits: false
+        persona: regular
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.29.0,<2.0.0'
   workspace:
     max_parallel_projects: null
     project_timeout: null
@@ -605,6 +778,8 @@ metadata:
   execution_discrepancy_report: {}
   expected_scanners: []
   generated_at: '2026-01-15T12:00:00+00:00'
+  ignore_file_exclusions: null
+  inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: ASH
   report_id: ASH-20260115
@@ -791,7 +966,7 @@ sarif:
         id: null
         markdown: null
         properties: null
-        text: 'Possible hardcoded password: ''hunter2-not-a-real-secret'''
+        text: 'Possible hardcoded password: ''hu**********************t'''
       occurrenceCount: null
       partialFingerprints: null
       properties:
@@ -2009,6 +2184,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 1
@@ -2022,9 +2198,10 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.0
-    excluded: false
+    excluded: true
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2041,6 +2218,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2057,6 +2235,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 4
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 1
@@ -2073,6 +2252,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2089,6 +2269,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 1
       high: 0
@@ -2100,11 +2281,12 @@ scanner_results:
     suppressed_finding_count: 0
   npm-audit:
     actionable_finding_count: 0
-    dependencies_satisfied: true
+    dependencies_satisfied: false
     duration: 0.0
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2121,6 +2303,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2137,6 +2320,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2146,6 +2330,11 @@ scanner_results:
       suppressed: 0
     status: PASSED
     suppressed_finding_count: 0
+secret_value_shapes:
+- length: 25
+  prefix: hu
+  spans_whitespace: false
+  suffix: t
 used_suppressions:
 - app/app.py|SECRET-SECRET-KEYWORD|5|5
 validation_checkpoints: []

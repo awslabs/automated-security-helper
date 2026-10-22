@@ -88,6 +88,17 @@ class MCScanStatus(Enum):
 #: ``coverage_complete`` is the separate answer to "did it cover everything".
 FINISHED_WITH_RESULTS = frozenset({MCScanStatus.COMPLETED, MCScanStatus.INCOMPLETE})
 
+#: The session a scan belongs to when its registrar named none: stdio's single
+#: client and in-process callers. The same value as
+#: ``cli.mcp.profile_registry.DEFAULT_SESSION_ID``, spelled here rather than
+#: imported because this module sits below the MCP CLI package.
+DEFAULT_SCAN_SESSION = "__default__"
+
+
+def _owner(session_id: Optional[str]) -> str:
+    """The session a registry entry is recorded under, or looked up for."""
+    return session_id or DEFAULT_SCAN_SESSION
+
 
 def _empty_coverage() -> Dict[str, Any]:
     """The coverage payload of a scan with no gap to report."""
@@ -110,6 +121,7 @@ class ScanRegistryEntry:
         output_directory: str,
         severity_threshold: str = "MEDIUM",
         config_path: Optional[str] = None,
+        session_id: Optional[str] = None,
     ):
         """
         Initialize a scan registry entry.
@@ -120,8 +132,12 @@ class ScanRegistryEntry:
             output_directory: Path to the output directory for scan results
             severity_threshold: Minimum severity threshold for findings
             config_path: Optional path to ASH configuration file
+            session_id: The MCP session that started the scan. Only that session
+                sees the entry through a session-scoped lookup. Not part of
+                ``to_dict``: the owner is never reported, not even to itself.
         """
         self.scan_id = scan_id
+        self.session_id = _owner(session_id)
         self.directory_path = directory_path
         self.output_directory = output_directory
         self.start_time = datetime.now()
@@ -229,6 +245,7 @@ class ScanRegistry:
         severity_threshold: str = "MEDIUM",
         config_path: Optional[str] = None,
         scan_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> str:
         """
         Register a new scan in the registry.
@@ -239,6 +256,8 @@ class ScanRegistry:
             severity_threshold: Minimum severity threshold for findings
             config_path: Optional path to ASH configuration file
             scan_id: Optional scan ID to use (generated if not provided)
+            session_id: The MCP session starting the scan; None records it under
+                :data:`DEFAULT_SCAN_SESSION`.
 
         Returns:
             Scan ID for the registered scan
@@ -311,17 +330,23 @@ class ScanRegistry:
             # scans, not about a directory ever having been scanned: without it,
             # the first scan of a directory would permanently block every later
             # one.
+            #
+            # The refusal names the running scan's id only to the session that
+            # owns it. Another session is told the directory is busy, which it
+            # needs to know, and nothing that would let it address that scan.
             requested = _canonical_directory(directory_path)
             for entry in self._registry.values():
                 if (
                     _canonical_directory(entry.directory_path) == requested
                     and entry.is_active()
                 ):
+                    context: Dict[str, Any] = {"directory_path": directory_path}
+                    if entry.session_id == _owner(session_id):
+                        context["scan_id"] = entry.scan_id
                     raise MCPResourceError(
                         f"Directory {directory_path} already has an active scan",
                         context={
-                            "directory_path": directory_path,
-                            "scan_id": entry.scan_id,
+                            **context,
                             "error_category": ErrorCategory.RESOURCE_EXHAUSTED.value,
                             "suggestions": [
                                 "Wait for the existing scan to complete",
@@ -339,6 +364,7 @@ class ScanRegistry:
                     output_directory=output_directory,
                     severity_threshold=severity_threshold,
                     config_path=config_path,
+                    session_id=session_id,
                 )
                 self._registry[scan_id] = entry
                 self._logger.info(
@@ -362,18 +388,39 @@ class ScanRegistry:
                     },
                 )
 
-    def get_scan(self, scan_id: str) -> Optional[ScanRegistryEntry]:
+    def get_scan(
+        self, scan_id: str, session_id: Optional[str] = None
+    ) -> Optional[ScanRegistryEntry]:
         """
         Get a scan entry by ID.
 
         Args:
             scan_id: ID of the scan to retrieve
+            session_id: When given, only that session's scan is returned; another
+                session's id answers exactly like an id that was never issued.
+                None is the unscoped lookup the scan runners use.
 
         Returns:
             Scan registry entry or None if not found
         """
         with self._registry_lock:
-            return self._registry.get(scan_id)
+            return self._visible(scan_id, session_id)
+
+    def _visible(
+        self, scan_id: str, session_id: Optional[str]
+    ) -> Optional[ScanRegistryEntry]:
+        """The entry for ``scan_id`` as ``session_id`` may see it. Caller holds the lock."""
+        entry = self._registry.get(scan_id)
+        if entry is None or session_id is None:
+            return entry
+        return entry if entry.session_id == _owner(session_id) else None
+
+    def _entries_for(self, session_id: Optional[str]) -> List[ScanRegistryEntry]:
+        """Every entry ``session_id`` may see; all of them for None. Caller holds the lock."""
+        if session_id is None:
+            return list(self._registry.values())
+        owner = _owner(session_id)
+        return [e for e in self._registry.values() if e.session_id == owner]
 
     def get_scan_by_directory(self, directory_path: str) -> Optional[ScanRegistryEntry]:
         """
@@ -488,7 +535,10 @@ class ScanRegistry:
             return True
 
     def list_scans(
-        self, active_only: bool = False, directory_path: Optional[str] = None
+        self,
+        active_only: bool = False,
+        directory_path: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         List scans in the registry.
@@ -496,6 +546,7 @@ class ScanRegistry:
         Args:
             active_only: If True, only list active scans
             directory_path: Optional directory path to filter by
+            session_id: When given, only that session's scans are listed
 
         Returns:
             List of scan entries as dictionaries
@@ -507,7 +558,7 @@ class ScanRegistry:
         requested = _canonical_directory(directory_path) if directory_path else None
         with self._registry_lock:
             result = []
-            for entry in self._registry.values():
+            for entry in self._entries_for(session_id):
                 if active_only and not entry.is_active():
                     continue
                 if (
@@ -518,12 +569,14 @@ class ScanRegistry:
                 result.append(entry.to_dict())
             return result
 
-    def cancel_scan(self, scan_id: str) -> bool:
+    def cancel_scan(self, scan_id: str, session_id: Optional[str] = None) -> bool:
         """
         Cancel a scan.
 
         Args:
             scan_id: ID of the scan to cancel
+            session_id: When given, only that session's scan can be cancelled;
+                another session's id is treated as not found.
 
         Returns:
             True if the scan was cancelled, False if not found or already completed
@@ -532,7 +585,7 @@ class ScanRegistry:
             MCPResourceError: If the scan cannot be cancelled
         """
         with self._registry_lock:
-            entry = self._registry.get(scan_id)
+            entry = self._visible(scan_id, session_id)
             if entry is None:
                 return False
 
@@ -628,45 +681,62 @@ class ScanRegistry:
 
             return len(scans_to_remove)
 
-    def get_active_scan_count(self) -> int:
+    def get_active_scan_count(self, session_id: Optional[str] = None) -> int:
         """
         Get the number of active scans.
+
+        Args:
+            session_id: When given, count only that session's scans
 
         Returns:
             Number of active scans
         """
         with self._registry_lock:
-            return sum(1 for entry in self._registry.values() if entry.is_active())
+            return sum(
+                1 for entry in self._entries_for(session_id) if entry.is_active()
+            )
 
-    def get_scan_count(self) -> int:
+    def get_scan_count(self, session_id: Optional[str] = None) -> int:
         """
         Get the total number of scans in the registry.
+
+        Args:
+            session_id: When given, count only that session's scans
 
         Returns:
             Total number of scans
         """
         with self._registry_lock:
-            return len(self._registry)
+            return len(self._entries_for(session_id))
 
-    def get_scan_status_counts(self) -> Dict[str, int]:
+    def get_scan_status_counts(
+        self, session_id: Optional[str] = None
+    ) -> Dict[str, int]:
         """
         Get counts of scans by status.
+
+        Args:
+            session_id: When given, count only that session's scans
 
         Returns:
             Dictionary mapping status values to counts
         """
         with self._registry_lock:
             counts = {status.value: 0 for status in MCScanStatus}
-            for entry in self._registry.values():
+            for entry in self._entries_for(session_id):
                 counts[entry.status.value] += 1
             return counts
 
-    def check_scan_progress(self, scan_id: str) -> Dict[str, Any]:
+    def check_scan_progress(
+        self, scan_id: str, session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Check the progress of a scan.
 
         Args:
             scan_id: ID of the scan to check
+            session_id: When given, another session's scan is reported exactly
+                as an unknown id is
 
         Returns:
             Dictionary with scan progress information
@@ -686,7 +756,7 @@ class ScanRegistry:
             raise error
 
         with self._registry_lock:
-            entry = self._registry.get(scan_id)
+            entry = self._visible(scan_id, session_id)
             if entry is None:
                 raise MCPResourceError(
                     f"Scan {scan_id} not found in registry",

@@ -56,6 +56,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
 SCRIPTS = REPO_ROOT / "scripts"
@@ -78,26 +80,57 @@ def _attr_chain(node: ast.AST) -> str:
     return ".".join(reversed(parts))
 
 
-def _collect_env_names() -> tuple[set[str], list[str]]:
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    """Upper-case module-level names bound exactly once, to a string literal.
+
+    ``ALLOW_IN_TREE_TOOLS_ENV = "ASH_ALLOW_IN_TREE_TOOLS"`` read as
+    ``os.environ.get(ALLOW_IN_TREE_TOOLS_ENV)`` in the same module names a fixed
+    variable as surely as the literal would. A name bound twice, or to anything
+    but a string literal, stays unresolved and its lookups stay dynamic.
+    """
+    bound: dict[str, list[ast.AST]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.value is not None:
+                bound.setdefault(node.target.id, []).append(node.value)
+    return {
+        name: values[0].value
+        for name, values in bound.items()
+        if name.isupper()
+        and len(values) == 1
+        and isinstance(values[0], ast.Constant)
+        and isinstance(values[0].value, str)
+    }
+
+
+def _collect_env_names(root: Path = PACKAGE_ROOT) -> tuple[set[str], list[str]]:
     """Return (literal env names reachable in the package, dynamic key sites).
 
     The second element is the honesty valve. Every key expression that is not a
-    plain string literal lands there, and a caller that wants to assert a name is
-    absent must account for those sites rather than assume the literal set is
-    exhaustive.
+    plain string literal, or a module constant bound to one (see
+    _module_string_constants), lands there, and a caller that wants to assert a
+    name is absent must account for those sites rather than assume the literal
+    set is exhaustive.
     """
     literals: set[str] = set()
     dynamic: list[str] = []
 
-    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+    for path in sorted(root.rglob("*.py")):
         tree = ast.parse(
             path.read_text(encoding="utf-8", errors="replace"), filename=str(path)
         )
-        rel = path.relative_to(REPO_ROOT)
+        rel = path.relative_to(root.parent)
+        constants = _module_string_constants(tree)
 
         def record(key_node: ast.AST, shape: str, lineno: int) -> None:
             if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
                 literals.add(key_node.value)
+            elif isinstance(key_node, ast.Name) and key_node.id in constants:
+                literals.add(constants[key_node.id])
             else:
                 dynamic.append(f"{rel}:{lineno} [{shape}]")
 
@@ -217,6 +250,7 @@ def test_reporter_docs_are_current() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, (
         "Reporter documentation is stale relative to the registered reporter set.\n"
@@ -240,6 +274,7 @@ def test_mcp_tool_reference_is_current() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, (
         "The MCP tool reference is stale relative to the registered tool set.\n"
@@ -276,3 +311,28 @@ def test_documented_env_vars_exist() -> None:
             "test cannot resolve to a name and which could assemble one at runtime:\n  "
             + "\n  ".join(dynamic)
         )
+
+
+def test_a_module_constant_key_names_its_variable(tmp_path) -> None:
+    """Resolved only for an upper-case module constant bound once to a string."""
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "m.py").write_text(
+        "import os\n"
+        'FIXED = "ASH_FIXED"\n'
+        'TWICE = "ASH_ONE"\n'
+        'TWICE = "ASH_TWO"\n'
+        "os.environ.get(FIXED)\n"
+        "os.environ.get(TWICE)\n"
+        "def lookup(name):\n"
+        "    return os.environ.get(name)\n"
+    )
+
+    literals, dynamic = _collect_env_names(package)
+
+    assert "ASH_FIXED" in literals
+    assert not literals & {"ASH_ONE", "ASH_TWO"}
+    assert sorted(site.split(" ")[0].replace("\\", "/") for site in dynamic) == [
+        "pkg/m.py:6",
+        "pkg/m.py:8",
+    ]

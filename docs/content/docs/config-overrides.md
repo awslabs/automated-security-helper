@@ -182,10 +182,12 @@ ash config validate --config-overrides 'scanners.bandit.options.confidence_level
 ### Custom Plugins
 
 You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list.
-The top-level package must be inside ASH's plugin namespace: either under
-`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`
-(`my_ash_plugins`, `acme_ash_plugins`). A module outside that namespace is skipped with
-a warning rather than imported, so a name like `my_plugins` silently registers nothing.
+Each entry must be a dotted path of Python identifiers inside ASH's plugin namespace:
+under `automated_security_helper.` or `ash_plugins`, or a top-level package named
+`ash_plugins` or ending in `_ash_plugins` (`my_ash_plugins`, `acme_ash_plugins`). A
+name outside that namespace, such as `my_plugins`, ASH's plugin root
+`automated_security_helper.plugin_modules`, or a namespace package (a directory with no
+`__init__.py`) refuses the scan with exit code 3 before any module is imported.
 
 ```yaml
 ash_plugin_modules:
@@ -214,13 +216,39 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or `AWS_PROFILE`. A reference to
   any other name is left in the configuration exactly as written and a warning
   names it; ASH does not read the variable. The names are matched exactly, so
-  write them in upper case.
+  write them in upper case. An `ASH_` name that ends in `_KEY`, `_TOKEN`,
+  `_SECRET`, `_PASSWORD`, `_CREDENTIAL`, `_CREDENTIALS` or `_HEADER_VALUE`, in
+  any case, and `ASH_MCP_AUTH_HEADER_VALUE`, is left as written the same way:
+  a configuration file does not read a variable named for a credential. The
+  warning names the variable, never its value.
 
   ASH reads the configuration file it finds in the directory it is scanning, so
   which variables that file may name is ASH's decision rather than the file's.
   To reference a variable of your own, give it an `ASH_` prefix — `ASH_MY_BUCKET`
   rather than `MY_BUCKET` — and set it under that name wherever you run ASH.
 
-  A reference with no default, `${VAR_NAME}`, has never resolved and still does
-  not; write `${VAR_NAME:default_value}`. A reference must also be the whole
-  value, not part of a longer string.
+  A reference with no default, `${VAR_NAME}`, reads the variable too. When the
+  variable is not set, the configuration is refused with exit code 3 and the
+  error names the variable, since there is no value to use; write
+  `${VAR_NAME:None}`, or another default, for a variable that may be unset. This
+  holds in YAML, TOML and `pyproject.toml` alike. A reference must also be the
+  whole value, not part of a longer string.
+
+  The scan, and the reports it renders, use the value. What ASH writes of the
+  configuration holds the reference as the file wrote it instead: the
+  `ash_config` a scan records in `ash_aggregated_results.json`, the merged
+  results, what an off-host reporter sends, `ash config get`, and the MCP
+  `get_config` tool, which shows `<from ${VAR_NAME}>`. Debug output names a
+  section's keys, never its values. A reference whose variable is unset records
+  the default the file wrote. `ash merge` and `ash report` do not read the
+  environment for a recorded reference. A field that takes a fixed choice, a
+  boolean or a number, such as `global_settings.severity_threshold`, cannot hold
+  one, so they exit 3 and name the field until you supply it, as in
+  `--config-overrides 'global_settings.severity_threshold=MEDIUM'` or in the
+  file `--config` names.
+
+  Under the MCP server, a configuration file an MCP client delivered may not use
+  `!ENV` at all, whatever the name, and for a remote client neither may any other
+  file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own `config/`
+  directory, a scan target's own config included; see
+  [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).

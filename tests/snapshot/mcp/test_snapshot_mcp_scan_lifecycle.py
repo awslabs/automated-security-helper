@@ -225,7 +225,7 @@ async def test_progress_errors(allowed, monkeypatch, snapshot, snapshot_normaliz
     snapshot_normalizer.add_literal(scan_id, "SCAN_ID")
 
     class _Emptied:
-        def get_scan(self, _scan_id):
+        def get_scan(self, _scan_id, session_id=None):
             return None
 
     monkeypatch.setattr(mcp_server, "get_scan_registry", lambda: _Emptied())

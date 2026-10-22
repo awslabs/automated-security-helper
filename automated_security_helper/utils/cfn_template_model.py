@@ -85,6 +85,9 @@ class CloudFormationTemplateModel(BaseModel):
         extra="allow",
         validate_assignment=True,
         validate_default=True,
+        # A template is scanned content, which an error does not quote
+        # (describe_parse_error).
+        hide_input_in_errors=True,
     )
 
     Resources: Dict[str, CloudFormationResource]

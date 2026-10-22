@@ -1,0 +1,66 @@
+<testsuites name="ASH Scan Report"><testsuite name="trivy" tests="10" errors="10" failures="0" skipped="0" time="0"><testcase name="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2021-23337&#10;Severity: HIGH&#10;Fixed Version: 4.17.21&#10;Link: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337) [CVE-2021-23337]" classname="CVE-2021-23337"><error message="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2021-23337&#10;Severity: HIGH&#10;Fixed Version: 4.17.21&#10;Link: [CVE-2021-23337](https://avd.aquasec.com/nvd/cve-2021-23337)" type="error" /><system-out>tags: ['trivy']
+package_name: lodash
+package_version: 4.17.20
+package_path: node_modules/lodash
+issue_severity: HIGH
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2026-4800&#10;Severity: HIGH&#10;Fixed Version: 4.18.0&#10;Link: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800) [CVE-2026-4800]" classname="CVE-2026-4800"><error message="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2026-4800&#10;Severity: HIGH&#10;Fixed Version: 4.18.0&#10;Link: [CVE-2026-4800](https://avd.aquasec.com/nvd/cve-2026-4800)" type="error" /><system-out>tags: ['trivy']
+package_name: lodash
+package_version: 4.17.20
+package_path: node_modules/lodash
+issue_severity: HIGH
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2020-28500&#10;Severity: MEDIUM&#10;Fixed Version: 4.17.21&#10;Link: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500) [CVE-2020-28500]" classname="CVE-2020-28500"><error message="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2020-28500&#10;Severity: MEDIUM&#10;Fixed Version: 4.17.21&#10;Link: [CVE-2020-28500](https://avd.aquasec.com/nvd/cve-2020-28500)" type="error" /><system-out>tags: ['trivy']
+package_name: lodash
+package_version: 4.17.20
+package_path: node_modules/lodash
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2025-13465&#10;Severity: MEDIUM&#10;Fixed Version: 4.17.23&#10;Link: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465) [CVE-2025-13465]" classname="CVE-2025-13465"><error message="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2025-13465&#10;Severity: MEDIUM&#10;Fixed Version: 4.17.23&#10;Link: [CVE-2025-13465](https://avd.aquasec.com/nvd/cve-2025-13465)" type="error" /><system-out>tags: ['trivy']
+package_name: lodash
+package_version: 4.17.20
+package_path: node_modules/lodash
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2026-2950&#10;Severity: MEDIUM&#10;Fixed Version: 4.18.0&#10;Link: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950) [CVE-2026-2950]" classname="CVE-2026-2950"><error message="Package: lodash&#10;Installed Version: 4.17.20&#10;Vulnerability CVE-2026-2950&#10;Severity: MEDIUM&#10;Fixed Version: 4.18.0&#10;Link: [CVE-2026-2950](https://avd.aquasec.com/nvd/cve-2026-2950)" type="error" /><system-out>tags: ['trivy']
+package_name: lodash
+package_version: 4.17.20
+package_path: node_modules/lodash
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2018-18074&#10;Severity: HIGH&#10;Fixed Version: 2.20.0&#10;Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074) [CVE-2018-18074]" classname="CVE-2018-18074"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2018-18074&#10;Severity: HIGH&#10;Fixed Version: 2.20.0&#10;Link: [CVE-2018-18074](https://avd.aquasec.com/nvd/cve-2018-18074)" type="error" /><system-out>tags: ['trivy']
+package_name: requests
+package_version: 2.19.1
+issue_severity: HIGH
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2023-32681&#10;Severity: MEDIUM&#10;Fixed Version: 2.31.0&#10;Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681) [CVE-2023-32681]" classname="CVE-2023-32681"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2023-32681&#10;Severity: MEDIUM&#10;Fixed Version: 2.31.0&#10;Link: [CVE-2023-32681](https://avd.aquasec.com/nvd/cve-2023-32681)" type="error" /><system-out>tags: ['trivy']
+package_name: requests
+package_version: 2.19.1
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-35195&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.0&#10;Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195) [CVE-2024-35195]" classname="CVE-2024-35195"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-35195&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.0&#10;Link: [CVE-2024-35195](https://avd.aquasec.com/nvd/cve-2024-35195)" type="error" /><system-out>tags: ['trivy']
+package_name: requests
+package_version: 2.19.1
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-47081&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.4&#10;Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081) [CVE-2024-47081]" classname="CVE-2024-47081"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2024-47081&#10;Severity: MEDIUM&#10;Fixed Version: 2.32.4&#10;Link: [CVE-2024-47081](https://avd.aquasec.com/nvd/cve-2024-47081)" type="error" /><system-out>tags: ['trivy']
+package_name: requests
+package_version: 2.19.1
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase><testcase name="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2026-25645&#10;Severity: MEDIUM&#10;Fixed Version: 2.33.0&#10;Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645) [CVE-2026-25645]" classname="CVE-2026-25645"><error message="Package: requests&#10;Installed Version: 2.19.1&#10;Vulnerability CVE-2026-25645&#10;Severity: MEDIUM&#10;Fixed Version: 2.33.0&#10;Link: [CVE-2026-25645](https://avd.aquasec.com/nvd/cve-2026-25645)" type="error" /><system-out>tags: ['trivy']
+package_name: requests
+package_version: 2.19.1
+issue_severity: MEDIUM
+scanner_name: trivy
+scanner_version: 0.69.3
+scanner_details: {'tool_name': 'trivy', 'tool_version': '0.69.3', 'tool_invocation': {'exit_code': 0, 'duration': 0.5, 'start_time': '2026-01-15T12:00:00+00:00', 'end_time': '2026-01-15T12:00:00.500000+00:00'}}</system-out></testcase></testsuite></testsuites>

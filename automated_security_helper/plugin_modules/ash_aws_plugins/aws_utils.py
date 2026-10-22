@@ -1,9 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import random
+import threading
 import time
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, TypeVar
 
 import botocore.exceptions
 
@@ -11,6 +12,73 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 # Type variable for the return type of the function
 T = TypeVar("T")
+
+#: (reporter key, option) pairs already named by :func:`report_missing_setting`
+#: in this process. A workspace builds and checks a reporter for each project,
+#: and one missing setting should produce one message.
+_MISSING_SETTINGS_NAMED: Set[Tuple[str, str]] = set()
+_MISSING_SETTINGS_LOCK = threading.Lock()
+
+
+def reset_missing_setting_notices() -> None:
+    """Forget which missing settings were already named (tests)."""
+    with _MISSING_SETTINGS_LOCK:
+        _MISSING_SETTINGS_NAMED.clear()
+
+
+def report_missing_setting(
+    reporter_key: str, option: str, environment: Sequence[str]
+) -> None:
+    """Say, once per process, that an enabled reporter lacks a setting it needs.
+
+    For an AWS reporter's ``validate_plugin_dependencies``, before it returns
+    False because ``option`` is unset. The report phase then leaves the reporter
+    out, and when no output format was requested nothing else names it, so the
+    upload the operator turned on would not happen with no word of why. The
+    message names the reporter, the option, the ``--config-overrides`` key that
+    sets it and the environment variables its default is read from.
+
+    Logged at ERROR so that it is shown under ``--quiet``, like a requested
+    format that produces nothing (``report_phase``). The exit code is not
+    changed: it stays a verdict on the scanned code. Only names are logged,
+    never a value.
+    """
+    with _MISSING_SETTINGS_LOCK:
+        if (reporter_key, option) in _MISSING_SETTINGS_NAMED:
+            return
+        _MISSING_SETTINGS_NAMED.add((reporter_key, option))
+    from_environment = ""
+    if environment:
+        from_environment = (
+            f", or set {' or '.join(environment)} in the environment, which is "
+            f"read only when no config sets {option}"
+        )
+    ASH_LOGGER.error(
+        f"Reporter '{reporter_key}' is enabled but does not run: no {option} is "
+        f"set. Set it with --config-overrides "
+        f"reporters.{reporter_key}.options.{option}=<value>{from_environment}."
+    )
+
+
+#: The most retries an AWS reporter's options allow, and the longest delay in
+#: seconds between two attempts, so no config makes a reporter keep calling an
+#: API that refuses it for longer than that.
+MAX_RETRIES = 10
+MAX_RETRY_DELAY_SECONDS = 60
+
+
+def check_retry_delays(options: Any) -> Any:
+    """``options``, refused when its ``base_delay`` exceeds its ``max_delay``.
+
+    For an AWS reporter's options model validator. A model without
+    ``max_delay`` is held to ``MAX_RETRY_DELAY_SECONDS``.
+    """
+    base = getattr(options, "base_delay", None)
+    maximum = getattr(options, "max_delay", MAX_RETRY_DELAY_SECONDS)
+    if base is not None and base > maximum:
+        raise ValueError(f"base_delay ({base}) must not exceed max_delay ({maximum})")
+    return options
+
 
 # List of retryable exceptions
 RETRYABLE_EXCEPTIONS = [
@@ -263,7 +331,7 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
 
 
 def validate_bedrock_model(
-    bedrock_client: Any, model_id: str
+    bedrock_client: Any, model_id: str, label: Optional[str] = None
 ) -> tuple[bool, Optional[str]]:
     """
     Validate that a Bedrock model is available and accessible.
@@ -271,10 +339,14 @@ def validate_bedrock_model(
     Args:
         bedrock_client: Boto3 Bedrock client
         model_id: The model ID to validate
+        label: How the log lines and the error message name the model, when not
+            by its ID: the reference a config file wrote for an ID it read from
+            the environment (config/environment_record.py).
 
     Returns:
         Tuple of (is_valid, error_message)
     """
+    shown = label or model_id
     try:
         # Get all available models
         available_models = get_available_models(bedrock_client)
@@ -287,14 +359,15 @@ def validate_bedrock_model(
 
         # Check if the requested model is in the available models
         if model_id in available_model_ids:
-            ASH_LOGGER.debug(f"Model {model_id} is available")
+            ASH_LOGGER.debug(f"Model {shown} is available")
             return True, None
 
         # If model not found directly, try to find a matching model ID (case insensitive)
         for available_id in available_model_ids:
             if available_id and model_id and available_id.lower() == model_id.lower():
                 ASH_LOGGER.debug(
-                    f"Found model {available_id} matching {model_id} (case insensitive)"
+                    f"Found model {available_id if label is None else 'one'} "
+                    f"matching {shown} (case insensitive)"
                 )
                 return True, None
 
@@ -304,16 +377,14 @@ def validate_bedrock_model(
                 model.get("inferenceType") == "INFERENCE_PROFILE"
                 and model.get("modelId") == model_id
             ):
-                ASH_LOGGER.debug(
-                    f"Model {model_id} is available as an inference profile"
-                )
+                ASH_LOGGER.debug(f"Model {shown} is available as an inference profile")
                 return True, None
 
         # Model not found in available models
         ASH_LOGGER.warning(
-            f"Model {model_id} not found in available models: {available_model_ids}"
+            f"Model {shown} not found in available models: {available_model_ids}"
         )
-        return False, f"Model {model_id} not found in available models"
+        return False, f"Model {shown} not found in available models"
 
     except botocore.exceptions.ClientError as e:
         error_code = e.response.get("Error", {}).get("Code")
@@ -322,11 +393,11 @@ def validate_bedrock_model(
         ASH_LOGGER.warning(f"Bedrock API error ({error_code}): {error_message}")
 
         if error_code == "AccessDeniedException":
-            return False, f"Access denied to model {model_id}: {error_message}"
+            return False, f"Access denied to model {shown}: {error_message}"
         elif error_code == "ResourceNotFoundException":
-            return False, f"Model {model_id} not found: {error_message}"
+            return False, f"Model {shown} not found: {error_message}"
         else:
-            return False, f"Error validating model {model_id}: {error_message}"
+            return False, f"Error validating model {shown}: {error_message}"
     except Exception as e:
-        ASH_LOGGER.warning(f"Unexpected error validating model {model_id}: {str(e)}")
-        return False, f"Unexpected error validating model {model_id}: {str(e)}"
+        ASH_LOGGER.warning(f"Unexpected error validating model {shown}: {str(e)}")
+        return False, f"Unexpected error validating model {shown}: {str(e)}"

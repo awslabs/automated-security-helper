@@ -81,10 +81,14 @@ def workflow():
 
 
 def _get_steps(workflow):
-    """Extract the step list from the single job in the workflow."""
+    """Every step of every job in the workflow.
+
+    The publish step is in the reporting job, not the scan job ``ash``: the scan job
+    holds a read-only token (tests/unit/test_scan_workflow_runs_code_without_a_write_token.py).
+    """
     jobs = workflow["jobs"]
     assert "ash" in jobs, "Expected 'ash' job in workflow"
-    return jobs["ash"]["steps"]
+    return [step for job in jobs.values() for step in job.get("steps") or []]
 
 
 def _junit_publish_step(workflow):
@@ -205,10 +209,14 @@ class TestReportPathIsNotDotBlind:
         )
 
     def test_report_paths_honors_the_output_dir_input(self, workflow):
-        """A hardcoded path would ignore a caller that overrides output-dir."""
+        """A hardcoded path would ignore a caller that overrides output-dir.
+
+        The reporting job reads output-dir as the scan job's input check wrote it,
+        through the scan job's output-dir output, not the input as given.
+        """
         report_paths = str(_junit_publish_step(workflow)["with"]["report_paths"])
-        assert "inputs.output-dir" in report_paths, (
-            "report_paths must be built from the output-dir input so a caller "
+        assert "needs.ash.outputs.output-dir" in report_paths, (
+            "report_paths must be built from the checked output-dir so a caller "
             f"that overrides it is still published. Got: {report_paths!r}"
         )
 

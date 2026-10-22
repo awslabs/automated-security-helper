@@ -4,14 +4,11 @@ import math
 import os
 import random
 from contextlib import suppress
-from typing import List
+from typing import Any, Callable, Dict, Iterable, List
 import uuid
 from pathlib import Path, PurePosixPath
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.core.constants import (
-    ASH_WORK_DIR_NAME,
-    KNOWN_IGNORE_PATHS,
-)
+from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
@@ -37,7 +34,7 @@ from automated_security_helper.utils.package_identity import (
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.symbol_spans import SymbolResolver
-from automated_security_helper.utils.suppression_matcher import file_path_matches
+from automated_security_helper.utils.suppression_matcher import ignore_path_matches
 
 
 def get_finding_id(
@@ -514,9 +511,21 @@ def _check_ignore_paths(
     ignore_paths: List[IgnorePathWithReason],
 ) -> str | None:
     """Return the reason string if *normalized_uri* matches any ignore path, else None."""
+    matched = _matching_ignore_path(normalized_uri, ignore_paths)
+    return matched.reason if matched is not None else None
+
+
+def _matching_ignore_path(
+    normalized_uri: str,
+    ignore_paths: List[IgnorePathWithReason],
+) -> IgnorePathWithReason | None:
+    """The first ignore path *normalized_uri* matches, or None.
+
+    ``ignore_path_matches``: a path ending in ``/`` names its directory.
+    """
     for ignore_path in ignore_paths:
-        if file_path_matches(normalized_uri, ignore_path.path):
-            return ignore_path.reason
+        if ignore_path_matches(normalized_uri, ignore_path.path):
+            return ignore_path
     return None
 
 
@@ -561,10 +570,18 @@ def _apply_config_suppression(
         f"'{escape_markup(flat_finding.file_path)}' based on suppression rule: "
         f"[yellow]{escape_markup(reason)}[/yellow]"
     )
+    client_supplied = getattr(matching_suppression, "client_supplied", False) is True
     result.suppressions.append(
         Suppression(
             kind=Kind1.inSource,
-            justification=f"(ASH) Suppressing finding for rule '{result.ruleId}' in '{flat_finding.file_path}' with reason: {reason}",
+            justification=(
+                f"(ASH{', client-supplied config' if client_supplied else ''}) "
+                f"Suppressing finding for rule '{result.ruleId}' in "
+                f"'{flat_finding.file_path}' with reason: {reason}"
+            ),
+            # A suppression from the config of a tree an MCP client delivered,
+            # marked so a reader can tell it from the operator's.
+            properties=PropertyBag(clientSupplied=True) if client_supplied else None,
         )
     )
     return True
@@ -704,23 +721,292 @@ def _suppress_transitive_of_suppressed_roots(
             ]
 
 
+def _add_client_suppression(result: Any, justification: str) -> None:
+    """Suppress ``result`` for a client-supplied entry, marked ``clientSupplied``.
+
+    Once: suppressions are applied to each scanner's report and again to the
+    aggregated one, and the second pass must not add the same suppression again.
+    """
+    existing = list(result.suppressions or [])
+    if any(getattr(item, "justification", None) == justification for item in existing):
+        return
+    result.suppressions = [
+        *existing,
+        Suppression(
+            kind=Kind1.external,
+            justification=justification,
+            properties=PropertyBag(clientSupplied=True),
+        ),
+    ]
+
+
+def _result_scanner_name(result: Any, run: Any) -> str | None:
+    """The scanner that reported ``result``: its ``scanner_name``, else the run's tool."""
+    name = (
+        getattr(result.properties, "scanner_name", None) if result.properties else None
+    )
+    if isinstance(name, str) and name:
+        return name
+    driver = run.tool.driver if run.tool else None
+    return driver.name if driver is not None else None
+
+
+def _client_exclusion_for(
+    result: Any,
+    run: Any,
+    exclusions: List[Any],
+    normalize: Callable[[str], str],
+    source_dir: Path,
+) -> Any:
+    """The client-supplied scanner exclusion that would have kept ``result`` out, if any."""
+    from automated_security_helper.config.client_scanner_exclusions import (
+        matching_exclusion,
+    )
+
+    scanner_name = _result_scanner_name(result, run)
+    if not any(exclusion.applies_to(scanner_name) for exclusion in exclusions):
+        return None
+    for location in result.locations or []:
+        if not (
+            location.physicalLocation
+            and location.physicalLocation.root.artifactLocation
+        ):
+            continue
+        raw_uri = location.physicalLocation.root.artifactLocation.uri
+        if not raw_uri:
+            continue
+        uri = normalize(raw_uri)
+        absolute = (
+            Path(uri).as_posix()
+            if Path(uri).is_absolute()
+            else (source_dir / uri).as_posix()
+        )
+        found = matching_exclusion(
+            exclusions,
+            scanner_name=scanner_name,
+            relative=uri,
+            absolute=absolute,
+            rule_id=result.ruleId,
+        )
+        if found is not None:
+            return found
+    return None
+
+
+class _OutputDirExclusion:
+    """Which SARIF results are located in ASH's own output directory.
+
+    ASH writes its reports to the output directory, which by default is inside the
+    scanned tree, so a scanner that walks the tree can report ASH's own files.
+    Those results are removed, except under the output directory's work directory,
+    where converters write the files they produce for scanning. Shared by
+    ``apply_suppressions_to_sarif`` and ``exclude_output_dir_results`` so both
+    decide the same way, and ``normalize`` is the URI reading the rest of
+    ``apply_suppressions_to_sarif`` uses too.
+    """
+
+    def __init__(self, plugin_context: PluginContext) -> None:
+        # Resolved once, outside the per-result loop (bug #46).
+        self.output_dir = plugin_context.output_dir.resolve()
+        self.work_dir = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
+        self.source_dir = plugin_context.source_dir.resolve()
+        self.source_dir_prefix = str(self.source_dir).replace("\\", "/") + "/"
+        # On Windows, SARIF URIs may have a leading "/" before the drive letter (e.g., /D:/path)
+        self.source_dir_prefix_with_slash = "/" + self.source_dir_prefix
+        # Some Windows scanners strip the drive letter entirely (e.g., /a/repo/ instead of D:/a/repo/)
+        self.source_dir_prefix_no_drive = (
+            self.source_dir_prefix[2:]
+            if len(self.source_dir_prefix) > 2 and self.source_dir_prefix[1] == ":"
+            else None
+        )
+        # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
+        # However, skip basename stripping when source_dir contains a subdirectory with the same name
+        # as its own basename (#361) - that means the basename is a real project directory, not a
+        # scanner artifact. Example: source_dir="/src" with /src/src/ existing -> skip.
+        self.source_dir_basename: PurePosixPath | None = None
+        basename = self.source_dir.name
+        if basename and not (self.source_dir / basename).exists():
+            self.source_dir_basename = PurePosixPath(basename)
+        self._resolve_cache: dict[str, Path] = {}
+        # Results removed, reported by ``report``. Counted because this can remove
+        # an arbitrary number of results, and before it was counted the only trace
+        # was one per-finding line at VERBOSE.
+        self.excluded = 0
+
+        # Whether the output directory contains the source directory, in which case
+        # the exclusion is not applied at all.
+        #
+        # Every finding in the scanned tree resolves inside such an output directory,
+        # so the exclusion would drop the entire result set -- and a run with no
+        # findings exits 0, so emptying it is indistinguishable from a clean scan.
+        # That is the worst outcome this can produce, and it is reachable: `ash
+        # merge` builds its context with source_dir=Path.cwd() and the operator's
+        # --output-dir verbatim, so `ash merge --output-dir .` lands here. `ash scan`
+        # relocates the equal-paths case before reaching this point; this covers
+        # containment, which it does not, and covers every other caller that builds
+        # a context directly.
+        #
+        # Declining the exclusion rather than refusing the scan: the exclusion exists
+        # to keep ASH's own reports out of its findings, which is a tidiness
+        # property, and trading a whole result set for it is the wrong way round.
+        # Said at WARNING because a guard that quietly stops applying is how a guard
+        # becomes decoration. is_relative_to is true for equal paths, so this covers
+        # output_dir == source_dir as well as containment.
+        self.output_dir_contains_source = self.source_dir.is_relative_to(
+            self.output_dir
+        )
+        if self.output_dir_contains_source:
+            ASH_LOGGER.warning(
+                f"Not excluding findings under the output directory "
+                f"'{self.output_dir.as_posix()}': it is the source directory "
+                f"'{self.source_dir.as_posix()}' or an ancestor of it, so every finding "
+                f"in the scanned tree resolves inside it and the exclusion would discard "
+                f"the whole result set. Point --output-dir at a directory outside the "
+                f"scanned tree to restore it."
+            )
+
+    def normalize(self, raw_uri: str) -> str:
+        """``raw_uri`` relative to the source directory where it is inside it."""
+        return _normalize_sarif_uri(
+            raw_uri,
+            self.source_dir_prefix,
+            self.source_dir_prefix_with_slash,
+            self.source_dir_prefix_no_drive,
+            self.source_dir_basename,
+        )
+
+    def ignore_path_for(
+        self, raw_uri: str, ignore_paths: List[IgnorePathWithReason]
+    ) -> IgnorePathWithReason | None:
+        """The first of ``ignore_paths`` that a result located at ``raw_uri`` is under.
+
+        ``raw_uri`` as the scanner reported it, read as ``normalize`` reads it. The
+        one match the findings step and snyk-code's refusal both make
+        (``ignore_paths_for_locations``), so the two cannot disagree.
+        """
+        return _matching_ignore_path(self.normalize(raw_uri), ignore_paths)
+
+    def holds(self, uri: str) -> bool:
+        """Whether the normalized ``uri`` is ASH's output, outside the work directory."""
+        if self.output_dir_contains_source:
+            return False
+        if uri not in self._resolve_cache:
+            # Anchored on the source directory, NOT on the process's working
+            # directory. normalize has just stripped the source-directory prefix, so
+            # `uri` is relative to source_dir; Path(uri).resolve() anchored it on cwd
+            # instead, which agrees only when cwd happens to equal source_dir.
+            # Anywhere else -- a CI job that checks out to one directory and passes
+            # --source-dir for another, `ash merge`, any MCP session -- the
+            # resolution landed outside the output directory and the exclusion
+            # silently stopped firing, so ASH's own reports came back as findings
+            # about the scanned tree.
+            #
+            # An absolute `uri` is left alone rather than relocated: pathlib discards
+            # the left operand of `/` when the right is absolute. That is what this
+            # needs. A URI the prefix strip did not match is absolute and outside the
+            # source tree -- a system config, a cached dependency -- and joining it
+            # onto source_dir would fabricate a path inside a tree it is not in.
+            self._resolve_cache[uri] = (self.source_dir / uri).resolve()
+        resolved = self._resolve_cache[uri]
+        return resolved.is_relative_to(self.output_dir) and not resolved.is_relative_to(
+            self.work_dir
+        )
+
+    def record(self, uri: str) -> None:
+        """Count one removed result, and name it at VERBOSE."""
+        ASH_LOGGER.verbose(
+            f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'",
+            extra=NO_MARKUP,
+        )
+        self.excluded += 1
+
+    def excludes(self, result: Result) -> bool:
+        """Whether any of ``result``'s locations is ASH's output; counts it if so."""
+        for location in result.locations or []:
+            if not (
+                location.physicalLocation
+                and location.physicalLocation.root.artifactLocation
+            ):
+                continue
+            raw_uri = location.physicalLocation.root.artifactLocation.uri
+            if not raw_uri:
+                continue
+            uri = self.normalize(raw_uri)
+            if self.holds(uri):
+                self.record(uri)
+                return True
+        return False
+
+    def report(self) -> None:
+        """Say how many results were removed, when any were.
+
+        WARNING rather than the per-finding VERBOSE line, because the aggregate is
+        what tells an operator their result set shrank -- silently emptying a run
+        is the failure this exclusion is closest to causing, and the individual
+        lines are invisible at the default level. Conditional because a count
+        printed on every scan is noise, and noise gets filtered.
+        """
+        if self.excluded:
+            ASH_LOGGER.warning(
+                f"Excluded {self.excluded} finding(s) whose location is inside "
+                f"the output directory '{self.output_dir.as_posix()}' and outside "
+                f"its work directory. These are reports ASH wrote, not findings about "
+                f"the scanned tree. Run with --verbose to see each one."
+            )
+
+
+def ignore_paths_for_locations(
+    raw_uris: Iterable[str],
+    plugin_context: PluginContext,
+    ignore_paths: List[IgnorePathWithReason],
+) -> Dict[str, IgnorePathWithReason]:
+    """``{raw_uri: ignore path}`` for each result location an ignore path matches.
+
+    Matched as ``apply_suppressions_to_sarif`` matches a result's location to drop
+    it, by the same call, ``_OutputDirExclusion.ignore_path_for``: the URI as the
+    scanner reported it, normalized to the source directory where it is inside it,
+    then ``_matching_ignore_path``. For a scanner that has to decide before it runs
+    which files it may be given, such as snyk-code, whose tool uploads them: a
+    file is then refused exactly when ASH would drop the finding the tool reports
+    at it, and a file whose findings ASH keeps is not refused. Locations in ASH's
+    own output directory are not answered here; apply_suppressions_to_sarif drops
+    those for every result whatever the ignore paths say.
+    """
+    if not ignore_paths:
+        return {}
+    exclusion = _OutputDirExclusion(plugin_context)
+    found: Dict[str, IgnorePathWithReason] = {}
+    for raw_uri in raw_uris:
+        matched = exclusion.ignore_path_for(raw_uri, ignore_paths)
+        if matched is not None:
+            found[raw_uri] = matched
+    return found
+
+
 def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
     used_suppressions: set | None = None,
 ) -> SarifReport:
     """Apply suppressions to a SARIF report based on global ignore paths and suppression rules."""
-    known_ignore_formatted: List[IgnorePathWithReason] = [
-        IgnorePathWithReason(path=p, reason="Known ignore path")
-        for item in KNOWN_IGNORE_PATHS
-        for p in (item, f"**/{item}")
-    ]
-    ignore_paths = [
-        *(plugin_context.config.global_settings.ignore_paths or []),
-        *known_ignore_formatted,
-    ]
+    # The config's ignore paths only. KNOWN_IGNORE_PATHS (node_modules/, .venv/,
+    # venv/) were added here too, with their **/ forms, but as globs ending in "/"
+    # they matched no finding. Since an ignore path ending in "/" names its
+    # directory, they would drop every finding below one, and the dependency
+    # scanners report there: npm-audit locates each finding at
+    # node_modules/<package>/package.json, so all of them would go. They are
+    # scanner-level exclusions, for bandit and checkov, and stay out of this step.
+    ignore_paths = list(plugin_context.config.global_settings.ignore_paths or [])
 
     suppressions = plugin_context.config.global_settings.suppressions or []
+
+    # Exclusions a delivered config gave one scanner in its options, moved out of
+    # them before the scan so the files were scanned. Each finding of that scanner
+    # one would have kept out is suppressed and marked here, like a finding under a
+    # client-supplied ignore path (config/client_scanner_exclusions.py).
+    client_exclusions = list(
+        getattr(plugin_context.config, "_client_scanner_exclusions", None) or []
+    )
 
     ignore_suppressions = (
         hasattr(plugin_context, "ignore_suppressions")
@@ -738,32 +1024,12 @@ def apply_suppressions_to_sarif(
     if not sarif_report or not sarif_report.runs:
         return sarif_report
 
-    # Cache resolved output paths outside the inner loop (bug #46)
-    _output_dir_resolved = plugin_context.output_dir.resolve()
-    _work_dir_resolved = plugin_context.output_dir.joinpath(ASH_WORK_DIR_NAME).resolve()
-    _uri_resolve_cache: dict[str, Path] = {}
-    _source_dir_prefix = (
-        str(plugin_context.source_dir.resolve()).replace("\\", "/") + "/"
-    )
-    # On Windows, SARIF URIs may have a leading "/" before the drive letter (e.g., /D:/path)
-    _source_dir_prefix_with_slash = "/" + _source_dir_prefix
-    # Some Windows scanners strip the drive letter entirely (e.g., /a/repo/ instead of D:/a/repo/)
-    _source_dir_prefix_no_drive = (
-        _source_dir_prefix[2:]
-        if len(_source_dir_prefix) > 2 and _source_dir_prefix[1] == ":"
-        else None
-    )
-    # Offline opengrep produces relative paths with source_dir basename prefix (e.g., "src/.github/...")
-    # However, skip basename stripping when source_dir contains a subdirectory with the same name
-    # as its own basename (#361) - that means the basename is a real project directory, not a
-    # scanner artifact. Example: source_dir="/src" with /src/src/ existing -> skip.
-    _resolved_source = plugin_context.source_dir.resolve()
-    _source_dir_basename_str = _resolved_source.name
-    _source_dir_basename: PurePosixPath | None = None
-    if _source_dir_basename_str:
-        _child_with_same_name = _resolved_source / _source_dir_basename_str
-        if not _child_with_same_name.exists():
-            _source_dir_basename = PurePosixPath(_source_dir_basename_str)
+    output_exclusion = _OutputDirExclusion(plugin_context)
+    _source_dir_prefix = output_exclusion.source_dir_prefix
+    _source_dir_prefix_with_slash = output_exclusion.source_dir_prefix_with_slash
+    _source_dir_prefix_no_drive = output_exclusion.source_dir_prefix_no_drive
+    _source_dir_basename = output_exclusion.source_dir_basename
+    _resolved_source = output_exclusion.source_dir
 
     _inline_suppression_cache: dict[str, list] = {}
 
@@ -776,40 +1042,6 @@ def apply_suppressions_to_sarif(
         else None
     )
 
-    # Whether the output directory contains the source directory, in which case the
-    # output-path exclusion below is not applied at all.
-    #
-    # Every finding in the scanned tree resolves inside such an output directory, so
-    # the exclusion would drop the entire result set -- and a run with no findings
-    # exits 0, so emptying it is indistinguishable from a clean scan. That is the
-    # worst outcome this function can produce, and it is reachable: `ash merge`
-    # builds its context with source_dir=Path.cwd() and the operator's --output-dir
-    # verbatim, so `ash merge --output-dir .` lands here. `ash scan` relocates the
-    # equal-paths case before reaching this point; this covers containment, which it
-    # does not, and covers every other caller that builds a context directly.
-    #
-    # Declining the exclusion rather than refusing the scan: the exclusion exists to
-    # keep ASH's own reports out of its findings, which is a tidiness property, and
-    # trading a whole result set for it is the wrong way round. Said at WARNING
-    # because a guard that quietly stops applying is how a guard becomes decoration.
-    # is_relative_to is true for equal paths, so this covers output_dir == source_dir
-    # as well as containment.
-    _output_dir_contains_source = _resolved_source.is_relative_to(_output_dir_resolved)
-    if _output_dir_contains_source:
-        ASH_LOGGER.warning(
-            f"Not excluding findings under the output directory "
-            f"'{_output_dir_resolved.as_posix()}': it is the source directory "
-            f"'{_resolved_source.as_posix()}' or an ancestor of it, so every finding "
-            f"in the scanned tree resolves inside it and the exclusion would discard "
-            f"the whole result set. Point --output-dir at a directory outside the "
-            f"scanned tree to restore it."
-        )
-
-    # Findings removed by the output-path exclusion, reported below. Counted because
-    # this pass can remove an arbitrary number of results, and before it was counted
-    # the only trace was one per-finding line at VERBOSE.
-    excluded_by_output_path = 0
-
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -817,6 +1049,10 @@ def apply_suppressions_to_sarif(
         updated_results = []
         for result in run.results:
             is_in_ignorable_path = False
+            # A match on an ignore path the client's own delivered config supplied.
+            # The finding is kept, suppressed and marked, rather than dropped, so the
+            # results show what the client chose to hide.
+            client_ignored: IgnorePathWithReason | None = None
 
             # --- Step 1: ignore-path check ---
             if result.locations:
@@ -831,59 +1067,59 @@ def apply_suppressions_to_sarif(
                     raw_uri = location.physicalLocation.root.artifactLocation.uri
                     if not raw_uri:
                         continue
-                    uri = _normalize_sarif_uri(
-                        raw_uri,
-                        _source_dir_prefix,
-                        _source_dir_prefix_with_slash,
-                        _source_dir_prefix_no_drive,
-                        _source_dir_basename,
-                    )
-                    if uri not in _uri_resolve_cache:
-                        # Anchored on the source directory, NOT on the process's
-                        # working directory. _normalize_sarif_uri has just stripped
-                        # the source-directory prefix, so `uri` is relative to
-                        # source_dir; Path(uri).resolve() anchored it on cwd instead,
-                        # which agrees only when cwd happens to equal source_dir.
-                        # Anywhere else -- a CI job that checks out to one directory
-                        # and passes --source-dir for another, `ash merge`, any MCP
-                        # session -- the resolution landed outside the output
-                        # directory and the exclusion silently stopped firing, so
-                        # ASH's own reports came back as findings about the scanned
-                        # tree.
-                        #
-                        # An absolute `uri` is left alone rather than relocated:
-                        # pathlib discards the left operand of `/` when the right is
-                        # absolute. That is what this needs. A URI the prefix strip
-                        # did not match is absolute and outside the source tree -- a
-                        # system config, a cached dependency -- and joining it onto
-                        # source_dir would fabricate a path inside a tree it is not
-                        # in.
-                        _uri_resolve_cache[uri] = (_resolved_source / uri).resolve()
-                    resolved_uri = _uri_resolve_cache[uri]
-                    if (
-                        not _output_dir_contains_source
-                        and resolved_uri.is_relative_to(_output_dir_resolved)
-                        and not resolved_uri.is_relative_to(_work_dir_resolved)
-                    ):
-                        ASH_LOGGER.verbose(
-                            f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'",
-                            extra=NO_MARKUP,
-                        )
-                        excluded_by_output_path += 1
+                    uri = output_exclusion.normalize(raw_uri)
+                    if output_exclusion.holds(uri):
+                        output_exclusion.record(uri)
                         is_in_ignorable_path = True
                         continue
-                    ignore_reason = _check_ignore_paths(uri, ignore_paths)
-                    if ignore_reason is not None:
+                    matched_ignore = output_exclusion.ignore_path_for(
+                        raw_uri, ignore_paths
+                    )
+                    if matched_ignore is not None:
                         ASH_LOGGER.verbose(
                             f"Ignoring finding on rule '{escape_markup(result.ruleId)}' "
                             f"file location '{escape_markup(uri)}' based on ignore_path "
                             f"match with global reason: "
-                            f"[yellow]{escape_markup(ignore_reason)}[/yellow]"
+                            f"[yellow]{escape_markup(matched_ignore.reason)}[/yellow]"
                         )
-                        is_in_ignorable_path = True
+                        # ``is True``: an ignore path is a model here, and a stand-in
+                        # without the field must not count as the client's.
+                        if getattr(matched_ignore, "client_supplied", False) is True:
+                            client_ignored = matched_ignore
+                        else:
+                            is_in_ignorable_path = True
 
             if is_in_ignorable_path:
                 continue
+
+            if client_ignored is not None:
+                _add_client_suppression(
+                    result,
+                    "(ASH, client-supplied config) Ignoring finding under "
+                    f"ignore path '{client_ignored.path}' with reason: "
+                    f"{client_ignored.reason}",
+                )
+                updated_results.append(result)
+                continue
+
+            if client_exclusions:
+                excluded_by = _client_exclusion_for(
+                    result,
+                    run,
+                    client_exclusions,
+                    lambda raw: _normalize_sarif_uri(
+                        raw,
+                        _source_dir_prefix,
+                        _source_dir_prefix_with_slash,
+                        _source_dir_prefix_no_drive,
+                        _source_dir_basename,
+                    ),
+                    _resolved_source,
+                )
+                if excluded_by is not None:
+                    _add_client_suppression(result, excluded_by.justification())
+                    updated_results.append(result)
+                    continue
 
             ASH_LOGGER.debug(
                 f"Suppression check: is_in_ignorable_path={is_in_ignorable_path}, suppressions={bool(suppressions)}, ignore_suppressions={ignore_suppressions}"
@@ -1035,18 +1271,32 @@ def apply_suppressions_to_sarif(
             ),
         )
 
-    # Reported after every run, and only when something was removed.
-    #
-    # WARNING rather than the per-finding VERBOSE line above, because the aggregate
-    # is what tells an operator their result set shrank -- silently emptying a run is
-    # the failure this exclusion is closest to causing, and the individual lines are
-    # invisible at the default level. Conditional because a count printed on every
-    # scan is noise, and noise gets filtered.
-    if excluded_by_output_path:
-        ASH_LOGGER.warning(
-            f"Excluded {excluded_by_output_path} finding(s) whose location is inside "
-            f"the output directory '{_output_dir_resolved.as_posix()}' and outside "
-            f"its work directory. These are reports ASH wrote, not findings about "
-            f"the scanned tree. Run with --verbose to see each one."
-        )
+    output_exclusion.report()
+    return sarif_report
+
+
+def exclude_output_dir_results(
+    sarif_report: SarifReport, plugin_context: PluginContext
+) -> SarifReport:
+    """Remove the results located in ASH's output directory, and change nothing else.
+
+    What a scan applies to SARIF in place of ``apply_suppressions_to_sarif`` when
+    ``--ignore-suppressions`` is set. The flag lifts suppressions and ignore paths,
+    and the output directory is neither: it holds ASH's own reports, which are left
+    out of every scan. ``apply_suppressions_to_sarif`` removes those results first,
+    and every caller skips it under the flag, so without this a scanner that reads
+    the whole tree reported ASH's files as findings. Results under the output
+    directory's work directory, where converters write files to be scanned, are
+    kept, as they are there.
+    """
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+    output_exclusion = _OutputDirExclusion(plugin_context)
+    for run in sarif_report.runs:
+        if not run.results:
+            continue
+        run.results = [
+            result for result in run.results if not output_exclusion.excludes(result)
+        ]
+    output_exclusion.report()
     return sarif_report

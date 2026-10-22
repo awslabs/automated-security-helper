@@ -6,6 +6,7 @@ local mode when Nix is absent all produce a scan that looks like it worked. Each
 gets an explicit test rather than being left to an end-to-end run to notice.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -153,11 +154,114 @@ class TestBuildNixCommand:
         # makes every first run fail with "experimental Nix feature ... is disabled".
         assert cmd.index("--extra-experimental-features") < cmd.index("develop")
 
-    def test_runs_ash_inside_the_shell_with_the_forwarded_args(self):
+    def test_runs_this_ash_inside_the_shell_with_the_forwarded_args(self):
+        """The inner scan is the interpreter running now, started by absolute path."""
         cmd = build_nix_command("path:/repo", ["scan", "--mode", "local"], "nix")
-        assert cmd[-4:] == ["ash", "scan", "--mode", "local"]
-        assert "--command" in cmd
-        assert cmd[cmd.index("--command") + 1] == "ash"
+        inner = cmd[cmd.index("--command") + 1 :]
+        assert inner[0] == sys.executable
+        assert Path(inner[0]).is_absolute()
+        code = inner.index("-c")
+        # -P, where Python has it, is the only option before -c.
+        assert inner[1:code] == (["-P"] if sys.version_info >= (3, 11) else [])
+        assert "automated_security_helper.cli.entrypoint" in inner[code + 1]
+        assert inner[code + 2 :] == ["scan", "--mode", "local"]
+
+    def test_the_inner_command_runs_this_ash_and_not_one_in_the_scanned_tree(
+        self, tmp_path
+    ):
+        """-c puts the working directory, the scanned tree, first on sys.path."""
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+        from tests.utils.helpers import REPO_ROOT
+
+        planted = tmp_path / "automated_security_helper"
+        planted.mkdir()
+        (planted / "__init__.py").write_text(
+            "raise SystemExit('imported from the scanned tree')\n", encoding="utf-8"
+        )
+        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
+
+        completed = subprocess.run(  # nosec B603 - the command under test
+            [*_this_ash(), "--version"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert "imported from the scanned tree" not in completed.stderr
+        assert completed.returncode == 0, completed.stderr[-2000:]
+
+
+#: The inner command as it was: `-c`, with nothing dropping the working directory.
+_OLD_INNER_COMMAND = [
+    sys.executable,
+    "-c",
+    (
+        "import sys; sys.argv[0] = 'ash'; "
+        "from automated_security_helper.cli.entrypoint import main; main()"
+    ),
+]
+
+
+def _plant_ash(directory: Path, marker: Path) -> None:
+    """An ``automated_security_helper`` package in ``directory`` that records its import."""
+    init = directory / "automated_security_helper" / "__init__.py"
+    init.parent.mkdir(parents=True)
+    init.write_text(
+        f"open({str(marker)!r}, 'a', encoding='utf-8').write('planted\\n')\n",
+        encoding="utf-8",
+    )
+
+
+def _run_in(argv, cwd: Path) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONSAFEPATH"}
+    return subprocess.run(
+        [*argv, "--version"],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
+class TestTheInnerScanImportsNothingFromTheScanDirectory:
+    """``nix develop --command`` starts the inner scan in the scan's directory.
+
+    Under ``-c`` Python puts that directory first on ``sys.path`` (as ``''``), and
+    the inner command's first import is ``automated_security_helper``, so a package of
+    that name in the scanned repository ran in place of ASH. The directory stays as
+    it is; the inner command drops the entry instead, and adds ``-P`` where Python
+    has it.
+    """
+
+    def test_control_the_old_inner_command_imports_the_planted_package(self, tmp_path):
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "repo", marker)
+        _run_in(_OLD_INNER_COMMAND, tmp_path / "repo")
+        assert marker.read_text(encoding="utf-8") == "planted\n"
+
+    def test_the_inner_command_runs_the_installed_ash(self, tmp_path):
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "repo", marker)
+        result = _run_in(_this_ash(), tmp_path / "repo")
+        assert not marker.exists(), marker.read_text(encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+
+    def test_without_p_the_code_alone_drops_the_entry(self, tmp_path):
+        """Python 3.10 has no -P, so the -c source has to be enough on its own."""
+        from automated_security_helper.interactions.run_ash_nix import _this_ash
+
+        argv = [arg for arg in _this_ash() if arg != "-P"]
+        marker = tmp_path / "IMPORTED"
+        _plant_ash(tmp_path / "repo", marker)
+        result = _run_in(argv, tmp_path / "repo")
+        assert not marker.exists(), marker.read_text(encoding="utf-8")
+        assert result.returncode == 0, result.stderr
 
     def test_flake_ref_is_passed_to_develop(self):
         cmd = build_nix_command("github:owner/repo/v1", ["scan"], "nix")
@@ -202,9 +306,10 @@ class TestRunAshNix:
 
         captured = {}
 
-        def fake_run(cmd, env=None, check=None, text=None):
+        def fake_run(cmd, env=None, check=None, text=None, stdin=None):
             captured["cmd"] = cmd
             captured["env"] = env
+            captured["stdin"] = stdin
             return subprocess.CompletedProcess(cmd, 0)
 
         monkeypatch.setattr(
@@ -223,6 +328,36 @@ class TestRunAshNix:
         # And the inner invocation must be a local scan, not another nix one.
         assert "--mode" in captured["cmd"]
         assert captured["cmd"][captured["cmd"].index("--mode") + 1] == "local"
+        # Not this process's standard input.
+        assert captured["stdin"] is subprocess.DEVNULL
+
+    def test_child_environment_carries_the_outer_run_id(self, monkeypatch):
+        """The inner run writes it into its results file (utils/inner_run_outcome.py)."""
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.find_executable",
+            lambda _: "/usr/bin/nix",
+        )
+        captured = {}
+
+        def fake_run(cmd, env=None, check=None, text=None, stdin=None):
+            captured["env"] = env
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.subprocess.run",
+            fake_run,
+        )
+
+        run_ash_nix(
+            argv=["scan"],
+            outer_run_id="0123456789abcdef0123456789abcdef",  # pragma: allowlist secret
+        )
+
+        assert captured["env"]["ASH_OUTER_RUN_ID"] == (
+            "0123456789abcdef0123456789abcdef"  # pragma: allowlist secret
+        )
 
     def test_nonzero_exit_is_returned_rather_than_raised(self, monkeypatch):
         # A scan that finds something exits non-zero by design. Raising here would turn a
@@ -235,8 +370,8 @@ class TestRunAshNix:
         )
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: subprocess.CompletedProcess(
-                cmd, 2
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
+                subprocess.CompletedProcess(cmd, 2)
             ),
         )
         result = run_ash_nix(argv=["scan"])
@@ -254,8 +389,8 @@ class TestRunAshNix:
         )
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: subprocess.CompletedProcess(
-                cmd, 0
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
+                subprocess.CompletedProcess(cmd, 0)
             ),
         )
 
@@ -278,15 +413,51 @@ class TestRunAshNix:
 
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: (
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
                 captured.update(cmd=cmd) or subprocess.CompletedProcess(cmd, 0)
             ),
         )
 
         run_ash_nix()
         # sys.argv[0] is the executable and must not be forwarded as a scan argument.
-        assert "ash" == captured["cmd"][captured["cmd"].index("--command") + 1]
+        inner = captured["cmd"][captured["cmd"].index("--command") + 1 :]
+        assert inner[0] == sys.executable
+        assert "ash" not in inner
         assert "--quiet" in captured["cmd"]
+
+    def test_the_shell_gets_a_path_without_the_scanned_trees_entries(
+        self, monkeypatch, tmp_path
+    ):
+        """As every other child does; nix develop prepends its own packages to it."""
+        from automated_security_helper.utils import subprocess_utils
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        repo = tmp_path / "repo"
+        (repo / ".venv" / "bin").mkdir(parents=True)
+        monkeypatch.delenv(ASH_IN_NIX_ENV_VAR, raising=False)
+        monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
+        monkeypatch.setenv(ASH_NIX_FLAKE_REF_ENV_VAR, "path:/repo")
+        monkeypatch.setenv(
+            "PATH", os.pathsep.join([str(repo / ".venv" / "bin"), "/usr/bin"])
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.find_executable",
+            lambda _: "/usr/bin/nix",
+        )
+        captured = {}
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_nix.subprocess.run",
+            lambda cmd, env=None, check=None, text=None, stdin=None: (
+                captured.update(env=env) or subprocess.CompletedProcess(cmd, 0)
+            ),
+        )
+        subprocess_utils.clear_find_executable_cache()
+
+        with scanning_tree(repo):
+            run_ash_nix(argv=["scan"])
+
+        assert captured["env"]["PATH"] == "/usr/bin"
+        assert captured["env"][ASH_IN_NIX_ENV_VAR] == "1"
 
 
 class TestRepoFlakeDir:

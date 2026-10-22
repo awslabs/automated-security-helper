@@ -478,15 +478,21 @@ class TestTheExecutableDigestTable:
     def test_a_bare_executable_asset_is_its_own_executable_digest(self):
         """An asset that is the executable needs no second digest.
 
-        No asset in the table is shaped like this yet; the property reads an
-        ``archive`` attribute when one exists, and this pins what it does then.
+        opengrep publishes the executable itself (``archive`` is False), so the
+        digest of the download is the digest of the bytes that run. An archived
+        asset without an executable digest stays None: it is never a match.
         """
-        bare = SimpleNamespace(executable_sha256=None, archive=False, sha256="ab" * 32)
-        assert tool_downloads.ToolAsset.executable_digest.fget(bare) == "ab" * 32
+        opengrep = get_tool_asset("opengrep", "linux", "amd64")
+        assert opengrep.archive is False
+        assert opengrep.executable_digest == opengrep.sha256
+        assert "opengrep_manylinux_x86" not in _EXECUTABLE_DIGESTS
+
         archived = SimpleNamespace(
             executable_sha256=None, archive=True, sha256="ab" * 32
         )
         assert tool_downloads.ToolAsset.executable_digest.fget(archived) is None
+        bare = SimpleNamespace(executable_sha256=None, archive=False, sha256="ab" * 32)
+        assert tool_downloads.ToolAsset.executable_digest.fget(bare) == "ab" * 32
 
 
 class TestRecognizingAPinnedInstallCommand:

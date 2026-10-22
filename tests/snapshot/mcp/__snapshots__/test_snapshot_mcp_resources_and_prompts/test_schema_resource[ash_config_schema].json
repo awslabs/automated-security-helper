@@ -1,5 +1,114 @@
 {
   "$defs": {
+    "ActionlintScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "actionlint",
+          "default": "actionlint",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ActionlintScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "pyflakes": null,
+            "scan_timeout": 1800,
+            "severity_threshold": null,
+            "shellcheck": null
+          },
+          "description": "Configure the actionlint scanner"
+        }
+      },
+      "title": "ActionlintScannerConfig",
+      "type": "object"
+    },
+    "ActionlintScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.",
+          "title": "Config File"
+        },
+        "pyflakes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Command name or path of pyflakes, which actionlint runs on 'shell: python' steps. Unset (the default) disables the integration. Any config may set 'pyflakes', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.",
+          "title": "Pyflakes"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "shellcheck": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Command name or path of shellcheck, which actionlint runs on every run: script. Unset (the default) disables the integration so results do not depend on what is installed on the host. Any config may set 'shellcheck', looked up on PATH. Another program, or a path that resolves outside the scanned tree: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. From such a config it is ignored with a warning. When set and not found, the scanner reports MISSING.",
+          "title": "Shellcheck"
+        }
+      },
+      "title": "ActionlintScannerConfigOptions",
+      "type": "object"
+    },
     "ArchiveConverterConfig": {
       "additionalProperties": true,
       "description": "Archive (ZIP/TAR/GZIP/etc) converter configuration.",
@@ -17,7 +126,12 @@
         },
         "options": {
           "$ref": "#/$defs/ArchiveConverterConfigOptions",
-          "default": {},
+          "default": {
+            "max_compression_ratio": 100,
+            "max_member_bytes": 268435456,
+            "max_members": 100000,
+            "max_total_bytes": 1073741824
+          },
           "description": "Configure Archive converter"
         }
       },
@@ -26,7 +140,37 @@
     },
     "ArchiveConverterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
+      "properties": {
+        "max_compression_ratio": {
+          "default": 100,
+          "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted. Checked only once the members declare more than 512 KiB in all.",
+          "exclusiveMinimum": 0,
+          "title": "Max Compression Ratio",
+          "type": "integer"
+        },
+        "max_member_bytes": {
+          "default": 268435456,
+          "description": "The largest size in bytes one member of an archive may declare. An archive with a larger member is not extracted. Default 256 MiB.",
+          "exclusiveMinimum": 0,
+          "title": "Max Member Bytes",
+          "type": "integer"
+        },
+        "max_members": {
+          "default": 100000,
+          "description": "The most members an archive may have, directories included. An archive with more is not extracted. All the archives one scan extracts may hold four times this many together.",
+          "exclusiveMinimum": 0,
+          "title": "Max Members",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 1073741824,
+          "description": "The most bytes an archive's members may declare added up, each counted as at least 512. An archive whose members declare more is not extracted. All the archives one scan extracts may declare four times this together. Default 1 GiB.",
+          "exclusiveMinimum": 0,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        }
+      },
       "title": "ArchiveConverterConfigOptions",
       "type": "object"
     },
@@ -64,6 +208,12 @@
           "title": "Content Db Staleness",
           "type": "string"
         },
+        "content_db_staleness_offline_image_default": {
+          "default": true,
+          "description": "Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather than to content_db_staleness: fail. Such an image carries the trivy database it was built with, and trivy's own bound would fail every scan in it from a day after the build; with this, those scans pass and every report records the stale database. Only trivy-db: grype-db and the offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES in ASH's environment, which the image sets from its OFFLINE build argument, turns it on; without that variable this does nothing, whatever it says. Set false to hold trivy-db to content_db_staleness in the image too. A content_db_staleness_overrides entry for trivy-db outranks it, and either form of --allow-stale-content-db sets this to false for that scan.",
+          "title": "Content Db Staleness Offline Image Default",
+          "type": "boolean"
+        },
         "content_db_staleness_overrides": {
           "default": [],
           "description": "Per-database exceptions to content_db_staleness, each with a required expiration date and reason. An entry holds one named database to its own policy until 00:00 UTC on its expiration date, and every database not named keeps content_db_staleness. An expired entry is ignored with a warning. Empty by default. Either form of --allow-stale-content-db clears this list for that scan, so the flag still decides for every database.",
@@ -79,7 +229,12 @@
             "archive": {
               "enabled": true,
               "name": "archive",
-              "options": {}
+              "options": {
+                "max_compression_ratio": 100,
+                "max_member_bytes": 268435456,
+                "max_members": 100000,
+                "max_total_bytes": 1073741824
+              }
             },
             "jupyter": {
               "enabled": true,
@@ -128,7 +283,7 @@
         },
         "fail_on_incomplete_scanners": {
           "default": true,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
@@ -144,23 +299,120 @@
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
                   "/content_db_staleness_overrides",
+                  "/honor_ignore_files",
+                  "/content_db_staleness_offline_image_default",
                   "/sandbox",
                   "/sandbox/**",
                   "/ash_plugin_modules",
                   "/ash_plugin_modules/**",
+                  "/scanners/detect-secrets/options/scan_settings/filters_used",
+                  "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+                  "/scanners/detect-secrets/options/scan_settings/plugins_used",
+                  "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+                  "/scanners/detect-secrets/options/baseline_file",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
+                  "/global_settings/mcp",
+                  "/global_settings/mcp/**",
+                  "/scanners/opengrep/options/exclude_rule",
+                  "/scanners/semgrep/options/exclude_rule",
+                  "/scanners/bandit/options/confidence_level",
+                  "/scanners/checkov/options/frameworks",
+                  "/scanners/checkov/options/skip_frameworks",
+                  "/scanners/opengrep/options/config",
+                  "/scanners/opengrep/options/patterns",
+                  "/scanners/opengrep/options/severity",
+                  "/scanners/semgrep/options/config",
+                  "/scanners/semgrep/options/severity",
+                  "/scanners/detect-secrets/options/scan_settings",
+                  "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+                  "/scanners/ferret-scan/options/checks",
+                  "/scanners/ferret-scan/options/confidence_levels",
+                  "/scanners/ferret-scan/options/disable_ip_types",
+                  "/scanners/ferret-scan/options/enable_preprocessors",
+                  "/scanners/ferret-scan/options/finding_limit",
+                  "/scanners/ferret-scan/options/profile",
+                  "/scanners/ferret-scan/options/recursive",
+                  "/scanners/ferret-scan/options/respect_gitignore",
+                  "/scanners/ferret-scan/options/use_default_config",
+                  "/scanners/ferret-scan/options/validator_budget",
+                  "/scanners/trivy-repo/options/license_full",
+                  "/scanners/trivy-repo/options/scanners",
+                  "/scanners/cfn-guard/options/rule_sets",
+                  "/scanners/cfn-lint/options/ignore_checks",
+                  "/scanners/cfn-lint/options/regions",
+                  "/scanners/gitleaks/options/baseline_path",
+                  "/scanners/trivy/options/scanners",
+                  "/scanners/trivy/options/ignore_unfixed",
+                  "/scanners/*/options/offline",
+                  "/scanners/ferret-scan/options/max_live_bytes",
+                  "/scanners/gitleaks/options/max_target_megabytes",
+                  "/scanners/bandit/options/config_file",
+                  "/scanners/checkov/options/config_file",
+                  "/scanners/ferret-scan/options/config_file",
+                  "/scanners/grype/options/config_file",
+                  "/scanners/syft/options/config_file",
+                  "/scanners/trivy-repo/options/secret_config_file",
+                  "/scanners/trivy-repo/options/config_file",
+                  "/scanners/trivy-repo/options/module_dir",
+                  "/scanners/trivy/options/config_file",
+                  "/scanners/trivy/options/secret_config_file",
+                  "/scanners/actionlint/options/config_file",
+                  "/scanners/actionlint/options/shellcheck",
+                  "/scanners/actionlint/options/pyflakes",
+                  "/scanners/cfn-guard/options/rules_paths",
+                  "/scanners/cfn-lint/options/config_file",
+                  "/scanners/gitleaks/options/config_file",
+                  "/scanners/zizmor/options/config_file",
+                  "/scanners/zizmor/options/online_audits",
+                  "/scanners/snyk-code/options/honor_tree_exclusions",
+                  "/scanners/cfn-lint/options/honor_inline_ignores",
+                  "/scanners/gitleaks/options/honor_inline_ignores",
+                  "/scanners/zizmor/options/honor_inline_ignores",
+                  "/scanners/*/options/tool_version",
+                  "/converters/jupyter/options/tool_version",
+                  "/scanners/opengrep/options/version",
+                  "/scanners/opengrep/options/sha256",
+                  "/scanners/opengrep/options/metrics",
+                  "/scanners/semgrep/options/metrics",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
-                  "/reporters/cloudwatch-logs/**"
+                  "/reporters/cloudwatch-logs/**",
+                  "/reporters/aws-security-hub/**",
+                  "/reporters/bedrock-summary-reporter/options/model_id",
+                  "/reporters/bedrock-summary-reporter/options/output_file",
+                  "/reporters/bedrock-summary-reporter/options/output_executive_file",
+                  "/reporters/bedrock-summary-reporter/options/output_technical_file",
+                  "/reporters/s3/**",
+                  "/reporters/bedrock-summary-reporter/**",
+                  "/reporters/gitlab-sast/options/exclude_suppressed",
+                  "/scanners/detect-secrets/**",
+                  "/scanners/npm-audit/**",
+                  "/scanners/opengrep/**",
+                  "/scanners/semgrep/**",
+                  "/scanners/snyk-code/**",
+                  "/scanners/trivy-repo/**",
+                  "/scanners/trivy/**",
+                  "/scanners/zizmor/**",
+                  "/converters/archive/options/max_members",
+                  "/converters/archive/options/max_member_bytes",
+                  "/converters/archive/options/max_total_bytes",
+                  "/converters/archive/options/max_compression_ratio"
                 ],
                 "denied_value_patterns": {},
-                "enabled": false
+                "enabled": false,
+                "replace_default_denied_paths": false
               }
             },
             "severity_threshold": "MEDIUM",
             "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
+        },
+        "honor_ignore_files": {
+          "default": true,
+          "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
+          "title": "Honor Ignore Files",
+          "type": "boolean"
         },
         "mcp-resource-management": {
           "$ref": "#/$defs/MCPResourceManagementConfig",
@@ -170,6 +422,7 @@
             "health_check_interval_seconds": 60,
             "log_resource_operations": false,
             "max_concurrent_scans": 3,
+            "max_concurrent_scans_per_session": 2,
             "max_concurrent_tasks": 20,
             "max_directory_size_mb": 1000,
             "max_message_size_bytes": 10485760,
@@ -337,15 +590,28 @@
         "sandbox": {
           "$ref": "#/$defs/SandboxConfig",
           "default": {
+            "env_scanners": [],
             "extra_read_paths": [],
             "mode": "off",
-            "network_scanners": null
+            "network_scanners": null,
+            "read_path_scanners": []
           },
           "description": "OS-level sandboxing of scanner subprocesses."
         },
         "scanners": {
           "$ref": "#/$defs/ScannerConfigSegment",
           "default": {
+            "actionlint": {
+              "enabled": true,
+              "name": "actionlint",
+              "options": {
+                "config_file": null,
+                "pyflakes": null,
+                "scan_timeout": 1800,
+                "severity_threshold": null,
+                "shellcheck": null
+              }
+            },
             "bandit": {
               "enabled": true,
               "name": "bandit",
@@ -375,6 +641,33 @@
                 },
                 "scan_timeout": 1800,
                 "severity_threshold": null
+              }
+            },
+            "cfn-guard": {
+              "enabled": true,
+              "name": "cfn-guard",
+              "options": {
+                "rule_sets": [
+                  "wa-Security-Pillar"
+                ],
+                "rules_paths": [],
+                "scan_timeout": 1800,
+                "severity_threshold": null
+              }
+            },
+            "cfn-lint": {
+              "enabled": true,
+              "name": "cfn-lint",
+              "options": {
+                "config_file": null,
+                "honor_inline_ignores": false,
+                "ignore_checks": [],
+                "include_checks": [],
+                "install_timeout": 300,
+                "regions": [],
+                "scan_timeout": 1800,
+                "severity_threshold": null,
+                "tool_version": ">=1.43.3,<2.0.0"
               }
             },
             "cfn-nag": {
@@ -421,6 +714,18 @@
                 "scan_timeout": 1800,
                 "severity_threshold": null,
                 "skip_generated_lockfiles": true
+              }
+            },
+            "gitleaks": {
+              "enabled": true,
+              "name": "gitleaks",
+              "options": {
+                "baseline_path": null,
+                "config_file": null,
+                "honor_inline_ignores": false,
+                "max_target_megabytes": null,
+                "scan_timeout": 1800,
+                "severity_threshold": null
               }
             },
             "grype": {
@@ -494,6 +799,38 @@
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
+            },
+            "trivy": {
+              "enabled": true,
+              "name": "trivy",
+              "options": {
+                "config_file": null,
+                "disable_telemetry": true,
+                "ignore_file": null,
+                "ignore_unfixed": false,
+                "license_full": false,
+                "offline": false,
+                "scan_timeout": 1800,
+                "scanners": [
+                  "vuln"
+                ],
+                "secret_config_file": null,
+                "severity_threshold": null
+              }
+            },
+            "zizmor": {
+              "enabled": true,
+              "name": "zizmor",
+              "options": {
+                "config_file": null,
+                "honor_inline_ignores": false,
+                "install_timeout": 300,
+                "online_audits": false,
+                "persona": "regular",
+                "scan_timeout": 1800,
+                "severity_threshold": null,
+                "tool_version": ">=1.29.0,<2.0.0"
+              }
             }
           },
           "description": "Scanner configurations by name."
@@ -532,17 +869,108 @@
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
                 "/content_db_staleness_overrides",
+                "/honor_ignore_files",
+                "/content_db_staleness_offline_image_default",
                 "/sandbox",
                 "/sandbox/**",
                 "/ash_plugin_modules",
                 "/ash_plugin_modules/**",
+                "/scanners/detect-secrets/options/scan_settings/filters_used",
+                "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+                "/scanners/detect-secrets/options/scan_settings/plugins_used",
+                "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+                "/scanners/detect-secrets/options/baseline_file",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
+                "/global_settings/mcp",
+                "/global_settings/mcp/**",
+                "/scanners/opengrep/options/exclude_rule",
+                "/scanners/semgrep/options/exclude_rule",
+                "/scanners/bandit/options/confidence_level",
+                "/scanners/checkov/options/frameworks",
+                "/scanners/checkov/options/skip_frameworks",
+                "/scanners/opengrep/options/config",
+                "/scanners/opengrep/options/patterns",
+                "/scanners/opengrep/options/severity",
+                "/scanners/semgrep/options/config",
+                "/scanners/semgrep/options/severity",
+                "/scanners/detect-secrets/options/scan_settings",
+                "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+                "/scanners/ferret-scan/options/checks",
+                "/scanners/ferret-scan/options/confidence_levels",
+                "/scanners/ferret-scan/options/disable_ip_types",
+                "/scanners/ferret-scan/options/enable_preprocessors",
+                "/scanners/ferret-scan/options/finding_limit",
+                "/scanners/ferret-scan/options/profile",
+                "/scanners/ferret-scan/options/recursive",
+                "/scanners/ferret-scan/options/respect_gitignore",
+                "/scanners/ferret-scan/options/use_default_config",
+                "/scanners/ferret-scan/options/validator_budget",
+                "/scanners/trivy-repo/options/license_full",
+                "/scanners/trivy-repo/options/scanners",
+                "/scanners/cfn-guard/options/rule_sets",
+                "/scanners/cfn-lint/options/ignore_checks",
+                "/scanners/cfn-lint/options/regions",
+                "/scanners/gitleaks/options/baseline_path",
+                "/scanners/trivy/options/scanners",
+                "/scanners/trivy/options/ignore_unfixed",
+                "/scanners/*/options/offline",
+                "/scanners/ferret-scan/options/max_live_bytes",
+                "/scanners/gitleaks/options/max_target_megabytes",
+                "/scanners/bandit/options/config_file",
+                "/scanners/checkov/options/config_file",
+                "/scanners/ferret-scan/options/config_file",
+                "/scanners/grype/options/config_file",
+                "/scanners/syft/options/config_file",
+                "/scanners/trivy-repo/options/secret_config_file",
+                "/scanners/trivy-repo/options/config_file",
+                "/scanners/trivy-repo/options/module_dir",
+                "/scanners/trivy/options/config_file",
+                "/scanners/trivy/options/secret_config_file",
+                "/scanners/actionlint/options/config_file",
+                "/scanners/actionlint/options/shellcheck",
+                "/scanners/actionlint/options/pyflakes",
+                "/scanners/cfn-guard/options/rules_paths",
+                "/scanners/cfn-lint/options/config_file",
+                "/scanners/gitleaks/options/config_file",
+                "/scanners/zizmor/options/config_file",
+                "/scanners/zizmor/options/online_audits",
+                "/scanners/snyk-code/options/honor_tree_exclusions",
+                "/scanners/cfn-lint/options/honor_inline_ignores",
+                "/scanners/gitleaks/options/honor_inline_ignores",
+                "/scanners/zizmor/options/honor_inline_ignores",
+                "/scanners/*/options/tool_version",
+                "/converters/jupyter/options/tool_version",
+                "/scanners/opengrep/options/version",
+                "/scanners/opengrep/options/sha256",
+                "/scanners/opengrep/options/metrics",
+                "/scanners/semgrep/options/metrics",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
-                "/reporters/cloudwatch-logs/**"
+                "/reporters/cloudwatch-logs/**",
+                "/reporters/aws-security-hub/**",
+                "/reporters/bedrock-summary-reporter/options/model_id",
+                "/reporters/bedrock-summary-reporter/options/output_file",
+                "/reporters/bedrock-summary-reporter/options/output_executive_file",
+                "/reporters/bedrock-summary-reporter/options/output_technical_file",
+                "/reporters/s3/**",
+                "/reporters/bedrock-summary-reporter/**",
+                "/reporters/gitlab-sast/options/exclude_suppressed",
+                "/scanners/detect-secrets/**",
+                "/scanners/npm-audit/**",
+                "/scanners/opengrep/**",
+                "/scanners/semgrep/**",
+                "/scanners/snyk-code/**",
+                "/scanners/trivy-repo/**",
+                "/scanners/trivy/**",
+                "/scanners/zizmor/**",
+                "/converters/archive/options/max_members",
+                "/converters/archive/options/max_member_bytes",
+                "/converters/archive/options/max_total_bytes",
+                "/converters/archive/options/max_compression_ratio"
               ],
               "denied_value_patterns": {},
-              "enabled": false
+              "enabled": false,
+              "replace_default_denied_paths": false
             }
           },
           "description": "MCP-server-specific configuration (runtime override allowlist, etc.)."
@@ -586,17 +1014,108 @@
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
               "/content_db_staleness_overrides",
+              "/honor_ignore_files",
+              "/content_db_staleness_offline_image_default",
               "/sandbox",
               "/sandbox/**",
               "/ash_plugin_modules",
               "/ash_plugin_modules/**",
+              "/scanners/detect-secrets/options/scan_settings/filters_used",
+              "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+              "/scanners/detect-secrets/options/scan_settings/plugins_used",
+              "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+              "/scanners/detect-secrets/options/baseline_file",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
+              "/global_settings/mcp",
+              "/global_settings/mcp/**",
+              "/scanners/opengrep/options/exclude_rule",
+              "/scanners/semgrep/options/exclude_rule",
+              "/scanners/bandit/options/confidence_level",
+              "/scanners/checkov/options/frameworks",
+              "/scanners/checkov/options/skip_frameworks",
+              "/scanners/opengrep/options/config",
+              "/scanners/opengrep/options/patterns",
+              "/scanners/opengrep/options/severity",
+              "/scanners/semgrep/options/config",
+              "/scanners/semgrep/options/severity",
+              "/scanners/detect-secrets/options/scan_settings",
+              "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+              "/scanners/ferret-scan/options/checks",
+              "/scanners/ferret-scan/options/confidence_levels",
+              "/scanners/ferret-scan/options/disable_ip_types",
+              "/scanners/ferret-scan/options/enable_preprocessors",
+              "/scanners/ferret-scan/options/finding_limit",
+              "/scanners/ferret-scan/options/profile",
+              "/scanners/ferret-scan/options/recursive",
+              "/scanners/ferret-scan/options/respect_gitignore",
+              "/scanners/ferret-scan/options/use_default_config",
+              "/scanners/ferret-scan/options/validator_budget",
+              "/scanners/trivy-repo/options/license_full",
+              "/scanners/trivy-repo/options/scanners",
+              "/scanners/cfn-guard/options/rule_sets",
+              "/scanners/cfn-lint/options/ignore_checks",
+              "/scanners/cfn-lint/options/regions",
+              "/scanners/gitleaks/options/baseline_path",
+              "/scanners/trivy/options/scanners",
+              "/scanners/trivy/options/ignore_unfixed",
+              "/scanners/*/options/offline",
+              "/scanners/ferret-scan/options/max_live_bytes",
+              "/scanners/gitleaks/options/max_target_megabytes",
+              "/scanners/bandit/options/config_file",
+              "/scanners/checkov/options/config_file",
+              "/scanners/ferret-scan/options/config_file",
+              "/scanners/grype/options/config_file",
+              "/scanners/syft/options/config_file",
+              "/scanners/trivy-repo/options/secret_config_file",
+              "/scanners/trivy-repo/options/config_file",
+              "/scanners/trivy-repo/options/module_dir",
+              "/scanners/trivy/options/config_file",
+              "/scanners/trivy/options/secret_config_file",
+              "/scanners/actionlint/options/config_file",
+              "/scanners/actionlint/options/shellcheck",
+              "/scanners/actionlint/options/pyflakes",
+              "/scanners/cfn-guard/options/rules_paths",
+              "/scanners/cfn-lint/options/config_file",
+              "/scanners/gitleaks/options/config_file",
+              "/scanners/zizmor/options/config_file",
+              "/scanners/zizmor/options/online_audits",
+              "/scanners/snyk-code/options/honor_tree_exclusions",
+              "/scanners/cfn-lint/options/honor_inline_ignores",
+              "/scanners/gitleaks/options/honor_inline_ignores",
+              "/scanners/zizmor/options/honor_inline_ignores",
+              "/scanners/*/options/tool_version",
+              "/converters/jupyter/options/tool_version",
+              "/scanners/opengrep/options/version",
+              "/scanners/opengrep/options/sha256",
+              "/scanners/opengrep/options/metrics",
+              "/scanners/semgrep/options/metrics",
               "/reporters/bedrock-summary-reporter/options/aws_*",
-              "/reporters/cloudwatch-logs/**"
+              "/reporters/cloudwatch-logs/**",
+              "/reporters/aws-security-hub/**",
+              "/reporters/bedrock-summary-reporter/options/model_id",
+              "/reporters/bedrock-summary-reporter/options/output_file",
+              "/reporters/bedrock-summary-reporter/options/output_executive_file",
+              "/reporters/bedrock-summary-reporter/options/output_technical_file",
+              "/reporters/s3/**",
+              "/reporters/bedrock-summary-reporter/**",
+              "/reporters/gitlab-sast/options/exclude_suppressed",
+              "/scanners/detect-secrets/**",
+              "/scanners/npm-audit/**",
+              "/scanners/opengrep/**",
+              "/scanners/semgrep/**",
+              "/scanners/snyk-code/**",
+              "/scanners/trivy-repo/**",
+              "/scanners/trivy/**",
+              "/scanners/zizmor/**",
+              "/converters/archive/options/max_members",
+              "/converters/archive/options/max_member_bytes",
+              "/converters/archive/options/max_total_bytes",
+              "/converters/archive/options/max_compression_ratio"
             ],
             "denied_value_patterns": {},
-            "enabled": false
+            "enabled": false,
+            "replace_default_denied_paths": false
           },
           "description": "Allowlist for runtime JSON-Patch overrides."
         }
@@ -607,6 +1126,12 @@
     "AshSuppression": {
       "description": "Represents a finding suppression rule.",
       "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
         "expiration": {
           "anyOf": [
             {
@@ -810,7 +1335,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
+          "description": "Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. A file named exactly `.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`. Unless config_file names a `.bandit` file that exists, ASH passes bandit an empty config file with `bandit --ini`, so bandit does not read a `.bandit` file from the scanned tree. A path that is not a file is logged as a warning and ignored.",
           "title": "Config File"
         },
         "excluded_paths": {
@@ -1087,6 +1612,240 @@
       "title": "CdkNagScannerConfigOptions",
       "type": "object"
     },
+    "CfnGuardScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "cfn-guard",
+          "default": "cfn-guard",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CfnGuardScannerConfigOptions",
+          "default": {
+            "rule_sets": [
+              "wa-Security-Pillar"
+            ],
+            "rules_paths": [],
+            "scan_timeout": 1800,
+            "severity_threshold": null
+          },
+          "description": "Configure the cfn-guard scanner"
+        }
+      },
+      "title": "CfnGuardScannerConfig",
+      "type": "object"
+    },
+    "CfnGuardScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "rule_sets": {
+          "default": [
+            "wa-Security-Pillar"
+          ],
+          "description": "Rule sets from the bundled AWS Guard Rules Registry to evaluate, by file name without the .guard extension, e.g. ['wa-Security-Pillar', 'cis-aws-benchmark-level-1']. Defaults to the Well-Architected Security Pillar set. Set to [] to evaluate only rules_paths. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default set is evaluated.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Rule Sets",
+          "type": "array"
+        },
+        "rules_paths": {
+          "default": [],
+          "description": "Your own cfn-guard rules: .guard files or directories of them. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Evaluated in addition to rule_sets. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. cfn-guard prints a rules file it cannot parse, so a path the scanned repository chose could put any file the scan can read into the report. Set by such a config, it is ignored with a warning, and an empty rule_sets falls back to wa-Security-Pillar. In a directory, the .guard and .ruleset files are read, recursively; one that resolves outside the directory, through a symlink, is refused.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Rules Paths",
+          "type": "array"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "CfnGuardScannerConfigOptions",
+      "type": "object"
+    },
+    "CfnLintScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "cfn-lint",
+          "default": "cfn-lint",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/CfnLintScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "honor_inline_ignores": false,
+            "ignore_checks": [],
+            "include_checks": [],
+            "install_timeout": 300,
+            "regions": [],
+            "scan_timeout": 1800,
+            "severity_threshold": null,
+            "tool_version": ">=1.43.3,<2.0.0"
+          },
+          "description": "Configure the cfn-lint scanner"
+        }
+      },
+      "title": "CfnLintScannerConfig",
+      "type": "object"
+    },
+    "CfnLintScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a cfn-lint configuration file (.cfnlintrc). A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. When unset, ASH gives cfn-lint an empty configuration, so a .cfnlintrc in the scanned repository or the home directory is NOT read: such a file can load Python rules (append_rules) and switch checks off. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning.",
+          "title": "Config File"
+        },
+        "honor_inline_ignores": {
+          "default": false,
+          "description": "Honor the ignore_checks and configure_rules a template sets for itself in `Metadata: cfn-lint: config` (ignore_checks also at the resource level). Off by default: every rule outside ignore_checks and the config_file's ignore_checks is passed to cfn-lint as mandatory, and the config_file's configure_rules are passed on the command line, which cfn-lint takes instead of a template's, so a template cannot hide its own findings or the next template's parse errors, which reach ASH, where suppressions are reported and counted. A config_file setting the command line cannot carry (a list of more than one item, or a value with a comma, colon or equals sign) is then left out with a warning, and a config_file that sets merge_configs fails the scan. On, each template is linted by a cfn-lint run of its own, so its settings reach no other template; that adds a cfn-lint start-up per template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
+          "title": "Honor Inline Ignores",
+          "type": "boolean"
+        },
+        "ignore_checks": {
+          "default": [],
+          "description": "cfn-lint rule ids or prefixes to skip, e.g. ['W2001', 'W3']. Prefer ASH suppressions for individual findings; this removes the rule from every template. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ignore Checks",
+          "type": "array"
+        },
+        "include_checks": {
+          "default": [],
+          "description": "cfn-lint rule ids or prefixes to enable in addition to the defaults, e.g. ['I'] for informational rules.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Include Checks",
+          "type": "array"
+        },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
+        "regions": {
+          "default": [],
+          "description": "AWS regions to validate templates against, e.g. ['us-east-1', 'eu-west-1'], or ['ALL_REGIONS']. Empty validates against us-east-1, or the regions a template names in its own cfn-lint metadata or config_file names; AWS_REGION and AWS_DEFAULT_REGION are not read.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Regions",
+          "type": "array"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": ">=1.43.3,<2.0.0",
+          "description": "Version constraint for the cfn-lint installation, in pip requirement syntax. The default is the range the scanner's SARIF handling was verified against. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
+          "title": "Tool Version"
+        }
+      },
+      "title": "CfnLintScannerConfigOptions",
+      "type": "object"
+    },
     "CfnNagScannerConfig": {
       "additionalProperties": true,
       "properties": {
@@ -1233,7 +1992,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+          "description": "Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
           "title": "Config File"
         },
         "frameworks": {
@@ -1412,7 +2171,7 @@
     },
     "ContentDbStalenessOverride": {
       "additionalProperties": false,
-      "description": "One content database held to a different staleness policy, until a fixed date.\n\n``content_db_staleness`` decides for every database at once. This narrows a\nrelaxation to the one database that needs it -- typically one whose upstream\npublisher has stopped publishing for a while -- so every other database is still\nheld to the scan-wide policy. ``expiration`` and ``reason`` are required, the\nsame two fields a time-boxed suppression carries: an exception to a freshness\ngate that has no end date is a permanent one. On and after ``expiration``\n(00:00 UTC) the entry is ignored, with a warning in the log, and the database\nfalls back to ``content_db_staleness``.",
+      "description": "One content database held to a different staleness policy, until a fixed date.\n\n``content_db_staleness`` decides for every database at once. This narrows a\nrelaxation to the one database that needs it -- typically one whose upstream\npublisher has stopped publishing for a while -- so every other database is still\nheld to the scan-wide policy. ``expiration`` and ``reason`` are required, the\nsame two fields a time-boxed suppression carries: an exception to a freshness\ngate that has no end date is a permanent one. On and after ``expiration``\n(00:00 UTC) the entry is ignored, with a warning in the log, and the database\nis held to the policy it has without the entry: ``content_db_staleness``, or,\nfor trivy-db in an image built with ``OFFLINE=YES``, that image's ``warn``\ndefault unless ``content_db_staleness_offline_image_default`` is false.",
       "properties": {
         "database": {
           "description": "The content database's registry name, as listed in automated_security_helper/utils/content_databases.py: grype-db, trivy-db, semgrep-offline-rules or opengrep-offline-rules.",
@@ -1420,7 +2179,7 @@
           "type": "string"
         },
         "expiration": {
-          "description": "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer applies: at 00:00 UTC that day the database returns to content_db_staleness.",
+          "description": "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer applies: at 00:00 UTC that day the database returns to the policy it has without the entry, which is content_db_staleness, or, for trivy-db in an image built with OFFLINE=YES, that image's warn default unless content_db_staleness_offline_image_default is false.",
           "title": "Expiration",
           "type": "string"
         },
@@ -1464,7 +2223,12 @@
           "default": {
             "enabled": true,
             "name": "archive",
-            "options": {}
+            "options": {
+              "max_compression_ratio": 100,
+              "max_member_bytes": 268435456,
+              "max_members": 100000,
+              "max_total_bytes": 1073741824
+            }
           },
           "description": "Configure the options for the ArchiveConverter"
         },
@@ -1769,7 +2533,7 @@
             }
           ],
           "default": null,
-          "description": "Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+          "description": "Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
           "title": "Baseline File"
         },
         "scan_settings": {
@@ -2051,6 +2815,131 @@
       "title": "GitLabSASTReporterConfigOptions",
       "type": "object"
     },
+    "GitleaksScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "gitleaks",
+          "default": "gitleaks",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/GitleaksScannerConfigOptions",
+          "default": {
+            "baseline_path": null,
+            "config_file": null,
+            "honor_inline_ignores": false,
+            "max_target_megabytes": null,
+            "scan_timeout": 1800,
+            "severity_threshold": null
+          },
+          "description": "Configure the gitleaks scanner"
+        }
+      },
+      "title": "GitleaksScannerConfig",
+      "type": "object"
+    },
+    "GitleaksScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "baseline_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a gitleaks JSON report whose findings gitleaks ignores (gitleaks --baseline-path). A relative path is taken as for config_file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. A path that does not exist fails the scan.",
+          "title": "Baseline Path"
+        },
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a gitleaks TOML config. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Its rules and [[allowlists]] apply on top of ASH suppressions. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Unset, gitleaks uses GITLEAKS_CONFIG or GITLEAKS_CONFIG_TOML from the environment if one is set, else its default rules; a .gitleaks.toml in the scanned repository is not read. A path that does not exist fails the scan.",
+          "title": "Config File"
+        },
+        "honor_inline_ignores": {
+          "default": false,
+          "description": "Honor gitleaks' inline `gitleaks:allow` comments. Off by default: ASH runs `gitleaks --ignore-gitleaks-allow`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
+          "title": "Honor Inline Ignores",
+          "type": "boolean"
+        },
+        "max_target_megabytes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
+          "title": "Max Target Megabytes"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "GitleaksScannerConfigOptions",
+      "type": "object"
+    },
     "GrypeScannerConfig": {
       "additionalProperties": true,
       "properties": {
@@ -2096,7 +2985,7 @@
             }
           ],
           "default": null,
-          "description": "Path to Grype configuration file, relative to current source directory. Defaults to searching for `.grype.yaml` and `.grype.yml` in the root of the source directory.",
+          "description": "Path to Grype configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, grype gets an empty config, so it does not read `.grype.yaml` from the scanned tree.",
           "title": "Config File"
         },
         "offline": {
@@ -2178,6 +3067,12 @@
     "IgnorePathWithReason": {
       "description": "Represents a path exclusion entry.",
       "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
         "expiration": {
           "anyOf": [
             {
@@ -2339,6 +3234,14 @@
           "maximum": 10,
           "minimum": 1,
           "title": "Max Concurrent Scans",
+          "type": "integer"
+        },
+        "max_concurrent_scans_per_session": {
+          "default": 2,
+          "description": "Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Max Concurrent Scans Per Session",
           "type": "integer"
         },
         "max_concurrent_tasks": {
@@ -2544,7 +3447,7 @@
       "properties": {
         "offline": {
           "default": false,
-          "description": "Run in offline mode, using locally cached data. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+          "description": "Run offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, and with a lockfile the scanner is reported MISSING. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -3129,16 +4032,106 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/honor_ignore_files",
+            "/content_db_staleness_offline_image_default",
             "/sandbox",
             "/sandbox/**",
             "/ash_plugin_modules",
             "/ash_plugin_modules/**",
+            "/scanners/detect-secrets/options/scan_settings/filters_used",
+            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+            "/scanners/detect-secrets/options/baseline_file",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
+            "/global_settings/mcp",
+            "/global_settings/mcp/**",
+            "/scanners/opengrep/options/exclude_rule",
+            "/scanners/semgrep/options/exclude_rule",
+            "/scanners/bandit/options/confidence_level",
+            "/scanners/checkov/options/frameworks",
+            "/scanners/checkov/options/skip_frameworks",
+            "/scanners/opengrep/options/config",
+            "/scanners/opengrep/options/patterns",
+            "/scanners/opengrep/options/severity",
+            "/scanners/semgrep/options/config",
+            "/scanners/semgrep/options/severity",
+            "/scanners/detect-secrets/options/scan_settings",
+            "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+            "/scanners/ferret-scan/options/checks",
+            "/scanners/ferret-scan/options/confidence_levels",
+            "/scanners/ferret-scan/options/disable_ip_types",
+            "/scanners/ferret-scan/options/enable_preprocessors",
+            "/scanners/ferret-scan/options/finding_limit",
+            "/scanners/ferret-scan/options/profile",
+            "/scanners/ferret-scan/options/recursive",
+            "/scanners/ferret-scan/options/respect_gitignore",
+            "/scanners/ferret-scan/options/use_default_config",
+            "/scanners/ferret-scan/options/validator_budget",
+            "/scanners/trivy-repo/options/license_full",
+            "/scanners/trivy-repo/options/scanners",
+            "/scanners/cfn-guard/options/rule_sets",
+            "/scanners/cfn-lint/options/ignore_checks",
+            "/scanners/cfn-lint/options/regions",
+            "/scanners/gitleaks/options/baseline_path",
+            "/scanners/trivy/options/scanners",
+            "/scanners/trivy/options/ignore_unfixed",
+            "/scanners/*/options/offline",
+            "/scanners/ferret-scan/options/max_live_bytes",
+            "/scanners/gitleaks/options/max_target_megabytes",
+            "/scanners/bandit/options/config_file",
+            "/scanners/checkov/options/config_file",
+            "/scanners/ferret-scan/options/config_file",
+            "/scanners/grype/options/config_file",
+            "/scanners/syft/options/config_file",
+            "/scanners/trivy-repo/options/secret_config_file",
+            "/scanners/trivy-repo/options/config_file",
+            "/scanners/trivy-repo/options/module_dir",
+            "/scanners/trivy/options/config_file",
+            "/scanners/trivy/options/secret_config_file",
+            "/scanners/actionlint/options/config_file",
+            "/scanners/actionlint/options/shellcheck",
+            "/scanners/actionlint/options/pyflakes",
+            "/scanners/cfn-guard/options/rules_paths",
+            "/scanners/cfn-lint/options/config_file",
+            "/scanners/gitleaks/options/config_file",
+            "/scanners/zizmor/options/config_file",
+            "/scanners/zizmor/options/online_audits",
+            "/scanners/snyk-code/options/honor_tree_exclusions",
+            "/scanners/cfn-lint/options/honor_inline_ignores",
+            "/scanners/gitleaks/options/honor_inline_ignores",
+            "/scanners/zizmor/options/honor_inline_ignores",
+            "/scanners/*/options/tool_version",
+            "/converters/jupyter/options/tool_version",
+            "/scanners/opengrep/options/version",
+            "/scanners/opengrep/options/sha256",
+            "/scanners/opengrep/options/metrics",
+            "/scanners/semgrep/options/metrics",
             "/reporters/bedrock-summary-reporter/options/aws_*",
-            "/reporters/cloudwatch-logs/**"
+            "/reporters/cloudwatch-logs/**",
+            "/reporters/aws-security-hub/**",
+            "/reporters/bedrock-summary-reporter/options/model_id",
+            "/reporters/bedrock-summary-reporter/options/output_file",
+            "/reporters/bedrock-summary-reporter/options/output_executive_file",
+            "/reporters/bedrock-summary-reporter/options/output_technical_file",
+            "/reporters/s3/**",
+            "/reporters/bedrock-summary-reporter/**",
+            "/reporters/gitlab-sast/options/exclude_suppressed",
+            "/scanners/detect-secrets/**",
+            "/scanners/npm-audit/**",
+            "/scanners/opengrep/**",
+            "/scanners/semgrep/**",
+            "/scanners/snyk-code/**",
+            "/scanners/trivy-repo/**",
+            "/scanners/trivy/**",
+            "/scanners/zizmor/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio"
           ],
-          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema.",
+          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code and trivy-repo scanners) are added to it.",
           "items": {
             "type": "string"
           },
@@ -3150,7 +4143,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only.",
+          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only. Each key starts with '/'.",
           "title": "Denied Value Patterns",
           "type": "object"
         },
@@ -3158,6 +4151,12 @@
           "default": false,
           "description": "Master switch \u2014 runtime patches are rejected unless True.",
           "title": "Enabled",
+          "type": "boolean"
+        },
+        "replace_default_denied_paths": {
+          "default": false,
+          "description": "When true, denied_paths is used as written instead of being added to ASH's default list, and each default entry it leaves out is named in a warning. When false (the default), the entries listed are denied as well as the defaults. Either way, an unset list, or one equal to a default ASH has shipped, gets the current default list.",
+          "title": "Replace Default Denied Paths",
           "type": "boolean"
         }
       },
@@ -3234,9 +4233,18 @@
       "additionalProperties": false,
       "description": "OS-level sandboxing of scanner subprocesses. Off by default.\n\nSee docs/content/docs/scanner-sandbox.md for the policy each scanner gets.",
       "properties": {
+        "env_scanners": {
+          "default": [],
+          "description": "Scanners allowed the environment variables their own options ask for (a token for an online check, for example). Without this, such variables are not passed. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Env Scanners",
+          "type": "array"
+        },
         "extra_read_paths": {
           "default": [],
-          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside the scanned tree.",
+          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
           "items": {
             "type": "string"
           },
@@ -3245,7 +4253,7 @@
         },
         "mode": {
           "default": "off",
-          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary.",
+          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Ignored in container mode, where the container is the boundary.",
           "enum": [
             "off",
             "auto",
@@ -3270,8 +4278,17 @@
             }
           ],
           "default": null,
-          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside the scanned tree; set inside the tree, a list can only remove network.",
+          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network.",
           "title": "Network Scanners"
+        },
+        "read_path_scanners": {
+          "default": [],
+          "description": "Scanners allowed the extra host paths their own options ask for (a rules file or baseline outside the source tree, for example). Under a sandbox, without this, a scanner whose read paths come from its options gets only the default policy, and ASH does not read a detect-secrets baseline_file outside the source tree. With it, a granted path, that baseline included, is used only when it resolves inside the source tree or an extra_read_paths entry. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Read Path Scanners",
+          "type": "array"
         }
       },
       "title": "SandboxConfig",
@@ -3287,6 +4304,21 @@
         ]
       },
       "properties": {
+        "actionlint": {
+          "$ref": "#/$defs/ActionlintScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "actionlint",
+            "options": {
+              "config_file": null,
+              "pyflakes": null,
+              "scan_timeout": 1800,
+              "severity_threshold": null,
+              "shellcheck": null
+            }
+          },
+          "description": "Configure the options for actionlint"
+        },
         "bandit": {
           "$ref": "#/$defs/BanditScannerConfig",
           "default": {
@@ -3325,6 +4357,41 @@
             }
           },
           "description": "Configure the options for CdkNag"
+        },
+        "cfn-guard": {
+          "$ref": "#/$defs/CfnGuardScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "cfn-guard",
+            "options": {
+              "rule_sets": [
+                "wa-Security-Pillar"
+              ],
+              "rules_paths": [],
+              "scan_timeout": 1800,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for cfn-guard"
+        },
+        "cfn-lint": {
+          "$ref": "#/$defs/CfnLintScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "cfn-lint",
+            "options": {
+              "config_file": null,
+              "honor_inline_ignores": false,
+              "ignore_checks": [],
+              "include_checks": [],
+              "install_timeout": 300,
+              "regions": [],
+              "scan_timeout": 1800,
+              "severity_threshold": null,
+              "tool_version": ">=1.43.3,<2.0.0"
+            }
+          },
+          "description": "Configure the options for cfn-lint"
         },
         "cfn-nag": {
           "$ref": "#/$defs/CfnNagScannerConfig",
@@ -3383,6 +4450,22 @@
             }
           },
           "description": "Configure the options for DetectSecrets"
+        },
+        "gitleaks": {
+          "$ref": "#/$defs/GitleaksScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "gitleaks",
+            "options": {
+              "baseline_path": null,
+              "config_file": null,
+              "honor_inline_ignores": false,
+              "max_target_megabytes": null,
+              "scan_timeout": 1800,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Gitleaks"
         },
         "grype": {
           "$ref": "#/$defs/GrypeScannerConfig",
@@ -3475,6 +4558,46 @@
             }
           },
           "description": "Configure the options for Syft"
+        },
+        "trivy": {
+          "$ref": "#/$defs/TrivyScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "trivy",
+            "options": {
+              "config_file": null,
+              "disable_telemetry": true,
+              "ignore_file": null,
+              "ignore_unfixed": false,
+              "license_full": false,
+              "offline": false,
+              "scan_timeout": 1800,
+              "scanners": [
+                "vuln"
+              ],
+              "secret_config_file": null,
+              "severity_threshold": null
+            }
+          },
+          "description": "Configure the options for Trivy (trivy fs)"
+        },
+        "zizmor": {
+          "$ref": "#/$defs/ZizmorScannerConfig",
+          "default": {
+            "enabled": true,
+            "name": "zizmor",
+            "options": {
+              "config_file": null,
+              "honor_inline_ignores": false,
+              "install_timeout": 300,
+              "online_audits": false,
+              "persona": "regular",
+              "scan_timeout": 1800,
+              "severity_threshold": null,
+              "tool_version": ">=1.29.0,<2.0.0"
+            }
+          },
+          "description": "Configure the options for zizmor"
         }
       },
       "title": "ScannerConfigSegment",
@@ -4026,16 +5149,19 @@
               "type": "string"
             },
             {
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Path to Syft configuration file, relative to current source directory. Defaults to searching for `.syft.yaml` and `.syft.yml` in the root of the source directory.",
+          "description": "Path to Syft configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. ASH does not look for one by name. Without one, syft gets an empty config, so it does not read `.syft.yaml` from the scanned tree.",
           "title": "Config File"
         },
         "exclude": {
           "default": [],
-          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "description": "Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with \"./\", \"*/\" or \"**/\", and syft fails the scan on any other. \"*\" does not match across \"/\" and \"**\" does: \"./dir1/**\" skips the top-level \"dir1\", and \"**/dir1/**\" skips every directory named \"dir1\".",
           "items": {
             "$ref": "#/$defs/IgnorePathWithReason"
           },
@@ -4252,6 +5378,176 @@
       "title": "ToolExtraArg",
       "type": "object"
     },
+    "TrivyScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "trivy",
+          "default": "trivy",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/TrivyScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "disable_telemetry": true,
+            "ignore_file": null,
+            "ignore_unfixed": false,
+            "license_full": false,
+            "offline": false,
+            "scan_timeout": 1800,
+            "scanners": [
+              "vuln"
+            ],
+            "secret_config_file": null,
+            "severity_threshold": null
+          },
+          "description": "Configure the trivy scanner"
+        }
+      },
+      "title": "TrivyScannerConfig",
+      "type": "object"
+    },
+    "TrivyScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A trivy config file (trivy.yaml), passed as --config. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; otherwise it is ignored with a warning. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Unset or ignored, ASH passes TRIVY_CONFIG when that names a file outside the scanned tree (a relative path in it is taken from the working directory), and otherwise an empty config of its own, so a trivy.yaml in the scanned repository is not read: its settings (severity, scan.skip-files, db.repository, ...) can drop findings with nothing in the report saying so, and module.dir can load WASM modules. A path that does not exist fails the scan.",
+          "title": "Config File"
+        },
+        "disable_telemetry": {
+          "default": true,
+          "description": "Disable sending anonymous usage data to Aqua (--disable-telemetry). Only the operator sets it to false, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, may set it to true but not to false. Offline, trivy sends none whatever this says. As for trivy-repo.",
+          "title": "Disable Telemetry",
+          "type": "boolean"
+        },
+        "ignore_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A trivy ignore file, passed as --ignorefile. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree; a relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides and the environment variable. Unset, TRIVY_IGNOREFILE is used the same way, and otherwise trivy gets an empty one, so a .trivyignore in the scanned repository does not remove findings. As for trivy-repo.",
+          "title": "Ignore File"
+        },
+        "ignore_unfixed": {
+          "default": false,
+          "description": "Report only vulnerabilities that have a fixed version (trivy --ignore-unfixed). Off by default: an unfixed vulnerability is still one, and turning this on withholds it from the report.",
+          "title": "Ignore Unfixed",
+          "type": "boolean"
+        },
+        "license_full": {
+          "default": false,
+          "description": "Look for licenses in source file headers and license files too (trivy --license-full). Only used when scanners includes license.",
+          "title": "License Full",
+          "type": "boolean"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run in offline mode: skip database and check updates and use the vulnerability database already in trivy's cache. ASH still fails the scan when that database is past its 24h bound. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "scanners": {
+          "default": [
+            "vuln"
+          ],
+          "description": "Which trivy scanners to run. Defaults to vuln only: ASH's default scanners already cover secrets (detect-secrets) and IaC misconfigurations (checkov, cfn-nag, cdk-nag), and license findings are a compliance question. Add secret, misconfig or license to run trivy's checks for them as well. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, any set but the default is ignored with a warning.",
+          "items": {
+            "enum": [
+              "vuln",
+              "misconfig",
+              "secret",
+              "license"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Scanners",
+          "type": "array"
+        },
+        "secret_config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A trivy secret scanning config (trivy-secret.yaml), passed as --secret-config. Only read when scanners includes secret. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. The file is used only when it is outside the scanned tree, and a relative path is taken as for ignore_file. Unset, TRIVY_SECRET_CONFIG is used the same way, and otherwise trivy gets an empty one, so a trivy-secret.yaml in the scanned repository does not disable secret rules. As for trivy-repo.",
+          "title": "Secret Config File"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        }
+      },
+      "title": "TrivyScannerConfigOptions",
+      "type": "object"
+    },
     "UnusedSuppressionsReporterConfig": {
       "additionalProperties": true,
       "description": "Configuration for the Unused Suppressions reporter.",
@@ -4363,6 +5659,138 @@
       "additionalProperties": true,
       "properties": {},
       "title": "YAMLReporterConfigOptions",
+      "type": "object"
+    },
+    "ZizmorScannerConfig": {
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "const": "zizmor",
+          "default": "zizmor",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ZizmorScannerConfigOptions",
+          "default": {
+            "config_file": null,
+            "honor_inline_ignores": false,
+            "install_timeout": 300,
+            "online_audits": false,
+            "persona": "regular",
+            "scan_timeout": 1800,
+            "severity_threshold": null,
+            "tool_version": ">=1.29.0,<2.0.0"
+          },
+          "description": "Configure zizmor scanner"
+        }
+      },
+      "title": "ZizmorScannerConfig",
+      "type": "object"
+    },
+    "ZizmorScannerConfigOptions": {
+      "additionalProperties": true,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a zizmor configuration file, passed as `zizmor --config`. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory; an absolute path is used as given. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise it runs `zizmor --no-config`, so a `zizmor.yml` or `.github/zizmor.yml` in the scanned repository is not read.",
+          "title": "Config File"
+        },
+        "honor_inline_ignores": {
+          "default": false,
+          "description": "Honor zizmor's inline `# zizmor: ignore[...]` comments and the `ignore` rules of the operator's `config_file`. Off by default: ASH runs `zizmor --no-ignores`, so every finding reaches ASH, where suppressions are reported and counted. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
+          "title": "Honor Inline Ignores",
+          "type": "boolean"
+        },
+        "install_timeout": {
+          "default": 300,
+          "description": "Timeout in seconds for tool installation",
+          "title": "Install Timeout",
+          "type": "integer"
+        },
+        "online_audits": {
+          "default": false,
+          "description": "Allow zizmor's online audits. Off by default: ASH runs `zizmor --offline` and any GH_TOKEN, GITHUB_TOKEN or ZIZMOR_GITHUB_TOKEN is removed from its environment. When true, ASH does not pass `zizmor --offline`, those variables reach zizmor unchanged, and zizmor may call the GitHub API with the token. ASH never reads or logs the token. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. It is ignored, with a warning, when ASH runs in offline mode.",
+          "title": "Online Audits",
+          "type": "boolean"
+        },
+        "persona": {
+          "default": "regular",
+          "description": "zizmor persona. `regular` reports the fewest false positives; `pedantic` adds code-smell findings; `auditor` reports everything, false positives included.",
+          "enum": [
+            "regular",
+            "pedantic",
+            "auditor"
+          ],
+          "title": "Persona",
+          "type": "string"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
+        "severity_threshold": {
+          "anyOf": [
+            {
+              "enum": [
+                "ALL",
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
+          "title": "Severity Threshold"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": ">=1.29.0,<2.0.0",
+          "description": "Version constraint for zizmor installation, in pip requirement syntax. The default below is the constraint the scanner enforces. Another value: Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning and the default applies.",
+          "title": "Tool Version"
+        }
+      },
+      "title": "ZizmorScannerConfigOptions",
       "type": "object"
     }
   },

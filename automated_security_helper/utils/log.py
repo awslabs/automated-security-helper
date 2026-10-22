@@ -421,6 +421,60 @@ def configure_windows_safe_logging():
         pass  # codecs/locale not available
 
 
+class _GuardedFileHandler(logging.FileHandler):
+    """A FileHandler that opens its file as ``fs_guard.open_for_write`` does.
+
+    Appending, since get_logger has already truncated the file when asked to. A link
+    at the file name, or a file another name refers to, raises instead of being
+    opened: the directory holding the file is guarded for each open, whether or not
+    it is still a registered root, and below a registered output directory every
+    component under it is checked too.
+
+    The handler registers the directory holding its file (the output directory) as
+    a guarded root while it is open, so ASH's other writes there refuse a link for
+    as long as it logs there, and releases it in close().
+    """
+
+    def __init__(self, filename: str, *args, **kwargs) -> None:
+        # Imported here, not at the top: fs_guard imports this module for
+        # ASH_LOGGER. Do not hoist.
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        self._root: Path | None = fs_guard.register_writable_root(Path(filename).parent)
+        try:
+            super().__init__(filename, *args, **kwargs)
+        except BaseException:
+            self._release_root()
+            raise
+
+    def _release_root(self) -> None:
+        # Not at the top: fs_guard imports this module. Do not hoist.
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        root, self._root = self._root, None
+        if root is not None:
+            fs_guard.release_writable_root(root)
+
+    def close(self) -> None:
+        """Close the file, and release the directory's registration once."""
+        try:
+            super().close()
+        finally:
+            self._release_root()
+
+    def _open(self):
+        # Not at the top: fs_guard imports this module. Do not hoist.
+        from automated_security_helper.utils.sandbox import fs_guard
+
+        return fs_guard.open_for_write(
+            self.baseFilename,
+            encoding=self.encoding,
+            errors=self.errors,
+            append=True,
+            root=Path(self.baseFilename).parent,
+        )
+
+
 def get_logger(
     name: str = "ash",
     level: str | int | None = None,
@@ -449,6 +503,11 @@ def get_logger(
 
     # Clear existing handlers to avoid duplicates when the function is called multiple times
     if logger.handlers:
+        # The log files of an earlier call are closed, which releases the output
+        # directory each one registered; the other handlers are only dropped.
+        for handler in logger.handlers:
+            if isinstance(handler, _GuardedFileHandler):
+                handler.close()
         logger.handlers = []
 
     # Explicit set the logger level to TRACE/5
@@ -558,6 +617,12 @@ def get_logger(
     if output_dir:
         """Add a file handler for this logger with the specified `name` (and
         store the log file under `output_dir`)."""
+        # The log files are opened with the output directory guarded, as ASH's
+        # other writes there are: a link at the file name, or a file another name
+        # refers to, raises before anything is written (_log_file_handler). That
+        # holds whether or not a root is registered; run_ash_scan registers the
+        # output directory for the whole run, which guards every write below it.
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
         # Determine file log level (default to INFO to avoid huge log files)
         final_file_log_level = (
             file_log_level if file_log_level is not None else logging.INFO
@@ -566,16 +631,7 @@ def get_logger(
         # Create JSONLines/JSONL file handler for logging to a file
         if log_format in ["JSONL", "BOTH"]:
             jsonl_log_file = Path(output_dir).joinpath(f"{name}.log.jsonl")
-            jsonl_log_file.parent.mkdir(parents=True, exist_ok=True)
-            # Truncate the file if requested (default), otherwise append
-            if truncate_log:
-                jsonl_log_file.write_text("")  # Clear the file
-            else:
-                jsonl_log_file.touch(
-                    exist_ok=True
-                )  # Create if doesn't exist, but don't truncate
-
-            jsonl_file_handler = logging.FileHandler(jsonl_log_file.as_posix())
+            jsonl_file_handler = _log_file_handler(jsonl_log_file, truncate_log)
             logger.verbose("Logging to JSONL file: %s", jsonl_log_file.as_posix())
             jsonl_file_handler.setLevel(final_file_log_level)
             jsonl_file_handler.setFormatter(
@@ -598,16 +654,7 @@ def get_logger(
         # Create tabular file handler for logging to a file
         if log_format in ["TABULAR", "BOTH"]:
             tab_log_file = Path(output_dir).joinpath(f"{name}.log")
-            tab_log_file.parent.mkdir(parents=True, exist_ok=True)
-            # Truncate the file if requested (default), otherwise append
-            if truncate_log:
-                tab_log_file.write_text("")  # Clear the file
-            else:
-                tab_log_file.touch(
-                    exist_ok=True
-                )  # Create if doesn't exist, but don't truncate
-
-            tab_file_handler = logging.FileHandler(tab_log_file.as_posix())
+            tab_file_handler = _log_file_handler(tab_log_file, truncate_log)
             logger.verbose("Logging to tabular file: %s", tab_log_file.as_posix())
             tab_file_handler.setLevel(final_file_log_level)
             tab_file_handler.setFormatter(
@@ -618,6 +665,21 @@ def get_logger(
             logger.addHandler(tab_file_handler)
 
     return logger
+
+
+def _log_file_handler(path: Path, truncate: bool) -> logging.FileHandler:
+    """A handler appending to ``path``, emptied first when ``truncate`` (the default).
+
+    Both opens go through fs_guard.open_for_write below the output directory
+    get_logger registered, so a link at the name, or a file another name refers to,
+    raises before anything is written; see _GuardedFileHandler.
+    """
+    # Not at the top: fs_guard imports this module. Do not hoist.
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    with fs_guard.open_for_write(path, append=not truncate, root=path.parent):
+        pass
+    return _GuardedFileHandler(path.as_posix())
 
 
 ASH_LOGGER: ASHLogger = logging.getLogger("ash")  # type: ignore[assignment]

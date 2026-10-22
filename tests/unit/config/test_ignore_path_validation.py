@@ -5,7 +5,8 @@
 
 Covers two bugs:
 1. Invalid ignore_paths pass validation silently (no error from `ash config validate`)
-2. Folder paths without `**` are silently ignored (should warn to add `/**`)
+2. Folder paths without `**` are silently ignored (should warn, naming `<dir>/` for an
+   ignore path and `<dir>/**/*` for a suppression path)
 """
 
 import pytest
@@ -156,21 +157,43 @@ class TestIgnorePathLinting:
         ]
         assert len(ignore_path_issues) == 1
         assert ignore_path_issues[0].severity == LintSeverity.WARNING
-        assert "tests/test_data" in ignore_path_issues[0].message
-        assert "/**" in ignore_path_issues[0].message
+        assert "'tests/test_data/'" in ignore_path_issues[0].message
 
-    def test_warns_on_directory_with_trailing_slash(
+    def test_no_warning_for_an_ignore_path_ending_in_a_slash(
         self, config_with_trailing_slash_ignore_path
     ):
-        """A path with trailing slash pointing to an existing directory should also warn."""
+        """An ignore path ending in '/' names the directory and ignores what is in
+        it, so there is nothing to warn about."""
         result = ConfigLinter.lint(config_with_trailing_slash_ignore_path)
 
         ignore_path_issues = [
             i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
         ]
+        assert ignore_path_issues == []
+
+    def test_warns_on_a_suppression_path_ending_in_a_slash(self, project_with_dirs):
+        """A suppression path ending in '/' still matches no file in the directory."""
+        config_path = project_with_dirs / ".ash" / ".ash.yaml"
+        config_path.write_text(
+            yaml.dump(
+                {
+                    "project_name": "test-project",
+                    "global_settings": {
+                        "suppressions": [
+                            {"path": "docs/", "rule_id": "R1", "reason": "examples"}
+                        ]
+                    },
+                }
+            )
+        )
+
+        result = ConfigLinter.lint(config_path)
+
+        ignore_path_issues = [
+            i for i in result.issues if i.category == LintCategory.IGNORE_PATH_ISSUE
+        ]
         assert len(ignore_path_issues) == 1
-        assert ignore_path_issues[0].severity == LintSeverity.WARNING
-        assert "tests/test_data" in ignore_path_issues[0].message
+        assert "'docs/**/*'" in ignore_path_issues[0].message
 
     def test_no_warning_for_valid_glob_paths(self, config_with_valid_ignore_paths):
         """Paths with ** or file wildcards should not produce warnings."""
@@ -297,7 +320,7 @@ class TestIgnorePathValidation:
 
         # Should not be valid because of the path warning
         assert not is_valid
-        assert any("tests/test_data" in e and "/**" in e for e in errors)
+        assert any("'tests/test_data/'" in e for e in errors), errors
 
     def test_validate_passes_with_valid_paths(self, config_with_valid_ignore_paths):
         """ash config validate should pass with properly formed paths."""
@@ -306,7 +329,7 @@ class TestIgnorePathValidation:
         )
 
         # Should be valid (no path-related errors)
-        path_errors = [e for e in errors if "directory" in e.lower() and "/**" in e]
+        path_errors = [e for e in errors if "points to a directory" in e]
         assert len(path_errors) == 0
 
     def test_validate_no_warning_for_nonexistent_path(
@@ -317,7 +340,7 @@ class TestIgnorePathValidation:
             config_with_nonexistent_dir_path
         )
 
-        path_errors = [e for e in errors if "directory" in e.lower() and "/**" in e]
+        path_errors = [e for e in errors if "points to a directory" in e]
         assert len(path_errors) == 0
 
     def test_validate_warns_on_suppression_directory_path(
@@ -329,7 +352,7 @@ class TestIgnorePathValidation:
         )
 
         assert not is_valid
-        assert any("docs" in e and "/**" in e for e in errors)
+        assert any("'docs/**/*'" in e for e in errors), errors
 
     def test_validate_with_source_dir(self, tmp_path):
         """ash config validate should accept source_dir for path resolution."""
@@ -355,8 +378,54 @@ class TestIgnorePathValidation:
         )
 
         assert not is_valid
-        path_errors = [e for e in errors if "vendor" in e and "/**" in e]
-        assert len(path_errors) == 1
+        path_errors = [e for e in errors if "'vendor/'" in e]
+        assert len(path_errors) == 1, errors
+
+
+@pytest.mark.parametrize("checker", ["lint", "validate"])
+@pytest.mark.parametrize(
+    "section, path, advice",
+    [
+        ("ignore_paths", "docs", "'docs/'"),
+        ("ignore_paths", "docs/", None),
+        ("suppressions", "docs", "'docs/**/*'"),
+        ("suppressions", "docs/", "'docs/**/*'"),
+    ],
+)
+def test_one_spelling_for_every_file_inside_a_directory(
+    project_with_dirs, checker, section, path, advice
+):
+    """``ash config lint`` and ``ash config validate`` give the spelling the scan
+    reads as "every file inside the directory": ``docs/`` for an ignore path, and
+    ``docs/**/*`` for a suppression path, whose trailing slash is literal and where
+    ``docs/**`` would also match a path named exactly ``docs``. An ignore path
+    already ending in ``/`` gets no advice."""
+    entry = {"path": path, "reason": "r"}
+    if section == "suppressions":
+        entry["rule_id"] = "R1"
+    config_path = project_with_dirs / ".ash" / ".ash.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {"project_name": "test-project", "global_settings": {section: [entry]}}
+        )
+    )
+
+    if checker == "lint":
+        messages = [
+            issue.message
+            for issue in ConfigLinter.lint(config_path).issues
+            if issue.category == LintCategory.IGNORE_PATH_ISSUE
+        ]
+    else:
+        _, errors = ConfigValidator.validate_config_file(config_path)
+        messages = [e for e in errors if "points to a directory" in e]
+
+    if advice is None:
+        assert messages == []
+    else:
+        assert len(messages) == 1, messages
+        assert f"Use {advice}" in messages[0], messages[0]
+        assert "'docs/**'" not in messages[0]
 
 
 class TestEdgeCases:

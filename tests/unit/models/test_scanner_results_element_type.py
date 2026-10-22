@@ -49,10 +49,12 @@ TARGET_ONLY_FIELDS = (
     "severity_counts",
     "exit_code",
     "duration",
+    # Why a MISSING row is missing, when ASH knows: set by the scan phase only.
+    "missing_reason",
 )
 
 
-def test_the_six_target_only_fields_are_still_target_only():
+def test_the_target_only_fields_are_still_target_only():
     """If this drifts, the rest of this file is testing the wrong asymmetry."""
     target = set(ScannerTargetStatusInfo.model_fields)
     scanner = set(ScannerStatusInfo.model_fields)
@@ -63,14 +65,14 @@ def test_the_six_target_only_fields_are_still_target_only():
 
 
 def test_every_target_only_field_is_readable_on_the_declared_type():
-    """The positive half: the declared type answers all six without a guard."""
+    """The positive half: the declared type answers each of them without a guard."""
     entry = ScannerTargetStatusInfo()
     for name in TARGET_ONLY_FIELDS:
         getattr(entry, name)
 
 
 def test_none_of_them_is_readable_on_the_wrong_shape():
-    """The control for the above: the wrong shape raises on every one of the six.
+    """The control for the above: the wrong shape raises on every one of them.
 
     This is what makes the writer assertions below load-bearing rather than
     decorative -- if ScannerStatusInfo happened to carry these fields, storing it in
@@ -262,7 +264,7 @@ class TestNoWriterStoresTheScannerLevelShape:
             f"{rel} stores ScannerStatusInfo into scanner_results at "
             f"{[line for line, _ in offenders]}. That dict is declared "
             "Dict[str, ScannerTargetStatusInfo] and the published schema agrees; "
-            "six fields read off entries are not declared on ScannerStatusInfo."
+            "the fields read off entries are not declared on ScannerStatusInfo."
         )
 
     def test_the_gate_can_see_an_assignment_at_all(self):

@@ -56,24 +56,44 @@ async def _safe_send(
         return False
 
 
+def _in_session(session_id: Optional[str]) -> Dict[str, str]:
+    """The keyword that reads the scan in the session that started it.
+
+    The registry shows a scan only to its own session, so the monitor asks as
+    that session. Omitted when there is none, which is the default session.
+    """
+    return {} if session_id is None else {"session_id": session_id}
+
+
 async def _fetch_initial_scan_info(
-    ctx: Context, scan_id: str
+    ctx: Context, scan_id: str, session_id: Optional[str] = None
 ) -> Optional[Tuple[Path, Path, Path]]:
     """Resolve the scan's working directory or report the failure to the client.
 
     Returns ``(directory_path, output_dir, ash_aggregated_results)`` on success,
     or ``None`` when the registry lookup fails or the directory path is missing.
     """
-    registry_info = await mcp_get_scan_progress(scan_id=scan_id)
+    registry_info = await mcp_get_scan_progress(
+        scan_id=scan_id, **_in_session(session_id)
+    )
     if not registry_info.get("success", False):
-        await ctx.error(
-            f"Failed to get scan info: {registry_info.get('error', 'Unknown error')}"
+        await _safe_send(
+            True,
+            lambda: ctx.error(
+                f"Failed to get scan info: "
+                f"{registry_info.get('error', 'Unknown error')}"
+            ),
+            "Failed to send scan-info error",
         )
         return None
 
     directory_path = registry_info.get("directory_path", "")
     if not directory_path:
-        await ctx.error("Missing directory path in scan registry")
+        await _safe_send(
+            True,
+            lambda: ctx.error("Missing directory path in scan registry"),
+            "Failed to send scan-info error",
+        )
         return None
 
     directory_path_obj = Path(directory_path)
@@ -338,6 +358,7 @@ async def _run_monitor_loop(
     output_dir: Path,
     ash_aggregated_results: Path,
     connection_alive: bool,
+    session_id: Optional[str] = None,
 ) -> None:
     """Poll-and-emit loop until the scan finishes, fails, cancels, or times out."""
     completed_scanners: set = set()
@@ -349,8 +370,15 @@ async def _run_monitor_loop(
         current_time = asyncio.get_event_loop().time()
 
         if current_time - start_time > _MAX_WAIT_SECONDS:
-            await ctx.warning(
-                f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+            # Through _safe_send under the loop's own connection_alive: after a
+            # failed send the client is known to be gone, and the timeout
+            # warning honors that instead of sending into a closed transport.
+            await _safe_send(
+                connection_alive,
+                lambda: ctx.warning(
+                    f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                ),
+                "Failed to send timeout warning",
             )
             return
 
@@ -363,7 +391,9 @@ async def _run_monitor_loop(
             await _handle_scan_completed(ctx, output_dir, connection_alive)
             return
 
-        progress_info = await mcp_get_scan_progress(scan_id=scan_id)
+        progress_info = await mcp_get_scan_progress(
+            scan_id=scan_id, **_in_session(session_id)
+        )
         if progress_info.get("status") in ["failed", "incomplete", "cancelled"]:
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
@@ -486,7 +516,9 @@ async def monitor_workspace_progress(
         await asyncio.sleep(poll_interval)
 
 
-async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
+async def monitor_scan_progress(
+    ctx: Context, scan_id: str, session_id: Optional[str] = None
+) -> None:
     """
     Monitor scan progress and report updates via the MCP context.
 
@@ -496,10 +528,12 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
     Args:
         ctx: MCP context for reporting progress/log messages.
         scan_id: The scan ID returned by run_ash_scan.
+        session_id: The session that started the scan, which is the only one
+            the registry shows it to. None is the default session.
     """
     connection_alive = True
     try:
-        scan_info = await _fetch_initial_scan_info(ctx, scan_id)
+        scan_info = await _fetch_initial_scan_info(ctx, scan_id, session_id)
         if scan_info is None:
             return
         _, output_dir, ash_aggregated_results = scan_info
@@ -512,6 +546,7 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
             output_dir,
             ash_aggregated_results,
             connection_alive,
+            session_id,
         )
     except asyncio.CancelledError:
         logger.info(f"Scan monitoring cancelled for scan_id: {scan_id}")

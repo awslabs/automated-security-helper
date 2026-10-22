@@ -1,34 +1,33 @@
 # yaml-language-server: $schema=../automated_security_helper/schemas/AshConfig.json
 project_name: automated-security-helper
 fail_on_findings: true
-# === Time-boxed: upstream trivy-db publishing outage (expires 2026-10-11T00:00:00Z) ===
-# The scheduled "Trivy DB" publish workflow in aquasecurity/trivy-db has failed on every
-# run from 2026-10-07 12:09Z on (https://github.com/aquasecurity/trivy-db/actions), so the
-# newest published trivy-db was built 2026-10-07T07:38:55Z and is past its 24h bound on
-# every run of these legs. This entry holds trivy-db, and only trivy-db, to warn: the scan
-# still prints the stale-database warning and records it in every report, while grype-db
-# and the offline rulesets keep content_db_staleness: fail. It stops applying at 00:00 UTC
-# on its expiration date, and tests/unit/test_ci_content_db_staleness_overrides.py fails
-# from that moment until this entry is removed. This is this repository's CI config only;
-# ASH's own default is still content_db_staleness: fail with no overrides.
-content_db_staleness_overrides:
-  - database: trivy-db
-    policy: warn
-    expiration: "2026-10-11"
-    reason: >-
-      aquasecurity/trivy-db has published no database since 2026-10-07T07:38:55Z because
-      its scheduled publish workflow is failing upstream, so no refresh can bring trivy-db
-      inside its 24h bound. Time-boxed so the scan fails on a stale trivy-db again
-      without anyone having to remember to turn it back on.
 #ash_plugin_modules: []
+# automated_security_helper.plugin_modules.ash_snyk_plugins is not listed: this file
+# is inside the scanned tree, and such a file cannot load it, because its scanner
+# sends the scanned source to Snyk with the operator's token. The CI legs that use
+# this file pass it with --ash-plugin-modules (.github/actions/run-scan-test).
 ash_plugin_modules:
-  - automated_security_helper.plugin_modules.ash_snyk_plugins
   - automated_security_helper.plugin_modules.ash_trivy_plugins
   - automated_security_helper.plugin_modules.ash_ferret_plugins
 external_reports_to_include: []
 global_settings:
   severity_threshold: MEDIUM
   suppressions:
+    # === GuardDog false positive in this repository's own tests (line-pinned) ===
+    # GuardDog's heuristics read source text, so test code that writes a fake
+    # credentials file matches them. Pinned to the one line GuardDog reports, so a
+    # real finding elsewhere in the file is still reported. The test writes creds.env
+    # twice, at lines 775 and 991; GuardDog 3.2.0 drops a match whose code snippet
+    # is the same as one it already reported, so it reports 775 only.
+    - rule_id: "threat-filesystem-read"
+      path: "tests/integration/scanners/test_trivy_real_binary.py"
+      line_start: 775
+      line_end: 775
+      reason: >-
+        False positive. The line writes a creds.env holding a fake AWS key id and
+        secret, generated per run with secrets.choice, into the test's temporary
+        fixture tree so trivy's secret scanner has something to find. Nothing reads
+        a real credentials file.
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
@@ -88,19 +87,21 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 261
-      line_end: 316
+      line_start: 333
+      line_end: 438
       reason: >-
         False positive — every string in this range is a published SHA256 release
-        checksum or the SHA256 of the executable inside one of those verified
-        archives. The archive digests in _DIGESTS were transcribed from the vendor's
-        own *_checksums.txt for grype, syft and trivy, and for opengrep and uv taken
-        from the digest GitHub reports for each release asset and confirmed by
-        hashing the asset. _EXECUTABLE_DIGESTS, the second table in the range, holds
-        the SHA256 of the executable extracted from each verified archive. A
-        64-character hex string is what an entropy detector is built to find, so
-        the 23 archive digests were reported at 95% confidence and the 18
-        executable digests have the same shape, but a release checksum is public by construction
+        checksum or the SHA256 of what one of those verified archives extracts to.
+        The archive digests in _DIGESTS were transcribed from the vendor's
+        own *_checksums.txt or `<asset>.sha256` file, or, for the projects that
+        publish neither (cfn-guard, opengrep, the Guard Rules Registry), from the
+        digest GitHub reports for each release asset and confirmed by hashing the
+        asset. _EXECUTABLE_DIGESTS, the second table in the range, holds the SHA256
+        of the executable extracted from each verified archive, and
+        _BUNDLE_CONTENTS_DIGESTS, the third, the SHA256 over the names and digests of
+        the rule files extracted from a rules bundle archive. A 64-character hex
+        string is what an entropy detector is built to find, so every one is
+        reported at 95% confidence, but a release checksum is public by construction
         and is the opposite of a credential: it exists so anyone can compare against
         it. detect-secrets is handled by an inline `# pragma: allowlist secret` on
         each line; ferret-scan does not honour that marker, hence this entry.
@@ -110,8 +111,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 638
-      line_end: 654
+      line_start: 862
+      line_end: 888
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -978,13 +979,13 @@ global_settings:
       reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 469
-      line_end: 469
+      line_start: 654
+      line_end: 654
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 738
-      line_end: 738
+      line_start: 925
+      line_end: 925
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
@@ -1189,10 +1190,12 @@ reporters:
 scanners:
   bandit:
     enabled: true
+    # .ash/bandit.yaml is named with --config-overrides where this repository
+    # scans itself: a config file inside the scanned tree does not choose a
+    # scanner's own config file.
     options:
       confidence_level: all
       ignore_nosec: false
-      config_file: .ash/bandit.yaml
   cdk-nag:
     enabled: false
     options:
@@ -1211,7 +1214,8 @@ scanners:
         - all
       additional_formats: []
       skip_path: []
-      config_file: .ash/.checkov.yaml
+      # .ash/.checkov.yaml is not named here: a checkov config file inside the
+      # scanned tree is not passed to checkov, whoever names it.
       severity_threshold: LOW
   detect-secrets:
     enabled: false
@@ -1219,8 +1223,6 @@ scanners:
     enabled: false
   grype:
     enabled: false
-    options:
-      config_file: .ash/.grype.yaml
   opengrep:
     enabled: false
   semgrep:

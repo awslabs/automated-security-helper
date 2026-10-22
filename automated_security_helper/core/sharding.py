@@ -152,7 +152,10 @@ class ShardAssignment(BaseModel):
     in the provenance that said so.
     """
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="forbid", hide_input_in_errors=True
+    )
 
     shard_index: int = Field(
         ge=0, description="Zero-based index of this shard within the run."

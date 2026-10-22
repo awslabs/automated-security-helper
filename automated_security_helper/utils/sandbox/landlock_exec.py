@@ -71,9 +71,15 @@ FILE_ONLY_RIGHTS = (
 
 PR_SET_NO_NEW_PRIVS = 38
 PR_SET_CHILD_SUBREAPER = 36
-#: How long the wrapper keeps reaping after its scanner exits. Below ASH's
-#: SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
+#: How long the wrapper keeps reaping after its scanner exits on its own. Below
+#: ASH's SANDBOX_STOP_GRACE_SECONDS (10), so the wrapper finishes before ASH gives up on it.
 REAP_DEADLINE_SECONDS = 5.0
+#: How long it keeps reaping once ASH has asked it to stop (SIGTERM, SIGINT or
+#: SIGHUP), counted from that signal, if that ends sooner. ASH SIGKILLs a wrapper
+#: still running when its grace after SIGTERM ends, and a wrapper killed while it
+#: reaps leaves what its scanner started running, so a stop is finished well
+#: inside a grace of half a second.
+STOP_REAP_DEADLINE_SECONDS = 0.25
 # prctl(PR_SET_SECCOMP) rather than seccomp(2): the syscall number differs per arch.
 PR_SET_SECCOMP = 22
 SECCOMP_MODE_FILTER = 2
@@ -409,9 +415,18 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
         # restriction that failed leaves it here, unrestricted, so it exits.
         os._exit(126)
 
+    stopped_at: List[float] = []
+    scanner_exited = False
+
     def stop(_signum: int, _frame: object) -> None:
-        # ASH asks the wrapper to stop (a timeout, Ctrl-C): end the scanner now,
-        # and the loop below ends everything it started.
+        # ASH asks the wrapper to stop (a timeout, Ctrl-C, a cancelled scan): end
+        # the scanner now, and the loop below ends everything it started, by
+        # STOP_REAP_DEADLINE_SECONDS from the first such signal.
+        if not stopped_at:
+            stopped_at.append(time.monotonic())
+        if scanner_exited:
+            # Reaped, or about to be: its pid may already be another process's.
+            return
         try:
             os.kill(pid, signal.SIGKILL)
         except OSError:
@@ -420,20 +435,37 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
     for signum in stop_signals:
         signal.signal(signum, stop)
     signal.pthread_sigmask(signal.SIG_UNBLOCK, stop_signals)
+    # Waited for without reaping (WNOWAIT): until it is reaped below, the
+    # scanner's pid stays its own, so a stop that kills it in between kills
+    # nothing else.
     while True:
         try:
-            _, status = os.waitpid(pid, 0)
+            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
             break
         except InterruptedError:
             continue
+    scanner_exited = True
+    _, status = os.waitpid(pid, 0)
+    exited_at = time.monotonic()
+
+    def deadline() -> float:
+        if stopped_at:
+            return min(
+                exited_at + REAP_DEADLINE_SECONDS,
+                stopped_at[0] + STOP_REAP_DEADLINE_SECONDS,
+            )
+        return exited_at + REAP_DEADLINE_SECONDS
+
     # An orphan is reparented here only once its own parent has exited, which can
     # trail the scanner's exit, so "no children" has to hold for a short while.
     # Every pass kills the whole remaining tree at once, so depth costs nothing;
-    # bounded by time rather than by a pass count, and well inside the grace ASH
-    # gives a stopping process before it SIGKILLs this wrapper.
+    # bounded by time rather than by a pass count, and inside the grace ASH gives
+    # a stopping process before it SIGKILLs this wrapper. At least one pass is
+    # made, however late a stop left the scanner's exit.
     quiet = 0
-    deadline = time.monotonic() + REAP_DEADLINE_SECONDS
-    while time.monotonic() < deadline:
+    passes = 0
+    while passes == 0 or time.monotonic() < deadline():
+        passes += 1
         leftovers = _descendants()
         if not leftovers:
             quiet += 1

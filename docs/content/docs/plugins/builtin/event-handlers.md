@@ -82,6 +82,12 @@ def my_custom_callback(**kwargs):
 ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, my_custom_callback)
 ```
 
+Where the handler is defined decides which scans notify it. A handler defined in your
+own program, outside ASH's plugin namespace, is notified in every scan that program
+runs. A handler defined in a plugin package is notified only in scans whose
+`ash_plugin_modules` name that package, and only when the package defines, imports or
+lists it (see [Using Custom Plugin Packages](../development-guide.md#using-custom-plugin-packages)).
+
 ## Benefits
 
 1. **Better Observability** - Comprehensive visibility into scan execution

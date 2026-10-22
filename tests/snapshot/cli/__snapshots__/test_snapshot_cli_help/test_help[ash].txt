@@ -265,14 +265,23 @@
 │                                                                            the same code as a    │
 │                                                                            clean scan, because   │
 │                                                                            no scanner produced   │
-│                                                                            any finding. SKIPPED  │
-│                                                                            scanners are ones you │
-│                                                                            did not select and    │
-│                                                                            never trip it, so     │
-│                                                                            --scanners and        │
+│                                                                            any finding. A        │
+│                                                                            SKIPPED scanner, one  │
+│                                                                            you did not select or │
+│                                                                            one with nothing of   │
+│                                                                            its kind to scan,     │
+│                                                                            does not trip it by   │
+│                                                                            itself, so --scanners │
+│                                                                            and                   │
 │                                                                            --exclude-scanners    │
 │                                                                            both narrow what is   │
-│                                                                            gated. Independent of │
+│                                                                            gated; but a run in   │
+│                                                                            which every scanner   │
+│                                                                            is SKIPPED, such as   │
+│                                                                            one where no selected │
+│                                                                            scanner had a file to │
+│                                                                            scan, exits 1.        │
+│                                                                            Independent of        │
 │                                                                            --fail-on-findings,   │
 │                                                                            and takes precedence  │
 │                                                                            over it when both     │
@@ -306,14 +315,20 @@
 │                                                                            120h after the        │
 │                                                                            database was built.   │
 │                                                                            Without it such a     │
-│                                                                            scan exits 1. With it │
-│                                                                            the scan proceeds and │
-│                                                                            the warning is        │
-│                                                                            recorded in the log   │
-│                                                                            and in the reports.   │
+│                                                                            scan exits 1, except  │
+│                                                                            for trivy's database  │
+│                                                                            in an image built     │
+│                                                                            with OFFLINE=YES,     │
+│                                                                            which warns by        │
+│                                                                            default. With it the  │
+│                                                                            scan proceeds and the │
+│                                                                            warning is recorded   │
+│                                                                            in the log and in the │
+│                                                                            reports.              │
 │                                                                            --no-allow-stale-con… │
-│                                                                            forces the default    │
-│                                                                            failure. Defaults to  │
+│                                                                            forces the failure,   │
+│                                                                            for that database     │
+│                                                                            too. Defaults to      │
 │                                                                            unset, which prefers  │
 │                                                                            the                   │
 │                                                                            `content_db_stalenes… │
@@ -333,6 +348,40 @@
 │                                                                            suppression status.   │
 │                                                                            [default:             │
 │                                                                            no-ignore-suppressio… │
+│ --honor-ignore-files       --no-honor-ignore-f…                            Whether the           │
+│                                                                            .gitignore and        │
+│                                                                            .ignore files in the  │
+│                                                                            scanned tree decide   │
+│                                                                            which files are left  │
+│                                                                            out of ASH's scan set │
+│                                                                            (the files            │
+│                                                                            detect-secrets,       │
+│                                                                            cfn-nag, cdk-nag,     │
+│                                                                            cfn-lint, cfn-guard,  │
+│                                                                            actionlint, zizmor,   │
+│                                                                            npm-audit and the     │
+│                                                                            converters read).     │
+│                                                                            --no-honor-ignore-fi… │
+│                                                                            scans the files they  │
+│                                                                            match too; ASH's own  │
+│                                                                            exclusions such as    │
+│                                                                            .git still apply.     │
+│                                                                            Defaults to unset,    │
+│                                                                            which prefers the     │
+│                                                                            operator's            │
+│                                                                            `honor_ignore_files`  │
+│                                                                            config value and then │
+│                                                                            honoring them. Either │
+│                                                                            form takes precedence │
+│                                                                            over the config. A    │
+│                                                                            config file inside    │
+│                                                                            the scanned tree      │
+│                                                                            cannot set it. The    │
+│                                                                            results and summaries │
+│                                                                            record whether the    │
+│                                                                            ignore files were     │
+│                                                                            honored and how many  │
+│                                                                            files they excluded.  │
 │ --min-severity                                       <str>                 Minimum severity to   │
 │                                                                            trigger non-zero exit │
 │                                                                            code (critical, high, │
@@ -373,6 +422,30 @@
 │                                                                            ASH_BASE_REF]         │
 │                                                                            [default:             │
 │                                                                            origin/main]          │
+│ --allow-in-tree-tools                                                      Let ASH start         │
+│                                                                            scanners and other    │
+│                                                                            tools found inside    │
+│                                                                            the scanned           │
+│                                                                            directory, such as an │
+│                                                                            activated in-repo     │
+│                                                                            .venv/bin or          │
+│                                                                            node_modules/.bin.    │
+│                                                                            Off by default: a     │
+│                                                                            tool inside the       │
+│                                                                            scanned directory is  │
+│                                                                            treated as missing.   │
+│                                                                            Only this flag (also  │
+│                                                                            the                   │
+│                                                                            allow_in_tree_tools   │
+│                                                                            key of                │
+│                                                                            --cli-json-input) and │
+│                                                                            the                   │
+│                                                                            ASH_ALLOW_IN_TREE_TO… │
+│                                                                            environment variable  │
+│                                                                            (1, true, yes or on)  │
+│                                                                            turn it on, never a   │
+│                                                                            config file, and `ash │
+│                                                                            mcp` never does.      │
 │ --shard-index                                        <int>                 Zero-based index of   │
 │                                                                            this shard when one   │
 │                                                                            scan is split across  │
@@ -476,9 +549,17 @@
 │                                                                            docker to run the     │
 │                                                                            containerized tools   │
 │                                                                            [env var: OCI_RUNNER] │
-│ --build-target                                       <non-root|ci>         Specify the target    │
-│                                                                            stage of the ASH      │
-│                                                                            image to build        │
+│ --build-target                                       <non-root|ci>         The ASH image stage   │
+│                                                                            to build and run:     │
+│                                                                            'non-root' (an        │
+│                                                                            unprivileged user,    │
+│                                                                            the default) or 'ci'  │
+│                                                                            (root, the default on │
+│                                                                            Windows). CI          │
+│                                                                            environment variables │
+│                                                                            do not change it;     │
+│                                                                            --custom-containerfi… │
+│                                                                            builds on 'ci'.       │
 │ --container-uid        -u                            <str>                 UID to use for the    │
 │                                                                            container user        │
 │ --container-gid        -g                            <str>                 GID to use for the    │

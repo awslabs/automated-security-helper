@@ -39,7 +39,11 @@ from automated_security_helper.utils.cfn_template_model import (
     get_model_from_template_text,
     read_template_text,
 )
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
+from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -54,17 +58,33 @@ from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 #: the template cfn_nag_scan reads. Removed once cfn_nag_scan has run.
 _CFN_NAG_INPUT_DIR = ".ash-cfn-nag-input"
 
+#: The copy's name, less its extension. Fixed, so the path cfn_nag_scan is given is
+#: the same whatever the template is called, including on Windows, where
+#: cfn_nag_scan is the RubyGems wrapper cfn_nag_scan.bat.
+_CFN_NAG_INPUT_STEM = "template"
+
+#: The extensions the scanner selects templates by. The copy keeps the template's
+#: own, so cfn_nag sees a JSON template as JSON and a YAML one as YAML.
+_CFN_NAG_INPUT_SUFFIXES = (".json", ".yaml", ".yml")
+
 
 def _stage_cfn_nag_input(results_file_dir: Path, cfn_file: str, text: str) -> Path:
     """Write the template text ASH checked where cfn_nag_scan will read it.
 
     cfn_nag_scan opens its ``--input-path`` by name. Giving it the scanned-tree path
     would let a file replaced after ASH's check be read in its place; a copy of the
-    checked text cannot be. The copy keeps the template's file name, and is written
-    without following a link (``open_for_write``) because the results directory is
-    one a sandboxed scanner can write.
+    checked text cannot be. The copy is named ``template`` plus the template's
+    extension whatever the template is called (see ``_CFN_NAG_INPUT_STEM``), and is
+    written without following a link (``open_for_write``) because the results
+    directory is one a sandboxed scanner can write. Findings on it are pointed back
+    at the template by :func:`_restore_cfn_nag_uris`.
     """
-    staged = results_file_dir.joinpath(_CFN_NAG_INPUT_DIR, Path(cfn_file).name)
+    suffix = Path(cfn_file).suffix.lower()
+    if suffix not in _CFN_NAG_INPUT_SUFFIXES:
+        suffix = ".yaml"
+    staged = results_file_dir.joinpath(
+        _CFN_NAG_INPUT_DIR, f"{_CFN_NAG_INPUT_STEM}{suffix}"
+    )
     staged.parent.mkdir(parents=True, exist_ok=True)
     with open_for_write(staged) as handle:
         handle.write(text)
@@ -433,9 +453,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         # Top of the method, above all five early returns, for the reason the same pair
         # carries in cdk_nag_scanner: an initialization placed further down is inherited by
         # whichever return sits above it, and the executor then reads stale attributes from
-        # the previous target.
+        # the previous target. ``exit_code`` too: it is the largest code of this target's
+        # cfn_nag_scan runs, and the invocation below reports it.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.exit_code = 0
 
         tool_component = ToolComponent(
             name="cfn_nag",
@@ -500,13 +522,19 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         try:
             target_results_dir = self.results_dir.joinpath(target_type)
 
+            # The scan set, without the files the global ignore paths ignore.
             orig_scannable = (
                 list(self.context.work_dir.glob("**/*.*"))
                 if target_type == "converted"
-                else scan_set(
-                    source=self.context.source_dir,
-                    output=self.context.output_dir,
-                    # filter_pattern=r"\.(yaml|yml|json)$",
+                else drop_ignored(
+                    scan_set(
+                        source=self.context.source_dir,
+                        output=self.context.output_dir,
+                        honor_ignore_files=honors_ignore_files(self.context.config),
+                        # filter_pattern=r"\.(yaml|yml|json)$",
+                    ),
+                    self.context.source_dir,
+                    global_ignore_paths,
                 )
             )
             ASH_LOGGER.debug(

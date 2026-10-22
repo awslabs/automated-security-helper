@@ -222,11 +222,12 @@
       │ offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, │
       │ inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, │
       │ config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners,                    │
-      │ allow_stale_content_db, simple, ignore_suppressions, min_severity, compact_report,               │
-      │ changed_files_only, base_ref, shard_index, shard_count, workspace, workspace_config,             │
-      │ allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid,     │
-      │ container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg; each option's    │
-      │ long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.         │
+      │ allow_stale_content_db, simple, ignore_suppressions, honor_ignore_files, min_severity,           │
+      │ compact_report, changed_files_only, base_ref, allow_in_tree_tools, shard_index, shard_count,     │
+      │ workspace, workspace_config, allow_missing_projects, dry_run, build, run, force, oci_runner,     │
+      │ build_target, container_uid, container_gid, ash_revision_to_install, custom_containerfile,       │
+      │ custom_build_arg; each option's long flag spelling is accepted as well. Run with                 │
+      │ --generate-cli-skeleton for a template.                                                          │
       ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   
     ''',
@@ -242,10 +243,13 @@
       ERROR (1) Exiting because conversion was incomplete: 1 converter(s) did not process the files they
       were given
         jupyter: dependencies unavailable, so it never ran
-      A converter that did not run leaves its inputs unscanned, so the scanners saw fewer files than this
-      repository holds. Install the converter's tool, disable the converter if its inputs are not wanted,
-      or drop --fail-on-incomplete-scanners to accept a partial scan. A converter with nothing to convert
-      never reports here.
+      A converter that did not run, or could not convert some files, leaves those inputs unscanned, so the
+      scanners saw fewer files than this repository holds. Install the converter's tool if it is missing,
+      fix the files it could not convert or exclude them with ignore_paths, disable the converter if its
+      inputs are not wanted, or drop --fail-on-incomplete-scanners to accept a partial scan. A converter
+      with nothing to convert never reports here. An archive over an extraction limit is extracted once
+      the limit named is raised, with --config-overrides converters.archive.options.<limit>=<value> or a
+      config file outside every git checkout.
   
     ''',
   })
@@ -335,6 +339,37 @@
     ''',
   })
 # ---
+# name: TestScanFailures.test_configuration_that_cannot_be_loaded[missing]
+  dict({
+    'exit_code': 3,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Using config file specified at: missing.yaml
+                   INFO     Initializing ASH v<ASH_VERSION>
+      ERROR (3) Invalid configuration: Configuration file not found: missing.yaml
+  
+    ''',
+  })
+# ---
+# name: TestScanFailures.test_configuration_that_cannot_be_loaded[not_yaml]
+  dict({
+    'exit_code': 3,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Using config file specified at: bad.yaml
+                   INFO     Initializing ASH v<ASH_VERSION>
+                   ERROR    Failed to load configuration file: while parsing a flow sequence
+                              in "bad.yaml", line 2, column 11
+                            expected ',' or ']', but got '<stream end>'
+                              in "bad.yaml", line 3, column 1
+      ERROR (3) Invalid configuration: could not parse bad.yaml: while parsing a flow sequence
+        in "bad.yaml", line 2, column 11
+      expected ',' or ']', but got '<stream end>'
+        in "bad.yaml", line 3, column 1
+  
+    ''',
+  })
+# ---
 # name: TestScanFailures.test_invalid_configuration
   dict({
     'exit_code': 3,
@@ -349,7 +384,7 @@
       ERROR (3) Invalid configuration: Configuration validation failed for 'bad.yaml': 1 validation error
       for AshConfig
       fail_on_findings
-        Input should be a valid boolean
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config
       lint' to identify and fix issues.
   
@@ -396,7 +431,7 @@
                    INFO     Identifying non-ignored files to include in scans
                    INFO     No ignore files were found under <TMP>, so no ignore rules removed anything from the scan set.
                    INFO     ASH_INCLUSIONS excluded 0 files from the scan set
-                   INFO     Found 1 files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified.
+                   INFO     Found 0 files within the provided source directory to scan. Please see the 'ash-scan-set-files-list.txt' in the output folder for the full list of files identified to scan within the source directory identified.
                    INFO     Executing phases: ['scan']
                    INFO     ===== ASH Security Scan Starting =====
                    INFO     Executing phases: scan
@@ -404,19 +439,19 @@
                    INFO
                             ----- Starting phase: SCAN -----
                    INFO     Building scanner tasks...
-                   WARNING  No registered scanner matches not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft
-                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
-                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+                   WARNING  No registered scanner matches not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor
+                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
                    INFO
-                            Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+                            Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
                    INFO     ===== ASH Security Scan Completed in 0s =====
-                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag, cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
-      ERROR (1) None of the requested scanners exist: not-a-scanner. Registered scanners: bandit, cdk-nag,
-      cfn-nag, checkov, detect-secrets, grype, npm-audit, opengrep, semgrep, syft. Refused rather than
-      scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded
-      SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself
-      clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them
-      all.
+                   ERROR    Execution failed: None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint, bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit, opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use hyphens, not underscores -- or drop --scanners to run them all.
+      ERROR (1) None of the requested scanners exist: not-a-scanner. Registered scanners: actionlint,
+      bandit, cdk-nag, cfn-guard, cfn-lint, cfn-nag, checkov, detect-secrets, gitleaks, grype, npm-audit,
+      opengrep, semgrep, syft, trivy, zizmor. Refused rather than scanned, because an allowlist that
+      matches nothing selects nothing: every scanner would be recorded SKIPPED, the run would produce no
+      findings, and a scan that checked nothing would report itself clean. Check the spelling -- names use
+      hyphens, not underscores -- or drop --scanners to run them all.
   
     ''',
   })
@@ -477,11 +512,11 @@
     'stderr': '''
       Configuration validation failed: 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type
       Project 'service-a' at '<TMP>/service-a' has an invalid configuration: Configuration validation failed for '<TMP>/service-a/.ash/.ash.yaml': 1 validation error for AshConfig
       fail_on_findings
-        Input should be a valid boolean [type=bool_type, input_value='sometimes', input_type=str]
+        Input should be a valid boolean [type=bool_type]
           For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_type. Run 'ash config lint' to identify and fix issues.
   
     ''',

@@ -126,11 +126,14 @@ from __future__ import annotations
 import os
 from itertools import combinations
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.client_config_policy import ClientConfigRules
 from automated_security_helper.config.resolve_config import (
+    check_operator_config,
     find_config_file,
+    operator_config_digest,
     resolve_config,
 )
 from automated_security_helper.core.exceptions import (
@@ -421,40 +424,102 @@ def _apply_existence_checks(
         )
 
 
+def _as_named(path: Optional[Path]) -> Optional[str]:
+    """``path`` made absolute without following a symlink, or None."""
+    return Path(os.path.abspath(path)).as_posix() if path is not None else None
+
+
+def _operator_config(
+    default_config: Optional[Path], trusted_config: Optional[Path]
+) -> Optional[Path]:
+    """The operator's config a workspace layers over each project's own, or None.
+
+    ``trusted_config`` when there is one: under the MCP server, the profile as the
+    operator registered it, never the client's patched ``default_config``.
+    Otherwise ``default_config``, which ``check_operator_config`` then refuses if
+    it is a client's file, so a client's copy is never layered for want of the
+    registered one.
+    """
+    return trusted_config if trusted_config is not None else default_config
+
+
 def _resolve_project_config(
     candidate: _Candidate,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
-) -> Tuple[AshConfig, Optional[Path]]:
+    client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[Path] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+) -> Tuple[AshConfig, Optional[Path], Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
-    ``workspace_root`` and ``default_config`` are passed on as ``scanned_root``
-    and ``trusted_config_path``, as ``execution._project_config_with_policy`` does,
-    so what an in-tree config may set (sandbox grants, ``ash_plugin_modules``) is
-    decided against the whole workspace here too. The plan's plugin list is what
-    the registry is pre-warmed from, before any project's scan resolves its config.
+    ``workspace_root`` and ``trusted_config`` (``default_config`` when None) are
+    passed on as ``scanned_root`` and ``trusted_config_path``, as
+    ``execution._project_config_with_policy`` does, so what an in-tree config may
+    set (sandbox grants, ``ash_plugin_modules``) is decided against the whole
+    workspace here too. The plan's plugin list is what the registry is pre-warmed
+    from, before any project's scan resolves its config.
+
+    The two differ under the MCP server when a client patched the session's
+    profile: ``default_config`` is then the client's copy, and ``trusted_config``
+    the profile as the operator registered it. Taking the client's copy as the
+    trusted base would let it grant what it sets; it is refused as one
+    (``resolve_config``), and falling back to the defaults would drop the
+    profile's own grants.
 
     The config file is located once and passed back in, rather than letting
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
 
-    ``default_config`` and where it sits in the precedence
-    -----------------------------------------------------
-    Used only when the project declares no config of its own -- when
-    ``find_config_file`` returns None, where ASH's built-in default would
-    otherwise apply. A project with an ``.ash.yaml`` keeps it, because the
-    project's own config is the more specific statement; the same rule makes an
-    explicit ``config_path`` beat a session-bound profile on a single-directory
-    MCP scan.
+    The operator's config, and where it sits in the precedence
+    ----------------------------------------------------------
+    The operator's config is ``trusted_config``, or ``default_config`` when that
+    is None: ``--config`` on the CLI, the profile the session bound or the call
+    named under the MCP server. Every field it sets is final for every project,
+    and a project's own config fills only the fields it leaves unset:
 
-    The MCP server passes a profile a client bound with ``select_profile`` here.
-    It must reach BOTH this function and ``execution._project_config_with_policy``,
-    which re-resolves at scan time: the plan's reported threshold comes from this
-    call and the scan's actual config comes from that one, so a value threaded
-    into only one of them makes ``--dry-run`` report a plan the scan does not run.
-    ``ProjectScanSettings.default_config_path`` is the same value on the execution
-    side, and the MCP caller sets both from one variable for that reason.
+    * A project with a config of its own resolves that file with the operator's
+      layered over it (``resolve_config``'s ``overlay_config_path``), by the
+      ``extends`` merge rule with the operator's file as the child: mappings
+      merge key by key, and a list the operator sets replaces the project's.
+      "Sets" means the key is in the operator's file or its ``extends`` chain,
+      whatever its value. The CLI overrides apply after both.
+    * A project with none resolves ``default_config`` alone, where ASH's built-in
+      default would otherwise apply.
+
+    Rejected: ignoring every project's own config when the operator names one,
+    which loses the per-project settings a workspace exists to keep; and taking
+    the operator's file as the base with the project merged over it, which lets
+    a project turn off ``fail_on_findings`` or ``fail_on_incomplete_scanners``
+    that the operator set.
+
+    Under the MCP server the client's patched copy (``default_config`` when it
+    differs from ``trusted_config``) is not layered over a project's own config:
+    the registered profile is. So a client's values are never final over a
+    project, and they are not trusted either: the patched copy is a project's
+    config only when the project has none, and is then checked as a file the
+    client delivered, as before. A session's operator copy holds only the fields
+    the profile sets (``profile_registry.materialize_session_config``), so the
+    project still fills the rest.
+
+    Every file the operator's config is built from must be the operator's.
+    ``resolve_workspace`` refuses one with a file inside the workspace or one an
+    MCP client delivered (``resolve_config.check_operator_config``), as a config
+    error, before any project resolves; ``resolve_config`` refuses such an
+    overlay again for each project. There is no fallback from a missing
+    ``trusted_config`` to a client's ``default_config``: that copy is a client's
+    file, so it is refused rather than layered (``_operator_config``).
+
+    These values must reach BOTH this function and
+    ``execution._project_config_with_policy``, which re-resolves at scan time:
+    the plan's reported threshold comes from this call and the scan's actual
+    config from that one, so a value threaded into only one of them makes
+    ``--dry-run`` report a plan the scan does not run. The layered file is
+    recorded as ``ProjectPlan.operator_config``, which execution reads, and
+    ``ProjectScanSettings.default_config_path`` holds ``default_config`` on the
+    execution side.
 
     Why the CLI overrides are applied HERE
     -------------------------------------
@@ -467,8 +532,9 @@ def _resolve_project_config(
     therefore ``--dry-run`` -- reporting a threshold that is not the one enforced.
 
     Returns:
-        The resolved config, and the config file it came from -- ``None`` when the
-        project has none and took ASH's default config.
+        The resolved config; the config file it came from, ``None`` when the
+        project has none and took ASH's default config; and the operator's file
+        layered over it, ``None`` when nothing was layered.
 
     Raises:
         ASHConfigValidationError: When the project's own config is invalid, or an
@@ -480,8 +546,14 @@ def _resolve_project_config(
             message is re-issued with the project key so the operator knows which
             of N projects to look at.
     """
+    operator = _operator_config(default_config, trusted_config)
     try:
-        config_path = find_config_file(candidate.resolved)
+        # The project directory is one the caller may read, but a source found
+        # there may be a link out of it, and discovery reads a pyproject.toml to
+        # look for its table; a caller's gate covers every source before any is
+        # opened (config_sources.check_discovery_candidates).
+        config_path = find_config_file(candidate.resolved, permit=permit_base)
+        overlay = operator if config_path is not None else None
         if config_path is None and default_config is not None:
             config_path = Path(default_config)
         config = resolve_config(
@@ -490,9 +562,13 @@ def _resolve_project_config(
             fallback_to_default=True,
             config_overrides=list(config_overrides),
             scanned_root=workspace_root,
-            trusted_config_path=default_config,
+            trusted_config_path=operator,
+            client_config_policy=client_config_rules,
+            remote_client=remote_client,
+            overlay_config_path=overlay,
+            permit_base=permit_base,
         )
-        return config, config_path
+        return config, config_path, overlay
     except ASHConfigValidationError as exc:
         raise ASHConfigValidationError(
             f"Project '{candidate.key}' at '{candidate.resolved.as_posix()}' has "
@@ -506,7 +582,10 @@ def _validate_scanner_pins(
     """Refuse a workspace whose projects demand irreconcilable tool versions.
 
     Only projects that will actually be scanned are compared: a skipped project
-    cannot conflict with one that runs.
+    cannot conflict with one that runs. A project's own config does not choose
+    ``tool_version`` (``config/tool_config_trust.confine_tool_versions``), so the
+    pins recorded are the operator's or the scanner's default; the check still
+    holds the plan to one installable version per scanner, whatever set them.
 
     An undecidable comparison is refused alongside an incompatible one. Assuming
     compatibility would mean a project could be scanned by a tool version it
@@ -647,10 +726,91 @@ def _assign_display_labels(projects: List[ProjectPlan]) -> None:
         )
 
 
+def _policy_document(
+    suppressions: Any, ignore_paths: Any, scanners: Any
+) -> Dict[str, Any]:
+    """A workspace policy's effect on a project, written as the config it amounts to.
+
+    Its suppressions and ignore paths land in ``global_settings``, and each
+    scanner it adds is a ``scanners.<name>.enabled: true``, so the rules that
+    govern a client's config file govern a client's policy file the same way.
+    """
+    document: Dict[str, Any] = {
+        "global_settings": {
+            "suppressions": [
+                entry.model_dump(mode="json", exclude={"client_supplied"})
+                for entry in suppressions or []
+            ],
+            "ignore_paths": [
+                entry.model_dump(mode="json", exclude={"client_supplied"})
+                for entry in ignore_paths or []
+            ],
+        }
+    }
+    if scanners:
+        document["scanners"] = {str(name): {"enabled": True} for name in scanners}
+    return document
+
+
+def _check_a_client_supplied_policy(
+    source: Path,
+    documents: List[Dict[str, Any]],
+    root: Path,
+    default_config: Optional[PathLike],
+    client_config_rules: Optional[ClientConfigRules],
+) -> None:
+    """Hold a policy file an MCP client delivered to the rules a client's config file gets.
+
+    ``documents`` are the policy as written and as each active project gets
+    it, after its patterns are rewritten for the project (``_policy_document``),
+    since a rewritten entry can be one the rules deny when the written one is
+    not. Under the default ``denied_paths`` its suppressions and ignore paths
+    apply, marked, and an operator's ``denied_value_patterns`` still hold; a
+    profile whose own ``denied_paths`` lists them, or a scanner's ``enabled``,
+    refuses the file. Its ceiling only tightens a project's threshold, and its
+    scanners gate only makes the verdict stricter, so neither is checked.
+
+    Raises:
+        ASHConfigFieldDeniedError: The file sets a field the rules deny.
+        ASHConfigPolicyUnreadableError: The rules cannot be established.
+    """
+    from automated_security_helper.config.client_config_policy import (
+        _trusted_config,
+        client_file_denials,
+        denied_fields_message,
+        rules_from,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
+        ASHConfigPolicyUnreadableError,
+    )
+
+    rules = client_config_rules or rules_from(
+        _trusted_config(default_config, root, None)
+    )
+    if rules.unreadable is not None:
+        raise ASHConfigPolicyUnreadableError(
+            f"A workspace policy an MCP client delivered cannot be checked: "
+            f"{rules.unreadable}"
+        )
+    for document in documents:
+        found = client_file_denials(
+            {source: document}, rules, scanned_root=root, all_delivered=True
+        )
+        if found:
+            path, denials = found[0]
+            raise ASHConfigFieldDeniedError(denied_fields_message(path, denials))
+
+
 def _apply_workspace_policy(
     definition: WorkspaceDefinition,
     projects: List[ProjectPlan],
     workspace_config: Optional[PathLike],
+    default_config: Optional[PathLike] = None,
+    client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[PathLike] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> Optional[Path]:
     """Resolve the workspace policy and fold it into every active project.
 
@@ -665,40 +825,122 @@ def _apply_workspace_policy(
     happens, and pushing a pattern into it could refuse the whole workspace over
     a project nobody is looking at.
 
+    A policy file an MCP client delivered (``config_is_client_supplied``) is
+    checked as a delivered config is (``_check_a_client_supplied_policy``), and
+    each suppression and ignore path it pushes down is marked
+    ``client_supplied``, so a finding it hides is reported suppressed and
+    marked rather than dropped and the files under its ignore paths are still
+    scanned. Any other policy's entries are left unmarked, whatever the file
+    says: only ASH marks an entry. Delivered is judged at the path the file was
+    found or named at, so a delivered link is the client's wherever it points.
+
+    The file that path reaches must be one ``permit_base`` permits, checked
+    before it is read. For a delivered file, or any under a remote caller, a
+    refusal of its content says where each problem is, not what the file holds.
+
     Returns:
-        The policy file that was applied, or ``None`` when there is no policy.
+        The path the applied policy file was found or named at, or ``None``
+        when there is no policy.
 
     Raises:
         WorkspaceDefinitionError: Exit code 4, for an unusable policy file or a
             pattern with no sound rewrite for some project. The message names the
             project as well as the pattern, because a workspace-level pattern is
             legal in itself and only fails in combination with one project.
+        ASHConfigFieldDeniedError: Exit code 3, for a delivered policy that sets
+            a field the rules deny.
+        ASHConfigInputNotPermittedError: The policy file is outside what
+            ``permit_base`` permits.
     """
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    def client_supplied(path: Path) -> bool:
+        return remote_client or config_is_client_supplied(path)
+
     policy, source = resolve_workspace_policy(
         definition.root,
         explicit=workspace_config,
         project_config_paths=[
             Path(project.config_source) for project in projects if project.config_source
         ],
+        permit_base=permit_base,
+        client_supplied=client_supplied,
     )
+    delivered = source is not None and config_is_client_supplied(source)
+    workspace_policy = policy.workspace if policy else None
 
+    resolved_for: Dict[str, Any] = {}
     for project in projects:
         if project.skipped:
             continue
-        resolved = policy_for_project(
-            policy.workspace if policy else None,
+        resolved_for[project.key] = policy_for_project(
+            workspace_policy,
             project_prefix=project.relative_path,
             project_threshold=project.severity_threshold,
             project_scanners=project.scanners,
         )
+    if delivered and source is not None and workspace_policy is not None:
+        _check_a_client_supplied_policy(
+            source,
+            [
+                _policy_document(
+                    workspace_policy.suppressions,
+                    workspace_policy.ignore_paths,
+                    workspace_policy.additional_scanners,
+                )
+            ]
+            + [
+                _policy_document(
+                    resolved.suppressions,
+                    resolved.ignore_paths,
+                    resolved.policy_scanners,
+                )
+                for resolved in resolved_for.values()
+            ],
+            definition.root,
+            trusted_config if trusted_config is not None else default_config,
+            client_config_rules,
+        )
+
+    for project in projects:
+        if project.skipped:
+            continue
+        resolved = resolved_for[project.key]
         project.effective_severity_threshold = resolved.effective_threshold
         project.threshold_tightened_by_policy = resolved.threshold_tightened
-        project.policy_suppressions = list(resolved.suppressions)
-        project.policy_ignore_paths = list(resolved.ignore_paths)
+        project.policy_suppressions = [
+            entry.model_copy(update={"client_supplied": delivered})
+            for entry in resolved.suppressions
+        ]
+        project.policy_ignore_paths = [
+            entry.model_copy(update={"client_supplied": delivered})
+            for entry in resolved.ignore_paths
+        ]
         project.policy_scanners = list(resolved.policy_scanners)
         project.policy_scanners_gate = resolved.policy_scanners_gate
 
     return source
+
+
+def _refuse_missing_default_config(default_config: Optional[PathLike]) -> None:
+    """Refuse a named default config that is not a file, before any project is read.
+
+    Checked here, not only where a project falls back to it, because every project
+    may have its own config, and the file is also the trusted base those projects'
+    sandbox grants come from. A missing one used to be skipped without a word, so
+    the plan, and ``--dry-run``, described a run with the built-in defaults where
+    the operator had named a file. Whether the file parses is left to the
+    projects' own resolution, which reads it with the confinement a scan uses.
+    """
+    if default_config is None:
+        return
+    if not str(default_config).strip() or not Path(default_config).is_file():
+        raise ASHConfigValidationError(
+            f"The default configuration file '{default_config}' (--config, or the "
+            "profile bound to the MCP session) does not exist or is not a regular "
+            "file. Name an existing config file, or omit it so that projects "
+            "without their own config use ASH's built-in defaults."
+        )
 
 
 def resolve_workspace(
@@ -708,6 +950,11 @@ def resolve_workspace(
     workspace_config: Optional[PathLike] = None,
     config_overrides: Tuple[str, ...] = (),
     default_config: Optional[PathLike] = None,
+    project_gate: Optional[Callable[[Sequence[Tuple[str, Path]]], None]] = None,
+    client_config_rules: Optional[ClientConfigRules] = None,
+    trusted_config: Optional[PathLike] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -733,12 +980,37 @@ def resolve_workspace(
             having none is not an error. When given it must exist; ASH does not
             fall back to searching, because that would apply different policy
             than the one named. It may not be any project's own config.
-        default_config: Config file to use for a project that declares none of
-            its own, in place of ASH's built-in default. A project with its own
-            ``.ash.yaml`` is unaffected. The MCP server passes a profile a client
-            bound with ``select_profile``; see
-            :func:`_resolve_project_config` on why the same value has to reach
+        default_config: The operator's config file (``--config``). Every field
+            it sets is final for every project: it is layered over a project's
+            own config, which fills only the fields it leaves unset, and a
+            project that declares no config uses it alone in place of ASH's
+            built-in default. The MCP server passes the profile a client bound
+            with ``select_profile``; see :func:`_resolve_project_config` for the
+            precedence, and on why the same value has to reach
             ``ProjectScanSettings.default_config_path`` as well.
+        project_gate: Called with ``(key, resolved directory)`` for every
+            project that will be scanned, after the definition's own checks and
+            before any project's config is read; it raises to refuse the
+            workspace. The MCP server passes its scan-root confinement here, so
+            a config outside the permitted roots is never read.
+        client_config_rules: The rules a config an MCP client delivered is
+            checked against (``config/client_config_policy.py``).
+        trusted_config: The operator's config the trust checks take as the
+            trusted base, when it is not ``default_config``: the registered
+            profile, when the MCP client patched the session's copy of it. None
+            takes ``default_config``. It is also the file layered over a
+            project's own config, so the client's patched copy is not. Must
+            reach ``ProjectScanSettings.trusted_config_path`` too.
+        remote_client: The workspace is resolved for a remote MCP client, so a
+            project config the operator did not set aside resolves no ``!ENV``
+            (``resolve_config``). Must reach ``ProjectScanSettings.remote_client``
+            too.
+        permit_base: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+            or None. Every config source in each project's directory, every
+            base a project's chain extends, and the workspace policy file must
+            resolve to a file it permits; one that is a link out is refused
+            before anything opens it (``config_sources.check_discovery_candidates``).
+            Must reach ``ProjectScanSettings.config_base_gate`` too.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -751,7 +1023,9 @@ def resolve_workspace(
             key, or pins a scanner version irreconcilable with another project's.
             The message names every offending entry.
         ASHConfigValidationError: Exit code 3. The workspace is fine but one
-            project's own config is invalid. The message names the project.
+            project's own config is invalid, or cannot be loaded, or
+            ``default_config`` names a file that does not exist. The message
+            names the project or the file.
     """
     definition = load_workspace_file(workspace_file)
 
@@ -759,6 +1033,7 @@ def resolve_workspace(
     _validate_no_overlap(definition, candidates)
     _validate_unique_keys(definition, candidates)
     _apply_existence_checks(definition, candidates, allow_missing_projects)
+    _refuse_missing_default_config(default_config)
 
     if all(candidate.skipped for candidate in candidates):
         raise WorkspaceDefinitionError(
@@ -766,6 +1041,20 @@ def resolve_workspace(
             f"scan: every folder it lists was skipped. Exiting 0 here would "
             f"report a clean result for a workspace nothing examined."
         )
+
+    if project_gate is not None:
+        project_gate([(c.key, c.resolved) for c in candidates if not c.skipped])
+
+    operator = _operator_config(
+        Path(default_config) if default_config else None,
+        Path(trusted_config) if trusted_config else None,
+    )
+    operator_digest: Optional[str] = None
+    if operator is not None:
+        # Once for the whole workspace, so a project with no config of its own,
+        # which uses the operator's file alone, is refused with the rest.
+        check_operator_config(operator, definition.root, remote_client=remote_client)
+        operator_digest = operator_config_digest(operator)
 
     projects: List[ProjectPlan] = []
     for candidate in candidates:
@@ -784,11 +1073,15 @@ def resolve_workspace(
             )
             continue
 
-        config, config_path = _resolve_project_config(
+        config, config_path, operator_config = _resolve_project_config(
             candidate,
             config_overrides,
             default_config=Path(default_config) if default_config else None,
             workspace_root=definition.root,
+            client_config_rules=client_config_rules,
+            trusted_config=Path(trusted_config) if trusted_config else None,
+            remote_client=remote_client,
+            permit_base=permit_base,
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)
@@ -801,7 +1094,14 @@ def resolve_workspace(
                 # Settled below by _assign_display_labels, which needs the whole
                 # sibling set to know whether this label is ambiguous.
                 display_label=label,
-                config_source=config_path.resolve().as_posix() if config_path else None,
+                # By the path the project holds it at, not the file a link there
+                # reaches: execution re-resolves from it, and a file is judged by
+                # every path it was reached by (config_sources, "Base paths"). The
+                # sandbox check needs the config's own name too, and a symlinked
+                # .ash.yaml resolves out of the project.
+                config_source=_as_named(config_path),
+                operator_config=_as_named(operator_config),
+                operator_config_digest=operator_digest if operator_config else None,
                 scanners=scanners,
                 severity_threshold=config.global_settings.severity_threshold,
                 scanner_pins=pins,
@@ -813,7 +1113,16 @@ def resolve_workspace(
     _validate_scanner_pins(definition, active)
     _validate_plugin_modules(definition, active)
     _assign_display_labels(projects)
-    policy_source = _apply_workspace_policy(definition, projects, workspace_config)
+    policy_source = _apply_workspace_policy(
+        definition,
+        projects,
+        workspace_config,
+        default_config=default_config,
+        client_config_rules=client_config_rules,
+        trusted_config=trusted_config,
+        remote_client=remote_client,
+        permit_base=permit_base,
+    )
 
     return WorkspacePlan(
         workspace_file=definition.path.as_posix(),

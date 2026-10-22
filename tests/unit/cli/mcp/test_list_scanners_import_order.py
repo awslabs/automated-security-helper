@@ -5,14 +5,10 @@
 
 The mechanism these guard
 -------------------------
-``ash_plugin_manager.plugin_modules()`` memoises its resolved class list and never
-invalidates it, so the first resolve in a process decides the answer for every
-later one. ``mcp_list_scanners()`` has to account for the vendored
-ferret/snyk/trivy scanners, which ``load_internal_plugins()`` does not load; when
-it read them back through that memo, and anything had resolved earlier, those
-three were absent from what it returned. A caller asking a security scanner which
-scanners it has got an answer three short, with nothing logged and no error
-raised.
+``mcp_list_scanners()`` reports the vendored ferret/snyk/trivy scanners, which
+``load_internal_plugins()`` does not load, by reading the loaders' return values
+rather than the process-wide registry. Its answer is the same whatever resolved
+the registry before it and whatever the process has already imported.
 
 Why these tests provoke the memo through the public API only
 -----------------------------------------------------------
@@ -30,13 +26,13 @@ caught it.
 
 What is deliberately not asserted here
 -------------------------------------
-That ``mcp_list_scanners()`` leaves ``plugin_modules()`` returning the full set.
-It does not, and is not meant to: the memo is repaired for nobody, because
-workspace mode depends on it holding still. The scope of this fix is that *this*
-function answers completely; every other consumer of the memo is unchanged, and a
-test asserting otherwise passed only when no prior resolve had happened, which is
-the same worker-count nondeterminism these tests exist to remove.
+What ``plugin_modules()`` returns after ``mcp_list_scanners()``. Listing registers
+the vendored scanners in the process-wide registry; whether a scan then runs them
+is decided by the scan's own plugin modules, which
+tests/unit/cli/mcp/test_list_scanners_scan_selection.py holds.
 """
+
+import pytest
 
 from automated_security_helper.cli.mcp_tools import (
     _VENDORED_SCANNER_PLUGIN_PACKAGES,
@@ -48,6 +44,21 @@ from automated_security_helper.plugins.loader import (
     load_additional_plugin_modules,
     load_internal_plugins,
 )
+from tests.utils.isolated_tool_env import isolated_tool_dirs
+
+
+@pytest.fixture(autouse=True)
+def _tool_writes_stay_in_tmp_path(tmp_path, monkeypatch):
+    """Point every directory a scanner probe writes to under the test's tmp_path.
+
+    ``mcp_list_scanners()`` builds each scanner in this process, and building one
+    probes its tool: semgrep writes its settings and version cache, checkov its
+    update cache, and uv its tool directory lock, under the XDG and uv tool
+    directories, which are otherwise the developer's own.
+    """
+    for name, value in isolated_tool_dirs(tmp_path / "tool-dirs").items():
+        monkeypatch.setenv(name, value)
+
 
 VENDORED_SCANNER_NAMES = {"ferret_scan", "snyk_code", "trivy_repo"}
 VENDORED_SCANNER_CLASSES = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}
@@ -156,17 +167,19 @@ class TestLoadedScannerClasses:
         """Guards the subtlety that makes this work.
 
         ``ASH_SCANNERS`` is declared in each package's ``__init__``, so the
-        loaders return the three vendored scanners only when handed the package
+        loaders return the vendored scanners only when handed the package
         path. Pointing at ``ash_ferret_plugins.ferret_scanner`` imports the
         scanner but reports nothing, and the resulting list would be silently
-        short again. Measured both ways: leaf paths yield 0, package paths yield 3.
+        short again. Measured both ways: leaf paths yield 0, package paths yield all.
         """
+        leaves = {
+            "ash_ferret_plugins": "ferret_scanner",
+            "ash_snyk_plugins": "snyk_code_scanner",
+            "ash_trivy_plugins": "trivy_repo_scanner",
+        }
         leaf_paths = [
-            f"{package}.{leaf}"
-            for package, leaf in zip(
-                _VENDORED_SCANNER_PLUGIN_PACKAGES,
-                ("ferret_scanner", "snyk_code_scanner", "trivy_repo_scanner"),
-            )
+            f"{package}.{leaves[package.rsplit('.', 1)[1]]}"
+            for package in _VENDORED_SCANNER_PLUGIN_PACKAGES
         ]
 
         via_leaves = load_additional_plugin_modules(leaf_paths)
@@ -179,4 +192,15 @@ class TestLoadedScannerClasses:
             "the leaf modules this guard is stale, but check the package paths "
             "still work before deleting it"
         )
-        assert len(via_packages["scanners"]) == 3
+        assert len(via_packages["scanners"]) == len(VENDORED_SCANNER_CLASSES)
+
+
+def test_the_vendored_list_is_every_in_tree_community_module():
+    """A new community module that is not listed here is missing from list_scanners."""
+    from automated_security_helper.core.community_scanners import (
+        community_scanner_modules,
+    )
+
+    assert set(_VENDORED_SCANNER_PLUGIN_PACKAGES) == set(
+        community_scanner_modules().values()
+    )

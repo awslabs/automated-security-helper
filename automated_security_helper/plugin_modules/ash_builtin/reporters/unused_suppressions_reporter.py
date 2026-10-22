@@ -4,7 +4,7 @@
 """Reporter for identifying unused suppressions."""
 
 import json
-from typing import Literal, TYPE_CHECKING, Dict, Any, List
+from typing import Literal, TYPE_CHECKING, Any, ClassVar, Dict, List, Tuple
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -89,10 +89,24 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
     workspace_behaviour = ReporterWorkspaceBehaviour.WORKSPACE_SCOPED
 
+    #: The markdown copy written beside the JSON report when ``output_format`` is
+    #: ``both``.
+    MARKDOWN_FILE_NAME: ClassVar[str] = "ash.unused-suppressions.md"
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = UnusedSuppressionsReporterConfig()
         return super().model_post_init(context)
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The markdown copy, when ``output_format`` is ``both`` (the default)."""
+        config = self.config
+        if isinstance(config, dict):
+            config = UnusedSuppressionsReporterConfig.model_validate(config)
+        output_format = getattr(
+            getattr(config, "options", None), "output_format", "both"
+        )
+        return (self.MARKDOWN_FILE_NAME,) if output_format == "both" else ()
 
     def report(self, model: "AshAggregatedResults") -> str:
         """Generate a report of unused suppressions."""
@@ -164,11 +178,13 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             if hasattr(self.context, "output_dir"):
                 from pathlib import Path
 
+                from automated_security_helper.base.reporter_plugin import (
+                    write_report_file,
+                )
+
                 report_dir = Path(self.context.output_dir) / "reports"
                 report_dir.mkdir(parents=True, exist_ok=True)
-                markdown_file = report_dir / "ash.unused-suppressions.md"
-                with open(markdown_file, "w", encoding="utf-8") as f:
-                    f.write(markdown_output)
+                write_report_file(report_dir, self.MARKDOWN_FILE_NAME, markdown_output)
 
             # Return JSON as the primary output
             return json_output

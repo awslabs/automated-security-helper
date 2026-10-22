@@ -801,12 +801,12 @@ class TestConfigLintCLI:
         assert result.exit_code == 1
         assert "issue" in result.output.lower()
 
-    def test_lint_missing_config_exits_one(self, cli_runner, tmp_path):
-        """Linting a non-existent config should exit with code 1."""
+    def test_lint_missing_config_exits_three(self, cli_runner, tmp_path):
+        """A config that is not there cannot be loaded: exit 3, as a scan refuses it."""
         result = cli_runner.invoke(
             config_app, ["lint", "--config", str(tmp_path / "nonexistent.yaml")]
         )
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "not found" in result.output.lower()
 
     def test_lint_fix_applies_changes(self, cli_runner, config_with_internal_fields):

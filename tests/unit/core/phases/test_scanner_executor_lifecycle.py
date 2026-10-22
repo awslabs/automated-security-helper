@@ -691,9 +691,16 @@ class TestTerminalStatusIsNotRegraded:
         assert results[0].status == ScannerStatus.ERROR
 
     def test_clean_scan_is_still_graded_passed(self, tmp_path):
-        """A scanner that ran and found nothing keeps reaching PASSED."""
+        """A scanner that ran and found nothing keeps reaching PASSED.
+
+        It reports its empty findings list. A dict with nothing to grade at all is
+        ERROR (``test_scanner_executor_ungradable_results.py``), so this control
+        says what it found.
+        """
         ctx = _make_context(tmp_path)
-        scanner = _make_scanner(ctx, scripted_result={"output": "nothing to report"})
+        scanner = _make_scanner(
+            ctx, scripted_result={"output": "nothing to report", "findings": []}
+        )
         executor = _make_executor(ctx)
 
         results = executor._execute_scanner("scripted", scanner, _targets(ctx))

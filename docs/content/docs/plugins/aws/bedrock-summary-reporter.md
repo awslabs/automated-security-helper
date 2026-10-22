@@ -18,6 +18,8 @@ The Bedrock Summary Reporter leverages Amazon Bedrock to:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml
@@ -45,11 +47,34 @@ reporters:
       summary_style: "executive"  # executive, technical, or detailed
       custom_prompt: "Focus on business impact and compliance risks"
       # Retry and fallback configuration
-      max_retries: 5      # Default: 3
-      base_delay: 2.0     # Default: 1.0 seconds
-      max_delay: 120.0    # Default: 60.0 seconds
+      max_retries: 5      # Default: 3, at most 10
+      base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+      max_delay: 30.0     # Default: 60.0 seconds, at most 60
       enable_fallback_models: true
 ```
+
+### What is sent to Bedrock
+
+The reporter receives results ASH has already masked: secret values that findings
+expose are masked in every snippet and message before any reporter runs (see
+"Secret values in reports" in the output formats page). On top of that:
+
+- **Findings from secrets scanners are counted, not sent.** `exclude_scanner_types`
+  (default `["SECRET"]`) names scanner tool types whose findings go into the
+  prompts only as a count ("Secret findings: N"). A finding's type is its scanner's
+  tool type, looked up from the scanner's name (detect-secrets, ferret-scan and
+  gitleaks are `SECRETS`), or a `tool_type::` tag on the finding. `SECRET` and `SECRETS` both
+  name the secrets type. With the secrets type excluded, a finding from any rule
+  that detects a credential or key is counted too: semgrep's and opengrep's
+  `generic.secrets.*` rules, checkov's `CKV_SECRET_*`, and rules tagged `secret`,
+  `secrets`, CWE-798 or CWE-321. A hard-coded password check such as bandit's B105
+  (CWE-259) is sent, with the value masked.
+- **A finding whose scanner type cannot be determined is sent without its code.**
+  Its message and location are sent, its snippets are not, and they are left out of
+  the local summary too.
+- **`include_code_snippets` decides whether code is sent or written.** With it off
+  (the default), no prompt holds a snippet, and the "Raw JSON" blocks in
+  `reports/ash.bedrock.summary.md` are written without the result's snippets.
 
 ### Environment Variables
 
@@ -64,6 +89,66 @@ export ASH_BEDROCK_MODEL_ID="anthropic.claude-v2"
 export ASH_BEDROCK_MAX_TOKENS="3000"
 export ASH_BEDROCK_TEMPERATURE="0.2"
 ```
+
+### Output files
+
+With `output_markdown` on (the default), the reporter writes its summary to
+`output_file` (default `ash.bedrock.summary.md`), and the executive summary and
+technical analysis to `output_executive_file` and `output_technical_file` (defaults
+`bedrock-executive.md` and `bedrock-technical.md`), in the reports directory. Each must
+be a plain file name, from any source, `--config-overrides` included. A value with a
+`/`, `\` or NUL in it, or one that is `.` or `..`, such as `../summary.md`, is replaced
+by the option's default, with a warning naming the key. ASH also writes these files
+only when the resolved file is directly inside the reports directory.
+
+### Where these options can be set
+
+These options are the operator's:
+
+- `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file` and
+  `output_technical_file` choose where findings are sent or written and which
+  credentials send them.
+- `include_code_snippets`, `custom_prompt`, `industry_context`,
+  `compliance_frameworks` and `custom_context` choose what is sent to the model
+  with them: source from the scanned tree, and text added to the prompts.
+- `exclude_scanner_types` (which keeps secret findings out by default),
+  `actionable_only`, `max_findings_to_analyze`, `max_findings_per_severity`,
+  `summarize_findings` and `batch_processing` choose which findings are sent, and
+  how many.
+- `enable_fallback_models` chooses whether a model other than `model_id` may
+  receive them.
+- `add_section_headers`, `output_markdown`, `include_sections`, `exclude_sections`
+  and `group_by_severity` choose which of the reporter's calls are made, and each
+  of those calls sends findings: the single summary call or the sectioned report,
+  the calls behind the executive and technical files, the call for each section,
+  and a call for each severity.
+- `max_retries`, `base_delay` and `max_delay` choose how long the reporter keeps
+  calling Bedrock when it is refused. `max_retries` is at most 10, `max_delay` at
+  most 60 seconds, and `base_delay` at most `max_delay`.
+
+They take effect only from the
+defaults (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_PROFILE` and `ASH_BEDROCK_MODEL_ID`),
+`--config-overrides`, or a config file outside the scanned tree. A config file inside
+the scanned tree, or one an MCP client delivered, cannot set them: from the tree they
+are ignored with a warning, under either spelling of the name (`exclude-scanner-types`
+is the same option as `exclude_scanner_types`), and under the MCP server they are
+default `denied_paths` entries, so a delivered config that changes one is refused. A
+repository config that repeats the operator's value is no change, and is not warned
+about. The model parameters (`temperature`, `top_p`, `max_tokens`),
+`add_table_of_contents`, `summary_style` and `enable_caching` still apply from the
+tree.
+
+Whether the reporter runs is the operator's too: a config file inside the scanned tree
+neither turns it on nor turns it off (see
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set)).
+Under the MCP server every setting of the section is a default `denied_paths` entry
+(`/reporters/bedrock-summary-reporter/**`), so a delivered config that changes one is
+refused. A client's `enabled: false` is not refused, but the server's `enabled`
+applies.
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
 
 ## Prerequisites
 
@@ -404,9 +489,9 @@ options:
 ```yaml
 # Configure retry behavior
 options:
-  max_retries: 5      # Default: 3
-  base_delay: 2.0     # Default: 1.0 seconds
-  max_delay: 120.0    # Default: 60.0 seconds
+  max_retries: 5      # Default: 3, at most 10
+  base_delay: 2.0     # Default: 1.0 seconds, at most max_delay
+  max_delay: 30.0     # Default: 60.0 seconds, at most 60
   enable_fallback_models: true  # Enable fallback models
 ```
 

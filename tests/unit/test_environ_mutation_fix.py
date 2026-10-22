@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -299,6 +300,7 @@ def test_run_command_with_output_handling_forwards_env_to_subprocess(tmp_path):
             "SystemRoot": os.environ.get("SystemRoot", ""),
             "COMSPEC": os.environ.get("COMSPEC", ""),
         },
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert "propagated" in response.get("stdout", ""), (
         f"env= was not forwarded to subprocess. stdout={response.get('stdout')!r}"

@@ -39,9 +39,17 @@
  * `get_default_config()` in ASH reads `ASH_CONFIG` from the process environment
  * directly, so the deployment-wide default applies to every scan the process
  * runs — including MCP-initiated scans of arbitrary directories, which never see
- * a config placed next to the server. A `.ash.yaml` inside the scanned
- * repository still wins, which is the precedence adopters expect: project config
- * overrides the deployment default.
+ * a config placed next to the server.
+ *
+ * What it does NOT do is override a config the scanned directory carries. ASH
+ * selects one config source rather than merging them: an MCP scan of a directory
+ * with its own `.ash.yaml` discovers and uses that file, and `ASH_CONFIG` is the
+ * default for directories without one. `ash scan` is different, because its
+ * `--config` option reads `ASH_CONFIG` as its value, so the shard and merge
+ * projects, which run `ash scan` with this variable set, read the base config, or
+ * `{}` when `AshBaseConfigYaml` is empty (see ash-distributed-pipeline-stack.ts),
+ * and never the repository's. The CodeCommit gate passes `--config` itself,
+ * always; see `CODECOMMIT_GATE_HANDLER`.
  */
 export const ASH_MATERIALIZED_CONFIG_PATH = '/tmp/ash-config/.ash.yaml';
 
@@ -101,6 +109,7 @@ the ASH image, which ships boto3 but not the AWS CLI.
 Usage:
     ash-s3-sync.py upload   <local-dir> <bucket> <key-prefix>
     ash-s3-sync.py download <bucket> <key-prefix> <local-dir>
+    ash-s3-sync.py collect  <bucket> <key-prefix> <local-dir> <execution-id> <shard-count>
 
 Both directions are recursive. Empty directories are not represented in S3 and
 are therefore not recreated on download.
@@ -108,6 +117,7 @@ are therefore not recreated on download.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
@@ -157,11 +167,19 @@ def download(bucket: str, prefix: str, local_dir: str) -> int:
             relative = key[len(prefix) + 1 :] if prefix else key
             if not relative:
                 continue
+
+            # Every segment must be a plain name. S3 stores "." and ".." segments
+            # literally, so such a key is its own object, yet on disk it names
+            # another key's file or a path outside local_dir. S3 keys are written
+            # by whoever can write the bucket.
+            if any(part in ("", ".", "..") for part in relative.split("/")):
+                _fail(
+                    f"key {key!r} has an empty, '.' or '..' segment, so it would "
+                    f"write outside {local_dir} or onto another key's file"
+                )
             destination = root / relative
 
-            # Refuse a key that would escape the destination directory. S3 keys
-            # are attacker-influenced in the general case, and a key containing
-            # ".." would otherwise write outside local_dir.
+            # A link already under local_dir could still lead outside it.
             resolved = destination.resolve()
             if not resolved.is_relative_to(root.resolve()):
                 _fail(f"key {key!r} would write outside {local_dir}")
@@ -171,6 +189,134 @@ def download(bucket: str, prefix: str, local_dir: str) -> int:
             count += 1
 
     print(f"ash-s3-sync: downloaded {count} file(s) from s3://{bucket}/{prefix}/")
+    return count
+
+
+def _calling_build() -> tuple[str, str, str]:
+    """Partition, Region and account of this build, from CODEBUILD_BUILD_ARN."""
+    parts = os.environ.get("CODEBUILD_BUILD_ARN", "").split(":")
+    if len(parts) < 7 or parts[0] != "arn" or parts[2] != "codebuild":
+        _fail("CODEBUILD_BUILD_ARN does not hold this build's ARN")
+    return parts[1], parts[3], parts[4]
+
+
+def _shard_builds(
+    pipeline: str, execution_id: str, shard_count: int
+) -> list[tuple[str, set[str]]]:
+    """For each shard action, its one succeeded build and the builds of its other runs.
+
+    CodePipeline lists every run of an action in an execution: a retried shard has a
+    failed run and a succeeded one. The externalExecutionId of a CodeBuild action is its
+    build id, <project>:<uuid>.
+    """
+    client = boto3.client("codepipeline")
+    request = {
+        "pipelineName": pipeline,
+        "filter": {"pipelineExecutionId": execution_id},
+    }
+    details = []
+    while True:
+        page = client.list_action_executions(**request)
+        details.extend(page.get("actionExecutionDetails", []))
+        if not page.get("nextToken"):
+            break
+        request["nextToken"] = page["nextToken"]
+    shards = []
+    for index in range(shard_count):
+        name = f"Shard{index}"
+        runs = [
+            d
+            for d in details
+            if d.get("actionName") == name
+            and d.get("pipelineExecutionId") == execution_id
+        ]
+        builds = []
+        for run in runs:
+            project = (
+                run.get("input", {}).get("configuration", {}).get("ProjectName", "")
+            )
+            build = (
+                run.get("output", {})
+                .get("executionResult", {})
+                .get("externalExecutionId", "")
+            )
+            if not project or not build.startswith(project + ":"):
+                _fail(
+                    f"{name} reports build {build!r}, which is not a build of project {project!r}"
+                )
+            builds.append((run.get("status"), build))
+        succeeded = [build for status, build in builds if status == "Succeeded"]
+        if len(succeeded) != 1:
+            _fail(
+                f"expected one succeeded run of {name} in execution {execution_id}, "
+                f"found {len(succeeded)}"
+            )
+        shards.append((succeeded[0], {build for _, build in builds} - set(succeeded)))
+    return shards
+
+
+def collect(
+    bucket: str, prefix: str, local_dir: str, execution_id: str, shard_count: str
+) -> int:
+    """Download each shard's results from the build CodePipeline reports for it.
+
+    Shard N writes under <prefix>/shard-N/<its build ARN>/, which its role allows only for
+    its own build. This asks CodePipeline which build ran each shard action of this
+    execution, downloads that build's keys to <local-dir>/shard-N/, skips the keys of the
+    action's other runs, and refuses every other key: nothing but this execution's shard
+    builds writes under <prefix>/, apart from the merge's own merged/ output.
+    """
+    initiator = os.environ.get("CODEBUILD_INITIATOR", "")
+    if not initiator.startswith("codepipeline/"):
+        _fail("CODEBUILD_INITIATOR does not name the pipeline that started this build")
+    pipeline = initiator[len("codepipeline/") :]
+    partition, region, account = _calling_build()
+    prefix = prefix.strip("/")
+    arn = f"arn:{partition}:codebuild:{region}:{account}:build/"
+    shards = _shard_builds(pipeline, execution_id, int(shard_count))
+    wanted = [
+        f"{prefix}/shard-{i}/{arn}{build}/" for i, (build, _) in enumerate(shards)
+    ]
+    stale = [
+        f"{prefix}/shard-{i}/{arn}{build}/"
+        for i, (_, others) in enumerate(shards)
+        for build in others
+    ]
+    client = boto3.client("s3")
+    root = pathlib.Path(local_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    count = 0
+
+    for page in client.get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix=f"{prefix}/"
+    ):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith("/") or key.startswith(f"{prefix}/merged/"):
+                continue
+            if any(key.startswith(p) for p in stale):
+                continue
+            index = next((i for i, p in enumerate(wanted) if key.startswith(p)), None)
+            if index is None:
+                _fail(
+                    f"key {key!r} is not under a build this execution lists for its shards"
+                )
+            relative = key[len(wanted[index]) :]
+            if any(part in ("", ".", "..") for part in relative.split("/")):
+                _fail(
+                    f"key {key!r} has an empty, '.' or '..' segment, so it would "
+                    f"write outside {local_dir} or onto another key's file"
+                )
+            destination = root / f"shard-{index}" / relative
+            if not destination.resolve().is_relative_to(root.resolve()):
+                _fail(f"key {key!r} would write outside {local_dir}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(bucket, key, str(destination))
+            count += 1
+
+    print(
+        f"ash-s3-sync: collected {count} file(s) from {len(wanted)} shard build(s) of execution {execution_id}"
+    )
     return count
 
 
@@ -188,8 +334,14 @@ def main(argv: list[str]) -> int:
         if len(rest) != 3:
             _fail("download takes <bucket> <key-prefix> <local-dir>")
         download(rest[0], rest[1], rest[2])
+    elif action == "collect":
+        if len(rest) != 5:
+            _fail(
+                "collect takes <bucket> <key-prefix> <local-dir> <execution-id> <shard-count>"
+            )
+        collect(*rest)
     else:
-        _fail(f"unknown subcommand {action!r}; expected upload or download")
+        _fail(f"unknown subcommand {action!r}; expected upload, download or collect")
 
     return 0
 
@@ -286,12 +438,16 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * excuses, so that target keeps exiting 65 until its `AshVersion` can serve
  * stateless.
  *
- * KNOWN LIMITATION: ASH takes the shared-secret value as `--auth-header-value`,
- * a command-line argument, and exposes no environment-variable equivalent for
- * it. The resolved secret is therefore visible in the container's own process
- * list. Nothing outside the container can read it, and it never reaches the
- * template or the task definition, but a process running inside the same
- * container could. Closing that would need an env-var option in ASH itself.
+ * THE SHARED SECRET STAYS OFF THE COMMAND LINE WHEN ASH ALLOWS IT. A process's
+ * command line is readable by every user in the container, and from the host by
+ * anyone who can list its processes. When this image's `ash mcp --help` lists
+ * `--auth-header-value-fd`, the entrypoint passes the resolved secret on
+ * descriptor 3, a here-document `ash mcp` reads once and closes, so it is on no
+ * command line and, as before, in no environment variable, the template or the
+ * task definition. An older ASH (the `AshVersion` decides) has only
+ * `--auth-header-value`, and gets the secret on its command line as it always
+ * did. A here-document and not a file: a file would put the secret on the
+ * container's storage.
  *
  * WHY THE ALLOWED HOSTS ARE FOLDED TO LOWER CASE
  * ---------------------------------------------
@@ -324,6 +480,43 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  * ASH's CLI — at every container start. That is well inside the five-minute
  * health-check grace period the Fargate target allows.
  *
+ * HOST CHECKING IS AN EXPLICIT DECISION, AND SO IS SESSION TRUST
+ * --------------------------------------------------------------
+ * An ASH whose `ash mcp` has these options refuses to bind a non-loopback host
+ * without `--allowed-host` unless the operator passes `--trust-upstream-host-check`,
+ * the statement that a proxy or platform in front of ASH checks Host and Origin. In
+ * stateless mode it treats a client-supplied `Mcp-Session-Id` as a session identity
+ * only when the operator passes `--trust-upstream-session-id`, the statement that
+ * the platform in front issues and authenticates that header. The entrypoint maps two environment
+ * variables onto them, the names the Terraform launcher reads
+ * (ash-image-pipeline/files/ash-mcp-serve):
+ *
+ * - `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true` passes `--trust-upstream-host-check`,
+ *   and only when no allowlist was given: ASH refuses the two together.
+ * - `ASH_MCP_TRUST_UPSTREAM_SESSION_ID=true` passes `--trust-upstream-session-id`,
+ *   and only with `--stateless-http`, the one mode ASH accepts it in.
+ *
+ * Each flag is passed only when this image's `ash mcp --help` lists it; an older ASH
+ * has no such check to opt out of. Unlike the Terraform launcher, whose defaults are
+ * AgentCore's, both default to `false` here: every CDK stack sets what it needs, so
+ * an unset value means nobody decided. AgentCore sets both (Host is on its
+ * restricted-header list, so no allowlist can be known, and the platform issues the
+ * session header); Fargate sets neither (its allowlist is the load balancer's name,
+ * and a load balancer issues no session header).
+ *
+ * With neither an allowlist nor the host-check statement, the entrypoint refuses
+ * (exit 65), whatever ASH version is inside. A release ASH has no Host check of its
+ * own, so the entrypoint is where the decision is enforced for it; an ASH that has
+ * the check makes the same refusal itself, and the entrypoint says it first.
+ *
+ * AND A REQUESTED ALLOWLIST IS ENFORCED OR NOTHING STARTS. When `ASH_MCP_ALLOWED_HOST`
+ * is set and this ASH has no `--allowed-host`, the entrypoint refuses (exit 65), and
+ * so it does when the value names no host at all (`,`), which would otherwise pass
+ * no `--allowed-host`. A stack that asks for an allowlist therefore runs with one
+ * or does not start. The Fargate stack always supplies its load balancer's name, so
+ * the value that satisfies the refusal there is an `AshVersion` whose `ash mcp`
+ * accepts `--allowed-host`.
+ *
  * WHERE TO PUT AN EXPLANATION, AND WHY IT MATTERS HERE
  * ---------------------------------------------------
  * Comments inside the script below are not free. The script is inlined into the
@@ -341,39 +534,30 @@ export const MCP_ENTRYPOINT_SCRIPT = `#!/bin/sh
 # targets; see deploy/cdk/lib/ash-container-scripts.ts.
 set -eu
 
-# Materialize the deployment-wide ASH config, when one was supplied. Written to
-# a fixed path and exported through ASH_CONFIG so it applies to every scan this
-# process runs, not just scans of one directory.
+# Materialize the deployment-wide ASH config, when one was supplied.
 if [ -n "\${ASH_BASE_CONFIG_SSM_PARAMETER:-}" ]; then
   mkdir -p "$(dirname "\${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}")"
   python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])" \\
     > "\${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}"
 else
-  # No config supplied. Unset ASH_CONFIG so ASH does not log a missing-file
-  # notice on every scan and falls through to its built-in defaults.
+  # ASH refuses an ASH_CONFIG that names no file.
   unset ASH_CONFIG || true
 fi
 
-# Resolve the shared secret from its ARN. The ARN travels in the environment;
-# the value never does, so it stays out of the template, the task definition and
-# the runtime's environment-variable map.
+# The secret's ARN travels in the environment; its value never does.
 ASH_AUTH_VALUE=""
 if [ -n "\${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}" ]; then
   ASH_AUTH_VALUE=$(python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])")
 fi
 
-# Ask this image's ASH which MCP options it accepts, once. AshVersion decides
-# which ASH is in here at deploy time, and older releases have neither
-# --stateless-http nor --allowed-host; passing an unknown option would leave the
-# server unable to bind. COLUMNS is wide so rich cannot wrap a flag name across
-# lines and make a supported option measure as missing.
+# Ask this image's ASH which MCP options it accepts, once; AshVersion decides
+# which ASH is in here. COLUMNS keeps rich from wrapping a flag name.
 if ! ASH_MCP_HELP="$(COLUMNS=200 ash mcp --help 2>&1)"; then
   echo "ash-mcp-entrypoint: 'ash mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:" >&2
   printf '%s\\n' "\${ASH_MCP_HELP}" >&2
   exit 69
 fi
 
-# Fixed-string match, so a flag name is never interpreted as a regex.
 ash_mcp_supports() {
   printf '%s' "\${ASH_MCP_HELP}" | grep -qF -- "$1"
 }
@@ -383,13 +567,12 @@ set -- ash mcp --transport streamable-http \\
   --port "\${ASH_MCP_PORT:-8000}" \\
   --mount-path "\${ASH_MCP_MOUNT_PATH:-/mcp}"
 
-# --stateless-http is a paired flag, so state the intent rather than inheriting
-# ASH's default. Refuses to start if stateless was asked for and this ASH has no
-# such option: running stateful instead would answer 404 to every session id the
-# platform injects while still passing the health check.
 if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
   if ash_mcp_supports '--stateless-http'; then
     set -- "$@" --stateless-http
+    if [ "\${ASH_MCP_TRUST_UPSTREAM_SESSION_ID:-false}" = "true" ] && ash_mcp_supports '--trust-upstream-session-id'; then
+      set -- "$@" --trust-upstream-session-id
+    fi
   elif [ "\${ASH_MCP_STATELESS_FALLBACK:-refuse}" = "warn" ]; then
     echo "ash-mcp-entrypoint: WARNING: stateless was asked for, but the ASH in this image has no --stateless-http option, so this server runs STATEFUL. It honors only the session id it issued at initialize, so a client that adopts the id returned on each response is refused on its third call. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http to remove this." >&2
   else
@@ -399,36 +582,49 @@ if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
 elif ash_mcp_supports '--no-stateless-http'; then
   set -- "$@" --no-stateless-http
 fi
-# The remaining case needs no flag and is not a degradation: stateful was asked
-# for, and an ASH without the option is already stateful.
 
-# --allowed-host is repeatable, so split the comma-separated value and pass one
-# flag per hostname; a comma-joined single value would match nothing. Warns
-# rather than refusing when the option is absent: the Fargate stack always
-# substitutes its load balancer DNS name here, so there is no parameter value an
-# operator could set to satisfy a refusal.
+# Host checking: a Host allowlist, or the operator's statement that something in
+# front of ASH checks Host. One of the two, never both, never neither.
 if [ -n "\${ASH_MCP_ALLOWED_HOST:-}" ]; then
-  if ash_mcp_supports '--allowed-host'; then
-    ASH_SAVED_IFS=$IFS
-    IFS=,
-    for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
-      if [ -n "$ash_host" ]; then
-        # Lower-cased because a load balancer lowercases Host while the MCP SDK
-        # matches case-sensitively; mixed case yields 421 on every request.
-        ash_host=$(printf '%s' "$ash_host" | tr 'A-Z' 'a-z')
-        set -- "$@" --allowed-host "$ash_host"
-      fi
-    done
-    IFS=$ASH_SAVED_IFS
-  else
-    echo "ash-mcp-entrypoint: WARNING: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option, so EVERY Host header will be accepted. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host to enforce the allowlist." >&2
+  if ! ash_mcp_supports '--allowed-host'; then
+    echo "ash-mcp-entrypoint: a Host allowlist of '\${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option and would accept every Host header. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host." >&2
+    exit 65
   fi
+  ASH_SAVED_IFS=$IFS
+  IFS=,
+  ash_hosts=""
+  for ash_host in \${ASH_MCP_ALLOWED_HOST}; do
+    # Lower-cased because load balancers lowercase Host.
+    ash_host=$(printf '%s' "$ash_host" | tr -d ' \t' | tr 'A-Z' 'a-z')
+    if [ -n "$ash_host" ]; then
+      set -- "$@" --allowed-host "$ash_host"
+      ash_hosts=1
+    fi
+  done
+  IFS=$ASH_SAVED_IFS
+  if [ -z "$ash_hosts" ]; then
+    echo "ash-mcp-entrypoint: ASH_MCP_ALLOWED_HOST='\${ASH_MCP_ALLOWED_HOST}' names no host." >&2
+    exit 65
+  fi
+elif [ "\${ASH_MCP_TRUST_UPSTREAM_HOST_CHECK:-false}" = "true" ]; then
+  if ash_mcp_supports '--trust-upstream-host-check'; then
+    set -- "$@" --trust-upstream-host-check
+  fi
+else
+  echo "ash-mcp-entrypoint: refusing to serve every Host header on \${ASH_MCP_HOST:-0.0.0.0}: set ASH_MCP_ALLOWED_HOST (McpAllowedHost) to the names clients use, or ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=true if a proxy in front of ASH checks Host." >&2
+  exit 65
 fi
 
 # Both halves are required: a header name with no value would make ASH compare
 # against an empty secret.
 if [ -n "\${ASH_MCP_AUTH_HEADER_NAME:-}" ] && [ -n "$ASH_AUTH_VALUE" ]; then
-  set -- "$@" --auth-header-name "\${ASH_MCP_AUTH_HEADER_NAME}" --auth-header-value "$ASH_AUTH_VALUE"
+  set -- "$@" --auth-header-name "\${ASH_MCP_AUTH_HEADER_NAME}"
+  if ash_mcp_supports '--auth-header-value-fd'; then
+    exec "$@" --auth-header-value-fd 3 3<<ASH_AUTH_EOF
+$ASH_AUTH_VALUE
+ASH_AUTH_EOF
+  fi
+  set -- "$@" --auth-header-value "$ASH_AUTH_VALUE"
 elif [ -n "\${ASH_MCP_AUTH_HEADER_NAME:-}" ]; then
   echo "ash-mcp-entrypoint: McpAuthHeaderName was set but no secret value resolved; refusing to start an unauthenticated server that the deployment expected to authenticate." >&2
   exit 64
@@ -446,8 +642,9 @@ exec "$@"
  * resolve dependencies, a project file to detect the language. Installing
  * `git-remote-codecommit` into this image flavor lets git clone over the
  * `codecommit::` transport using the function's own IAM role, so ASH sees a real
- * working tree. ASH's own `--changed-files-only --base-ref` then narrows the
- * scan to the pull request's diff while keeping that context.
+ * working tree. With `ChangedFilesOnly` on, ASH's own `--changed-files-only
+ * --base-ref` narrows the findings to the pull request's diff while keeping that
+ * context; it is off by default, and ash-codecommit-gate-stack.ts says why.
  *
  * FAILURE MODES:
  * - Lambda's ceiling is 900 seconds. A large repository or a slow scanner set
@@ -555,6 +752,60 @@ exec "$@"
  * An ONLINE scan whose caches are empty is logged and allowed: grype can still
  * fetch a database, so the scan is slow rather than blind.
  *
+ * THE SCAN ALWAYS RUNS WITH THE OPERATOR'S CONFIG
+ * -----------------------------------------------
+ * Without `--config` or `ASH_CONFIG`, ASH looks for a config inside the scanned
+ * tree, which here is the pull request. The gate's verdict follows the operator's
+ * settings instead: `_scan_config` writes the config the scan is given into the
+ * invocation's workdir, beside the clone and never inside it, and the argv names it
+ * with `--config`, which makes ASH skip discovery. With `AshBaseConfigYaml` set, the
+ * parameter is read on every invocation, so an edit to it applies to the next
+ * pull request without an image rebuild; this image's ENTRYPOINT is the runtime
+ * interface client, which runs no script of ours at start. Without it the file is
+ * `{}`, ASH's defaults. Not the SSM placeholder: it is a comment-only YAML
+ * document, which ASH refuses as a config. A parameter that cannot be read
+ * refuses the scan, through the same comment-and-REVOKE path as the offline
+ * refusal below, rather than falling back to defaults the operator did not choose.
+ *
+ * AN INCOMPLETE SCAN IS AN ERROR, AND AN ASH THAT CANNOT SAY SO IS REFUSED
+ * -----------------------------------------------------------------------
+ * The scan passes `--fail-on-incomplete-scanners`, so a run in which a selected
+ * scanner was MISSING or ERROR exits 1 ("errored") rather than 0 ("passed"), whatever
+ * an operator's base config says about `fail_on_incomplete_scanners`. Releases up to
+ * v3.7.1, including the default `AshVersion`, have no such option, and their
+ * `ash scan` collects unknown options instead of refusing them, so there the flag
+ * has no effect and a scan with every scanner MISSING exits 0. So
+ * `_check_completeness_flag` asks `ash scan --help`
+ * once per execution environment whether the option exists, and when it does not
+ * the scan is refused through the same comment-and-REVOKE path as the offline
+ * refusal below. The probe runs with colour off and a wide terminal, and ANSI codes
+ * are stripped before the match, because rich styles each dash of an option name
+ * separately when colour is forced.
+ *
+ * WHAT THIS COSTS: with the default `AshVersion` (v3.7.0) the gate refuses every pull
+ * request until it is deployed with an `AshVersion` whose `ash scan` has the option.
+ *
+ * THE SCAN RUNS WITHOUT THE FUNCTION ROLE'S CREDENTIALS
+ * -----------------------------------------------------
+ * On Lambda the execution role's credentials are in the function's environment
+ * (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN). That role comments
+ * on pull requests and votes on them, and the scan itself needs no AWS call, so
+ * `SCAN_ENV_DROPPED` removes every variable an SDK or CLI reads credentials or a
+ * profile from, and IMDS is switched off so nothing waits on it. The scanners run
+ * with no AWS identity.
+ * The clone keeps the role: git-remote-codecommit signs with it, and `_run` is
+ * called there with the handler's own environment.
+ *
+ * WHAT THIS COSTS: a base config that enables a reporter which calls AWS (S3,
+ * Security Hub, CloudWatch Logs, Bedrock) gets no credentials in this gate, and
+ * that reporter fails. Giving it a separate role the scan could assume was
+ * rejected: the scanners would then hold that role's credentials too.
+ *
+ * KNOWN LIMIT: the variables are dropped from the child's environment, not from
+ * the sandbox. A scanner running as the same user can still read the handler
+ * process's own environment through /proc. Closing that needs the handler to run
+ * the scan as another user, which Lambda does not offer.
+ *
  * WHERE THE REFUSAL GOES, AND WHY IT IS NOT JUST A RAISE
  * -----------------------------------------------------
  * `_scan_env` is called BEFORE the clone, and a `RuntimeError` from it is caught,
@@ -565,12 +816,25 @@ exec "$@"
  * That is the same stale-approval shape the Terraform flavor of this gate was
  * fixed for, so `_set_approval` exists to be shared by both paths rather than
  * having the approval logic inline on only one of them.
+ *
+ * COMMIT IDS AND GIT ARGUMENTS
+ * ----------------------------
+ * git reads an argument that starts with `-` as an option, wherever it sits. The
+ * clone passes `--` before the repository. The source commit reaches
+ * `git checkout`, which takes whatever follows `--` as paths, and git before 2.44
+ * keeps `--end-of-options` in checkout's arguments instead of consuming it, so
+ * neither can carry a commit. The destination commit reaches the diff ASH runs
+ * for `--changed-files-only` when that is on. So the handler accepts an event only
+ * when both ids are full hex object ids (`COMMIT_ID`), and raises before any git
+ * or CodeCommit call otherwise. CodeCommit sends 40-digit ids, so a real event
+ * always passes. The Terraform gate's `parse_event` applies the same check.
  */
 export const CODECOMMIT_GATE_HANDLER = `# ASH one-shot CodeCommit pull-request gate.
 # Generated by the ASH CDK deployment targets; see
 # deploy/cdk/lib/ash-container-scripts.ts.
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -602,6 +866,17 @@ BAKED_SCANNER_DATA = (
 # What is_offline_mode() in core/constants.py reads as offline.
 OFFLINE_VALUES = ("YES", "TRUE", "1")
 
+# The function role's credentials stay with the handler; the scan gets none.
+# See ash-container-scripts.ts.
+SCAN_ENV_DROPPED = (
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN", "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE", "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_ROLE_ARN", "AWS_ROLE_SESSION_NAME", "AWS_PROFILE", "AWS_DEFAULT_PROFILE",
+    "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE",
+)
+
 
 def _run(argv, **kwargs):
     return subprocess.run(argv, capture_output=True, text=True, **kwargs)
@@ -624,7 +899,8 @@ def _seed_from_baked(baked, writable, directories_only):
 
 def _scan_env(workdir):
     """Redirect scanner writes into /tmp. See the note in ash-container-scripts.ts."""
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if k not in SCAN_ENV_DROPPED}
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
     cache = os.path.join(workdir, "cache")
     tool_dir = os.path.join(workdir, "uv-tools")
 
@@ -693,6 +969,52 @@ def _verdict(exit_code):
     return "errored", "ASH exited with unexpected code %d." % exit_code
 
 
+# A full git object id. The event's commit ids reach git as arguments; see
+# ash-container-scripts.ts.
+COMMIT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+
+# Whether this image's ash scan has the option, asked once per execution
+# environment; see ash-container-scripts.ts.
+COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
+_completeness_flag_found = None
+
+
+def _check_completeness_flag(scan_env):
+    global _completeness_flag_found
+    if _completeness_flag_found is None:
+        env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
+        env.pop("FORCE_COLOR", None)
+        probe = _run(["ash", "scan", "--help"], env=env)
+        if probe.returncode != 0:
+            raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
+                               "checked for %s. Refusing to scan." % (probe.returncode, COMPLETENESS_FLAG))
+        _completeness_flag_found = COMPLETENESS_FLAG in re.sub(r"\\x1b\\[[0-9;]*m", "", probe.stdout or "")
+    if not _completeness_flag_found:
+        raise RuntimeError(
+            "The ASH in this image has no %s option, so a scan whose scanners never ran "
+            "would be reported as passing. Refusing to scan. Deploy an AshVersion whose "
+            "'ash scan' accepts %s." % (COMPLETENESS_FLAG, COMPLETENESS_FLAG))
+
+
+def _scan_config(workdir):
+    """The operator's config for this scan, outside the clone. See the .ts note."""
+    name = os.environ.get("ASH_BASE_CONFIG_SSM_PARAMETER", "")
+    document = "{}\\n"
+    if name:
+        try:
+            document = boto3.client("ssm").get_parameter(
+                Name=name, WithDecryption=True)["Parameter"]["Value"]
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not read the base configuration from %s, so this scan is "
+                "refused rather than run with a configuration the operator did not "
+                "choose: %s" % (name, exc))
+    path = os.path.join(workdir, "ash-config.yaml")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(document)
+    return path
+
+
 def handler(event, context):
     detail = event.get("detail") or {}
     pull_request_id = detail.get("pullRequestId")
@@ -704,6 +1026,9 @@ def handler(event, context):
     # repositoryNames is a list in the CodeCommit event payload, not a string.
     if not (pull_request_id and repository_names and source_commit and destination_commit):
         return {"skipped": "event did not carry a complete pull request", "detail": detail}
+    for commit in (source_commit, destination_commit):
+        if not (isinstance(commit, str) and COMMIT_ID.fullmatch(commit)):
+            raise RuntimeError("event commit %r is not a full commit id" % (commit,))
 
     repository_name = repository_names[0]
     region = os.environ["AWS_REGION"]
@@ -717,13 +1042,16 @@ def handler(event, context):
     # standing approval rather than failing the invocation silently.
     try:
         scan_env = _scan_env(workdir)
+        _check_completeness_flag(scan_env)
+        config_path = _scan_config(workdir)
+        scan_env["ASH_CONFIG"] = config_path
     except RuntimeError as exc:
         _post(codecommit, pull_request_id, repository_name, destination_commit,
               source_commit, "## ASH scan errored\\n\\n%s\\n" % exc)
         _set_approval(codecommit, pull_request_id, revision_id, "errored")
         raise
 
-    clone = _run(["git", "clone", "--no-single-branch", "--quiet",
+    clone = _run(["git", "clone", "--no-single-branch", "--quiet", "--",
                   "codecommit::%s://%s" % (region, repository_name), source_dir])
     if clone.returncode != 0:
         body = "## ASH scan errored\\n\\nCould not clone the repository:\\n\\n\`\`\`\\n%s\\n\`\`\`\\n" % (
@@ -737,8 +1065,9 @@ def handler(event, context):
         raise RuntimeError("could not check out %s: %s" % (source_commit, checkout.stderr))
 
     argv = ["ash", "scan", "--source-dir", source_dir, "--output-dir", output_dir,
+            "--config", config_path, COMPLETENESS_FLAG,
             "--no-progress", "--simple", "--compact-report"]
-    if os.environ.get("ASH_CHANGED_FILES_ONLY", "true") == "true":
+    if os.environ.get("ASH_CHANGED_FILES_ONLY", "false") == "true":
         # Diff against the pull request's destination commit, which is what the
         # reviewer is being asked to merge into.
         argv += ["--changed-files-only", "--base-ref", destination_commit]

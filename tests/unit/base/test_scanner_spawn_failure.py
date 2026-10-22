@@ -49,6 +49,7 @@ from automated_security_helper.utils.subprocess_utils import (
     run_command_with_output_handling,
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 PluginContext.model_rebuild()
 AshConfig.model_rebuild()
@@ -80,7 +81,9 @@ class TestSpawnFailureReturnCode:
     def test_a_real_missing_executable(self, tmp_path):
         """No mock: the OS itself refuses to start a path that does not exist."""
         missing = str(tmp_path / "no-such-tool")
-        response = run_command_with_output_handling([missing], results_dir=tmp_path)
+        response = run_command_with_output_handling(
+            [missing], results_dir=tmp_path, timeout=CHILD_TIMEOUT_SECONDS
+        )
 
         assert response["returncode"] == 127
         assert response["spawn_failed"] is True
@@ -106,21 +109,30 @@ class TestSpawnFailureReturnCode:
             assert run_command_stream_output(["uv", "--version"]) == 127
 
     def test_a_command_that_ran_and_exited_127_is_not_a_spawn_failure(self):
-        result = run_command([sys.executable, "-c", "raise SystemExit(127)"])
+        result = run_command(
+            [sys.executable, "-c", "raise SystemExit(127)"],
+            timeout=CHILD_TIMEOUT_SECONDS,
+        )
 
         assert result.returncode == 127
         assert not isinstance(result, SpawnFailedProcess)
 
     def test_an_oserror_writing_logs_is_not_a_spawn_failure(self, tmp_path):
-        """Only the spawn is guarded: the tool ran, so this is the generic path."""
+        """Only the spawn is guarded: the tool ran, so this is the generic path.
+
+        That path reports ASH's own failure with the code no scanner accepts, not
+        1, which most do, and not as a spawn failure.
+        """
         with patch.object(
             subprocess_utils, "_write_stream_log", side_effect=OSError("disk full")
         ):
             response = run_command_with_output_handling(
-                [sys.executable, "-c", "print('ran')"], results_dir=tmp_path
+                [sys.executable, "-c", "print('ran')"],
+                results_dir=tmp_path,
+                timeout=CHILD_TIMEOUT_SECONDS,
             )
 
-        assert response["returncode"] == 1
+        assert response["returncode"] == subprocess_utils.SPAWN_FAILURE_RETURNCODE
         assert "spawn_failed" not in response
 
 
@@ -234,7 +246,9 @@ class _LenientScanner(ScannerPluginBase):
         self, target, target_type=None, global_ignore_paths=None, config=None, *a, **k
     ):
         self._run_subprocess(
-            command=[self.tool, "-c", "pass"], results_dir=self.results_dir
+            command=[self.tool, "-c", "pass"],
+            results_dir=self.results_dir,
+            timeout=CHILD_TIMEOUT_SECONDS,
         )
         return {"severity_counts": {}}
 

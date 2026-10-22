@@ -256,18 +256,37 @@ from __future__ import annotations
 
 import json
 import time
+import contextvars
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from threading import Event, Lock
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+)
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (
+    SCANNER_EXIT_CODE_UNRECORDED,
     ProjectRunStatus,
     SkippedProjectReason,
     WorkspaceExitCode,
@@ -281,16 +300,31 @@ from automated_security_helper.utils.content_db_staleness import (
 from automated_security_helper.utils.get_scan_set import (
     get_changed_files,
     git_repository_root,
+    validate_base_ref,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    refuse_linked_output_dir,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import (
+    exposed_secret_values,
+    mask_secret_values_in_text,
+    mask_secret_values_in_tree,
+    mask_secrets_in_results,
+    shapes_of_secret_values,
+)
 from automated_security_helper.workspace.aggregation import (
     RESULTS_FILENAME,
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
+    incomplete_converters_for_project,
     incomplete_scanners_for_project,
+    inputs_not_scanned_for_project,
     no_scanner_ran_for_project,
+    rewrite_workspace_block,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import (
@@ -298,8 +332,11 @@ from automated_security_helper.workspace.policy import (
     normalise_scanner_name,
 )
 from automated_security_helper.workspace.reporting import (
+    MANIFEST_FILENAME,
     WorkspaceReportOutcome,
     emit_workspace_reports,
+    exit_code_after_report_step,
+    refuse_linked_workspace_report_paths,
     unsupported_reporter_names,
 )
 
@@ -339,6 +376,9 @@ class ProjectScanSettings:
     excluded_scanners: Tuple[str, ...] = ()
     output_formats: Tuple[str, ...] = ()
     config_overrides: Tuple[str, ...] = ()
+    #: ``config_overrides`` came from an MCP client, not the operator; see
+    #: ``resolve_config(client_overrides=)``.
+    client_overrides: bool = False
     ash_plugin_modules: Tuple[str, ...] = ()
     strategy: str = "parallel"
     offline: bool = False
@@ -366,7 +406,8 @@ class ProjectScanSettings:
     project_timeout: Optional[float] = None
     allow_missing_projects: bool = False
     #: Config file to use for a project that declares none of its own, in place
-    #: of ASH's built-in default. A project with an ``.ash.yaml`` is unaffected.
+    #: of ASH's built-in default. For a project with an ``.ash.yaml``, the plan's
+    #: ``operator_config`` names the operator's file layered over it.
     #:
     #: Must hold the SAME value the plan was resolved with -- ``resolver``'s
     #: ``default_config``. The resolver computes each project's reported threshold
@@ -375,6 +416,26 @@ class ProjectScanSettings:
     #: plan the scan does not run, with nothing raising. The MCP workspace tools
     #: set both from one variable for that reason.
     default_config_path: Optional[str] = None
+    #: The operator's config the trust checks take as the trusted base, when it is
+    #: not ``default_config_path``: the registered profile, when an MCP client
+    #: patched the session's copy and ``default_config_path`` names that copy.
+    #: None takes ``default_config_path``. The same value as the resolver's
+    #: ``trusted_config``, for the reason given above.
+    trusted_config_path: Optional[str] = None
+    #: The rules a project config an MCP client delivered is checked against,
+    #: the session's (config/client_config_policy.py). Set by the MCP workspace
+    #: tools with the same value they resolved the plan with; None takes the
+    #: trusted base's, which is ``default_config_path``'s.
+    client_config_rules: Optional["ClientConfigRules"] = None
+    #: The run was started by a remote MCP client, so a project config the
+    #: operator did not set aside resolves no ``!ENV`` (``resolve_config``). The
+    #: same value the plan was resolved with.
+    remote_client: bool = False
+    #: The MCP session's gate (``cli/mcp/sandbox.config_base_gate``), or None.
+    #: Each project's config file and its bases must resolve to a file it
+    #: permits, as for the plan (``resolver.resolve_workspace``'s
+    #: ``permit_base``), so a link changed after the plan is refused too.
+    config_base_gate: Optional[Callable[[Path], bool]] = None
 
 
 @dataclass
@@ -398,66 +459,104 @@ class _ProjectRun:
 
     outcome: WorkspaceProjectResult
     run: Optional[Dict[str, Any]] = None
+    #: The raw values the project's own masking found (``exposed_secret_values``),
+    #: so every other project's outputs can be masked with them too.
+    secret_values: Set[str] = field(default_factory=set)
+    #: The project's ``metadata.plugin_load_errors``, for the workspace results'
+    #: own: the modules its scan could not import, with the error.
+    plugin_load_errors: Dict[str, str] = field(default_factory=dict)
+
+
+def workspace_plugin_modules(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> List[str]:
+    """The plugin modules the workspace's scans name, sorted.
+
+    Every active project has the same list by now, so the projects speak for all
+    of them; settings may add more from the CLI. Each entry is split on commas and
+    stripped, the way a scan reads its own list.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    declared: Set[str] = set(split_plugin_modules(settings.ash_plugin_modules))
+    for project in plan.active_projects:
+        declared.update(split_plugin_modules(project.ash_plugin_modules))
+    return sorted(declared)
 
 
 def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) -> int:
     """Register every plugin the workspace needs, once, before any project starts.
 
-    Why this has to happen up front
-    -------------------------------
-    ``ScanExecutionEngine.__init__`` registers a project's ``ash_plugin_modules``
-    into the module-level ``plugin_library`` and then reads the scanner set back
-    through ``ash_plugin_manager.plugin_modules()``, which memoises into
-    ``_resolved_plugins``. Whichever project builds its engine first therefore
-    freezes the scanner class list for the whole run. Measured before this
-    existed, on two real projects where only one declared an external plugin:
-    scanning the non-declaring project first made the declaring project LOSE its
-    own scanner, and the other order gave the non-declaring project one it never
-    asked for. Neither order was correct, at every value of
-    ``max_parallel_projects`` -- concurrency only randomises which project is
-    wrong.
+    Why this happens up front
+    -------------------------
+    ``ScanExecutionEngine.__init__`` imports a project's ``ash_plugin_modules``,
+    which registers their plugins into the module-level ``plugin_library``, and
+    then resolves the registry through ``ash_plugin_manager.plugin_modules()``.
+    Each engine selects only the built-in plugins and its own modules'
+    (``plugins.loader.scan_plugin_filter``), and a resolve reads the registry again
+    after a new registration, so the order in which projects start does not decide
+    the set. Importing and resolving once before the pool means no worker does
+    import work or resolves a registry another worker is registering into.
 
     Resolution has already refused any workspace whose projects ask for different
     module sets (see ``resolver._validate_plugin_modules``), so there is exactly
-    one correct set and registering it here is correct for every project. Doing it
-    before the pool starts also removes the ordering nondeterminism entirely, and
-    with it the concurrent-registration race in ``plugin_modules``: that function
-    iterates ``plugin_library.scanners`` doing imports inside the loop, and a
-    second thread registering a new key mid-iteration raises
-    ``RuntimeError: dictionary changed size during iteration``, which surfaces as
-    a spurious failed project.
+    one set and registering it here is correct for every project.
 
     This does not change *which* scanners run for a project. Registration and
-    selection are separate mechanisms: this fills the registry, and each
-    project's own config still decides enablement through
-    ``ScanPhase._execute_phase``'s ``config.enabled`` and enabled/excluded
-    filtering. A project that disables a scanner still skips it.
+    selection are separate mechanisms: this fills the registry, each project's
+    engine selects from it by its own modules, and the project's config still
+    decides enablement through ``ScanPhase._execute_phase``'s ``config.enabled``
+    and enabled/excluded filtering. A project that disables a scanner still skips
+    it.
 
     Returns:
         How many scanner classes the registry resolved to, for logging. Zero
         means plugin discovery found nothing, which is worth seeing in a log
         rather than discovering later as an empty scan.
+
+    Raises:
+        ASHConfigValidationError: A project or ``--ash-plugin-modules`` names a
+            module outside the plugin namespace; nothing has been imported.
     """
     from automated_security_helper.plugins import ash_plugin_manager
     from automated_security_helper.plugins.discovery import discover_plugins
     from automated_security_helper.plugins.loader import (
         load_additional_plugin_modules,
         load_internal_plugins,
+        refuse_plugin_modules_outside_namespace,
     )
 
-    load_internal_plugins()
+    modules = workspace_plugin_modules(plan, settings)
+    # Before anything is imported or any project starts: a name outside the plugin
+    # namespace refuses the workspace with exit 3, as it refuses a single scan.
+    refuse_plugin_modules_outside_namespace(modules)
 
-    # Every active project has the same list by now, so the first one speaks for
-    # all of them; settings may add more from the CLI.
-    declared: Set[str] = set(settings.ash_plugin_modules)
-    for project in plan.active_projects:
-        declared.update(project.ash_plugin_modules)
-    modules = sorted(declared)
+    load_internal_plugins()
+    # The run's own --ash-plugin-modules; the rest only the projects name.
+    operator, _ = _workspace_plugin_modules(plan, settings)
 
     if modules:
         ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")
-        load_additional_plugin_modules(modules)
-        discover_plugins(plugin_modules=modules)
+        # A named module that does not import refuses the workspace with exit 3,
+        # before any project starts.
+        if operator:
+            load_additional_plugin_modules(operator, fail_on_import_error=True)
+            discover_plugins(plugin_modules=operator)
+        # A module only the projects name is imported as an untrusted config's,
+        # like ScanExecutionEngine imports one, so that a later scan in this
+        # process that does not load it is not offered what it registered. The
+        # plan does not say which project configs are the operator's, so each
+        # project's engine records those its own config trusts
+        # (ash_plugin_manager.trust_plugin_modules) when it is built.
+        for module_name in modules:
+            if module_name in operator:
+                continue
+            with ash_plugin_manager.untrusted_import(module_name):
+                load_additional_plugin_modules([module_name], fail_on_import_error=True)
+                discover_plugins(plugin_modules=[module_name])
+    ash_plugin_manager.trust_plugin_modules(operator)
 
     # Resolve once so the memoised list is complete and identical for every
     # project, rather than whatever the first project happened to see.
@@ -470,6 +569,45 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
         f"Workspace plugin registry pre-warmed with {resolved} scanner class(es)"
     )
     return resolved
+
+
+def _workspace_plugin_modules(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> Tuple[List[str], List[str]]:
+    """The run's ``--ash-plugin-modules``, and every module the run loads, sorted.
+
+    The second list is those and every active project's ``ash_plugin_modules``.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        split_plugin_modules,
+    )
+
+    operator = sorted(split_plugin_modules(settings.ash_plugin_modules))
+    declared: Set[str] = set(operator)
+    for project in plan.active_projects:
+        declared.update(project.ash_plugin_modules)
+    return operator, sorted(declared)
+
+
+def workspace_reporter_classes(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> List[type]:
+    """The reporters the workspace-level report step considers.
+
+    Every reporter class the registry resolved that this run's plugin modules
+    (``_workspace_plugin_modules``) or the operator's load. The registry is the
+    process's, so under the MCP server it also holds reporters an earlier scan's
+    untrusted config loaded; this run did not choose those
+    (``AshPluginManager.plugins_loaded_by``). Called after
+    ``prewarm_plugin_registry``, so the resolved list is the warm one.
+    """
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    _, modules = _workspace_plugin_modules(plan, settings)
+    reporters = ash_plugin_manager.plugin_modules("reporter")
+    return ash_plugin_manager.plugins_loaded_by({"reporter": reporters}, modules)[
+        "reporter"
+    ]
 
 
 def _project_output_dir(settings: ProjectScanSettings, project: ProjectPlan) -> Path:
@@ -613,6 +751,20 @@ def _scan_one_project(
             f"no files changed against '{settings.base_ref}'",
         )
 
+    # Before the mkdir, which would follow a link at projects/ or projects/<key>.
+    # Checked from the workspace's output directory down, so both are examined, and
+    # the project's working directories with them. The orchestrator checks again
+    # from the project's own directory.
+    try:
+        refuse_linked_output_dir(settings.output_dir, project_output)
+    except OutputDirLinkRefused as refusal:
+        ASH_LOGGER.error(f"Project '{project.key}' was not scanned: {refusal}")
+        return _failed_outcome(
+            project,
+            settings,
+            str(refusal),
+            duration_seconds=time.monotonic() - started,
+        )
     project_output.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -740,6 +892,12 @@ def _scan_one_project(
     # under workspace/ passes shard_index or shard_count to an orchestrator, so a
     # guard for it could not fire and would only imply the case was handled.
     measured_nothing = no_scanner_ran_for_project(results)
+    # The converter question _compute_exit_code also asks: a notebook that could
+    # not be converted, or a converter that crashed, is coverage the scanners never
+    # had. Without it a project inside a workspace passed where `ash --source-dir P`
+    # exited 1. Not subject to the policy-scanner exclusion below, which is about
+    # scanners a policy added; converters are not added by policy.
+    incomplete_conversions = incomplete_converters_for_project(results)
     fail_on_incomplete = _resolve_fail_on_incomplete_scanners(settings, results)
     # The same policy_scanners_gate exclusion, applied to the completeness half.
     # Without it the flag is honoured for findings and ignored for the exit code:
@@ -813,17 +971,48 @@ def _scan_one_project(
         output_path=output_path,
         scanners=statuses,
         incomplete_scanners=incomplete,
+        # The unified results carry no per-target reports, so without this the
+        # merged summaries and the console could not name what went unscanned.
+        inputs_not_scanned=inputs_not_scanned_for_project(
+            results, project.relative_path
+        ),
         no_scanner_ran=measured_nothing,
+        incomplete_converters=incomplete_conversions,
         # A stale content database under `content_db_staleness: fail` fails the project
         # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
         # `ash --source-dir P` exits 1 on it, so P inside a workspace must not pass.
         scan_incomplete=(
-            (bool(gating_incomplete) or measured_nothing) and fail_on_incomplete
+            (
+                bool(gating_incomplete)
+                or measured_nothing
+                or bool(incomplete_conversions)
+            )
+            and fail_on_incomplete
         )
         or bool(stale_content_databases(results, enforced_only=True)),
         ceiling_unreachable_findings=unreachable,
+        ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
-    return _ProjectRun(outcome=outcome, run=run)
+    outcome.carry_scanner_exit_codes(_scanner_exit_codes(results))
+    return _ProjectRun(
+        outcome=outcome,
+        run=run,
+        secret_values=exposed_secret_values(results),
+        plugin_load_errors=dict(
+            getattr(getattr(results, "metadata", None), "plugin_load_errors", None)
+            or {}
+        ),
+    )
+
+
+def _ignore_file_exclusions_of(results: Any) -> Optional[IgnoreFileExclusions]:
+    """The project's ``metadata.ignore_file_exclusions``, or None when it has none."""
+    record = getattr(getattr(results, "metadata", None), "ignore_file_exclusions", None)
+    if isinstance(record, IgnoreFileExclusions):
+        return record
+    if isinstance(record, dict):
+        return IgnoreFileExclusions.model_validate(record)
+    return None
 
 
 def _workspace_root(project: ProjectPlan) -> Path:
@@ -832,6 +1021,63 @@ def _workspace_root(project: ProjectPlan) -> Path:
     for _ in PurePosixPath(project.relative_path).parts:
         root = root.parent
     return root
+
+
+def _same_file(first: Optional[str | Path], second: Optional[str | Path]) -> bool:
+    """Whether two optional paths name the same file, or are both None."""
+    if first is None or second is None:
+        return first is None and second is None
+    return Path(first).resolve() == Path(second).resolve()
+
+
+def _check_the_plans_operator_config(
+    project: ProjectPlan, settings: ProjectScanSettings
+) -> None:
+    """Refuse a project whose plan does not layer the operator config the scan names.
+
+    The scan layers the file the plan recorded (``project.operator_config``), so
+    the plan's ``--dry-run`` is what runs. That holds only for a plan resolved
+    with the same operator config as these settings: a plan resolved without one,
+    or with another, would be scanned without the operator's final fields. And
+    the file must not have changed since the plan was resolved
+    (``operator_config_digest``), or the scan would run settings the plan did not
+    report. Either is refused for this project, as a config error.
+
+    Raises:
+        ASHConfigValidationError: The plan and these settings disagree, or the
+            operator config changed since the plan.
+    """
+    from automated_security_helper.config.resolve_config import operator_config_digest
+    from automated_security_helper.workspace.resolver import _operator_config
+
+    operator = _operator_config(
+        Path(settings.default_config_path) if settings.default_config_path else None,
+        Path(settings.trusted_config_path) if settings.trusted_config_path else None,
+    )
+    # A project with no config of its own uses the default config alone, so
+    # nothing is layered over it.
+    own_config = project.config_source is not None and not _same_file(
+        project.config_source, settings.default_config_path
+    )
+    expected = operator if own_config else None
+    if not _same_file(project.operator_config, expected):
+        raise ASHConfigValidationError(
+            f"Project '{project.key}' was planned with operator config "
+            f"{project.operator_config or 'none'}, but this scan is run with "
+            f"{expected.as_posix() if expected else 'none'}. Resolve the workspace "
+            "again with the same --config as the scan."
+        )
+    if (
+        project.operator_config is not None
+        and project.operator_config_digest is not None
+        and operator_config_digest(project.operator_config)
+        != project.operator_config_digest
+    ):
+        raise ASHConfigValidationError(
+            f"The operator config {project.operator_config} changed after "
+            f"project '{project.key}' was planned, so the scan would not run the "
+            "plan. Resolve the workspace again."
+        )
 
 
 def _project_config_with_policy(
@@ -874,13 +1120,22 @@ def _project_config_with_policy(
             override cannot be applied. Fatal rather than dropped; the caller
             records the project FAILED and the run exits 3.
     """
+    from automated_security_helper.config.config_sources import (
+        check_discovered_source,
+    )
     from automated_security_helper.config.resolve_config import resolve_config
+
+    _check_the_plans_operator_config(project, settings)
 
     # ``config_source`` is None for a project that declared no config. The plan was
     # resolved with the same fallback, so the resolver already recorded the
     # fallback as this project's config_source when one applied -- this branch
     # covers a plan built without it, and a hand-built plan.
     config_path = project.config_source or settings.default_config_path
+    if config_path is not None:
+        # Checked again here, not only by the plan: the file is read now, and a
+        # link can change between the two (config_sources, "Base paths").
+        check_discovered_source(Path(config_path), settings.config_base_gate)
 
     config = resolve_config(
         config_path=config_path,
@@ -891,10 +1146,22 @@ def _project_config_with_policy(
         # The whole workspace is scanned, so a config anywhere under its root was
         # written by the repository, not only one under this project.
         scanned_root=_workspace_root(project),
-        # A project's own config replaces the operator's default config. The
-        # operator's file still decides the sandbox when the project's is in the
-        # tree, the same as it would for a project that has none.
-        trusted_config_path=settings.default_config_path,
+        client_overrides=settings.client_overrides,
+        # The operator's file is the trusted base for every project, and the
+        # file the plan layered over a project's own config
+        # (resolver._resolve_project_config) is that same file, so a field the
+        # operator set is its trusted value.
+        trusted_config_path=(
+            settings.trusted_config_path
+            if settings.trusted_config_path is not None
+            else settings.default_config_path
+        ),
+        client_config_policy=settings.client_config_rules,
+        remote_client=settings.remote_client,
+        # Read from the plan rather than re-derived from the settings, so the
+        # scan layers exactly the file --dry-run reported.
+        overlay_config_path=project.operator_config,
+        permit_base=settings.config_base_gate,
     )
 
     # The scanners' own checks on tool config file paths (config/path_trust.py)
@@ -1195,6 +1462,90 @@ def _scanner_statuses(results: Any) -> Dict[str, str]:
     return statuses
 
 
+def _scanner_exit_codes(results: Any) -> Dict[str, Optional[int]]:
+    """Per-scanner exit code for one project, from the rows the statuses come from.
+
+    A row carries a code only when the scanner produced a target report that said
+    what its tool exited with; otherwise ``exit_code`` was never set and its
+    ``model_fields_set`` does not name it, which is how a recorded 0 is told from the
+    field's default. A row with no recorded integer reads
+    ``SCANNER_EXIT_CODE_UNRECORDED``, except a SKIPPED one: SKIPPED is a complete,
+    operator-chosen outcome, so its entry reads what the row itself dumps for
+    ``exit_code`` (nothing, which the rollup writes as null) and never claims the
+    run did not finish.
+    """
+    statuses = _scanner_statuses(results)
+    codes: Dict[str, Optional[int]] = {}
+    for name, info in (getattr(results, "scanner_results", None) or {}).items():
+        recorded = getattr(info, "exit_code", None)
+        was_set = "exit_code" in getattr(info, "model_fields_set", ())
+        if was_set and isinstance(recorded, int) and not isinstance(recorded, bool):
+            codes[str(name)] = recorded
+        elif statuses.get(str(name)) == "SKIPPED":
+            codes[str(name)] = None
+        else:
+            codes[str(name)] = SCANNER_EXIT_CODE_UNRECORDED
+    return codes
+
+
+#: The tools' own output in a project's output tree, which output-formats.md says
+#: is not masked: what each scanner wrote, and the converted copies of the source.
+_TOOL_OUTPUT_DIRS = frozenset({"scanners", ASH_WORK_DIR_NAME})
+
+
+def _mask_project_output(
+    project_output: Path, values: Set[str], shapes: List[Any]
+) -> None:
+    """Mask a finished project's output tree with the values every project exposed.
+
+    The results file is read back as a model, masked with ``values`` and
+    ``shapes`` and rewritten, so it records the workspace's shapes too. Every
+    other file -- the project's own reports, which cannot be re-rendered without
+    running its reporters again -- has each value masked in every text form a
+    report writes it (``mask_secret_values_in_text``). The tools' own output
+    (``_TOOL_OUTPUT_DIRS``) and links are left alone.
+    """
+    if not project_output.is_dir():
+        return
+    results_file = project_output / RESULTS_FILENAME
+    for path in sorted(project_output.rglob("*")):
+        relative = path.relative_to(project_output)
+        if relative.parts[0] in _TOOL_OUTPUT_DIRS:
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path == results_file:
+            _remask_results_file(path, values, shapes)
+            continue
+        data = path.read_bytes()
+        try:
+            text, encoding = data.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            # Not UTF-8: read byte for byte, so the rewrite changes nothing else.
+            text, encoding = data.decode("latin-1"), "latin-1"
+        masked = mask_secret_values_in_text(text, values)
+        if masked != text:
+            write_text_atomically(path, masked, encoding=encoding)
+
+
+def _remask_results_file(path: Path, values: Set[str], shapes: List[Any]) -> None:
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    try:
+        model = AshAggregatedResults.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+    except ValueError as error:
+        # A file this run wrote moments ago that no longer parses: mask it as text
+        # rather than leave it as it is.
+        ASH_LOGGER.warning(f"Could not read {path} to mask it again: {error}")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        write_text_atomically(path, mask_secret_values_in_text(text, values))
+        return
+    mask_secrets_in_results(model, values=values, shapes=shapes)
+    write_text_atomically(path, model.model_dump_json(indent=2, by_alias=True))
+
+
 def _write_project_results(project_output: Path, results: Any) -> None:
     """Write the project's own ``ash_aggregated_results.json``.
 
@@ -1229,17 +1580,34 @@ def execute_workspace(
             ``ASHScanOrchestrator.create``; injected only by tests, so production
             callers never pass it.
         reporter_classes: The reporters the workspace-level report step considers.
-            Defaults to the plugin registry; injected only by tests.
+            Defaults to the built-in reporters plus those of the workspace's
+            plugin modules (:func:`workspace_plugin_modules`), and of those only
+            the ones this run's plugin modules load
+            (:func:`workspace_reporter_classes`); injected only by tests.
 
     Returns:
-        The unified results path, the process exit code, and the payload.
+        The unified results path, the process exit code, and the payload. A run
+        whose projects gave exit 0 or 2 gives exit 1 when the report step left a
+        report or the manifest unwritten; the results file then records 1 too.
 
     Raises:
         WorkspaceDefinitionError: When an enabled reporter declares itself
             unsupported in workspace mode. Raised rather than recorded because
             nothing has been scanned yet -- that is an exit-4 refusal, not a
             project failure.
+        InvalidBaseRefError: When ``changed_files_only`` is set and
+            ``validate_base_ref`` refuses ``base_ref``. Checked once, before any
+            project runs or any output is written, rather than failing each
+            project with the same error.
+        ReportPathRefused: When a selected reporter's file name is not a file
+            name, before any project is scanned (``ReportPathLinkRefused``, its
+            subclass, when a path a workspace report would be written to is a
+            link: before any project is scanned, or when the report step starts if
+            the link appeared during the scan).
     """
+    if settings.changed_files_only:
+        validate_base_ref(settings.base_ref)
+
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
@@ -1271,6 +1639,23 @@ def execute_workspace(
     # Before the pool, never inside it: the registry is process-global and the
     # first project to touch it would otherwise freeze the scanner set for all.
     prewarm_plugin_registry(plan, settings)
+    if reporter_classes is None:
+        # The workspace's own reporters, as each project's engine selects its own:
+        # the registry also holds whatever another scan in this process imported.
+        # Both filters apply: the run's plugin modules (scan_plugin_filter), and
+        # what this run's own imports registered (workspace_reporter_classes).
+        from automated_security_helper.plugins import ash_plugin_manager
+        from automated_security_helper.plugins.loader import scan_plugin_filter
+
+        loaded = workspace_reporter_classes(plan, settings)
+        reporter_classes = [
+            cls
+            for cls in ash_plugin_manager.plugin_modules(
+                "reporter",
+                scan_plugin_filter(workspace_plugin_modules(plan, settings)),
+            )
+            if cls in loaded
+        ]
 
     reports_requested = _REPORT_PHASE in settings.phases
     if reports_requested:
@@ -1304,6 +1689,15 @@ def execute_workspace(
                 f"Nothing was scanned. Disable them, narrow --output-format to "
                 f"exclude them, or scan the projects separately."
             )
+        # Here for the same two reasons: a link at a workspace report path
+        # refuses the run before any project is scanned.
+        refuse_linked_workspace_report_paths(
+            plan,
+            output_dir,
+            output_formats=settings.output_formats,
+            python_based_plugins_only=settings.python_based_plugins_only,
+            reporter_classes=reporter_classes,
+        )
 
     bound = min(configured_bound, len(active) or 1)
     ASH_LOGGER.info(
@@ -1318,10 +1712,26 @@ def execute_workspace(
 
     collected.update(_run_projects(active, settings, orchestrator_factory, bound))
 
+    # A value one project's secret finding exposed is masked in every project's
+    # output, not only its own: one password used by two services is reported in
+    # one and passed on a command line in the other. Each project's scan masked
+    # its outputs against its own findings, so they are masked again here with
+    # the values all of them exposed, and the runs before they are spooled.
+    exposed = set().union(*(entry.secret_values for entry in collected.values()))
+    shapes = shapes_of_secret_values(exposed)
+    if exposed:
+        for project in plan.projects:
+            if project.key in collected:
+                _mask_project_output(
+                    _project_output_dir(settings, project), exposed, shapes
+                )
+
     for project in plan.projects:
         run = collected.get(project.key)
         if run is None:
             continue
+        if exposed and run.run is not None:
+            mask_secret_values_in_tree(run.run, exposed, shapes)
         aggregator.add(run.outcome, run.run, project)
         # Drop the run as soon as it is spooled: peak memory is what makes a
         # 20-project workspace viable.
@@ -1329,11 +1739,20 @@ def execute_workspace(
 
     exit_code = int(workspace_exit_code(entry.outcome for entry in collected.values()))
     wall_clock = time.monotonic() - started
+    from automated_security_helper.plugins.loader import combined_plugin_load_errors
+
     results_path = aggregator.write(
         exit_code=exit_code,
         wall_clock_seconds=wall_clock,
         max_parallel_projects=configured_bound,
         project_timeout=settings.project_timeout,
+        secret_value_shapes=shapes,
+        # In workspace-file order, as the projects are written.
+        plugin_load_errors=combined_plugin_load_errors(
+            collected[project.key].plugin_load_errors
+            for project in plan.projects
+            if project.key in collected
+        ),
     )
     payload = aggregator.results_payload(
         exit_code,
@@ -1357,6 +1776,23 @@ def execute_workspace(
             ignore_suppressions=settings.ignore_suppressions,
             reporter_classes=reporter_classes,
         )
+        # After the results file, so the file is restamped when this changes the
+        # answer: it records "the process status this run exited with", and a
+        # failed report step is part of what that status answers for.
+        reported_exit_code = exit_code_after_report_step(exit_code, report_outcome)
+        if reported_exit_code != exit_code:
+            ASH_LOGGER.error(
+                "The workspace report step did not write everything it owed, so "
+                f"the run exits {reported_exit_code} rather than {exit_code}. "
+                f"See {MANIFEST_FILENAME} in the reports directory."
+            )
+            exit_code = reported_exit_code
+            payload = payload.model_copy(update={"exit_code": exit_code})
+            if not rewrite_workspace_block(results_path, payload):
+                ASH_LOGGER.warning(
+                    f"Could not record exit code {exit_code} in {results_path}; "
+                    "the file still holds the code the projects alone gave."
+                )
 
     return WorkspaceRunResult(
         results_path=results_path,
@@ -1401,7 +1837,11 @@ def _run_projects(
     pool = ThreadPoolExecutor(max_workers=bound)
     try:
         futures: Dict[Future, ProjectPlan] = {
-            pool.submit(worker, project): project for project in active
+            # With a copy of this context: the scanned-tree scope the run entered
+            # (utils/subprocess_utils.scanning_tree) is per context, and a pool
+            # thread would otherwise start without it.
+            pool.submit(contextvars.copy_context().run, worker, project): project
+            for project in active
         }
         pending: Set[Future] = set(futures)
         timeout = settings.project_timeout

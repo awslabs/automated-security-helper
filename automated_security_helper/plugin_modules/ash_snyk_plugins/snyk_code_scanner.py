@@ -6,12 +6,15 @@ import shlex
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal, Set
+
+import yaml
 from pydantic import Field
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     ToolExtraArg,
@@ -27,13 +30,116 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.utils.display_text import escape_controls
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.sarif_utils import attach_scanner_details
+from automated_security_helper.utils.link_exclusions import walked_files
+from automated_security_helper.utils.sarif_utils import (
+    attach_scanner_details,
+    ignore_paths_for_locations,
+)
+from automated_security_helper.utils.scanned_tree import (
+    REASON_LINK_LEAVES_TREE,
+    TreeInputRefused,
+    open_in_scanned_tree,
+    relative_display,
+)
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+# snyk code test reads exclusions from files in the tree it tests, at any depth,
+# and leaves the files they name out of the analysis. Its native implementation
+# collects files named .snyk, .dcignore and .gitignore (code-client-go
+# internal/commands/code_workflow/native_workflow.go, getFilesForPath); its
+# legacy one globs *.snyk, *.dcignore and *.gitignore by base name
+# (@snyk/code-client src/files.ts, collectFilePolicies). Neither has an option
+# that turns this off: code test takes no --policy-path. A file named exactly
+# .gitignore is left to snyk, since ASH's own scan set honors it too
+# (utils/get_scan_set.py).
+_POLICY_SUFFIX = ".snyk"
+_IGNORE_SUFFIXES = (".dcignore", ".gitignore")
+_POLICY_SECTIONS = ("code", "global")
+# A larger exclusion file is not parsed, and counts as excluding.
+_MAX_EXCLUSION_FILE_BYTES = 1024 * 1024
+_REFUSAL_FILES_SHOWN = 10
+
+
+def tree_exclusion_files(target: Path) -> List[Path]:
+    """The files under ``target`` that would make snyk code test leave files out.
+
+    A ``.snyk`` policy counts when its ``exclude.code`` or ``exclude.global`` has
+    an entry, and an ignore file when it has a rule. One that is not a regular
+    file inside the tree (snyk reads a link's target), cannot be read, or cannot
+    be parsed counts too. ``.git`` is walked as well, as snyk's native filter
+    walks it.
+
+    A link to a directory is not followed, and nothing behind it counts, because
+    snyk does not follow one either. Its native filter lists files with Go's
+    ``filepath.WalkDir`` (go-application-framework ``pkg/utils/file_filter.go``,
+    ``GetAllFiles``), which reports a link to a directory as an entry and does not
+    walk into it. Its legacy one globs with ``followSymbolicLinks`` set from
+    ``symlinksEnabled`` (``@snyk/code-client`` ``collectFilePolicies``), which the
+    CLI's ``snyk code test`` does not set (snyk/cli
+    ``src/lib/plugins/sast/analysis.ts``). Measured on those sources as of
+    2026-10-11.
+    """
+    found: List[Path] = []
+    for directory, _subdirectories, names in os.walk(target):
+        for name in names:
+            if _is_exclusion_name(name):
+                path = Path(directory) / name
+                if _excludes(path, Path(target)):
+                    found.append(path)
+    return sorted(found)
+
+
+def _is_exclusion_name(name: str) -> bool:
+    if name.endswith(_POLICY_SUFFIX):
+        return True
+    return name != ".gitignore" and name.endswith(_IGNORE_SUFFIXES)
+
+
+def _excludes(path: Path, root: Path) -> bool:
+    try:
+        with open_in_scanned_tree(path, root) as handle:
+            content = handle.read(_MAX_EXCLUSION_FILE_BYTES + 1)
+    except (TreeInputRefused, OSError):
+        return True
+    if len(content) > _MAX_EXCLUSION_FILE_BYTES:
+        return True
+    text = content.decode("utf-8", errors="replace")
+    if not path.name.endswith(_POLICY_SUFFIX):
+        return any(
+            line.strip() and not line.strip().startswith("#")
+            for line in text.splitlines()
+        )
+    try:
+        policy = yaml.safe_load(text)
+    except (yaml.YAMLError, RecursionError, ValueError):
+        # RecursionError: nesting deeper than the parser's stack. Unreadable as
+        # a policy, so it counts, like any file that cannot be parsed.
+        return True
+    exclude = policy.get("exclude") if isinstance(policy, dict) else None
+    return isinstance(exclude, dict) and any(
+        exclude.get(section) for section in _POLICY_SECTIONS
+    )
+
+
+#: ``snyk code test`` exits 3 when the target holds no file it supports.
+_NO_SUPPORTED_FILES_EXIT_CODE = 3
 
 
 class SnykCodeScannerConfigOptions(ScannerOptionsBase):
-    pass
+    honor_tree_exclusions: Annotated[
+        bool,
+        Field(
+            description="Let snyk code test apply the exclusion files it finds in "
+            "the scanned tree: the exclude.code and exclude.global entries of a "
+            ".snyk file and the rules of a .dcignore file, which leave the files "
+            "they name out of the analysis. snyk has no option that stops it "
+            "reading them, so while this is false and the tree has one, snyk-code "
+            f"does not run and its error names the files. {SET_BY_THE_OPERATOR}"
+        ),
+    ] = False
 
 
 class SnykCodeScannerConfig(ScannerPluginConfigBase):
@@ -60,6 +166,10 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
+
+    # src/cli/exit-codes.ts: 0 no issues, 1 issues found, 2 an error, 3 no supported
+    # project detected.
+    success_exit_codes: ClassVar[Set[int]] = {0, 1}
 
     def model_post_init(self, context):
         if self.config is None:
@@ -164,6 +274,125 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _refuse_output_dir_inside(self, target: Path) -> None:
+        """Refuse a target that holds ASH's own output directory.
+
+        snyk would upload it with the rest: an earlier run's reports and logs,
+        which can quote code from ignored paths, and the converted files. snyk
+        honors a ``.gitignore``, and ASH writes one there, but that is read from
+        snyk's sources and not measured, so it is not relied on: ASH's output is
+        never in what snyk is given. With the default output directory,
+        ``.ash/ash_output``, that refuses the source target; the converted target,
+        the work directory below the output directory, is not affected.
+
+        Raises:
+            ScannerError: Naming the output directory and the remedy.
+        """
+        inside = self._output_dir_inside(Path(target))
+        if inside is None:
+            return
+        raise ScannerError(
+            f"Not running snyk code test on {Path(target).as_posix()}: ASH's output "
+            f"directory '{escape_controls(inside.as_posix())}' is inside it, and "
+            "snyk has no option that leaves out a path, so it would upload ASH's own "
+            "output: an earlier run's reports and logs, and the converted files. "
+            "Pass --output-dir with a directory outside the scanned tree to run "
+            "snyk-code on it (snyk code test was not started)."
+        )
+
+    def _refuse_ignored_files(self, target: Path, ignore_paths: Any) -> None:
+        """Refuse a target holding a file the global ignore paths ignore.
+
+        ``snyk code test`` uploads the files it reads to Snyk and has no option
+        that leaves out a path, so an ignored file would leave the host. The other
+        scanners are told to leave such a file out, or ASH drops its findings; for
+        an upload that is not enough. The files are every file snyk is given
+        (``walked_files``, which walks as the tools do): the source directory for
+        the source target, and the work directory, wherever it is, for the
+        converted one. Each is matched exactly as ASH matches the location snyk
+        reports for a finding in it, its path below the directory snyk tests
+        (``sarif_utils.ignore_paths_for_locations``, the findings step's own
+        matching). So a converted file is matched by its path below the work
+        directory, not the source directory: a file whose findings ASH would drop
+        is refused, and a file whose findings ASH keeps is not. The converters do
+        not convert an ignored notebook or archive in the first place, and a
+        converted file's name is flattened, so an exact source path such as
+        ``vendor/nb.ipynb`` is kept from snyk by that skip, not by this match.
+
+        The ignore paths are the operator's: the default config sets none, and
+        the scanner-level default exclusions (``KNOWN_IGNORE_PATHS``) are not
+        ignore paths. snyk-code has no exclusion option of its own to check as
+        well; a test fails if it gains one.
+
+        Raises:
+            ScannerError: Naming the first ignored file and the pattern that
+                matched it, with the number of ignored files, the patterns and the
+                remedy. snyk is then not run on ``target``.
+        """
+        if not ignore_paths:
+            return
+        if self.context is None:
+            # Never the case for a scan the executor runs; refused rather than
+            # run unchecked.
+            raise ScannerError(
+                "Not running snyk code test: there is no scan context to match "
+                "global_settings.ignore_paths against (snyk code test was not started)."
+            )
+        files, _ = walked_files(target)
+        root = Path(target)
+        found = ignore_paths_for_locations(files, self.context, ignore_paths)
+        if not found:
+            return
+        # walked_files sorts, and ignore_paths_for_locations keeps that order.
+        ignored = {relative: matched.path for relative, matched in found.items()}
+        first_path, first_pattern = next(iter(ignored.items()))
+        patterns = list(dict.fromkeys(ignored.values()))
+        shown = ", ".join(repr(pattern) for pattern in patterns[:3])
+        if len(patterns) > 3:
+            shown += f" and {len(patterns) - 3} more"
+        count = len(ignored)
+        raise ScannerError(
+            f"Not running snyk code test on {root.as_posix()}: {count} "
+            f"{'file' if count == 1 else 'files'} there "
+            f"{'is' if count == 1 else 'are'} in global_settings.ignore_paths "
+            f"({shown}), the first '{escape_controls(first_path)}', "
+            f"which {first_pattern!r} matches. snyk has no option that leaves out a "
+            f"path, so it would upload {'it' if count == 1 else 'them'}. To scan the "
+            "rest, narrow ignore_paths, or leave snyk-code out with "
+            "--exclude-scanners snyk-code (snyk code test was not started)."
+        )
+
+    def _refuse_links_leaving(self, target: Path) -> None:
+        """Refuse a target holding any link whose target leaves it.
+
+        ``snyk code test`` uploads the files it reads to Snyk, has no option that
+        leaves out one path (``--exclude`` is for open-source projects, and takes
+        names, not paths), and how it treats links has not been measured by running
+        it. So a link the repository committed could send a file from outside the
+        scanned tree, such as a credentials file, off the host. A link to a
+        directory (``creds -> ~/.aws``) counts too: snyk's sources list files
+        without walking into one (see ``tree_exclusion_files``), but that is read,
+        not measured, and the files below one could be every credential the host
+        has. The links come
+        from ``file_links_leaving_tree``, which does not read ignore files and lists
+        the directory links it does not enter.
+
+        Raises:
+            ScannerError: Naming the first such link. snyk is then not run on
+                ``target``.
+        """
+        directory_links: List[str] = []
+        links = sorted(
+            file_links_leaving_tree(target, directory_links=directory_links)
+            + directory_links
+        )
+        if links:
+            raise ScannerError(
+                f"Not running snyk code test on {Path(target).as_posix()}: "
+                f"{links[0]!r}: {REASON_LINK_LEAVES_TREE}, and snyk has no option "
+                "that leaves out one path, so it might upload the file it points at."
+            )
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — SnykCodeScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -191,6 +420,14 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         Returns:
             dict: Scan results
         """
+        # No claim until this target's run makes one (exit 3 below), so the count
+        # from an earlier target is never read as this one's. The exit code too:
+        # _run_subprocess keeps the worst code of every run of this instance, and the
+        # executor runs one instance over the source tree and then the converted one,
+        # so after a source that exited 3 the converted target read 3 whatever its
+        # own run returned, and was graded SKIPPED with its findings unread.
+        self.targets_attempted = None
+        self.exit_code = 0
         # Check if the target directory is empty or doesn't exist
         if not target.exists() or not any(target.iterdir()):
             message = (
@@ -227,7 +464,16 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
             return False
 
+        if not self.config.options.honor_tree_exclusions:
+            excluding = tree_exclusion_files(Path(target))
+            if excluding:
+                raise ScannerError(self._exclusion_refusal(excluding, Path(target)))
+
         try:
+            self._refuse_output_dir_inside(target)
+            self._refuse_links_leaving(target)
+            # Passed by keyword, as the executor passes it to every scanner.
+            self._refuse_ignored_files(target, kwargs.get("global_ignore_paths"))
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
@@ -243,15 +489,33 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
 
             # No environment modifications are currently needed for Snyk Code.
-            self._run_subprocess(
+            response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 timeout=self._effective_scan_timeout(),
             )
 
-            # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not
-            # executed successfully.
-            if self.exit_code != 0:
+            # snyk exits 1 when it found issues, which is a completed scan, 2 when it
+            # failed, and 3 when it found no supported project; see success_exit_codes.
+            self._record_target_exit_code(response)
+            # Exit 3 is snyk's "no supported projects detected": the target holds no
+            # file Snyk Code reads, so it evaluated nothing. SKIPPED, by the
+            # maintainer's ruling, rather than the ERROR every other code outside
+            # success_exit_codes gets: a Terraform-only tree is not a failed scan.
+            # targets_attempted = 0 is what the executor grades SKIPPED. Exit 2 is
+            # still a failure.
+            if self.exit_code == _NO_SUPPORTED_FILES_EXIT_CODE:
+                self._plugin_log(
+                    f"Snyk Code found no supported files in {target}; nothing was "
+                    "evaluated (snyk exit code 3).",
+                    target_type=target_type,
+                    level=logging.INFO,
+                )
+                self.targets_attempted = 0
+                self._post_scan(target=target, target_type=target_type)
+                return True
+
+            if not self._exit_code_accepted():
                 raise ScannerError(
                     f"Snyk scan failed with exit code {self.exit_code}: {self.errors}"
                 )
@@ -332,14 +596,16 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # Check if there are useful error details
             raise ScannerError(f"Snyk Code scan failed: {str(e)}")
 
-    def _post_scan(self, target, target_type):
-        # Snyk returns 1 on a successful scan when actionable items are detected
-        if self.exit_code == 1:
-            self._plugin_log(
-                "Snyk scan completed with actionable items detected (1).",
-                target_type=target_type,
-                level=logging.INFO,
-            )
-            self.exit_code = 0  # Reset exit code to 0 for successful scan
-
-        return super()._post_scan(target, target_type)
+    @staticmethod
+    def _exclusion_refusal(files: List[Path], target: Path) -> str:
+        shown = [
+            relative_display(path, target) for path in files[:_REFUSAL_FILES_SHOWN]
+        ]
+        more = len(files) - len(shown)
+        listed = ", ".join(shown) + (f" and {more} more" if more else "")
+        return (
+            f"snyk-code did not run: snyk code test would leave out the files that "
+            f"{listed} in the scanned tree exclude, and it has no option that stops "
+            "it reading them. Remove them, or accept them with --config-overrides "
+            "scanners.snyk-code.options.honor_tree_exclusions=true."
+        )

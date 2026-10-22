@@ -19,7 +19,10 @@ sandbox:
 
 If you ask for a sandbox and ASH cannot provide one, the affected scanners are recorded
 `MISSING` with the reason, and the scan exits 1 like any other incomplete scan. ASH
-never falls back to running a scanner unsandboxed after you asked for a sandbox.
+never falls back to running a scanner unsandboxed after you asked for a sandbox. That
+includes asking in a config file that cannot be loaded: a scan whose config file is
+missing or does not parse stops with exit code 3, rather than running with the default
+configuration, whose mode is `off`.
 
 ## Modes
 
@@ -29,12 +32,20 @@ never falls back to running a scanner unsandboxed after you asked for a sandbox.
 | `auto` | any | one of the below | Linux: `bwrap`, then `firejail`, then `landlock`. macOS: `sandbox-exec`. Windows: none. |
 | `bwrap` | Linux | `bubblewrap`, unprivileged user namespaces | Recommended. |
 | `firejail` | Linux | `firejail` | Fallback. Weaker filesystem hiding, see below. |
-| `landlock` | Linux 5.13+ | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. |
+| `landlock` | Linux 6.2+ (Landlock ABI 3) | nothing (kernel LSM) | No package to install. Needs Landlock enabled in the kernel's LSM list. Below ABI 3 it counts as unavailable. |
 | `sandbox-exec` | macOS | ships with macOS | Apple marks `sandbox-exec` deprecated. See risks. |
 
 Container mode (`--mode container`) ignores the setting: the container is the boundary,
 and the image does not need bubblewrap. Nix mode composes with it: the inner scan that
 runs inside `nix develop` applies the sandbox to each scanner.
+
+ASH finds `bwrap` and `firejail`, and the `readlink` and `true` its probes run, the way
+it finds scanners: on absolute `PATH` entries and in ASH's own bin directory, never
+through the working directory, and not inside the scanned directory unless you pass
+`--allow-in-tree-tools` or set `ASH_ALLOW_IN_TREE_TOOLS=1`. One found only inside the
+scanned directory counts as not installed: `auto` moves on to the next backend, and a
+mode that names that backend reports its scanners MISSING. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory).
 
 ## What a sandboxed scanner can do
 
@@ -46,7 +57,10 @@ it needs.
   persistent location it can write. The rest of the output directory is read-only.
 - `/tmp` and `$HOME` are private and empty. Your real home directory is not visible.
   The tool locations a scanner needs (ASH's bin directory, uv's tool and Python
-  directories, the scanner's declared caches) are mounted at their usual paths.
+  directories, the scanner's declared caches) are mounted at their usual paths. A
+  uv directory that `UV_TOOL_DIR`, `UV_PYTHON_INSTALL_DIR` or `UV_CACHE_DIR` names
+  is not mounted, with a warning, when it is `/`, a home directory, a directory
+  holding one, or a directory directly in one such as `~/.local`.
 - Tool caches (uv's cache, grype's and trivy's databases, semgrep's settings) are
   writable only where the writes are thrown away: under bwrap (bubblewrap 0.8+ and
   Linux 5.11+) through an overlay, so writes succeed but are discarded when the
@@ -60,19 +74,110 @@ it needs.
 - grype and trivy cannot update their databases from inside a sandbox, so before a
   sandboxed online scan ASH updates them itself, outside the sandbox: `grype db
   update`, and `trivy image --download-db-only` plus, for a misconfiguration scan,
-  trivy's checks bundle. Nothing from the scanned repository reaches these: they run
-  from an empty directory outside every checkout, with an explicit empty config file,
-  against the cache directory the scan reads. A lock in that cache directory makes
+  trivy's checks bundle. trivy and trivy-repo do this on every online scan, sandboxed
+  or not, since they share the cache. Nothing from the scanned repository reaches
+  these, or ASH's check of the database's age after the scan: they run from a
+  directory outside the scanned tree or any other checkout, with an explicit config
+  file (an empty one ASH ships, or for trivy the config the scan passes: the
+  operator's `config_file` once it passes the rule for that option, else
+  `TRIVY_CONFIG` for a file outside the scanned tree), against the cache directory
+  the scan reads. A lock in that cache directory makes
   concurrent scans take turns, and each tool is updated once per scan. The scanners
   then run with their own update turned off (`--skip-db-update`,
   `GRYPE_DB_AUTO_UPDATE=false`). Offline nothing is updated, and in both cases ASH's
   staleness check still holds the database to its bound. trivy's Java database
-  (about 935 MiB) is not updated and trivy-repo runs with `--skip-java-db-update`:
-  `trivy repository` does not analyze JAR, WAR or EAR files and never reads it.
+  (about 935 MiB) is not updated and trivy and trivy-repo run with
+  `--skip-java-db-update`: `trivy fs` and `trivy repository` do not analyze JAR, WAR
+  or EAR files and never read it. In every run, sandboxed or not, online or offline,
+  trivy and trivy-repo keep their scan cache in memory (`--cache-backend=memory`),
+  because trivy otherwise opens
+  `fanal/fanal.db` in a cache directory it may only read, and exits 1. A cache can
+  be read-only outside a sandbox too, when it is shared or baked into an image.
+- The cache directory is the one grype or trivy itself uses on the host:
+  `GRYPE_DB_CACHE_DIR` or `TRIVY_CACHE_DIR` when set, else `$XDG_CACHE_HOME` when it
+  is an absolute path (trivy reads it only on Linux, and a relative one makes it use
+  `$TMPDIR/trivy`), else `~/.cache` on Linux,
+  `~/Library/Caches` on macOS, and `%LOCALAPPDATA%\cache` (grype) or
+  `%LocalAppData%` (trivy) on Windows. grype keeps its database in `grype/db` under
+  it and trivy in `trivy`. The sandbox does not pass `XDG_CACHE_HOME`, so in every
+  run, sandboxed or not, ASH names the directory to the scan (`--cache-dir`,
+  `GRYPE_DB_CACHE_DIR`), to the update and to the staleness check, and all three read
+  the same database. A `cache.dir` in a `trivy.yaml` or a `db.cache-dir` in a grype
+  config does not move it; set the variable instead. ASH logs a warning naming the
+  grype config when it sets `db.cache-dir`; a trivy `cache.dir` is overridden
+  without one.
+- The config files ASH writes for a scanner's tool (the empty config bandit, grype,
+  syft, ferret-scan, trivy, trivy-repo, actionlint and cfn-lint get when you name
+  none, gitleaks' default-rules config, trivy's and trivy-repo's empty ignore file
+  and secret config, the empty directories ASH passes trivy and trivy-repo as their
+  modules directory and gitleaks as its ignore path, the copies of your `rules_paths`
+  files ASH gives cfn-guard, and the copies of the files a `.gitleaksignore` names
+  that gitleaks re-scans) are in a directory of that scanner run's own, outside the
+  scanned tree (normally in the system temporary directory, never under one another
+  account can change), made with mode 0700 and removed when the run ends. The
+  scanner can read it and cannot write to it. Under sandbox-exec, the one backend
+  that limits where programs run from, it cannot run programs from it either.
 - System directories (`/usr`, `/etc`, `/opt`, `/nix`) and the directories on `PATH`
-  are read-only. Inside `$HOME` only `PATH` entries named `bin`, `sbin` or `Scripts`
-  are mounted, and a tool's install prefix only when it is deeper than a directory
-  directly under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no).
+  are read-only. A `PATH` entry inside the scanned tree or the output directory is
+  not a tool directory; the tree is mounted only as the scan's data. The same goes
+  for an entry of ASH's own `sys.path` there (`PYTHONPATH=src`): it stays readable
+  for the imports, and nothing is run from it. Inside `$HOME`
+  only `PATH` entries that are `bin`, `sbin` or `Scripts` directories are mounted,
+  and a tool's install prefix only when it is deeper than a directory directly
+  under `$HOME` (`~/.nvm/versions/node/v22` yes, `~/.cargo` no). A directory counts
+  as a `bin` directory only by the directory it resolves to: that directory must be
+  named `bin`, `sbin` or `Scripts`, must not be a home directory, and must not
+  contain one. So a real `~/bin` is mounted, while a link spelled `bin` that
+  resolves somewhere else (`~/bin` linked to `~/.aws`, or `$WORK/bin` linked to
+  `$WORK`) is not a `bin` directory. An install prefix that is `/`, a home directory or a
+  directory holding one is never mounted: a tool in `$WORK/bin` with
+  `HOME=$WORK/home` gets `$WORK/bin`, and nothing of `$WORK` when `$WORK/bin` is a
+  link to `$WORK` itself. When `HOME` names a directory other than your account's
+  passwd entry's home, both directories are screened this way. A link at the top of
+  a home that names a directory elsewhere, such as `~/.local` kept on another disk,
+  counts as part of that home: the directory it names is screened as if it were
+  directly in the home, so its `share` and keyrings are not mounted. A link to a
+  system directory (`~/u` linked to `/usr`) changes nothing.
+- A program that one of ASH's own checks has a spawn's tool start gets the grants
+  that tool gets, through the same rules: its directory and its install prefix. The
+  check of a pre-installed scanner runs `uv`, which starts the scanner's Python to
+  inspect it, so that Python's environment is mounted for the check. Only ASH's own
+  code names such a program, never a scanner's options or the scanned repository.
+- ASH's own Python is mounted where it is installed, and `ASH_BIN_PATH` with it. A
+  Python whose binary sits directly in a top-level system directory (`/opt/python3`,
+  or `/bin/python3` where `/bin` is not merged into `/usr`) gets that directory,
+  which is already mounted, and never `/`. One directly in any other top-level
+  directory (`/mnt/python3`, `/srv/python3`) is refused, since it would mount that
+  whole directory, and so is a Python whose `sys.prefix` is `/`. The scanner is
+  refused rather than given the home when the Python's prefix is a home directory
+  or a directory directly in one that is not a virtual environment or conda
+  installation, when the Python is reached through a link kept in a home outside a
+  `bin`, `sbin` or `Scripts` directory and outside the Python's own installation (a
+  virtual environment made with `~/python3 -m venv`, or a link in `~/.config`), or
+  when `ASH_BIN_PATH` names a home or a directory directly in one that is not a
+  `bin` directory. Use an interpreter or virtual environment outside the home
+  directory, or one created from the interpreter's real path. A virtual environment
+  made from a Python whose prefix is refused keeps that prefix as its base, so it is
+  refused too.
+- A virtual environment or conda installation directly in a home is told apart from
+  any other directory there by its marker (`pyvenv.cfg`, `conda-meta`) and by a short
+  list of directories that never count as one, whatever marker they hold:
+  `~/.local`, and any directory holding `share/keyrings`. That list is a heuristic,
+  not a proof. Another directory with a marker, such as a venv made at `~/work`, is
+  mounted whole. It is acceptable because `sys.prefix` is the Python the operator
+  chose to run ASH with, so keep that environment free of files a scanner must not
+  read.
+- The offline rule cache of semgrep and opengrep, the directory
+  `SEMGREP_RULES_CACHE_DIR` or `OPENGREP_RULES_CACHE_DIR` names, is mounted read-only
+  for that scanner wherever it is, `$HOME` included. Under sandbox-exec, the backend
+  that restricts which files may be executed, no program runs from it; bwrap,
+  firejail and Landlock restrict writes and reads, not exec, there. Only the
+  variable in ASH's own environment grants it, never a path in the scanner's options;
+  an empty or relative value grants nothing, and one naming a file, `/`, `$HOME` or a
+  directory above `$HOME` (or the passwd entry's home, or a directory above it, when
+  `HOME` names another directory) is not mounted, with a warning. A directory directly under
+  `$HOME`, such as `~/rules`, is mounted as named, so point the variable at the rules
+  directory itself.
 - The environment is filtered to an allowlist: locale, `PATH`, TLS and proxy settings,
   ASH's and uv's own variables, and the prefixes the scanner declares (`GRYPE_`,
   `SEMGREP_`, ...). Within those, a name containing `TOKEN`, `PASSWORD`, `SECRET`,
@@ -93,22 +198,45 @@ it needs.
   tree, so the scanned repository could otherwise plant one pointing anywhere.
 - So is an output directory that is a symlink, or that is reached through one below
   the source directory (a committed `build -> /some/host/dir` scanned with
-  `--output-dir build/ash`), or whose real path differs from where its path inside
-  the source directory reads. A sandboxed scan stops with an error before ASH writes
-  anything there. Links at or above the source directory are your own and are not
-  examined, and with the sandbox off the output goes where you send it, as before.
+  `--output-dir build/ash`), however either path is spelled, or that is inside the
+  source directory by its path but outside it by its real path, or whose
+  `analysis`, `reports`, `scanners` or `converted` directory, or a file ASH writes
+  there by a fixed name such as `ash.log`, is one. The scan stops with an error that names the link before ASH
+  writes anything there, whatever the sandbox mode, since ASH clears and writes
+  those itself; pass `--output-dir` with a directory that is not a link. See
+  [Output directory](concepts.md#output-directory) for the full list. Links above an
+  output directory outside the source tree (`/tmp` on macOS) are your own and are
+  not examined.
 - ASH writes into the results directory after the scanner exits, and ASH is not
   sandboxed. So after every sandboxed spawn, and again after the scan, ASH removes
-  every symlink and special file the scanner left there, and ASH's own writes there
-  (stream logs, `ASH.ScanResults.json`, the files a scanner override writes) open
-  without following a symlink. A process the scanner leaves running cannot keep
+  every symlink and special file the scanner left there. A symlink already below the
+  results directory when the scanner starts (one committed with the scanned tree) is
+  refused instead, and the scanner is `ERROR`.
+- ASH's own writes below the output directory never follow a symlink, with the
+  sandbox on or off: `ash.log` and `ash.log.jsonl`, worker request files, stream
+  logs, `ASH.ScanResults.json`, `ash_aggregated_results.json`, every report, the
+  files a converter extracts and the files a scanner override writes. A link at
+  `ash.log` stops the scan with exit 3 before it starts, as a linked output directory does. A symlink at any component of the path, the
+  file name included, stops the write with "`<path>` was not written: `<link>` is a
+  symlink, and ASH does not write through a symlink below its output directory"
+  (`OutputLinkRefused`, an `OSError`). Nothing is written where the link points, the
+  link is left in place, and the scanner whose write was refused is `ERROR`. A file
+  there that another name also refers to (a hard link, which an extracted archive can
+  hold) is refused the same way, before anything in it is changed, with "`<path>`
+  was not written: `<n>` names refer to it" (`OutputHardLinkRefused`); so is one
+  already below a sandboxed scanner's results directory when the scanner starts.
+  Links at or above the output directory itself are not examined, as above. On
+  Windows, which has no way to open a path relative to a directory without
+  following a link, ASH checks each component by name before it opens the file,
+  symlinks and reparse points such as junctions included: a link already there is
+  refused, but one created between that check and the open is not. A process the scanner leaves running cannot keep
   planting links afterwards: bwrap and firejail end the whole process tree with the
   scanner, and the Landlock wrapper is a child subreaper that kills any process its
   scanner left behind before it exits. On a timeout ASH sends a sandboxed process
   SIGTERM first (SIGKILL after 10 seconds), so the Landlock wrapper gets to end its
   whole tree rather than being killed outright.
 - Network: under `--offline` no scanner gets a network. Online, only scanners that
-  declare a network need get one (to fetch a vulnerability database, a rule pack, or
+  declare a network need get one (to fetch a content database, a rule pack, or
   audit data from a package registry); everything else runs with no network.
 
 ### Per-scanner needs
@@ -117,15 +245,20 @@ it needs.
 |---------|--------------------|--------|---------|
 | bandit | no | uv cache | uv-managed Python |
 | checkov | no | uv cache | uv-managed Python |
-| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep` | uv-managed Python |
-| opengrep | yes (registry rules) | `~/.opengrep` | single binary; on macOS it unpacks itself into a private directory per spawn |
-| grype | yes (database update) | grype database cache; on macOS, `~/Library/Caches/grype` | single binary |
+| semgrep | yes (registry rules, `p/ci`) | uv cache, `~/.semgrep`; `$SEMGREP_RULES_CACHE_DIR` read-only | uv-managed Python |
+| opengrep | yes (registry rules) | `~/.opengrep`; `$OPENGREP_RULES_CACHE_DIR` read-only | single binary; on macOS it unpacks itself into a private directory per spawn |
+| grype | yes (database update) | grype database cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | syft | no | syft cache | single binary |
-| trivy | yes (database update) | trivy cache; on macOS, `~/Library/Caches/trivy` | single binary |
+| trivy-repo | yes (database update) | trivy cache (read-only, or a throwaway overlay under bwrap) | single binary |
 | npm-audit | yes (registry audit API) | `~/.npm` | Node.js |
 | cfn-nag | no | none | Ruby and its gem paths |
 | detect-secrets | only when `sandbox.network_scanners` names it | none | ASH's Python, in a worker subprocess |
 | cdk-nag | no | jsii's runtime cache, not used on macOS | ASH's Python with the cdk extra, and Node.js for jsii, in a worker subprocess |
+| actionlint | no | none | single binary |
+| cfn-lint | no | uv cache | uv-managed Python |
+| cfn-guard | no; reads its rules bundle (`$ASH_CFN_GUARD_RULES_DIR`, or `share/cfn-guard-rules` beside ASH's bin directory) | none | single binary |
+| gitleaks | no | none | single binary |
+| zizmor | no; `online_audits` gets neither a network nor a GitHub token yet | uv cache | uv-managed binary |
 
 ### Community and third-party plugin scanners
 
@@ -166,26 +299,60 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         # The tool unpacks itself where this variable says and runs what it
         # unpacked; sandbox-exec points it at a private directory per spawn.
         unpack_dir_env="XDG_CACHE_HOME",
+        # True when read_paths come from the scanner's options, which the
+        # scanned repository can write: they are then mounted only for scanners
+        # named in sandbox.read_path_scanners, and cache_paths are not mounted.
+        read_paths_require_grant=False,
+        # The same for env_prefixes and env_names, with sandbox.env_scanners.
+        env_requires_grant=False,
+        # Variables in ASH's own environment naming a directory the tool reads
+        # (semgrep's SEMGREP_RULES_CACHE_DIR): mounted read-only, and not
+        # executable under sandbox-exec.
+        # An unset or empty variable, or one naming /, $HOME or a directory above
+        # it, grants nothing.
+        read_path_env=("MYTOOL_RULES_DIR",),
+        # True for a tool handed a staged copy of its input outside the tree
+        # (the jupyter converter's nbconvert): it may not read the source or
+        # output directory. See "Converters" below.
+        staged_input_only=False,
     )
 ```
 
-The community scanners declare theirs: snyk-code asks for a network, its `SNYK_`
-variables and `SNYK_TOKEN`, and read access to its token file; trivy-repo asks for a
-network and its database cache; ferret-scan asks only for its `FERRET_` variables.
+The community scanners declare theirs:
+
+- snyk-code asks for a network, its `SNYK_` variables and `SNYK_TOKEN`, and read
+  access to its token file.
+- trivy-repo shares the builtin trivy's declaration: a network, the database cache and
+  the `TRIVY_` variables.
+- ferret-scan asks only for its `FERRET_` variables.
+
+A file outside the source tree that a scanner option names is not mounted (cfn-guard's
+`rules_paths` needs no mount: ASH copies those rules into the scanner run's own
+directory above): a
+`config_file` of actionlint, gitleaks, cfn-lint,
+zizmor, trivy or trivy-repo, gitleaks' `baseline_path`, trivy's `ignore_file`, a
+`secret_config_file` of trivy or trivy-repo, trivy-repo's `module_dir`, or a
+path-valued actionlint `shellcheck` or `pyflakes`. Nor do gitleaks' `GITLEAKS_*` variables or
+zizmor's GitHub token reach a sandbox. Grants derived from options or the environment
+wait for the sandbox's grant gates; until then list such a path in
+`sandbox.extra_read_paths`, from a config outside the tree.
 
 detect-secrets needs a network only to verify candidate secrets with their issuers,
-which it does when its settings list the verification filter. Those settings come
-from a `.secrets.baseline` or an ASH config file, and the scanned repository can
-commit either one. The same baseline can also load a detect-secrets plugin from the
-repository. So the sandbox doesn't take detect-secrets' own word for it: detect-secrets
-gets a network only when `sandbox.network_scanners` names it, and a repository can't
-set that (see below). Without a network every candidate counts as unverified, so a
-sandboxed scan whose settings verify reports the candidates that verification would
-have dropped, and ASH logs a warning naming the setting.
+which it does when its settings list the verification filter. Only the operator's own
+configuration can list it: ASH removes it from a `.secrets.baseline` inside the
+scanned tree and from a config file the scanned repository or an MCP client wrote,
+and offline from every source (see
+[Secret verification](configuration-guide.md#secret-verification)). A baseline the
+operator names can still load a detect-secrets plugin from a file outside the tree, so
+the sandbox doesn't take detect-secrets' own word for it either: detect-secrets gets a
+network only when `sandbox.network_scanners` names it, and a repository can't set that
+(see below). Without a network every candidate counts as unverified, so a sandboxed
+scan whose settings verify reports the candidates that verification would have
+dropped, and ASH logs a warning naming the setting.
 
-detect-secrets and cdk-nag are Python libraries. They used to run inside the ASH
-process, where no OS sandbox can reach them; they now run in worker subprocesses that
-use the same interpreter and the same library calls, so their findings are unchanged
+detect-secrets and cdk-nag are Python libraries. They run in worker subprocesses,
+not in the ASH process, where no OS sandbox could reach them. The workers use the
+same interpreter and the same library calls, so their findings are unchanged
 and the sandbox wraps them like any other scanner. To let detect-secrets verify
 secrets under the sandbox, pass `--config-overrides 'sandbox.network_scanners=[detect-secrets]'`
 (plus any other scanners that need a network). Under `--offline` it gets none.
@@ -195,84 +362,191 @@ To give an extra scanner network access, or take it away:
 ```yaml
 sandbox:
   mode: bwrap
-  network_scanners: [grype, trivy]   # replaces the per-scanner defaults
+  network_scanners: [grype, trivy-repo]   # replaces the per-scanner defaults
   extra_read_paths: [/opt/company-ca]
 ```
 
-`network_scanners` and `extra_read_paths` grant access, so they are honored only from
-`--config-overrides` or a config file outside the scanned tree. When any file the
-config was built from is inside the tree, both settings are taken from the defaults
-plus `--config-overrides`, and ASH logs a warning naming the file. That covers the
-discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, and the file
-`ASH_CONFIG` names. The tree is the whole checkout: the outermost directory at or
-above the scanned directory (in workspace mode, the workspace root) that holds a
-`.git` entry, or the scanned directory itself outside a repository. Outermost, so a
-submodule's `.git` file can't make the superproject's config look outside. The
-checkout is looked up from the scanned directory as given and from its resolved
-path, so a scanned directory that is a symlink still counts the checkout it sits in. A symlink, a `..`
-segment, or a case-only difference on a case-insensitive filesystem doesn't change
-the answer, because ASH compares the files themselves, not their path strings. An
-in-tree `network_scanners` list still takes network away: a scanner it doesn't name
-gets none, so a repository can keep its own scan offline with `network_scanners: []`.
+Four settings grant access: `network_scanners`, `extra_read_paths`, and the two
+below that let a scanner have what its own options ask for. A config file the
+scanned repository could have written can't grant any of them. That means a config
+file inside any git checkout, where a directory at or above the file, by its own path
+or its resolved path, holds a `.git` entry (a directory, or the file a submodule or
+linked worktree has). Only `--config-overrides` and config files outside every git
+checkout can grant; the `--sandbox` flag sets only the mode. For a scanned directory
+outside any checkout, such as an extracted archive, a config file inside that
+directory can't grant either, whether it is reached by the directory's own name, its
+resolved path, or the shell's working directory (`$PWD`).
 
-`mode` follows the same rule. When `--sandbox`, `ASH_CONFIG`, or the operator's
-config file turns the sandbox on, an in-tree config can't turn it off or switch it
-to another backend. A mode set by a file outside the tree comes first. When no file
-outside the tree sets one, the operator's mode still holds even if the operator's
-file is itself inside the tree, for example under a home directory that is a git
-checkout: its grants are dropped, but its mode stays, because a mode other than
-`off` grants nothing. Only `--sandbox off` or a `sandbox.mode` override turns it off.
+When any file the config was built from can't grant (the discovered `.ash/.ash.yaml`,
+a `--config` path, an `extends` base, or the file `ASH_CONFIG` names), the four
+settings are taken from the files that can: in workspace mode the operator's
+default config (under the MCP server, the session's bound profile), else
+`ASH_CONFIG`'s file, else the defaults, plus `--config-overrides`. A file that can
+grant itself but extends a base that can't keeps the settings its own `sandbox`
+section writes, `mode` included. For example, a `--config` outside every checkout
+that extends the scanned repository's config keeps the grants it sets, and loses
+what it inherits from any base, even one outside every checkout, and what it changes
+with `patch`. ASH logs a warning that names the files that can't grant and the
+settings it dropped. A `network_scanners` list in such a file still takes network away: a scanner
+it doesn't name gets none, so a repository can keep its own scan offline with
+`network_scanners: []`.
 
-The checkout is also looked up from the shell's working directory (`$PWD`), so
-`cd vendor && ash scan`, where `vendor` is a symlink out of the checkout, still
-counts the checkout. A bind mount of a directory inside a checkout can't be traced
-back to it; scan the checkout itself, or keep its config out of the grants with
-`--config-overrides`. When none of them does, an in-tree `mode` applies, because a
-sandbox the repository asks for only takes access away. In workspace mode, the
-operator's `--config` decides for a project that has its own config file, the same
-as for one that doesn't.
+This applies to a trusted config kept in a checkout of its own as well, such as an
+ops or dotfiles repository: its grants are dropped with the same warning. Pass them
+with `--config-overrides` instead, for example
+`--config-overrides 'sandbox.network_scanners=[grype,trivy-repo]'`.
 
-A trusted config outside the tree that `extends` a base inside the tree loses its own
-grants too, because the merged settings no longer record which file set them. Pass
-the grants with `--config-overrides` in that layout.
+A plugin scanner can take its read paths or environment variables from its options,
+such as a rules file outside the source tree, or a token for an online check. The
+repository can write those options, so such a scanner declares it with
+`read_paths_require_grant` or `env_requires_grant`, and the sandbox grants those
+needs only to the scanners named in `sandbox.read_path_scanners` or
+`sandbox.env_scanners`. None of the scanners ASH ships declares either;
+detect-secrets' baseline, below, is gated by `read_path_scanners` directly. The two
+settings follow the same rule as `network_scanners`, and ASH logs a warning when it
+withholds such a need. Even when granted, a path a scanner's options name is
+mounted only if it resolves inside the source tree or one of the operator's
+`extra_read_paths` entries, and only if it is a regular file or directory, never a
+socket or device. To let a scanner read a
+rules file elsewhere on the host, put its directory in `sandbox.extra_read_paths`. A
+cache path a scanner's options name is never mounted.
 
-A sandboxed scan does not install tools: installing runs a package's build code and
-writes uv's tool directory, which a sandboxed scanner may only read. Run
-`ash dependencies install` first; a scanner whose tool is missing is recorded
-`MISSING`.
+ASH itself reads some files that scanner options name, outside the sandbox, and
+passes their contents on. detect-secrets' `baseline_file` is one. Under a sandbox,
+ASH reads such a file only when it is inside the source tree, or when
+`sandbox.read_path_scanners` names the scanner and the file is inside one of the
+operator's `sandbox.extra_read_paths` entries, the same containment a path the
+scanner reads itself gets. Otherwise it skips the file with a warning, and the
+candidates the baseline would have marked are reported. A baseline an MCP client
+delivered is not read at all.
+
+A config file is judged by the name it was found under as well as by the file it
+resolves to, so a `.ash/.ash.yaml` that is a symlink out of the scanned directory
+still counts as inside it. An `extends` base is judged the same way, by the path its
+`extends` entry names as well as by the file it resolves to, so a base the repository
+turns into a symlink to some other file still counts as inside the checkout. Every
+symlink met on the way counts too: a path that leads through a link inside a
+checkout, even from a link of your own, counts as inside that checkout, and the
+reason names the link.
+Plugin modules are judged by the same rule. A tool config file a scanner option
+names is judged by it too when a config inside the scanned tree names it; one the
+operator names may sit in a checkout of the operator's own. See
+[Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
+Sandbox grants follow a scanner's own name, the one its code gives it. If a config
+file renames a scanner's section, for example by setting `name: grype` on a plugin's
+section, that scanner is not run sandboxed: it is recorded `MISSING` with the reason.
+
+`mode` is a restriction, so it is honored from any source, as a floor. When
+`--sandbox`, `ASH_CONFIG`, or the operator's config file turns the sandbox on, a
+config file the repository could have written can't turn it off or switch it to
+another backend. The operator's mode holds even if the operator's file is itself in
+a checkout, because a mode other than `off` grants nothing. Only `--sandbox off` or a
+`sandbox.mode` override turns it off. When nothing the operator set turns the
+sandbox on, the repository's `mode` applies, because a sandbox the repository asks
+for only takes access away. In workspace mode, the operator's `--config` decides for
+a project that has its own config file, the same as for one that doesn't.
+
+A sandboxed scan does not install tools, for scanners and converters alike:
+installing runs a package's build code and writes uv's tool directory, which a
+sandboxed scanner may only read. Run `ash dependencies install` first; a scanner
+whose tool is missing is recorded `MISSING`, and so is the jupyter converter when
+nbconvert is missing, which fails the scan if the tree has notebooks.
+
+### Converters
+
+The jupyter converter runs nbconvert, a third-party tool, over the repository's
+notebooks, so under a sandbox nbconvert runs with the confinement a scanner gets: no
+network unless `sandbox.network_scanners` names `jupyter`, the environment allowlist,
+and the converter's own `<output>/converted/jupyter/` directory as the only writable
+place. Unlike a scanner, it may not read the source tree or the output directory:
+nbconvert is handed a copy of one notebook in a private directory, and reads that
+copy and its tools (`SandboxRequirements.staged_input_only`). bwrap mounts an empty
+directory over the tree where a wider mount would show it (a checkout under `/opt`),
+and sandbox-exec denies reading the tree and the output directory after the reads it
+allows; both give back the results directory and any tool path inside them. Landlock
+can only grant access and firejail shows everything outside `$HOME` and `/tmp`, so
+under those two a tree inside a directory they show (`/opt`, `/usr/local`, or for
+firejail any directory outside `$HOME` and `/tmp`) stays readable to nbconvert. Its
+version probe and dependency check run sandboxed as well, with the same read scope. Under a sandbox the converter runs
+nbconvert's own `jupyter-nbconvert` executable rather than `uv tool run`, which writes
+uv's tools directory and so cannot run there. The convert phase applies the same scope
+to every converter, so a third-party converter's tool is confined the same way.
+
+If no sandbox backend can be used, or the backend cannot plan one notebook's run,
+nbconvert is not run on that notebook, and it is listed in the converter's
+`refused_inputs` with the reason. A notebook nbconvert fails on (a non-zero exit,
+as for a notebook that is not JSON, a timeout, or a run that writes no output) is
+not converted either, with or without a sandbox. Each such notebook is listed in
+the converter row's `failed_inputs`, which the completeness gate reads, so with
+`fail_on_incomplete_scanners` on (the default) the scan exits 1; exclude a notebook
+that is malformed on purpose, such as a test fixture, with `ignore_paths`. The same
+holds for
+any converter: a process its `convert()` started that the sandbox refused is named
+in its `failure`. Nothing a converter starts runs unsandboxed under a sandbox.
 
 ## Threat model
 
 The sandbox is for three cases.
 
-1. A malicious or compromised scanner, plugin, or rule pack. A typosquatted or
+1. A scanner, plugin, or rule pack that does more than it says. A typosquatted or
    hijacked package on PyPI or npm, a scanner binary replaced on disk, a community
    rule pack that runs code.
-2. Scanned content that exploits a scanner. Scanners parse untrusted input and some
+2. Scanned content that takes control of a scanner. Scanners parse untrusted input and some
    execute it on purpose: tool configuration files committed to the repository
    (`trivy.yaml`, `.semgrep.yml`, `.checkov.yaml`, `.npmrc`, `.bandit`) change what a
    scanner does, plugin systems `eval` code found in the tree, and parser bugs give
    code execution or path traversal on write.
-3. Exfiltration. Code running in any of the above reading credentials (`~/.ssh`,
-   `~/.aws`, tokens in the environment) and sending them out over the network.
+3. Data sent off the machine. Code running in any of the above reading credentials
+   (`~/.ssh`, `~/.aws`, tokens in the environment) and sending them over the network.
 
 Inside the sandbox such code can read the source tree (it is scanning it), write its
 own results, and, if the scanner is allowed a network, talk to the network. It cannot
 read the rest of your home directory, write outside its results directory, modify the
 source tree, or see environment variables outside the allowlist.
 
+A symlink in the tree is resolved inside the sandbox, so it reads only what the
+sandbox shows. Under bwrap and Landlock a link to a file outside the read list, in
+`$HOME` or anywhere else, cannot be read. firejail shows everything outside `$HOME`
+and `/tmp`, and sandbox-exec reads everywhere except `$HOME` and the shared temporary
+directories, so under those two a link can be read unless its target is in what they
+hide.
+
+A hard link is not a link to anything: it is the file, under another name, and
+nothing tells it apart from an ordinary file. A file in the tree that is a hard link to
+a file outside it is read as part of the tree, by ASH and by every scanner, sandbox or
+not. ASH does not try to detect one; a git checkout never makes one, but a tree copied
+or unpacked by another tool can. What contains a scanner that reads one is the
+sandbox: with no network unless it is granted one, and writes only to its results
+directory, what it read reaches only its results. ASH's own writes refuse a file
+another name refers to (see [What a sandboxed scanner can do](#what-a-sandboxed-scanner-can-do)).
+
 Out of scope:
 
-- ASH itself, its converters, and `git`, which run unsandboxed. ASH is the trusted
-  base. Converters unpack archives and notebooks into the work directory; they are
-  ASH code, not third-party tools. `git` runs only for `--changed-files-only` and
-  workspace planning, never inside a scanner.
+- ASH itself and `git`, which run unsandboxed. ASH is the trusted base, and that
+  includes the converters' own code: the archive converter unpacks archives into the
+  work directory in ASH's process. The tools a converter starts are not ASH code and
+  are sandboxed; see [Converters](#converters). `git` runs only for
+  `--changed-files-only` and workspace planning, never inside a scanner.
+- Links in the scanned tree. ASH's scan set leaves out a link to a file whose target
+  is outside the source directory, and warns about each one (see
+  [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set)),
+  so the scanners and converters that read the scan set are not given it.
+  bandit, semgrep, opengrep, checkov, grype and syft walk the source directory
+  themselves, and snyk-code passes it to the Snyk CLI as it is; what each of those
+  does with such a link is the tool's own behavior.
 - Plugin modules. A config file can list `ash_plugin_modules`, which ASH imports into
   its own process, so they run unsandboxed. From a config file inside the scanned
   tree, only installed modules outside the tree are imported (see
   [Settings a repository's config cannot choose](configuration-guide.md#settings-a-repositorys-config-cannot-choose)),
   but an installed package still runs with ASH's access. The sandbox doesn't change
   this; review the plugin modules a repository's config names before you scan it.
+  ASH's own `ash_aws_plugins` and `ash_snyk_plugins` packages are not imported from
+  such a file at all, because they send findings or source off the host with the
+  operator's credentials.
+  A virtualenv kept inside any git checkout counts as inside it, so a repository's
+  config can't import plugins installed there; the warning names the checkout.
+  Name such plugins with `--ash-plugin-modules` instead.
 - Resource exhaustion. A scanner can still use all the CPU and memory it can get, or
   fork until a limit stops it; the existing per-scanner `scan_timeout` bounds how long.
 - A scanner allowed a network shares the host's network, so TCP and UDP services
@@ -281,10 +555,10 @@ Out of scope:
   refuses Unix sockets.
 - A scanner allowed a network can still send what it can read (the source tree)
   wherever it likes. The online allowlist is per scanner, not per host. Host-level
-  filtering would need a proxy inside the sandbox, which tools can bypass unless the
+  filtering would need a proxy inside the sandbox, which tools can go around unless the
   network namespace forces all traffic through it; that is future work.
-- Results integrity. A compromised scanner can still lie in its own results file.
-- Kernel exploits. All backends share the host kernel.
+- Results integrity. A scanner can still write false results to its own results file.
+- Kernel defects. All backends share the host kernel.
 
 ## Design
 
@@ -299,13 +573,16 @@ its scan, and around the content-database check that runs `grype db status`.
 `_prepare_spawn` rewrites the command line for the active backend when a scope is
 active. Probes get a throwaway results directory. A scanner that cannot be sandboxed
 as requested gets a refusing scope, so its probes fail instead of running unsandboxed.
-Spawns made outside any scanner scope (ASH's own `git` calls, converters, the
-container runtime) are unaffected. A sandboxed scan never installs a tool.
+The convert phase enters the same kind of scope around each converter's construction,
+dependency check and `convert()`, and the jupyter converter enters one around each
+nbconvert run, with the staged notebook as its scan target. Spawns made outside any
+scope (ASH's own `git` calls, the container runtime) are unaffected. A sandboxed scan
+never installs a tool.
 
 `tests/unit/utils/test_sandbox_choke_point.py` fails the build if any module in the
 package outside a short, reasoned exemption list calls `subprocess.run`,
 `subprocess.Popen`, `os.system`, `os.exec*` or the like directly, so a new spawn site
-cannot bypass the choke point. The scope is per thread: a scanner that started a
+cannot go around the choke point. The scope is per thread: a scanner that started a
 process from a thread it created itself would not inherit it. No builtin scanner does.
 
 ### Linux: bubblewrap (preferred)
@@ -341,8 +618,8 @@ instead, as under the other backends, and the log says so.
 
 ### Linux: firejail (fallback)
 
-firejail is a setuid-root binary, which is attack surface of its own (it has had
-privilege-escalation CVEs), and its filesystem model is "everything visible, then
+firejail is a setuid-root binary, a privileged program of its own (it has had
+privilege-escalation advisories), and its filesystem model is "everything visible, then
 restrict" rather than "nothing visible, then allow". ASH uses
 `--noprofile --private-dev --nonewprivs --caps.drop=all --seccomp --nogroups`,
 `--dbus-user=none --dbus-system=none`, `--net=none` when the scanner gets no network,
@@ -354,6 +631,22 @@ caches are read-only because firejail has no throwaway overlay. Because
 everything outside `$HOME` stays visible, `/run` and its sockets included, the
 scanner is started through the same seccomp socket filter as under bwrap. Use bwrap
 when you can.
+
+firejail takes the home directory it hides from your account's passwd entry, not
+from `HOME`. When `HOME` names another directory, ASH decides the whitelists inside
+the home against the passwd entry's home, as firejail applies them, and also
+blacklists the directory `HOME` names, unless it is under `/tmp`, which is already
+private. A tool installed inside that directory then fails to start rather than the
+directory being shown. sandbox-exec likewise denies reading both directories.
+
+A directory that a link at the top of either home names outside the homes, such as
+`~/.local` kept on another disk, is part of that home but lies outside it, where
+both backends would otherwise show it. sandbox-exec denies reading it along with the
+homes, before the policy's own paths are allowed again, so a tool's `bin` directory
+inside it still runs while its `share` and keyrings stay unreadable. firejail
+blacklists it, or, where the policy lists paths inside it (that `bin` directory, or a
+scanned repository kept in a linked `~/code`), every entry beside the way to those
+paths. A link to a system directory, such as `~/u` linked to `/usr`, is not hidden.
 
 firejail also decides for itself whether to build a sandbox at all. When it finds no
 kernel threads among the first ten PIDs, as inside a container that has its own PID
@@ -368,9 +661,13 @@ Landlock.
 
 ### Linux: Landlock
 
-Landlock is an unprivileged kernel LSM (Linux 5.13+), so this mode needs nothing
-installed. ASH starts a small wrapper (`utils/sandbox/landlock_exec.py`, standard
-library only) that restricts itself and then `exec`s the scanner:
+Landlock is an unprivileged kernel LSM, so this mode needs nothing installed. It
+needs Landlock ABI 3 (Linux 6.2) or later, the first that controls truncation: on an
+older kernel a scanner could truncate files it may only read, so ASH reports
+Landlock unavailable there. `--sandbox landlock` then records each scanner `MISSING`
+with the ABI in the reason, and `auto` does not use it. ASH starts a small wrapper
+(`utils/sandbox/landlock_exec.py`, standard library only) that restricts itself and
+then `exec`s the scanner:
 
 - Landlock filesystem rules: read and execute beneath the read-only paths, full access
   beneath the results directory and a fresh private temporary directory (`TMPDIR`).
@@ -424,6 +721,13 @@ With a network, IP sockets are allowed and Unix sockets are not, except the
 resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH agent
 stay out of reach. The scanner starts in a new session, with no controlling terminal.
 
+The home directory is the one `HOME` names. When that is not the home your account's
+passwd entry names, as in a CI job or `HOME=/tmp/x ash scan`, the profile denies
+reading both, and the keychain rule covers `Library/Keychains` under both. The paths
+the policy lists are allowed again after those denies, wherever they are, so a tool
+path inside either home stays readable. With `HOME` set to the passwd entry's home,
+the profile is the same as before.
+
 Programs run only from the system and tool paths the policy makes readable, and from
 two directories made for the spawn alone: its private uv cache, where `uv tool run`
 keeps the environments of tools it was not asked to install, and a self-unpacking
@@ -431,7 +735,7 @@ tool's unpack directory (below). Nothing runs from the source tree, the output a
 results directories, the host caches, the other private caches or the private
 `TMPDIR`, even where a tool path contains one of them (a repository checked out under
 `/opt`), so a program the scanner writes, or one the scanned repository ships, cannot
-be started. A tool path inside the scanned tree, such as a virtualenv ASH itself runs
+be started. A tool path inside the source tree, such as a virtualenv ASH itself runs
 from, stays executable.
 
 Mach service lookups are limited to a list measured on the macOS 14, 15 and 26 CI
@@ -462,9 +766,9 @@ macOS-specific locations are declared per scanner and granted as narrowly as the
 allows:
 
 - grype's database at `~/Library/Caches/grype`, its default location on macOS, is
-  read-only. Before an online scan ASH updates it there, outside the sandbox, as it
-  does `~/.cache/grype` on Linux. trivy-repo's database at `~/Library/Caches/trivy`
-  is handled the same way.
+  a read-only cache, from which nothing may run. Before an online scan ASH updates it
+  there, outside the sandbox, as it does `~/.cache/grype` on Linux. The database
+  trivy and trivy-repo share at `~/Library/Caches/trivy` is handled the same way.
 - cdk-nag runs with jsii's package cache disabled, so jsii unpacks into its own
   temporary directory instead of the shared `~/Library/Caches/com.amazonaws.jsii`,
   whose JavaScript every CDK process on the machine runs.
@@ -519,12 +823,14 @@ its command line maps one to one onto the policy above.
 
 ## Verifying it
 
-`tests/integration/sandbox/` holds a malicious fixture scanner that tries to read a
+`tests/integration/sandbox/` holds a fixture scanner that tries to read a
 file outside the source tree (a planted `~/.ssh/id_rsa`), write outside its results
 directory, open a network socket under `--offline`, and modify the source tree. CI runs
 it under each backend available on the runner. Each attempt must fail with the sandbox
 on, and succeed with `--sandbox off`, which is the negative control that proves the
-attempts are real. CI also runs every builtin scanner under bubblewrap on Linux and
+attempts are real. The one exception is the links the fixture plants for ASH to write
+through: ASH refuses those with the sandbox off too, and the control checks that it
+does. CI also runs every builtin scanner under bubblewrap on Linux and
 under sandbox-exec on macOS against the snapshot fixture, offline and online, and
 asserts the findings match the unsandboxed run.
 

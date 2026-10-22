@@ -4,22 +4,39 @@ import logging
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Any, TYPE_CHECKING
+from typing import Annotated, Dict, List, Literal, Any, TYPE_CHECKING, Tuple
 
 import boto3
 import botocore.exceptions
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.options import (
+    ReporterOptionsBase,
+    report_file_name,
+)
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
+    write_report_file,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanner_tool_types import (
+    SECRETS_TOOL_TYPE,
+    normalize_tool_type,
+    result_tool_types,
+)
+from automated_security_helper.utils.secret_masking import (
+    is_secret_detection,
+    secret_detection_rule_ids,
+)
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    MAX_RETRIES,
+    MAX_RETRY_DELAY_SECONDS,
+    check_retry_delays,
     get_fallback_model,
+    report_missing_setting,
     validate_bedrock_model,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
@@ -32,39 +49,52 @@ if TYPE_CHECKING:
 
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
+    # The environment defaults are read when the options are built, not when this
+    # module is imported, so a config built later sees the run's environment.
     aws_region: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+            ),
             pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
             description="AWS region to use for Bedrock. If not specified, the default region will be used. If specified, the region will be used for all Bedrock requests.",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+    ]
     aws_profile: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS profile to use for Bedrock. If not specified, the default profile will be used.",
         ),
-    ] = os.environ.get("AWS_PROFILE", None)
+    ]
     model_id: Annotated[
         str,
         Field(
+            default_factory=lambda: os.environ.get(
+                "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            ),
             description="Bedrock model ID to use for generating summaries.",
         ),
-    ] = os.environ.get(
-        "ASH_BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-    )
+    ]
     temperature: Annotated[
         float,
         Field(
+            default_factory=lambda: float(
+                os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5")
+            ),
             description="Temperature parameter for the Bedrock model. Higher values make output more random.",
         ),
-    ] = float(os.environ.get("ASH_BEDROCK_TEMPERATURE", "0.5"))
+    ]
     max_tokens: Annotated[
         int,
         Field(
+            default_factory=lambda: int(
+                os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000")
+            ),
             description="Maximum number of tokens to generate in the response.",
         ),
-    ] = int(os.environ.get("ASH_BEDROCK_MAX_TOKENS", "4000"))
+    ]
     top_p: Annotated[
         float,
         Field(
@@ -116,28 +146,36 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     output_file: Annotated[
         str,
         Field(
-            description="Filename for the main output markdown report.",
+            description="Filename for the main output markdown report, a file name in the reports directory.",
         ),
+        report_file_name("reporters.bedrock-summary-reporter.options.output_file"),
     ] = "ash.bedrock.summary.md"
     # Retry configuration
     max_retries: Annotated[
         int,
         Field(
+            le=MAX_RETRIES,
             description="Maximum number of retries for Bedrock API calls.",
         ),
     ] = 3
     base_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Base delay in seconds between retries (will be increased exponentially).",
         ),
     ] = 1.0
     max_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Maximum delay in seconds between retries.",
         ),
     ] = 60.0
+
+    @model_validator(mode="after")
+    def _retry_delays_are_bounded(self):
+        return check_retry_delays(self)
 
     enable_fallback_models: Annotated[
         bool,
@@ -149,13 +187,19 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     output_executive_file: Annotated[
         str,
         Field(
-            description="Filename for the executive summary markdown report.",
+            description="Filename for the executive summary markdown report, a file name in the reports directory.",
+        ),
+        report_file_name(
+            "reporters.bedrock-summary-reporter.options.output_executive_file"
         ),
     ] = "bedrock-executive.md"
     output_technical_file: Annotated[
         str,
         Field(
-            description="Filename for the technical analysis markdown report.",
+            description="Filename for the technical analysis markdown report, a file name in the reports directory.",
+        ),
+        report_file_name(
+            "reporters.bedrock-summary-reporter.options.output_technical_file"
         ),
     ] = "bedrock-technical.md"
 
@@ -183,7 +227,14 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     exclude_scanner_types: Annotated[
         List[str],
         Field(
-            description="List of scanner types to exclude from detailed analysis (e.g., 'SECRET').",
+            description=(
+                "Scanner tool types whose findings are counted but not sent to the "
+                "model (e.g., 'SECRETS'). A finding's type is its scanner's tool "
+                "type, looked up from the scanner's name, or a tool_type:: tag on "
+                "the finding; 'SECRET' and 'SECRETS' both name the secrets type. A "
+                "finding whose type cannot be determined is sent without its code "
+                "snippets."
+            ),
         ),
     ] = ["SECRET"]
     # Include only actionable findings (not suppressed, above severity threshold)
@@ -246,11 +297,34 @@ class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
     ] = False
 
 
+#: Keys of a SARIF result that hold source code: snippets of a region or context
+#: region, and the content a fix would insert.
+_CODE_KEYS = frozenset({"snippet", "insertedContent"})
+
+
+def _without_snippets(value: Any) -> Any:
+    """A copy of a SARIF result dict (or part of one) without any code it holds."""
+    if isinstance(value, dict):
+        return {
+            key: _without_snippets(item)
+            for key, item in value.items()
+            if key not in _CODE_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_snippets(item) for item in value]
+    return value
+
+
 class BedrockSummaryReporterConfig(ReporterPluginConfigBase):
     name: Literal["bedrock-summary-reporter"] = "bedrock-summary-reporter"
     extension: str = "bedrock.summary.md"
-    enabled: bool = True
-    options: BedrockSummaryReporterConfigOptions = BedrockSummaryReporterConfigOptions()
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
+    enabled: bool = False
+    # A factory, so the environment defaults are read when the config is built.
+    options: BedrockSummaryReporterConfigOptions = Field(
+        default_factory=BedrockSummaryReporterConfigOptions
+    )
 
 
 @ash_reporter_plugin
@@ -272,6 +346,40 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
+    destination_options = (
+        "aws_region",
+        "aws_profile",
+        "model_id",
+        "output_file",
+        "output_executive_file",
+        "output_technical_file",
+        # What is sent to the model with the findings, which findings and how
+        # many, whether another model may receive them, and which of the calls
+        # that send them are made.
+        "include_code_snippets",
+        "custom_prompt",
+        "exclude_scanner_types",
+        "actionable_only",
+        "max_findings_to_analyze",
+        "max_findings_per_severity",
+        "summarize_findings",
+        "batch_processing",
+        "industry_context",
+        "compliance_frameworks",
+        "custom_context",
+        "enable_fallback_models",
+        "add_section_headers",
+        "output_markdown",
+        "include_sections",
+        "exclude_sections",
+        "group_by_severity",
+        # How long it keeps calling Bedrock with the operator's credentials.
+        "max_retries",
+        "base_delay",
+        "max_delay",
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -283,17 +391,31 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             self.config = BedrockSummaryReporterConfig()
         return super().model_post_init(context)
 
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The markdown files ``_write_markdown_files`` writes, with ``output_markdown`` on."""
+        config = self.config
+        if isinstance(config, dict):
+            config = BedrockSummaryReporterConfig.model_validate(config)
+        opts = config.options
+        if not opts.output_markdown:
+            return ()
+        included = set(opts.include_sections) - set(opts.exclude_sections)
+        names = [opts.output_file]
+        if "executive_summary" in included:
+            names.append(opts.output_executive_file)
+        if "technical_analysis" in included:
+            names.append(opts.output_technical_file)
+        return tuple(names)
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
 
-        # Check if AWS region is configured
+        # The region defaults to us-east-1, so it is unset only when a config sets
+        # it to null.
         if self.config.options.aws_region is None:
-            self._plugin_log(
-                "AWS region is not configured. Set AWS_REGION environment variable or specify in config.",
-                level=logging.WARNING,
-                target_type="source",
-                append_to_stream="stderr",
+            report_missing_setting(
+                self.config.name, "aws_region", ("AWS_REGION", "AWS_DEFAULT_REGION")
             )
             return self.dependencies_satisfied
 
@@ -354,11 +476,14 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
             # Validate the configured model
             model_id = self.config.options.model_id
-            is_valid, error_message = validate_bedrock_model(bedrock_client, model_id)
+            label = self._model_label(model_id)
+            is_valid, error_message = validate_bedrock_model(
+                bedrock_client, model_id, label=label
+            )
 
             if not is_valid:
                 self._plugin_log(
-                    f"Configured model '{model_id}' is not valid: {error_message}",
+                    f"Configured model '{label}' is not valid: {error_message}",
                     level=logging.WARNING,
                     target_type="source",
                     append_to_stream="stderr",
@@ -458,15 +583,23 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         sarif_results = model.sarif.get_all_results()
         if not sarif_results:
             return all_findings, secret_findings, indexed_findings
+        detection_rule_ids = secret_detection_rule_ids(model.sarif)
 
         for i, result in enumerate(sarif_results):
             finding_dict = result.model_dump(
                 by_alias=True, exclude_defaults=True, exclude_unset=True, mode="json"
             )
+            # A finding from a scanner of unknown type might be a secret finding the
+            # exclusion cannot recognize, so its code is not sent or written.
+            if not result_tool_types(finding_dict):
+                finding_dict = _without_snippets(finding_dict)
             finding_dict["index"] = i + 1
             indexed_findings.append(self._make_indexed_finding(i + 1, finding_dict))
 
-            is_secret = self._is_secret_scanner(finding_dict)
+            is_secret = self._is_secret_scanner(finding_dict) or (
+                self._excludes_secrets()
+                and is_secret_detection(result, detection_rule_ids)
+            )
             is_actionable = self._is_actionable(finding_dict)
 
             if is_secret:
@@ -511,8 +644,33 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         }
 
     def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
-        props = finding_dict.get("properties", {})
-        return props.get("scanner_type") in self.config.options.exclude_scanner_types
+        """Whether the finding's scanner type is one ``exclude_scanner_types`` names.
+
+        The type comes from the scanner, looked up by the ``scanner_name`` the
+        engine writes on every result, and from ``tool_type::`` tags
+        (utils/scanner_tool_types.py). No scanner writes a ``scanner_type``
+        property.
+        """
+        excluded = {
+            normalize_tool_type(name)
+            for name in self.config.options.exclude_scanner_types
+        }
+        excluded.discard(None)
+        return bool(result_tool_types(finding_dict) & excluded)
+
+    def _excludes_secrets(self) -> bool:
+        """Whether ``exclude_scanner_types`` names the secrets type.
+
+        Then a finding from any rule that detects a credential or key is counted,
+        not sent: semgrep's and opengrep's ``generic.secrets.*`` findings come from
+        SAST scanners, so only the finding's rule says what it is
+        (utils/secret_masking.is_secret_detection). A hard-coded password check
+        such as bandit's B105 is sent, its value masked like every other.
+        """
+        return SECRETS_TOOL_TYPE in {
+            normalize_tool_type(name)
+            for name in self.config.options.exclude_scanner_types
+        }
 
     def _is_actionable(self, finding_dict: Dict[str, Any]) -> bool:
         if not self.config.options.actionable_only:
@@ -802,6 +960,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         report += f"**Code Snippet**:\n```\n{snippet_text}\n```\n\n"
 
             if original:
+                if not self.config.options.include_code_snippets:
+                    original = _without_snippets(original)
                 report += "<details>\n<summary>Raw JSON</summary>\n\n```json\n"
                 report += json.dumps(original, indent=2)
             report += "\n```\n</details>\n\n"
@@ -855,6 +1015,25 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     # Client factory
     # ------------------------------------------------------------------
 
+    def _model_label(self, model_id: str) -> str:
+        """How the logs and the error text name ``model_id``: the configured ID
+        as the config file wrote it when the file read it from the environment
+        (config/environment_record.py), else the ID itself. A fallback model's
+        ID is ASH's own."""
+        if model_id != self.config.options.model_id:
+            return model_id
+        from automated_security_helper.config.environment_record import (
+            record_environment_references,
+        )
+
+        ash_config = getattr(self.context, "config", None)
+        shown = record_environment_references(
+            {"model_id": model_id},
+            getattr(ash_config, "_environment_references", ()) or (),
+            at=("reporters", "bedrock-summary-reporter", "options"),
+        )["model_id"]
+        return str(shown)
+
     def _make_model_client(self, bedrock_runtime: Any) -> BedrockModelClient:
         opts = self.config.options
         return BedrockModelClient(
@@ -863,6 +1042,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             temperature=opts.temperature,
             max_tokens=opts.max_tokens,
             top_p=opts.top_p,
+            max_retries=opts.max_retries,
+            base_delay=opts.base_delay,
+            max_delay=opts.max_delay,
+            model_label=self._model_label(opts.model_id),
         )
 
     # ------------------------------------------------------------------
@@ -885,10 +1068,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         reports_dir = Path(self.context.output_dir) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = reports_dir / opts.output_file
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(summary)
-        ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
+        output_path = write_report_file(reports_dir, opts.output_file, summary)
+        if output_path is not None:
+            ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
 
         if "executive_summary" in included:
             prompt = builder.prepare_prompt(
@@ -907,10 +1089,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     "You are a security expert providing a concise executive summary of security scan results.",
                 ),
             )
-            exec_path = reports_dir / opts.output_executive_file
-            with open(exec_path, "w", encoding="utf-8") as f:
-                f.write(f"# Executive Security Summary\n\n{exec_content}")
-            ASH_LOGGER.info(f"Executive summary written to {exec_path}")
+            exec_path = write_report_file(
+                reports_dir,
+                opts.output_executive_file,
+                f"# Executive Security Summary\n\n{exec_content}",
+            )
+            if exec_path is not None:
+                ASH_LOGGER.info(f"Executive summary written to {exec_path}")
 
         if "technical_analysis" in included:
             tech_prompt = builder.prepare_prompt(
@@ -931,10 +1116,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     "You are a security expert providing detailed technical analysis of security findings.",
                 ),
             )
-            tech_path = reports_dir / opts.output_technical_file
-            with open(tech_path, "w", encoding="utf-8") as f:
-                f.write(f"# Technical Security Analysis\n\n{tech_content}")
-            ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
+            tech_path = write_report_file(
+                reports_dir,
+                opts.output_technical_file,
+                f"# Technical Security Analysis\n\n{tech_content}",
+            )
+            if tech_path is not None:
+                ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
 
     # ------------------------------------------------------------------
     # Caching
@@ -1068,7 +1256,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         client = self._make_model_client(bedrock_runtime)
 
         bedrock_client = boto3.client("bedrock", region_name=opts.aws_region)
-        is_valid, error_message = validate_bedrock_model(bedrock_client, opts.model_id)
+        label = self._model_label(opts.model_id)
+        is_valid, error_message = validate_bedrock_model(
+            bedrock_client, opts.model_id, label=label
+        )
         if not is_valid:
             if opts.enable_fallback_models:
                 prepared = self._prepare_prompt(user_message)
@@ -1084,7 +1275,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         "topP": opts.top_p,
                     },
                 )
-            return f"*Error: Primary model {opts.model_id} validation failed: {error_message}*"
+            return f"*Error: Primary model {label} validation failed: {error_message}*"
 
         prepared = builder.prepare_prompt(
             user_message,
@@ -1121,7 +1312,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         """Try fallback models when the primary model fails."""
         fallback_model = get_fallback_model(failed_model_id)
         if not fallback_model or fallback_model == failed_model_id:
-            return f"*Error: No suitable fallback model found for {failed_model_id}*"
+            return (
+                "*Error: No suitable fallback model found for "
+                f"{self._model_label(failed_model_id)}*"
+            )
         ASH_LOGGER.info(f"Trying fallback model: {fallback_model}")
         is_valid, _err = validate_bedrock_model(bedrock_client, fallback_model)
         if not is_valid:
@@ -1179,6 +1373,10 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             temperature=inference_config.get("temperature", opts.temperature),
             max_tokens=inference_config.get("maxTokens", opts.max_tokens),
             top_p=inference_config.get("topP", opts.top_p),
+            max_retries=opts.max_retries,
+            base_delay=opts.base_delay,
+            max_delay=opts.max_delay,
+            model_label=self._model_label(model_id),
         )
         prompt_text = ""
         if messages and messages[0].get("content"):

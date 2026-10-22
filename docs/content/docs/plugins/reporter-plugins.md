@@ -301,7 +301,9 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
 1. **Handle Configuration**: Use Pydantic models for configuration
 2. **Validate Dependencies**: Implement the `validate` method to check dependencies
 3. **Error Handling**: Use try/except blocks and provide meaningful error messages
-4. **Output to Files**: Write reports to the `reports` directory
+4. **Output to Files**: Write reports to the `reports` directory. Return the report and ASH writes it to
+   `ash.<extension>`; write any other file there with `write_report_file` and return its name from
+   `companion_file_names()`, so that a link already at that name stops the run before any reporter writes
 5. **Return Content**: Return the report content as a string
 6. **Use Model Methods**: Use the model's helper methods like `to_simple_dict()` and `to_flat_vulnerabilities()`
 
@@ -319,6 +321,50 @@ reporters:
       max_findings: 50
       output_file: custom-report.txt
 ```
+
+## Declaring destination options
+
+A reporter that sends findings somewhere, or writes them to a path its options
+name, declares those options in `destination_options`:
+
+```python
+from typing import ClassVar, Tuple
+
+
+@ash_reporter_plugin
+class WebhookReporter(ReporterPluginBase[WebhookReporterConfig]):
+    destination_options: ClassVar[Tuple[str, ...]] = ("webhook_url", "api_token")
+```
+
+List every option that chooses where findings are sent or written, or which
+credentials send them: an endpoint, a region, an account, a bucket, a profile, a
+token, an output path. Name each as its field in the options model. An alias of
+the field is covered as well. The default is `()`.
+
+When the config was built from a file inside the scanned tree (a discovered
+`.ash/.ash.yaml`, a `--config` inside the tree, an `extends` base, or
+`ASH_CONFIG`), or from a file an MCP client delivered, ASH takes these options from
+the trusted base instead: the defaults, an operator config outside the tree, and
+`--config-overrides`. A value such a file set is replaced, under any spelling of the
+reporter's section that ASH reads as this reporter's, and one warning names each
+option it ignored. The reporter's other options still apply from the file. ASH
+does this once it has imported your plugin module and before it builds any
+reporter, in a scan and in `ash report`. The built-in AWS reporters declare theirs
+the same way; see [Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
+A reporter that declares any destination option sends findings somewhere, so
+whether it runs is the operator's choice too, in both directions. Its `enabled`
+comes from the trusted base, or from the default of your config model's `enabled`
+when the trusted base sets none: such a file's `enabled: true` or `enabled: false`
+is replaced with a warning where it differs, and leaving the section out leaves the
+reporter as the trusted base has it. A reporter that declares no destination
+options writes only local files, and its `enabled` applies from the file.
+
+Under the MCP server, a delivered file that sets a declared option is scanned with
+the server's value rather than refused, because the server checks the file against
+`denied_paths` before it imports your plugin module. To have such a file refused,
+add the option to the profile's `global_settings.mcp.runtime_overrides.denied_paths`,
+for example `/reporters/webhook/options/webhook_url`.
 
 ## Testing Reporter Plugins
 

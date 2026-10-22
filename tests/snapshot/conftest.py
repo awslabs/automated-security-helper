@@ -352,6 +352,8 @@ _PINNED_UV_TOOL_VERSIONS = {
     "bandit": "9.0.1",
     "checkov": "9.0.2",
     "semgrep": "9.0.3",
+    "cfn-lint": "9.0.4",
+    "zizmor": "9.0.6",
 }
 _PINNED_UV_TOOL_VERSION_DEFAULT = "9.0.9"
 

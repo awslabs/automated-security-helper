@@ -1,3 +1,7 @@
+from pathlib import Path
+from typing import Optional
+
+
 class ScannerError(Exception):
     """Exception raised when scanner execution fails."""
 
@@ -23,6 +27,16 @@ class ASHConfigSourceError(ASHConfigValidationError):
     """
 
 
+class ASHConfigFileNotFoundError(ASHConfigSourceError):
+    """A config file that was named or discovered does not exist.
+
+    Raised for a missing path, a symbolic link to nothing, and an ``ASH_CONFIG``
+    naming a missing file. A subclass of ``ASHConfigSourceError`` so it refuses
+    the same way; distinct so that a caller reporting it (the MCP tools) can say
+    "not found" rather than "cannot be parsed".
+    """
+
+
 class ASHConfigInputNotPermittedError(ASHConfigSourceError):
     """A file in an ``extends`` chain is outside what the caller may read.
 
@@ -33,6 +47,67 @@ class ASHConfigInputNotPermittedError(ASHConfigSourceError):
     rather than as a malformed config. The message names the ``extends`` entry as
     written and never the resolved target, so it reads the same whether or not
     that target exists.
+    """
+
+
+class ASHConfigFieldDeniedError(ASHConfigValidationError):
+    """A config file an MCP client delivered sets a field the session's policy denies.
+
+    The policy is ``global_settings.mcp.runtime_overrides``' ``denied_paths`` and
+    ``denied_value_patterns``, the rules a client's ``patch_ops`` and
+    ``config_overrides`` are held to. A subclass of ``ASHConfigValidationError``
+    so every caller that refuses an invalid config refuses this one, and distinct
+    so the MCP tools can report it as a refusal naming the field.
+    """
+
+
+class ASHConfigPolicyUnreadableError(ASHConfigValidationError):
+    """The policy a client-delivered config is checked against cannot be established.
+
+    The profile the session bound is no longer registered, or the trusted config
+    has two sections that read as the same plugin. Raised only when the config
+    being resolved has a client-delivered file in its chain, so a scan that reads
+    no such file is unaffected.
+    """
+
+
+class ASHConfigUnsetVariableError(ASHConfigSourceError):
+    """A config file references ``${VAR}``, with no default, and ``VAR`` is unset.
+
+    Its text names the variable, as the file writes it, and the file that holds
+    the reference once the reader that opened it has said so; with ``VAR`` unset
+    there is no value to quote. A subclass of ``ASHConfigSourceError``, so every
+    caller that refuses a config that did not load refuses this one with exit 3.
+
+    ``variable`` is the name. ``config_file`` is the file holding the reference,
+    or None before a reader has named it. ``detail`` is the message without the
+    file, for a reader that names the file another way (the ``extends`` reader,
+    which does not quote a base's path).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        variable: str,
+        config_file: Optional[Path] = None,
+        detail: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.variable = variable
+        self.config_file = config_file
+        self.detail = message if detail is None else detail
+
+
+class ASHConfigEnvNotResolvedError(ASHConfigSourceError):
+    """A config file an MCP client delivered uses ``!ENV``.
+
+    Such a file does not resolve environment variables at all, and one that
+    uses ``!ENV`` is refused rather than read with the reference dropped; see
+    "Environment variables" in ``config/config_sources.py``. A subclass of
+    ``ASHConfigSourceError`` so every path that refuses a config that did not
+    load refuses this one, and distinct so ``ConfigValidator`` and the MCP tools
+    can report it as its own error type.
     """
 
 

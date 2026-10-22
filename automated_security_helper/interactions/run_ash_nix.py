@@ -21,8 +21,13 @@ from pathlib import Path
 from typing import List, Optional
 
 from automated_security_helper.core.constants import ASH_REPO_URL
+from automated_security_helper.utils.inner_run_outcome import OUTER_RUN_ID_ENV
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.subprocess_utils import find_executable
+from automated_security_helper.utils.python_child import python_code_argv
+from automated_security_helper.utils.subprocess_utils import (
+    child_environ,
+    find_executable,
+)
 
 # Recursion guard, following the existing ASH_IN_CONTAINER precedent. The inner invocation
 # is rewritten to --mode local, so this should never be observed as already set; it is
@@ -138,12 +143,40 @@ def rewrite_mode_args(argv: List[str]) -> List[str]:
     return out
 
 
+#: How the shell starts the inner scan: this interpreter, by absolute path, running
+#: the same entry point as the ``ash`` script, so the inner scan is the ASH that is
+#: running now. ``sys.argv[0]`` is set so its messages name ``ash``, not ``-c``.
+_INNER_ENTRY_POINT = (
+    "import sys; sys.argv[0] = 'ash'; "
+    "from automated_security_helper.cli.entrypoint import main; main()"
+)
+
+
+def _this_ash() -> List[str]:
+    """The command that starts the ASH running now inside the shell.
+
+    This ASH's interpreter rather than whichever ``ash`` comes first on the shell's
+    PATH, so the inner run is the same ASH as the outer one: the flake supplies
+    scanners, not ASH, and an older ``ash`` earlier on PATH would scan without
+    writing the completion record the outer process reads back
+    (utils/inner_run_outcome.py).
+
+    ``nix develop --command`` starts it in the scan's own directory, which ``-c``
+    puts first on ``sys.path``: an ``automated_security_helper/`` there would run in
+    place of ASH. The directory is left as it is, and the command drops that entry
+    (``utils/python_child.python_code_argv``). A directory ``PYTHONPATH`` names
+    stays on ``sys.path``, the working directory included: Python makes a ``.`` or
+    an empty entry there absolute, so no check of the entry tells it apart.
+    """
+    return python_code_argv(_INNER_ENTRY_POINT)
+
+
 def build_nix_command(
     flake_ref: str,
     inner_args: List[str],
     nix_executable: str,
 ) -> List[str]:
-    """Assemble the `nix develop ... --command ash ...` invocation."""
+    """Assemble the `nix develop ... --command <this ASH> ...` invocation."""
     return [
         nix_executable,
         "--extra-experimental-features",
@@ -151,7 +184,7 @@ def build_nix_command(
         "develop",
         flake_ref,
         "--command",
-        "ash",
+        *_this_ash(),
         *inner_args,
     ]
 
@@ -160,8 +193,12 @@ def run_ash_nix(
     argv: Optional[List[str]] = None,
     flake_ref: Optional[str] = None,
     debug: bool = False,
+    outer_run_id: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     """Re-execute this scan inside a Nix shell holding the pinned scanners.
+
+    ``outer_run_id`` is handed to the inner run, which writes it into its results
+    file when it completes (utils/inner_run_outcome.py).
 
     Raises:
         NixModeRefused: if `nix` is not installed, or if called from inside a Nix-mode run.
@@ -190,12 +227,18 @@ def run_ash_nix(
     inner_args = rewrite_mode_args(list(argv if argv is not None else sys.argv[1:]))
     cmd = build_nix_command(resolved_ref, inner_args, nix_executable)
 
-    env = os.environ.copy()
+    # The environment every child of a scan gets, copied under ENVIRON_LOCK
+    # (utils/process_env.snapshot_environ, through child_environ): no PATH entry
+    # inside the scanned tree unless the operator allowed in-tree tools. nix
+    # develop prepends the shell's packages to this PATH.
+    env = child_environ()
     env[ASH_IN_NIX_ENV_VAR] = "1"
     # The flake already supplies every scanner, so stop the thirteen scanners that prefer
     # `uv tool install` from fetching their own copies and shadowing the pinned ones.
     # utils/uv_tool_runner.py takes its skip-installation path when this is set.
     env["ASH_OFFLINE"] = "YES"
+    if outer_run_id is not None:
+        env[OUTER_RUN_ID_ENV] = outer_run_id
 
     ASH_LOGGER.info(f"Entering Nix shell from flake: {resolved_ref}")
     ASH_LOGGER.debug(f"Nix command: {' '.join(cmd)}")
@@ -208,6 +251,9 @@ def run_ash_nix(
     # into an error.
     return subprocess.run(  # nosec B603 - argument list is built here, not shell-parsed
         cmd,
+        # The inner scan reads nothing from standard input; nix and the scanners
+        # it starts get an empty one, not this process's.
+        stdin=subprocess.DEVNULL,
         env=env,
         check=False,
         text=True,

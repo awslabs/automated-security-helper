@@ -132,6 +132,48 @@ def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
     return fnmatch.fnmatchcase(finding_norm, pattern_norm)
 
 
+def ignore_path_pattern(pattern: str) -> str:
+    """The pattern a global ignore path's ``path`` is matched as.
+
+    One ending in ``/`` (or ``\\``) names a directory and ignores what is inside
+    it, so ``vendor/`` is matched as ``vendor/*/**``. A file's path never ends in a
+    slash, so before this ``vendor/`` matched nothing, though it is how a
+    ``.gitignore`` names a directory. Anchored like every ignore path: ``vendor/``
+    is the top-level directory, and ``**/vendor/`` one at any depth. A pattern that
+    is only slashes is left alone, so ``/`` keeps matching nothing instead of
+    becoming ``**``; any other pattern is returned as it is.
+
+    Not ``vendor/**``: a trailing ``**`` also matches no component at all, so
+    that form covers a FILE named ``vendor`` as well, and ``**/.*/`` covered
+    every dotfile (``.env``, ``app/config/.npmrc``), which the detect-secrets
+    pre-filter then stopped scanning. The ``*`` requires one component below
+    the directory.
+
+    For ignore paths only. A suppression's path ending in ``/`` keeps its literal
+    meaning, which matches no file (see
+    ``suppression_matcher.warn_unmatched_directory_suppressions``).
+    """
+    if pattern.endswith(("/", "\\")):
+        directory = pattern.rstrip("/\\")
+        if directory:
+            return f"{directory}/*/{_DOUBLE_STAR}"
+    return pattern
+
+
+def directory_spelling(directory: str, *, ignore_path: bool) -> str:
+    """How to write "every file inside ``directory``", for advice ASH prints.
+
+    One spelling for one meaning, so the config lint, ``ash config validate`` and
+    the warning after the scan agree. For an ignore path, ``<dir>/``, which
+    ``ignore_path_pattern`` reads as what is inside the directory. For a
+    suppression path, whose trailing slash is literal, ``<dir>/**/*``: every file
+    below the directory and not a path named exactly ``<dir>``, which ``<dir>/**``
+    would also match.
+    """
+    directory = directory.rstrip("/\\")
+    return f"{directory}/" if ignore_path else f"{directory}/**/*"
+
+
 def match_glob(path: str, pattern: str) -> bool:
     """Public entry point: case-insensitive glob match with ``**`` support."""
     return _path_pattern_matches(path, pattern)

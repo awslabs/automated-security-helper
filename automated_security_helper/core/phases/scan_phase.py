@@ -1,7 +1,8 @@
 """Implementation of the Scan phase."""
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Set, Tuple
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
@@ -16,7 +17,11 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.base.uv_tool_mixin import deferred_tool_version_probes
 from automated_security_helper.utils.sandbox.scope import plugin_probe_scope
+from automated_security_helper.utils.subprocess_utils import (
+    recording_in_tree_refusals,
+)
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
 )
@@ -117,11 +122,34 @@ def _scanner_display_name(plugin_instance) -> str:
     return plugin_instance.__class__.__name__.lower()
 
 
+def _unconstructed_scanner_name(plugin_config: Any, plugin_class: type) -> str:
+    """The name a scanner that did not construct is recorded under.
+
+    Its section's ``name``, read from the dict ``get_plugin_config`` returns as
+    well as from a model, else the name the scanner declares for itself. Read
+    with ``getattr`` alone, a dict section never gave a name, so the row went
+    under the lowercased class name (``snykcodescanner`` for ``snyk-code``),
+    which ``--exclude-scanners``, the shard partition and the reports do not use.
+    """
+    if isinstance(plugin_config, dict):
+        name = plugin_config.get("name")
+    else:
+        name = getattr(plugin_config, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return plugin_config_key(plugin_class)
+
+
 class ScanPhase(EnginePhase):
     """Implementation of the Scan phase."""
 
     def __init__(
-        self, plugin_context, plugins=None, progress_display=None, asharp_model=None
+        self,
+        plugin_context,
+        plugins=None,
+        progress_display=None,
+        asharp_model=None,
+        plugin_filter=None,
     ):
         """Initialize the ScanPhase with validation manager.
 
@@ -130,8 +158,15 @@ class ScanPhase(EnginePhase):
             plugins: List of plugins to use
             progress_display: Progress display to use for reporting progress
             asharp_model: AshAggregatedResults to update with results
+            plugin_filter: The event handlers this phase's notifications reach
         """
-        super().__init__(plugin_context, plugins or [], progress_display, asharp_model)
+        super().__init__(
+            plugin_context,
+            plugins or [],
+            progress_display,
+            asharp_model,
+            plugin_filter=plugin_filter,
+        )
         self.validation_manager = ScannerValidationManager(plugin_context)
         # Set when this run is one shard of several; read by the caller to stamp
         # provenance onto the results so `ash merge` can verify coverage.
@@ -293,6 +328,10 @@ class ScanPhase(EnginePhase):
 
             # Create scanner instances for validation and processing
             scanner_instances = []
+            # Names of scanners whose constructor raised. They resolved: the ERROR row
+            # recorded for each is the result, so a selection naming one is not
+            # unresolved and must not be told its module is missing.
+            construction_failed: Set[str] = set()
             if scanner_classes:
                 ASH_LOGGER.debug(
                     f"Creating instances for {len(scanner_classes)} scanner classes"
@@ -328,7 +367,14 @@ class ScanPhase(EnginePhase):
 
                         # Create scanner instance. Under a sandbox, the tool probes
                         # some scanners run while they are constructed run sandboxed.
-                        with plugin_probe_scope(plugin_class, self.plugin_context):
+                        # Their `uv tool run` version probes are deferred until the
+                        # scanner is selected (see the dependency check below): a
+                        # scanner this run will not execute must not be resolved
+                        # against the package index.
+                        with (
+                            plugin_probe_scope(plugin_class, self.plugin_context),
+                            deferred_tool_version_probes(),
+                        ):
                             plugin_instance = plugin_class(
                                 config=plugin_config,
                                 context=self.plugin_context,
@@ -363,9 +409,10 @@ class ScanPhase(EnginePhase):
                         # MISSING because it is reached before any dependency
                         # question is asked; the two paths are told apart by which
                         # status they carry.
-                        failed_name = (
-                            getattr(plugin_config, "name", None) or plugin_name
+                        failed_name = _unconstructed_scanner_name(
+                            plugin_config, plugin_class
                         )
+                        construction_failed.add(failed_name.lower().strip())
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
                             f"did not run: {type(e).__name__}: {e}"
@@ -455,23 +502,62 @@ class ScanPhase(EnginePhase):
             # warns and continues: such a run still scans and reports what did
             # resolve, so it is not the silent-zero case, and a CI matrix whose
             # runners load different plugin modules can produce that shape
-            # legitimately. The unresolved name is named either way.
+            # legitimately. The unresolved name is named either way, and a name
+            # that belongs to a community module ASH ships but that this run did
+            # not import is named with the module to add, in the warning and in
+            # the refusal alike.
             if enabled_scanners and scanner_instances:
                 registered_names = {
                     _scanner_display_name(instance).lower().strip()
                     for instance in scanner_instances
                 }
+                known_names = registered_names | construction_failed
                 requested = [(name, name.lower().strip()) for name in enabled_scanners]
-                unresolved = [
-                    name for name, key in requested if key not in registered_names
-                ]
+                unresolved = [name for name, key in requested if key not in known_names]
+                from automated_security_helper.core.community_scanners import (
+                    community_module_for,
+                )
+
+                # "Not loaded" means no scanner class handed to this phase comes
+                # from the module. A module that did supply this run's scanners,
+                # but not the requested name, falls through to the generic
+                # message: the module hint would send the operator to add what is
+                # already there. Read from the classes, not sys.modules, because
+                # anything in the process may have imported a module this run did
+                # not list.
+                loaded_modules = {
+                    str(getattr(cls, "__module__", "")) for cls in scanner_classes
+                }
+                unloaded: Dict[str, str] = {}
+                for name in unresolved:
+                    module = community_module_for(name)
+                    if module and not any(
+                        m == module or m.startswith(module + ".")
+                        for m in loaded_modules
+                    ):
+                        unloaded[name] = module
+                hint = ""
+                if unloaded:
+                    modules = sorted(set(unloaded.values()))
+                    hint = (
+                        f" {', '.join(sorted(unloaded))} "
+                        f"{'is a community scanner' if len(unloaded) == 1 else 'are community scanners'}"
+                        " whose plugin module is not loaded. Add "
+                        f"{', '.join(modules)} to ash_plugin_modules in the ASH "
+                        "config, or pass "
+                        + " ".join(f"--ash-plugin-modules {m}" for m in modules)
+                        + "."
+                    )
                 if unresolved:
                     ASH_LOGGER.warning(
                         "No registered scanner matches "
                         f"{', '.join(sorted(unresolved))}. Registered scanners: "
                         f"{', '.join(sorted(registered_names))}"
+                        + (f".{hint}" if hint else "")
                     )
-                if not any(key in registered_names for _, key in requested):
+                if not any(key in known_names for _, key in requested):
+                    if hint:
+                        raise ScannerSelectionError(hint.strip())
                     raise ScannerSelectionError(
                         "None of the requested scanners exist: "
                         f"{', '.join(sorted(unresolved))}. "
@@ -738,23 +824,42 @@ class ScanPhase(EnginePhase):
 
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
-                        with plugin_probe_scope(plugin_instance, self.plugin_context):
+                        # Whatever tool lookups the check makes, a refused in-tree
+                        # copy is what the MISSING row says, with its path and the
+                        # remedy, rather than "Dependencies not satisfied". Read here
+                        # so every scanner's own validate_plugin_dependencies counts.
+                        with (
+                            plugin_probe_scope(plugin_instance, self.plugin_context),
+                            recording_in_tree_refusals() as in_tree_reasons,
+                        ):
+                            # The version probe construction deferred, now that this
+                            # scanner is selected. getattr: a scanner plugin need not
+                            # inherit PluginBase (see unsupported_platform_reason above).
+                            resolve_version = getattr(
+                                plugin_instance, "resolve_deferred_tool_version", None
+                            )
+                            if callable(resolve_version):
+                                resolve_version()
                             plugin_instance.dependencies_satisfied = (
                                 plugin_instance.validate_plugin_dependencies()
                             )
                         if not plugin_instance.dependencies_satisfied:
+                            missing_reason = "; ".join(in_tree_reasons)
                             ASH_LOGGER.warning(
                                 f"Scanner {display_name} dependencies are not satisfied, marking as MISSING"
+                                + (f": {missing_reason}" if missing_reason else "")
                             )
                             # Track dependency error for validation
                             dependency_error_scanners[display_name] = [
-                                "Dependencies not satisfied"
+                                missing_reason or "Dependencies not satisfied"
                             ]
 
                             # Create a ScanResultsContainer with dependencies_satisfied=False
                             results_container = ScanResultsContainer.for_missing_deps(
                                 display_name
                             )
+                            if missing_reason:
+                                results_container.add_error(missing_reason)
 
                             # Process the container through _process_results to store duration info
                             aggregated_results = self._process_results(
@@ -770,6 +875,11 @@ class ScanPhase(EnginePhase):
                                     status=ScannerStatus.MISSING,
                                     dependencies_satisfied=False,
                                     excluded=False,
+                                    **(
+                                        {"missing_reason": missing_reason}
+                                        if missing_reason
+                                        else {}
+                                    ),
                                 )
                             )
 
@@ -1538,7 +1648,10 @@ class ScanPhase(EnginePhase):
                     completed=10,
                     description=f"[blue]({scanner_name}) Queued scan...",
                 )
+                # With a copy of this context, which carries the scanned-tree scope
+                # (utils/subprocess_utils.scanning_tree) into the scanner's thread.
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     self._safe_execute_scanner,
                     scanner_name,
                     scanner_plugin,

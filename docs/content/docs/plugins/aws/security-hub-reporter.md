@@ -15,6 +15,8 @@ The Security Hub Reporter integrates ASH scan results with AWS Security Hub by:
 
 ## Configuration
 
+This reporter is disabled by default: it sends findings to AWS with the host's credentials, so it runs only when your config sets `enabled: true` for it (see [Enabling the AWS reporters](index.md#enabling-the-aws-reporters)).
+
 ### Basic Configuration
 
 ```yaml
@@ -48,6 +50,30 @@ reporters:
       aws_region: "us-west-2"
       aws_profile: "production"
 ```
+
+### Where these options can be set
+
+`aws_region`, `aws_profile` and `account_id` choose where findings are sent and which
+credentials send them, and `findings_scope` and `archive_resolved_findings` choose
+which findings the reporter imports and whether it archives the ones that are
+resolved, so they are the operator's. They take effect only from the
+defaults (`AWS_REGION`, `AWS_DEFAULT_REGION` and `AWS_PROFILE`), `--config-overrides`,
+or a config file outside the scanned tree. A config file inside the scanned tree, or
+one an MCP client delivered, cannot set them: from the tree they are ignored with a
+warning, and under the MCP server they are default `denied_paths` entries, so a
+delivered config that changes one is refused.
+
+Whether the reporter runs is the operator's too: a config file inside the scanned tree
+neither turns it on nor turns it off. Under the MCP server every setting of the
+section is a default `denied_paths` entry (`/reporters/aws-security-hub/**`), so a
+delivered config that turns the reporter on, or changes any of its settings, is
+refused. A client's `enabled: false` is not refused, but the server's `enabled`
+applies. See
+[Settings only the operator can set](index.md#settings-only-the-operator-can-set).
+
+The reporter is in the `ash_aws_plugins` package, which only the operator can load,
+with `--ash-plugin-modules`, `ASH_PLUGIN_MODULES` or the operator's own config, never
+a repository's. See [Loading the plugins](index.md#loading-the-plugins).
 
 ## Prerequisites
 

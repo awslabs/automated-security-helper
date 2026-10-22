@@ -16,9 +16,22 @@ patterns mode, version-gated `--metrics`). Everything else lives here.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
-from typing import ClassVar, Generic, List, Literal, Optional, Tuple, TypeVar, final
+from typing import (
+    Any,
+    ClassVar,
+    Generic,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TypeVar,
+    final,
+)
+
+from pydantic import PrivateAttr
 
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -28,18 +41,46 @@ from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
+    IgnorePathWithReason,
     ToolExtraArg,
 )
+from automated_security_helper.utils.link_exclusions import grep_ignore_names
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
 
 
+#: The paths semgrep and opengrep skip by default when no .semgrepignore is
+#: read. Passed as --exclude with --x-ignore-semgrepignore-files, so that a
+#: repository's own .semgrepignore is not honored and the default coverage stays
+#: the same. Measured: each entry here was skipped by both tools' defaults, and
+#: .semgrep and .semgrep_logs, which semgrep's documentation also lists, were not.
+SEMGREP_DEFAULT_IGNORES: tuple[str, ...] = (
+    "node_modules/",
+    "build/",
+    "dist/",
+    "vendor/",
+    ".env/",
+    ".venv/",
+    ".tox/",
+    "*.min.js",
+    ".npm/",
+    ".yarn/",
+    "test/",
+    "tests/",
+    "*_test.go",
+)
+
+
 class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     """Shared scaffolding for semgrep and opengrep scanners."""
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    # The names the current target's command excludes for the global ignore paths
+    # (_execute_scan), which _post_process_sarif tells apart from other excludes.
+    _ignore_exclude_names: List[str] = PrivateAttr(default_factory=list)
 
     # ---------------------------------------------------------------
     # Hooks subclasses override
@@ -173,6 +214,25 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         else:
             self._configure_online_mode()
 
+        # A .semgrepignore in the scanned tree is the repository's own choice of
+        # what to leave out, and both tools honor one on their own: semgrep from
+        # the scan root or any directory up to the repository root, opengrep from
+        # its working directory, which is the source directory. Neither is read.
+        # Ignoring the files also drops each tool's built-in list of paths it
+        # skips, so that list is passed back as --exclude patterns, keeping what
+        # a scan covers unchanged (measured against semgrep 1.180 and opengrep
+        # 1.15.1 and 1.30.0: the same files are reported as with no
+        # .semgrepignore at all).
+        self.args.extra_args = [
+            a for a in self.args.extra_args if a.key != "--x-ignore-semgrepignore-files"
+        ]
+        self.args.extra_args.append(
+            ToolExtraArg(key="--x-ignore-semgrepignore-files", value=None)
+        )
+        for pattern in SEMGREP_DEFAULT_IGNORES:
+            self.args.extra_args.append(ToolExtraArg(key="--exclude", value=pattern))
+        self._note_unhonored_semgrepignore()
+
         # Exclude patterns / rules / severity filters — verbatim across both
         # scanners.
         for pattern in getattr(opts, "exclude", []) or []:
@@ -188,6 +248,57 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         self.args.extra_args.append(ToolExtraArg(key="--sarif", value=""))
 
         return super()._process_config_options()
+
+    def _note_unhonored_semgrepignore(self) -> None:
+        """Say in the results that a ``.semgrepignore`` the tool would have read was not.
+
+        Looked for where either tool would read one: the source directory and
+        each directory above it up to the repository root (the first one holding
+        ``.git``). Only its presence is checked; the file is not read. The note
+        is a config warning, which the orchestrator records in the results as a
+        ``config_warning`` validation checkpoint, once per file. A file an MCP
+        client delivered (``cli/mcp/sandbox.config_is_client_supplied``, judged by
+        its path, each symlink on the way and the file it resolves to) is named
+        as client-supplied.
+        """
+        # Imported here, as config/path_trust.py does: importing cli.mcp runs its
+        # __init__, which imports the config modules.
+        from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+        source = getattr(self.context, "source_dir", None)
+        if source is None:
+            return
+        found = []
+        directory = Path(os.path.abspath(source))
+        for candidate in (directory, *directory.parents):
+            ignore_file = candidate / ".semgrepignore"
+            if os.path.lexists(ignore_file):
+                found.append(ignore_file)
+            if os.path.lexists(candidate / ".git"):
+                break
+        config = getattr(self.context, "config", None)
+        warnings = getattr(config, "_resolution_warnings", None)
+        for ignore_file in found:
+            if config_is_client_supplied(ignore_file):
+                message = (
+                    f"{ignore_file.as_posix()} is client-supplied (an MCP client "
+                    "delivered it) and was not honored: ASH runs semgrep and opengrep "
+                    "with --x-ignore-semgrepignore-files and their default "
+                    "exclusions, so it does not leave files out. List them in "
+                    "global_settings.ignore_paths instead, where a client's entries "
+                    "apply marked client_supplied."
+                )
+            else:
+                message = (
+                    f"{ignore_file.as_posix()} was not honored: ASH runs semgrep and "
+                    "opengrep with --x-ignore-semgrepignore-files and their default "
+                    "exclusions, so a .semgrepignore in the scanned tree does not "
+                    "leave files out. List them in global_settings.ignore_paths "
+                    "instead."
+                )
+            if isinstance(warnings, list) and message not in warnings:
+                warnings.append(message)
+                self._plugin_log(message, level=logging.WARNING)
 
     def _configure_offline_mode(self) -> None:
         """Set --metrics off (when supported), validate cache dir, append cache --config."""
@@ -285,6 +396,26 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # is required here.
     # ---------------------------------------------------------------
 
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason] | None = None,
+        config: Any = None,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """The template scan, with this target's scanned-file count reset first.
+
+        ``targets_attempted`` is set from the tool's output (_post_process_sarif)
+        and read by the executor after every target, so a target that returns
+        before the tool runs (an empty directory) must not keep the last one's.
+        """
+        self.targets_attempted: Optional[int] = None
+        return super().scan(
+            target, target_type, global_ignore_paths, config, *args, **kwargs
+        )
+
     def _execute_scan(
         self,
         target: Path,
@@ -322,8 +453,158 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         target_results_dir.mkdir(exist_ok=True, parents=True)
 
+        # No --exclude for links leaving the target: semgrep 1.180.0 and opengrep
+        # 1.30.2 follow no link (measured), and their --exclude cannot name one
+        # path. semgrep matches a pattern against paths below its project root, the
+        # git work tree's root when the target is a directory inside one, so even a
+        # name nothing below the target has can be one of the target's own
+        # directories, and then it leaves out the whole target.
         final_args = self._resolve_arguments(target=target, results_file=results_file)
+
+        # The global ignore paths, as names that leave out nothing else (see
+        # utils/link_exclusions.grep_ignore_names); an ignored path no such name
+        # covers is still read, and ASH drops its findings. In the joined form,
+        # since a name can start with "-".
+        ignore_names = grep_ignore_names(
+            target, getattr(self.context, "source_dir", None), global_ignore_paths
+        )
+        self._ignore_exclude_names = ignore_names
+        if ignore_names:
+            head = [self.command, *self.subcommands]
+            insert_at = len(head) if final_args[: len(head)] == head else 1
+            final_args[insert_at:insert_at] = [
+                f"--exclude={name}" for name in ignore_names
+            ]
+
+        # The scanned and skipped paths, read after the run (_post_process_sarif).
+        # Not in patterns mode, which writes its JSON results instead of SARIF.
+        if not getattr(getattr(self.config, "options", None), "patterns", None):
+            paths_file = target_results_dir.joinpath(
+                f"{self.__class__.__name__}.paths.json"
+            )
+            paths_file.unlink(missing_ok=True)
+            head = [self.command, *self.subcommands]
+            insert_at = len(head) if final_args[: len(head)] == head else 1
+            final_args[insert_at:insert_at] = [
+                f"{_PATHS_OUTPUT_FLAG}={paths_file.as_posix()}",
+                "--verbose",
+            ]
 
         env_vars = self.extra_subprocess_env()
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
         return final_args, results_file, subprocess_env
+
+    def _post_process_sarif(self, sarif_report, final_args: List[str], target: Path):
+        """Record how many files the tool scanned, and refuse a scan of none.
+
+        semgrep 1.180.0 and opengrep 1.30.2 write ``paths.scanned`` to
+        ``--json-output``, and with ``--verbose`` also ``paths.skipped``, each with
+        its reason (measured). The count becomes ``targets_attempted``. None scanned
+        while files were skipped by ``--exclude`` (``cli_exclude_flags_match``) means
+        the patterns left out every file the tool found, so the scan says nothing
+        about them: that is an error, not a PASSED with no findings. None scanned and
+        none skipped that way means nothing below the target is in a language the
+        rules cover, which the executor grades SKIPPED (``targets_attempted`` 0). An
+        unreadable or absent file leaves the count unset (no claim).
+
+        Raises:
+            ScannerError: When ``--exclude`` left out every file the tool found.
+        """
+        paths = _read_paths_output(final_args)
+        if paths is not None:
+            scanned = paths.get("scanned")
+            skipped = paths.get("skipped")
+            scanned = scanned if isinstance(scanned, list) else []
+            skipped = skipped if isinstance(skipped, list) else []
+            if scanned:
+                self.targets_attempted = len(scanned)
+            else:
+                excluded = [
+                    entry
+                    for entry in skipped
+                    if isinstance(entry, dict)
+                    and entry.get("reason") == "cli_exclude_flags_match"
+                ]
+                # Files left out for the global ignore paths were left out on
+                # purpose, so a scan that found only those had nothing to scan.
+                ignored_names = set(self._ignore_exclude_names)
+                not_ignored = [
+                    entry
+                    for entry in excluded
+                    if not ignored_names.intersection(
+                        Path(str(entry.get("path", ""))).parts
+                    )
+                ]
+                if not_ignored:
+                    raise ScannerError(
+                        f"{self.command} scanned no file below "
+                        f"{Path(target).as_posix()}: its --exclude patterns left out "
+                        f"all {len(excluded)} files it found, so its result says "
+                        "nothing about them."
+                    )
+                self.targets_attempted = 0
+                if excluded:
+                    self._plugin_log(
+                        f"{self.command} scanned no file below "
+                        f"{Path(target).as_posix()}: every file it found is in "
+                        "global_settings.ignore_paths.",
+                        level=logging.INFO,
+                    )
+                    return super()._post_process_sarif(sarif_report, final_args, target)
+                reasons = sorted(
+                    {
+                        str(entry.get("reason"))
+                        for entry in skipped
+                        if isinstance(entry, dict) and entry.get("reason")
+                    }
+                )
+                self._plugin_log(
+                    f"{self.command} scanned no file below "
+                    f"{Path(target).as_posix()}: none is in a language its rules "
+                    "cover"
+                    + (f" (skipped: {', '.join(reasons)})" if reasons else "")
+                    + ".",
+                    level=logging.INFO,
+                )
+        return super()._post_process_sarif(sarif_report, final_args, target)
+
+
+#: The flag the scanned-paths JSON is written with (semgrep and opengrep alike).
+_PATHS_OUTPUT_FLAG = "--json-output"
+
+#: The largest scanned-paths JSON read.
+_PATHS_OUTPUT_READ_LIMIT = 64 * 1024 * 1024
+
+
+def _read_paths_output(final_args: List[str]) -> Optional[dict]:
+    """The ``paths`` object of the ``--json-output`` file named in ``final_args``.
+
+    None when no such flag was passed, or the file is missing, not a regular file,
+    larger than _PATHS_OUTPUT_READ_LIMIT, or not the JSON the tools write. Opened
+    without following a link at its name.
+    """
+    import json
+    import stat
+
+    prefix = f"{_PATHS_OUTPUT_FLAG}="
+    named = [arg[len(prefix) :] for arg in final_args if str(arg).startswith(prefix)]
+    if not named:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(named[-1], flags)
+    except OSError:
+        return None
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            status = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or status.st_size > _PATHS_OUTPUT_READ_LIMIT
+            ):
+                return None
+            data = json.loads(handle.read().decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    paths = data.get("paths") if isinstance(data, dict) else None
+    return paths if isinstance(paths, dict) else None

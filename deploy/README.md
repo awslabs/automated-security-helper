@@ -90,9 +90,9 @@ one structural one, both of which will cost you a failed plan if you guess:
 
 | Parameter | Applies to | Meaning |
 | --- | --- | --- |
-| `AshOfflineMode` | all | Run ASH with no network egress at scan time. Scanner vulnerability databases and rulesets are baked into the image at build time instead of fetched per scan. Trades image size and rebuild frequency for a scan that cannot fail on a network problem and cannot reach out from inside your account. |
-| `AshBaseConfigYaml` | image build | The contents of the `.ash.yaml` the deployment scans with, as a string, so the deployed configuration is part of the stack rather than something baked into the image. A repository's own `.ash.yaml` still applies on top of it. |
-| `AshVersion` | image build | The ASH version the image is built from. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. |
+| `AshOfflineMode` | all | Bake scanner databases and rulesets into the image at build time, so ASH does not fetch them per scan. Trades image size and rebuild frequency for a scan that does not fail on a ruleset or database download. It is not a network control: the CDK Fargate tasks keep TCP 443 egress through a NAT gateway, AgentCore runs in `PUBLIC` network mode, the CodeBuild projects have no VPC, and the Terraform Fargate module allows all egress. Confining what a scan can reach is VPC placement: the gate's `VpcId`, `VpcSubnetIds` and `ScanEgressCidr`, or the subnets and security groups you give the Terraform modules. |
+| `AshBaseConfigYaml` | image build | The contents of the `.ash.yaml` the deployment scans with, as a string, so the deployed configuration is part of the stack rather than something baked into the image. ASH uses one config, never a merge of two. When this is set, the CodeCommit gate and the pipeline shards scan with it and never read the repository's own `.ash.yaml`. The gate never reads the repository's ASH config at all: with this empty it scans with `{}` (ASH's defaults). This is ASH's config only; ASH still passes some scanners a config file committed in the scanned tree, such as an in-tree `bandit.yaml`. An MCP scan of a directory with its own `.ash.yaml` uses that file instead. |
+| `AshVersion` | image build | The ASH version the image is built from: a tag, a branch, or a full commit SHA. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. The build passes it to `git fetch` after `--`, so git always reads it as a ref, never as an option. |
 | `RebuildSchedule` | image build | How often the image is rebuilt. An image built once and never rebuilt ages, and the scanners inside it age with it — the tradeoff called out in the trust note below. Offline deployments need this most, because their vulnerability databases are only as fresh as the last build. |
 | `McpStatelessHttp` | MCP-serving targets | Whether the MCP server runs stateless. Defaults to true on AgentCore, and that default is not cosmetic — see [Why `McpStatelessHttp` defaults to true on AgentCore](#why-mcpstatelesshttp-defaults-to-true-on-agentcore). |
 | `McpAuthHeaderName` | MCP-serving targets | The header the MCP server requires on every request. Names the header only; the value is separate so the two can be rotated independently. |
@@ -227,7 +227,8 @@ means an incorrect reason is public — write it for a reviewer, not to silence 
   whether the input contracts work.
 
   That gap is covered separately, by `terraform/tests/validate-inputs.sh`, which
-  the gate runs after the per-module init. It works without credentials because
+  the gate runs after the per-module init, followed by each module's
+  `terraform test` suite against mocked providers. It works without credentials because
   Terraform evaluates input variable validation before it initializes the
   provider: a plan carrying a deliberately invalid value fails on the rule's own
   `error_message` and never reaches AWS. Measured with every `AWS_*` variable

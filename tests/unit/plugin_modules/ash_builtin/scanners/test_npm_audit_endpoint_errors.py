@@ -407,9 +407,10 @@ def test_one_failed_lockfile_fails_the_scan_but_every_lockfile_is_audited(
     assert "ECONNREFUSED" in message, message
 
 
-def test_offline_keeps_its_existing_behaviour(plugin_context, caplog):
-    """Offline, an unreachable advisory source is expected and the scan goes on
-    as before; the warning says which lockfile was not audited."""
+def test_offline_audits_nothing_and_records_the_lockfile(plugin_context, caplog):
+    """Offline, npm audit cannot reach the advisory service, so no audit runs: the
+    lockfile is recorded as not audited, a warning names it, and scan() returns False,
+    which the executor records MISSING."""
     scanner = _scanner(plugin_context, offline=True)
     _project(plugin_context.work_dir)
 
@@ -419,15 +420,21 @@ def test_offline_keeps_its_existing_behaviour(plugin_context, caplog):
             "_run_subprocess",
             autospec=True,
             side_effect=_respond(_npm(CONNECTION_REFUSED)),
-        ),
+        ) as run,
         caplog.at_level(logging.WARNING),
     ):
         report = scanner.scan(target=plugin_context.work_dir, target_type="converted")
 
-    assert report.runs[0].results == []
+    started = [
+        call.kwargs.get("command") or call.args[1] for call in run.call_args_list
+    ]
+    assert [command for command in started if "audit" in command] == [], started
+    assert report is False
+    assert [entry["path"] for entry in scanner.inputs_not_scanned] == [
+        "package-lock.json"
+    ]
     assert any(
-        "npm-audit (offline) could not audit 1 lockfile(s)" in r.message
-        for r in caplog.records
+        "Offline, npm-audit audits nothing" in r.message for r in caplog.records
     ), [r.message for r in caplog.records]
 
 

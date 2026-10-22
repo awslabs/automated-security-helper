@@ -51,11 +51,27 @@ list, a scalar, ``null`` -- replaces what was there. Lists are replaced, never
 concatenated, so a child that writes ``suppressions`` drops its base's
 suppressions; to keep them and add more, use a ``patch`` ``add`` at
 ``/global_settings/suppressions/-``. To delete a key a base set, use a ``patch``
-``remove``. Keys that differ only in ``-`` versus ``_`` are one key, the same
-equivalence ``--config-overrides`` uses (``_resolve_dict_key``), so a base that
-writes ``cdk-nag`` and a child that writes ``cdk_nag`` merge instead of standing
-side by side. JSON-Patch pointers are matched to the document's own spelling
-the same way.
+``remove``. JSON-Patch pointers are matched to the document's own spelling,
+where a key differs only in ``-`` versus ``_`` (``_resolve_dict_key``).
+
+Spellings: a setting is merged as the config model reads it (``deep_merge``
+with the model). Where the model reads a field under two spellings, its name
+and its alias (``cdk_nag`` and ``cdk-nag``), both are one setting: each
+document's spellings are folded as the model folds them, the child's result is
+merged over the base's, and the result is written once, under the alias. A
+spelling the model does not read (``global-settings`` for ``global_settings``)
+in the base is left as it is, so it cannot take the child's value away from the
+setting. One in the child still reaches the base's spelling of the setting, as
+keys differing only in ``-`` versus ``_`` always did, unless the child also
+sets the setting under a spelling the model reads, which wins. Two
+spellings of a plugin's section in ``scanners``, ``reporters`` or
+``converters`` that ``get_plugin_config`` reads for the same plugin
+(``plugin_key_lookup_names``: ``BedrockSummary`` and
+``bedrock-summary-reporter``) are one section, written under the child's
+spelling. Keys inside a section whose model is not known (a plugin's own
+section) keep the older rule: keys that differ only in ``-`` versus ``_`` are
+one key. Workspace mode merges the operator's ``--config`` over a project's
+config by the same rules (``resolve_config``'s ``overlay_config_path``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
@@ -75,7 +91,15 @@ stays inside the root is fine. One that leaves it is refused, and so is a
 symlink inside the root whose target is outside. The root is the scan's source
 directory when the root config is inside it, otherwise the root config's own
 directory (the parent of ``.ash/`` for a file in ``.ash/``); see
-``default_confinement_root``.
+``default_confinement_root``. A root config reached through a link an MCP
+client delivered is placed where that link sits for this, not where it leads,
+so a named link in a delivered tree cannot extend a file beside its target.
+
+A file is judged by every path it was reached by
+(``ResolvedConfigDocument.names``), and a base also by the paths of the files
+above it, since the file that names a base chose it: a base of a file a client
+delivered, or of a file a client's link reaches, is the client's wherever it
+is.
 
 A caller can narrow that further with ``permit_base``, a predicate every base
 must also pass after its symlinks are resolved. The MCP server passes one built
@@ -86,8 +110,30 @@ consulted before the confinement root, and its refusal,
 ``ASHConfigInputNotPermittedError``, names the ``extends`` entry as written and
 not the path it resolved to. Without a predicate the rules above are unchanged.
 
+Discovery takes the same predicate (``discover_config_source(..., permit=)``).
+A source found in the scanned directory can be a symbolic link to any file, and
+discovery reads ``pyproject.toml`` to look for its table, so every source that
+exists is checked by the path it resolves to before anything opens it. A refused
+one raises ``ASHConfigInputNotPermittedError`` naming the source as found, so the
+refusal reads the same whether its target is missing, unreadable or readable.
+
+The same predicate is applied to the file discovery selects, when a caller
+passes one (``check_discovered_source``). The directory searched is one the
+caller may read, but a file found there may be a symlink to a file elsewhere,
+and reading that file would let the caller choose a file on the host. The
+MCP server's ``get_config`` already checks a file it finds this way. The refusal
+names the file as found, not the file it resolves to. Discovery looks only at
+whether each candidate exists before the predicate is applied to it; a
+``pyproject.toml`` is read for its ``[tool.ash]`` table only after it passed.
+
 Bounds
 ------
+Every config file is opened without blocking and read only when the opened file
+is a regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES`` of it
+(``read_config_bytes``). A FIFO or a device at a config name, including one
+swapped in after a caller checked the name, is refused rather than blocking the
+scan or being read until memory runs out.
+
 A file that appears twice on its own chain is a cycle and fails with the chain
 printed. The same file reached on two branches (a diamond) is not a cycle. A
 chain deeper than ``ASH_CONFIG_EXTENDS_MAX_DEPTH`` fails, and so does reading
@@ -103,45 +149,114 @@ constructor calls), and JSON with no interpolation, as before. The
 ``ASH_CONFIG_ENV_VAR_PREFIX`` / ``ASH_CONFIG_ENV_VAR_ALLOWLIST`` bound therefore
 holds for every value in the merged result, whichever file it came from.
 
+Some files resolve no environment variable at all, and one of them that uses
+``!ENV`` (tagged, a plain ``${VAR:default}`` scalar, or a TOML string starting
+with one) is refused with ``ASHConfigEnvNotResolvedError`` naming the file and
+the line or key. Which files is a ``RefuseEnv`` predicate the caller passes to
+``read_config_file`` and ``resolve_config_document``; ``env_refused_for`` gives
+the MCP server's two:
+
+* For a remote caller (``cli/mcp/sandbox.caller_is_remote``), every file the
+  operator did not set aside: anything outside ``ASH_MCP_ALLOWED_CONFIG_ROOTS``
+  except the profile files the server writes in the calling session's
+  ``config/`` directory (``cli/mcp/sandbox.client_named_config_is_untrusted``).
+  That covers a path the
+  client names, a file discovered in a directory it names, and a scan target's
+  own config, as well as anything it delivered.
+* For any other caller, the CLI included, and the default when none is passed:
+  a file an MCP client delivered (``cli/mcp/sandbox.config_is_client_supplied``),
+  that is anything under the MCP workspace root except the profile files the
+  server writes in the sessions' ``config/`` directories, judged on the path as
+  named and on the file it resolves to. A local stdio caller launched the server and holds its
+  environment already, so its own repository config keeps ``!ENV``.
+
+``validate_config``'s ``config_content`` from a remote caller is refused
+wherever it is written (``refuse_env_everywhere``). Each base is judged by the
+same predicate, on the path its ``extends`` entry spells and on the file that
+resolves to, and every base of a refused file is refused with it: the file that
+names a base is what chose it.
+
+The bound above cannot cover this case. There the variables are the operator's
+own, set wherever ASH runs; here they are the MCP server's, and a remote client
+reads the result back (``get_config`` returns the resolved config, and a scan's
+results carry it). Refused rather than left as written, because a value that
+silently stays a literal is a config that is not what either side meant, and
+the other refusals for delivered configs work the same way. A config the CLI
+reads keeps ``!ENV`` exactly as before.
+
 Failure
 -------
 Every failure here raises ``ASHConfigSourceError``, which ``resolve_config``
-re-raises instead of falling back to the default config. A root config file
-that fails to parse as YAML or JSON keeps its existing behavior (default config
-plus a resolution warning); a base that fails to parse is an error, because the
-file that names it was not loaded as written.
+re-raises instead of falling back to the default config. A root YAML or JSON
+file that cannot be read or parsed raises what the reader raised;
+``resolve_config.read_config_document`` turns that into an
+``ASHConfigSourceError`` too, so a root file that does not load refuses the
+scan just as a base that does not load does. Neither is replaced by the
+defaults, which would scan with the file's suppressions and settings off.
+
+Discovery selects a config name that exists, not only one that is a regular
+file: a dangling symbolic link or a directory at ``.ash/.ash.yaml`` is selected
+and then refused when it is read, rather than skipped as though the repository
+had no config. A ``pyproject.toml`` that cannot be read refuses the same way
+when it would be the selected source, because whether it holds a ``[tool.ash]``
+table cannot be told. Discovery opens ``pyproject.toml`` to look for that table
+only when it is a regular file; one that is not is told by its type and never
+opened (``_pyproject_is_a_source``).
 """
 
 from __future__ import annotations
 
 import copy
+import errno
+import functools
+import io
 import json
 import os
 import re
-from dataclasses import dataclass, field
+import stat
+import types
+import typing
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 # jsonpatch ships no type information (no py.typed, no stubs package).
 import jsonpatch  # type: ignore[import-untyped]
 import yaml
 
+from pydantic import BaseModel
+
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
+    AshConfig,
+    EnvReferenceNotResolved,
+    _PluginConfigSegment,
     load_yaml_config,
+    plugin_key_lookup_names,
     resolve_env_references,
 )
 from automated_security_helper.core.constants import (
     ASH_CONFIG_EXTENDS_MAX_DEPTH,
     ASH_CONFIG_EXTENDS_MAX_FILES,
     ASH_CONFIG_FILE_NAMES,
+    ASH_CONFIG_MAX_FILE_BYTES,
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigEnvNotResolvedError,
+    ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
     ASHConfigSourceError,
+    ASHConfigUnsetVariableError,
 )
+from automated_security_helper.config.environment_record import (
+    UNKNOWN_INDEX,
+    EnvironmentReference,
+    environment_references,
+)
+from automated_security_helper.utils.display_text import escape_controls
+from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
 
 # tomllib is stdlib only from Python 3.11; requires-python starts at 3.10, so
@@ -171,6 +286,14 @@ PATCH_KEY = "patch"
 #: Decides whether one resolved base path may be read. True permits it. See
 #: "Base paths" in the module docstring.
 PermitBase = Callable[[Path], bool]
+
+#: Decides whether one config file may not resolve ``!ENV``. True refuses it. See
+#: "Environment variables" in the module docstring.
+RefuseEnv = Callable[[Path], bool]
+
+#: Decides whether one config file is the operator's, so its relative paths are
+#: taken from its directory (``config/operator_paths.py``). True anchors them.
+AnchorPaths = Callable[[Path], bool]
 
 SOURCE_KIND_EXPLICIT = "explicit"
 SOURCE_KIND_DEDICATED = "dedicated"
@@ -225,17 +348,102 @@ def is_pyproject(path: Path) -> bool:
     return Path(path).name == ASH_PYPROJECT_FILE_NAME
 
 
-def _read_toml_text(path: Path) -> str:
+def is_regular_file(path: Path) -> bool:
+    """Whether `path` leads to a regular file; False for any error.
+
+    os.stat rather than Path.is_file: before Python 3.14, is_file raises for an
+    error other than "not found" (a directory above that cannot be searched),
+    which let a bare OSError out of a check that only meant to ask.
+    """
+    try:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        # ValueError: a path with a NUL in it.
+        return False
+
+
+FileIdentity = Tuple[int, int]
+
+
+def file_identity(path: Path) -> Optional[FileIdentity]:
+    """(device, inode) of the file `path` leads to now, or None when it leads nowhere.
+
+    Taken when a caller checks a config path, and handed to ``read_config_bytes``
+    as ``expect``, so the file read is the file that was checked.
+    """
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return info.st_dev, info.st_ino
+
+
+def read_config_bytes(path: Path, expect: Optional[FileIdentity] = None) -> bytes:
+    """A config file's bytes; see "Bounds" in the module docstring.
+
+    Opened with ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and
+    ``O_NOCTTY``, so a tty swapped in at the name cannot become the controlling
+    terminal of a process that has none (a daemonized MCP server). Checked with
+    ``fstat`` on the open descriptor, so what is read is the regular file that was
+    opened and not whatever the name pointed at when a caller checked it. With
+    ``expect`` (from ``file_identity`` at the caller's check), the opened file's
+    device and inode must be those, so a file replaced between a check and this
+    read is refused rather than read. Raises ``OSError`` for anything else, and
+    ``ASHConfigSourceError`` for a file longer than ``ASH_CONFIG_MAX_FILE_BYTES``.
+    """
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY | nonblock | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
+    )
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", os.fspath(path))
+        if expect is not None and (opened.st_dev, opened.st_ino) != expect:
+            raise OSError(
+                errno.ESTALE,
+                "changed after it was checked, so it is not read",
+                os.fspath(path),
+            )
+        if nonblock:
+            # O_NONBLOCK was for the open. A regular file is then read normally:
+            # on some filesystems a non-blocking read of one can return early.
+            os.set_blocking(fd, True)
+        limit = ASH_CONFIG_MAX_FILE_BYTES
+        chunks: List[bytes] = []
+        remaining = limit + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(remaining, 1 << 20))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    finally:
+        os.close(fd)
+    if remaining <= 0:
+        raise ASHConfigSourceError(
+            f"{Path(path).as_posix()} is larger than {limit} bytes, the most ASH "
+            "reads from one config file."
+        )
+    return b"".join(chunks)
+
+
+def _read_toml_text(path: Path, expect: Optional[FileIdentity] = None) -> str:
     """A TOML file's text. A leading UTF-8 byte order mark is dropped, since
     tomllib rejects it and editors on some platforms write one."""
-    text = Path(path).read_text(encoding="utf-8")
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
     return text.removeprefix("\ufeff")
 
 
 def _tool_ash_line(path: Path) -> Optional[int]:
+    # Only a regular file is read: this names a file in messages, including the
+    # one that says a path is not a regular file.
+    if not is_regular_file(path):
+        return None
     try:
         text = _read_toml_text(path)
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, ASHConfigSourceError):
         return None
     match = _TOOL_ASH_PATTERN.search(text)
     if match is None:
@@ -244,13 +452,19 @@ def _tool_ash_line(path: Path) -> Optional[int]:
 
 
 def describe_config_path(path: Path) -> str:
-    """Name a config source for a message: the path, plus the table for pyproject."""
+    """Name a config source for a message: the path, plus the table for pyproject.
+
+    The path is written with its control characters escaped
+    (``utils.display_text.escape_controls``), so a name holding a newline or a
+    terminal escape cannot start a line of its own or restyle the output.
+    """
     path = Path(path)
+    shown = escape_controls(path.as_posix())
     if is_pyproject(path):
         line = _tool_ash_line(path)
         where = f" (line {line})" if line else ""
-        return f"{path.as_posix()} [tool.ash]{where}"
-    return path.as_posix()
+        return f"{shown} [tool.ash]{where}"
+    return shown
 
 
 @dataclass(frozen=True)
@@ -265,10 +479,18 @@ class ConfigSource:
 
 @dataclass
 class ConfigDiscovery:
-    """The source discovery selected, and every other source it found."""
+    """The source discovery selected, and every other source it found.
+
+    ``notes`` are what discovery could not use behind the selected source, such
+    as a pyproject.toml it could not read. They are reported with the ignored
+    sources (``discovery_warnings``), so they are logged once per scan and
+    recorded with its results, rather than logged by each of the several readers
+    that run discovery.
+    """
 
     selected: Optional[ConfigSource] = None
     ignored: List[ConfigSource] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
 
 
 def pyproject_has_ash_table(path: Path) -> bool:
@@ -283,7 +505,7 @@ def pyproject_has_ash_table(path: Path) -> bool:
         text = _read_toml_text(path)
     except UnicodeDecodeError as exc:
         # Latin-1 decodes any byte string, which is all the pattern needs.
-        if _TOOL_ASH_PATTERN.search(Path(path).read_bytes().decode("latin-1")):
+        if _TOOL_ASH_PATTERN.search(read_config_bytes(path).decode("latin-1")):
             raise ASHConfigSourceError(
                 f"{describe_config_path(path)} declares an ASH configuration but "
                 f"is not valid UTF-8, which TOML requires: {exc}"
@@ -314,68 +536,251 @@ def pyproject_has_ash_table(path: Path) -> bool:
     return True
 
 
-def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool:
+def _unreadable_pyproject(
+    path: Path, found_before: List[ConfigSource], exc: OSError, notes: List[str]
+) -> bool:
+    """Refuse a pyproject.toml that could not be read, or note it behind a source."""
+    if not found_before:
+        refusal = (
+            ASHConfigFileNotFoundError
+            if isinstance(exc, FileNotFoundError)
+            else ASHConfigSourceError
+        )
+        raise refusal(
+            f"Could not read {path.as_posix()} ({exc}), so ASH cannot tell "
+            "whether it holds a [tool.ash] table. Make it readable, remove "
+            "it, or name a config file with --config."
+        ) from exc
+    notes.append(
+        f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
+        "config source."
+    )
+    return False
+
+
+def _pyproject_is_a_source(
+    path: Path, found_before: List[ConfigSource], notes: List[str]
+) -> bool:
     """Probe pyproject.toml without letting it break an unrelated config.
 
     When a higher-precedence source already exists, pyproject.toml is probed
     only to report it as ignored, so nothing about it may fail the load: before
     #313 a repository with .ash/.ash.yaml was unaffected by whatever its
     pyproject.toml held. When it would be the selected source, a pyproject that
-    declares [tool.ash] but cannot be parsed fails closed. One that cannot be
-    read at all is skipped with a warning either way, because there is no way
-    to tell whether it configures ASH, and most pyproject.toml files do not.
+    declares [tool.ash] but cannot be parsed fails closed, and so does one that
+    cannot be read at all (a dangling link, a directory, no permission): there
+    is no way to tell whether it configures ASH, and skipping it would scan with
+    the defaults while its [tool.ash] table, if it has one, sat unread.
+
+    Only a regular file is opened. Discovery runs on whatever a cloned
+    repository holds, and opening a device can act on it even when nothing is
+    read: a watchdog arms, a tape rewinds. So a FIFO, a device or a directory at
+    this name is told by its type, from ``stat``, and refused or ignored unopened.
+
+    What cannot be used behind a higher-precedence source is appended to
+    ``notes`` rather than logged; see ``ConfigDiscovery``.
     """
+    # Classified from os.stat and its errno, so each name that cannot be followed
+    # is reported for what it is.
+    try:
+        regular = stat.S_ISREG(os.stat(path).st_mode)
+    except FileNotFoundError:
+        # The name exists (discovery found it) but leads nowhere.
+        missing = FileNotFoundError(
+            errno.ENOENT, "a symbolic link to nothing", os.fspath(path)
+        )
+        return _unreadable_pyproject(path, found_before, missing, notes)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            exc = OSError(
+                errno.ELOOP,
+                "a symbolic link that leads back to itself",
+                os.fspath(path),
+            )
+        return _unreadable_pyproject(path, found_before, exc, notes)
+    if not regular:
+        return _unreadable_pyproject(
+            path,
+            found_before,
+            OSError(errno.EINVAL, "not a regular file", os.fspath(path)),
+            notes,
+        )
     try:
         return pyproject_has_ash_table(path)
     except OSError as exc:
-        ASH_LOGGER.warning(
-            f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
-            "config source."
-        )
-        return False
+        return _unreadable_pyproject(path, found_before, exc, notes)
     except ASHConfigSourceError as exc:
         if not found_before:
             raise
-        ASH_LOGGER.warning(
+        notes.append(
             f"Ignoring {path.as_posix()}: {found_before[0].label} takes precedence, "
             f"and the [tool.ash] table there could not be read ({exc})."
         )
         return False
 
 
-def discover_config_source(search_dir: Path) -> ConfigDiscovery:
-    """Find every config source in `search_dir` and select one by precedence."""
-    search_dir = Path(search_dir)
-    found: List[ConfigSource] = []
+def _name_exists(path: Path) -> bool:
+    """Whether a config name exists, as ``os.path.lexists`` says, but never guessed.
+
+    ``lexists`` answers False for any error, so a ``.ash/`` directory that cannot
+    be searched hid the config inside it and the scan ran with the defaults.
+    Only "no such file" and "a path component is not a directory" mean absent;
+    any other error refuses, since whether the repository has a config there
+    cannot be told.
+    """
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        raise ASHConfigSourceError(
+            f"Could not look for a config file at {Path(path).as_posix()} "
+            f"({exc.strerror}), so ASH cannot tell whether one is there. Make the "
+            "directory readable, or name a config file with --config."
+        ) from exc
+    return True
+
+
+def _not_permitted(found: Path) -> ASHConfigInputNotPermittedError:
+    # Names the source as found, never what it resolves to, so the refusal reads
+    # the same whether that target is missing, unreadable or readable.
+    return ASHConfigInputNotPermittedError(
+        f"{found.as_posix()}, a config source found in the scanned directory, "
+        "reaches a file outside the directories this caller may read config from."
+    )
+
+
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _is_a_link(path: Path) -> bool:
+    """Whether `path` is a symbolic link or, on Windows, any reparse point."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    return bool(getattr(info, "st_file_attributes", 0) & reparse)
+
+
+def _permitted(path: Path, permit: PermitBase) -> bool:
+    if _on_windows() and _is_a_link(path):
+        # Resolving a link on Windows can open a connection to the host a UNC
+        # target names, so a linked source is refused unresolved, as an extends
+        # base whose spelling leaves the root is (_resolve_base_path).
+        return False
+    # realpath reads links and opens nothing, and does not raise on a loop.
+    return permit(Path(os.path.realpath(path)))
+
+
+def _existing_candidates(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> List[ConfigSource]:
+    """Every config name in `search_dir` that exists, in precedence order, unopened.
+
+    Under ``permit`` a ``.ash`` that is a link out of the grant is refused before
+    anything looks inside it: whether a name exists there would otherwise answer
+    whether a file exists in a directory the caller may not read.
+    """
+    dot_ash = search_dir / ".ash"
+    if permit is not None and _name_exists(dot_ash) and not _permitted(dot_ash, permit):
+        raise _not_permitted(dot_ash)
+    candidates: List[ConfigSource] = []
     for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in (search_dir / name, search_dir / ".ash" / name):
-            if candidate.is_file():
-                found.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
+        for candidate in (search_dir / name, dot_ash / name):
+            if _name_exists(candidate):
+                candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
-        if candidate.is_file():
-            found.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
+        if _name_exists(candidate):
+            candidates.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
     pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
-    if pyproject.is_file() and _pyproject_is_a_source(pyproject, found):
-        found.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
+    if _name_exists(pyproject):
+        candidates.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
+    return candidates
+
+
+def _check_candidates(
+    candidates: List[ConfigSource], permit: Optional[PermitBase]
+) -> None:
+    if permit is None:
+        return
+    for candidate in candidates:
+        if not _permitted(candidate.path, permit):
+            raise _not_permitted(candidate.path)
+
+
+def check_discovery_candidates(search_dir: Path, permit: Optional[PermitBase]) -> None:
+    """Refuse `search_dir` when a config source in it resolves outside `permit`.
+
+    The check ``discover_config_source(search_dir, permit=permit)`` makes before
+    it opens anything, for a caller that refuses before a scan starts (MCP
+    ``scan_directory``). Opens nothing itself.
+    """
+    search_dir = Path(search_dir)
+    _check_candidates(_existing_candidates(search_dir, permit), permit)
+
+
+def discover_config_source(
+    search_dir: Path, permit: Optional[PermitBase] = None
+) -> ConfigDiscovery:
+    """Find every config source in `search_dir` and select one by precedence.
+
+    A name counts when it exists, whatever it is; see "Failure" in the module
+    docstring for why a dangling link is selected rather than skipped.
+
+    ``permit`` is the caller's predicate for the files it may read config from,
+    as for an ``extends`` base. Every source that exists -- the one selected and
+    the ones ignored, which are reported and, for ``pyproject.toml``, read -- is
+    checked by the path it resolves to before anything opens it, and one the
+    predicate refuses raises ``ASHConfigInputNotPermittedError`` naming the
+    source as found. Without it nothing is checked.
+    """
+    search_dir = Path(search_dir)
+    candidates = _existing_candidates(search_dir, permit)
+    _check_candidates(candidates, permit)
+    found: List[ConfigSource] = []
+    notes: List[str] = []
+    for candidate in candidates:
+        if candidate.kind != SOURCE_KIND_PYPROJECT or _pyproject_is_a_source(
+            candidate.path, found, notes
+        ):
+            found.append(candidate)
     if not found:
         return ConfigDiscovery()
-    return ConfigDiscovery(selected=found[0], ignored=found[1:])
+    return ConfigDiscovery(selected=found[0], ignored=found[1:], notes=notes)
 
 
-def log_config_discovery(
-    discovery: ConfigDiscovery, announce_selected: bool = True
-) -> None:
-    """Say which source is used and which were found but ignored.
+def check_discovered_source(path: Path, permit_base: Optional[PermitBase]) -> None:
+    """Refuse a discovered config file that resolves to one ``permit_base`` does not permit.
 
-    ``announce_selected`` is False for a caller that reports the selected file
-    through its own logger; the ignored sources are always reported here.
+    See "Base paths". Nothing is checked without ``permit_base``. Raises
+    ``ASHConfigInputNotPermittedError`` naming ``path`` as it was found, never the
+    file it resolves to.
+    """
+    if permit_base is None or permit_base(Path(path).resolve()):
+        return
+    raise ASHConfigInputNotPermittedError(
+        f"{Path(path).as_posix()}, the config file found in the scanned directory, "
+        "reaches a file outside the directories this caller may read config from."
+    )
+
+
+def discovery_warnings(discovery: ConfigDiscovery) -> List[str]:
+    """One warning per source discovery found and did not select, then its notes.
+
+    The settings in an ignored source are not applied, so a scan reports these
+    with its results as well as in the log; see ``log_config_discovery`` and
+    ``resolve_config``. A note says what discovery could not use behind the
+    selected source (``ConfigDiscovery.notes``).
     """
     selected = discovery.selected
     if selected is None:
-        return
-    if announce_selected:
-        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+        return []
+    warnings: List[str] = []
     for other in discovery.ignored:
         message = (
             f"Ignoring ASH configuration at {other.label}: {selected.label} takes "
@@ -392,7 +797,29 @@ def log_config_discovery(
                 f"{ASH_PYPROJECT_FILE_NAME}. Move the settings into one source "
                 "and delete the other."
             )
+        warnings.append(message)
+    warnings.extend(discovery.notes)
+    return warnings
+
+
+def log_config_discovery(
+    discovery: ConfigDiscovery, announce_selected: bool = True
+) -> List[str]:
+    """Say which source is used and which were found but ignored.
+
+    ``announce_selected`` is False for a caller that reports the selected file
+    through its own logger; the ignored sources are always reported here.
+    Returns the warnings logged, ``discovery_warnings(discovery)``.
+    """
+    selected = discovery.selected
+    if selected is None:
+        return []
+    if announce_selected:
+        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+    warnings = discovery_warnings(discovery)
+    for message in warnings:
         ASH_LOGGER.warning(message)
+    return warnings
 
 
 def _resolve_toml_env(value: Any) -> Any:
@@ -405,20 +832,135 @@ def _resolve_toml_env(value: Any) -> Any:
     return value
 
 
-def read_config_file(path: Path) -> Any:
+def _toml_env_reference(value: Any, key: str = "") -> Optional[str]:
+    """The key of the first value `_resolve_toml_env` would resolve, or None."""
+    if isinstance(value, dict):
+        items = ((f"{key}.{k}" if key else str(k), v) for k, v in value.items())
+    elif isinstance(value, list):
+        items = ((f"{key}[{i}]", v) for i, v in enumerate(value))
+    else:
+        if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
+            return key
+        return None
+    for child_key, child in items:
+        found = _toml_env_reference(child, child_key)
+        if found is not None:
+            return found
+    return None
+
+
+def config_is_client_delivered(path: Path) -> bool:
+    """Whether an MCP client delivered `path`; see "Environment variables".
+
+    ``cli.mcp.sandbox.config_is_client_supplied``, imported when called. The
+    ``RefuseEnv`` every caller gets unless it passes another.
+    """
+    # Imported here, as config/path_trust.py does: importing cli.mcp runs its
+    # __init__, which imports profile_registry and through it ash_config.
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+    return config_is_client_supplied(path)
+
+
+def env_refused_for(remote_client: bool, session_id: Optional[str] = None) -> RefuseEnv:
+    """The files that resolve no ``!ENV`` for a caller; see "Environment variables".
+
+    ``remote_client`` is ``cli.mcp.sandbox.caller_is_remote`` for the MCP call
+    the config is read for, and False for everything else. ``session_id`` is
+    that call's session: of the profile files the server writes in the sessions'
+    ``config/`` directories, only its own are set aside for a remote caller.
+    """
+    if not remote_client:
+        return config_is_client_delivered
+    from automated_security_helper.cli.mcp.sandbox import (
+        client_named_config_is_untrusted,
+    )
+
+    def refused(path: Path) -> bool:
+        return client_named_config_is_untrusted(path, session_id=session_id)
+
+    return refused
+
+
+def refuse_env_everywhere(path: Path) -> bool:
+    """A ``RefuseEnv`` that refuses every file: content a remote client sent."""
+    return True
+
+
+def _refuse_env_nowhere(path: Path) -> bool:
+    return False
+
+
+def _env_rule(refused: bool) -> RefuseEnv:
+    """The ``RefuseEnv`` for one file of a chain, once its refusal is decided."""
+    return refuse_env_everywhere if refused else _refuse_env_nowhere
+
+
+def _env_not_resolved(path: Path, where: str) -> ASHConfigEnvNotResolvedError:
+    return ASHConfigEnvNotResolvedError(
+        f"{describe_config_path(path)} uses !ENV ({where}). !ENV is not resolved "
+        "in a config an MCP client delivered, so the file is refused. Write the "
+        "value itself in the file (in YAML, quote a value that only looks like a "
+        "${VAR} reference), or leave the setting to the server's config."
+    )
+
+
+def read_config_file(
+    path: Path,
+    expect: Optional[FileIdentity] = None,
+    refuse_env: Optional[RefuseEnv] = None,
+    references: Optional[List[EnvironmentReference]] = None,
+) -> Any:
     """Parse one config file, without resolving its `extends`.
 
     A ``pyproject.toml`` yields its ``[tool.ash]`` table; any other ``.toml``
     file is a config at its top level. YAML and JSON are read exactly as
-    ``AshConfig.from_file`` always read them.
+    ``AshConfig.from_file`` always read them, except that a YAML or TOML file
+    ``refuse_env`` refuses (by default, one an MCP client delivered) is refused
+    if it uses ``!ENV``; see "Environment variables". JSON has no ``!ENV``.
+    ``expect`` is passed to ``read_config_bytes``.
+
+    ``references``, when given, is extended with what the file read from the
+    environment, at paths in the file's own document. They are found by parsing
+    the text the file was read as a second time, with each reference left as
+    the file wrote it (``config/environment_record.py``); a YAML text that can
+    hold no reference is parsed once.
     """
-    path = Path(path)
+    data, found = _read_config_file(Path(path), expect, refuse_env)
+    if references is not None:
+        references.extend(found)
+    return data
+
+
+def read_config_file_and_references(
+    path: Path,
+    expect: Optional[FileIdentity] = None,
+    refuse_env: Optional[RefuseEnv] = None,
+) -> Tuple[Any, List[EnvironmentReference]]:
+    """``read_config_file``, and what the file read from the environment."""
+    found: List[EnvironmentReference] = []
+    data = read_config_file(
+        path, expect=expect, refuse_env=refuse_env, references=found
+    )
+    return data, found
+
+
+def _read_config_file(
+    path: Path,
+    expect: Optional[FileIdentity],
+    refuse_env: Optional[RefuseEnv],
+) -> Tuple[Any, List[EnvironmentReference]]:
     if path.name.endswith(".json"):
-        with open(path, mode="r", encoding="utf-8") as f:
-            return json.load(f)
+        # utf-8-sig: a leading byte order mark is dropped, as YAML and TOML drop
+        # it; Windows PowerShell 5 writes one.
+        return (
+            json.loads(read_config_bytes(path, expect=expect).decode("utf-8-sig")),
+            [],
+        )
+    delivered = (refuse_env or config_is_client_delivered)(path)
     if path.name.endswith(".toml"):
         try:
-            text = _read_toml_text(path)
+            text = _read_toml_text(path, expect=expect)
         except UnicodeDecodeError as exc:
             raise ASHConfigSourceError(
                 f"{describe_config_path(path)} is not valid UTF-8, which TOML "
@@ -444,9 +986,56 @@ def read_config_file(path: Path) -> Any:
                     f"{type(table).__name__}"
                 )
             document = table
-        return _resolve_toml_env(document)
-    with open(path, mode="r", encoding="utf-8") as f:
-        return load_yaml_config(f)
+        if delivered:
+            key = _toml_env_reference(document)
+            if key is not None:
+                raise _env_not_resolved(path, f"key {key}")
+            return document, []
+        try:
+            resolved = _resolve_toml_env(document)
+        except ASHConfigUnsetVariableError as exc:
+            raise _unset_variable_in(path, exc) from None
+        return resolved, environment_references(document, resolved)
+    text = read_config_bytes(path, expect=expect).decode("utf-8")
+    try:
+        resolved = load_yaml_config(
+            named_text_stream(text, path),
+            env="refuse" if delivered else "resolve",
+        )
+    except EnvReferenceNotResolved as exc:
+        raise _env_not_resolved(path, f"line {exc.line}") from exc
+    except ASHConfigUnsetVariableError as exc:
+        raise _unset_variable_in(path, exc) from None
+    if delivered or ("$" not in text and "\\" not in text):
+        # No reference: one holds a "$", written as itself or, in a
+        # double-quoted scalar a file tags !ENV, as an escape.
+        return resolved, []
+    written = load_yaml_config(named_text_stream(text, path), env="written")
+    return resolved, environment_references(written, resolved)
+
+
+def _unset_variable_in(
+    path: Path, exc: ASHConfigUnsetVariableError
+) -> ASHConfigUnsetVariableError:
+    """``exc``, naming ``path`` as the file that references the unset variable."""
+    return ASHConfigUnsetVariableError(
+        f"{describe_config_path(path)}: {exc.detail}",
+        variable=exc.variable,
+        config_file=path,
+        detail=exc.detail,
+    )
+
+
+def named_text_stream(text: str, path: Path) -> io.StringIO:
+    """`text` as a stream named `path`, for a YAML parser.
+
+    A parse error then names the file and gives its line and column, as it did
+    when the parser read the open file, rather than "<unicode string>" followed
+    by a copy of the offending line.
+    """
+    stream = io.StringIO(text)
+    stream.name = os.fspath(path)
+    return stream
 
 
 def default_confinement_root(
@@ -458,8 +1047,14 @@ def default_confinement_root(
     config may extend a file anywhere in the repository being scanned.
     Otherwise -- no source directory, or a config kept outside it -- the root
     config's own directory, or the parent of ``.ash/`` for a file in ``.ash/``.
+
+    A root config reached through a link an MCP client delivered is placed
+    where that link sits, not where it leads (``_client_link``): the client
+    chose the file by placing the link, so its bases stay in the tree the client
+    delivered, as the bases of a file written there do.
     """
-    config_real = Path(config_path).resolve()
+    placed = _client_link(Path(config_path))
+    config_real = placed if placed is not None else Path(config_path).resolve()
     if source_dir is not None:
         source_real = Path(source_dir).resolve()
         if config_real.is_relative_to(source_real):
@@ -470,26 +1065,125 @@ def default_confinement_root(
     return parent
 
 
+def _client_link(path: Path) -> Optional[Path]:
+    """Where the first link on the way to ``path`` that sits in a client's tree is, or None.
+
+    A link sits in a client's tree when the directory holding it is one an MCP
+    client delivered (``config_is_client_delivered``); a link elsewhere that
+    leads into such a tree was not placed by the client. Each location is under
+    its parent with that parent's links resolved (``link_locations``), so it
+    compares with resolved paths.
+    """
+    for location in link_locations(path):
+        if config_is_client_delivered(location.parent):
+            return location
+    return None
+
+
 @dataclass
 class ResolvedConfigDocument:
     """A config's merged data, and the files it was built from.
 
     ``chain`` lists every file read, in merge order: bases before the files that
     extend them, the root config last. A file reached on two branches appears
-    twice, because it was merged twice.
+    twice, because it was merged twice. ``named`` lists the same files, in the same
+    order, by the path that named them before any symlink was followed: the root
+    as the caller gave it, and each base as its ``extends`` entry spells it from
+    the file that extends it. A base that is a symlink is judged by that name too
+    (``config/sandbox_grants.py``), since whoever can write the link chooses the
+    file it reaches. ``documents`` holds each file's document
+    as it was parsed, before its ``extends`` and ``patch`` were applied, so a
+    caller checking what a file sets checks what was read rather than reading the
+    file again.
+
+    ``chain`` and ``documents`` name each file by its resolved path. ``names``
+    gives, for each of them, the paths it was reached by before any symlink was
+    followed: the root config as it was passed or discovered, and a base as its
+    ``extends`` entry spells it, relative to the resolved directory of the file
+    that names it. After those, a base's names include the resolved path and the
+    names of every file above it in the chain, since the file that names a base
+    chose it. A check of who wrote a file judges it by each of these and by
+    every symlink on the way (``by_every_name``), since a link's location says who
+    chose the file it reaches.
     """
 
     data: Any
     chain: List[Path] = field(default_factory=list)
     root: Optional[Path] = None
+    named: List[Path] = field(default_factory=list)
+    documents: Dict[Path, Any] = field(default_factory=dict)
+    names: Dict[Path, Tuple[Path, ...]] = field(default_factory=dict)
+    #: What the files of the chain read from the environment, each at the path
+    #: it holds in ``data``'s terms: a ``patch`` operation's value at the place
+    #: the operation puts it (``config/environment_record.py``).
+    environment_references: List[EnvironmentReference] = field(default_factory=list)
+
+
+#: The paths each file of a chain was reached by; see ``ResolvedConfigDocument``.
+ChainNames = Mapping[Path, Sequence[Path]]
+
+
+def by_every_name(
+    judge: Callable[[Path], bool], names: Optional[ChainNames] = None
+) -> Callable[[Path], bool]:
+    """``judge`` for a chain file, true when it holds for any name the file has.
+
+    The names are the file's resolved path and each path in ``names`` it was
+    reached by. ``judge`` takes one path, as named; the checks it is used with
+    (``cli/mcp/sandbox.config_is_client_supplied`` and
+    ``client_named_config_is_untrusted``) also judge each symlink on the way.
+    """
+    known = names or {}
+
+    def judged(path: Path) -> bool:
+        return any(judge(name) for name in (path, *known.get(path, ())))
+
+    return judged
 
 
 @dataclass
 class _ChainState:
     root: Path
     permit_base: Optional[PermitBase] = None
+    refuse_env: RefuseEnv = config_is_client_delivered
+    anchor_relative_paths: Optional[AnchorPaths] = None
     files_read: int = 0
     order: List[Path] = field(default_factory=list)
+    named: List[Path] = field(default_factory=list)
+    documents: Dict[Path, Any] = field(default_factory=dict)
+    names: Dict[Path, List[Path]] = field(default_factory=dict)
+    #: For each base, the paths of the files above it in the chain.
+    above: Dict[Path, List[Path]] = field(default_factory=dict)
+    #: ``ResolvedConfigDocument.environment_references``.
+    references: List[EnvironmentReference] = field(default_factory=list)
+
+    def reached(self, real: Path, named: Path) -> None:
+        spellings = self.names.setdefault(real, [])
+        if named != real and named not in spellings:
+            spellings.append(named)
+
+    def chosen_by(self, real: Path, paths: Sequence[Path]) -> None:
+        recorded = self.above.setdefault(real, [])
+        for path in paths:
+            if path != real and path not in recorded:
+                recorded.append(path)
+
+    def all_names(self) -> Dict[Path, Tuple[Path, ...]]:
+        """``ResolvedConfigDocument.names``: own spellings first, then the files above.
+
+        A file with no spelling of its own but files above it is listed under
+        its own path first, so a message that names a file by the first of
+        these (``client_config_policy._as_reached``) names the file itself.
+        """
+        result: Dict[Path, Tuple[Path, ...]] = {}
+        for real in dict.fromkeys([*self.names, *self.above]):
+            own = list(self.names.get(real, ()))
+            inherited = [p for p in self.above.get(real, ()) if p not in own]
+            if inherited:
+                own = (own or [real]) + inherited
+            if own:
+                result[real] = tuple(own)
+        return result
 
 
 def _format_chain(paths: Tuple[Path, ...]) -> str:
@@ -523,7 +1217,12 @@ def _resolve_base_path(
     extending: Path,
     root: Path,
     permit_base: Optional[PermitBase] = None,
-) -> Path:
+) -> Tuple[Path, Optional[FileIdentity]]:
+    """The base `ref` names, resolved and checked, and the identity checked.
+
+    The identity is the file the resolved path led to when the checks ran; the
+    read of the base must open that same file (``read_config_bytes(expect=)``).
+    """
     if _URL_PATTERN.match(ref):
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} looks like "
@@ -558,6 +1257,7 @@ def _resolve_base_path(
             f"must stay inside ({root.as_posix()})."
         )
     resolved = candidate.resolve()
+    checked = file_identity(resolved)
     # Ahead of the root check, whose message names the resolved target: this
     # refusal must read the same whether or not that target exists.
     if permit_base is not None and not permit_base(resolved):
@@ -571,26 +1271,143 @@ def _resolve_base_path(
             f"{how} to {resolved.as_posix()}, which is outside the directory "
             f"config bases must stay inside ({root.as_posix()})."
         )
-    return resolved
+    return resolved, checked
 
 
-def deep_merge(base: Any, overlay: Any) -> Any:
-    """Merge `overlay` over `base` under the rules in the module docstring."""
+@dataclass(frozen=True)
+class _Setting:
+    """One field of a config model, as the model reads it from a document."""
+
+    #: The spelling a merged value is written under: the alias, else the name.
+    written: str
+    #: Every spelling the model reads, lowest precedence first.
+    spellings: Tuple[str, ...]
+    #: The model the value is validated as, when it is one.
+    model: Optional[type[BaseModel]]
+    #: Where a document holds several spellings, whether the model takes the
+    #: last one whole (pydantic's alias over name) rather than merging them key
+    #: by key (``_PluginConfigSegment``'s validator).
+    whole: bool
+
+
+def _value_model(annotation: Any) -> Optional[type[BaseModel]]:
+    """The pydantic model a field's mapping is validated as, or None.
+
+    Only through ``Optional`` and other unions: a list is replaced whole, and the
+    keys of a ``Dict`` field are names, not settings.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        models = {_value_model(arg) for arg in typing.get_args(annotation)}
+        models.discard(None)
+        return models.pop() if len(models) == 1 else None
+    return None
+
+
+@functools.lru_cache(maxsize=None)
+def _settings_of(model: type[BaseModel]) -> Dict[str, _Setting]:
+    """Each field of ``model``, keyed by every spelling the model reads it under."""
+    segment = issubclass(model, _PluginConfigSegment)
+    by_name = segment or bool(
+        model.model_config.get("populate_by_name")
+        or model.model_config.get("validate_by_name")
+    )
+    settings: Dict[str, _Setting] = {}
+    for name, info in model.model_fields.items():
+        alias = info.alias if info.alias and info.alias != name else None
+        if alias is None:
+            spellings: Tuple[str, ...] = (name,)
+        elif by_name:
+            spellings = (name, alias)
+        else:
+            spellings = (alias,)
+        setting = _Setting(
+            written=alias or name,
+            spellings=spellings,
+            model=_value_model(info.annotation),
+            whole=not segment,
+        )
+        for spelling in spellings:
+            settings[spelling] = setting
+    return settings
+
+
+def _fold(values: List[Any], setting: _Setting) -> Any:
+    """One document's spellings of ``setting``, read as the model reads them."""
+    if setting.whole:
+        return values[-1]
+    folded = values[0]
+    for value in values[1:]:
+        folded = deep_merge(folded, value, setting.model)
+    return folded
+
+
+def deep_merge(base: Any, overlay: Any, model: Optional[type[BaseModel]] = None) -> Any:
+    """Merge `overlay` over `base` under the rules in the module docstring.
+
+    ``model`` is the config model both mappings are read as (``AshConfig`` for
+    a whole config document). With it, a setting is merged under the spellings
+    the model reads (see "Spellings"); without it, keys that differ only in
+    ``-`` versus ``_`` are one key.
+    """
     if not isinstance(base, dict) or not isinstance(overlay, dict):
         return copy.deepcopy(overlay)
     merged = copy.deepcopy(base)
-    base_keys = dict.fromkeys(base)
-    # Keys the overlay spells exactly as the base does (or that are new) are
-    # applied last, so where the overlay itself carries both spellings of one
-    # key, its exact spelling wins, matching how a single file is read.
+    rest = dict(overlay)
+    settings = _settings_of(model) if model is not None else {}
+    # The spellings of the fields the overlay sets under a spelling the model
+    # reads: settled here, so no other key of the overlay reaches them below.
+    settled: set[str] = set()
+    for setting in dict.fromkeys(settings.values()):
+        upper = [rest.pop(key) for key in setting.spellings if key in rest]
+        if not upper:
+            continue
+        settled.update(setting.spellings)
+        lower = [merged.pop(key) for key in setting.spellings if key in merged]
+        value = _fold(upper, setting)
+        merged[setting.written] = (
+            deep_merge(_fold(lower, setting), value, setting.model)
+            if lower
+            else copy.deepcopy(value)
+        )
+    if model is not None and issubclass(model, _PluginConfigSegment):
+        # A plugin's section: every spelling get_plugin_config reads for the
+        # same plugin is one section, under the overlay's spelling.
+        for key in list(rest):
+            names = plugin_key_lookup_names(key)
+            same = [
+                other
+                for other in merged
+                if other not in settings and plugin_key_lookup_names(other) & names
+            ]
+            if not same:
+                continue
+            lower_value: Any = merged.pop(same[0])
+            for other in same[1:]:
+                lower_value = deep_merge(lower_value, merged.pop(other))
+            merged[key] = deep_merge(lower_value, rest.pop(key))
+    # The rest: a key the model does not read as a field. Keys that differ
+    # only in '-' versus '_' are one key here, as they always were, so an
+    # overlay's unread spelling of a field still reaches the base's spelling of
+    # it -- but not a field the overlay set above under a spelling the model
+    # reads, which wins. Those the overlay spells exactly as the base does (or
+    # that are new) are applied last, so where the overlay carries both
+    # spellings of one key, its exact spelling wins.
+    base_keys = dict.fromkeys(
+        key for key in base if key in merged and key not in settled
+    )
     items = sorted(
-        overlay.items(),
+        rest.items(),
         key=lambda kv: _resolve_dict_key(base_keys, kv[0]) == kv[0],
     )
     for key, value in items:
         target = _resolve_dict_key(base_keys, key)
         if target in merged:
-            merged[target] = deep_merge(merged[target], value)
+            field = settings.get(target)
+            merged[target] = deep_merge(
+                merged[target], value, field.model if field else None
+            )
         else:
             merged[target] = copy.deepcopy(value)
     return merged
@@ -632,33 +1449,127 @@ def _apply_patch(document: Dict[str, Any], ops: Any, path: Path) -> Any:
             f"got {type(ops).__name__}"
         )
     result: Any = document
+    # The messages below name an entry's position, its op and its path, never a
+    # value the entry or the document holds: either can be one a file read from
+    # the environment.
     for index, op in enumerate(ops):
         if not isinstance(op, dict) or not isinstance(op.get("path"), str):
+            got = (
+                f"a mapping with keys {', '.join(sorted(map(str, op)))}"
+                if isinstance(op, dict)
+                else f"a {type(op).__name__}"
+            )
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where} must be a mapping with "
-                f"'op' and 'path', got {op!r}"
+                f"'op' and 'path', got {got}"
             )
         op_name = op.get("op")
         if not isinstance(op_name, str) or op_name not in _PATCH_OPS:
             raise ASHConfigSourceError(
-                f"'{PATCH_KEY}' entry {index} in {where} uses op {op.get('op')!r}; "
-                f"allowed ops are {', '.join(sorted(_PATCH_OPS))}"
+                f"'{PATCH_KEY}' entry {index} in {where} uses an op that is not "
+                f"one of the allowed ops, {', '.join(sorted(_PATCH_OPS))}"
             )
         normalized = dict(op, path=_normalize_pointer(result, op["path"]))
         try:
             result = jsonpatch.apply_patch(result, [normalized], in_place=False)
-        except jsonpatch.JsonPatchTestFailed as exc:
+        except jsonpatch.JsonPatchTestFailed:
             # jsonpatch's own message quotes the value it found, which may come
             # from a base the author of this file did not write.
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where}: the value at "
                 f"{op['path']!r} does not equal the value the test op gives"
-            ) from exc
+            ) from None
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
+            # jsonpatch's message quotes the document it patches.
             raise ASHConfigSourceError(
-                f"'{PATCH_KEY}' entry {index} in {where} ({op!r}) failed: {exc}"
-            ) from exc
+                f"'{PATCH_KEY}' entry {index} in {where} ({op_name} at "
+                f"{op['path']!r}) failed: {type(exc).__name__}, the path does not "
+                "fit the document it patches"
+            ) from None
     return result
+
+
+def _placed_references(
+    references: List[EnvironmentReference], data: Any
+) -> List[EnvironmentReference]:
+    """``references``, one file's, each at the path it holds once the file merges.
+
+    One under ``extends`` names a base, which is not part of the merged
+    configuration, and is left out. One in a ``patch`` operation's ``value`` is
+    moved to the operation's ``path``. A digit in the pointer is that list index;
+    ``-`` (append) is an index the file cannot name, which the record reads as an
+    unknown index (``UNKNOWN_INDEX``). A list inside the operation's value keeps
+    the length it had there. Any other reference under ``patch`` sets no value,
+    and is left out too.
+    """
+    placed: List[EnvironmentReference] = []
+    for reference in references:
+        head = reference.path[:1]
+        if head == (EXTENDS_KEY,):
+            continue
+        if head != (PATCH_KEY,):
+            placed.append(reference)
+            continue
+        ops = data.get(PATCH_KEY) if isinstance(data, dict) else None
+        index = reference.path[1] if len(reference.path) > 2 else None
+        if (
+            not isinstance(ops, list)
+            or not isinstance(index, int)
+            or not 0 <= index < len(ops)
+            or reference.path[2] != "value"
+            or not isinstance(ops[index], dict)
+            or not isinstance(ops[index].get("path"), str)
+        ):
+            continue
+        pointer = ops[index]["path"]
+        segments: List[Any] = [
+            UNKNOWN_INDEX
+            if segment == "-"
+            else int(segment)
+            if segment.isdigit()
+            else _unescape(segment)
+            for segment in pointer.split("/")[1:]
+        ]
+        placed.append(reference.rebase(3, tuple(segments)))
+    return placed
+
+
+def _measured_in(
+    references: List["EnvironmentReference"], data: Any
+) -> List["EnvironmentReference"]:
+    """Each reference whose path ends at a digit index of a list the post-patch
+    document holds, with that list's length recorded, so the index is used; a
+    path the document does not hold stays as it is."""
+    measured: List[Any] = []
+    for reference in references:
+        place = None
+        if reference.length is None:
+            for position, segment in enumerate(reference.path):
+                if isinstance(segment, int):
+                    place = position
+        if place is None:
+            measured.append(reference)
+            continue
+        container: Any = data
+        for segment in reference.path[:place]:
+            if isinstance(container, dict) and segment in container:
+                container = container[segment]
+            else:
+                container = None
+                break
+        # ``place`` was found with isinstance(segment, int) above, so the
+        # segment is an int; the isinstance here is the narrowing mypy needs
+        # to admit the comparison, not a new condition.
+        index = reference.path[place]
+        if (
+            isinstance(index, int)
+            and isinstance(container, list)
+            and 0 <= index < len(container)
+        ):
+            measured.append(replace(reference, length=len(container), index_at=place))
+        else:
+            measured.append(reference)
+    return measured
 
 
 def _resolve(
@@ -666,8 +1577,13 @@ def _resolve(
     stack: Tuple[Path, ...],
     state: _ChainState,
     ref: Optional[str] = None,
+    env_refused_above: bool = False,
+    named: Optional[Path] = None,
+    above: Tuple[Path, ...] = (),
+    expect: Optional[FileIdentity] = None,
 ) -> Any:
     real = path.resolve()
+    named = path if named is None else named
     if real in stack:
         raise ASHConfigSourceError(
             f"Config '{EXTENDS_KEY}' cycle: {_format_chain(stack + (real,))}"
@@ -686,25 +1602,76 @@ def _resolve(
         )
 
     if not stack:
-        # The root config: parse errors behave exactly as they always have.
-        data = read_config_file(path)
+        # The root config: a read or parse error propagates as the reader raised
+        # it, and resolve_config.read_config_document refuses it.
+        # Read and judged as named rather than as `real`, so a refusal names the
+        # path the caller gave and not the target of a symlink.
+        env_refused = state.refuse_env(path)
+        read: List[EnvironmentReference] = []
+        data = read_config_file(
+            path, expect=expect, refuse_env=_env_rule(env_refused), references=read
+        )
     else:
         extending = stack[-1]
-        if not real.is_file():
+        if not is_regular_file(real):
             raise ASHConfigSourceError(
                 f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
                 f"{real.as_posix()}, which does not exist or is not a file"
             )
+        # Judged by the name the entry spells as well as the file it reaches, as
+        # the root is: a base reached through a client's link is the client's.
+        env_refused = (
+            env_refused_above or state.refuse_env(named) or state.refuse_env(real)
+        )
+        unquoted: Optional[str] = None
+        read = []
         try:
-            data = read_config_file(real)
+            data = read_config_file(
+                real,
+                expect=expect,
+                refuse_env=_env_rule(env_refused),
+                references=read,
+            )
+        except ASHConfigUnsetVariableError as exc:
+            # A base can be named through an environment variable, so its path
+            # is not quoted: the chain's root is, and the variable as written.
+            raise ASHConfigUnsetVariableError(
+                f"A config file in the extends chain of "
+                f"{describe_config_path(stack[0])}: {exc.detail}",
+                variable=exc.variable,
+                config_file=real,
+                detail=exc.detail,
+            ) from None
         except ASHConfigSourceError:
             raise
         except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
-            # json.JSONDecodeError is a ValueError.
-            raise ASHConfigSourceError(
+            # json.JSONDecodeError is a ValueError. A base of a client's chain, or
+            # one a client delivered, is not quoted: the parser's message repeats
+            # the line it stopped at, and a client's link can reach a file on
+            # the server. Raised outside the handler, so that message is not the
+            # context either.
+            if isinstance(exc, OSError) or not (
+                env_refused
+                or config_is_client_delivered(real)
+                or config_is_client_delivered(named)
+            ):
+                raise ASHConfigSourceError(
+                    f"Base config {describe_config_path(real)}, extended by "
+                    f"{describe_config_path(extending)}, could not be read: {exc}"
+                ) from exc
+            mark = getattr(exc, "problem_mark", None)
+            where = (
+                f" at line {mark.line + 1}, column {mark.column + 1}"
+                if mark is not None
+                else ""
+            )
+            unquoted = (
                 f"Base config {describe_config_path(real)}, extended by "
-                f"{describe_config_path(extending)}, could not be read: {exc}"
-            ) from exc
+                f"{describe_config_path(extending)}, could not be parsed "
+                f"({type(exc).__name__}{where})"
+            )
+        if unquoted is not None:
+            raise ASHConfigSourceError(unquoted)
         if not isinstance(data, dict):
             raise ASHConfigSourceError(
                 f"Base config {describe_config_path(real)}, extended by "
@@ -712,27 +1679,79 @@ def _resolve(
                 f"{type(data).__name__}"
             )
 
+    state.documents.setdefault(real, copy.deepcopy(data))
+    # In read order, so a file's own come before those of the bases it extends,
+    # which are read below. The order decides only which of two references at
+    # one position that resolved to the same text is recorded: the extending
+    # file's, whose value the merge keeps.
+    measured_from = len(state.references)
+    state.references.extend(_placed_references(read, data))
+    measured_to = len(state.references)
+    state.reached(real, named)
+    # The file that names a base chose it, so a base is judged by the paths of
+    # the files above it too, as env_refused_above carries a refusal down.
+    state.chosen_by(real, above)
+    anchor = state.anchor_relative_paths is not None and (
+        state.anchor_relative_paths(real) and state.anchor_relative_paths(named)
+    )
+    if anchor:
+        # Each operator file's own relative paths are taken from its directory,
+        # before the merge loses which file set them (config/operator_paths.py).
+        # ``documents`` keeps what the file holds, for the checks of who set what.
+        from automated_security_helper.config.operator_paths import (
+            anchor_relative_paths,
+        )
+
+        data = anchor_relative_paths(data, real.parent)
     if not isinstance(data, dict) or (
         EXTENDS_KEY not in data and PATCH_KEY not in data
     ):
         state.order.append(real)
+        state.named.append(named)
         return data
 
     try:
         own = dict(data)
         refs = _extends_refs(own.pop(EXTENDS_KEY, None), real)
         ops = own.pop(PATCH_KEY, None)
+        if anchor:
+            from automated_security_helper.config.operator_paths import (
+                anchor_patch_operations,
+            )
+
+            ops = anchor_patch_operations(ops, real.parent)
         merged: Any = {}
         for base_ref in refs:
-            base_path = _resolve_base_path(
+            base_path, checked = _resolve_base_path(
                 base_ref, real, state.root, state.permit_base
             )
+            # The base as its entry spells it, before any symlink is followed:
+            # relative to the resolved file that extends it, as base_path is.
+            spelled = Path(base_ref)
+            base_named = spelled if spelled.is_absolute() else real.parent / spelled
             merged = deep_merge(
-                merged, _resolve(base_path, stack + (real,), state, base_ref)
+                merged,
+                _resolve(
+                    base_path,
+                    stack + (real,),
+                    state,
+                    base_ref,
+                    env_refused,
+                    base_named,
+                    (real, named, *above),
+                    expect=checked,
+                ),
+                AshConfig,
             )
-        merged = deep_merge(merged, own)
+        merged = deep_merge(merged, own, AshConfig)
         if ops is not None:
             merged = _apply_patch(merged, ops, real)
+            # The digit index of a patch pointer is measured against the
+            # post-patch document, which holds the list the operation grew;
+            # a reference that already carries its length passes through.
+            state.references[measured_from:measured_to] = _measured_in(
+                state.references[measured_from:measured_to], merged
+            )
     except ASHConfigSourceError:
         raise
     except Exception as exc:  # noqa: BLE001 -- see below
@@ -745,6 +1764,7 @@ def _resolve(
             f"{describe_config_path(real)}: {type(exc).__name__}: {exc}"
         ) from exc
     state.order.append(real)
+    state.named.append(named)
     return merged
 
 
@@ -752,12 +1772,21 @@ def resolve_config_document(
     config_path: Path,
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
+    refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
 ) -> ResolvedConfigDocument:
     """Read `config_path` and every base it extends into one merged document.
 
     `permit_base` is checked for every base, in addition to `confine_to`; see
     "Base paths" in the module docstring. It is not checked for `config_path`
     itself, which the caller chose and is responsible for having checked.
+    `refuse_env` decides which files of the chain resolve no ``!ENV``; None
+    refuses the files an MCP client delivered. See "Environment variables".
+    `anchor_relative_paths` judges each file of the chain by its resolved path
+    and by the path it was reached by; for a file it accepts under both, the
+    relative paths the file sets for the options in ``config/operator_paths.py``
+    are taken from its directory. ``resolve_config`` passes one that accepts the
+    operator's files. ``documents`` holds each file as written either way.
     """
     config_path = Path(config_path)
     root = (
@@ -765,16 +1794,52 @@ def resolve_config_document(
         if confine_to is not None
         else default_confinement_root(config_path)
     )
-    state = _ChainState(root=root, permit_base=permit_base)
-    data = _resolve(config_path, (), state)
-    return ResolvedConfigDocument(data=data, chain=state.order, root=root)
+    state = _ChainState(
+        root=root,
+        permit_base=permit_base,
+        refuse_env=refuse_env or config_is_client_delivered,
+        anchor_relative_paths=anchor_relative_paths,
+    )
+    # The root is read as the file the name leads to now, when its caller has
+    # just checked it; one swapped in before the open is refused.
+    data = _resolve(config_path, (), state, expect=file_identity(config_path))
+    return ResolvedConfigDocument(
+        data=data,
+        chain=state.order,
+        root=root,
+        named=state.named,
+        documents=state.documents,
+        names=state.all_names(),
+        environment_references=state.references,
+    )
+
+
+def load_config_with_references(
+    config_path: Path,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
+) -> AshConfig:
+    """``AshConfig.from_file``, keeping what the file and its bases read from the
+    environment (``AshConfig._environment_references``), for a caller that
+    writes the config out again (``config/environment_record.py``)."""
+    document = resolve_config_document(
+        Path(config_path), anchor_relative_paths=anchor_relative_paths
+    )
+    config = AshConfig.model_validate(document.data, strict=True)
+    config._environment_references = tuple(document.environment_references)
+    return config
 
 
 def load_config_document(
     config_path: Path,
     confine_to: Optional[Path] = None,
     permit_base: Optional[PermitBase] = None,
+    refuse_env: Optional[RefuseEnv] = None,
+    anchor_relative_paths: Optional[AnchorPaths] = None,
 ) -> Any:
     return resolve_config_document(
-        config_path, confine_to=confine_to, permit_base=permit_base
+        config_path,
+        confine_to=confine_to,
+        permit_base=permit_base,
+        refuse_env=refuse_env,
+        anchor_relative_paths=anchor_relative_paths,
     ).data

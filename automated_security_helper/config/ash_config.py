@@ -10,7 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from typing import Annotated, Any, Callable, List, Dict, Literal, Optional
+from typing import Annotated, Any, Callable, List, Dict, Literal, Optional, Tuple
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -21,6 +21,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+    EXTRACTION_LIMIT_OPTIONS,
     ArchiveConverterConfig,
 )
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
@@ -29,8 +30,11 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
+    ASH_CONFIG_ENV_VAR_SECRET_NAMES,
+    ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
+from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason, AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
@@ -78,6 +82,24 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
+    ActionlintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner import (
+    CfnGuardScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner import (
+    CfnLintScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
+    GitleaksScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+    TrivyScannerConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner import (
+    ZizmorScannerConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -108,7 +130,8 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScannerConfig,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.config_trust import ConfigProvenance
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
 def config_env_var_is_interpolatable(var_name: str) -> bool:
@@ -138,88 +161,280 @@ def config_env_var_is_interpolatable(var_name: str) -> bool:
     names it, the docs and ASH's own config write these names in upper case, and
     ``tests/unit/config/test_config_env_interpolation.py`` pins both directions so
     that reintroducing folding is a decision rather than a drift.
+
+    A name ``config_env_var_is_secret_shaped`` matches is not admitted either;
+    that check does fold case, since it only ever excludes.
     """
+    if config_env_var_is_secret_shaped(var_name):
+        return False
     return (
         var_name.startswith(ASH_CONFIG_ENV_VAR_PREFIX)
         or var_name in ASH_CONFIG_ENV_VAR_ALLOWLIST
     )
 
 
-ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+):?(.*)?}")
+def config_env_var_is_secret_shaped(var_name: str) -> bool:
+    """Whether ``var_name`` ends like a credential's name, or is one listed.
+
+    See ``ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES`` in ``core/constants.py``.
+    """
+    upper = var_name.upper()
+    return upper in ASH_CONFIG_ENV_VAR_SECRET_NAMES or upper.endswith(
+        ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES
+    )
+
+
+# Group 2 captures the colon itself, so that ``${VAR}`` and ``${VAR:}`` can be
+# told apart; the strings the pattern matches are the same as without it.
+ENV_REFERENCE_PATTERN = re.compile(r"^\${(\w+)(:?)(.*)?}")
 
 
 def resolve_env_references(value: str) -> Optional[str]:
-    """Resolve the ``${VAR:default}`` reference a config scalar starts with.
+    """Resolve the ``${VAR}`` or ``${VAR:default}`` reference a config scalar starts with.
 
     This is the body of the YAML ``!ENV`` constructor, shared so that a TOML
     config source resolves references by exactly the same rule. Only names
     ``config_env_var_is_interpolatable`` admits are read; any other reference is
-    left as written.
+    left as written, and that check comes before the environment is consulted.
+
+    ``${VAR:default}`` falls back to ``default`` when ``VAR`` is unset (the
+    default ``None`` and an empty default both resolve to ``None``). ``${VAR}``
+    has no fallback, so an unset ``VAR`` raises ``ASHConfigUnsetVariableError``
+    naming it: substituting nothing would read as the variable being set to
+    nothing, and the literal ``${VAR}`` would reach a reporter as a bucket or
+    region name.
+
+    The bare form did not resolve before. The text to replace was rebuilt as
+    ``":".join(groups)``, which appended a colon the bare form had not written,
+    so the replacement never matched and ``${VAR}`` stayed as written whatever
+    the environment held. The text replaced is now the text the pattern matched.
     """
-    pattern = ENV_REFERENCE_PATTERN
-    match = pattern.findall(value)  # to find all env variables in line
-    if match:
-        full_value = value
-        for g in match:
-            ASH_LOGGER.debug(f"Evaluating env var match: {g}")
-            var_name = g[0] if isinstance(g, tuple) else g
-            if not config_env_var_is_interpolatable(var_name):
-                # Left exactly as written rather than replaced
-                # with its default. A literal that still reads
-                # as a reference is visible in the artifact and
-                # refused by any typed field, whereas the
-                # default is indistinguishable from the variable
-                # simply not being set. See
-                # ASH_CONFIG_ENV_VAR_ALLOWLIST in
-                # core/constants.py for which names resolve.
-                ASH_LOGGER.warning(
-                    f"Not reading environment variable {var_name} "
-                    "into the configuration. A configuration file "
-                    "may reference names beginning with "
-                    f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
-                    f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
-                    "The reference is left as written."
-                )
-                continue
-            default_val = g[1] if isinstance(g, tuple) else None
-            if default_val == "None":
-                default_val = None
-            resolved_var = os.environ.get(var_name, None)
-            if resolved_var is None:
-                ASH_LOGGER.warning(
-                    f"Environment variable {var_name} not set"
-                    + (
-                        f", using default value of {default_val}"
-                        if isinstance(g, tuple)
-                        else ""
-                    )
-                )
-                if default_val is None:
-                    resolved_var = ""
-                else:
-                    resolved_var = default_val
-            rep_val = ":".join(g) if isinstance(g, tuple) else g
-            full_value = full_value.replace(f"${{{rep_val}}}", resolved_var)
-        if full_value.strip() == "":
-            return None
-        return full_value.strip()
-    return value
+    match = ENV_REFERENCE_PATTERN.match(value)
+    if not match:
+        return value
+    var_name, colon, default_text = match.group(1), match.group(2), match.group(3)
+    default_text = default_text or ""
+    ASH_LOGGER.debug(f"Evaluating env var match: {match.group(0)}")
+    if config_env_var_is_secret_shaped(var_name):
+        ASH_LOGGER.warning(
+            f"Not reading environment variable {var_name} into the configuration: "
+            "a configuration file may not read a variable whose name is a "
+            "credential's. The reference is left as written."
+        )
+        return value.strip()
+    if not config_env_var_is_interpolatable(var_name):
+        # Left exactly as written rather than replaced with its default. A
+        # literal that still reads as a reference is visible in the artifact
+        # and refused by any typed field, whereas the default is
+        # indistinguishable from the variable simply not being set. See
+        # ASH_CONFIG_ENV_VAR_ALLOWLIST in core/constants.py for which names
+        # resolve.
+        ASH_LOGGER.warning(
+            f"Not reading environment variable {var_name} "
+            "into the configuration. A configuration file "
+            "may reference names beginning with "
+            f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
+            f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
+            "The reference is left as written."
+        )
+        return value.strip()
+    if not colon and default_text:
+        # No colon but more text before the closing brace, as in ``${VAR}x}``
+        # or ``${A}/${B}``: not a reference this function resolves, so it is
+        # left as written, as it always was.
+        return value.strip()
+    resolved_var = os.environ.get(var_name, None)
+    if resolved_var is None:
+        if not colon:
+            raise ASHConfigUnsetVariableError(
+                f"Environment variable {var_name} is not set, and the "
+                f"configuration references it as ${{{var_name}}}, which has no "
+                f"default. Set {var_name}, or write ${{{var_name}:None}} (or "
+                "another default after the colon) to allow it to be unset.",
+                variable=var_name,
+            )
+        default_val: Optional[str] = default_text
+        if default_val == "None":
+            default_val = None
+        ASH_LOGGER.warning(
+            f"Environment variable {var_name} not set, using default value of "
+            f"{default_val}"
+        )
+        resolved_var = "" if default_val is None else default_val
+    full_value = resolved_var + value[match.end() :]
+    if full_value.strip() == "":
+        return None
+    return full_value.strip()
 
 
-def load_yaml_config(stream: Any) -> Any:
-    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes."""
+class _NoAliasSafeLoader(yaml.SafeLoader):
+    """``yaml.SafeLoader`` that refuses YAML aliases; see ``load_config_yaml``."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.events.AliasEvent):
+            event = self.peek_event()
+            raise yaml.composer.ComposerError(
+                None,
+                None,
+                f"found the alias *{event.anchor}; ASH configuration does not "
+                "accept YAML aliases, so write the value out where it is used",
+                event.start_mark,
+            )
+        return super().compose_node(parent, index)
+
+
+def _load_single_document(loader_class: type, stream: Any) -> Any:
+    # What yaml.load does, with the loader class given: one document, then the
+    # loader's resources released.
+    loader = loader_class(stream)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
+def load_config_yaml(stream: Any) -> Any:
+    """Parse YAML that configures ASH: safe tags only, and no aliases.
+
+    Every reader of an ASH config file, workspace policy, MCP profile or
+    client-supplied config fragment parses with this, or with
+    ``load_yaml_config``, which adds ``!ENV`` on top of it.
+
+    Why no aliases: an alias is a reference to an anchored node, and a few
+    hundred bytes of nested aliases stand for gigabytes once the parsed config
+    is walked or serialized. A scan writes its config into its results, and MCP
+    ``get_config`` returns it, so such a file exhausted memory in the process
+    reading it; an MCP server resolves a client's config in the process every
+    session shares. Parsing does not expand aliases, so a read-size bound cannot
+    stop this. None of the YAML files in ASH's repository uses an alias, and a
+    config that repeats a value can write it out where it is used. Anchors with
+    no alias referring to them are harmless and still parse.
+    """
+    return _load_single_document(_NoAliasSafeLoader, stream)
+
+
+class EnvReferenceNotResolved(Exception):
+    """``load_yaml_config(..., env="refuse")`` met an ``!ENV`` value.
+
+    ``line`` is 1-based. ``config_sources.read_config_file`` turns this into the
+    ``ASHConfigEnvNotResolvedError`` that names the file.
+    """
+
+    def __init__(self, line: int) -> None:
+        super().__init__(f"!ENV at line {line}")
+        self.line = line
+
+
+#: What ``load_yaml_config(..., env="written")`` puts before a reference the file
+#: tags explicitly, so the reference reads as the file wrote it.
+EXPLICIT_ENV_TAG = "!ENV "
+
+
+def load_yaml_config(
+    stream: Any, env: Literal["resolve", "refuse", "keep", "written"] = "resolve"
+) -> Any:
+    """Parse an ASH YAML config, resolving ``!ENV`` references as it goes.
+
+    With ``env="refuse"``, the first ``!ENV`` value, tagged or matched by the
+    implicit resolver, raises ``EnvReferenceNotResolved`` before anything is read
+    from the environment. With ``env="keep"``, each one is the reference as
+    written, which is what a raw view of the file shows. ``env="written"`` is
+    ``keep``, except that a value the file tags ``!ENV`` itself keeps the tag
+    (``EXPLICIT_ENV_TAG``): the reference exactly as the file wrote it, which is
+    what a record of the configuration holds (``config/environment_record.py``).
+
+    Aliases are refused, as in ``load_config_yaml``.
+    """
 
     # Use a local subclass to avoid mutating the global SafeLoader
-    class _AshConfigLoader(yaml.SafeLoader):
-        pass
+    class _AshConfigLoader(_NoAliasSafeLoader):
+        def compose_scalar_node(self, anchor):
+            # The tag is known only from the event: a node the implicit resolver
+            # tagged !ENV and one the file tagged look the same once composed.
+            explicit = self.peek_event().tag == "!ENV"
+            node = super().compose_scalar_node(anchor)
+            node.ash_explicit_env = explicit
+            return node
 
     _AshConfigLoader.add_implicit_resolver("!ENV", ENV_REFERENCE_PATTERN, None)
 
     def constructor_env_variables(loader, node):
+        if env == "refuse":
+            raise EnvReferenceNotResolved(node.start_mark.line + 1)
+        if env == "keep":
+            return loader.construct_scalar(node)
+        if env == "written":
+            scalar = loader.construct_scalar(node)
+            if getattr(node, "ash_explicit_env", False):
+                return f"{EXPLICIT_ENV_TAG}{scalar}"
+            return scalar
         return resolve_env_references(loader.construct_scalar(node))
 
     _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
-    return yaml.load(stream, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by resolve_env_references above
+    # !ENV is bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by
+    # resolve_env_references above.
+    return _load_single_document(_AshConfigLoader, stream)
+
+
+class _ConfigDumper(yaml.SafeDumper):
+    """``yaml.safe_dump``, except that a string ``load_yaml_config`` would read as
+    ``!ENV`` is written quoted, which the implicit resolver does not match."""
+
+
+def _represent_config_str(dumper: yaml.SafeDumper, value: str) -> yaml.ScalarNode:
+    style = "'" if ENV_REFERENCE_PATTERN.match(value) else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+_ConfigDumper.add_representer(str, _represent_config_str)
+
+
+class TaggedReference(str):
+    """A reference ``AshConfig.save(as_written=True)`` writes tagged ``!ENV``, so
+    the file reads it from the environment when it is loaded. Any other string
+    that reads as a reference is still written quoted."""
+
+    __slots__ = ()
+
+
+def represent_tagged_reference(
+    dumper: Any, value: "TaggedReference"
+) -> yaml.ScalarNode:
+    """``value`` as an ``!ENV`` scalar, the reference without a tag it wrote."""
+    return dumper.represent_scalar("!ENV", str(value).removeprefix(EXPLICIT_ENV_TAG))
+
+
+_ConfigDumper.add_representer(TaggedReference, represent_tagged_reference)
+
+
+class _QuotedStr(str):
+    """A string ``_rewrite_config_with_entry`` writes quoted, as ``_ConfigDumper``
+    would, among existing values it writes as they were."""
+
+    __slots__ = ()
+
+
+class _EntryRewriteDumper(yaml.SafeDumper):
+    pass
+
+
+_EntryRewriteDumper.add_representer(
+    _QuotedStr,
+    lambda dumper, value: dumper.represent_scalar(
+        "tag:yaml.org,2002:str", str(value), style="'"
+    ),
+)
+
+
+def _quote_references(value: Any) -> Any:
+    """``value`` with every string that reads as ``!ENV`` marked to be quoted."""
+    if isinstance(value, dict):
+        return {k: _quote_references(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_quote_references(v) for v in value]
+    if isinstance(value, str) and ENV_REFERENCE_PATTERN.match(value):
+        return _QuotedStr(value)
+    return value
 
 
 # Define BuildConfig class
@@ -350,6 +565,10 @@ class ScannerConfigSegment(_PluginConfigSegment):
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
 
+    actionlint: Annotated[
+        ActionlintScannerConfig,
+        Field(description="Configure the options for actionlint"),
+    ] = ActionlintScannerConfig()
     bandit: Annotated[
         BanditScannerConfig, Field(description="Configure the options for Bandit")
     ] = BanditScannerConfig()
@@ -357,6 +576,14 @@ class ScannerConfigSegment(_PluginConfigSegment):
         CdkNagScannerConfig,
         Field(description="Configure the options for CdkNag", alias="cdk-nag"),
     ] = CdkNagScannerConfig()
+    cfn_guard: Annotated[
+        CfnGuardScannerConfig,
+        Field(description="Configure the options for cfn-guard", alias="cfn-guard"),
+    ] = CfnGuardScannerConfig()
+    cfn_lint: Annotated[
+        CfnLintScannerConfig,
+        Field(description="Configure the options for cfn-lint", alias="cfn-lint"),
+    ] = CfnLintScannerConfig()
     cfn_nag: Annotated[
         CfnNagScannerConfig,
         Field(description="Configure the options for CfnNag", alias="cfn-nag"),
@@ -371,6 +598,9 @@ class ScannerConfigSegment(_PluginConfigSegment):
             alias="detect-secrets",
         ),
     ] = DetectSecretsScannerConfig()
+    gitleaks: Annotated[
+        GitleaksScannerConfig, Field(description="Configure the options for Gitleaks")
+    ] = GitleaksScannerConfig()
     grype: Annotated[
         GrypeScannerConfig, Field(description="Configure the options for Grype")
     ] = GrypeScannerConfig()
@@ -387,6 +617,13 @@ class ScannerConfigSegment(_PluginConfigSegment):
     syft: Annotated[
         SyftScannerConfig, Field(description="Configure the options for Syft")
     ] = SyftScannerConfig()
+    trivy: Annotated[
+        TrivyScannerConfig,
+        Field(description="Configure the options for Trivy (trivy fs)"),
+    ] = TrivyScannerConfig()
+    zizmor: Annotated[
+        ZizmorScannerConfig, Field(description="Configure the options for zizmor")
+    ] = ZizmorScannerConfig()
 
 
 class ReporterConfigSegment(_PluginConfigSegment):
@@ -491,6 +728,21 @@ class MCPResourceManagementConfig(BaseModel):
             le=10,
         ),
     ] = 3
+
+    max_concurrent_scans_per_session: Annotated[
+        int,
+        Field(
+            description=(
+                "Maximum number of scans one session of a network transport "
+                "(streamable-http, sse) may run at once; 0 for no per-session "
+                "limit. A run_ash_workspace_scan counts once. Read from the "
+                "operator's config (ASH_CONFIG) only, never from a scanned or "
+                "delivered one. stdio's single session is not limited."
+            ),
+            ge=0,
+            le=100,
+        ),
+    ] = 2
 
     max_concurrent_tasks: Annotated[
         int,
@@ -630,6 +882,63 @@ class MCPResourceManagementConfig(BaseModel):
     ] = False
 
 
+#: The archive converter's extraction limits as runtime-override pointers. They bound
+#: what extracting an archive in the scanned tree may write, so no client may raise
+#: them; they are part of ALWAYS_DENIED_PATHS. A write at an ancestor
+#: (``/converters/archive``, ``/converters``) is refused too, as for any denied_paths
+#: entry.
+ARCHIVE_LIMIT_RUNTIME_PATHS: Tuple[str, ...] = tuple(
+    f"/converters/archive/options/{name}" for name in EXTRACTION_LIMIT_OPTIONS
+)
+
+#: Runtime-override denials no profile can remove: RuntimeOverridesConfig adds any of
+#: them its denied_paths leaves out. A client override that gets past the gate is
+#: replayed as the operator's own setting (resolve_config, the session's profile), so
+#: these are the settings that trust depends on. The scanner sandbox. Plugin modules,
+#: imported into ASH's own process. The detect-secrets settings that turn on secret
+#: verification (each candidate secret is sent to its issuer) or import a plugin or
+#: filter from a file, and the baseline that can carry both. The archive extraction
+#: limits. And every plugin that sends data off the host, each a whole section, so a
+#: client can neither configure nor enable one through config overrides, nor change
+#: what it sends or where, nor disable such a scanner (``**`` also matches the
+#: section itself; a reporter's ``enabled: false`` is accepted and takes no effect,
+#: see reporter_trust; a workspace scan's ``scanners`` and ``excluded_scanners``
+#: arguments can still leave a scanner out of a run, never add one): the reporters
+#: that send the results, and the scanners that send the source (snyk-code),
+#: dependency lists (npm-audit), candidate secrets (detect-secrets), usage metrics
+#: (semgrep, opengrep) or usage data (trivy, trivy-repo), or that call the GitHub
+#: API with the token in ASH's environment (zizmor's online audits).
+#: tests/unit/config/test_off_host_plugins_are_operator_only.py lists what each one
+#: sends and classifies every plugin.
+#:
+#: A floor rather than the default alone: denied_paths was replaced whole by a
+#: profile's own list, so adding one entry dropped every shipped one.
+ALWAYS_DENIED_PATHS = (
+    "/sandbox",
+    "/sandbox/**",
+    "/ash_plugin_modules",
+    "/ash_plugin_modules/**",
+    "/scanners/detect-secrets/options/scan_settings/filters_used",
+    "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+    "/scanners/detect-secrets/options/scan_settings/plugins_used",
+    "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+    "/scanners/detect-secrets/options/baseline_file",
+    *ARCHIVE_LIMIT_RUNTIME_PATHS,
+    "/reporters/s3/**",
+    "/reporters/aws-security-hub/**",
+    "/reporters/cloudwatch-logs/**",
+    "/reporters/bedrock-summary-reporter/**",
+    "/scanners/detect-secrets/**",
+    "/scanners/npm-audit/**",
+    "/scanners/opengrep/**",
+    "/scanners/semgrep/**",
+    "/scanners/snyk-code/**",
+    "/scanners/trivy-repo/**",
+    "/scanners/trivy/**",
+    "/scanners/zizmor/**",
+)
+
+
 class RuntimeOverridesConfig(BaseModel):
     """Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
 
@@ -662,8 +971,22 @@ class RuntimeOverridesConfig(BaseModel):
         List[str],
         Field(
             description=(
-                "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
-                "Defaults block the most dangerous fields on the real AshConfig schema."
+                "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). "
+                "Each entry starts with '/'. The defaults block the fields that decide "
+                "whether a scan fails, what it runs and reports, where findings are "
+                "sent, the scanner sandbox, and this policy. A list equal to a default "
+                "ASH has shipped counts as the current default list. Any other list "
+                "is added to the current defaults, unless replace_default_denied_paths "
+                "is true. When it is added, a list that holds some default entries and "
+                "leaves others out still gets them, and a warning names the ones it "
+                "leaves out. Whatever the list, and with replace_default_denied_paths "
+                "too, the entries ASH always denies (the scanner sandbox, "
+                "ash_plugin_modules, the detect-secrets verification, plugin and "
+                "baseline settings, the archive converter's extraction limits, and the "
+                "sections of the plugins that send data off the host: the s3, "
+                "aws-security-hub, cloudwatch-logs and bedrock-summary-reporter "
+                "reporters and the detect-secrets, npm-audit, opengrep, semgrep, "
+                "snyk-code and trivy-repo scanners) are added to it."
             )
         ),
     ] = [
@@ -676,6 +999,11 @@ class RuntimeOverridesConfig(BaseModel):
         # out-of-date vulnerability database pass.
         "/content_db_staleness",
         "/content_db_staleness_overrides",
+        # Turning the scanned repository's ignore files off or on changes which
+        # files are scanned; it is the operator's choice.
+        "/honor_ignore_files",
+        # Turning it back on after the operator turned it off would relax trivy-db.
+        "/content_db_staleness_offline_image_default",
         # The scanner sandbox: a client must not be able to switch it off, hand a
         # scanner a network, or widen what it can read.
         "/sandbox",
@@ -683,12 +1011,165 @@ class RuntimeOverridesConfig(BaseModel):
         # Plugin modules are imported into ASH's own process, unsandboxed.
         "/ash_plugin_modules",
         "/ash_plugin_modules/**",
+        # detect-secrets settings the trust checks count as the operator's: the
+        # verification filter sends each candidate secret to the service that issued
+        # it, plugins and filters named by file are imported, and a baseline file can
+        # carry both.
+        "/scanners/detect-secrets/options/scan_settings/filters_used",
+        "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+        "/scanners/detect-secrets/options/scan_settings/plugins_used",
+        "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+        "/scanners/detect-secrets/options/baseline_file",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
-        # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
+        # The runtime-override policy itself: a client that could rewrite it
+        # through patch_ops could then lift every other entry here.
+        "/global_settings/mcp",
+        "/global_settings/mcp/**",
+        # Scanner options that drop findings by rule ID, by a baseline, or by a
+        # whole category (a framework, a severity, a rule set, a detector, a
+        # confidence level, a cap on the number reported) rather than by path. A
+        # delivered config's path exclusions are re-applied to the results as
+        # marked suppressions (config/client_scanner_exclusions.py); these have
+        # no file to scan instead, so a client may not change them. Options that
+        # only tune output or performance, or whose default already reports the
+        # least they can, are not listed. Of cdk-nag's packs only the one on by
+        # default is listed: turning another on reports more. The detect-secrets
+        # baseline, which can drop findings too, is listed above with its settings.
+        "/scanners/opengrep/options/exclude_rule",
+        "/scanners/semgrep/options/exclude_rule",
+        "/scanners/bandit/options/confidence_level",
+        "/scanners/checkov/options/frameworks",
+        "/scanners/checkov/options/skip_frameworks",
+        "/scanners/opengrep/options/config",
+        "/scanners/opengrep/options/patterns",
+        "/scanners/opengrep/options/severity",
+        "/scanners/semgrep/options/config",
+        "/scanners/semgrep/options/severity",
+        "/scanners/detect-secrets/options/scan_settings",
+        "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+        "/scanners/ferret-scan/options/checks",
+        "/scanners/ferret-scan/options/confidence_levels",
+        "/scanners/ferret-scan/options/disable_ip_types",
+        "/scanners/ferret-scan/options/enable_preprocessors",
+        "/scanners/ferret-scan/options/finding_limit",
+        "/scanners/ferret-scan/options/profile",
+        "/scanners/ferret-scan/options/recursive",
+        "/scanners/ferret-scan/options/respect_gitignore",
+        "/scanners/ferret-scan/options/use_default_config",
+        "/scanners/ferret-scan/options/validator_budget",
+        "/scanners/trivy-repo/options/license_full",
+        "/scanners/trivy-repo/options/scanners",
+        # The same for the builtin scanners: cfn-guard's rule sets, the cfn-lint
+        # rules it skips and the regions it validates for, a gitleaks baseline,
+        # and trivy's scanners and ignore_unfixed (off by default; on, it
+        # withholds every vulnerability that has no fixed version).
+        "/scanners/cfn-guard/options/rule_sets",
+        "/scanners/cfn-lint/options/ignore_checks",
+        "/scanners/cfn-lint/options/regions",
+        "/scanners/gitleaks/options/baseline_path",
+        "/scanners/trivy/options/scanners",
+        "/scanners/trivy/options/ignore_unfixed",
+        # Options that can leave findings out without naming them. A scanner
+        # set offline runs on whatever data is cached, and npm audit keeps no
+        # advisory data: offline it skips the advisory request, reports none
+        # and exits 0 (npm 10.9). max_live_bytes bounds how much extracted
+        # content ferret-scan holds at once, and gitleaks skips every file
+        # larger than max_target_megabytes.
+        "/scanners/*/options/offline",
+        "/scanners/ferret-scan/options/max_live_bytes",
+        "/scanners/gitleaks/options/max_target_megabytes",
+        # A scanner's own config file, and which version of its tool runs. From a
+        # config file inside the scanned tree the config file comes only from the
+        # operator (config/tool_config_trust.py), and so does every scanner's and
+        # converter's tool_version. The version is a specifier set or release tag
+        # from any source, installed only from the tool's own index or release
+        # page; a repository's config may still choose opengrep's version. A
+        # client's file may set none of them; refusing says so instead of
+        # leaving them out with a log line.
+        "/scanners/bandit/options/config_file",
+        "/scanners/checkov/options/config_file",
+        "/scanners/ferret-scan/options/config_file",
+        "/scanners/grype/options/config_file",
+        "/scanners/syft/options/config_file",
+        "/scanners/trivy-repo/options/secret_config_file",
+        # And the builtin scanners' own config files, trivy-repo's config file
+        # and modules directory, cfn-guard's rules files, the programs actionlint
+        # runs, and zizmor's online audits, which let the GitHub token in ASH's
+        # environment reach zizmor. From a config inside the scanned tree each
+        # is the operator's alone (utils/config_trust.py).
+        "/scanners/trivy-repo/options/config_file",
+        "/scanners/trivy-repo/options/module_dir",
+        "/scanners/trivy/options/config_file",
+        "/scanners/trivy/options/secret_config_file",
+        "/scanners/actionlint/options/config_file",
+        "/scanners/actionlint/options/shellcheck",
+        "/scanners/actionlint/options/pyflakes",
+        "/scanners/cfn-guard/options/rules_paths",
+        "/scanners/cfn-lint/options/config_file",
+        "/scanners/gitleaks/options/config_file",
+        "/scanners/zizmor/options/config_file",
+        "/scanners/zizmor/options/online_audits",
+        # Whether snyk code test may apply the .snyk and .dcignore files in the
+        # tree it tests, which leave files out of its analysis.
+        "/scanners/snyk-code/options/honor_tree_exclusions",
+        # Whether cfn-lint, gitleaks and zizmor honor the ignore comments and
+        # template metadata in the files they scan, which drop findings before
+        # ASH's suppressions see them.
+        "/scanners/cfn-lint/options/honor_inline_ignores",
+        "/scanners/gitleaks/options/honor_inline_ignores",
+        "/scanners/zizmor/options/honor_inline_ignores",
+        "/scanners/*/options/tool_version",
+        "/converters/jupyter/options/tool_version",
+        "/scanners/opengrep/options/version",
+        "/scanners/opengrep/options/sha256",
+        "/scanners/opengrep/options/metrics",
+        "/scanners/semgrep/options/metrics",
+        # AWS-credential-bearing reporter options (plugin-provided, hyphenated
+        # names), and every other destination and credential option of the
+        # built-in AWS reporters (config/reporter_trust.py). The whole section
+        # of each reporter that sends findings off the host is denied, its
+        # enabled with the rest: S3's, Security Hub's, CloudWatch Logs' and the
+        # Bedrock reporter's. A client's enabled: false is not refused
+        # (client_config_policy._writes_a_tightening), but takes no effect: the
+        # operator's enabled applies (config/reporter_trust.py). A local
+        # reporter's enabled is not denied.
         "/reporters/bedrock-summary-reporter/options/aws_*",
+        # The reporters that send results off the host, whole: turning one on or
+        # choosing its destination is the operator's call (also in
+        # ALWAYS_DENIED_PATHS).
         "/reporters/cloudwatch-logs/**",
+        "/reporters/aws-security-hub/**",
+        "/reporters/bedrock-summary-reporter/options/model_id",
+        "/reporters/bedrock-summary-reporter/options/output_file",
+        "/reporters/bedrock-summary-reporter/options/output_executive_file",
+        "/reporters/bedrock-summary-reporter/options/output_technical_file",
+        "/reporters/s3/**",
+        "/reporters/bedrock-summary-reporter/**",
+        # The GitLab SAST report leaves suppressed findings out with this set, so
+        # the findings a client's own suppressions are marked on would be gone
+        # from it (off by default; GHAS's is on by default and off reports more).
+        "/reporters/gitlab-sast/options/exclude_suppressed",
+        # The scanners that send data off the host, whole, for the same reason: the
+        # source (snyk-code), dependency lists (npm-audit), candidate secrets
+        # (detect-secrets), usage metrics (semgrep, opengrep) or usage data (trivy,
+        # trivy-repo), or the GitHub token (zizmor's online audits). Also in
+        # ALWAYS_DENIED_PATHS.
+        "/scanners/detect-secrets/**",
+        "/scanners/npm-audit/**",
+        "/scanners/opengrep/**",
+        "/scanners/semgrep/**",
+        "/scanners/snyk-code/**",
+        "/scanners/trivy-repo/**",
+        "/scanners/trivy/**",
+        "/scanners/zizmor/**",
+        # The archive converter's extraction limits bound what extracting an
+        # archive in the scanned tree may write, so a client may not raise them.
+        # A write at an ancestor (/converters/archive, /converters) is refused too.
+        # Listed for the operator reading the default; a profile's own list keeps
+        # them too (ALWAYS_DENIED_PATHS).
+        *ARCHIVE_LIMIT_RUNTIME_PATHS,
     ]
 
     denied_value_patterns: Annotated[
@@ -699,10 +1180,83 @@ class RuntimeOverridesConfig(BaseModel):
                 "any string leaf reachable from the op's value matches the regex; lists "
                 "and dicts are walked recursively so a forbidden token cannot be hidden "
                 "inside a nested structure. The `test` op is exempt because it is "
-                "read-only."
+                "read-only. Each key starts with '/'."
             )
         ),
     ] = {}
+
+    #: Set by ``client_config_policy.effective_policy`` on the copy it returns:
+    #: the operator's own list (None for a default one), and that this copy's
+    #: ``denied_paths`` is already the list that applies.
+    _listed_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
+    _effective: bool = PrivateAttr(default=False)
+    #: ``denied_paths`` as the profile wrote it, before ``_keep_the_always_denied_paths``
+    #: added the ALWAYS_DENIED_PATHS entries it left out; None when it set no list.
+    #: Whether the list is a shipped default, and which fields the operator's own
+    #: list names, are decided from what was written
+    #: (``client_config_policy.policy_is_default`` and ``exempt_paths``).
+    _written_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
+
+    replace_default_denied_paths: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, denied_paths is used as written instead of being added "
+                "to ASH's default list, and each default entry it leaves out is "
+                "named in a warning. When false (the default), the entries listed "
+                "are denied as well as the defaults. Either way, an unset list, or "
+                "one equal to a default ASH has shipped, gets the current default "
+                "list."
+            )
+        ),
+    ] = False
+
+    @field_validator("denied_paths")
+    @classmethod
+    def _denied_paths_are_pointers(cls, value: List[str]) -> List[str]:
+        # Named by position, not quoted: a value can be one read from the
+        # environment, and the message goes wherever the error is shown.
+        bad = [
+            str(index)
+            for index, entry in enumerate(value)
+            if not str(entry).startswith("/")
+        ]
+        if bad:
+            raise ValueError(
+                "denied_paths entries are JSON pointers and start with '/'; "
+                f"the entries at positions {', '.join(bad)} do not and would match "
+                "nothing"
+            )
+        return value
+
+    @field_validator("denied_value_patterns")
+    @classmethod
+    def _value_pattern_keys_are_pointers(cls, value: Dict[str, str]) -> Dict[str, str]:
+        # Counted, not quoted, as for denied_paths.
+        bad = sum(1 for key in value if not str(key).startswith("/"))
+        if bad:
+            raise ValueError(
+                "denied_value_patterns keys are JSON pointers and start with '/'; "
+                f"{bad} of them do not and would match nothing"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _keep_the_always_denied_paths(self) -> "RuntimeOverridesConfig":
+        """Add each ALWAYS_DENIED_PATHS entry the list leaves out, at its end.
+
+        Assigned only when one is missing, so a default policy (which holds them all)
+        is the shipped list unchanged and keeps its serialized shape. The list as
+        written is kept first (``_written_denied_paths``).
+        """
+        if "denied_paths" in self.model_fields_set:
+            self._written_denied_paths = tuple(self.denied_paths)
+        missing = [
+            entry for entry in ALWAYS_DENIED_PATHS if entry not in self.denied_paths
+        ]
+        if missing:
+            self.denied_paths = [*self.denied_paths, *missing]
+        return self
 
 
 class SandboxConfig(BaseModel):
@@ -711,7 +1265,8 @@ class SandboxConfig(BaseModel):
     See docs/content/docs/scanner-sandbox.md for the policy each scanner gets.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Validated on its own too; see AshConfig.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     mode: Annotated[
         Literal["off", "auto", "bwrap", "firejail", "landlock", "sandbox-exec"],
@@ -722,6 +1277,9 @@ class SandboxConfig(BaseModel):
                 "then firejail, then landlock; macOS: sandbox-exec). Any other value "
                 "requires that backend. A scanner that cannot be sandboxed as requested "
                 "is recorded MISSING with the reason; it is never run unsandboxed. "
+                "A mode that --sandbox, ASH_CONFIG or the operator's config file sets "
+                "is a floor: a config file inside a git checkout or the scanned "
+                "directory cannot turn it off or switch backends. "
                 "Ignored in container mode, where the container is the boundary."
             )
         ),
@@ -735,8 +1293,9 @@ class SandboxConfig(BaseModel):
                 "uses each scanner's declared need: semgrep, opengrep, grype, trivy, "
                 "npm-audit and snyk-code fetch rules, databases or audit data. A list "
                 "replaces those defaults. Under --offline no scanner gets a network. "
-                "Honored only from --config-overrides or a config file outside the "
-                "scanned tree; set inside the tree, a list can only remove network."
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory; set by any other config file, "
+                "a list can only remove network."
             )
         ),
     ] = None
@@ -747,13 +1306,44 @@ class SandboxConfig(BaseModel):
             description=(
                 "Additional host paths every sandboxed scanner may read, for example a "
                 "corporate CA bundle or a shared rule directory. '~' and $VARS expand. "
-                "Ignored when set by a config file inside the scanned tree."
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory."
+            )
+        ),
+    ] = []
+
+    read_path_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanners allowed the extra host paths their own options ask for "
+                "(a rules file or baseline outside the source tree, for example). "
+                "Under a sandbox, without this, a scanner whose read paths come from "
+                "its options gets only the default policy, and ASH does not read a "
+                "detect-secrets baseline_file outside the source tree. With it, a "
+                "granted path, that baseline included, is used only when it resolves "
+                "inside the source tree or an extra_read_paths entry. "
+                "Honored only from --config-overrides or a config file outside every "
+                "git checkout and the scanned directory."
+            )
+        ),
+    ] = []
+
+    env_scanners: Annotated[
+        List[str],
+        Field(
+            description=(
+                "Scanners allowed the environment variables their own options ask "
+                "for (a token for an online check, for example). Without this, such "
+                "variables are not passed. Honored only from --config-overrides or a "
+                "config file outside every git checkout and the scanned directory."
             )
         ),
     ] = []
 
     # Set by config/sandbox_grants.py from a network_scanners list that a config
-    # file inside the scanned tree wrote. Private, so no config file can set it.
+    # file the scanned repository could have written. Private, so no config file
+    # can set it.
     _network_limit: Optional[List[str]] = PrivateAttr(default=None)
 
     @property
@@ -794,6 +1384,8 @@ class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         validate_default=True,
+        # Validated on its own too; see AshConfig.
+        hide_input_in_errors=True,
     )
 
     severity_threshold: Annotated[
@@ -975,7 +1567,9 @@ class ContentDbStalenessOverride(BaseModel):
     same two fields a time-boxed suppression carries: an exception to a freshness
     gate that has no end date is a permanent one. On and after ``expiration``
     (00:00 UTC) the entry is ignored, with a warning in the log, and the database
-    falls back to ``content_db_staleness``.
+    is held to the policy it has without the entry: ``content_db_staleness``, or,
+    for trivy-db in an image built with ``OFFLINE=YES``, that image's ``warn``
+    default unless ``content_db_staleness_offline_image_default`` is false.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -1001,8 +1595,10 @@ class ContentDbStalenessOverride(BaseModel):
         Field(
             description=(
                 "Required. The date (YYYY-MM-DD, UTC) from which the entry no longer "
-                "applies: at 00:00 UTC that day the database returns to "
-                "content_db_staleness."
+                "applies: at 00:00 UTC that day the database returns to the policy it "
+                "has without the entry, which is content_db_staleness, or, for "
+                "trivy-db in an image built with OFFLINE=YES, that image's warn "
+                "default unless content_db_staleness_offline_image_default is false."
             )
         ),
     ]
@@ -1022,8 +1618,10 @@ class ContentDbStalenessOverride(BaseModel):
 
         names = sorted(entry.name for entry in CONTENT_DATABASES)
         if v not in names:
+            # The declared names, not the value: a value can be one read from the
+            # environment, and the message goes wherever the error is shown.
             raise ValueError(
-                f"unknown content database {v!r}; declared databases: {', '.join(names)}"
+                f"unknown content database; declared databases: {', '.join(names)}"
             )
         return v
 
@@ -1033,7 +1631,9 @@ class ContentDbStalenessOverride(BaseModel):
         try:
             datetime.strptime(v, "%Y-%m-%d")
         except ValueError:
-            raise ValueError(f"Invalid expiration date format. Use YYYY-MM-DD: {v}")
+            # Not the value, as above; from None so strptime's message, which
+            # quotes it, is not the cause either.
+            raise ValueError("Invalid expiration date format. Use YYYY-MM-DD") from None
         return v
 
     @property
@@ -1054,6 +1654,10 @@ class AshConfig(BaseModel):
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
         extra="ignore",
+        # A refused value can be a secret read from the environment, and an
+        # error's text goes wherever the error is shown: the console, ash.log,
+        # an MCP response. The input stays in errors().
+        hide_input_in_errors=True,
         # Accept BOTH the alias (e.g., 'mcp-resource-management') and the
         # Python field name (e.g., 'mcp_resource_management') as input.
         # Pydantic v2 default is alias-only when an alias is declared,
@@ -1065,11 +1669,63 @@ class AshConfig(BaseModel):
 
     # Internal field to track config resolution warnings (not serialized)
     _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
+    # Whether the operator or the scanned tree supplied this config, recorded by the
+    # orchestrator (utils/config_trust.py). None means unknown, which counts as the
+    # scanned tree.
+    _provenance: Optional[ConfigProvenance] = PrivateAttr(default=None)
 
     # The tree a scan with this config covers, when it is wider than the source
     # directory: workspace mode sets the workspace root. config/path_trust.py
     # refuses tool config files inside it. None means the source directory's tree.
     _scanned_root: Optional[Path] = PrivateAttr(default=None)
+
+    # Which tool paths in this config the operator named
+    # (config/path_trust.OperatorPaths), recorded by resolve_config. None means
+    # no option value counts as the operator's.
+    _operator_paths: Optional[Any] = PrivateAttr(default=None)
+
+    # What the detect-secrets settings of this config may turn on, when a file the
+    # scanned repository or an MCP client wrote built it (an
+    # UntrustedDetectSecretsSettings from config/secret_verification_trust.py), or
+    # None when the operator's own sources built it. Private, so no config file can
+    # set or clear it.
+    _untrusted_detect_secrets_settings: Optional[Any] = PrivateAttr(default=None)
+
+    # Scanner exclusions a config an MCP client delivered supplied, moved out of the
+    # scanners' options and applied to their results as marked suppressions
+    # instead (config/client_scanner_exclusions.py). Set by resolve_config.
+    _client_scanner_exclusions: List[Any] = PrivateAttr(default_factory=list)
+
+    # Set by resolve_config when a file of the config's chain is inside the scanned
+    # tree or was delivered by an MCP client: those files, and the trusted base the
+    # built-in reporters' destination options were taken from, with the reporter
+    # overrides replayed. A reporter a plugin module adds is only known once the
+    # scan imports the module, and its declared destination options are taken from
+    # the same base then (config/reporter_trust.py). Empty, and None, when there
+    # is no such file. Also the reporter section keys those files wrote, so a
+    # warning quotes a section as they spelled it where the merge kept another
+    # spelling of it.
+    _in_tree_config_files: Tuple[Path, ...] = PrivateAttr(default=())
+    _trusted_reporter_base: Optional["AshConfig"] = PrivateAttr(default=None)
+    _in_tree_reporter_keys: Tuple[str, ...] = PrivateAttr(default=())
+
+    # Set by resolve_config in the same case: the ash_plugin_modules entries of the
+    # trusted base, with the overrides replayed. A plugin class defined in an
+    # off-host package is selected only when one of them, or
+    # --ash-plugin-modules, loads it (config/plugin_module_trust.py). None when
+    # no file of the chain needs it; the config's own entries are trusted then.
+    _trusted_plugin_modules: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
+
+    # What the files this config was resolved from read from the environment
+    # (config/environment_record.EnvironmentReference), set by resolve_config. A
+    # record of the config, such as a results file's ash_config, holds each as the
+    # file wrote it instead of its value. In memory only, never serialized.
+    _environment_references: Tuple[Any, ...] = PrivateAttr(default=())
+
+    # The fields of a recorded config that held a reference they cannot hold, and
+    # read as their defaults (environment_record.load_recorded_config). ash merge
+    # and ash report refuse them unless the operator supplies them.
+    _unread_references: Tuple[Any, ...] = PrivateAttr(default=())
 
     # Project information
     project_name: Annotated[
@@ -1099,17 +1755,42 @@ class AshConfig(BaseModel):
             description=(
                 "Whether to exit with a non-zero code when a selected scanner did "
                 "not complete -- status ERROR (ran and failed) or MISSING "
-                "(dependencies unavailable, never ran). SKIPPED scanners are not "
-                "selected and never trip this. Independent of fail_on_findings: "
+                "(dependencies unavailable, never ran). A SKIPPED scanner, one not "
+                "selected or one with nothing of its kind to scan, does not trip "
+                "this by itself, but a run in which every scanner is SKIPPED, such "
+                "as one where no selected scanner had a file to scan, exits 1 while "
+                "this is on. Independent of fail_on_findings: "
                 "one answers 'was anything found', this one answers 'did what I "
                 "asked for actually run'. Selects on the scanner's status, so it "
                 "covers only a failure that reached that status. Defaults to True, "
                 "so a scanner recorded ERROR or MISSING does not report the exit "
-                "code of a clean scan. Set it to False, or pass "
+                "code of a clean scan. Converters count too: one that crashed, one "
+                "that could not convert some of its inputs, and one whose tool is "
+                "missing while it had inputs make the scan exit non-zero the same "
+                "way. Set it to False, or pass "
                 "--no-fail-on-incomplete-scanners, to accept a partial scan's exit "
                 "code; excluding the scanner whose tool is unavailable is usually "
                 "better, because an excluded scanner is recorded SKIPPED and the "
                 "report then says what was not measured."
+            )
+        ),
+    ] = True
+
+    honor_ignore_files: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether the .gitignore and .ignore files in the scanned tree decide "
+                "which files are left out of ASH's scan set, the file list "
+                "detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, "
+                "zizmor, npm-audit and the converters read. True (the default) leaves out every file they match. False "
+                "scans those files too; ASH's own exclusions (.git, CDK assets, "
+                "its own output directory) still apply. An operator setting: a config file inside the scanned "
+                "tree, or one an MCP client supplied, cannot change it, and its "
+                "value there is ignored with a warning. Set it in a config file "
+                "outside the tree, with --config-overrides, or with "
+                "--no-honor-ignore-files / --honor-ignore-files. Every scan records "
+                "the outcome in metadata.ignore_file_exclusions."
             )
         ),
     ] = True
@@ -1151,6 +1832,26 @@ class AshConfig(BaseModel):
             )
         ),
     ] = []
+
+    content_db_staleness_offline_image_default: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether an image built with OFFLINE=YES holds trivy-db to 'warn' rather "
+                "than to content_db_staleness: fail. Such an image carries the trivy "
+                "database it was built with, and trivy's own bound would fail every scan "
+                "in it from a day after the build; with this, those scans pass and every "
+                "report records the stale database. Only trivy-db: grype-db and the "
+                "offline rulesets keep content_db_staleness. ASH_OFFLINE_AT_BUILD_TIME=YES "
+                "in ASH's environment, which the image sets from its OFFLINE build "
+                "argument, turns it on; without that variable this does nothing, whatever "
+                "it says. Set false to hold trivy-db to content_db_staleness in the image "
+                "too. A content_db_staleness_overrides "
+                "entry for trivy-db outranks it, and either form of "
+                "--allow-stale-content-db sets this to false for that scan."
+            )
+        ),
+    ] = True
 
     ash_plugin_modules: Annotated[
         List[str],
@@ -1242,15 +1943,17 @@ class AshConfig(BaseModel):
     def _one_override_per_database(
         cls, v: List[ContentDbStalenessOverride]
     ) -> List[ContentDbStalenessOverride]:
-        seen: set[str] = set()
-        for entry in v:
+        # Named by the entries' positions, not by the database: a refusal names the
+        # field and the rule, never a value.
+        seen: Dict[str, int] = {}
+        for index, entry in enumerate(v):
             if entry.database in seen:
                 raise ValueError(
-                    f"content database {entry.database!r} is named by more than one "
-                    "content_db_staleness_overrides entry; which one applies would be "
-                    "ambiguous"
+                    f"content_db_staleness_overrides entries {seen[entry.database]} "
+                    f"and {index} name the same content database; one named by more "
+                    "than one entry would be ambiguous"
                 )
-            seen.add(entry.database)
+            seen[entry.database] = index
         return v
 
     @model_validator(mode="after")
@@ -1272,28 +1975,101 @@ class AshConfig(BaseModel):
         config_path: Path,
         confine_to: Optional[Path] = None,
         permit_base: Optional[Callable[[Path], bool]] = None,
+        refuse_env: Optional[Callable[[Path], bool]] = None,
+        anchor_relative_paths: Optional[Callable[[Path], bool]] = None,
     ) -> "AshConfig":
         """Load configuration from a file, following any ``extends`` chain.
 
         ``config_path`` may be YAML, JSON, an ``ashrc.toml``-style TOML file, or a
         ``pyproject.toml`` (whose ``[tool.ash]`` table is read). ``extends`` and
         ``patch`` are resolved by ``config/config_sources.py``, which documents
-        the merge rules and the confinement of base paths to ``confine_to`` and
-        ``permit_base``.
+        the merge rules, the confinement of base paths to ``confine_to`` and
+        ``permit_base``, and which files ``refuse_env`` keeps from resolving
+        ``!ENV``. ``anchor_relative_paths`` takes the relative paths each file it
+        accepts sets from that file's directory (``config/operator_paths.py``),
+        as a scan reads the operator's files; leave it None to get back what the
+        file holds.
         """
         from automated_security_helper.config.config_sources import (
             load_config_document,
         )
 
         config_data = load_config_document(
-            Path(config_path), confine_to=confine_to, permit_base=permit_base
+            Path(config_path),
+            confine_to=confine_to,
+            permit_base=permit_base,
+            refuse_env=refuse_env,
+            anchor_relative_paths=anchor_relative_paths,
         )
         return cls.model_validate(config_data, strict=True)
 
-    def save(self, config_path: Path):
-        """Save configuration to a file."""
+    def save(
+        self,
+        config_path: Path,
+        exclude_unset: bool = False,
+        as_written: bool = False,
+        env_tags: bool = True,
+    ):
+        """Save configuration to a file.
+
+        The file loads back as the values saved. A string that reads as an
+        ``!ENV`` reference is written quoted, so loading the file does not
+        resolve it against the loader's environment. The MCP server saves a
+        session's config with this (``profile_registry
+        .materialize_session_config``), and ``select_profile``'s ``patch_ops``
+        and ``override_yaml`` put values from the client into it.
+
+        ``exclude_unset`` writes only the fields the config was loaded or built
+        with, so the file sets what the original set and nothing else; it still
+        loads back as the same values.
+
+        ``as_written`` writes each value and key the config's files read from the
+        environment (``_environment_references``) as its reference, tagged
+        ``!ENV``, instead of the value, so loading the file reads it from the
+        environment again. Only where the whole string is the value: one the
+        load changed after reading it (a relative path taken from the file's
+        directory) is written as it is now. With ``env_tags`` False the reference
+        is written as quoted text instead, which nothing resolves on its own: the
+        copy of a profile a client patched, in a directory where ``!ENV`` is not
+        resolved, which a scan fills from the operator's copy
+        (``environment_record.fill_environment_references``).
+        """
+        data = self.model_dump(by_alias=True, exclude_unset=exclude_unset)
+        if as_written and self._environment_references:
+            from automated_security_helper.config.environment_record import (
+                record_environment_references,
+                written_without_tag,
+            )
+
+            data = record_environment_references(
+                data,
+                self._environment_references,
+                mark=TaggedReference if env_tags else written_without_tag,
+                whole_only=True,
+            )
         with open(config_path, mode="w", encoding="utf-8") as f:
-            yaml.safe_dump(self.model_dump(by_alias=True), f, indent=2)
+            yaml.dump(data, f, Dumper=_ConfigDumper, indent=2)
+
+    def __repr_args__(self):
+        """The fields as pydantic's repr shows them, except that a config whose
+        files read values from the environment shows each as the file wrote it.
+
+        A debug line that formats the config, or an object holding it (the
+        plugin context), would otherwise print the values. Those fields are
+        shown as the record holds them (config/environment_record.py), as plain
+        data rather than nested models.
+        """
+        if not self._environment_references:
+            yield from super().__repr_args__()
+            return
+        from automated_security_helper.config.environment_record import (
+            record_environment_references,
+        )
+
+        recorded = record_environment_references(
+            self.model_dump(by_alias=True), self._environment_references
+        )
+        yield from recorded.items()
 
     def get_plugin_config(
         self,
@@ -1301,6 +2077,7 @@ class AshConfig(BaseModel):
         plugin_name: str,
     ):
         found = None
+        found_key = plugin_name
         # Reduce the provided plugin_name in case the class name was passed in,
         # as the config itself uses kebab-case keys while the classes use PascalCase
         # for class names.
@@ -1366,22 +2143,38 @@ class AshConfig(BaseModel):
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} with direct match"
             )
-            found = item_dict[og_plugin_name]
+            found_key = og_plugin_name
+            found = item_dict[found_key]
         # Then the reduced form, against the reduced spellings of each key.
         elif plugin_name in item_dict:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} with direct match"
             )
-            found = item_dict[plugin_name]
+            found_key = plugin_name
+            found = item_dict[found_key]
         elif plugin_name in key_map:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
             )
-            found = item_dict[key_map[plugin_name]]
+            found_key = key_map[plugin_name]
+            found = item_dict[found_key]
 
         if found is not None:
+            from automated_security_helper.config.environment_record import (
+                setting_names,
+            )
+
+            # Which settings the section holds, never their values: a value can
+            # be one the file read from the environment, or a credential.
+            names = setting_names(
+                found,
+                self._environment_references,
+                at=(f"{plugin_type}s", found_key),
+            )
             ASH_LOGGER.debug(
-                f"Found config for {plugin_type} plugin {og_plugin_name}: {found}"
+                f"Found config for {plugin_type} plugin {og_plugin_name}, "
+                f"setting: {names}",
+                extra=NO_MARKUP,
             )
 
         return found
@@ -1443,7 +2236,7 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
         return
 
     text = config_path.read_text(encoding="utf-8")
-    data = yaml.safe_load(text) or {}
+    data = load_config_yaml(text) or {}
 
     # A file that extends a base and has no suppressions list of its own gets
     # its suppressions from the base. Writing a list here would replace that
@@ -1521,16 +2314,23 @@ def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:
     """Render one suppression entry as indented YAML lines.
 
     Serialized with ``yaml.safe_dump`` so a reason (or any value) containing
-    ``"``, ``\\``, ``:`` or ``#`` is quoted and escaped correctly.
+    ``"``, ``\\``, ``:`` or ``#`` is quoted and escaped correctly, and a value
+    shaped like an ``!ENV`` reference is quoted so it loads back as written.
     ``safe_dump([entry])`` emits the item at column 0 (``- key: value`` then
     ``  key: value``); each line is prefixed with ``item_indent``.
     """
-    dumped = yaml.safe_dump([entry], default_flow_style=False, sort_keys=False)
+    dumped = yaml.dump(
+        [entry], Dumper=_ConfigDumper, default_flow_style=False, sort_keys=False
+    )
     return [f"{item_indent}{line}\n" for line in dumped.splitlines()]
 
 
 def _rewrite_config_with_entry(config_path: Path, data: dict, entry: dict) -> None:
-    """Full ``safe_dump`` rewrite. Only for files with no comments to preserve."""
+    """Full ``safe_dump`` rewrite. Only for files with no comments to preserve.
+
+    The new entry's values are quoted where they read as ``!ENV``; the file's
+    existing values are written as they were, references included.
+    """
     if not isinstance(data, dict):
         data = {}
     global_settings = data.setdefault("global_settings", {})
@@ -1541,9 +2341,15 @@ def _rewrite_config_with_entry(config_path: Path, data: dict, entry: dict) -> No
     if not isinstance(suppressions_list, list):
         suppressions_list = []
         global_settings["suppressions"] = suppressions_list
-    suppressions_list.append(entry)
+    suppressions_list.append(_quote_references(entry))
     with open(config_path, mode="w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+        yaml.dump(
+            data,
+            f,
+            Dumper=_EntryRewriteDumper,
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
 
 def _has_top_level_key(lines: list, key: str) -> bool:

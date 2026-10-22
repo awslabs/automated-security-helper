@@ -21,8 +21,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from automated_security_helper.config.config_sources import read_config_file
-from automated_security_helper.config.config_validator import ConfigValidator
+from automated_security_helper.config.ash_config import load_config_yaml
+from automated_security_helper.config.config_sources import (
+    named_text_stream,
+    read_config_bytes,
+    read_config_file,
+)
+from automated_security_helper.config.config_validator import (
+    ConfigValidator,
+    directory_path_advice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +196,7 @@ class ConfigLinter:
         """
         cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
-        raw_content = config_path.read_text(encoding="utf-8")
+        raw_content = read_config_bytes(config_path).decode("utf-8")
 
         if issues is None:
             lint_result = cls.lint(config_path)
@@ -269,7 +277,7 @@ class ConfigLinter:
         """
         cls._refuse_to_rewrite_toml(config_path)
         config_data = cls._load_config(config_path)
-        raw_content = config_path.read_text(encoding="utf-8")
+        raw_content = read_config_bytes(config_path).decode("utf-8")
 
         # Find the unused suppressions report
         report_path, report_timestamp = cls._find_unused_report(config_path, output_dir)
@@ -459,15 +467,18 @@ class ConfigLinter:
 
         A TOML file goes through the config loader's reader, so a
         pyproject.toml yields its [tool.ash] table. Its own ``extends`` is not
-        followed: lint reports on the file it would fix.
+        followed: lint reports on the file it would fix. Every file is read as a
+        scan reads it (``read_config_bytes``): without blocking on a FIFO, only a
+        regular file, and at most ``ASH_CONFIG_MAX_FILE_BYTES``.
         """
         if str(config_path).endswith(".toml"):
             return read_config_file(config_path) or {}
-        with open(config_path, "r", encoding="utf-8") as f:
-            if str(config_path).endswith(".json"):
-                return json.load(f)
-            else:
-                return yaml.safe_load(f) or {}
+        data = read_config_bytes(config_path)
+        if str(config_path).endswith(".json"):
+            return json.loads(data.decode("utf-8-sig"))
+        return (
+            load_config_yaml(named_text_stream(data.decode("utf-8"), config_path)) or {}
+        )
 
     @classmethod
     def _refuse_to_rewrite_toml(cls, config_path: Path) -> None:
@@ -786,6 +797,7 @@ class ConfigLinter:
                         path_prefix=f"global_settings.ignore_paths[{i}].path",
                         project_root=project_root,
                         result=result,
+                        slash_names_directory=True,
                     )
 
         # Check suppression paths
@@ -810,16 +822,21 @@ class ConfigLinter:
         path_prefix: str,
         project_root: Path,
         result: LintResult,
+        slash_names_directory: bool = False,
     ) -> None:
         """Check a single path pattern for directory-without-glob issues.
 
-        A path like 'tests/test_data' or 'tests/test_data/' that points to an
-        existing directory will silently fail to match any files inside it.
-        The user likely intended 'tests/test_data/**'.
+        A path like 'tests/test_data' that points to an existing directory will
+        silently fail to match any files inside it. The user likely intended
+        'tests/test_data/**'. So does 'tests/test_data/' for a suppression; an
+        ignore path ending in '/' names the directory and matches what is in it
+        (``slash_names_directory``), so it is not reported.
         """
         # Skip patterns that already contain glob characters that would match files
         # Patterns with ** already handle recursive matching
         if "**" in path_pattern:
+            return
+        if slash_names_directory and path_pattern.endswith(("/", "\\")):
             return
 
         # Strip trailing slash for directory check
@@ -835,15 +852,13 @@ class ConfigLinter:
         # We strip leading **/ patterns that won't exist as literal paths
         candidate = project_root / clean_path
         if candidate.is_dir():
-            # The path exists as a directory — warn that it needs /**
+            # The path exists as a directory and matches no file in it.
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
                     category=LintCategory.IGNORE_PATH_ISSUE,
-                    message=(
-                        f"Path '{path_pattern}' points to a directory but lacks a '**' glob suffix. "
-                        f"This pattern will not match files inside the directory. "
-                        f"Use '{clean_path}/**' to ignore all files recursively."
+                    message=directory_path_advice(
+                        path_pattern, ignore_path=slash_names_directory
                     ),
                     path=path_prefix,
                 )
@@ -967,6 +982,7 @@ class ConfigLinter:
             SYMBOLS_EXTRA,
             is_valid_symbol,
             symbols_extra_available,
+            symbols_extra_install_hint,
         )
 
         symbol = suppression.get("symbol")
@@ -1009,6 +1025,7 @@ class ConfigLinter:
                     )
 
         if not reported_missing_extra and not symbols_extra_available():
+            hint = symbols_extra_install_hint()
             result.issues.append(
                 LintIssue(
                     severity=LintSeverity.WARNING,
@@ -1017,8 +1034,7 @@ class ConfigLinter:
                         f"Suppressions that set 'symbol' need the optional "
                         f"'{SYMBOLS_EXTRA}' extra, which is not installed here. "
                         f"Until it is, they match nothing and the findings they "
-                        f"name stay visible. Install "
-                        f"automated-security-helper[{SYMBOLS_EXTRA}]"
+                        f"name stay visible. {hint[:1].upper()}{hint[1:]}"
                     ),
                     path=path_prefix,
                 )

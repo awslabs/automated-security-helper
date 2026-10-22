@@ -406,7 +406,7 @@ ALLOWLIST: tuple[Entry, ...] = (
             "${{ inputs.config-file }}${{ inputs.oci-runner && "
             "format('-{0}', inputs.oci-runner) || '' }}"
             "${{ inputs.offline == 'true' && '-offline' || '' }} "
-            "path=.ash/ash_output"
+            "path=.ash/ash_output/reports|.ash/ash_output/ash_aggregated_results.json"
         ),
         reason=(
             "Scan reports -- SARIF, JSON, HTML -- from scanning this repository's "
@@ -418,7 +418,12 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
-        publishes="name=ash_output path=${{ inputs.output-dir }}",
+        publishes=(
+            "name=ash_output path=${{ steps.inputs.outputs.output_dir }}/reports"
+            "|${{ steps.inputs.outputs.output_dir }}/ash_aggregated_results.json"
+            "|${{ steps.inputs.outputs.output_dir }}/projects/*/reports"
+            "|${{ steps.inputs.outputs.output_dir }}/projects/*/ash_aggregated_results.json"
+        ),
         reason=(
             "Scan reports, in the reusable workflow consumers call. The bytes "
             "belong to the calling repository's scan and are published into the "
@@ -700,10 +705,17 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
-        publishes="enable-cache=true save-cache=${{ github.event_name == 'push' }}",
+        publishes=(
+            "cache-local-path=${{ runner.temp }}/setup-uv-cache "
+            "enable-cache=${{ env.RESTORE_CACHES }} "
+            "save-cache=${{ github.event_name == 'push' }}"
+        ),
         reason=_UV_CACHE_REASON
-        + " Saved from a push only, which narrows who writes the entry: a pull"
-        " request restores its base branch's copy and no longer saves its own.",
+        + " Saved from a push only, which narrows who writes the entry. Not"
+        " restored either on pull_request or merge_group (RESTORE_CACHES), where"
+        " the run's own cache scope can hold entries written by other jobs that"
+        " run the pull request's code. cache-local-path is setup-uv's own default"
+        " on a hosted runner, named so that the checkout's cache-dir is not read.",
     ),
     Entry(
         file=".github/workflows/ash-iac-drift.yml",

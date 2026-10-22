@@ -259,21 +259,18 @@ def test_reading_a_missing_results_file_raises(plugin_context, tmp_path):
         scanner._read_results_file(tmp_path / "never-written.json")
 
 
-def test_handle_empty_results_returns_an_empty_sarif_report(plugin_context):
+def test_handle_empty_results_raises_by_default(plugin_context):
+    """An empty results file is nothing to grade, so the default raises."""
     scanner = _scanner(plugin_context)
 
-    report = scanner._handle_empty_results()
-
-    assert isinstance(report, SarifReport)
-    assert report.version == "2.1.0"
-    assert report.runs == []
+    with pytest.raises(ScannerError, match="nothing to grade"):
+        scanner._handle_empty_results()
 
 
-def test_the_default_ensure_runs_and_post_process_hooks_are_inert(plugin_context):
+def test_the_default_post_process_hooks_are_inert(plugin_context):
     scanner = _scanner(plugin_context)
     report = SarifReport.model_validate(MINIMAL_SARIF)
 
-    assert scanner._ensure_runs(report) is None
     assert scanner._post_process_sarif(report, ["stub-tool"], Path(".")) is report
     assert scanner._invocation_extras(report, ["stub-tool"], Path(".")) == {}
 
@@ -401,7 +398,8 @@ def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(
     assert "scanners.stub.options.scan_timeout" in message
 
 
-def test_an_empty_results_file_yields_the_empty_sarif_report(plugin_context, tmp_path):
+def test_an_empty_results_file_fails_the_scan(plugin_context, tmp_path):
+    """An empty results file is a failed scan, not an empty report graded PASSED."""
     scanner = _scanner(plugin_context, execute_scan=_execute_writing(""))
     target = _populated_target(tmp_path)
 
@@ -409,11 +407,10 @@ def test_an_empty_results_file_yields_the_empty_sarif_report(plugin_context, tmp
     with (
         patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
         patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError, match="nothing to grade"),
     ):
-        report = scanner.scan(target=target, target_type="source")
+        scanner.scan(target=target, target_type="source")
 
-    assert isinstance(report, SarifReport)
-    assert report.runs == []
     assert "results file is empty" in logger.warning.call_args.args[0]
     assert "No stderr output captured." in logger.warning.call_args.args[0]
 
@@ -433,30 +430,32 @@ def test_the_empty_results_warning_quotes_captured_stderr_when_present(
     with (
         patch.object(type(scanner), "_run_subprocess", _run),
         patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError, match="tool said no"),
     ):
         scanner.scan(target=target, target_type="source")
 
     assert "Stderr: tool said no" in logger.warning.call_args.args[0]
 
 
-def test_a_results_file_that_is_not_sarif_is_returned_raw_with_a_warning(
-    plugin_context, tmp_path
-):
-    """Unparsable output degrades to the raw dict rather than failing the scan."""
+def test_a_results_file_that_is_not_sarif_fails_the_scan(plugin_context, tmp_path):
+    """Unparsable output is a failed scan, not a dict that reads as a clean one.
+
+    Returned as the raw dict, it would carry no verdict, and the executor would grade
+    it on its zero findings.
+    """
     scanner = _scanner(
         plugin_context, execute_scan=_execute_writing(json.dumps({"not": "sarif"}))
     )
     target = _populated_target(tmp_path)
 
-    logger = create_autospec(ASH_LOGGER)
     with (
         patch.object(type(scanner), "_run_subprocess", return_value={"returncode": 0}),
-        patch("automated_security_helper.base.scanner_plugin.ASH_LOGGER", logger),
+        pytest.raises(ScannerError) as excinfo,
     ):
-        result = scanner.scan(target=target, target_type="source")
+        scanner.scan(target=target, target_type="source")
 
-    assert result == {"not": "sarif"}
-    assert "Failed to parse" in logger.warning.call_args.args[0]
+    assert "is not SARIF ASH can read" in str(excinfo.value)
+    assert "could not be graded" in str(excinfo.value)
 
 
 def test_a_valid_sarif_results_file_is_returned_as_a_report(plugin_context, tmp_path):
@@ -524,14 +523,42 @@ def test_the_failure_message_reads_the_stderr_log_when_errors_are_empty(
     assert "Stderr: tool wrote this" in detail
 
 
-def test_a_long_stderr_is_truncated_in_the_failure_message(plugin_context):
+def test_a_long_stderr_is_shortened_in_the_failure_message(plugin_context):
     scanner = _scanner(plugin_context)
     scanner.errors = ["x" * (_STDERR_EXCERPT_LIMIT + 500)]
 
     detail = scanner._describe_scan_failure(RuntimeError("broke"), None)
 
-    assert " ...[truncated]" in detail
+    assert "characters omitted]" in detail
     assert len(detail) < _STDERR_EXCERPT_LIMIT + 500
+
+
+def test_a_long_stderr_keeps_its_last_line_in_the_failure_message(
+    plugin_context, tmp_path
+):
+    """A tool says why it failed last: trivy prints download progress, then the error.
+
+    The shape of the podman CI failure: a config line, a long progress bar, and the
+    reason at the very end. The message used to keep only the first 2000
+    characters, which ended inside the progress output.
+    """
+    scanner = _scanner(plugin_context)
+    results_file = tmp_path / "scanners" / "stub" / "results.json"
+    results_file.parent.mkdir(parents=True)
+    progress = "".join(
+        f"{n}.00 MiB / 120.19 MiB [---->____] {n}% ? p/s ?" for n in range(400)
+    )
+    reason = "FATAL Fatal error: unable to extract the vulnerability DB: no space left"
+    (results_file.parent / "StubScanner.stderr.log").write_text(
+        f'INFO Loaded file_path="/out/trivy-config.yaml"\n{progress}\n{reason}\n'
+    )
+
+    detail = scanner._describe_scan_failure(RuntimeError("broke"), results_file)
+
+    assert detail.endswith(reason)
+    assert 'Loaded file_path="/out/trivy-config.yaml"' in detail
+    assert "characters omitted]" in detail
+    assert len(detail) < _STDERR_EXCERPT_LIMIT + 400
 
 
 def test_a_short_stderr_is_not_truncated(plugin_context):

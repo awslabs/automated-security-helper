@@ -21,6 +21,7 @@ from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scann
     TrivyRepoScanner,
     TrivyRepoScannerConfig,
 )
+from automated_security_helper.utils.config_trust import record_provenance
 
 PluginContext.model_rebuild()
 
@@ -45,8 +46,13 @@ def _tree(tmp_path: Path) -> Path:
 def _argv(tmp_path: Path, source: Path, options=None) -> list:
     output = tmp_path / "out"
     output.mkdir(exist_ok=True)
+    # Built from no config file in the tree: the options here are the operator's.
+    # tests/unit/plugin_modules/ash_builtin/test_trivy_input_provenance.py covers
+    # options the scanned tree or an MCP client set.
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
     scanner = TrivyRepoScanner(
-        context=PluginContext(source_dir=source, output_dir=output, config=AshConfig()),
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
         config=TrivyRepoScannerConfig(options=options or {}),
     )
     scanner.dependencies_satisfied = True
@@ -87,6 +93,28 @@ def test_trivy_ignorefile_from_the_environment_is_passed(tmp_path, monkeypatch):
     operator.write_text("github-pat\n")
     monkeypatch.setenv("TRIVY_IGNOREFILE", str(operator))
     assert _ignorefile(_argv(tmp_path, source)) == operator.resolve()
+
+
+@pytest.mark.parametrize(
+    ("env", "flag"),
+    [
+        ("TRIVY_IGNOREFILE", "--ignorefile="),
+        ("TRIVY_SECRET_CONFIG", "--secret-config="),
+    ],
+)
+def test_a_relative_path_in_the_environment_is_taken_from_the_working_directory(
+    tmp_path, monkeypatch, env, flag
+):
+    """The variable is the operator's, set where ASH runs, not in the scanned tree."""
+    source = _tree(tmp_path)
+    (source / "operator-file").write_text("github-pat\n")
+    workdir = tmp_path / "ci"
+    workdir.mkdir()
+    (workdir / "operator-file").write_text("github-pat\n")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv(env, "operator-file")
+    values = [a.split("=", 1)[1] for a in _argv(tmp_path, source) if a.startswith(flag)]
+    assert [Path(v) for v in values] == [(workdir / "operator-file").resolve()]
 
 
 @pytest.mark.parametrize("value", [".trivyignore", "sub/ignore"])
@@ -155,34 +183,54 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
     assert argv[:2] == ["trivy", "repository"]
     assert argv[2].startswith("--ignorefile=")
     assert argv[3].startswith("--secret-config=")
-    assert argv[4:] == resolved[2:]
+    # The config and modules directory trivy-repo also pins are the only additions.
+    assert [
+        a for a in argv[4:] if not a.startswith(("--config=", "--module-dir="))
+    ] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
     """Both changes to trivy-repo's argv at once: an online scan in a sandbox.
 
     The database is prepared outside the sandbox and trivy is told not to update
     it, and the ignore file is still ASH's own, not the scanned tree's .trivyignore.
+    The update and its flags come from TrivyScannerBase._run_subprocess, which
+    trivy fs and trivy-repo share, so it is the base spawn that is replaced here.
     """
-    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-        trivy_repo_scanner,
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        _trivy_scanner_base as trivy_base,
     )
 
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     source = _tree(tmp_path)
+    output = tmp_path / "out"
+    output.mkdir()
+    config = AshConfig()
+    record_provenance(config, in_tree=[])
+    scanner = TrivyRepoScanner(
+        context=PluginContext(source_dir=source, output_dir=output, config=config),
+        config=TrivyRepoScannerConfig(options={"ignore_file": ".trivyignore"}),
+    )
+    scanner.dependencies_satisfied = True
     prepared = []
-    with (
-        patch.object(trivy_repo_scanner, "sandboxed_online", return_value=True),
-        patch.object(
-            trivy_repo_scanner,
-            "prepare_content_db",
-            side_effect=lambda tool, *a, **k: prepared.append((tool, k)),
-        ),
-    ):
-        argv = _argv(tmp_path, source, {"ignore_file": ".trivyignore"})
+    commands = []
+    monkeypatch.setattr(
+        trivy_base,
+        "prepare_content_db",
+        lambda tool, *a, **k: prepared.append((tool, k)),
+    )
+    monkeypatch.setattr(
+        trivy_base.ScannerPluginBase,
+        "_run_subprocess",
+        lambda self, command, *a, **k: commands.append(list(command)) or {},
+    )
+    with patch.object(scanner, "_pre_scan", return_value=True):
+        scanner.scan(target=source, target_type="source")
     assert [tool for tool, _ in prepared] == ["trivy"]
     assert prepared[0][1]["offline"] is False
+    (argv,) = commands
     passed = _ignorefile(argv)
     assert not passed.resolve().is_relative_to(source.resolve())
     assert passed.read_text() == ""
@@ -195,5 +243,6 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     subcommand_at = argv.index("repository")
     target_at = max(i for i, a in enumerate(argv) if Path(a) == source)
     ignore_at = next(i for i, a in enumerate(argv) if a.startswith("--ignorefile="))
-    for at in [*(argv.index(flag) for flag in flags), ignore_at]:
+    cache_at = next(i for i, a in enumerate(argv) if a.startswith("--cache-dir="))
+    for at in [*(argv.index(flag) for flag in flags), ignore_at, cache_at]:
         assert subcommand_at < at < target_at, argv

@@ -63,7 +63,7 @@ RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u1 \
+    ca-certificates=20250419~deb12u2 \
     python3-venv=3.11.2-1+b1 \
     git=1:2.39.5-0+deb12u3 \
     tree=2.1.0-1 \
@@ -154,6 +154,10 @@ ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV ASH_OFFLINE="${OFFLINE}"
+# YES only in an image built with OFFLINE=YES. ASH reads it as "this image carries the
+# databases it was built with" and then holds trivy-db to warn rather than fail
+# (OFFLINE_IMAGE_POLICIES in utils/content_databases.py), so it must keep following the
+# build argument and nothing else.
 ENV ASH_OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV OFFLINE_SEMGREP_RULESETS="${OFFLINE_SEMGREP_RULESETS}"
 ENV TZ=UTC
@@ -189,7 +193,7 @@ RUN mkdir -p ${HOME}/.ssh && \
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u1 \
+    ca-certificates=20250419~deb12u2 \
     curl=7.88.1-10+deb12u15 \
     git=1:2.39.5-0+deb12u3 \
     gnupg=2.2.40-1.1+deb12u2 \
@@ -241,8 +245,13 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 # cfn-nag (via Gemfile)
 #
-COPY automated_security_helper/assets/Gemfile /deps/Gemfile
-ARG BUNDLER_VERSION="2.4.22"
+COPY automated_security_helper/assets/Gemfile automated_security_helper/assets/Gemfile.lock /deps/
+ARG BUNDLER_VERSION="2.6.9"
+# Bundler installs the committed Gemfile.lock and does not resolve again. Frozen,
+# it refuses to run when the lockfile is missing or disagrees with the Gemfile, so
+# every build of one ASH commit installs the same gems. An ARG rather than an ENV:
+# it reaches the RUN below and is not left in the environment the image scans with.
+ARG BUNDLE_FROZEN=true
 # One RUN for install, build and purge. `core` is the base for both `ci` and
 # `non-root`, so a C toolchain left here ships in every published image, which is
 # its own finding in a security scanner. Docker layers are additive, so purging in
@@ -250,11 +259,16 @@ ARG BUNDLER_VERSION="2.4.22"
 # carried it -- keeping all three steps in one layer means it never lands at all.
 #
 # apt-get update runs again because the base layer clears the package lists.
+#
+# Some gems ship files mode 777 (lightly, which cfn-nag pulls in, does), and gem
+# install keeps the modes the gem was packed with. The chmod clears group and other
+# write in the same layer, so those modes never reach the image.
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     apt-get update && \
     apt-get install -y --no-install-recommends build-essential=12.9 ruby-dev=1:3.1 && \
     with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
     with-retry 'bundle install --jobs=4' && \
+    chmod -R go-w /var/lib/gems && \
     apt-get purge -y --auto-remove build-essential ruby-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -280,11 +294,16 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
 #
+# Owned by root and writable by root only: a scan reads the database and the rules
+# in these caches, so they have one owner. The offline build below
+# writes them as root. At scan time only grype's database update writes here,
+# which the ci stage runs as root and for which the non-root stage hands
+# GRYPE_DB_CACHE_DIR to its own user.
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
-    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+    chmod 755 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 #
@@ -338,6 +357,17 @@ ARG GRYPE_VERSION="v0.120.1"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
+# actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and
+# grype.
+ARG ACTIONLINT_VERSION="v1.7.12"
+RUN with-retry 'install-pinned-tool actionlint -b /usr/local/bin'
+RUN actionlint --version
+
+# gitleaks backs the builtin gitleaks scanner, which runs beside detect-secrets.
+ARG GITLEAKS_VERSION="v8.30.1"
+RUN with-retry 'install-pinned-tool gitleaks -b /usr/local/bin'
+RUN gitleaks --version
+
 # POSIX `[ ... = ... ]`, not `[[ ... == ... ]]`. This block did not run at all under
 # podman or finch, in either direction of the condition, and nothing said so.
 #
@@ -374,18 +404,26 @@ RUN grype --version
 # so the download time is written down rather than inferred from mtime, which a copy
 # resets. The grype database needs no such file: `grype db status` reports its own
 # build time.
+#
+# Every command is its own statement, separated by `;`, never joined by `&&`. `set -e`
+# does not apply to a command in an AND-OR list other than the last, nor to anything
+# that command runs, so when this block was one `&&` chain the `for` loop ran with
+# `set -e` off: a ruleset that failed to download, other than the last, was skipped
+# and the build passed without it. The trivy step below had the same defect.
+# tests/unit/test_dockerfile_offline_provisioning.py runs both steps with failing
+# stand-in downloads, and rejects `&&` in any RUN that sets `-e`.
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
-    with-retry 'grype db update' && \
-    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    with-retry 'grype db update'; \
+    mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     for i in $OFFLINE_SEMGREP_RULESETS; do \
         outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
-    done && \
-    fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
-    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
-    printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
-    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    done; \
+    fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at"; \
+    printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at"; \
+    chmod -R u=rwX,go=rX ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 # Assert the block above actually provisioned something, so a repeat of the defect
@@ -418,6 +456,52 @@ ARG TRIVY_VERSION="v0.75.0"
 RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
+# trivy's cache, shared by the trivy and trivy-repo scanners. It is owned the way
+# GRYPE_DB_CACHE_DIR is: root's and writable by root only here, handed to the
+# non-root stage's user there because trivy's database update writes it at scan time,
+# and left root's in an offline image, which never updates it. Not mode 777: only
+# /src and /out may be writable by every user (see the chmod of /ash below), and a
+# scan reads the database in this cache. An offline image downloads the
+# vulnerability database into it here; trivy is a default scanner, and offline with no
+# database it is MISSING, which fails the scan. trivy's own bound for that database is
+# 24 hours (utils/content_databases.py); in this image ASH holds it to `warn` rather
+# than `fail` (ASH_OFFLINE_AT_BUILD_TIME above), so once it is a day old the scans still
+# pass and each report records the stale database until the image is rebuilt. The
+# artifact is checked rather than OFFLINE re-tested, for the reason given above.
+#
+# `;` between the commands, not `&&`, for the reason given at the grype step: as an
+# `&&` chain, a failed download skipped the emptiness check below and the step still
+# printed "verified" and exited 0.
+ENV TRIVY_CACHE_DIR="/deps/.trivy"
+RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 755 "${TRIVY_CACHE_DIR}"; \
+    if [ "${OFFLINE}" = "YES" ]; then \
+        with-retry "trivy image --download-db-only --no-progress --cache-dir ${TRIVY_CACHE_DIR}"; \
+        chmod -R u=rwX,go=rX "${TRIVY_CACHE_DIR}"; \
+        if [ -z "$(ls -A "${TRIVY_CACHE_DIR}/db" 2>/dev/null)" ]; then \
+            echo "OFFLINE=YES but ${TRIVY_CACHE_DIR}/db is empty: the trivy database was not downloaded." >&2; \
+            exit 1; \
+        fi; \
+        echo "offline provisioning verified: trivy database present"; \
+    fi
+
+# cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
+# templates against. The binary comes from its pinned release asset like the three
+# above. The rules archive is pinned the same way (RULES_BUNDLES in
+# utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
+# user cannot rewrite the rules a later scan trusts. `ash dependencies install`
+# below finds the bundle already in place, its rule files matching the contents
+# pinned beside the archive digest, and leaves it alone.
+# Under /usr/share rather than /deps, whose cache directories stay writable for the
+# scanners: the bundle and every directory above it are root's and writable by no one
+# else, which `--assert-root-only` checks here and again in the final stage.
+ARG CFN_GUARD_VERSION="3.2.1"
+ENV ASH_CFN_GUARD_RULES_DIR="/usr/share/ash/cfn-guard-rules"
+RUN with-retry 'install-pinned-tool cfn-guard -b /usr/local/bin' && \
+    with-retry "install-pinned-tool aws-guard-rules-registry --rules-bundle -d ${ASH_CFN_GUARD_RULES_DIR}"
+RUN cfn-guard --version && \
+    test -s "${ASH_CFN_GUARD_RULES_DIR}/aws-guard-rules-registry-1.0.2/wa-Security-Pillar.guard" && \
+    install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
+
 # opengrep has no release archive for install-pinned-tool to read license files from:
 # it is a bare executable that `ash dependencies install` puts in place below. So its
 # license files are fetched on their own, each pinned by SHA256 and by the upstream
@@ -448,12 +532,28 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 COPY --from=uv-reqs /src/dist/*.whl .
 # [symbols] is tree-sitter and its grammars, for suppressions scoped by `symbol`.
 # Without it every such suppression matches nothing, so the image ships it.
-RUN uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
+# UV_NO_CACHE on every uv install in this file: uv's download and wheel cache is
+# only useful to a later install on the same machine, and in an image layer it is
+# dead weight -- measured, it was most of the growth the new scanners' uv tool
+# environments added. Set per RUN rather than as an ENV so a scan inside the
+# container that installs a tool still gets uv's normal caching. The
+# `ash dependencies install` RUNs below also give that install a TMPDIR of its own
+# and remove it in the same RUN: uv keeps its no-cache cache in a temporary
+# directory, and measured, `ash dependencies install` left about 437 MB of it in
+# /tmp in each stage's layer.
+RUN UV_NO_CACHE=1 uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
 
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out ${ASH_BIN_PATH}
+# /ash and ASH_BIN_PATH, which is first on PATH, belong to root: nothing writes to
+# them at scan time, and a tool there has to stay the one installed here. /src and
+# /out are where a run mounts the source and the output, so their modes matter only
+# when the image is started without those mounts. They stay writable by every user,
+# because the ci stage is for platforms that start the container under a UID they
+# choose, and they carry the sticky bit so that one user cannot remove or replace
+# another's files there.
+RUN chmod -R 755 /ash ${ASH_BIN_PATH} && chmod 1777 /src /out
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -463,20 +563,28 @@ ENV _ASH_EXEC_MODE="local"
 #
 # Install dependencies via ASH CLI into
 #
-# bandit, checkov and semgrep are installed with `uv tool install`, and each scanner's
+# bandit, checkov, semgrep, cfn-lint and zizmor are installed with `uv tool install`, and each scanner's
 # own default is a version range, so on its own this would install whatever release
 # PyPI had on the day. `--uv-tool-pins` prints the --config-overrides that pin each to
 # the version of its THIRD_PARTY_LICENSES entry, so the license files and the source
 # commit below describe the release in the image. Assigned first so a failure stops
-# the build rather than leaving the install unpinned.
+# the build rather than leaving the install unpinned. UV_NO_CACHE=1 keeps uv's cache
+# out of the layer.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
+    uv_tmp="$(mktemp -d)" && \
+    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
 ENV PATH="${ASH_BIN_PATH}:$PATH"
 
 # The Python tools' license files, read from each installed wheel's dist-info and,
 # for semgrep, whose wheel carries none, fetched from its repository at the pinned
 # commit and checked against their SHA256.
-RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
+RUN with-retry 'install-pinned-tool --licenses-only bandit cfn-lint checkov semgrep zizmor'
+
+# zizmor (builtin scanner) is installed by the line above through `uv tool install`
+# within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.
+RUN zizmor --version
 
 #
 # Every bundled third-party tool has its license files, they match their pins, and
@@ -485,6 +593,21 @@ RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
 # ${ASH_THIRD_PARTY_DIR}/index.json, the list of what the image bundles.
 #
 RUN install-pinned-tool --verify-third-party
+
+#
+# Nothing in the image is writable by every user outside the sticky directories.
+# Not every installer honors the umask: uv creates the lock files in its cache and
+# tool directories mode 666. This clears group and other write on whatever an
+# install step left writable by everyone, after the last one in this stage. It stays
+# on the image's own filesystem (-xdev) and skips the sticky scratch directories,
+# whose files belong to whoever wrote them; it changes only the files it finds, so
+# this layer holds only those. The non-root stage repeats it after its own install.
+# tests/snapshot/container/runtime/test_container_image_permissions.py checks the
+# built image with the same find.
+#
+RUN find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
+        -o -path /var/tmp -o -path /run/lock \) -prune -o \
+        ! -type l -perm -0002 ! -perm -1000 -exec chmod go-w {} +
 
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
@@ -544,8 +667,24 @@ RUN adduser --disabled-password --disabled-login \
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
+#
+# GRYPE_DB_CACHE_DIR and TRIVY_CACHE_DIR are handed to this user because grype's
+# and trivy's database updates write them at scan time (utils/content_db_refresh.py);
+# one owner, not writable by others. Not in an offline image: its databases were
+# downloaded at build time and are never updated at scan time, so they stay root's
+# and the scan user can only read them.
+# ASH_BIN_PATH is handed over only for this stage's own `ash dependencies install`
+# below, which puts this user's cfn-nag binstub and its own copy of the pinned tools
+# there, and is given back to root right after it.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
-    chmod 750 -R ${ASHUSER_HOME} /src /out
+    chmod 750 -R ${ASHUSER_HOME} /src /out && \
+    chown -R ${UID}:${GID} ${ASH_BIN_PATH} && \
+    if [ "${OFFLINE}" != "YES" ]; then \
+        chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR} ${TRIVY_CACHE_DIR}; \
+    fi
+
+# The rules bundle a scan trusts is still root's after every change above.
+RUN install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
 
 USER ${UID}:${GID}
 
@@ -561,7 +700,20 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Pinned as in the core stage: this user's uv tool directory starts empty, so the
 # Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
-    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
+    uv_tmp="$(mktemp -d)" && \
+    { TMPDIR="${uv_tmp}" UV_NO_CACHE=1 \
+    ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}; \
+    status=$?; rm -rf "${uv_tmp:?}"; exit "${status}"; }
+
+# ASH_BIN_PATH back to root, readable and executable by this user but not writable:
+# nothing writes there at scan time. Then the core stage's sweep again, for the lock
+# files uv left mode 666 under this user's home.
+USER root
+RUN chown -R root:root ${ASH_BIN_PATH} && chmod -R u=rwX,go=rX ${ASH_BIN_PATH} && \
+    find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
+        -o -path /var/tmp -o -path /run/lock \) -prune -o \
+        ! -type l -perm -0002 ! -perm -1000 -exec chmod go-w {} +
+USER ${UID}:${GID}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD ["/bin/sh", "-c", "command -v ash || exit 1"]

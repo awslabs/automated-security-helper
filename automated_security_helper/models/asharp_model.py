@@ -11,14 +11,16 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SerializerFunctionWrapHandler,
+    field_serializer,
     field_validator,
     model_validator,
 )
 
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
 from automated_security_helper.core.sharding import ShardAssignment
+from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.workspace import WorkspaceResults
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -33,6 +35,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.secret_masking import (
+    SecretValueShape,
+    mask_secrets_in_results,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -54,6 +60,8 @@ class ScannerSeverityCount(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
     suppressed: int = (
         0  # Suppressed findings take precedence over other severity levels
@@ -118,6 +126,8 @@ class SummaryStats(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     severity_counts: ScannerSeverityCount = Field(default_factory=ScannerSeverityCount)
@@ -244,6 +254,8 @@ class ScannerTargetStatusInfo(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     status: ScannerStatus = ScannerStatus.PASSED
@@ -255,6 +267,20 @@ class ScannerTargetStatusInfo(BaseModel):
     suppressed_finding_count: int | None = 0
     exit_code: int | None = 0
     duration: float | None = 0.0
+    # Set only when a MISSING row has a reason better than "not installed": today,
+    # that its tool was found only inside the scanned tree. Left unset otherwise,
+    # so an exclude_unset dump of every other row is what it was.
+    missing_reason: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why the scanner is MISSING, when ASH knows more than that its tool "
+                "was not found: for example, that the tool was found only inside "
+                "the scanned tree, which ASH does not run tools from by default."
+            ),
+        ),
+    ] = None
 
     @property
     def total_duration(self) -> float:
@@ -269,6 +295,8 @@ class ScannerStatusInfo(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     severity_threshold: str | None = None
@@ -298,10 +326,37 @@ class ScannerStatusInfo(BaseModel):
         return _non_default(self.source) and _non_default(self.converted)
 
 
+class InputNotScanned(BaseModel):
+    """One input that was found and not scanned, and why.
+
+    A scanner records its own in its report (``ScanResultsContainer.
+    inputs_not_scanned``); ASH records the ones it left out of the scan set, which
+    every reader of the scan set therefore did not scan, in
+    ``ReportMetadata.inputs_not_scanned``.
+    """
+
+    # Read from a scanner's report or a results file, whose values an error does
+    # not quote.
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    path: Annotated[
+        str,
+        Field(
+            description=(
+                "The input's path relative to the scanned tree, with '/' separators."
+            )
+        ),
+    ]
+    reason: Annotated[str, Field(description="Why it was not scanned.")]
+
+
 class RefusedInputInfo(BaseModel):
     """One input a converter declined to read, and why."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="allow", hide_input_in_errors=True
+    )
 
     path: Annotated[
         str,
@@ -320,6 +375,54 @@ class RefusedInputInfo(BaseModel):
         ),
     ] = None
     reason: Annotated[str, Field(description="Why the input was not read.")]
+    # Left out of a dump when None, so every other refusal's record reads as it did
+    # before the field existed.
+    limit: Annotated[
+        str | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: value is None,
+            description=(
+                "The extraction-limit option the input exceeded, such as "
+                "max_total_bytes, when that is why it was refused. None for every "
+                "other refusal. A refusal with a limit leaves the whole input "
+                "unscanned, so the completeness gate counts it as incomplete "
+                "conversion."
+            ),
+        ),
+    ] = None
+    unlisted_members: Annotated[
+        int | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: value is None,
+            description=(
+                "Set on a record that stands for several members: how many more "
+                "members of the archive were refused for the same reason without "
+                "a record of their own. An archive lists the first 20 refusals of "
+                "each reason one by one and counts the rest here."
+            ),
+        ),
+    ] = None
+
+
+class FailedInputInfo(BaseModel):
+    """One input a converter set out to convert and could not."""
+
+    # Read from a results file, whose values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="allow", hide_input_in_errors=True
+    )
+
+    path: Annotated[
+        str,
+        Field(
+            description=(
+                "The input's path relative to the scanned tree, with '/' separators."
+            )
+        ),
+    ]
+    reason: Annotated[str, Field(description="Why it was not converted.")]
 
 
 class ConverterStatusInfo(BaseModel):
@@ -329,6 +432,8 @@ class ConverterStatusInfo(BaseModel):
         str_strip_whitespace=True,
         extra="allow",
         arbitrary_types_allowed=True,
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     dependencies_satisfied: bool = True
@@ -397,8 +502,25 @@ class ConverterStatusInfo(BaseModel):
             "Inputs this converter did not read because they failed the "
             "scanned-tree check: a symlink, a path outside the scanned tree, a "
             "file that is not a regular file or has more than one hard link, or "
-            "an archive member that is a link or would be extracted outside its "
-            "destination."
+            "an archive member that is a link, would be extracted outside its "
+            "destination, or is itself an archive. An archive over an extraction "
+            "limit is recorded here too, with the limit named in limit, and so is a "
+            "Git LFS pointer named like an archive. An archive that could not be "
+            "read is in failed_inputs instead."
+        ),
+    )
+
+    # A converter that raised has failure; one that could not convert some of its
+    # inputs carried on, and before this field those inputs were in the log alone.
+    # The completeness gate reads it, so a notebook nbconvert could not convert is
+    # lost coverage in the exit code as well. Omitted from the row when empty, as
+    # refused_inputs is.
+    failed_inputs: List[FailedInputInfo] = Field(
+        default_factory=list,
+        description=(
+            "Inputs this converter tried to convert and could not, so the scanners "
+            "never saw what conversion would have produced from them. The "
+            "completeness gate counts a converter with any as incomplete."
         ),
     )
 
@@ -416,6 +538,8 @@ class ReportMetadata(BaseModel):
             datetime: lambda v: v.isoformat(),
             ExportFormat: lambda v: str(v),
         },
+        # Read from a results file, whose values an error does not quote.
+        hide_input_in_errors=True,
     )
 
     report_id: Annotated[
@@ -512,6 +636,40 @@ class ReportMetadata(BaseModel):
             ),
         ),
     ]
+    # Declared for the reasons the `shard` field above states. The scan set decides
+    # what detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard, actionlint, zizmor,
+    # npm-audit and the converters read, and nothing in their own results says a
+    # file was left out of it.
+    ignore_file_exclusions: Annotated[
+        IgnoreFileExclusions | None,
+        Field(
+            default=None,
+            description=(
+                "Whether the scanned repository's .gitignore and .ignore files were "
+                "honored when ASH built its scan set, and how many files they "
+                "removed from it, in total and per ignore file. Written by every "
+                "scan that runs the convert or scan phase. Absent from results "
+                "that did not build a scan set, and from results older ASH "
+                "versions wrote."
+            ),
+        ),
+    ] = None
+    # Beside ignore_file_exclusions for the same reason: nothing in the scan-set
+    # readers' own results says a file was left out of it. Set only when there is
+    # something to record, as each scanner's inputs_not_scanned is.
+    inputs_not_scanned: Annotated[
+        List[InputNotScanned] | None,
+        Field(
+            default=None,
+            description=(
+                "Files ASH left out of its scan set, so that no reader of the scan "
+                "set scanned them, each with the reason: a link to a file whose "
+                "target, every link resolved, is outside the scanned tree ('link "
+                "leaves the scanned tree'). The summaries list them under 'Inputs "
+                "not scanned' as ASH's. Null when there were none."
+            ),
+        ),
+    ] = None
 
     @field_validator("project_name")
     @classmethod
@@ -529,7 +687,14 @@ class ReportMetadata(BaseModel):
         if not v:
             v = datetime.now(timezone.utc)
         if isinstance(v, str):
-            v = datetime.fromisoformat(v.strip())
+            try:
+                v = datetime.fromisoformat(v.strip())
+            except ValueError:
+                # fromisoformat's own message quotes the value, which is read
+                # from a results file; the rule is named instead.
+                raise ValueError(
+                    "generated_at must be an ISO 8601 date and time"
+                ) from None
         return v.isoformat(timespec="seconds")
 
     def model_post_init(self, context):
@@ -543,6 +708,20 @@ class ReportMetadata(BaseModel):
             )
 
 
+def _recorded_config(config: Any, data: Any) -> Any:
+    """``data``, a dump of ``config``, as a record of the config holds it: each
+    value and key the config's files read from the environment as the file
+    wrote it, never the value (config/environment_record.py)."""
+    references = getattr(config, "_environment_references", ()) if config else ()
+    if not references:
+        return data
+    from automated_security_helper.config.environment_record import (
+        record_environment_references,
+    )
+
+    return record_environment_references(data, references)
+
+
 class AshAggregatedResults(BaseModel):
     """Main model class for parsing security scan reports from ASH tooling."""
 
@@ -550,6 +729,9 @@ class AshAggregatedResults(BaseModel):
         extra="ignore",
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
+        # The stored config's values can be secrets, and the rest is read from a
+        # results file: an error does not quote them.
+        hide_input_in_errors=True,
     )
 
     name: str = Field(default="ASH Scan Report", description="Name of the report")
@@ -634,11 +816,33 @@ class AshAggregatedResults(BaseModel):
         ),
     ] = None
 
+    secret_value_shapes: Annotated[
+        List[SecretValueShape],
+        Field(
+            default_factory=list,
+            # Left out of a file with no secret findings, so its shape is
+            # unchanged.
+            exclude_if=lambda shapes: not shapes,
+            description=(
+                "The shape of each value a secret finding exposed, as its masked "
+                "form shows it: visible prefix, visible suffix and length, never "
+                "the value. Every token of these shapes is masked whenever the "
+                "results are masked, which is how `ash merge` masks, in one shard's "
+                "findings, a value another shard exposed."
+            ),
+        ),
+    ]
+
     # Private cache for to_flat_vulnerabilities() — the method mutates
     # summary_stats.suppressed and scanner_results as a side effect, so
     # we memoize the result to keep the method idempotent when reporters
     # call it multiple times during rendering.
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
+
+    # The raw values the masking of these results found (utils/secret_masking.py),
+    # never serialized. A workspace masks each project's outputs with the values
+    # every project exposed.
+    _secret_values: set = PrivateAttr(default_factory=set)
 
     # Each of the three entry points below retries the AshConfig forward-reference
     # rebuild before doing anything else, because the attempt made when this
@@ -684,21 +888,74 @@ class AshAggregatedResults(BaseModel):
         _resolve_forward_refs()
         return super().model_validate_json(*args, **kwargs)
 
+    @field_validator("ash_config", mode="before")
+    @classmethod
+    def read_recorded_ash_config(cls, v: Any):
+        """A recorded configuration read back: a reference to the environment
+        that a field cannot hold reads as the field's default, with a warning,
+        and is noted for ash merge and ash report (config/environment_record.py).
+        Before pydantic validates the field, which would refuse the reference."""
+        if isinstance(v, dict):
+            from automated_security_helper.config.environment_record import (
+                load_recorded_config,
+            )
+
+            return load_recorded_config(v)
+        return v
+
     @field_validator("ash_config")
     @classmethod
     def validate_ash_config(cls, v: Any):
         from automated_security_helper.config.ash_config import AshConfig
 
-        try:
-            return AshConfig.model_validate(v)
-        except Exception as e:
-            ASH_LOGGER.error(f"Failed to validate ASH config: {e}")
-        return get_default_config()
+        # No configuration recorded stays None, so the results never carry a
+        # configuration the scan did not record (the defaults, or the file
+        # ASH_CONFIG names in the process reading them). A value that is not a
+        # valid configuration raises.
+        if v is None:
+            return None
+        return AshConfig.model_validate(v)
+
+    @field_serializer("ash_config", mode="wrap")
+    def _record_ash_config(self, value: Any, handler: SerializerFunctionWrapHandler):
+        """The configuration as a record holds it: each value and key its files
+        read from the environment as the file wrote it, never the value
+        (config/environment_record.py). The model itself keeps the live
+        configuration, so what the run computes from it, its reports included,
+        does not change."""
+        return _recorded_config(value, handler(value))
+
+    @field_serializer("metadata", mode="wrap")
+    def _record_metadata(self, value: Any, handler: SerializerFunctionWrapHandler):
+        """``expected_scanners`` lists the configuration's ``scanners`` keys, so a
+        key read from the environment is recorded as the file wrote it there
+        too (``_record_ash_config``)."""
+        data = handler(value)
+        config = self.ash_config
+        references = getattr(config, "_environment_references", ()) if config else ()
+        if not references or not isinstance(data, dict):
+            return data
+        names = data.get("expected_scanners")
+        if not isinstance(names, list):
+            return data
+        from automated_security_helper.config.environment_record import (
+            recorded_names,
+        )
+
+        return {
+            **data,
+            "expected_scanners": recorded_names(names, references, ("scanners",)),
+        }
 
     def model_post_init(self, context):
         """Initialize aggregator and trend analyzer with current findings."""
         if self.scanner_results is None:
             self.scanner_results = {}
+        # Results read back from a file (ash report, ash merge, --use-existing, the
+        # MCP tools, a workspace's per-project files) may have been written without
+        # masking, by an older ASH or another producer, so every model is masked as
+        # it is built; see utils/secret_masking.py.
+        mask_secrets_in_results(self)
         return super().model_post_init(context)
 
     def metadata_only(self) -> dict:
@@ -718,14 +975,23 @@ class AshAggregatedResults(BaseModel):
     def to_simple_dict(self) -> dict:
         """Convert the AshAggregatedResults to a simple dictionary representation.
 
+        ``ash_config`` is the configuration the results record, as the fields that
+        were set, and None when they record none. ASH's defaults never stand in
+        for it: they are not the configuration the scan ran with.
+
         Returns:
             dict: A simple dictionary representation of the AshAggregatedResults
         """
-        conf = {}
-        if self.ash_config is not None:
-            conf = self.ash_config.model_dump(by_alias=True, exclude_unset=True)
-        if len(conf.keys()) == 0:
-            conf = get_default_config()
+        # As a record of the config holds it (_record_ash_config): the off-host
+        # reporters send this dict.
+        conf = (
+            _recorded_config(
+                self.ash_config,
+                self.ash_config.model_dump(by_alias=True, exclude_unset=True),
+            )
+            if self.ash_config is not None
+            else None
+        )
         simple_dict = {
             "name": self.name,
             "description": self.description,
@@ -901,8 +1167,17 @@ class AshAggregatedResults(BaseModel):
         if not self.scanner_results:
             self._populate_final_metrics()
 
-        report_dir = output_dir.joinpath("reports")
-        report_dir.mkdir(parents=True, exist_ok=True)
+        # No secret value a finding exposes is written to the file; see
+        # utils/secret_masking.py. In place, so what is reported next is masked too.
+        mask_secrets_in_results(self)
+
+        # Refused rather than created through when it is a link, which it can have
+        # become since the run set it up (utils/report_path_links.py).
+        from automated_security_helper.utils.report_path_links import (
+            ensure_reports_dir,
+        )
+
+        ensure_reports_dir(output_dir.joinpath("reports"))
 
         # Save aggregated results as JSON. Atomically, because this file's existence is
         # what marks the scan complete and get_scan_progress parses it while the scan is

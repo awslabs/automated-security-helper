@@ -84,7 +84,10 @@ global_settings:
 ```
 
 ### How do I exclude files from scanning?
-ASH respects `.gitignore` files. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file.
+ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries and `ash_aggregated_results.json` (`metadata.ignore_file_exclusions`) record how many files the ignore files excluded.
+
+### How do I scan files that a `.gitignore` excludes?
+Pass `--no-honor-ignore-files`, or set `honor_ignore_files: false` in a config file outside the scanned tree. A config file inside the repository being scanned cannot change this setting. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
 
 ### How do I run specific scanners?
 ```bash
@@ -253,6 +256,15 @@ ASH v3 includes a comprehensive Scanner Validation System that monitors scanner 
 The validation system will log specific reasons why scanners might be disabled (missing dependencies, configuration exclusions, etc.) and attempt automatic recovery where possible. Additionally, the system ensures all originally registered scanners appear in the final results with appropriate status, even if they failed or were disabled during the scan.
 
 For detailed information about the scanner validation system, see the [Scanner Validation System](developer-guide/scanner-validation-system.md) developer guide.
+
+### Why is a scanner MISSING when I run ASH with `uv run` or `npm run`?
+ASH does not start tools from inside the directory it scans, and `uv run` and `npm run` put the project's `.venv/bin` or `node_modules/.bin` first on `PATH`. Install the scanner outside the repository (for example `uv tool install bandit`), or allow in-tree tools for one run with `ash scan --allow-in-tree-tools` or `ASH_ALLOW_IN_TREE_TOOLS=1`. `ash mcp` never runs in-tree tools. See [Troubleshooting](docs/troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree).
+
+### Why does ASH refuse my output directory?
+Because it, a working directory or file ASH writes in it, or a directory inside the scanned tree on the way to it is a symlink. ASH clears and writes the output directory before a scan, so it refuses to do that through a link, whatever the sandbox mode. Pass `--output-dir` with a directory that is not a link. See [Troubleshooting](docs/troubleshooting.md#the-scan-stops-because-something-in-the-output-directory-is-a-symlink).
+
+### Why does the scan fail when a notebook or archive could not be converted?
+Those files went unscanned in converted form, so the scan is incomplete and exits 1, as it does when a scanner did not run. The reason for each file is in `converter_results.<converter>.failed_inputs`. A single compressed file such as `data.json.gz` is decompressed and scanned; it is a failed input only when it cannot be decompressed. See [Troubleshooting](docs/troubleshooting.md#the-scan-exits-1-because-conversion-was-incomplete).
 
 ### How do I debug ASH?
 ```bash

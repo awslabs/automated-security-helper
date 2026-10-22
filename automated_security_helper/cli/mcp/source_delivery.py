@@ -8,9 +8,10 @@ Source delivery for the MCP server.
 Two delivery channels are supported:
 
 1. ``set_source_git`` — clone a remote repository (optionally at a specific
-   ref) into a per-session workspace via ``git clone --depth``. SSH keys are
-   resolved from a server-side keyring identifier; raw private keys are never
-   accepted over the wire.
+   ref) into a per-session workspace via ``git clone --depth``. git runs
+   without the server's own credentials or configuration (see
+   :func:`_git_environment`); no ssh key can be named, and raw private keys are
+   never accepted over the wire.
 2. ``set_source_zip_chunk`` + ``set_source_zip_finalize`` — accept a zipped
    source tree as base64-encoded chunks (≤ 1 MiB each), reassemble in a
    per-session ``incoming/`` directory, verify a sha256 checksum at finalize
@@ -42,29 +43,41 @@ Each session lives under ``<workspace_root>/<session_id>/``. ``clear_source``
 recursively removes that directory.
 
 The session ↔ source_dir binding is persisted in a process-local registry
-(``_SESSION_SOURCE_DIRS``); when the larger session-state class lands
-(Track 10.3 / cascade-73), this dict is meant to be replaced by an attribute
-on the per-session object.
+(``_SESSION_SOURCE_DIRS``), the single source of truth for it; ``MCPSession``
+deliberately holds no ``source_dir`` field.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
+import functools
 import hashlib
+import inspect
 import os
+import re
 import shutil
+import signal
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
+import sys
+import threading
+import time
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
 from automated_security_helper.cli.mcp.session_paths import (
+    mark_session_workspace,
     session_directory,
     validated_path_component,
 )
 from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
+from automated_security_helper.utils.git_command import GIT_PROGRAM, git_argv
 from automated_security_helper.utils.process_env import snapshot_environ
 
 # ---------------------------------------------------------------------------
@@ -91,12 +104,134 @@ _S_IFMT_SHIFTED = 0xF000 << 16
 # ---------------------------------------------------------------------------
 # Per-process session → source_dir registry.
 #
-# Track 10.3 (cascade-73) is expected to land an MCPSession class; when that
-# happens, this dict should move onto that object as ``session.source_dir``.
-# Until then, we keep a process-local mapping keyed by session id.
+# The single source of truth for a session's delivered source directory.
+# ``MCPSession`` deliberately holds no ``source_dir`` field (test_sessions.py
+# pins the model's fields), so do not grow one there: a second copy of this
+# state drifts, and a scan would read a different tree than the delivery
+# recorded.
 # ---------------------------------------------------------------------------
 
 _SESSION_SOURCE_DIRS: Dict[str, Path] = {}
+
+
+class SourceDeliveryBusyError(RuntimeError):
+    """A change to the delivered tree was refused because a scan of the session runs.
+
+    Delivering replaces the tree, and the config files in it, and clearing
+    removes it, while the running scan is reading it: a scan whose tree
+    disappears under it can report clean for code it never examined, and the
+    config the scan checked would not be the config it used.
+    """
+
+
+#: Worker threads the server runs clones (``set_source_git``) on, across all
+#: sessions. A clone beyond this many waits for a worker; scans do not share
+#: these, and neither do the chunk, finalize and clear tools, which have a pool of
+#: their own.
+CLONE_MAX_WORKERS = 8
+
+#: Worker threads the server runs the other three delivery tools on (a chunk, a
+#: finalize, a clear), across all sessions. Explicit rather than
+#: ``ThreadPoolExecutor``'s default, which depends on the host's CPU count: the
+#: default is 5-6 workers on a 1-2 vCPU container, and before Python 3.13
+#: ``os.cpu_count`` ignores cgroup CPU quotas, so a big host gets 32 whatever
+#: its container's quota. A finalize (a sha256 and an extraction) or a clear
+#: (an ``rmtree``) can hold a worker for seconds, so the size bounds how many
+#: of those one tenant's calls can queue another's chunk behind.
+DELIVERY_MAX_WORKERS = 8
+
+#: ``error_type`` the MCP tools return for :class:`SourceDeliveryBusyError`.
+SOURCE_DELIVERY_BUSY = "source_delivery_busy"
+
+
+@contextlib.contextmanager
+def _no_scan_running(
+    session_id: str, *, removes_workspace: bool = True
+) -> Iterator[None]:
+    """Hold the session's scan lock for a change to its tree, or refuse.
+
+    Refused too for a scan that has started and not yet taken the lock
+    (``MCPSession.try_claim_scan``). Not blocking: a delivery runs on one of the
+    server's few delivery threads, and waiting there for a scan to finish would
+    hold the thread for the scan's length and queue other sessions' deliveries
+    behind it. A session that ended while the change held the lock is removed
+    once it is released.
+
+    ``removes_workspace`` is True for a change that deletes the session's whole
+    directory (``clear_source``). Such a change also excludes writes
+    (``MCPSession.try_begin_write``): it is refused while a chunk or a profile
+    binding is being written, and a write that comes meanwhile is refused. A
+    clone and a finalize pass False, so a write goes on beside them: a clone
+    replaces ``source/`` and its staging sibling and touches neither
+    ``incoming/`` nor ``config/``; a finalize replaces the same two and also
+    reads and removes its own upload's ``incoming/<id>.zip`` (it opens the zip
+    under the upload's lock (:func:`_upload_lock`), hashes and extracts the open
+    handle without the lock, and deletes the path under the lock again), so
+    only a chunk of that same upload waits for either step.
+
+    Takes the in-memory session only: a change that is refused leaves no session
+    directory, and each change that writes creates and marks the directory
+    itself.
+    """
+    from automated_security_helper.cli.mcp.sessions import (
+        CHANGE_REFUSED_BY_CHANGE,
+        CHANGE_REFUSED_BY_WRITE,
+        finish_ended_session,
+        get_default_registry,
+    )
+
+    session = get_default_registry().session_for(session_id)
+    refused = session.try_begin_change(removes_workspace=removes_workspace)
+    if refused is not None:
+        # The message names what refused this attempt
+        # (MCPSession.try_begin_change says why), so a client is not told to
+        # wait for a scan that does not exist.
+        if refused == CHANGE_REFUSED_BY_WRITE:
+            raise SourceDeliveryBusyError(
+                "a chunk of an upload or a profile selection is being "
+                "written; change the delivered source after it finishes"
+            )
+        if refused == CHANGE_REFUSED_BY_CHANGE:
+            raise SourceDeliveryBusyError(
+                "another change to this session's source is in progress (a "
+                "delivery, a clear, the end of the session, or the removal "
+                "of an idle session); change the delivered source after it "
+                "finishes"
+            )
+        raise SourceDeliveryBusyError(
+            "a scan of this session is running; change the delivered source "
+            "after it finishes"
+        )
+    try:
+        yield
+    finally:
+        session.end_change()
+        finish_ended_session(session_id)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _while_no_scan_runs(*, removes_workspace: bool = True) -> Callable[[_F], _F]:
+    """Run a change to a session's tree under ``_no_scan_running`` for its session.
+
+    Used as ``@_while_no_scan_runs()`` for a change that deletes the session's
+    directory, and as ``@_while_no_scan_runs(removes_workspace=False)`` for one
+    that replaces ``source/`` only; see :func:`_no_scan_running`.
+    """
+
+    def decorate(function: _F) -> _F:
+        signature = inspect.signature(function)
+
+        @functools.wraps(function)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            session_id = signature.bind(*args, **kwargs).arguments["session_id"]
+            with _no_scan_running(session_id, removes_workspace=removes_workspace):
+                return function(*args, **kwargs)
+
+        return cast(_F, wrapper)
+
+    return decorate
 
 
 def get_session_source_dir(session_id: str) -> Optional[Path]:
@@ -163,8 +298,18 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
 
     The return value is the unresolved join, unchanged from before, so a caller
     comparing it against its own spelling of the path still matches.
+
+    Raises:
+        ValueError: for ``UNIDENTIFIED_SESSION_ID``, the caller the server could
+            not identify, which owns no workspace; or for an id that does not
+            name one directory.
     """
 
+    if session_id == UNIDENTIFIED_SESSION_ID:
+        raise ValueError(
+            "this caller has no session the server issued, so it has no session "
+            "workspace"
+        )
     return session_directory(workspace_root, session_id)
 
 
@@ -174,27 +319,381 @@ def _ensure_dir(path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# SSH key resolution (placeholder).
+# ssh keys and the environment git runs with.
 # ---------------------------------------------------------------------------
 
 
-def _resolve_ssh_key(ssh_key_id: Optional[str]) -> Optional[Path]:
-    """Resolve an ``ssh_key_id`` to a key file on disk.
+def _refuse_ssh_key_id(ssh_key_id: Optional[str]) -> None:
+    """Refuse any ``ssh_key_id``: the server registers no ssh keys.
 
-    The actual server-side keyring backend is out of scope for this track —
-    cascade-73 / a future security-track will own the real implementation.
-    For now this function returns ``None`` for any input, which causes the
-    git clone to fall back to whatever credentials the host process already
-    has access to (e.g. an agent-forwarded SSH key, or none).
+    The parameter exists so a future operator-side key registry can be added
+    without changing the tool's signature. Until one exists every id names a
+    key nobody registered. Cloning anyway would authenticate with whatever the
+    server process can reach, which is the opposite of what naming a key asks
+    for, so the clone is refused before git runs.
 
-    Raw private-key material must never be accepted over the wire; only the
-    opaque identifier is accepted, by design.
+    Raises:
+        ValueError: for every non-None ``ssh_key_id``.
     """
 
-    if ssh_key_id is None:
-        return None
-    # TODO(track-10.x security): wire this up to the real keyring backend.
-    return None
+    if ssh_key_id is not None:
+        raise ValueError(
+            f"ssh_key_id {ssh_key_id!r} is not registered: this server registers no "
+            f"ssh keys, so set_source_git cannot authenticate with one. Clone a "
+            f"repository that needs no credentials, or deliver the tree with "
+            f"set_source_zip_chunk and set_source_zip_finalize."
+        )
+
+
+#: Environment variables git may inherit from the server. Everything else --
+#: ssh agent sockets, askpass helpers, proxies, tokens, ``GIT_*`` overrides and
+#: config locations -- is dropped. Trust anchors for TLS are kept: they are not
+#: credentials, and an operator who installed a private CA needs them.
+_GIT_INHERITED_ENV = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TZ",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
+
+#: ssh as git runs it for a clone: no configuration file (``-F`` also skips the
+#: system one), no identity file, no agent, no Kerberos, no shared connection,
+#: never a prompt, and only the system-wide known hosts. ssh reads the default
+#: identity files from the account's home directory in the password database,
+#: not from ``$HOME``, so overriding the environment alone would not stop it.
+_GIT_SSH_COMMAND = " ".join(
+    [
+        "ssh",
+        "-F",
+        os.devnull,
+        "-o BatchMode=yes",
+        "-o IdentitiesOnly=yes",
+        "-o IdentityFile=none",
+        "-o IdentityAgent=none",
+        "-o GSSAPIAuthentication=no",
+        "-o ControlPath=none",
+        "-o StrictHostKeyChecking=yes",
+        f"-o UserKnownHostsFile={os.devnull}",
+    ]
+)
+
+#: ``-c`` options on every git invocation of a delivery, placed before the
+#: subcommand so they outrank the repository's config and are not written into
+#: the clone's ``.git/config``. An empty ``credential.helper`` resets the helper
+#: list, so no configured helper runs; only the https and ssh protocols are
+#: allowed, for submodules and anything else git might reach as well as for the
+#: clone itself; an http redirect is not followed, so an allowed host cannot send
+#: git to one that is not. Every command is built by ``git_argv``, which also puts
+#: ``core.fsmonitor=false`` and ``core.hooksPath=/dev/null`` before these, so git
+#: starts neither the fsmonitor command nor a hook (the clone's post-checkout, the
+#: checkout's, a fetch's ref-update hooks), wherever they were configured.
+_GIT_CONFIG = (
+    "-c",
+    "credential.helper=",
+    "-c",
+    "core.askPass=",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "protocol.ssh.allow=always",
+    "-c",
+    "http.followRedirects=false",
+)
+
+#: The program a delivery runs as git. A tuple so a test can name a stand-in.
+_GIT_ARGV: Tuple[str, ...] = (GIT_PROGRAM,)
+
+#: Seconds each git command of a delivery (the clone, and for a ref the fetch
+#: and the checkout) may run. A command still running then is stopped together
+#: with every process it started, and the delivery fails with
+#: :class:`GitTimeoutError`.
+GIT_TIMEOUT_SECONDS = 600
+
+
+class CloneRefusedError(RuntimeError):
+    """A clone was stopped or refused; the partial tree is removed.
+
+    A subclass names its ``error_type``. ``_clone_into_session`` removes the
+    partial tree for every subclass, and ``mcp_set_source_git`` returns the
+    subclass's ``error_type``, so a new refusal type needs no other change.
+    """
+
+    error_type = "clone_refused"
+
+
+#: ``error_type`` the MCP tool returns for :class:`GitTimeoutError`.
+CLONE_TIMED_OUT = "clone_timed_out"
+
+
+class GitTimeoutError(CloneRefusedError):
+    """A git command of a delivery ran past ``GIT_TIMEOUT_SECONDS`` and was stopped."""
+
+    error_type = CLONE_TIMED_OUT
+
+
+#: Bytes a clone may grow the session's source directory to, the same limit the
+#: zip channel puts on the extracted tree. A command that passes it is stopped
+#: together with every process it started, and the delivery fails with
+#: :class:`CloneTooLargeError`.
+MAX_CLONE_BYTES = _MAX_EXTRACTED_BYTES
+
+#: Seconds between looks at the size of the tree a git command is writing.
+GIT_POLL_SECONDS = 0.5
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTooLargeError`.
+CLONE_TOO_LARGE = "clone_too_large"
+
+
+class CloneTooLargeError(CloneRefusedError):
+    """A clone passed ``MAX_CLONE_BYTES`` or ``_MAX_FILES`` entries."""
+
+    error_type = CLONE_TOO_LARGE
+
+
+#: ``error_type`` the MCP tool returns for :class:`CloneTreeUnreadableError`.
+CLONE_TREE_UNREADABLE = "clone_tree_unreadable"
+
+
+class CloneTreeUnreadableError(CloneRefusedError):
+    """The tree a git command wrote could not be read once the command had exited."""
+
+    error_type = CLONE_TREE_UNREADABLE
+
+
+def _walk_failed(error: OSError) -> None:
+    """``os.walk`` error handler: only a path that is gone is tolerated."""
+
+    if not isinstance(error, FileNotFoundError):
+        raise error
+
+
+def _walk_failed_during_poll(error: OSError) -> None:
+    """``os.walk`` error handler for a poll of a tree git is still writing.
+
+    Tolerates only the two shapes git's own writing produces under the walk: a
+    path that is gone (``FileNotFoundError``, git removes its lock files) and a
+    directory that became a file (``NotADirectoryError``, a checkout replaces
+    one with the other). Any other error is raised, so the poll stops the
+    command instead of leaving the subtree uncounted: this poll is the only
+    size check that runs while git writes, and a subtree it cannot read
+    (``ENAMETOOLONG``, ``EACCES``, ``EMFILE``) would otherwise not count
+    toward the limits until the command exits.
+    """
+
+    if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        raise error
+
+
+def _tree_extent(root: Path, *, running: bool = False) -> Tuple[int, int]:
+    """Bytes of the regular files under ``root`` and the count of its entries.
+
+    Links are not followed. A path that vanishes while the tree is walked (git
+    removes its lock files) is skipped, because what is left is still measured.
+
+    Args:
+        root: The directory to measure.
+        running: True for a poll while the command still writes into ``root``.
+            Git then changes the tree under the walk, so a path that vanished
+            (git removes its lock files) or a directory that became a file (a
+            checkout replaces one with the other) is skipped, and the figures
+            are a lower bound; the next poll and the check after the command
+            exits look again. Any other error is raised in both modes, because
+            a subtree that cannot be read must not count as empty: while the
+            command runs this walk is the only size check, and once it has
+            exited a tree that cannot be measured must not read as an empty
+            one.
+    """
+
+    onerror = _walk_failed_during_poll if running else _walk_failed
+    total = 0
+    entries = 0
+    for dirpath, dirnames, filenames in os.walk(
+        root, followlinks=False, onerror=onerror
+    ):
+        entries += len(dirnames) + len(filenames)
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_size
+            except FileNotFoundError:
+                continue
+            except NotADirectoryError:
+                # A directory became a file under the walk: one of git's own
+                # rewrites while it runs, impossible on a still tree.
+                if not running:
+                    raise
+    return total, entries
+
+
+def _tree_bytes(root: Path) -> int:
+    """Bytes of the regular files under ``root``; see :func:`_tree_extent`."""
+
+    return _tree_extent(root)[0]
+
+
+def _refuse_oversized(grows_in: Optional[Path], *, running: bool = False) -> None:
+    """Raise :class:`CloneTooLargeError` when ``grows_in`` is past a clone limit.
+
+    The limits are ``MAX_CLONE_BYTES`` and the zip channel's ``_MAX_FILES``
+    entries. A tree that cannot be read is refused with
+    :class:`CloneTreeUnreadableError`, which is not a limit, whether the command
+    has exited or still runs: while it runs the refusal stops it, because this
+    poll is the only size check until it exits and an unreadable subtree must
+    not stay uncounted. Only a path git itself removed or rewrote under the
+    walk leaves a running poll's figures short; see :func:`_tree_extent`.
+
+    Args:
+        grows_in: The directory the command writes into, or None.
+        running: True when the command is still running, so that it is about to
+            be stopped; False when it has already exited.
+    """
+
+    if grows_in is None:
+        return
+    suffix = " and was stopped" if running else ""
+    try:
+        size, entries = _tree_extent(grows_in, running=running)
+    except OSError as exc:
+        raise CloneTreeUnreadableError(
+            f"the tree git wrote could not be read ({exc.strerror or exc}); "
+            f"the delivery was refused"
+        ) from exc
+    if size > MAX_CLONE_BYTES:
+        raise CloneTooLargeError(f"git wrote more than {MAX_CLONE_BYTES} bytes{suffix}")
+    if entries > _MAX_FILES:
+        raise CloneTooLargeError(
+            f"git wrote more than {_MAX_FILES} files and directories{suffix}"
+        )
+
+
+def _stop_process_group(process: "subprocess.Popen[str]") -> None:
+    """Kill ``process`` and every process in the group it leads."""
+
+    # sys.platform rather than os.name: it is the check mypy reads, so the
+    # Windows-only names below are checked on Windows alone.
+    if sys.platform == "win32":
+        with contextlib.suppress(OSError, ValueError):
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        with contextlib.suppress(OSError):
+            process.kill()
+        return
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
+
+
+def _run_git(
+    cmd: List[str], *, env: Dict[str, str], grows_in: Optional[Path] = None
+) -> subprocess.CompletedProcess[str]:
+    """Run one git command of a delivery, for at most ``GIT_TIMEOUT_SECONDS``.
+
+    git runs in a process group of its own, with no stdin, so that on expiry the
+    helpers it started (ssh, ``git-remote-https``) are stopped with it.
+
+    Args:
+        cmd: The argv, with git as an absolute path.
+        env: The environment for the child.
+        grows_in: A directory the command writes into. When it passes
+            ``MAX_CLONE_BYTES`` the command is stopped.
+
+    Raises:
+        GitTimeoutError: when the command runs past the timeout.
+        CloneTooLargeError: when ``grows_in`` passes ``MAX_CLONE_BYTES``.
+        CloneTreeUnreadableError: when ``grows_in`` cannot be read after the
+            command exits.
+    """
+
+    # An if statement, not a conditional expression: mypy applies a platform
+    # check only to statements.
+    group: Dict[str, Any]
+    if sys.platform == "win32":
+        group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        group = {"start_new_session": True}
+    process = subprocess.Popen(  # nosec B603 - list-form argv, git from _GIT_ARGV, url and ref validated before any call; see set_source_git
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        **group,
+    )
+    deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(cmd, GIT_TIMEOUT_SECONDS)
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=min(GIT_POLL_SECONDS, remaining)
+                )
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            # Stopped, with its helpers, by the handler below.
+            _refuse_oversized(grows_in, running=True)
+        # A command that finished inside one poll interval was not looked at yet.
+        _refuse_oversized(grows_in)
+    except subprocess.TimeoutExpired:
+        _stop_process_group(process)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=10)
+        subcommand = next(
+            (part for part in cmd if part in ("clone", "fetch", "checkout")), "command"
+        )
+        raise GitTimeoutError(
+            f"git {subcommand} did not finish within {GIT_TIMEOUT_SECONDS} seconds and "
+            f"was stopped"
+        ) from None
+    except BaseException:
+        _stop_process_group(process)
+        process.wait()
+        raise
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+
+
+def _git_environment(home: Path) -> Dict[str, str]:
+    """The environment git runs with for a delivery.
+
+    Built from an allowlist rather than by deleting known-bad names from the
+    server's environment, because the bad set is open-ended: a deployment can
+    hold any number of token or proxy variables under names nothing here could
+    list. System and global git configuration are switched off, so no helper,
+    proxy or rewrite rule the server's own account configured applies, and
+    ``HOME`` is the session's own directory.
+
+    Args:
+        home: The session directory, used as ``HOME``.
+    """
+
+    inherited = snapshot_environ()
+    env = {name: inherited[name] for name in _GIT_INHERITED_ENV if name in inherited}
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_SSH_COMMAND": _GIT_SSH_COMMAND,
+        }
+    )
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +763,162 @@ def _validate_clone_url(url: str) -> str:
     return url
 
 
+#: URL schemes a clone may use. Plain http and the git protocol carry no
+#: integrity protection, file:// reads the server's own filesystem, and every
+#: other scheme is a transport helper.
+_CLONE_SCHEMES = ("https", "ssh")
+
+#: A host name as the allowlist compares it: letters, digits, dots and hyphens,
+#: starting with a letter or digit. Anything else is refused rather than
+#: interpreted, so this parser and git's cannot disagree about the host.
+_HOST_NAME = re.compile(r"[a-z0-9][a-z0-9.-]*")
+
+#: Characters refused between ``ssh://`` and the first ``/``. Without them, the
+#: host the allowlist checks is the host git hands ssh.
+_SSH_AUTHORITY_REFUSED = frozenset("%?#[]")
+
+
+#: The port a clone url without one reaches, by scheme. The scp-like form is ssh
+#: and has no way to name a port.
+_DEFAULT_PORTS = {"https": 443, "ssh": 22}
+
+
+def remote_clone_host(url: str) -> str:
+    """Return the host ``url`` makes git connect to, or raise if it is not allowed.
+
+    The host of :func:`remote_clone_endpoint`: lower-cased with any trailing dot
+    removed.
+
+    Raises:
+        ValueError: as :func:`remote_clone_endpoint`.
+    """
+
+    return remote_clone_endpoint(url)[1]
+
+
+def remote_clone_endpoint(url: str) -> tuple[str, str, int]:
+    """Return the ``(scheme, host, port)`` ``url`` makes git connect to.
+
+    Accepts ``https://`` and ``ssh://`` URLs and the scp-like ``[user@]host:path``
+    form, the three ways git reaches a remote over https or ssh. The scheme is
+    ``https`` or ``ssh`` (scp-like is ``ssh``), the host is lower-cased with any
+    trailing dot removed, and the port is the one the url names or its scheme's
+    default, for comparison against the operator's allowlist.
+
+    Raises:
+        ValueError: for a local path or ``file://`` URL, any other scheme, port 0,
+            or a host or port this parser cannot state unambiguously.
+    """
+
+    from urllib.parse import urlsplit
+
+    if any(ch.isspace() or ord(ch) < 0x20 or ch == "\\" for ch in url):
+        raise ValueError(
+            "refusing a clone url with whitespace, control characters or backslashes"
+        )
+    if local_clone_path(url) is not None:
+        raise ValueError(
+            "refusing a local clone source: set_source_git clones from a remote "
+            "https or ssh url only; it never reads the server's filesystem"
+        )
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        scheme = scheme.lower()
+        if scheme not in _CLONE_SCHEMES:
+            raise ValueError(
+                f"refusing a {scheme}:// clone url: only "
+                f"{', '.join(s + '://' for s in _CLONE_SCHEMES)} and the scp-like "
+                f"user@host:path form are allowed"
+            )
+        authority = rest.split("/", 1)[0]
+        refused = sorted(set(authority) & _SSH_AUTHORITY_REFUSED)
+        if scheme == "ssh" and refused:
+            raise ValueError(
+                f"refusing an ssh:// clone url with {' '.join(refused)} before the "
+                f"path; write the host and user plainly."
+            )
+        try:
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            named_port = parts.port
+        except ValueError:
+            raise ValueError(
+                f"refusing a clone url whose host cannot be read: {url!r}"
+            ) from None
+        if named_port == 0:
+            raise ValueError(f"refusing a clone url that names port 0: {url!r}")
+        port = _DEFAULT_PORTS[scheme] if named_port is None else named_port
+    else:
+        scheme = "ssh"
+        port = _DEFAULT_PORTS[scheme]
+        authority = url.split(":", 1)[0]
+        host = authority.rsplit("@", 1)[-1]
+    host = host.lower().rstrip(".")
+    if not _HOST_NAME.fullmatch(host):
+        raise ValueError(f"refusing a clone url whose host cannot be read: {url!r}")
+    return scheme, host, port
+
+
+#: Where ``set_source_git`` may clone from, set by the operator. Comma- or
+#: whitespace-separated ``[scheme://]host[:port]`` entries. A bare host stands for
+#: its scheme's default port (https 443, ssh 22) on either scheme; ``host:port``
+#: names the port, and ``https://`` or ``ssh://`` the scheme. Unset or empty means
+#: no remote is allowed.
+ASH_MCP_GIT_ALLOWED_HOSTS_ENV = "ASH_MCP_GIT_ALLOWED_HOSTS"
+
+
+def _git_allowed_entries() -> list[tuple[Optional[str], str, Optional[int]]]:
+    """The operator's entries as ``(scheme, host, port)``, None where unnamed.
+
+    An entry this cannot read (another scheme, a port that is not a number from 1
+    to 65535, a host that is not a plain name) allows nothing.
+    """
+
+    raw = os.environ.get(ASH_MCP_GIT_ALLOWED_HOSTS_ENV, "")
+    entries: list[tuple[Optional[str], str, Optional[int]]] = []
+    for text in raw.replace(",", " ").split():
+        scheme: Optional[str] = None
+        rest = text.strip().lower()
+        if "://" in rest:
+            scheme, rest = rest.split("://", 1)
+            if scheme not in _CLONE_SCHEMES:
+                continue
+        host, colon, port_text = rest.partition(":")
+        port: Optional[int] = None
+        if colon:
+            if not (port_text.isascii() and port_text.isdigit()):
+                continue
+            port = int(port_text)
+            if not 1 <= port <= 65535:
+                continue
+        host = host.rstrip(".")
+        if _HOST_NAME.fullmatch(host):
+            entries.append((scheme, host, port))
+    return entries
+
+
+def git_allowed_hosts() -> frozenset[str]:
+    """The host names the operator allows clones from, lower-cased; possibly none."""
+
+    return frozenset(host for _, host, _ in _git_allowed_entries())
+
+
+def clone_endpoint_allowed(scheme: str, host: str, port: int) -> bool:
+    """Whether an entry of the operator's list allows ``scheme``, ``host`` and ``port``.
+
+    The three come from :func:`remote_clone_endpoint`. An entry allows a clone when
+    its host is the url's, its scheme (if it names one) is the url's, and its port
+    (the scheme's default when it names none) is the url's.
+    """
+
+    return any(
+        entry_host == host
+        and entry_scheme in (None, scheme)
+        and (_DEFAULT_PORTS[scheme] if entry_port is None else entry_port) == port
+        for entry_scheme, entry_host, entry_port in _git_allowed_entries()
+    )
+
+
 def _is_windows_drive_path(url: str) -> bool:
     return len(url) >= 2 and url[1] == ":" and url[0].isalpha()
 
@@ -283,15 +938,50 @@ def local_clone_path(url: str) -> Optional[Path]:
     from urllib.parse import unquote, urlsplit
 
     if "://" in url:
-        parts = urlsplit(url)
-        if parts.scheme.lower() != "file":
+        if url.split("://", 1)[0].lower() != "file":
             return None
-        return Path(unquote(parts.path))
+        try:
+            return Path(unquote(urlsplit(url).path))
+        except ValueError:
+            # Not a url Python can split, but a file:// source all the same.
+            return Path(url)
     colon = url.find(":")
     slash = url.find("/")
     if colon > 0 and (slash == -1 or colon < slash) and not _is_windows_drive_path(url):
         return None
     return Path(url)
+
+
+def _git_executable() -> str:
+    """The git to clone with, as an absolute path: ``_GIT_ARGV``'s program.
+
+    Not the bare name: on Windows a program started by name is looked for in the
+    working directory before PATH, and ``find_executable`` does not answer from the
+    working directory. A program ``_GIT_ARGV`` names by absolute path is used as is.
+
+    Raises:
+        RuntimeError: git was not found, so nothing is run.
+    """
+    from automated_security_helper.utils.subprocess_utils import find_executable
+
+    program = _GIT_ARGV[0]
+    git = program if os.path.isabs(program) else find_executable(program)
+    if git is None:
+        raise RuntimeError(
+            "git was not found on PATH, so the repository cannot be cloned"
+        )
+    return git
+
+
+def _validated_clone_depth(depth: object) -> int:
+    """``depth`` if it is a positive whole number of commits, else raise ValueError."""
+
+    if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
+        raise ValueError(
+            f"refusing clone depth {depth!r}: the depth is a positive whole number "
+            f"of commits"
+        )
+    return depth
 
 
 def set_source_git(
@@ -305,12 +995,17 @@ def set_source_git(
 ) -> Path:
     """Clone ``url`` (optionally at ``ref``) into the session workspace.
 
+    The operator's host allowlist is the MCP tool boundary's policy
+    (``mcp_tools.mcp_set_source_git``); this function enforces what holds for
+    every caller: a remote https or ssh url, no ssh key, and git run without the
+    server's credentials or configuration.
+
     Args:
         url: Remote URL to clone (https or ssh).
         ref: Optional branch/tag/commit to check out. When ``None``, the
             remote default branch is used.
-        ssh_key_id: Opaque identifier resolved server-side via
-            :func:`_resolve_ssh_key`. Raw private keys are not accepted.
+        ssh_key_id: Must be None. No ssh keys are registered, so any id is
+            refused; raw private keys are never accepted.
         depth: Shallow-clone depth. Defaults to 1 (latest commit only).
         workspace_root: Override workspace root; defaults to
             :func:`resolve_workspace_root`.
@@ -320,95 +1015,150 @@ def set_source_git(
         The absolute path of the cloned working tree.
 
     Raises:
-        ValueError: if ``session_id`` is invalid, or if ``url``/``ref`` is
-            option-like or uses a command-executing git transport.
-        RuntimeError: if ``git clone`` (or the optional ``git checkout``
-            for an explicit ref) fails.
+        ValueError: if ``session_id`` is invalid, if ``url``/``ref`` is
+            option-like or uses a command-executing git transport, if ``url`` is
+            local or not https/ssh, if ``ssh_key_id`` is set, or if ``depth`` is
+            not a positive whole number. Raised before anything is created.
+        RuntimeError: if git is not on PATH, or ``git clone`` (or the optional
+            ``git checkout`` for an explicit ref) fails.
     """
 
-    # Validate before touching the filesystem so a rejected request leaves no
-    # session directory behind.
+    # Validated here, before the session is taken: taking it creates the session
+    # workspace, and a refused request leaves nothing behind.
     url = _validate_clone_url(url)
+    remote_clone_host(url)
+    _refuse_ssh_key_id(ssh_key_id)
     if ref:
         ref = _reject_option_like(ref, "ref")
+    depth = _validated_clone_depth(depth)
+    return _clone_into_session(
+        url, ref, depth=depth, workspace_root=workspace_root, session_id=session_id
+    )
+
+
+@_while_no_scan_runs(removes_workspace=False)
+def _clone_into_session(
+    url: str,
+    ref: Optional[str],
+    *,
+    depth: int,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Path:
+    """Clone a validated ``url`` into the session workspace; see ``set_source_git``."""
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = mark_session_workspace(_session_workspace(root, session_id))
 
     # Wipe any previous source for this session before cloning a fresh one;
     # callers are expected to call clear_source explicitly, but cloning over
     # an existing tree is a footgun we'd rather avoid.
+    # Resolved before the session directory is touched, like the validation above.
+    git = _git_executable()
+
     target = session_dir / "source"
     if target.exists():
         shutil.rmtree(target, ignore_errors=True)
     _ensure_dir(target)
 
-    env = snapshot_environ()
-    key_path = _resolve_ssh_key(ssh_key_id)
-    if key_path is not None:
-        env["GIT_SSH_COMMAND"] = (
-            f"ssh -i {str(key_path)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-        )
+    env = _git_environment(session_dir)
+    try:
+        _clone(url, ref, git=git, depth=depth, target=target, env=env)
+    except CloneRefusedError:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
 
-    cmd = [
-        "git",
+    _set_session_source_dir(session_id, target)
+    return target
+
+
+def _clone(
+    url: str,
+    ref: Optional[str],
+    *,
+    depth: int,
+    target: Path,
+    env: Dict[str, str],
+    git: Optional[str] = None,
+) -> None:
+    """Run the clone, and for a ref the fetch and checkout, into ``target``.
+
+    ``git`` is ``_git_executable()``'s answer, resolved here when not given; the
+    rest of ``_GIT_ARGV`` follows it. Every command is built by ``git_argv``.
+
+    Raises:
+        RuntimeError: when the clone or the checkout fails; ``target`` is removed.
+        GitTimeoutError: when a command runs past ``GIT_TIMEOUT_SECONDS``.
+    """
+
+    # PATH's anchored entries only, for the programs git starts by name (ssh, a
+    # credential helper); see subprocess_utils._spawn_env.
+    from automated_security_helper.utils.subprocess_utils import child_environ
+
+    env = child_environ(env)
+
+    program = (git if git is not None else _git_executable(), *_GIT_ARGV[1:])
+    cmd = git_argv(
+        *_GIT_CONFIG,
         "clone",
         "--depth",
-        str(int(depth)),
+        str(depth),
         # End-of-options marker, so even a future change that loosens
         # _validate_clone_url cannot turn the url into a git flag.
         "--",
         url,
         str(target),
-    ]
-    result = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, url validated by _validate_clone_url and fenced behind "--"
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
+        program=program,
     )
+    result = _run_git(cmd, env=env, grows_in=target)
     if result.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
         raise RuntimeError(
             f"git clone failed (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}"
         )
+    if not ref:
+        return
 
-    if ref:
-        # ``--depth 1`` may not have fetched the requested ref. Fetch it
-        # explicitly before checking out so non-default refs work reliably.
-        fetch_cmd = [
-            "git",
+    # A shallow clone is single-branch, so a ref off the default branch is not in
+    # it. The fetch brings it, and records it only in FETCH_HEAD: a named branch
+    # or tag gets no local ref, so the checkout takes FETCH_HEAD. A fetch that
+    # fails (a commit id the remote won't serve by id) leaves the checkout to
+    # find the ref in the clone itself, and to report it if it isn't there.
+    fetch = _run_git(
+        git_argv(
+            *_GIT_CONFIG,
             "-C",
             str(target),
             "fetch",
             "--depth",
-            str(int(depth)),
+            str(depth),
             "origin",
             ref,
-        ]
-        fetch_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
-            fetch_cmd, capture_output=True, text=True, env=env, check=False
+            program=program,
+        ),
+        env=env,
+        grows_in=target,
+    )
+    revision = "FETCH_HEAD" if fetch.returncode == 0 else ref
+    checkout = _run_git(
+        git_argv(
+            *_GIT_CONFIG,
+            "-C",
+            str(target),
+            "checkout",
+            "--detach",
+            revision,
+            program=program,
+        ),
+        env=env,
+        grows_in=target,
+    )
+    if checkout.returncode != 0:
+        shutil.rmtree(target, ignore_errors=True)
+        raise RuntimeError(
+            f"git checkout {ref!r} failed (exit {checkout.returncode}): "
+            f"{checkout.stderr.strip() or checkout.stdout.strip()}"
         )
-        if fetch_res.returncode != 0:
-            # Not all refs need an explicit fetch (e.g. a tag already in the
-            # initial clone). Don't fail here; let checkout produce the
-            # diagnostic.
-            pass
-
-        checkout_cmd = ["git", "-C", str(target), "checkout", "--detach", ref]
-        co_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
-            checkout_cmd, capture_output=True, text=True, env=env, check=False
-        )
-        if co_res.returncode != 0:
-            shutil.rmtree(target, ignore_errors=True)
-            raise RuntimeError(
-                f"git checkout {ref!r} failed (exit {co_res.returncode}): "
-                f"{co_res.stderr.strip() or co_res.stdout.strip()}"
-            )
-
-    _set_session_source_dir(session_id, target)
-    return target
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +1242,20 @@ def _write_next_sequence(session_dir: Path, upload_id: str, value: int) -> None:
     _meta_path(session_dir, upload_id).write_text(str(value))
 
 
+#: Locks that serialize the chunks of one upload. An upload maps to one of a fixed
+#: number of locks by its (session, upload id), so the table never grows with the
+#: number of uploads; two uploads that share a lock only take turns.
+_UPLOAD_LOCK_STRIPES = 64
+_UPLOAD_LOCKS = tuple(threading.Lock() for _ in range(_UPLOAD_LOCK_STRIPES))
+
+
+def _upload_lock(session_id: str, upload_id: str) -> threading.Lock:
+    """The lock held while a chunk of this upload reads and moves its sequence."""
+
+    digest = hashlib.sha256(f"{session_id}\0{upload_id}".encode()).digest()
+    return _UPLOAD_LOCKS[digest[0] % _UPLOAD_LOCK_STRIPES]
+
+
 def set_source_zip_chunk(
     upload_id: str,
     sequence: int,
@@ -518,10 +1282,38 @@ def set_source_zip_chunk(
     Raises:
         ValueError: on out-of-order sequence, oversize chunk, malformed b64
             payload, or duplicate ``last=True``.
+        sessions.SessionWorkspaceBusyError: while another request holds the
+            session's workspace (``sessions.writing_session_state``): the TTL
+            sweep, a ``clear_source``, or the end of the session. The hold can
+            end without removing the upload, so the chunk is sent again as it
+            is; only an out-of-order answer means the upload was removed, and
+            the upload is then sent again from its first chunk.
     """
+    from automated_security_helper.cli.mcp.sessions import writing_session_state
 
+    with writing_session_state(session_id), _upload_lock(session_id, upload_id):
+        return _append_zip_chunk(
+            upload_id,
+            sequence,
+            data_b64,
+            last,
+            workspace_root=workspace_root,
+            session_id=session_id,
+        )
+
+
+def _append_zip_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Dict[str, object]:
+    """:func:`set_source_zip_chunk`, once the session is held against the sweep."""
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
+    session_dir = mark_session_workspace(_session_workspace(root, session_id))
     part = _part_path(session_dir, upload_id)
     _ensure_dir(part.parent)
 
@@ -606,6 +1398,7 @@ def _validate_zip_member(name: str) -> None:
             raise ValueError(f"path traversal in zip: {name!r}")
 
 
+@_while_no_scan_runs(removes_workspace=False)
 def set_source_zip_finalize(
     upload_id: str,
     expected_sha256: str,
@@ -614,6 +1407,15 @@ def set_source_zip_finalize(
     session_id: str,
 ) -> Path:
     """Finalize a chunked upload: verify checksum and extract.
+
+    Holds the upload's lock (:func:`_upload_lock`) only to open the zip and to
+    remove its path afterwards, not while the zip is hashed and extracted: the
+    lock is one of 64 shared by every session, and holding it across up to the
+    size limit of work would starve the delivery pool. The checksum and the
+    extraction read one open handle, so the bytes extracted are exactly the bytes
+    hashed whatever happens to the path meanwhile, and the removal deletes the
+    path only while it still names the file that was read, so a zip a chunk
+    assembled over it meanwhile is kept; see :func:`_finalize_zip_upload`.
 
     Args:
         upload_id: Identifier matching the prior ``set_source_zip_chunk`` calls.
@@ -638,108 +1440,187 @@ def set_source_zip_finalize(
             this is a client-side packaging error rather than corruption.
     """
 
-    root = workspace_root if workspace_root is not None else resolve_workspace_root()
-    session_dir = _ensure_dir(_session_workspace(root, session_id))
-    final = _final_zip_path(session_dir, upload_id)
-    if not final.exists():
-        raise FileNotFoundError(
-            f"no finalized zip for upload_id={upload_id!r} "
-            f"(did the last chunk arrive with last=True?)"
-        )
+    return _finalize_zip_upload(
+        upload_id,
+        expected_sha256,
+        workspace_root=workspace_root,
+        session_id=session_id,
+    )
 
-    # Hard limit on the on-disk zip size.
-    actual_size = final.stat().st_size
-    if actual_size > _MAX_ZIP_BYTES:
-        final.unlink(missing_ok=True)
-        raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
-    # Verify checksum before opening the archive.
-    digest = hashlib.sha256()
-    with final.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
-            digest.update(block)
-    actual_sha = digest.hexdigest()
-    if actual_sha.lower() != expected_sha256.lower():
-        final.unlink(missing_ok=True)
-        raise ValueError(
-            f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
-        )
+class _ZipRefused(Exception):
+    """A finalized zip the finalize refuses before it extracts anything.
 
-    # Extract into a staging sibling and swap, rather than clearing the
-    # delivered tree first. The checksum and size guards above do precede any
-    # write, but the four guards a hostile or malformed archive trips -- entry
-    # count, member traversal, uncompressed total, symlink member -- all run
-    # after the archive is open, and so did ``zipfile.ZipFile`` itself raising
-    # BadZipFile. Removing the tree before that point left the session
-    # registered and pointing at an empty directory, which a scan then reports
-    # as clean: the false-negative shape, and the worst outcome available to a
-    # security scanner. Costs one delivery's worth of extra peak disk, since the
-    # old and new trees coexist until the rename.
-    target = session_dir / "source"
-    staging = session_dir / _STAGING_DIR_NAME
-    if staging.exists():
-        # Left behind by a delivery that died between extraction and the swap.
-        # It is scratch space and never the delivered tree, so removing it
-        # cannot lose anything a caller can still reach.
-        shutil.rmtree(staging, ignore_errors=True)
-    _ensure_dir(staging)
+    Raised inside the ``with`` that holds the zip open, so the zip is removed and
+    the refusal raised as a ``ValueError`` only after the handle is closed:
+    Windows does not delete a file that is open.
+    """
 
-    swapped = False
+
+@contextlib.contextmanager
+def _refusing_after_close(
+    handle: Any, remove_zip: Callable[[], None]
+) -> Iterator[None]:
+    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, ``remove_zip()``, refuse."""
+
     try:
-        # Pre-extraction validation pass: walk the namelist and the zipinfo
-        # list, rejecting absolute paths, traversal components, oversize totals,
-        # and symlinks that would resolve outside the session sandbox.
-        with zipfile.ZipFile(final) as zf:
-            infos = zf.infolist()
-            if len(infos) > _MAX_FILES:
-                raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
+        with handle:
+            yield
+    except _ZipRefused as refused:
+        remove_zip()
+        raise ValueError(str(refused)) from None
 
-            total_uncompressed = 0
-            for info in infos:
-                _validate_zip_member(info.filename)
-                total_uncompressed += info.file_size
-                if total_uncompressed > _MAX_EXTRACTED_BYTES:
-                    raise ValueError(
-                        f"extracted size exceeds {_MAX_EXTRACTED_BYTES} bytes "
-                        f"(at entry {info.filename!r})"
-                    )
-                if _is_symlink_zipinfo(info):
-                    # Reject ALL symlink entries — not just those whose target
-                    # resolves outside the sandbox. Pre-extraction resolve()
-                    # of a link under (target/info.filename).parent races
-                    # extraction: an earlier zip entry that materializes a
-                    # directory which is itself a symlink (or a leftover-from-
-                    # prior-upload directory that resolves elsewhere) would
-                    # let a later symlink entry pass validation but still
-                    # escape once extractall() runs.
-                    #
-                    # Source tree shipping over MCP does not need symlinks.
-                    # Refusing them outright eliminates the pre/post-write
-                    # divergence. See DA r6 #5.
-                    link_target = zf.read(info).decode("utf-8", errors="replace")
-                    raise ValueError(
-                        f"symlink {info.filename!r} -> {link_target!r}: "
-                        f"symlinks are not allowed in MCP source delivery zips"
-                    )
 
-            # Validation passed; extract into staging.
-            zf.extractall(staging)
+def _remove_zip_still_at(
+    final: Path, opened: os.stat_result, session_id: str, upload_id: str
+) -> None:
+    """Remove ``final`` if it still names the file ``opened`` describes.
 
-        # Swap. The old tree only goes away once the new one is complete on
-        # disk, and the rename is within one directory so the window in which
-        # neither is in place is two syscalls wide rather than the whole
-        # validate-and-extract pass.
-        if target.exists():
-            shutil.rmtree(target, ignore_errors=True)
-        staging.rename(target)
-        swapped = True
-    finally:
-        if not swapped:
+    Under the upload's lock, so no chunk of the upload assembles a zip over the
+    path between the comparison and the removal. A zip a chunk assembled over the
+    path while the finalize ran is a different file and is kept.
+    """
+
+    with _upload_lock(session_id, upload_id):
+        try:
+            if os.path.samestat(opened, final.stat()):
+                final.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
+
+
+def _finalize_zip_upload(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    workspace_root: Optional[Path],
+    session_id: str,
+) -> Path:
+    """:func:`set_source_zip_finalize`: the work behind its docstring."""
+
+    root = workspace_root if workspace_root is not None else resolve_workspace_root()
+    session_dir = mark_session_workspace(_session_workspace(root, session_id))
+    final = _final_zip_path(session_dir, upload_id)
+    # The lock covers the open only: a chunk of this upload holds it while it
+    # writes the zip, so the zip opened here is a complete one.
+    with _upload_lock(session_id, upload_id):
+        try:
+            handle = final.open("rb")
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"no finalized zip for upload_id={upload_id!r} "
+                f"(did the last chunk arrive with last=True?)"
+            ) from None
+        opened = os.fstat(handle.fileno())
+
+    def remove_zip() -> None:
+        _remove_zip_still_at(final, opened, session_id, upload_id)
+
+    # The size check, the checksum and the extraction all read this one handle.
+    # A handle names the bytes it was opened on, so what is extracted below is
+    # exactly what was hashed, even if the path is unlinked or renamed over
+    # meanwhile.
+    #
+    # A refusal raises _ZipRefused inside the block; _refusing_after_close removes
+    # the zip and raises the ValueError once the handle is closed.
+    with _refusing_after_close(handle, remove_zip):
+        # Hard limit on the on-disk zip size.
+        actual_size = os.fstat(handle.fileno()).st_size
+        if actual_size > _MAX_ZIP_BYTES:
+            raise _ZipRefused(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
+
+        # Verify checksum before opening the archive.
+        digest = hashlib.sha256()
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+        actual_sha = digest.hexdigest()
+        if actual_sha.lower() != expected_sha256.lower():
+            raise _ZipRefused(
+                f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
+            )
+
+        # Extract into a staging sibling and swap, rather than clearing the
+        # delivered tree first. The checksum and size guards above do precede any
+        # write, but the four guards a hostile or malformed archive trips -- entry
+        # count, member traversal, uncompressed total, symlink member -- all run
+        # after the archive is open, and so did ``zipfile.ZipFile`` itself raising
+        # BadZipFile. Removing the tree before that point left the session
+        # registered and pointing at an empty directory, which a scan then reports
+        # as clean: the false-negative shape, and the worst outcome available to a
+        # security scanner. Costs one delivery's worth of extra peak disk, since the
+        # old and new trees coexist until the rename.
+        target = session_dir / "source"
+        staging = session_dir / _STAGING_DIR_NAME
+        if staging.exists():
+            # Left behind by a delivery that died between extraction and the swap.
+            # It is scratch space and never the delivered tree, so removing it
+            # cannot lose anything a caller can still reach.
             shutil.rmtree(staging, ignore_errors=True)
+        _ensure_dir(staging)
+
+        swapped = False
+        try:
+            # Pre-extraction validation pass: walk the namelist and the zipinfo
+            # list, rejecting absolute paths, traversal components, oversize totals,
+            # and symlinks that would resolve outside the session sandbox. The
+            # archive is read from the handle the checksum read, never again from
+            # the path.
+            handle.seek(0)
+            with zipfile.ZipFile(handle) as zf:
+                infos = zf.infolist()
+                if len(infos) > _MAX_FILES:
+                    raise ValueError(
+                        f"too many files in zip: {len(infos)} > {_MAX_FILES}"
+                    )
+
+                total_uncompressed = 0
+                for info in infos:
+                    _validate_zip_member(info.filename)
+                    total_uncompressed += info.file_size
+                    if total_uncompressed > _MAX_EXTRACTED_BYTES:
+                        raise ValueError(
+                            f"extracted size exceeds {_MAX_EXTRACTED_BYTES} bytes "
+                            f"(at entry {info.filename!r})"
+                        )
+                    if _is_symlink_zipinfo(info):
+                        # Reject ALL symlink entries — not just those whose target
+                        # resolves outside the sandbox. Pre-extraction resolve()
+                        # of a link under (target/info.filename).parent races
+                        # extraction: an earlier zip entry that materializes a
+                        # directory which is itself a symlink (or a leftover-from-
+                        # prior-upload directory that resolves elsewhere) would
+                        # let a later symlink entry pass validation but still
+                        # escape once extractall() runs.
+                        #
+                        # Source tree shipping over MCP does not need symlinks.
+                        # Refusing them outright eliminates the pre/post-write
+                        # divergence. See DA r6 #5.
+                        link_target = zf.read(info).decode("utf-8", errors="replace")
+                        raise ValueError(
+                            f"symlink {info.filename!r} -> {link_target!r}: "
+                            f"symlinks are not allowed in MCP source delivery zips"
+                        )
+
+                # Validation passed; extract into staging.
+                zf.extractall(staging)
+
+            # Swap. The old tree only goes away once the new one is complete on
+            # disk, and the rename is within one directory so the window in which
+            # neither is in place is two syscalls wide rather than the whole
+            # validate-and-extract pass.
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            staging.rename(target)
+            swapped = True
+        finally:
+            if not swapped:
+                shutil.rmtree(staging, ignore_errors=True)
 
     _set_session_source_dir(session_id, target)
-    # The on-disk zip is no longer needed.
-    final.unlink(missing_ok=True)
+    # The on-disk zip is no longer needed. Its path is unlinked under the
+    # upload's lock and only while it still names the file that was hashed and
+    # extracted, never one a chunk assembled meanwhile.
+    remove_zip()
     return target
 
 
@@ -748,10 +1629,28 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
+@_while_no_scan_runs()
 def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
     Idempotent: missing workspaces are silently ignored.
+
+    Raises:
+        SourceDeliveryBusyError: while a scan of the session runs, or a chunk of
+            an upload or a profile selection is being written, because this
+            removes the directory they write into.
+    """
+
+    remove_session_workspace(session_id, workspace_root=workspace_root)
+
+
+def remove_session_workspace(
+    session_id: str, *, workspace_root: Optional[Path] = None
+) -> None:
+    """Remove the session workspace and its record, without taking the scan lock.
+
+    For a caller that already holds the session's lock --
+    ``sessions.end_session`` -- or that has decided a scan cannot be running.
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()

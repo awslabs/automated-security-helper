@@ -39,6 +39,12 @@
 #
 # tests/unit/schemas/test_sarif_enum_defaults.py walks every model in this module
 # and fails on any enum-member default, so a regeneration is caught here.
+#
+# Also deliberate: SarifReport, Run, Result, Invocation and PropertyBag, the
+# models validated on their own, set hide_input_in_errors=True, so a refused
+# value (scanned code, or a secret it holds) is not quoted in the error's text.
+# tests/unit/models/test_validation_errors_hide_input.py fails for a model
+# validated on its own that does not.
 
 from __future__ import annotations
 
@@ -136,6 +142,8 @@ class Content(str, Enum):
 class PropertyBag(BaseModel):
     model_config = ConfigDict(
         extra="allow",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     tags: Optional[List[str]] = Field(
@@ -1862,6 +1870,8 @@ class CodeFlow(BaseModel):
 class Invocation(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     commandLine: Optional[str] = Field(
@@ -1970,6 +1980,8 @@ class Result(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         use_enum_values=True,
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     ruleId: Optional[str] = Field(
@@ -2236,6 +2248,8 @@ class ExternalProperties(BaseModel):
 class Run(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     tool: Tool = Field(
@@ -2379,6 +2393,8 @@ class SarifReport(BaseModel):
         extra="forbid",
         use_enum_values=True,
         serialize_by_alias=True,
+        # DELIBERATE DEVIATION: see the module comment.
+        hide_input_in_errors=True,
     )
 
     field_schema: str = Field(

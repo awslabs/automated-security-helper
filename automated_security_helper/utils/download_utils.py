@@ -30,8 +30,8 @@ from automated_security_helper.core.exceptions import (
 
 # Name of the directory holding install receipts. See receipt_root() for why it is
 # NOT under the bin directory a tool is installed into: a receipt records the digest
-# an installed binary is checked against, so it is a trust anchor, and the bin
-# directory is world-writable in ASH's own image.
+# an installed binary is checked against, so it is a trust anchor, and a bin
+# directory can be writable by other users.
 RECEIPT_DIR_NAME = "install-receipts"
 
 # Read the download in chunks rather than into one buffer. syft's linux asset is
@@ -299,8 +299,8 @@ def _open_staging(target: Path) -> "tuple[int, Path]":
     The name has to be unpredictable, not merely exclusive. An earlier version staged
     at ``<target>.ash-partial`` with O_CREAT|O_EXCL|O_NOFOLLOW, which stops a symlink
     being *planted* at that path but does nothing about ``rename``: in a 0777
-    directory with no sticky bit -- which is what ASH's image leaves ASH_BIN_PATH as
-    (Dockerfile:243) -- rename permission comes from the directory's write bit, not
+    directory with no sticky bit -- which an install directory can be --
+    rename permission comes from the directory's write bit, not
     the file's. So anyone with write access to the directory could rename their own
     file over the staging path between the open and the ``os.replace``, and the
     replace would then install their bytes.
@@ -342,8 +342,8 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
     the install receipt, and re-deriving it from the target afterwards hands back
     exactly what this check exists to reject: ``make_executable`` runs between here and
     the receipt write, on macOS ``unquarantine_macos_binary`` spawns ``xattr`` as a
-    subprocess as well, and ASH's own image leaves the install directory
-    ``chmod -R 777`` with no sticky bit (Dockerfile:243) under a threat model where ASH
+    subprocess as well, and the install directory can be writable by other users,
+    with no sticky bit, under a threat model where ASH
     executes repository code during a scan -- cdk-nag synthesizes CDK apps, npm-audit
     runs a package manager. A receipt built from a fresh hash of the target records
     whatever is there by then, and ``_already_installed`` re-hashes, agrees, and skips
@@ -473,8 +473,8 @@ def receipt_root() -> Path:
 
     Receipts used to live in ``<bin dir>/.ash-install-receipts``, and that made the
     whole re-hash check worthless. A receipt records the digest an installed binary
-    is compared against, so it is a trust anchor -- and ASH's own image runs
-    ``chmod -R 777 ${ASH_BIN_PATH}`` (Dockerfile:243) with no sticky bit. Anything
+    is compared against, so it is a trust anchor -- and a bin directory can be
+    writable by other users, with no sticky bit. Anything
     able to replace the binary could equally unlink the receipts directory, recreate
     it, and write a receipt naming its substitute's digest. ``_already_installed``
     would then agree with itself and skip forever, exactly as it did before the
@@ -678,13 +678,12 @@ def _already_installed(
        not the extracted executable, so comparing it proves nothing about the file
        that will actually run.
 
-    Why (5) is not paranoia. ASH's own image does ``chmod -R 777 ${ASH_BIN_PATH}``
-    (Dockerfile:243), puts that directory first on PATH (:254), and runs
-    ``ash dependencies install`` into it twice (:253 and :328). Before idempotence
+    Why (5) is not paranoia. ASH's own image puts ASH_BIN_PATH first on PATH and
+    runs ``ash dependencies install`` into it twice. Before idempotence
     existed every install re-downloaded, so the second run overwrote anything
     substituted in between -- the redundant download was accidentally a self-healing
     property. Skipping on a receipt alone would have converted that into a persistent
-    one, in the one directory the image makes world-writable, in a tool whose output
+    one, in a directory other users may be able to write, in a tool whose output
     is used to make security decisions. Re-hashing costs well under a second on a
     30-100MB binary.
     """
@@ -846,8 +845,8 @@ def _extract_single_member(
 
     The extraction is staged and then renamed into place, and the staging file is
     opened with O_CREAT|O_EXCL (plus O_NOFOLLOW where the platform has it). Three
-    things follow, and since the destination directory is world-writable in ASH's own
-    image (Dockerfile:243) none of them is hypothetical:
+    things follow, and since the destination directory can be writable by other
+    users, none of them is hypothetical:
 
     * A pre-existing symlink at the target is not written *through*. A plain
       ``open(target, "wb")`` follows the link, so a link planted at
@@ -1207,7 +1206,7 @@ def install_pinned_tool(
             # Taken from the extraction, which verified it as the bytes landed, rather
             # than by hashing the target here -- make_executable and, on macOS,
             # unquarantine_macos_binary's xattr subprocess have run in between, in a
-            # directory ASH's image makes world-writable. See _finalize_staged.
+            # directory other users may be able to write. See _finalize_staged.
             "installed_sha256": installed_digest,
             "installed_as": asset.install_as,
         },
@@ -1331,9 +1330,13 @@ def current_bin_path() -> Path:
     ``ash dependencies install --bin-path`` sets the environment variable *after*
     that import has happened, so a function that closed over the constant would
     install into the default directory while reporting the requested one.
+
+    Absolute, because the install commands built from it run in an empty directory
+    of their own (``utils/python_child.py``), where a relative path names another
+    place.
     """
     from_env = os.environ.get("ASH_BIN_PATH")
-    return Path(from_env) if from_env else ASH_BIN_PATH
+    return Path(from_env).absolute() if from_env else ASH_BIN_PATH
 
 
 # The script every pinned-tool install command runs. A constant so that
@@ -1357,8 +1360,10 @@ def create_pinned_tool_install_command(
     configuration pins itself, so the installer keeps one execution model for every
     tool: plugins declare commands, the CLI runs them and counts them.
     """
-    if destination is None:
-        destination = str(current_bin_path()).replace("\\", "/")
+    # Absolute either way: the command runs in an empty directory of its own.
+    destination = str(
+        current_bin_path() if destination is None else Path(destination).absolute()
+    ).replace("\\", "/")
 
     return CustomCommand(
         args=[
@@ -1444,10 +1449,11 @@ def create_url_download_command(
     # `ash dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
     # installed into the default directory while the installer reported the
     # requested one, and the post-install sweep then found nothing there.
-    if destination is None:
-        destination = str(current_bin_path()).replace(
-            "\\", "/"
-        )  # Ensure forward slashes for cross-platform compatibility
+    # Forward slashes for cross-platform compatibility, and absolute either way: the
+    # command runs in an empty directory of its own.
+    destination = str(
+        current_bin_path() if destination is None else Path(destination).absolute()
+    ).replace("\\", "/")
 
     if not Path(destination).exists():
         ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")

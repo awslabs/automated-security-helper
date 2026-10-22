@@ -221,17 +221,22 @@ class TestFinalizeCannotReachOutsideTheSession:
         outside.mkdir()
         victim = outside / "x.zip"
         victim.write_bytes(b"Y" * 64)
+        upload_id = str(outside / "x")
 
         with pytest.raises(ValueError) as excinfo:
             sd.set_source_zip_finalize(
-                upload_id=str(outside / "x"),
+                upload_id=upload_id,
                 expected_sha256="0" * 64,
                 workspace_root=tmp_path,
                 session_id="session-attacker",
             )
 
-        assert "upload_id" in str(excinfo.value)
-        assert "64" not in str(excinfo.value), (
+        message = str(excinfo.value)
+        assert "upload_id" in message
+        # The refusal names the upload_id it refused, a path under pytest's
+        # temporary directory, which can hold any digits (pytest-64, for one).
+        # The size can only leak in the rest of the text.
+        assert "64" not in message.replace(upload_id, ""), (
             "the refusal leaked the size of a file outside the sandbox"
         )
         assert victim.exists()

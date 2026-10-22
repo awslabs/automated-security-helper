@@ -184,6 +184,8 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         # {CACHE_DIR}/opengrep/<version>, which is $XDG_CACHE_HOME when set, and
         # runs opengrep.bin from there.
         unpack_dir_env="XDG_CACHE_HOME",
+        # The offline rule cache ASH checked before the scan and passes as --config.
+        read_path_env=("OPENGREP_RULES_CACHE_DIR",),
     )
 
     def model_post_init(self, context):
@@ -347,10 +349,17 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _process_config_options(self):
         result = super()._process_config_options()
 
-        # Patterns mode: switch to JSON output and replace extra_args with
-        # only --json + --pattern entries (matches pre-refactor behaviour).
+        # Patterns mode: JSON output and --pattern entries in place of the rule
+        # configs, SARIF output and metrics flag. Every other argument stays,
+        # --x-ignore-semgrepignore-files and the exclusions among them, so a
+        # .semgrepignore in the tree is not honored here either.
         if self.config.options.patterns:
-            self.args.extra_args = [ToolExtraArg(key="--json", value="")]
+            kept = [
+                arg
+                for arg in self.args.extra_args
+                if arg.key not in ("--config", "--sarif", "--metrics", "--json")
+            ]
+            self.args.extra_args = [ToolExtraArg(key="--json", value=""), *kept]
             for pattern in self.config.options.patterns:
                 self.args.extra_args.append(
                     ToolExtraArg(key="--pattern", value=pattern)

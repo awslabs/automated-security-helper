@@ -75,6 +75,9 @@ def gem_bindir(tmp_path, monkeypatch):
         "#!/usr/bin/env ruby\n# a Ruby binstub: text, not a PE image\n",
         encoding="utf-8",
     )
+    # Executable, as RubyGems leaves it: on POSIX a file without the bit is not one
+    # find_executable may answer with.
+    (bindir / "cfn_nag_scan").chmod(0o755)
     (bindir / "cfn_nag_scan.bat").write_text(
         '@ECHO OFF\n@"ruby.exe" "%~dpn0" %*\n', encoding="utf-8"
     )

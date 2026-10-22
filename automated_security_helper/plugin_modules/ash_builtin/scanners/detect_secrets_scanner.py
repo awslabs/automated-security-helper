@@ -4,15 +4,26 @@ import logging
 
 from importlib.metadata import version
 import json
+import os
 import multiprocessing
 from pathlib import Path
 import re
+import stat
 import sys
-from typing import Annotated, Any, ClassVar, Dict, List, Literal
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Set, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
-from automated_security_helper.config.path_trust import honored_path
+from automated_security_helper.config.path_trust import (
+    honored_path,
+    scanned_checkout_reason,
+)
+from automated_security_helper.config.secret_verification_trust import (
+    UntrustedDetectSecretsSettings,
+    drop_untrusted_entries,
+    is_verification_filter,
+    same_baseline,
+)
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
@@ -41,21 +52,37 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.ash_install import (
+    ash_reinstall_command,
+    install_command,
+)
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.python_child import python_child
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
-#: Why this scanner cannot run when its library is absent. One string, used for
-#: the recorded reason and for the log line, so the two cannot drift.
-_MISSING_LIBRARY_REASON = (
-    "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
-    "It ships as a dependency of ASH; reinstall ASH (`pip install --force-reinstall "
-    "automated-security-helper`) or install the library directly with "
-    "`pip install detect-secrets`."
-)
+
+def _missing_library_reason() -> str:
+    """Why this scanner cannot run when its library is absent.
+
+    Built once per scanner and used for both the recorded reason and the log
+    line, so the two cannot drift. A function rather than a module constant
+    because the reinstall it names is where the running ASH was installed from.
+    """
+    # ASH's distribution name on its own ("pip install --force-reinstall
+    # automated-security-helper", the earlier text) is not a reinstall of ASH:
+    # on PyPI that name belongs to an unrelated project.
+    return (
+        "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
+        f"It ships as a dependency of ASH; reinstall ASH (`{ash_reinstall_command()}`) "
+        f"or install the library directly with `{install_command('detect-secrets')}`."
+    )
 
 
 def _detect_secrets_api():
@@ -88,22 +115,17 @@ def _detect_secrets_api():
     return SecretsCollection, transient_settings, get_mapping_from_secret_type_to_class
 
 
-#: The detect-secrets filter that verifies candidate secrets against their issuer's
-#: API over the network. See DetectSecretsScanner.sandbox_requirements.
-_VERIFICATION_FILTER_PATH = (
-    "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
-)
-
-
 class DetectSecretsScanSettingsPluginsUsed(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Built from detect-secrets' output, whose values an error does not quote.
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
     name: str | None = None
     limit: float | None = None
     keyword_exclude: str | None = None
 
 
 class DetectSecretsScanSettingsFiltersUsed(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Built from detect-secrets' output, whose values an error does not quote.
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
     path: str | None = None
     min_level: int | None = None
     keyword_exclude: str | None = None
@@ -127,7 +149,7 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
     baseline_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to detect-secrets baseline file, relative to current source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+            description="Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
         ),
     ] = None
     scan_settings: Annotated[
@@ -172,6 +194,16 @@ class DetectSecretsScannerConfig(ScannerPluginConfigBase):
 class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     """DetectSecretsScanner implements SECRET scanning using detect-secrets."""
 
+    # The baseline as parsed when the scanner was configured, read once from its
+    # checked path. The scan uses this copy and never reopens the file, so a path
+    # swapped for a link after the check is not followed.
+    _baseline_document: Optional[Dict[str, Any]] = PrivateAttr(default=None)
+
+    # Whether the settings, as configured, may verify secrets with their issuers.
+    # Decided once from where each setting came from (_apply_settings_trust); the scan
+    # checks it again, so a verification filter added afterwards does not run.
+    _verification_permitted: bool = PrivateAttr(default=False)
+
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
@@ -186,8 +218,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         try:
             secrets_collection_cls, _, _ = _detect_secrets_api()
         except ImportError as exc:
-            self.dependency_unavailable_reason = _MISSING_LIBRARY_REASON
-            ASH_LOGGER.warning(f"{_MISSING_LIBRARY_REASON} ({exc})")
+            reason = _missing_library_reason()
+            self.dependency_unavailable_reason = reason
+            # Data, not markup: the reason holds the path ASH was installed
+            # from, and the console handler would read a "[" in it as a tag.
+            ASH_LOGGER.warning(f"{reason} ({exc})", extra=NO_MARKUP)
             self._secrets_collection = None
         else:
             self._secrets_collection = secrets_collection_cls()
@@ -221,14 +256,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         time the executor asks. Under --offline no scanner gets a network, so
         there the extra, unverified findings are reported.
 
-        The need is declared with ``network_requires_grant``: the settings come
-        from a baseline or ASH config that the scanned repository can write,
-        and the same baseline can load a plugin from the repository, so a
-        repository could otherwise give its own code a network. The sandbox
-        grants it only when ``sandbox.network_scanners`` names detect-secrets.
+        The need is declared with ``network_requires_grant``: a baseline the
+        operator names can load a plugin from a file outside the tree, so the
+        filter alone does not decide it. The sandbox grants it only when
+        ``sandbox.network_scanners`` names detect-secrets. The filter itself is
+        kept only when the operator turned verification on, and never offline
+        (``_drop_refused_verification``).
         """
         verifying = any(
-            item.path == _VERIFICATION_FILTER_PATH
+            is_verification_filter(item.path)
             for item in self.config.options.scan_settings.filters_used
         )
         return SandboxRequirements(network=verifying, network_requires_grant=True)
@@ -262,10 +298,93 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
         return True
 
+    def _baseline_path(self, value: Union[str, Path]) -> Path:
+        """``value`` as the option means it: ``~`` expanded, and a relative path
+        taken from the source directory, not from ASH's working directory."""
+        path = Path(os.path.expanduser(str(value)))
+        if path.is_absolute():
+            return path
+        source_dir = getattr(getattr(self, "context", None), "source_dir", None)
+        return Path(source_dir if source_dir is not None else os.getcwd()) / path
+
+    def _baseline_refusal(self, named: Path, real: Path) -> Optional[str]:
+        """Why ASH may not read the baseline named ``named``, resolving to ``real``.
+
+        None when it may. Its entries mark candidates as known, so they leave the
+        report:
+
+        - A baseline an MCP client delivered is never read, sandbox or not: the
+          client chose which candidates to hide, as a client-supplied
+          ``baseline_file`` would.
+        - Under a sandbox, ASH reads the baseline itself, outside it, and hands
+          its contents to the sandboxed worker. So it reads one only when it
+          resolves inside the source tree, or, for a detect-secrets that
+          sandbox.read_path_scanners names, inside one of the operator's
+          sandbox.extra_read_paths entries: the same containment an option path
+          a scanner reads itself gets (``policy._contained_option_paths``).
+          Judged by the file the path resolves to, which ``_read_baseline``
+          then reads.
+        """
+        from automated_security_helper.config.path_trust import (
+            _client_delivered_reason,
+        )
+        from automated_security_helper.config.sandbox_grants import is_within
+
+        delivered = _client_delivered_reason(named) or _client_delivered_reason(real)
+        if delivered is not None:
+            return delivered
+        context = getattr(self, "context", None)
+        sandbox = getattr(getattr(context, "config", None), "sandbox", None)
+        if sandbox is None or getattr(sandbox, "mode", "off") == "off":
+            return None
+        source_dir = getattr(context, "source_dir", None)
+        if source_dir is not None and is_within(
+            real, Path(os.path.realpath(source_dir))
+        ):
+            return None
+        if "detect-secrets" not in (getattr(sandbox, "read_path_scanners", None) or []):
+            return (
+                "it is outside the source tree, and under the sandbox a file outside "
+                "the tree is read only for a scanner named in "
+                "sandbox.read_path_scanners"
+            )
+        roots = [
+            Path(os.path.realpath(os.path.expandvars(os.path.expanduser(entry))))
+            for entry in (getattr(sandbox, "extra_read_paths", None) or [])
+        ]
+        if any(is_within(real, root) for root in roots):
+            return None
+        return (
+            "it is outside the source tree and every sandbox.extra_read_paths entry, "
+            "which a granted baseline outside the tree has to be inside"
+        )
+
+    @staticmethod
+    def _read_baseline(real: Path) -> Dict[str, Any]:
+        """Parse the baseline at ``real``, the resolved path that was checked.
+
+        Only a regular file is opened (a FIFO would block the scan), without
+        following a link at its last component, and the opened file must have the
+        device and inode ``real`` named just before. That binds the read to the
+        resolved path; a directory above it swapped for a link between the check
+        and this stat is not detected, which needs a writer to the source tree
+        while the scan runs, and a sandboxed scanner may only read it.
+        """
+        checked = os.stat(real)
+        if not stat.S_ISREG(checked.st_mode):
+            raise OSError(f"{real.as_posix()} is not a regular file")
+        fd = os.open(real, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "r") as handle:
+            opened = os.fstat(handle.fileno())
+            if (opened.st_dev, opened.st_ino) != (checked.st_dev, checked.st_ino):
+                raise OSError(f"{real.as_posix()} changed while it was being read")
+            return json.load(handle)
+
     def _process_config_options(self):
-        # Check detect-secrets baseline path
+        # The configured baseline, else the default names, each taken from the
+        # source directory; the first that exists is used.
         possible_baseline_paths = [
-            item
+            self._baseline_path(item)
             for item in [
                 self.config.options.baseline_file,
                 ".ash/.secrets.baseline",
@@ -275,28 +394,43 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ]
         ASH_LOGGER.debug(f"Possible baseline file paths: {possible_baseline_paths}")
 
-        # Look through each baseline file path to see if it exists and configure
-        # the scan settings according to the first baseline file found
         for baseline_path in possible_baseline_paths:
-            ASH_LOGGER.debug(
-                f"Checking for detect-secrets config @ {Path(baseline_path).absolute()}"
-            )
-            if Path(baseline_path).absolute().exists():
-                ASH_LOGGER.debug(
-                    f"Identified detect-secrets config @ {Path(baseline_path).absolute()}"
-                )
-
-                self.config.options.baseline_file = Path(baseline_path)
+            if baseline_path.exists():
+                ASH_LOGGER.debug(f"Identified detect-secrets config @ {baseline_path}")
+                self.config.options.baseline_file = baseline_path
                 break
+
+        real_baseline: Optional[Path] = None
+        if self.config.options.baseline_file is not None:
+            baseline = self._baseline_path(self.config.options.baseline_file)
+            real_baseline = Path(os.path.realpath(baseline))
+            refusal = self._baseline_refusal(baseline, real_baseline)
+            if refusal is not None:
+                ASH_LOGGER.warning(
+                    f"Not reading the detect-secrets baseline {baseline.as_posix()}: "
+                    f"{refusal}. Candidates the baseline would have marked are "
+                    "reported."
+                )
+                self.config.options.baseline_file = None
+                real_baseline = None
 
         # If a baseline file was found, load its plugins_used and filters_used
         # into scan_settings so they are applied during scanning.
         # SecretsCollection.load_from_baseline() only loads results, not settings,
         # so we must propagate the baseline's configuration explicitly.
-        if self.config.options.baseline_file is not None:
+        settings_from_baseline = False
+        # The config's own filters, told apart from the baseline's by identity
+        # (_drop_in_tree_settings_paths keeps the same objects), so that
+        # _apply_settings_trust judges each by its own source. When the baseline's
+        # filters replace the config's, the config's verification filter is kept
+        # beside them: an operator who names only that filter still verifies.
+        config_filter_ids = {
+            id(item) for item in self.config.options.scan_settings.filters_used
+        }
+        if real_baseline is not None:
             try:
-                with open(Path(self.config.options.baseline_file).absolute(), "r") as f:
-                    baseline_data = json.load(f)
+                baseline_data = self._read_baseline(real_baseline)
+                self._baseline_document = baseline_data
 
                 # Only apply baseline settings if scan_settings was not explicitly
                 # configured by the user (i.e. still at defaults)
@@ -310,12 +444,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             DetectSecretsScanSettingsPluginsUsed(**plugin)
                             for plugin in baseline_data["plugins_used"]
                         ]
+                        settings_from_baseline = True
                     # Load filters from baseline (includes should_exclude_file, etc.)
                     if "filters_used" in baseline_data:
+                        config_verification = [
+                            item
+                            for item in self.config.options.scan_settings.filters_used
+                            if is_verification_filter(item.path)
+                        ]
                         self.config.options.scan_settings.filters_used = [
                             DetectSecretsScanSettingsFiltersUsed(**f)
                             for f in baseline_data["filters_used"]
-                        ]
+                        ] + config_verification
+                        settings_from_baseline = True
                     ASH_LOGGER.debug(
                         f"Loaded settings from baseline: "
                         f"{len(self.config.options.scan_settings.plugins_used)} plugins, "
@@ -328,6 +469,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 )
 
         self._drop_in_tree_settings_paths()
+        self._apply_settings_trust(
+            settings_from_baseline=settings_from_baseline,
+            config_entries={
+                id(item)
+                for item in self.config.options.scan_settings.filters_used
+                if id(item) in config_filter_ids
+            },
+        )
 
         # Skipped when the library is absent: the plugin list has to be read out of
         # detect-secrets itself, and there is no scan to configure for a scanner that
@@ -376,10 +525,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
                 for plugin_type in secret_type_to_class().values()
             ]
-            settings = self.config.options.scan_settings.model_dump(
-                exclude_defaults=True, exclude_none=True, exclude_unset=True
+            ASH_LOGGER.debug(
+                "Default settings identified: "
+                f"{len(self.config.options.scan_settings.plugins_used)} plugins"
             )
-            ASH_LOGGER.debug(f"Default settings identified: {settings}")
 
         return super()._process_config_options()
 
@@ -454,6 +603,138 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 item.path = value
                 filters.append(item)
         settings.filters_used = filters
+
+    def _untrusted_baseline_reason(
+        self, record: Optional[UntrustedDetectSecretsSettings]
+    ) -> Optional[str]:
+        """Why the baseline's settings are not the operator's, or None when they are.
+
+        A baseline inside the scanned tree, or inside a git checkout that holds the
+        scanned tree, is the repository's whichever config named it
+        (``scanned_checkout_reason``); ``detect-secrets scan`` writes the verification
+        filter into every baseline it generates, so a repository's
+        ``.secrets.baseline`` normally carries it. One outside both, in another
+        checkout included, is the operator's when the config is, or when the
+        operator's own settings name that same ``baseline_file``
+        (``--config-overrides``, or a workspace's default config, beside a
+        repository's own config).
+        """
+        baseline = self.config.options.baseline_file
+        if baseline is None:
+            return None
+        config = getattr(self.context, "config", None)
+        root = getattr(config, "_scanned_root", None) or self.context.source_dir
+        why = scanned_checkout_reason(Path(baseline), root)
+        if why is not None:
+            return f"the baseline {Path(baseline).as_posix()} is used, and {why}"
+        if record is None or same_baseline(
+            record.operator_baseline, baseline, self.context.source_dir
+        ):
+            return None
+        return (
+            f"the baseline {Path(baseline).as_posix()} was named by a config the "
+            f"operator did not write ({record.reason})"
+        )
+
+    def _apply_settings_trust(
+        self, *, settings_from_baseline: bool, config_entries: Set[int]
+    ) -> None:
+        """Keep only what each setting's source may turn on.
+
+        Two settings act on the scanning host rather than the scanned files, and only
+        the operator's own settings may supply them (config/secret_verification_trust.py):
+
+        * the verification filter, which sends each candidate secret, and for an AWS
+          key the key pair itself, to the service that issued it;
+        * a plugin or filter named by ``file://``, which the worker imports.
+
+        resolve_config has already removed them from the settings of a config the
+        operator did not write, and recorded what the operator's settings name. Here
+        the same rule is applied to the baseline's settings, which resolve_config
+        never sees, and offline mode turns verification off whatever any source
+        says. The rest of the
+        settings, the baseline's exclusions included, still apply, and candidates the
+        filter would have dropped as rejected by their issuer are reported.
+
+        Args:
+            settings_from_baseline: The plugins and filters were loaded from the
+                baseline, replacing the config's.
+            config_entries: ``id()`` of the filter entries that came from the config
+                rather than the baseline.
+        """
+        settings = self.config.options.scan_settings
+        record = getattr(
+            getattr(self.context, "config", None),
+            "_untrusted_detect_secrets_settings",
+            None,
+        )
+        notes: List[tuple] = []
+        if settings_from_baseline:
+            why = self._untrusted_baseline_reason(record)
+            if why is not None:
+                own = [
+                    item for item in settings.filters_used if id(item) in config_entries
+                ]
+                settings.filters_used = [
+                    item
+                    for item in settings.filters_used
+                    if id(item) not in config_entries
+                ]
+                removed = drop_untrusted_entries(
+                    settings,
+                    UntrustedDetectSecretsSettings(reason=why),
+                    keep_verification=False,
+                )
+                settings.filters_used = settings.filters_used + own
+                if removed:
+                    notes.append((removed, why))
+            if record is not None and not record.operator_verifies:
+                settings.filters_used = [
+                    item
+                    for item in settings.filters_used
+                    if id(item) not in config_entries
+                    or not is_verification_filter(item.path)
+                ]
+        offline = self._scanner_offline()
+        if offline:
+            dropped = [
+                str(item.path)
+                for item in settings.filters_used
+                if is_verification_filter(item.path)
+            ]
+            settings.filters_used = [
+                item
+                for item in settings.filters_used
+                if not is_verification_filter(item.path)
+            ]
+            if dropped:
+                notes.append((dropped, "ASH is running in offline mode"))
+        self._verification_permitted = any(
+            is_verification_filter(item.path) for item in settings.filters_used
+        )
+        for removed, why in notes:
+            verification = [path for path in removed if is_verification_filter(path)]
+            files = [path for path in removed if path not in verification]
+            if verification and not self._verification_permitted:
+                self._plugin_log(
+                    f"Not verifying candidate secrets with their issuers: {why}. "
+                    "Verification runs only online, when the operator's own ASH "
+                    "config names the filter in "
+                    "scanners.detect-secrets.options.scan_settings.filters_used or "
+                    "names a baseline that does, outside the scanned tree and the "
+                    "git checkout holding it (another checkout counts).",
+                    level=logging.INFO if offline else logging.WARNING,
+                )
+            if files:
+                self._plugin_log(
+                    f"Not loading the detect-secrets plugin or filter files "
+                    f"{', '.join(files)}: {why}. A plugin or filter named by file is "
+                    "loaded only from the operator's own ASH config, or a baseline "
+                    "it names outside the scanned tree and the git checkout holding "
+                    "it, and only from a file outside the scanned tree and every git "
+                    "checkout.",
+                    level=logging.WARNING,
+                )
 
     @staticmethod
     def _get_baseline_exclude_patterns(
@@ -532,13 +813,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
     @staticmethod
     def _worker_command(request_file: Path, output_file: Path) -> List[str]:
-        """The command that runs one scan in ``utils/detect_secrets_worker.py``.
+        """The interpreter arguments that run one scan in ``utils/detect_secrets_worker.py``.
 
-        The same interpreter as ASH, so the worker sees the same detect-secrets.
-        A separate method so tests can substitute the worker.
+        Everything after the interpreter: ``python_child`` adds ASH's own, so the
+        worker sees the same detect-secrets. A separate method so tests can
+        substitute the worker.
         """
         return [
-            sys.executable,
             "-m",
             "automated_security_helper.utils.detect_secrets_worker",
             str(request_file),
@@ -553,6 +834,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         scan_settings_dict: Dict[str, Any],
         work_dir: Path,
         scan_timeout: float | None,
+        verify: bool = False,
     ) -> Any:
         """Scan ``scan_paths`` in a subprocess; return the resulting collection.
 
@@ -563,6 +845,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ``transient_settings`` -- and this method rebuilds the same
         ``SecretsCollection`` from its output, so everything downstream reads
         ``self._secrets_collection`` exactly as before.
+
+        ``verify`` is whether this scan may send candidate secrets to their issuers.
+        When it is False the worker refuses every HTTP request detect-secrets
+        tries, so a filter or plugin that verifies under another name cannot
+        either (see ``utils/detect_secrets_worker.py``).
 
         Returns None when the worker was killed at ``scan_timeout``. The caller then
         keeps the collection it already holds (the parsed baseline, or empty). This
@@ -576,6 +863,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         from detect_secrets.core.potential_secret import PotentialSecret
 
+        from automated_security_helper.utils.detect_secrets_worker import (
+            REFUSE_HTTP_ENV,
+        )
+        from automated_security_helper.utils.process_env import snapshot_environ
         from automated_security_helper.utils.subprocess_utils import (
             run_command_with_output_handling,
         )
@@ -585,10 +876,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # Absolute, because the worker runs in a different working directory and
         # output_dir may be relative for a library caller.
         work_dir = Path(work_dir).absolute()
-        worker_cwd = Path(self.results_dir or work_dir).absolute()
         request_file = work_dir.joinpath("detect-secrets-worker-request.json")
         output_file = work_dir.joinpath("detect-secrets-worker-output.json")
-        output_file.unlink(missing_ok=True)
+        # The request first: open_for_write refuses a link at any component of
+        # work_dir, and the unlink below would follow one.
         with open_for_write(request_file) as fp:
             json.dump(
                 {
@@ -596,23 +887,38 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     "baseline": baseline,
                     "settings": scan_settings_dict,
                     "paths": scan_paths,
+                    "verify": verify,
                 },
                 fp,
             )
         try:
-            # cwd is the scanner's results directory, which ASH empties at the
-            # start of each run: `python -m` puts the working directory first on
-            # sys.path, so running from the scanned tree would let a repository's
-            # own `detect_secrets/` package replace the library.
-            response = run_command_with_output_handling(
-                command=self._worker_command(request_file, output_file),
-                stdout_preference="return",
-                stderr_preference="return",
-                cwd=worker_cwd,
-                encoding="utf-8",
-                errors="replace",
-                timeout=scan_timeout,
-            )
+            output_file.unlink(missing_ok=True)
+            # `python -m` puts the working directory first on sys.path, so the
+            # worker starts in an empty directory of its own (and with -P where
+            # Python has it) rather than in the scanned tree or the results
+            # directory under it, where a `detect_secrets/` or
+            # `automated_security_helper/` package would replace the real one. The
+            # directory is under work_dir, which a sandboxed worker can see.
+            with python_child(
+                *self._worker_command(request_file, output_file), parent=work_dir
+            ) as child:
+                response = run_command_with_output_handling(
+                    command=child.argv,
+                    stdout_preference="return",
+                    stderr_preference="return",
+                    cwd=child.cwd,
+                    env={
+                        **{
+                            key: value
+                            for key, value in snapshot_environ().items()
+                            if key != REFUSE_HTTP_ENV
+                        },
+                        **({} if verify else {REFUSE_HTTP_ENV: "1"}),
+                    },
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=scan_timeout,
+                )
             if response.get("timed_out"):
                 self._plugin_log(
                     f"detect-secrets scan timed out after {scan_timeout}s",
@@ -665,6 +971,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+        # Per target; see ScannerPluginBase.scan(). targets_attempted is the number
+        # of files given to detect-secrets, set below; None until then (no claim).
+        self.exit_code = 0
+        self.targets_attempted: Optional[int] = None
         tool_component = ToolComponent(
             name="detect-secrets",
             version=self.tool_version,
@@ -724,8 +1034,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
             return False
 
-        ASH_LOGGER.debug(f"self.config: {self.config}")
-        ASH_LOGGER.debug(f"config: {config}")
+        # Which settings, never their values (ScannerPluginBase._setting_names).
+        ASH_LOGGER.debug(f"self.config setting: {self._setting_names(self.config)}")
+        ASH_LOGGER.debug(f"config setting: {self._setting_names(config)}")
 
         try:
             secrets_collection_cls, _, _ = _detect_secrets_api()
@@ -744,9 +1055,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             if (
                 target_type == "source"
                 and self.config.options.baseline_file is not None
+                and self._baseline_document is not None
             ):
-                with open(self.config.options.baseline_file, "r") as f:
-                    baseline_document = json.load(f)
+                baseline_document = self._baseline_document
                 self._secrets_collection = secrets_collection_cls.load_from_baseline(
                     baseline=baseline_document,
                 )
@@ -814,6 +1125,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 else scan_set(
                     source=self.context.source_dir,
                     output=self.context.output_dir,
+                    honor_ignore_files=honors_ignore_files(self.context.config),
                 )
             )
             absolute_output_dir = Path(self.context.output_dir).absolute()
@@ -851,6 +1163,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     for f in self.config.options.scan_settings.filters_used
                 ]
 
+            # Verification is decided again on the settings the worker gets, because
+            # offline mode is read when it is used and the settings can change
+            # after the scanner was configured. See _apply_settings_trust.
+            verify = any(
+                is_verification_filter(item.get("path"))
+                for item in scan_settings_dict.get("filters_used", [])
+            )
+            if verify and (self._scanner_offline() or not self._verification_permitted):
+                scan_settings_dict["filters_used"] = [
+                    item
+                    for item in scan_settings_dict["filters_used"]
+                    if not is_verification_filter(item.get("path"))
+                ]
+                verify = False
+
             # Apply exclude file patterns from baseline filters to the scan set
             # BEFORE passing files to detect-secrets. This prevents unnecessary
             # file I/O and entropy calculations on excluded files, which is
@@ -870,7 +1197,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             if global_ignore_paths:
                 from automated_security_helper.utils.suppression_matcher import (
-                    file_path_matches as path_matches_pattern,
+                    ignore_path_matches,
                 )
 
                 original_count = len(scannable)
@@ -879,7 +1206,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     file_path
                     for file_path in scannable
                     if not any(
-                        path_matches_pattern(
+                        ignore_path_matches(
                             file_path.removeprefix(source_prefix),
                             ignore_path.path,
                         )
@@ -891,6 +1218,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         f"Filtered {original_count - len(scannable)} files using global_ignore_paths"
                     )
 
+            # Nothing to scan is SKIPPED (targets_attempted 0), not PASSED.
+            self.targets_attempted = len(scannable)
             if len(scannable) == 0:
                 message = f"There were no scannable files found in target '{target}'"
                 self._plugin_log(
@@ -950,13 +1279,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             # from ``scannable`` so the baseline exclude patterns above still
             # match against the paths they were written for.
             scan_paths = [str(Path(item).absolute()) for item in scannable]
-            ASH_LOGGER.debug(f"Settings: {scan_settings_dict}")
+            from automated_security_helper.config.environment_record import (
+                setting_names,
+            )
+
+            # Which settings, never their values.
+            ASH_LOGGER.debug(
+                f"Settings: {setting_names(scan_settings_dict)}", extra=NO_MARKUP
+            )
             scanned = self._scan_in_worker(
                 baseline=baseline_document,
                 scan_paths=scan_paths,
                 scan_settings_dict=scan_settings_dict,
                 work_dir=target_results_dir,
                 scan_timeout=scan_timeout,
+                verify=verify,
             )
             if scanned is not None:
                 self._secrets_collection = scanned

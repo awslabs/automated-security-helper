@@ -53,7 +53,7 @@ tags. So the spelling is hyphenated (``cfn-nag``, ``detect-secrets``,
 ``core/scanner_inventory.py`` reports for its own table. Matching against a
 snake_cased set would recognize none of the three hyphenated names.
 
-The set covers every scanner ASH ships, which is the ten in
+The set covers every scanner ASH ships, which is the sixteen in
 ``plugin_modules/ash_builtin/scanners`` plus the three vendored packages
 (``ferret-scan``, ``snyk-code``, ``trivy-repo``) that ``load_internal_plugins()``
 does not load. The vendored three are included because a vendored scanner's
@@ -114,27 +114,39 @@ the cycle it exists to route around.
 
 from __future__ import annotations
 
-from typing import FrozenSet
+from typing import FrozenSet, Mapping
+
+#: The tool type (a ``ScannerToolType`` value) of every scanner ASH ships, by
+#: config name. A scanner sets its ``tool_type`` in ``model_post_init``, so the
+#: class does not carry it, and instantiating a scanner probes its tool version;
+#: utils/scanner_tool_types.py reads the type from here instead.
+#: tests/unit/utils/test_scanner_tool_types.py checks each entry against the
+#: scanner's own ``tool_type``. Kept sorted so a diff adding one is a single line.
+SCANNER_TOOL_TYPES: Mapping[str, str] = {
+    "actionlint": "IAC",
+    "bandit": "SAST",
+    "cdk-nag": "IAC",
+    "cfn-guard": "IAC",
+    "cfn-lint": "IAC",
+    "cfn-nag": "IAC",
+    "checkov": "IAC",
+    "detect-secrets": "SECRETS",  # pragma: allowlist secret
+    "ferret-scan": "SECRETS",
+    "gitleaks": "SECRETS",
+    "grype": "SCA",
+    "npm-audit": "SCA",
+    "opengrep": "SAST",
+    "semgrep": "SAST",
+    "snyk-code": "SAST",
+    "syft": "SBOM",
+    "trivy": "SCA",
+    "trivy-repo": "SAST",
+    "zizmor": "SAST",
+}
 
 #: Scanner config names for every scanner ASH ships, as they appear in SARIF
-#: result tags. Kept sorted so a diff adding one is a single line.
+#: result tags.
 #:
 #: Derived-and-compared by tests/unit/utils/test_scanner_names_registry_agreement.py.
 #: Add a scanner to the registry without adding it here and that test fails.
-SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(
-    {
-        "bandit",
-        "cdk-nag",
-        "cfn-nag",
-        "checkov",
-        "detect-secrets",
-        "ferret-scan",
-        "grype",
-        "npm-audit",
-        "opengrep",
-        "semgrep",
-        "snyk-code",
-        "syft",
-        "trivy-repo",
-    }
-)
+SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)

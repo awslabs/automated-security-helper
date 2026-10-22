@@ -34,7 +34,7 @@ does with each outcome.
 
 from __future__ import annotations
 
-import logging
+import json
 import os
 import re
 import time
@@ -247,26 +247,52 @@ class TestResolveWorkspaceExecutionConfig:
 
         assert config.max_parallel_projects == 2
 
-    def test_an_unreadable_config_falls_back_rather_than_refusing_the_scan(
-        self, tmp_path, caplog
-    ):
-        """These are scheduling knobs; refusing to scan over one would be a poor trade."""
+    def test_an_unparseable_config_refuses_the_scan(self, tmp_path):
+        """The same file refuses a single-directory scan, so it refuses this one,
+        rather than scanning the workspace without the settings it is there to
+        apply."""
         (tmp_path / ".ash.yaml").write_text(
             "workspace: [this: is: not: valid\n", encoding="utf-8"
         )
 
-        with caplog.at_level(logging.WARNING):
-            config = _resolve_workspace_execution_config(
+        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml"):
+            _resolve_workspace_execution_config(
                 ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
             )
 
-        assert config.max_parallel_projects is None
-        assert "using defaults" in caplog.text
+    def test_a_named_config_that_does_not_exist_refuses_the_scan(self, tmp_path):
+        with pytest.raises(ASHConfigValidationError, match="profile.yaml"):
+            _resolve_workspace_execution_config(
+                ScanOptions(
+                    source_dir=tmp_path,
+                    output_dir=tmp_path / "out",
+                    config=(tmp_path / "profile.yaml").as_posix(),
+                )
+            )
+
+    def test_a_root_whose_only_source_cannot_be_read_refuses_the_scan(self, tmp_path):
+        """Discovery itself refuses here, before any file is loaded."""
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+
+        with pytest.raises(ASHConfigValidationError, match="pyproject.toml"):
+            _resolve_workspace_execution_config(
+                ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
+            )
 
 
 # ---------------------------------------------------------------------------
 # _run_workspace_mode
 # ---------------------------------------------------------------------------
+
+
+def _write_unified_results(root: Path, results_path: Path) -> None:
+    """Write the unified results file as the workspace aggregator does."""
+    from automated_security_helper.workspace.aggregation import WorkspaceAggregator
+
+    written = WorkspaceAggregator(
+        plan=_plan(root, "api"), output_dir=results_path.parent
+    ).write(exit_code=0, wall_clock_seconds=0.1)
+    assert written == results_path
 
 
 @pytest.fixture
@@ -304,6 +330,116 @@ class TestRunWorkspaceModeSettings:
         assert _run_workspace_mode(opts, logger) is expected
         assert recorded["plans"][0] is plan
 
+    @pytest.mark.parametrize("inner", [True, False], ids=["inner run", "own run"])
+    def test_the_inner_run_of_a_container_scan_marks_its_results_completed(
+        self, recorded_workspace_execution, logger, tmp_path, monkeypatch, inner
+    ):
+        """The outer process reads the unified file back only with this marker."""
+        expected = _run_result(tmp_path)
+        _write_unified_results(tmp_path, expected.results_path)
+        recorded_workspace_execution(result=expected)
+        run_id = "0123456789abcdef0123456789abcdef"
+        if inner:
+            monkeypatch.setenv("ASH_OUTER_RUN_ID", run_id)
+        else:
+            monkeypatch.delenv("ASH_OUTER_RUN_ID", raising=False)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        _run_workspace_mode(opts, logger)
+
+        written = json.loads(expected.results_path.read_text())
+        markers = [
+            checkpoint
+            for checkpoint in written.get("validation_checkpoints", [])
+            if checkpoint.get("type") == "run_completed"
+        ]
+        if inner:
+            assert [m["metadata"]["run_id"] for m in markers] == [run_id]
+        else:
+            assert markers == []
+
+    def test_a_marker_that_cannot_be_written_is_reported(
+        self, recorded_workspace_execution, logger, tmp_path, monkeypatch
+    ):
+        """The outer process then finds no marker and fails closed."""
+        import os
+
+        expected = _run_result(tmp_path)
+        _write_unified_results(tmp_path, expected.results_path)
+        before = expected.results_path.read_bytes()
+        recorded_workspace_execution(result=expected)
+        monkeypatch.setenv("ASH_OUTER_RUN_ID", "0123456789abcdef0123456789abcdef")
+
+        def no_replace(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        # The rename fs_guard.open_for_atomic_write makes when the stamp's copy ends.
+        monkeypatch.setattr(os, "replace", no_replace)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        _run_workspace_mode(opts, logger)
+
+        assert expected.results_path.read_bytes() == before
+        assert any(
+            "could not record" in message.lower()
+            for message in logger.records["warning"]
+        ), logger.records
+
+    @pytest.mark.parametrize("results_file", ["not yet written", "written"])
+    def test_a_report_refusal_is_recorded_for_the_outer_process(
+        self, recorded_workspace_execution, logger, tmp_path, monkeypatch, results_file
+    ):
+        """Before any project (no results file yet) or when the report step starts.
+
+        Beside the results file, which keeps what the projects wrote, and never in
+        a results file of its own, which --use-existing would read as a scan.
+        """
+        from automated_security_helper.utils.report_path_links import (
+            ReportPathRefused,
+        )
+
+        results_path = tmp_path / "out" / "ash_aggregated_results.json"
+        before = None
+        if results_file == "written":
+            _write_unified_results(tmp_path, results_path)
+            before = results_path.read_bytes()
+        refusal = ReportPathRefused(
+            "the report file name 'ash.../x' is not a file in /out/reports"
+        )
+        recorded_workspace_execution(raises=refusal)
+        run_id = "0123456789abcdef0123456789abcdef"
+        monkeypatch.setenv("ASH_OUTER_RUN_ID", run_id)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        with pytest.raises(SystemExit) as refused:
+            _run_workspace_mode(opts, logger)
+
+        assert refused.value.code == 1
+        record = json.loads(
+            (tmp_path / "out" / "ash_inner_run_outcome.json").read_text()
+        )
+        assert (record["type"], record["message"], record["metadata"]["run_id"]) == (
+            "report_path_refused",
+            str(refusal),
+            run_id,
+        )
+        if before is None:
+            assert not results_path.exists()
+        else:
+            assert results_path.read_bytes() == before
+
     def test_the_root_configs_parallelism_bound_reaches_the_settings(
         self, recorded_workspace_execution, logger, tmp_path
     ):
@@ -324,6 +460,27 @@ class TestRunWorkspaceModeSettings:
         settings = recorded["settings"][0]
         assert settings.max_parallel_projects == 2
         assert settings.project_timeout == 60.0
+
+    def test_a_root_whose_discovery_refuses_exits_3_and_scans_no_project(
+        self, recorded_workspace_execution, logger, tmp_path
+    ):
+        (tmp_path / "pyproject.toml").symlink_to(tmp_path / "absent.toml")
+        (tmp_path / "api").mkdir()
+        (tmp_path / "api" / ".ash.yaml").write_text(
+            "project_name: api\n", encoding="utf-8"
+        )
+        recorded = recorded_workspace_execution(result=_run_result(tmp_path))
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_workspace_mode(opts, logger)
+
+        assert excinfo.value.code == 3
+        assert recorded["plans"] == []
 
     def test_an_empty_phase_list_falls_back_to_the_standard_three(
         self, recorded_workspace_execution, logger, tmp_path

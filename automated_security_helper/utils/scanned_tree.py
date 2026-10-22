@@ -33,7 +33,9 @@ A file is read only when all of these hold:
 
 ``follow_links_inside=True`` relaxes rules 3 and 5 for readers that look up a file a
 scanner already reported: a link is followed when its target is inside the tree, and
-a hard-linked file is read. See :func:`open_in_scanned_tree`.
+a hard-linked file is read. ``allow_hardlinks=True`` relaxes rule 5 alone, for a
+reader that copies files a directory walk of the tree reads under these names. See
+:func:`open_in_scanned_tree`.
 
 How the check is made, and why that way
 ---------------------------------------
@@ -111,6 +113,8 @@ REASON_NOT_REGULAR = "it is not a regular file"
 REASON_HARDLINK = "it has more than one hard link"
 REASON_CHANGED = "it changed while it was being checked"
 REASON_RESOLVES_OUTSIDE = "it is a symbolic link that resolves outside the scanned tree"
+#: Why the scan set leaves out a file link: see :func:`resolves_inside`.
+REASON_LINK_LEAVES_TREE = "link leaves the scanned tree"
 
 
 def _parent_symlink_reason(component: str) -> str:
@@ -182,6 +186,60 @@ def relative_display(path: PathLike, root: PathLike) -> str:
     if below is None or not below[1]:
         return Path(path).as_posix()
     return "/".join(below[1])
+
+
+def is_inside_tree(path: PathLike, root: PathLike) -> bool:
+    """Whether ``path`` is in the tree at ``root``, as written or once resolved.
+
+    For a file ASH found some other way than through the scan set, such as an
+    executable on PATH. Inside if any of these is at or below the root: the path
+    as given; the path with its directory resolved; its real path. Or if the root
+    is one of its parents by device and inode, as named or resolved, which covers
+    spellings that differ only in case on a case-insensitive volume, and macOS's
+    ``/var`` for ``/private/var``. Components are compared through
+    ``os.path.normcase``.
+    """
+    if _below(path, root) is not None:
+        return True
+    named = _absolute(path)
+    real_root = Path(os.path.realpath(root))
+    # As named, with its directory resolved, and fully resolved: a link on PATH
+    # whose directory is a link into the tree, and a file in the tree that is
+    # itself a link elsewhere, are both in the tree.
+    for spelling in (
+        Path(os.path.realpath(named.parent)) / named.name,
+        Path(os.path.realpath(named)),
+    ):
+        if _starts_with(spelling, real_root):
+            return True
+    return _has_ancestor_file(named, root) or _has_ancestor_file(
+        Path(os.path.realpath(named)), root
+    )
+
+
+def _has_ancestor_file(path: Path, root: PathLike) -> bool:
+    """Whether ``root`` is ``path`` or one of its parents, by device and inode.
+
+    For spellings the comparisons by name miss: on a case-insensitive volume, which
+    macOS uses by default, ``/Users/me/Repo`` and ``/users/me/repo`` are one
+    directory, and ``normcase`` folds case only on Windows. A filesystem that
+    reports no inode numbers answers False rather than matching everything.
+    """
+    try:
+        root_stat = os.stat(root)
+    except OSError:
+        return False
+    if not root_stat.st_ino:
+        return False
+    identity = (root_stat.st_dev, root_stat.st_ino)
+    for candidate in (path, *path.parents):
+        try:
+            found = os.stat(candidate)
+        except OSError:
+            continue
+        if (found.st_dev, found.st_ino) == identity:
+            return True
+    return False
 
 
 def _split_below_root(path: PathLike, root: PathLike) -> Tuple[Path, Tuple[str, ...]]:
@@ -317,6 +375,24 @@ def _open_by_checked_path(
     return fd
 
 
+def resolves_inside(path: PathLike, root: PathLike) -> bool:
+    """Whether *path*, every link in it resolved, is strictly below *root* resolved.
+
+    Both are resolved with ``os.path.realpath``, so a root reached through a link (the
+    operator's choice) and a link inside the tree that points elsewhere inside it both
+    count as inside; a link whose target, after any chain of links, is outside the
+    root does not. A path that does not exist is resolved as far as it goes, so a
+    dangling link is judged by where it points. The scan set uses this to leave out
+    file links that leave the tree (``get_scan_set``); it says nothing about whether
+    the path is a regular file.
+    """
+    real_root = Path(os.path.realpath(root))
+    resolved = Path(os.path.realpath(_absolute(path)))
+    return len(resolved.parts) > len(real_root.parts) and _starts_with(
+        resolved, real_root
+    )
+
+
 def _resolved_inside(
     path: PathLike, root: PathLike, display: str
 ) -> Tuple[Path, Tuple[str, ...]]:
@@ -332,7 +408,11 @@ def _resolved_inside(
 
 
 def open_in_scanned_tree(
-    path: PathLike, root: PathLike, *, follow_links_inside: bool = False
+    path: PathLike,
+    root: PathLike,
+    *,
+    follow_links_inside: bool = False,
+    allow_hardlinks: bool = False,
 ) -> BinaryIO:
     """Open ``path`` for binary reading if it is a regular file inside ``root``.
 
@@ -355,6 +435,12 @@ def open_in_scanned_tree(
             more than one hard link is accepted too, for the same reason: the
             scanner already read it under this name, and installers that hard-link
             files (uv, pnpm, conda) would otherwise draw a warning per file.
+        allow_hardlinks: Accept a file with more than one hard link, and still
+            follow no link. For a reader that stands in for a directory walk of the
+            tree, which reads a hard-linked file under each of its names but
+            follows no symlink: the gitleaks ``.gitleaksignore`` re-scan copies the
+            files it names, and refusing a hard-linked one would leave a file the
+            scan covers unread.
 
     Returns:
         A binary file object positioned at the start of the file.
@@ -367,10 +453,11 @@ def open_in_scanned_tree(
     display = "/".join(parts)
     if follow_links_inside:
         anchor, parts = _resolved_inside(path, root, display)
+    hardlinks = follow_links_inside or allow_hardlinks
     if _DESCRIPTOR_WALK:
-        fd = _open_by_descriptor_walk(anchor, parts, display, follow_links_inside)
+        fd = _open_by_descriptor_walk(anchor, parts, display, hardlinks)
     else:
-        fd = _open_by_checked_path(anchor, parts, display, follow_links_inside)
+        fd = _open_by_checked_path(anchor, parts, display, hardlinks)
     return os.fdopen(fd, "rb")
 
 

@@ -59,10 +59,9 @@ come apart: replacing ``Optional["AshConfig"]`` with ``Optional[Any]`` leaves
 checked too.
 
 *Asserting the type is not enough on its own.* ``validate_ash_config``
-(``asharp_model.py``) swallows every exception and falls back to
-``get_default_config()``, which also returns an ``AshConfig`` -- so under an
-``Optional[Any]`` annotation the deserialized value is still an ``AshConfig``.
-Measured, not assumed. The annotation check is what closes that hole; the type
+(``asharp_model.py``) passes every value other than None through
+``AshConfig.model_validate``, which returns an ``AshConfig`` -- so under an
+``Optional[Any]`` annotation the deserialized value is still an ``AshConfig``. The annotation check is what closes that hole; the type
 check is what catches the field or its validator being gutted.
 
 *The output is sentinel-bracketed.* Comparing the whole of stdout couples this
@@ -92,6 +91,8 @@ any CI selection, because a guard that CI skips is not a guard.
 import subprocess  # nosec B404 — a fresh interpreter is the property under test
 import sys
 import textwrap
+
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 # Exit code for "the premise is gone", kept distinct from the 1 that an
 # unresolved forward reference produces so the two are never confused.
@@ -147,6 +148,7 @@ def test_deserialization_works_when_run_ash_scan_is_imported_first():
         # The non-zero exit IS the finding here, so it must not raise: the
         # assertions below report it with the subprocess stderr attached.
         check=False,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
 
     # First, because every other check below is meaningless if this one is wrong.

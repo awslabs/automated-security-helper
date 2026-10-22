@@ -202,7 +202,7 @@ describe('the Fargate VPC does not auto-assign public IPv4 addresses', () => {
 
   test('the NAT the template deploys is the one the layout was built for', () => {
     // Binds the constant to the artifact. Without this the guard below could be
-    // bypassed by leaving NAT_GATEWAYS at 1 and writing a different literal into
+    // defeated by leaving NAT_GATEWAYS at 1 and writing a different literal into
     // the VPC's own `natGateways`, which is precisely the drift the guard exists to
     // catch.
     template.resourceCountIs('AWS::EC2::NatGateway', NAT_GATEWAYS);
@@ -331,7 +331,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 90 across the five stacks, in the order STACKS declares them. Exact and
+    // 89 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -348,8 +348,21 @@ describe('no IAM policy grants the same thing twice', () => {
     //
     // AshCodeCommitGate's eighth is `ScanFunctionRoleEc2Access`, authored directly for
     // the same reason: it exists only under the ScanFunctionInVpc condition.
+    //
+    // AshDistributedPipeline was 50 until its four shard roles and the merge role stopped
+    // receiving `GetSecretValue` on the auth secret, which nothing in that stack reads; the
+    // split had filed each of those grants as its own `SecretsmanagerAccess` policy.
+    //
+    // AshAgentCore, AshFargate and AshCodeCommitGate each carry one more,
+    // `ImageBootstrapSsmAccess`: the image build reads CloudFormation's response URL
+    // from a SecureString parameter, and that read is authored directly rather than
+    // through the split (ash-image-build.ts says why).
+    //
+    // AshDistributedPipeline's 46th is the merge role's `MergeProjectRoleCodepipelineAccess`:
+    // `codepipeline:ListActionExecutions` on the pipeline, authored after the pipeline
+    // so the merge can look up which build ran each shard action.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 13, 10, 8, 50,
+      10, 14, 11, 9, 46,
     ]);
   });
 
@@ -363,7 +376,7 @@ describe('no IAM policy grants the same thing twice', () => {
       // Compared as objects carrying the logical id, so the failure output NAMES
       // the policy. `expect(size).toBe(length)` reports "Expected: 4, Received: 3"
       // and the test.each title carries only the stack name -- for
-      // AshDistributedPipeline that leaves a reader 50 policies to search.
+      // AshDistributedPipeline that leaves a reader 45 policies to search.
       // A separate `expect(logicalId).toBeTruthy()` cannot do this job: an
       // Object.entries key is always a non-empty string, so it never fails and
       // never prints anything.

@@ -2,6 +2,8 @@
 
 ASH produces scan results in multiple formats. Every scan writes an internal aggregated-results JSON file (`ash_aggregated_results.json`), and reporters transform that data into the formats listed below. You can enable any combination of reporters in your configuration or on the command line.
 
+The reports land in `reports/` under the output directory (`.ash/ash_output` by default), beside `ash_aggregated_results.json`. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files such as notebooks and archive contents. Those two are not masked: a secret a scanner found is in them in full. When you keep scan output as a CI artifact, keep `reports/` and `ash_aggregated_results.json` only, as the examples in [Running ASH in CI](../tutorials/running-ash-in-ci.md) do. A workspace scan repeats the layout per project under `projects/<key>/`, so keep `projects/*/reports` and `projects/*/ash_aggregated_results.json` too, and not the projects' `scanners/` or `converted/`.
+
 ## Quick reference
 
 <!-- BEGIN GENERATED: reporter-quick-reference -->
@@ -46,6 +48,40 @@ reporters:
 ```
 
 Reports are written to `.ash/ash_output/reports/` by default.
+
+ASH does not write a report through a link. When the reports directory, a report
+file of an enabled reporter, a file a reporter writes beside its report (such as
+`ash.unused-suppressions.md`) or, in workspace mode, `reports/workspace-reports.json`
+is already a symlink or a directory junction, the run exits 1 before any reporter
+writes, and the error names the link. The reports directory is refused whether its
+link points to a directory or to nothing, before ASH creates or clears it. A fresh
+scan removes `reports/` with anything in it before it starts, so a link left inside
+`reports/` by an earlier run is cleared rather than refused. A workspace run is
+refused before any project is scanned, and container and nix mode exit 1 when a link
+is left in `reports/` after the inner run. A regular file at one of those names is replaced as before. A
+reporter's report file name that is not a file in the reports directory (an
+`extension` with `/`, `\` or `..` that its config did not replace with the
+default), or such a name among the files a reporter writes beside its report, stops
+the run with exit 1 the same way, in container and nix mode too. There the inner run
+records the refusal in `ash_inner_run_outcome.json` beside
+`ash_aggregated_results.json`, and the outer process exits 1 with its message. The
+outer process reads the inner run's results back only when they carry a
+`run_completed` validation checkpoint with the ID it gave that run
+(`ASH_OUTER_RUN_ID`); otherwise it exits 1, saying the inner run did not complete.
+
+`--use-existing` exits 3 rather than report on a results file that holds no scan:
+one with neither scanner results nor findings, as a run that stopped before its
+scan recorded anything leaves, or one that records a refused run. Run the scan
+again without
+`--use-existing`.
+
+Each reporter writes files of its own. When two enabled reporters would write the
+same file, for example because `reporters.cyclonedx.extension: sarif` gives the
+CycloneDX report the SARIF report's name, the run exits 1 before either writes, and
+the error names both reporters and the file. Names are compared ignoring case and
+trailing dots and spaces, as case-insensitive file systems and Windows compare them.
+In workspace mode that covers `reports/workspace-reports.json` too, and the run is
+refused before any project is scanned.
 
 ---
 
@@ -93,15 +129,15 @@ Each object in the `findings` array has these fields:
 | `cve_id` | string or null | CVE identifier, if applicable |
 | `cwe_id` | string or null | CWE identifier, if applicable |
 | `fix_available` | boolean or null | Whether a known fix exists |
-| `is_suppressed` | boolean | `true` if the finding was suppressed via configuration or inline annotation |
+| `is_suppressed` | boolean | `true` if the finding was suppressed via configuration or inline annotation, including by an entry an MCP client's config supplied (see [SARIF](#sarif)) |
 | `suppression_kind` | string or null | `"inSource"` or `"external"`, depending on how it was suppressed |
 | `suppression_justification` | string or null | Reason text provided with the suppression |
 | `detected_at` | string or null | ISO 8601 timestamp of detection |
-| `code_snippet` | string or null | Relevant source code fragment. May span more lines than `line_start`–`line_end` when the scanner supplied surrounding context, so do not use it to infer the line range |
+| `code_snippet` | string or null | Relevant source code fragment. May span more lines than `line_start`–`line_end` when the scanner supplied surrounding context, so do not use it to infer the line range. Lines a secret finding reports are masked; see [Secret values in reports](#secret-values-in-reports) |
 | `tags` | string or null | JSON-encoded array of tags |
 | `properties` | string or null | JSON-encoded map of additional scanner-specific properties |
 | `references` | string or null | JSON-encoded array of reference URIs |
-| `raw_data` | string or null | Full SARIF result object as a JSON string, for lossless access |
+| `raw_data` | string or null | Full SARIF result object as a JSON string, after secret masking (see [Secret values in reports](#secret-values-in-reports)) |
 
 ### Example output
 
@@ -213,6 +249,28 @@ reporters:
 ```
 
 **Output file:** `reports/ash.sarif`
+
+### Suppressions from an MCP client's config
+
+When the suppression, ignore path or scanner exclusion that hid a finding came from a
+config an MCP client delivered, the finding's SARIF suppression is marked: its
+`justification` starts with `(ASH, client-supplied config)` and names the entry, its
+`kind` is `inSource` for a suppression entry and `external` for an ignore path or a
+scanner exclusion, and it carries `properties.clientSupplied: true`:
+
+```json
+"suppressions": [
+  {
+    "kind": "external",
+    "justification": "(ASH, client-supplied config) Ignoring finding under ignore path 'vendor/**' with reason: third-party code",
+    "properties": {"clientSupplied": true}
+  }
+]
+```
+
+The flat-json and CSV reports show such a finding with `is_suppressed: true` and that
+justification in `suppression_justification`. See
+[Suppressions an MCP client's config supplied](suppressions.md#suppressions-an-mcp-clients-config-supplied).
 
 ---
 
@@ -350,6 +408,11 @@ reporters:
 
 **Output file:** `reports/ash.summary.md`
 
+The scan metadata section has an **Ignore files** line: how many files the scanned
+repository's `.gitignore` and `.ignore` files excluded from ASH's scan set, or that
+they were not honored. It is left out in `compact` mode, with the rest of the scan
+metadata. See [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set).
+
 ---
 
 ## YAML
@@ -380,7 +443,112 @@ reporters:
 
 **Output file:** `reports/ash.summary.txt`
 
+`SCAN METADATA` has the same `Ignore files:` line as the Markdown summary.
+
 ---
+
+## Completeness fields
+
+`ash_aggregated_results.json` records why a scan is incomplete, and the exit code is
+decided from these fields:
+
+- `scanner_results.<name>.missing_reason`: why a `MISSING` scanner did not run when
+  that was its tool being found only inside the scanned directory; it names the path.
+  The YAML reporter and `ash report --format yaml` print it on every scanner row,
+  `null` where it does not apply.
+- `converter_results.<name>.failed_inputs`: each input the converter could not
+  convert, with `path` and `reason`.
+- In workspace mode, each project's `incomplete_converters` lists the converters that
+  did not process their inputs, next to `incomplete_scanners`.
+
+## Secret values in reports
+
+A finding can carry the value it found: bandit's B105, B106 and B107 quote it in
+their message, ferret-scan quotes it with `show_match` on, and every scanner's
+snippets (`region.snippet` and `contextRegion.snippet`) hold the lines around a
+finding, which can include a secret on a neighboring line. ASH masks these values
+once, after the scanners' results are merged and before
+`ash_aggregated_results.json` is written or any reporter runs, so every format
+above, the Bedrock summary and MCP responses get the masked results:
+
+- **By location.** Each snippet line, in any finding, at a file and line that a
+  secret finding reports is replaced with
+  `[masked: a secret finding reports this line]`. Its indentation and line ending
+  are kept. Lines are counted the way scanners count them, at `\n`, `\r\n` and
+  `\r`. A snippet in a file with a secret finding is masked whole when its line
+  numbers are unknown, or when it holds a character only some line counts break
+  at (a form feed, a vertical tab, NEL, U+2028, U+2029, an information separator
+  or a lone `\r`), since its lines cannot be placed. A base64 (`binary`) snippet
+  at a reported line is dropped.
+- **By value.** Each value a secret finding exposes is masked in its own
+  message. That is the value its message quotes
+  (`Possible hardcoded password: '...'`, `Matched text: '...'`, to the last quote
+  of the message), or, for a finding that quotes none, what its own region
+  matched (semgrep's and opengrep's columns). A value that looks like a secret is
+  also masked wherever it occurs as a whole token in what any finding reports:
+  messages, snippets, the other fields of a result and of `additional_reports`,
+  including on lines no secret finding reports. Rule metadata, tags and
+  identifiers (rule IDs, URIs) are left as they are. A value looks like a secret
+  when it has at least eight characters, is not made of letters alone (one word,
+  or words joined by spaces, dots, hyphens or underscores), is not a template
+  placeholder such as `${NAME}` or `{name}`, and is not repetitive (at least 2.5
+  bits of entropy per character). A hard-coded password check quotes ordinary
+  words such as `password` as often as credentials, so a value that does not look
+  like a secret is masked only in its own finding and in the findings that
+  overlap it: those whose region or context, in the same file, covers a line the
+  secret finding reports (or gives a snippet with no line number, or is in a file
+  where the secret finding gives none). There every field is masked, messages and
+  properties included, whatever the value's length or entropy. A short or
+  all-letter secret is therefore left as it is in a finding on another line or in
+  another file, where only masking by location applies. The masked form keeps at
+  most the first two and the last character, for example `hu*************t`.
+
+A secret finding is one from a secrets scanner (detect-secrets, ferret-scan,
+gitleaks, or a result tagged `tool_type::SECRETS`), one tagged `secret` or `secrets`, a bandit
+B105, B106 or B107, a checkov `CKV_SECRET_*` rule, a rule with a `secrets` segment
+in its id (semgrep's and opengrep's `generic.secrets.*`), or a rule whose tags, in
+the tool's rule metadata or on the result, carry `secret`, `secrets` or a
+hard-coded credential CWE: CWE-798, CWE-259 or CWE-321. So is a rule about a
+credential written into infrastructure code, recognized by what its message or
+description says since neither tool tags these: checkov's "hard-coded" checks
+(`CKV_AWS_41`, `CKV_AWS_45`, `CKV_AWS_46`, `CKV_AWS_384`, `CKV_AZURE_45`,
+`CKV_AZURE_131` and the providers' token and key checks) and cfn-nag's
+"... password must not be a plaintext string" rules (`F23`, `F31`, `F34` and the
+rest). checkov puts the whole resource in each finding's snippet, so its lines
+are masked in every finding about that resource. cfn-nag reports only the
+resource's first line, so the masked range runs from there to the end of the
+file. Snippets with no secret in them are left as they were.
+
+Results that are read back from an existing `ash_aggregated_results.json` are
+masked the same way as they are loaded, whatever wrote the file (an older ASH, or
+another tool): `ash report`, `ash scan --use-existing`, `ash merge`, the MCP tools
+that read stored results (`explain_finding`, `diff_scan_results`, `get_scan_results`),
+the findings browser and a workspace's unified reports. For a finding with no
+snippet, the findings browser shows the lines around it read from the file on
+disk, and masks them the same way: lines a secret finding reports, and every value
+the results' masking found.
+
+Masking also crosses result sets. `ash merge` masks the merged results by location
+against the secret findings of every shard, since a secret one shard's scanner
+reports can sit in another shard's snippets. A value is harder: each shard was
+masked in its own process, and none holds the value any more. So every results
+file records, under `secret_value_shapes`, the shape of each value it masked: the
+visible prefix, the visible suffix and the length, which the masked form already
+shows. The value itself, or a digest of it, is never written. `ash merge` masks
+every whole token of one of those shapes in every shard, and so does every later
+reading of a results file that records shapes. Masking by shape is approximate: a
+different token with the same visible characters and the same length is masked
+too.
+
+A workspace scan masks each project against its own findings while the project
+runs. Once every project has finished, it masks each project's results file and
+reports under `projects/<key>/`, and the unified results, again with the values
+every project's secret findings exposed, so a value one project reports is masked
+where another project's finding shows it. A project abandoned at its
+`project_timeout` contributes no values.
+
+The scanner's own output files under `scanners/<name>/` are what the tool wrote,
+and are not masked.
 
 ## Relationship between formats
 

@@ -741,6 +741,58 @@ jobs:
           offline: ${{ matrix.offline || 'false' }}
 
   # ---------------------------------------------------------------------------
+  # The default image stage's permissions.
+  #
+  # `ash build-image` and `ash --mode container` build the `non-root` stage when no
+  # --build-target is given, and that is the image an operator runs. Every scan leg
+  # above builds `ci` (validate-container and run-scan-test pass --build-target ci),
+  # so the steps only `non-root` has -- its user's home, the grype cache handed to
+  # that user, ASH_BIN_PATH handed back to root, its closing sweep of what an install
+  # left writable by every user -- are checked here in a built image. This builds
+  # the stage with no target, as an operator does, and runs the image permissions
+  # probe against the tag that build produces.
+  #
+  # No layer cache: the cache scope is per stage and only `ci`'s is warmed, so this
+  # leg would read nothing, and leaving the cache credentials out keeps the build
+  # step from holding them. tests/unit/test_ci_builds_and_probes_the_default_stage.py
+  # holds this job's shape.
+  # ---------------------------------------------------------------------------
+  non-root-image-permissions:
+    name: "non-root image permissions (ubuntu-latest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "true"
+      - name: Pre-pull the base image
+        id: prepull
+        uses: ./.github/actions/prepull-base-image
+        with:
+          oci-runner: docker
+          runner-wrapper: ""
+      - name: Build the default stage
+        shell: bash
+        env:
+          ASH_BASE_OCI_LAYOUT: ${{ steps.prepull.outputs.oci-layout }}
+          ASH_BASE_IMAGE_OVERRIDE: ${{ steps.prepull.outputs.base-image-override }}
+        run: ash build-image --oci-runner docker --ash-revision-to-install LOCAL --no-run --verbose
+      - name: Check who can write to the image
+        shell: bash
+        env:
+          ASH_IMAGE_NAME: automated-security-helper:non-root
+          OCI_RUNNER: docker
+        run: >-
+          uv run --extra cdk pytest
+          tests/snapshot/container/runtime/test_container_image_permissions.py
+          --run-container-snapshots --no-cov -n 0
+
+  # ---------------------------------------------------------------------------
   # External-target scan: assert on what comes back when ASH scans a directory
   # that is not its own working directory.
   #
@@ -898,6 +950,10 @@ jobs:
       - name: Run the sandbox escape and unit suites
         env:
           ASH_REQUIRE_SANDBOX_BACKENDS: ${{ matrix.require }}
+          # The escape suite may plant a file in this runner account's own home
+          # (the passwd entry's, not $HOME) and remove it: this job's runner is
+          # thrown away with it. tests/utils/throwaway_runner.py.
+          ASH_ESCAPE_TEST_WRITES_PASSWD_HOME: "1"
         run: |
           uv run pytest \
             tests/integration/sandbox \
@@ -967,21 +1023,73 @@ jobs:
         run: |
           pip install ".[cdk]"
           ash dependencies install
+      # trivy-repo is a plugin scanner, so ASH knows its name only once its module is
+      # loaded (`ash dependencies install --tool trivy-repo` without it exits 2,
+      # "Unknown tool(s)"): the install loads it with an override, and the config
+      # written here loads it for the parity runs. Its database and checks bundle are
+      # then fetched into
+      # trivy's own default cache, so that the offline pair has them: offline, ASH
+      # updates nothing, and under sandbox-exec the cache is read-only, which an
+      # offline trivy-repo scan must survive.
+      - name: Install trivy-repo, enable it, and seed trivy's cache
+        env:
+          TMPDIR: ${{ runner.temp }}
+          PARITY_CONFIG: ${{ runner.temp }}/parity-ash.yaml
+          EMPTY_TARGET: ${{ runner.temp }}/trivy-empty-target
+        run: |
+          printf '%s\n' \
+            'ash_plugin_modules:' \
+            '  - automated_security_helper.plugin_modules.ash_trivy_plugins' \
+            'scanners:' \
+            '  trivy-repo:' \
+            '    enabled: true' > "$PARITY_CONFIG"
+          ash dependencies install --tool trivy-repo \
+            --config-overrides "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_trivy_plugins]"
+          trivy="$(python -c 'from automated_security_helper.utils.subprocess_utils import find_executable; print(find_executable("trivy") or "")')"
+          test -n "$trivy" || { echo "::error::trivy was not installed"; exit 1; }
+          "$trivy" --version
+          "$trivy" image --download-db-only --no-progress
+          mkdir -p "$EMPTY_TARGET"
+          "$trivy" config "$EMPTY_TARGET"
+      # The unit tests that run the real syft and trivy offline (a fake `go` on PATH
+      # must record no call from syft; trivy must fetch no Terraform module source).
+      # Every other job skips them, because only this one installs the tools. The
+      # tools' directories go first on PATH, and ASH_REQUIRE_REAL_SCANNER_TESTS turns
+      # a skip into a failure, so a change to the install above cannot pass by
+      # skipping them (the ASH_REQUIRE_SYMBOLS_EXTRA pattern).
+      - name: Run the real-scanner offline tests
+        env:
+          TMPDIR: ${{ runner.temp }}
+          ASH_REQUIRE_REAL_SCANNER_TESTS: "1"
+        run: |
+          tools="$(python -c 'import os; from automated_security_helper.utils.subprocess_utils import find_executable; print(os.pathsep.join(os.path.dirname(find_executable(n) or "") for n in ("syft", "trivy")))')"
+          export PATH="${tools}${PATH:+:${PATH}}"
+          uv sync --frozen --extra cdk
+          uv run --frozen pytest \
+            tests/unit/plugin_modules/test_offline_go_toolchain.py \
+            tests/unit/plugin_modules/test_offline_trivy_terraform_modules.py \
+            --no-cov -p no:randomly -n 0
       # Every scanner runs twice over one fixture, with --sandbox off and under the
       # backend, offline and online, and status plus findings must match per scanner.
       # --require names the scanners that must actually have run, so a scanner that
-      # is MISSING in both runs cannot pass parity by being absent.
+      # is MISSING in both runs cannot pass parity by being absent; --require-offline
+      # holds trivy-repo to that in the offline pair too. The config loads the Trivy
+      # community module, so trivy-repo, which shares the builtin trivy's code, is
+      # compared too.
       - name: Compare every scanner with and without the sandbox
         # The report path through the environment, not interpolated into the script,
         # which is this repository's convention for every context value a shell reads.
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_REPORT: ${{ runner.temp }}/sandbox-parity.json
+          PARITY_CONFIG: ${{ runner.temp }}/parity-ash.yaml
           SANDBOX: ${{ matrix.sandbox }}
         run: |
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox "$SANDBOX" --online --ash ash \
-            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft \
+            --config "$PARITY_CONFIG" \
+            --require bandit,cdk-nag,cfn-nag,checkov,detect-secrets,grype,npm-audit,opengrep,semgrep,syft,actionlint,cfn-lint,cfn-guard,gitleaks,zizmor,trivy,trivy-repo \
+            --require-offline trivy-repo \
             --report "$PARITY_REPORT"
       # What a sandboxed scanner was refused, from the unified log, and the end of
       # each sandboxed scanner's stderr. System daemons log their own sandbox
@@ -992,7 +1100,7 @@ jobs:
           WORK: ${{ runner.temp }}
         run: |
           sudo log show --last 60m --predicate 'sender == "Sandbox"' --style compact \
-            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
+            | grep -E 'Sandbox: (Python|python3?[.0-9]*|uv|node|npm|grype|syft|trivy|semgrep-core|pysemgrep|opengrep|opengrep\.bin|opengrep-core|ruby|bash|sh|git|security|env)\([0-9]+\) deny' \
             | sed -E 's/^.*Sandbox: //; s/\([0-9]+\) / /' | sort | uniq -c | sort -rn | head -n 150 || true
           for log in "$WORK"/ash-sandbox-parity-*/out-*-sandbox-exec/ash.log; do
             echo "::group::$log (errors and warnings)"
@@ -1262,14 +1370,40 @@ jobs:
           install-ash: "false"
       - name: Install dependencies
         run: uv sync --extra cdk --extra symbols
+      # The integration suite runs bandit, actionlint, cfn-lint, cfn-guard and gitleaks
+      # for real, and nothing else in this job installs them: the first test that
+      # needed bandit ran `uv tool install` from inside the suite. This is the
+      # installer users run, it installs before any test starts, and it also exercises
+      # the pinned downloads and the cfn-guard rules-bundle install.
+      # ASH_REQUIRE_ACTIONLINT, ASH_REQUIRE_CFN_TOOLS and ASH_REQUIRE_GITLEAKS below make
+      # a missing tool fail those tests instead of skipping them. Without gitleaks here,
+      # both tests in test_repo_tool_configs_are_not_read.py skipped.
+      # tests/unit/test_integration_job_installs_required_tools.py holds this list.
+      - name: Install the scanners the integration suite runs for real
+        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
-      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
+      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
+      # ASH_REQUIRE_ACTIONLINT for the actionlint tests, and ASH_REQUIRE_GITLEAKS for the
+      # tests that run gitleaks from PATH. ASH_REQUIRE_PREINSTALLED_TOOLS names every
+      # tool the step above installed: the suite fails at start if it cannot find one the
+      # way its scanner looks (the uv tools by `uv tool list` or PATH, the pinned
+      # binaries on PATH), and a test fails if it `uv tool install`s one, so a
+      # pre-install that stops reaching the scanner shows up instead of being redone.
+      #
+      # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
+      # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
+      # later step of the job runs an executable by name from either directory.
       - name: Run the integration suite
         env:
+          ASH_REQUIRE_ACTIONLINT: "1"
           ASH_REQUIRE_CDK_EXTRA: "1"
+          ASH_REQUIRE_CFN_TOOLS: "1"
+          ASH_REQUIRE_GITLEAKS: "1"
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+          ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks
         run: |
+          export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
             tests/integration \
             tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
@@ -1285,6 +1419,34 @@ jobs:
           path: test-results/integration.junit.xml
           retention-days: 7
           if-no-files-found: warn
+
+  # The Jupyter converter's integration tests on the two platforms integration-test does
+  # not run. Only these, because they provision their tool the way ASH does -- the
+  # converter's own validate_plugin_dependencies runs `uv tool install nbconvert` -- and
+  # that works the same on macOS and Windows; the rest of tests/integration has not been
+  # made portable. Windows is the one that matters most here: it looks for a program
+  # started by name in the working directory before PATH.
+  converter-integration:
+    name: "converter-integration (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync
+      - name: Run the converter integration tests
+        run: uv run pytest tests/integration/converters --run-integration --no-cov -p no:randomly -n 0
 
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
@@ -1783,10 +1945,12 @@ jobs:
       - snapshot-trailers
       - unit-test
       - scan-validation
+      - non-root-image-permissions
       - external-target-scan
       - multi-project-attribution
       - deploy-aws-helpers
       - integration-test
+      - converter-integration
       - install-validation
       - sandbox
       - sandbox-scanner-parity

@@ -78,6 +78,12 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 | [npm-audit](https://docs.npmjs.com/cli/v8/commands/npm-audit) | SCA       | JavaScript/Node.js                                                                           | Install Node.js/npm                                                     |
 | [Grype](https://github.com/anchore/grype)                     | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Grype Installation](https://github.com/anchore/grype#installation) |
 | [Syft](https://github.com/anchore/syft)                       | SBOM      | Python, JavaScript/Node.js, Java, Go, Ruby, and more                                         | See [Syft Installation](https://github.com/anchore/syft#installation)   |
+| [gitleaks](https://github.com/gitleaks/gitleaks)              | Secrets   | All text files                                                                               | `ash dependencies install` (pinned release binary)                      |
+| [cfn-lint](https://github.com/aws-cloudformation/cfn-lint)    | IaC       | CloudFormation                                                                               | Managed via UV tool isolation (auto-installed: `cfn-lint[sarif]>=1.43.3,<2.0.0`) |
+| [cfn-guard](https://github.com/aws-cloudformation/cloudformation-guard) | IaC | CloudFormation (AWS Guard Rules Registry rules)                                        | `ash dependencies install` (pinned binary and rules)                    |
+| [Trivy](https://github.com/aquasecurity/trivy) (`trivy fs`)   | SCA       | Python, JavaScript/Node.js, Java, Go, Ruby, Rust, PHP, .NET, and more                        | `ash dependencies install` (pinned release binary)                      |
+| [actionlint](https://github.com/rhysd/actionlint)             | IaC       | GitHub Actions workflows                                                                     | `ash dependencies install` (pinned release binary)                      |
+| [zizmor](https://github.com/zizmorcore/zizmor)                | SAST      | GitHub Actions workflows and composite actions                                               | Managed via UV tool isolation (auto-installed: `zizmor>=1.29.0,<2.0.0`) |
 
 ## Prerequisites
 
@@ -288,8 +294,8 @@ The ASH MCP server provides these tools:
 |------|-------------|----------|
 | `get_scan_progress` | Get current progress of a running scan | Monitor scan status and partial results |
 | `get_scan_results` | Get final results of a completed scan | Retrieve complete scan results |
-| `list_active_scans` | List all active and recent scans | Manage multiple concurrent scans |
-| `cancel_scan` | Cancel a running scan | Stop unnecessary or problematic scans |
+| `list_active_scans` | List this session's active and recent scans | Manage multiple concurrent scans |
+| `cancel_scan` | Cancel a running scan this session started | Stop unnecessary or problematic scans |
 | `check_installation` | Verify ASH installation and dependencies | Troubleshoot setup issues |
 | `run_ash_scan` | Run a scan synchronously and return results | Simple blocking scans |
 | `get_scan_summary` | Get a lightweight summary of a completed scan | Cheap status/severity overview without full results |
@@ -300,11 +306,11 @@ The ASH MCP server provides these tools:
 | `suggest_suppression` | Build a paste-ready `AshSuppression` entry for a finding | Draft a correctly-shaped suppression without hand-writing YAML |
 | `resolve_ash_workspace` | Resolve a VS Code `.code-workspace` file into a scan plan without scanning | Inspect which projects, configs and thresholds a workspace would use before committing to N repository scans |
 | `run_ash_workspace_scan` | Scan every project in a `.code-workspace` file and return the per-project verdict | Scan a multi-repository workspace in one call, each project under its own config and threshold |
-| `list_scanners` | List every registered scanner with its metadata | See what will run, and under what name, before scanning |
+| `list_scanners` | List the built-in and community scanners ASH ships, with their metadata | See each scanner's name and whether its tool is installed; a community scanner runs only in a scan that names its plugin module |
 | `validate_config` | Validate a config file or an inline config string against the schema | Catch a malformed `.ash.yaml` without starting a scan |
 | `list_profiles` | List the config profiles the operator registered at startup | Discover which named configs a deployment offers |
 | `select_profile` | Bind a registered profile to this session, optionally patched or overridden | Run every later scan in the session under a named config without naming it each time |
-| `set_source_git` | Clone a repository into the session workspace and make it the scan target | Scan a repo when the client and server share no filesystem |
+| `set_source_git` | Clone a repository from a host the operator allowed into the session workspace and make it the scan target | Scan a repo when the client and server share no filesystem |
 | `set_source_zip_chunk` | Upload one base64 chunk (max 1 MiB) of a zipped source tree | Ship a working tree to a remote server without git access |
 | `set_source_zip_finalize` | Verify the uploaded zip's sha256, extract it, and make it the scan target | Complete a chunked upload before scanning |
 | `clear_source` | Delete the session's delivered source tree and workspace | Reclaim space or replace the delivered tree |
@@ -312,8 +318,10 @@ The ASH MCP server provides these tools:
 The last four matter only on a network transport, where the client has no path on
 the server to name. Deliver a tree with them, then call `run_ash_scan` with no
 `source_dir` and it scans what you delivered. Each takes its session from the
-transport's `Mcp-Session-Id` header rather than from an argument, so one client
-cannot name another's workspace. See
+transport (the session the server issued, never a client-chosen header) rather
+than from an argument, so one client cannot name another's workspace; a
+stateless server issues no session unless started with
+`--trust-upstream-session-id`. See
 [the streamable-HTTP guide](docs/content/docs/mcp/streamable-http.md) for the
 limits and the security boundary.
 

@@ -28,6 +28,7 @@ from automated_security_helper.utils.process_env import (
     restore_environ,
     snapshot_environ,
 )
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
 
 # The same three variables cdk_nag_wrapper sets around every evaluation.
 _JSII_OVERRIDES = {
@@ -40,6 +41,20 @@ _SPAWNS = 300
 
 # What the churn thread must leave behind once it stops.
 _ORIGINAL_ENV = {key: os.environ.get(key) for key in _JSII_OVERRIDES}
+
+
+@pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    These tests replace the process boundary and pass it programs that are not
+    installed. On Windows ASH refuses such a name before spawning it
+    (subprocess_utils._refuse_unresolved_on_windows); these tests are about what
+    happens after the spawn, so that decision is set aside here.
+    """
+    from automated_security_helper.utils import subprocess_utils as _subprocess_utils
+
+    monkeypatch.setattr(_subprocess_utils, "_refuse_unresolved_on_windows", False)
 
 
 def _vfork_race_possible() -> bool:
@@ -65,12 +80,17 @@ def _trivial_command() -> list:
     "spawn",
     [
         pytest.param(
-            lambda cmd: subprocess_utils.run_command(cmd, log_level=5),
+            lambda cmd: subprocess_utils.run_command(
+                cmd, log_level=5, timeout=CHILD_TIMEOUT_SECONDS
+            ),
             id="run_command",
         ),
         pytest.param(
             lambda cmd: subprocess_utils.run_command_with_output_handling(
-                cmd, stdout_preference="return", stderr_preference="return"
+                cmd,
+                stdout_preference="return",
+                stderr_preference="return",
+                timeout=CHILD_TIMEOUT_SECONDS,
             ),
             id="run_command_with_output_handling",
         ),

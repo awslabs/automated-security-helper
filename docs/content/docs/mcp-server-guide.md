@@ -100,7 +100,9 @@ result = await mcp_scan_directory(
 
 ### get_scan_progress
 
-Gets the current progress of a running scan using file-based tracking.
+Gets the current progress of a running scan using file-based tracking. Only a
+scan the calling session started is visible; another session's scan id gets the
+same response as an id that was never issued.
 
 **Parameters:**
 - `scan_id` (required): The scan ID returned from scan_directory
@@ -208,7 +210,9 @@ results = await mcp_get_scan_results(scan_id="550e8400-e29b-41d4-a716-4466554400
 
 ### list_active_scans
 
-Lists all active and recent scans with their current status.
+Lists the calling session's active and recent scans with their current status.
+Another session's scans are not listed, and `stats` counts only this session's.
+On stdio there is one client, so it sees every scan it started.
 
 **Parameters:**
 None
@@ -264,7 +268,9 @@ scans = await mcp_list_active_scans()
 
 ### cancel_scan
 
-Cancels a running scan and cleans up its resources.
+Cancels a running scan and cleans up its resources. Only a scan the calling
+session started can be cancelled; another session's scan id gets the same
+response as an id that was never issued.
 
 **Parameters:**
 - `scan_id` (required): The scan ID to cancel
@@ -325,6 +331,9 @@ scanning; `run_ash_workspace_scan` scans it and returns the per-project verdict,
 registering one scan per project so progress and results can still be fetched
 project by project.
 
+Each project's coverage lists the converters that did not process their inputs in
+`incomplete_converters`, next to the scanners in `incomplete_scanners`.
+
 They differ from the single-directory tools in ways worth reading before you use
 them: the allowed roots are checked per project and one project outside them
 refuses the whole workspace, the workspace file and the workspace policy file are
@@ -357,6 +366,25 @@ The following error categories are used:
 - `scan_not_found`: Requested scan ID was not found in the registry
 - `scan_incomplete`: Scan has not completed yet
 - `unexpected_error`: An unexpected error occurred
+
+### Config refusals
+
+A config the server will not use is refused with its own `error_type`, so a client
+can tell the reason apart from a scan that failed to start (`scan_start_failure`):
+
+| `error_type` | Returned by | Meaning |
+|---|---|---|
+| `config_input_not_permitted` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The config path, or a base its `extends` chain names, is outside the directories this session may read a config from |
+| `config_check_failed` | `run_ash_scan` | The check of the config sources in the scan target could not finish (an unreadable entry, a link loop), so the scan was not started. The config was not found outside the permitted roots; check the config files in the target for unreadable entries and link loops |
+| `config_field_denied` | `run_ash_scan`, `get_config` | A config file an MCP client delivered or named sets a field the session's runtime-override policy denies; `error` names each field |
+| `denied_by_runtime_policy` | `validate_config`, as an error `type` | The same, one error per field, with the field in `field` |
+| `config_policy_unreadable` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | The session's runtime-override policy cannot be established, for example because the profile it bound is no longer registered |
+| `config_env_not_resolved` | `run_ash_scan`, `get_config`, and as a `validate_config` error `type` | A config file that may not use `!ENV` uses an `!ENV` tag, or a plain value that starts with a `${VAR}` or `${VAR:default}` reference. Which files that covers for a remote and for a stdio caller is in [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source) |
+
+Delivering or clearing source while a scan of the same session runs is refused
+as well: `set_source_git`, `set_source_zip_finalize` and `clear_source` return
+`error_type: source_delivery_busy`. See
+[Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).
 
 ### Example Error Response
 
@@ -408,9 +436,12 @@ mcp-resource-management:
   max_directory_size_mb: 1024       # 1GB
 ```
 
+The server reads its operator configuration from the file `ASH_CONFIG` names, for every scan that names no config of its own. It loads that file at startup, the way it loads each `--profile`. If `ASH_CONFIG` names a path that is not a file, or a file the server can't read, parse or validate, `ash mcp` refuses to start (exit 3) with an error naming the variable and the path. `python -m automated_security_helper.cli.mcp_server` starts the same way as `ash mcp` and makes the same checks.
+
 ### Configuration Options
 
 - `max_concurrent_scans`: Maximum number of concurrent scans
+- `max_concurrent_scans_per_session`: Maximum number of scans one session of a network transport (streamable-http, sse) may run at once, default 2; `0` turns the per-session limit off. A `run_ash_workspace_scan` counts once, however many projects it has, and stdio's single session is not limited. A scan past the limit is refused with `error_type: session_scan_limit`, and other sessions are unaffected. Callers with no session the server issued (every caller of a stateless streamable-http server run without `--trust-upstream-session-id`, and a request that names no issued session) share one count under the same limit. Read only from the file `ASH_CONFIG` names, never from a config inside a scanned or delivered tree.
 - `max_concurrent_tasks`: Maximum number of concurrent tasks
 - `thread_pool_max_workers`: Maximum number of worker threads
 - `scan_timeout_seconds`: Timeout for scans in seconds
@@ -422,6 +453,21 @@ mcp-resource-management:
 - `task_count_warning_threshold`: Task count warning threshold
 - `max_message_size_bytes`: Maximum message size in bytes
 - `max_directory_size_mb`: Maximum directory size in MB
+
+### Tools and output inside the scanned directory
+
+The server never runs a scanner or other tool found inside the scanned or delivered
+directory, such as a project's `.venv/bin` or `node_modules/.bin`, whatever
+`ASH_ALLOW_IN_TREE_TOOLS` says; install the scanners it uses outside the repository.
+A scan whose `<target>/.ash` or `<target>/.ash/ash_output` is a symlink is refused
+before it starts, with `error_type` `output_dir_not_permitted`. A scan with a symlink
+at a working directory or a file ASH writes in that output tree, such as `reports` or
+`ash.log`, fails before it writes anything, with `ASH exited with code 1:` followed by
+the link and what to do. `run_ash_workspace_scan` refuses the whole call when its
+`output_dir`, a directory or file ASH writes there, `projects/` or a project's
+`projects/<key>` is a symlink. See
+[Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory)
+and [Output directory](concepts.md#output-directory).
 
 ### Restricting which directories can be scanned
 
@@ -440,8 +486,13 @@ resolved before the comparison, so a link inside an allowed root that points
 outside it is refused. The per-session MCP workspace root is always allowed as
 well, so source trees delivered over the protocol stay scannable.
 
-With it unset, ASH refuses a short fixed list of system directories as scan
-targets — on Linux and macOS `/boot`, `/dev`, `/etc`, `/proc`, `/root`, `/sys`
+With it unset, a caller on a network transport (sse or streamable-HTTP) may
+scan only its own session workspace: every network caller is remote, whatever
+headers it sends, and gets no fallback. See
+[Session identity](mcp/streamable-http.md#session-identity).
+
+With it unset on stdio, ASH refuses a short fixed list of system directories as
+scan targets — on Linux and macOS `/boot`, `/dev`, `/etc`, `/proc`, `/root`, `/sys`
 and the filesystem root; on Windows the Windows directory, `Program Files`,
 `ProgramData` and a bare drive root. To scan one of these deliberately, name it
 in `ASH_MCP_ALLOWED_ROOTS`, which replaces the list rather than adding to it.

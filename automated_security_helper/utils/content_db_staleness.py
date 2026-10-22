@@ -33,10 +33,20 @@ Decided per scan by ``content_db_staleness`` (``--allow-stale-content-db`` on th
 policy, and a required expiration date, and holds only that database to its own policy until
 00:00 UTC on that date. It exists for an upstream publisher that has stopped publishing for a
 few days, where ``warn`` for the whole scan would also stop failing on every other database.
-An expired entry is ignored with a warning, so the database returns to the scan-wide policy
-without anyone having to remember to remove it. Either form of ``--allow-stale-content-db``
+An expired entry is ignored with a warning, so the database returns to the policy it has
+without the entry (the scan-wide policy, or for trivy-db the offline image's default described
+below) without anyone having to remember to remove it. Either form of ``--allow-stale-content-db``
 clears the list for its scan (``content_db_staleness_flag_overrides``), so the flag still
 decides for every database.
+
+An image built with ``OFFLINE=YES`` holds trivy-db to ``warn`` by default rather than to
+``content_db_staleness: fail`` (``OFFLINE_IMAGE_POLICIES`` in ``utils/content_databases.py``,
+which also says why only trivy-db). The image's own environment turns it on
+(``OFFLINE_IMAGE_ENV``), never the config, which can only turn it off
+(``content_db_staleness_offline_image_default: false``). A ``content_db_staleness_overrides``
+entry for trivy-db outranks it, an expired one falls back to it, and either form of
+``--allow-stale-content-db`` turns it off for its scan. The record's ``policy_source`` says it
+chose the policy, so every report that shows the warning says why the scan still passed.
 
 Where the fact is recorded, and why there
 -----------------------------------------
@@ -59,19 +69,39 @@ Failure modes
 -------------
 * A build time that cannot be read (the tool printed nothing parseable, the metadata is
   missing) counts as stale, with the reason in the message. An unmeasurable database is not
-  evidence of a fresh one, and treating it as fresh would reopen the silent case.
+  evidence of a fresh one, and treating it as fresh would reopen the silent case. So does a
+  build time further in the future than ``CLOCK_SKEW_ALLOWANCE``: its age would be
+  negative, inside every bound, so it is not a measurement either.
+* A database the tool reports does not exist at all is ``absent``, which is more than
+  stale: the scanner had nothing to match against, so the executor records it ERROR
+  whatever the policy says. ``warn`` relaxes the age bound for a database that exists.
 * The offline rulesets carry no build time of their own. The Dockerfile records the download
   time in ``RULESET_FETCHED_AT_FILE``; without it the oldest rules file's mtime is used, which
   an ordinary ``cp`` resets to the copy time and so can only under-state the age. The record
   says which source it used.
 * Only scanners that return a SARIF report are measured. A scanner that failed outright is
   already reported as ERROR or MISSING, and its database contributed nothing.
+
+What the probes read
+--------------------
+grype's and trivy's probes read the cache the scan read, and nothing the scanned
+repository wrote. Measured with trivy 0.75.0 and grype 0.120.1: run from a directory
+holding a ``trivy.yaml`` with ``cache.dir`` (or a ``.grype.yaml`` or
+``.grype/config.yaml`` with ``db.cache-dir``) naming a planted database, ``trivy version``
+and ``grype db status`` reported the planted database's time (2099-01-01), so a
+repository scanned with ``cd repo && ash --offline`` could carry a stale database past
+this check. So each probe runs from ``ProbeContext.cwd``, outside the scanned tree, passes
+``content_db_shared.EMPTY_TOOL_CONFIG`` as its config file, the one the refresh passes
+(neither tool then looks for one), and names ``ProbeContext.cache_dir``, the directory the scanner pointed its scan at,
+with the flag or variable that beats any config file (``--cache-dir``,
+``GRYPE_DB_CACHE_DIR``).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -84,21 +114,27 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Tuple,
 )
 
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
     DEFAULT_STALENESS_POLICY,
+    OFFLINE_IMAGE_POLICIES,
     RULESET_FETCHED_AT_FILE,
     STALENESS_FAIL,
     STALENESS_POLICIES,
     STALENESS_WARN,
     ContentDatabase,
+    built_offline,
     go_duration,
+    is_future_dated,
     is_stale,
     parse_timestamp,
 )
+from automated_security_helper.utils.content_db_shared import EMPTY_TOOL_CONFIG
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_excerpt import head_and_tail
 from automated_security_helper.utils.subprocess_utils import spawn_run
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -106,6 +142,12 @@ if TYPE_CHECKING:
     from automated_security_helper.schemas.sarif_schema_model import Notification
 
 STALE_NOTIFICATION_ID = "ASH-CONTENT-DB-STALE"
+
+
+class ContentDatabaseAbsent(ValueError):
+    """The tool reports that the database does not exist, not only that it is unread."""
+
+
 INVOCATION_PROPERTY = "ash_content_databases"
 OPT_OUT_HINT = (
     "To scan against it anyway, pass --allow-stale-content-db or set "
@@ -131,10 +173,14 @@ class ContentDbAgeRecord:
     error: Optional[str] = None
     timestamp_label: str = "built"
     #: Set when a ``content_db_staleness_overrides`` entry chose ``policy`` rather than
-    #: ``content_db_staleness``: says which entry, and until when. Omitted from
+    #: ``content_db_staleness``: says which entry, and until when. Or, set to
+    #: ``offline_image_policy_source(name)``, when the offline image's default did. Omitted from
     #: ``to_dict`` when unset, so a scan with no overrides records exactly what it did
     #: before the field existed.
     policy_source: Optional[str] = None
+    #: The tool reports that the database does not exist (see "Failure modes" in the
+    #: module docstring). Omitted from ``to_dict`` when False, like ``policy_source``.
+    absent: bool = False
 
     @property
     def age(self) -> Optional[timedelta]:
@@ -157,6 +203,13 @@ class ContentDbAgeRecord:
         return self.stale and self.policy == STALENESS_FAIL
 
     def message(self) -> str:
+        if self.absent:
+            return (
+                f"Content database {self.name} ({self.scanner}) does not exist "
+                f"({self.error or 'the tool reports no database'}). The scanner had "
+                "nothing to match against, so it is recorded ERROR whatever "
+                f"content_db_staleness says. To create it, {self.refresh}."
+            )
         bound = go_duration(self.max_age)
         whose = (
             f"{self.scanner}'s own bound"
@@ -168,6 +221,20 @@ class ContentDbAgeRecord:
                 f"Content database {self.name} ({self.scanner}): the time it was "
                 f"{self.timestamp_label} could not be read ({self.error or 'no timestamp'}), "
                 f"so it cannot be shown to be inside its {bound} bound ({whose})."
+            )
+        elif is_future_dated(self.built, self.measured_at):
+            ahead = self.built - self.measured_at
+            ahead_text = (
+                format_age(ahead)
+                if ahead >= timedelta(hours=1)
+                else f"{int(ahead.total_seconds() // 60)}m"
+            )
+            head = (
+                f"Content database {self.name} ({self.scanner}): the time it says it was "
+                f"{self.timestamp_label}, {_iso(self.built)}, is {ahead_text} ahead of this "
+                "host's clock "
+                f"(read from {self.measured_by}), so its age cannot be measured and it "
+                f"cannot be shown to be inside its {bound} bound ({whose})."
             )
         else:
             head = (
@@ -192,6 +259,11 @@ class ContentDbAgeRecord:
                 "it may be missing advisories or rules published since."
             )
             tail = f"To refresh it, {self.refresh}."
+            if self.policy_source == offline_image_policy_source(self.name):
+                tail = (
+                    "To refresh it, rebuild the image (`ash build-image --offline`), "
+                    f"or {self.refresh}."
+                )
         return f"{head} {consequence} {tail}"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -215,6 +287,7 @@ class ContentDbAgeRecord:
             "error": self.error,
             "timestamp_label": self.timestamp_label,
             **({"policy_source": self.policy_source} if self.policy_source else {}),
+            **({"absent": True} if self.absent else {}),
         }
 
     @classmethod
@@ -234,6 +307,7 @@ class ContentDbAgeRecord:
             error=data.get("error"),
             timestamp_label=str(data.get("timestamp_label") or "built"),
             policy_source=data.get("policy_source") or None,
+            absent=data.get("absent") is True,
         )
 
 
@@ -294,13 +368,54 @@ def resolve_overrides(config: Any) -> List[Any]:
     return list(getattr(config, "content_db_staleness_overrides", None) or [])
 
 
+def resolve_offline_image_default(
+    config: Any, environ: Optional[Mapping[str, str]] = None
+) -> bool:
+    """Whether ``OFFLINE_IMAGE_POLICIES`` applies to this scan.
+
+    Only where ``environ`` (the process's own environment by default) has
+    ``OFFLINE_IMAGE_ENV`` set to YES, which an image built with ``OFFLINE=YES`` does,
+    and only while the config's ``content_db_staleness_offline_image_default`` is left
+    true. So a config can turn it off, never on: without the variable it is off
+    whatever the config says.
+    """
+    # A locked copy, not the live mapping (utils/process_env.py).
+    if not built_offline(snapshot_environ() if environ is None else environ):
+        return False
+    return (
+        getattr(config, "content_db_staleness_offline_image_default", True) is not False
+    )
+
+
+def offline_image_policy_source(name: str) -> str:
+    """The ``policy_source`` of a record whose policy the offline image's default chose."""
+    return f"default for {name} in an image built with OFFLINE=YES"
+
+
+def _default_policy_for(
+    entry: ContentDatabase, policy: str, offline_image: bool
+) -> tuple[str, Optional[str]]:
+    """The policy a database is held to when no override entry names it, and why."""
+    image_policy = OFFLINE_IMAGE_POLICIES.get(entry.name) if offline_image else None
+    if policy == STALENESS_FAIL and image_policy in STALENESS_POLICIES:
+        return str(image_policy), offline_image_policy_source(entry.name)
+    return policy, None
+
+
 def _policy_for(
     entry: ContentDatabase,
     policy: str,
     overrides: Sequence[Any],
     now: datetime,
+    offline_image: bool = False,
 ) -> tuple[str, Optional[str]]:
-    """The policy one database is held to, and which override chose it, if any."""
+    """The policy one database is held to, and which override or default chose it, if any."""
+    default, default_source = _default_policy_for(entry, policy, offline_image)
+    held_to = (
+        f"{default}, the {default_source}"
+        if default_source
+        else f"content_db_staleness ({policy})"
+    )
     for override in overrides:
         if getattr(override, "database", None) != entry.name:
             continue
@@ -308,23 +423,28 @@ def _policy_for(
         if override.is_expired(now):
             ASH_LOGGER.warning(
                 f"The content_db_staleness_overrides entry for {entry.name} expired at "
-                f"{expires} and is ignored; {entry.name} is held to "
-                f"content_db_staleness ({policy}). Remove the entry from the ASH config."
+                f"{expires} and is ignored; {entry.name} is held to {held_to}. "
+                "Remove the entry from the ASH config."
             )
-            return policy, None
+            break
         chosen = str(getattr(override.policy, "value", override.policy)).lower()
         if chosen not in STALENESS_POLICIES:
-            return policy, None
+            break
         ASH_LOGGER.info(
             f"Content database {entry.name} is held to {chosen} rather than "
-            f"content_db_staleness ({policy}) by a content_db_staleness_overrides entry "
-            f"until {expires}: {override.reason}"
+            f"{held_to} by a content_db_staleness_overrides entry until {expires}: "
+            f"{override.reason}"
         )
         return chosen, (
             f"content_db_staleness_overrides entry for {entry.name}, which expires at "
             f"{expires}"
         )
-    return policy, None
+    if default_source:
+        ASH_LOGGER.info(
+            f"Content database {entry.name} is held to {default} rather than "
+            f"content_db_staleness ({policy}): it is the {default_source}."
+        )
+    return default, default_source
 
 
 # --------------------------------------------------------------------------- measurement
@@ -336,10 +456,28 @@ class ProbeContext:
 
     env: Dict[str, str]
     executable: Optional[str] = None
+    #: The database's directory as the scan used it: grype's and trivy's cache
+    #: (``content_db_refresh.default_cache_dir``), or the offline rules directory.
+    #: For grype and trivy, None leaves the choice to the tool, with ``env``.
     cache_dir: Optional[str] = None
+    #: The config file the scan passed the tool, so a probe reads the database
+    #: through the same settings; None means ``EMPTY_TOOL_CONFIG`` (trivy only).
+    config_file: Optional[str] = None
+    #: Where a probe runs: outside the scanned tree
+    #: (``path_trust.cwd_outside_scanned_tree``). None runs it from the filesystem
+    #: root of the temporary directory, which no repository writes.
+    cwd: Optional[str] = None
 
 
-def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
+def _probe_cwd(ctx: ProbeContext) -> str:
+    if ctx.cwd:
+        return ctx.cwd
+    import tempfile
+
+    return Path(os.path.abspath(tempfile.gettempdir())).anchor
+
+
+def _run_json(command: List[str], env: Mapping[str, str], cwd: str) -> Any:
     """Run a tool's status command and parse its stdout as JSON, whatever it exits with.
 
     ``grype db status`` exits 1 when it considers the database invalid -- including when it
@@ -350,6 +488,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
         capture_output=True,
         text=True,
         env=dict(env),
+        cwd=cwd,
         timeout=_PROBE_TIMEOUT_SECONDS,
         check=False,
     )
@@ -357,7 +496,7 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
     if not text:
         raise ValueError(
             f"`{' '.join(command)}` printed nothing (exit {proc.returncode}): "
-            f"{(proc.stderr or '').strip()[:300]}"
+            f"{head_and_tail((proc.stderr or '').strip(), 300)}"
         )
     return json.loads(text)
 
@@ -365,21 +504,67 @@ def _run_json(command: List[str], env: Mapping[str, str]) -> Any:
 def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.executable:
         raise ValueError("grype executable not found")
-    status = _run_json([ctx.executable, "db", "status", "-o", "json"], ctx.env)
+    env = dict(ctx.env)
+    if ctx.cache_dir:
+        env["GRYPE_DB_CACHE_DIR"] = ctx.cache_dir
+    status = _run_json(
+        [
+            ctx.executable,
+            "db",
+            "status",
+            "-o",
+            "json",
+            "-c",
+            EMPTY_TOOL_CONFIG.as_posix(),
+        ],
+        env,
+        _probe_cwd(ctx),
+    )
     built = status.get("built") if isinstance(status, dict) else None
     if not built:
+        error = str(status.get("error") or "") if isinstance(status, dict) else ""
+        path = status.get("path") if isinstance(status, dict) else None
+        if "does not exist" in error or (
+            isinstance(path, str) and path and not Path(path).exists()
+        ):
+            raise ContentDatabaseAbsent(
+                f"`grype db status` reports no database at {path}: {error}"[:300]
+            )
         raise ValueError(f"`grype db status` reported no build time: {status!r}"[:300])
     return parse_timestamp(str(built)), "`built` in `grype db status -o json`"
 
 
 def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
+    """``VulnerabilityDB.UpdatedAt`` from ``trivy version``, read in isolation.
+
+    trivy loads ``trivy.yaml`` from its working directory unless ``--config`` names
+    a file, and that file's ``cache.dir`` decides which database ``version``
+    reports, so a probe run from ASH's own working directory could read another
+    cache than the scan did. It runs from ``ctx.cwd`` instead, a directory outside
+    the scanned tree (``path_trust.cwd_outside_scanned_tree``), or without one from
+    the filesystem root of the temporary directory (``_probe_cwd``), with
+    ``--config``: the file the scan passed trivy, or ``EMPTY_TOOL_CONFIG``. It reads
+    the cache the scan was given (``--cache-dir``) when ``ctx.cache_dir`` names it.
+    """
     if not ctx.executable:
         raise ValueError("trivy executable not found")
-    version = _run_json([ctx.executable, "version", "--format", "json"], ctx.env)
+    version = _run_json(
+        [
+            ctx.executable,
+            "version",
+            "--format",
+            "json",
+            "--config",
+            ctx.config_file or EMPTY_TOOL_CONFIG.as_posix(),
+            *(["--cache-dir", ctx.cache_dir] if ctx.cache_dir else []),
+        ],
+        ctx.env,
+        _probe_cwd(ctx),
+    )
     db = version.get("VulnerabilityDB") if isinstance(version, dict) else None
     updated = db.get("UpdatedAt") if isinstance(db, dict) else None
     if not updated:
-        raise ValueError(
+        raise ContentDatabaseAbsent(
             "`trivy version --format json` reported no VulnerabilityDB.UpdatedAt; "
             "no trivy database was found in the cache directory trivy reads"
         )
@@ -391,7 +576,7 @@ def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
 
 def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
     if not ctx.cache_dir:
-        raise ValueError("no offline rules cache directory is configured")
+        raise ContentDatabaseAbsent("no offline rules cache directory is configured")
     cache = Path(ctx.cache_dir)
     manifest = cache / RULESET_FETCHED_AT_FILE
     if manifest.is_file():
@@ -403,7 +588,7 @@ def _built_from_ruleset_dir(ctx: ProbeContext) -> tuple[datetime, str]:
         p for p in cache.rglob("*") if p.is_file() and p.suffix in {".yml", ".yaml"}
     ]
     if not rules:
-        raise ValueError(f"no rules files found in {cache.as_posix()}")
+        raise ContentDatabaseAbsent(f"no rules files found in {cache.as_posix()}")
     oldest = min(p.stat().st_mtime for p in rules)
     return (
         datetime.fromtimestamp(oldest, timezone.utc),
@@ -429,20 +614,29 @@ def measure(
     ctx: ProbeContext,
     policy: str,
     now: Optional[datetime] = None,
+    scanner: Optional[str] = None,
 ) -> ContentDbAgeRecord:
-    """Read one database's build time. Never raises: a failure is a record of unknown age."""
+    """Read one database's build time. Never raises: a failure is a record of unknown age.
+
+    ``scanner`` is the scanner that read the database. It is recorded in place of the
+    entry's own ``scanner`` when it is one of the entry's ``readers``, so a database two
+    scanners read is reported under the one that used it.
+    """
+    reader = scanner if scanner in entry.readers else entry.scanner
     now = now or datetime.now(timezone.utc)
     built: Optional[datetime] = None
     measured_by = entry.age_source
     error: Optional[str] = None
+    absent = False
     try:
         measurer = MEASURERS[entry.name]
         built, measured_by = measurer(ctx)
     except Exception as exc:  # noqa: BLE001 - recorded, and counted as stale
         error = f"{type(exc).__name__}: {exc}"
+        absent = isinstance(exc, ContentDatabaseAbsent)
     return ContentDbAgeRecord(
         name=entry.name,
-        scanner=entry.scanner,
+        scanner=reader,
         built=built,
         measured_by=measured_by,
         max_age=entry.max_age,
@@ -453,6 +647,7 @@ def measure(
         refresh=entry.refresh,
         error=error,
         timestamp_label=entry.timestamp_label,
+        absent=absent,
     )
 
 
@@ -531,12 +726,15 @@ def assess_scanner(
     policy: str,
     now: Optional[datetime] = None,
     overrides: Sequence[Any] = (),
+    offline_image: bool = False,
 ) -> List[ContentDbAgeRecord]:
     """Measure every database this scanner used, log each stale one, and attach all of them.
 
     ``policy`` is the scan-wide ``content_db_staleness``; ``overrides`` are the config's
     ``content_db_staleness_overrides`` entries, and an unexpired one naming a database
-    replaces ``policy`` for that database only.
+    replaces ``policy`` for that database only. ``offline_image`` is
+    ``resolve_offline_image_default``: whether ``OFFLINE_IMAGE_POLICIES`` replaces a
+    ``fail`` policy for the databases it names, below any override entry.
 
     Never raises. A failure to ask the scanner which databases it used is itself recorded as
     an unmeasurable record for each database declared for it, so a defect here cannot quietly
@@ -549,7 +747,7 @@ def assess_scanner(
         entries = list(scanner_plugin.content_databases_in_use())
         ctx = scanner_plugin.content_database_probe_context()
     except Exception as exc:  # noqa: BLE001
-        entries = [e for e in CONTENT_DATABASES if e.scanner == scanner_name]
+        entries = [e for e in CONTENT_DATABASES if scanner_name in e.readers]
         ctx = None
         failure = f"{type(exc).__name__}: {exc}"
     if not entries:
@@ -559,7 +757,9 @@ def assess_scanner(
     records: List[ContentDbAgeRecord] = []
     for entry in entries:
         try:
-            entry_policy, policy_source = _policy_for(entry, policy, overrides, now)
+            entry_policy, policy_source = _policy_for(
+                entry, policy, overrides, now, offline_image
+            )
         except Exception as exc:  # noqa: BLE001 - a broken override never relaxes
             ASH_LOGGER.error(
                 f"Could not apply content_db_staleness_overrides to {entry.name}: {exc}; "
@@ -567,11 +767,13 @@ def assess_scanner(
             )
             entry_policy, policy_source = policy, None
         if ctx is None:
-            record = measure(entry, ProbeContext(env={}), entry_policy, now)
+            record = measure(
+                entry, ProbeContext(env={}), entry_policy, now, scanner_name
+            )
             record.error = f"the scanner could not describe its database: {failure}"
             record.built = None
         else:
-            record = measure(entry, ctx, entry_policy, now)
+            record = measure(entry, ctx, entry_policy, now, scanner_name)
         record.policy_source = policy_source
         records.append(record)
         if record.stale:
@@ -611,14 +813,16 @@ def _extra(props: Any) -> Dict[str, Any]:
 
 
 def content_db_records(results: Any) -> List[ContentDbAgeRecord]:
-    """Every content database measurement in an aggregated result, deduplicated.
+    """Every content database measurement in an aggregated result, one per database and scanner.
 
     One scanner measured per target type writes the same database twice; the later
-    measurement of a database wins, and a stale record is kept over a fresh one for the same
-    database, so a duplicate can never hide a stale reading.
+    measurement wins, and a stale record is kept over a fresh one for the same database and
+    scanner, so a duplicate can never hide a stale reading. Two scanners that read one
+    database (trivy and trivy-repo both read trivy-db) keep a record each, so a report names
+    every scanner that read a stale database. Sorted by database, then scanner.
     """
     sarif = getattr(results, "sarif", None)
-    by_name: Dict[str, ContentDbAgeRecord] = {}
+    by_key: Dict[Tuple[str, str], ContentDbAgeRecord] = {}
     for run in getattr(sarif, "runs", None) or []:
         for invocation in getattr(run, "invocations", None) or []:
             for raw in (
@@ -632,10 +836,11 @@ def content_db_records(results: Any) -> List[ContentDbAgeRecord]:
                         f"Unreadable content database record {raw!r}: {exc}"
                     )
                     continue
-                current = by_name.get(record.name)
+                key = (record.name, record.scanner)
+                current = by_key.get(key)
                 if current is None or record.stale or not current.stale:
-                    by_name[record.name] = record
-    return [by_name[name] for name in sorted(by_name)]
+                    by_key[key] = record
+    return [by_key[key] for key in sorted(by_key)]
 
 
 def stale_content_databases(
@@ -645,10 +850,11 @@ def stale_content_databases(
 
     Read from the notifications rather than the property list, because the notification's
     level is what the policy decided when the scan ran; a record carried without one -- which
-    nothing in ASH writes -- cannot fail a scan.
+    nothing in ASH writes -- cannot fail a scan. One per database and scanner, as in
+    ``content_db_records``, an enforced one kept over one that only warns.
     """
     sarif = getattr(results, "sarif", None)
-    found: Dict[str, ContentDbAgeRecord] = {}
+    found: Dict[Tuple[str, str], ContentDbAgeRecord] = {}
     for run in getattr(sarif, "runs", None) or []:
         for invocation in getattr(run, "invocations", None) or []:
             for notification in (
@@ -674,9 +880,10 @@ def stale_content_databases(
                 record.policy = STALENESS_FAIL if level == "error" else STALENESS_WARN
                 if enforced_only and not record.enforced:
                     continue
-                if record.name not in found or record.enforced:
-                    found[record.name] = record
-    return [found[name] for name in sorted(found)]
+                key = (record.name, record.scanner)
+                if key not in found or record.enforced:
+                    found[key] = record
+    return [found[key] for key in sorted(found)]
 
 
 def probe_env(extra: Optional[Mapping[str, str]]) -> Dict[str, str]:

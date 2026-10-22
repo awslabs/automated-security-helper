@@ -11,7 +11,7 @@
     "workspace_file": "<REPO>/tests/test_data/snapshot_fixture/workspace/snapshot-with-skipped.code-workspace",
     "workspace_root": "<REPO>/tests/test_data/snapshot_fixture/workspace",
     "status": "completed",
-    "exit_code": 2,
+    "exit_code": 1,
     "projects": [
       {
         "project": "api",
@@ -33,9 +33,12 @@
         "incomplete_scanners": [
           "npm-audit"
         ],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": true,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": null,
         "skip_detail": null,
         "error": null,
@@ -59,9 +62,12 @@
           "semgrep": "PASSED"
         },
         "incomplete_scanners": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": null,
         "skip_detail": null,
         "error": null,
@@ -82,9 +88,12 @@
         "sarif_run_index": null,
         "scanners": {},
         "incomplete_scanners": [],
+        "inputs_not_scanned": [],
         "no_scanner_ran": false,
+        "incomplete_converters": {},
         "scan_incomplete": false,
         "ceiling_unreachable_findings": {},
+        "ignore_file_exclusions": null,
         "skip_reason": "error",
         "skip_detail": "'docs' does not exist as a directory at '<REPO>/tests/test_data/snapshot_fixture/workspace/docs'",
         "error": null,
@@ -111,7 +120,7 @@
       "actionable_finding_count": 1,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     },
     "checkov": {
       "status": "FAILED",
@@ -119,7 +128,7 @@
       "actionable_finding_count": 1,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     },
     "npm-audit": {
       "status": "MISSING",
@@ -127,7 +136,7 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": false,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     },
     "semgrep": {
       "status": "PASSED",
@@ -135,7 +144,7 @@
       "actionable_finding_count": 0,
       "dependencies_satisfied": true,
       "excluded": false,
-      "exit_code": 0
+      "exit_code": 125
     }
   },
   "converter_results": {},

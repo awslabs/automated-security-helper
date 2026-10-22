@@ -5,7 +5,10 @@ import re
 import shlex
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_config import (
+    PluginConfigBase,
+    config_validated_by_declared_model,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -19,10 +22,12 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import (
     SPAWN_FAILURE_RETURNCODE,
+    exit_status,
     find_executable,
+    in_tree_refusal,
 )
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr, ValidatorFunctionWrapHandler, field_validator
 from typing import (
     Annotated,
     Any,
@@ -42,11 +47,68 @@ from abc import abstractmethod
 # '=' and a value (e.g., --exclude="path1,path2" or --skip-path=".venv/").
 _VALID_FLAG_KEY_PATTERN = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?$")
 from pathlib import Path
+from automated_security_helper.utils.output_excerpt import head_and_tail
 
 # How much of a tool's stderr goes into the failure message. The full text stays
 # in the stderr log file, whose path the message names, so this bounds the
 # exception without losing anything.
 _STDERR_EXCERPT_LIMIT = 2000
+#: The largest results file a rejected run's notifications are read from.
+_NOTIFICATIONS_READ_LIMIT = 5 * 1024 * 1024
+
+
+def _error_notifications(results_file: Path) -> str:
+    """The text of the error-level toolExecutionNotifications in a SARIF file.
+
+    For a rejected run, to say why it failed; nothing read here is graded. Best
+    effort: a file that is missing, not a regular file, larger than
+    _NOTIFICATIONS_READ_LIMIT or not SARIF gives "". Opened without following a
+    link at its name. Truncated to _STDERR_EXCERPT_LIMIT, as stderr is.
+    """
+    import os
+    import stat
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(results_file, flags)
+    except OSError:
+        return ""
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            status = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or status.st_size > _NOTIFICATIONS_READ_LIMIT
+            ):
+                return ""
+            data = json.loads(handle.read().decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return ""
+
+    def items(value):
+        return value if isinstance(value, list) else []
+
+    texts = []
+    runs = data.get("runs") if isinstance(data, dict) else None
+    for run in items(runs):
+        invocations = run.get("invocations") if isinstance(run, dict) else None
+        for invocation in items(invocations):
+            notes = (
+                invocation.get("toolExecutionNotifications")
+                if isinstance(invocation, dict)
+                else None
+            )
+            for note in items(notes):
+                if not isinstance(note, dict) or note.get("level") != "error":
+                    continue
+                message = note.get("message")
+                text = message.get("text") if isinstance(message, dict) else None
+                if isinstance(text, str) and text.strip():
+                    texts.append(text.strip())
+    joined = " | ".join(texts)
+    if len(joined) > _STDERR_EXCERPT_LIMIT:
+        joined = joined[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+    return joined
 
 
 class ScannerPluginConfigBase(PluginConfigBase):
@@ -66,6 +128,11 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
     config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
+
+    # The content database cache this scanner's scan was pointed at, set by the
+    # scanner when it resolves one (grype, trivy-repo), and handed to the staleness
+    # check by content_database_probe_context so the check reads what the scan read.
+    _content_db_cache_dir: Optional[Path] = PrivateAttr(default=None)
 
     dependency_unavailable_reason: Annotated[
         str | None,
@@ -143,6 +210,22 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             description="List of UV tool install commands to execute for this scanner"
         ),
     ] = []
+
+    @field_validator("config", mode="wrap")
+    @classmethod
+    def _config_is_validated_by_the_declared_model(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """A scanner that declares a config model is configured by that model.
+
+        A section it refuses, such as an opengrep ``sha256`` that is not a
+        digest, is a ValidationError, which ``ScanPhase`` records as that
+        scanner's ERROR, naming the option, before it goes on with the others.
+        See ``plugin_config.config_validated_by_declared_model``.
+        """
+        return config_validated_by_declared_model(
+            cls, ScannerPluginConfigBase, value, handler
+        )
 
     def model_post_init(self, context):
         if self.config is None:
@@ -229,6 +312,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """
         return None
 
+    def _setting_names(self, config: Any) -> str:
+        """Which settings ``config``, this scanner's section, holds, never their
+        values, for the debug lines: a value can be one the config file read from
+        the environment, or a credential (``config/environment_record.py``)."""
+        from automated_security_helper.config.environment_record import (
+            setting_names,
+        )
+
+        ash_config = getattr(self.context, "config", None)
+        return setting_names(
+            config,
+            getattr(ash_config, "_environment_references", ()) or (),
+            at=("scanners", str(getattr(self.config, "name", "") or "")),
+        )
+
     def validate_plugin_dependencies(self) -> bool:
         """Check whether the scanner's command is available on PATH.
 
@@ -258,13 +356,19 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if self.dependency_unavailable_reason:
             return False
         found = find_executable(self.command)
+        if found is None and self.command:
+            # A copy inside the scanned tree was refused: say so in the MISSING row,
+            # with the path and how to allow it, rather than "not installed".
+            refusal = in_tree_refusal(self.command)
+            if refusal is not None:
+                self.dependency_unavailable_reason = refusal
         return found is not None
 
     def content_databases_in_use(self) -> list:
         """The declared content databases this scanner's last scan read.
 
-        Defaults to every entry in ``utils/content_databases.py`` whose ``scanner`` is this
-        scanner's config name. A scanner that reads its database only in some modes -- the
+        Defaults to every entry in ``utils/content_databases.py`` that this scanner's config
+        name reads: the entry's ``scanner``, or one of its ``also_read_by``. A scanner that reads its database only in some modes -- the
         semgrep and opengrep offline rulesets -- overrides this to say so. The executor
         holds each one to its declared age bound after the scan; see
         ``utils/content_db_staleness.py``.
@@ -272,22 +376,38 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         from automated_security_helper.utils.content_databases import CONTENT_DATABASES
 
         name = str(getattr(self.config, "name", "") or "")
-        return [entry for entry in CONTENT_DATABASES if entry.scanner == name]
+        return [entry for entry in CONTENT_DATABASES if name in entry.readers]
 
     def content_database_probe_context(self):
-        """How to read this scanner's database: its binary, and the env its scan ran with.
+        """How to read this scanner's database, as its scan did.
 
-        The env is the scanner's own ``extra_env`` over the process environment, so the
-        probe sees the same cache directory and settings the scan did.
+        Its binary; the env its scan ran with (the scanner's own ``extra_env`` over
+        the process environment); the cache directory its scan was pointed at, when
+        it recorded one; and a working directory outside the scanned tree
+        (``path_trust.cwd_outside_scanned_tree``), so the probe reads no config file
+        the scanned repository wrote. See "What the probes read" in
+        ``utils/content_db_staleness.py``.
         """
+        from automated_security_helper.config.path_trust import (
+            cwd_outside_scanned_tree,
+        )
         from automated_security_helper.utils.content_db_staleness import (
             ProbeContext,
             probe_env,
         )
 
+        cache = self._content_db_cache_dir
+        cwd = cwd_outside_scanned_tree(
+            self.context.source_dir,
+            results_dir=self.results_dir or self.context.output_dir,
+            source_dir=self.context.source_dir,
+            config=getattr(self.context, "config", None),
+        )
         return ProbeContext(
             env=probe_env(getattr(self, "extra_env", None)),
             executable=find_executable(self.command) if self.command else None,
+            cache_dir=cache.as_posix() if cache is not None else None,
+            cwd=cwd.as_posix(),
         )
 
     def _process_config_options(self) -> None:
@@ -386,7 +506,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             level=logging.INFO,
         )
         self._plugin_log(
-            f"self.config: {self.config}",
+            f"self.config setting: {self._setting_names(self.config)}",
             target_type=target_type,
             level=logging.DEBUG,
         )
@@ -395,7 +515,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 config = config.model_dump(by_alias=True)
             self.config = self.config.__class__.model_validate(config)
         self._plugin_log(
-            f"config: {config}",
+            f"config setting: {self._setting_names(config)}",
             target_type=target_type,
             level=logging.DEBUG,
         )
@@ -462,6 +582,43 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if self.exit_code == SPAWN_FAILURE_RETURNCODE:
             return False
         return self.exit_code in success_codes
+
+    def _record_target_exit_code(self, response: Any) -> None:
+        """Make ``exit_code`` the code of the run that scanned this target.
+
+        ``_process_command_response`` keeps the largest code any run of this plugin
+        returned, and the sets are not ordered: with grype's ``{0, 2}`` a 2 from one
+        target would accept a 1 from the next. A response without a code (a test
+        double, the runner's own failure) leaves the value as it is.
+        """
+        code = response.get("returncode") if isinstance(response, dict) else None
+        if isinstance(code, int) and not isinstance(code, bool):
+            self.exit_code = exit_status(code)
+
+    def _refuse_rejected_exit_code(self, results_file: Optional["Path"] = None) -> None:
+        """Raise ScannerError when the tool's exit code is outside its success set.
+
+        For the template and for a scanner that overrides ``scan()`` and runs one tool
+        per target: call it after the run and before reading the results file. A
+        tool that failed can still leave a results file -- semgrep writes SARIF that
+        holds only error notifications when it cannot read its rules, and grype a
+        zero-byte report when it cannot load its database -- and "found nothing"
+        and "never scanned" read the same in it.
+
+        The message names the code. With ``results_file``, for an override whose own
+        handler does not describe the failure, it also carries the accepted set and
+        the tool's stderr (``_describe_scan_failure``); the template's handler adds
+        those itself.
+        """
+        if self._exit_code_accepted():
+            return
+        rejected = ScannerError(
+            f"its tool exited with code {self.exit_code}, which this scanner "
+            "does not accept as a completed run, so its results file is not graded"
+        )
+        if results_file is None:
+            raise rejected
+        raise ScannerError(self._describe_scan_failure(rejected, results_file))
 
     # Log level used for the empty-target preamble message. Defaults to INFO;
     # bandit overrides to VERBOSE since python-only repos commonly trip it.
@@ -554,15 +711,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     def _read_results_file(self, results_file: "Path") -> Optional[dict]:
         """Read and parse the scanner results file as JSON.
 
-        Returns ``None`` for a file that exists and is EMPTY, which
-        ``scan()`` replaces with the default empty SARIF report (see
-        ``_handle_empty_results``).
+        Returns ``None`` for a file that exists and is EMPTY (or holds JSON
+        ``null``), which ``scan()`` hands to ``_handle_empty_results``.
 
         A **missing** file must raise, and that is a constraint rather than an
         accident of this implementation. Returning ``None`` for it would route a
         scanner that produced no output at all into ``_handle_empty_results()``,
-        which yields an empty SARIF and lets the scan **succeed** -- reporting a
-        clean result for a tool that died. That is a false negative in a security
+        which a scanner may override to return a report and let the scan
+        **succeed** -- reporting a clean result for a tool that died. That is a false negative in a security
         scanner, so the missing case must stay an exception. ``scan()``'s handler
         enriches it with the exit code and the tool's stderr; see
         ``_describe_scan_failure``.
@@ -581,24 +737,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         return json.loads(content)
 
     def _handle_empty_results(self) -> SarifReport:
-        """Return a SARIF report representing an empty/missing scanner result.
+        """Decide what an empty results file means, after an accepted exit code.
 
-        Default returns an empty SARIF 2.1.0 report with no runs. Override
-        if a scanner needs richer empty-state handling.
+        The default raises ``ScannerError``: there is nothing to grade. bandit,
+        checkov and semgrep write SARIF with one run even when there is nothing for
+        them to scan (measured), and grype's and opengrep's SARIF writers always add
+        one, so an empty file is not a clean scan. A scanner whose tool really does
+        write an empty file for a clean scan overrides this to return a report.
         """
-        return SarifReport(  # type: ignore[call-arg]
-            version="2.1.0",
-            runs=[],
-        )
-
-    def _ensure_runs(self, sarif_report: SarifReport) -> None:
-        """Ensure ``sarif_report.runs`` is non-empty before invocation injection.
-
-        Default no-op. Override (e.g. Grype) to synthesize a fallback Run
-        when the scanner produces a SARIF report with zero runs but the
-        template still needs to attach an invocation.
-        """
-        return None
+        raise ScannerError("its results file is empty, so there is nothing to grade")
 
     def _post_process_sarif(
         self,
@@ -707,10 +854,17 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         """Template scan: preamble → _execute_scan → read result → inject invocation → postamble.
 
         Subclasses with bespoke logic (file-iteration, Python-API scanners) should
-        override this method directly and leave _execute_scan unimplemented.
+        override this method directly and leave _execute_scan unimplemented, and
+        start it with the same ``exit_code`` reset as this one.
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Per target. One plugin instance scans source and then converted, and
+        # _process_command_response keeps the largest code any run of the instance
+        # returned, so without this a target that returns before its tool runs (an
+        # empty tree, missing dependencies) reports the previous target's code.
+        self.exit_code = 0
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(
@@ -738,6 +892,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # Bound before the try so the failure handler can name the stderr log
         # even when _execute_scan itself is what raised.
         results_file = None
+        # Whether the tool was started, so a failure before it (a refusal while
+        # resolving the arguments) is not described with an exit code it never had.
+        tool_started = False
 
         try:
             final_args, results_file, subprocess_env = self._execute_scan(
@@ -752,6 +909,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             # was the only scanner that timed out cleanly, because it carried its
             # own copy of this option and enforced it in its own scan override.
             effective_timeout = self._effective_scan_timeout()
+            tool_started = True
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=results_file.parent,
@@ -788,10 +946,14 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                     f"produced no results file: {response.get('stderr') or response.get('error')}"
                 )
 
+            # Before the results file is read: a failed tool's file decides nothing.
+            self._record_target_exit_code(response)
+            self._refuse_rejected_exit_code()
+
             raw = self._read_results_file(results_file)
             if raw is None:
-                # Empty result file: defer to _handle_empty_results so
-                # subclasses can log or build a richer fallback report.
+                # Empty result file: defer to _handle_empty_results, which raises
+                # unless the scanner says an empty file is a clean scan.
                 error_msg = (
                     f"{self.__class__.__name__} results file is empty "
                     f"(exit code: {self.exit_code}). "
@@ -805,24 +967,35 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
             try:
                 sarif_report: SarifReport = SarifReport.model_validate(raw)
-                self._ensure_runs(sarif_report)
-                self._inject_invocation(sarif_report, final_args, target)
-                sarif_report = self._post_process_sarif(
-                    sarif_report, final_args, target
-                )
             except Exception as e:
-                ASH_LOGGER.warning(
-                    f"Failed to parse {self.__class__.__name__} results as SARIF: {e}"
+                # Not returned as it is: the executor would grade a dict without a
+                # verdict on its zero findings, which is how a clean scan reads.
+                raise ScannerError(
+                    f"its results file is not SARIF ASH can read, so its findings "
+                    f"could not be graded: {e}"
                 )
-                sarif_report = raw  # type: ignore[assignment]
-
-            return sarif_report
+            if not sarif_report.runs:
+                # Every field of a SARIF log is optional, so `{}` validates. No run
+                # is no scan; see _handle_empty_results. Checked on the report as
+                # the tool wrote it, before any scanner adjusts it.
+                raise ScannerError(
+                    "its results file holds no SARIF run, so there is nothing to grade"
+                )
+            # Failures from here on are ASH's or the scanner's own code, and the
+            # outer handler reports them as what they are.
+            self._inject_invocation(sarif_report, final_args, target)
+            return self._post_process_sarif(sarif_report, final_args, target)
 
         except Exception as e:
-            raise ScannerError(self._describe_scan_failure(e, results_file))
+            raise ScannerError(
+                self._describe_scan_failure(e, results_file, tool_started=tool_started)
+            )
 
     def _describe_scan_failure(
-        self, exc: Exception, results_file: Optional["Path"]
+        self,
+        exc: Exception,
+        results_file: Optional["Path"],
+        tool_started: bool = True,
     ) -> str:
         """Build the failure message, naming the cause rather than the symptom.
 
@@ -860,11 +1033,20 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         * Reading the log is best-effort. If it cannot be read the message says
           where it looked, so the reader can tell "stderr was empty" from
           "stderr was not where we checked".
-        * stderr is truncated to keep a scanner that wrote megabytes from
-          swamping the error; the full text stays in the log file, which is
-          named.
+        * stderr is shortened to keep a scanner that wrote megabytes from
+          swamping the error. The start and the end are kept
+          (``utils/output_excerpt.head_and_tail``): a tool usually says why it
+          failed last, after any progress output. The full text stays in the log
+          file, which is named.
+        * With ``tool_started`` False the failure came before the tool was
+          started, such as a target the scanner refuses while resolving its
+          arguments. There is no exit code or stderr to describe, so the message
+          is the failure and that the tool was not started.
         """
         detail = f"{self.__class__.__name__} scan failed: {exc}"
+        if not tool_started:
+            tool = getattr(getattr(self, "config", None), "name", None)
+            return f"{detail} ({tool or 'its tool'} was not started)"
 
         accepted = self._exit_code_accepted()
         verdict = (
@@ -891,13 +1073,32 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 stderr_text = ""
 
         if stderr_text:
-            if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
-                stderr_text = stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
+            stderr_text = head_and_tail(stderr_text, _STDERR_EXCERPT_LIMIT)
             detail += f". Stderr: {stderr_text}"
         elif log_path is not None:
             detail += f". No stderr captured; checked {log_path.as_posix()}"
+            if not log_path.exists():
+                detail += ", which the tool did not write"
         else:
             detail += ". No stderr captured."
+
+        # A rejected run's results file is not graded, but a tool can say there
+        # why it failed: semgrep reports a rule file it cannot read as an
+        # error-level SARIF notification and writes nothing on stderr.
+        if not accepted and results_file is not None:
+            results_path = Path(results_file)
+            reported = _error_notifications(results_path)
+            if reported:
+                detail += f". {results_path.as_posix()} reports: {reported}"
+            elif not stderr_text:
+                stdout_log = (
+                    results_path.parent / f"{self.__class__.__name__}.stdout.log"
+                )
+                outputs = [
+                    p.as_posix() for p in (results_path, stdout_log) if p.exists()
+                ]
+                if outputs:
+                    detail += f". The tool's output is in {' and '.join(outputs)}"
 
         return detail
 

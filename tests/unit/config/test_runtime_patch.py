@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, Dict, List
 
 import pytest
 
@@ -12,6 +13,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.runtime_patch import (
     RuntimePatchDeniedError,
+    _off_host_reporter_section,
     apply_runtime_override,
     apply_runtime_patch,
     check_runtime_ops,
@@ -361,18 +363,53 @@ class TestDefaults:
         fictional schema paths). For glob-bearing entries we resolve the prefix
         up to (but not including) the first wildcard segment.
 
-        Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`)
-        are NOT present on a default `AshConfig`; we materialize them here via
-        model_validate so the schema check covers extras that real plugins add.
+        Plugin-provided reporters (`bedrock-summary-reporter`, `cloudwatch-logs`,
+        `aws-security-hub`, `s3`) and scanners (`snyk-code`, `trivy-repo`) are NOT
+        present on a default `AshConfig`; we materialize them here via
+        model_validate so the schema check covers extras that real plugins add,
+        from their own models.
         """
+        from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+            FerretScannerConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+            TrivyRepoScannerConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+            SnykCodeScannerConfig,
+        )
+
+        from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
+            BedrockSummaryReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter import (
+            S3ReporterConfig,
+        )
+        from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter import (
+            SecurityHubReporterConfig,
+        )
+
         cfg = AshConfig.model_validate(
             {
+                # The AWS reporters' sections, from their own models, so an
+                # entry under them has to name an option the reporter has.
                 "reporters": {
-                    "bedrock-summary-reporter": {
-                        "options": {"aws_region": "us-east-1"}
-                    },
+                    "aws-security-hub": SecurityHubReporterConfig().model_dump(
+                        by_alias=True
+                    ),
+                    "bedrock-summary-reporter": BedrockSummaryReporterConfig().model_dump(
+                        by_alias=True
+                    ),
                     "cloudwatch-logs": {"options": {"aws_region": "us-east-1"}},
-                }
+                    "s3": S3ReporterConfig().model_dump(by_alias=True),
+                },
+                # Plugin scanners' sections, from their own models, so an entry
+                # under them has to name an option the plugin really has.
+                "scanners": {
+                    "ferret-scan": FerretScannerConfig().model_dump(by_alias=True),
+                    "trivy-repo": TrivyRepoScannerConfig().model_dump(by_alias=True),
+                    "snyk-code": SnykCodeScannerConfig().model_dump(by_alias=True),
+                },
             }
         )
         dumped = cfg.model_dump(by_alias=True)
@@ -596,10 +633,17 @@ class TestRootPointerRefused:
             )
         assert "root pointer" in excinfo.value.rule
 
-    def test_root_replace_allowed_when_allowlist_names_root_explicitly(self) -> None:
-        """The refusal is an escape-hatch, not a wall: an operator who writes
-        the root pointer into `allowed_paths` has asked for a whole-config
-        swap, and with an empty denylist there is nothing left to constrain.
+    def test_root_replace_refused_even_with_an_empty_denylist(self) -> None:
+        """Naming the root in `allowed_paths` clears the structural refusal, but an
+        empty `denied_paths` no longer leaves nothing to constrain: the entries ASH
+        always denies (ALWAYS_DENIED_PATHS: the sandbox, ash_plugin_modules, the
+        detect-secrets verification settings, the archive extraction limits) are
+        added to any list, and a root write carries every one of them. So a
+        whole-config swap is refused. A field below the root (`/project_name`) is
+        still allowed.
+
+        This test used to assert the swap succeeded with `denied_paths=[]`, which
+        was the case the always-denied entries exist to close.
         """
         base = _base_config()
         allowlist = RuntimeOverridesConfig(
@@ -609,10 +653,20 @@ class TestRootPointerRefused:
         )
         swapped = base.model_dump(mode="json", by_alias=False)
         swapped["project_name"] = "swapped"
-        result = apply_runtime_patch(
-            base, [{"op": "replace", "path": "", "value": swapped}], allowlist=allowlist
+        with pytest.raises(RuntimePatchDeniedError, match="/sandbox"):
+            apply_runtime_patch(
+                base,
+                [{"op": "replace", "path": "", "value": swapped}],
+                allowlist=allowlist,
+            )
+        renamed = apply_runtime_patch(
+            base,
+            [{"op": "replace", "path": "/project_name", "value": "swapped"}],
+            allowlist=RuntimeOverridesConfig(
+                enabled=True, allowed_paths=["/project_name"], denied_paths=[]
+            ),
         )
-        assert result.project_name == "swapped"
+        assert renamed.project_name == "swapped"
 
     def test_root_replace_still_denied_by_denylist_when_root_is_allowed(self) -> None:
         """Naming the root in `allowed_paths` clears the structural refusal but
@@ -1062,19 +1116,19 @@ class TestDenialsMatchEitherSeparator:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_either_spelling(self) -> None:
+        # ferret-scan, a plugin that sends nothing off the host: those that do are
+        # always denied whole, so a value pattern under one is never reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={
-                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
-            },
+            denied_value_patterns={"/scanners/ferret-scan/options/config_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/reporters/bedrock_summary_reporter/options/aws_region",
-                "value": "us-east-1",
+                "path": "/scanners/ferret_scan/options/config_file",
+                "value": "x",
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
@@ -1160,35 +1214,610 @@ class TestDenialsMatchEveryPluginSpelling:
         assert "denied_paths" in excinfo.value.rule
 
     def test_value_pattern_binds_to_every_spelling(self) -> None:
+        # ferret-scan, a plugin that sends nothing off the host: a section of one
+        # that does is always denied whole, so a value pattern under it is never
+        # reached.
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=[],
-            denied_value_patterns={
-                "/reporters/bedrock-summary-reporter/options/aws_region": r"^us-east-1$"
-            },
+            denied_value_patterns={"/scanners/ferret-scan/options/config_file": r"^x$"},
         )
         ops = [
             {
                 "op": "add",
-                "path": "/reporters/BedrockSummary",
-                "value": {"options": {"aws_region": "us-east-1"}},
+                "path": "/scanners/FerretScan",
+                "value": {"options": {"config_file": "x"}},
             }
         ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
             check_runtime_ops(ops, allowlist=allowlist)
         assert "denied_value_patterns" in excinfo.value.rule
 
-    @pytest.mark.parametrize(
-        "path",
-        ["/scanners/TrivyImage/options/ignore_file", "/reporters/TrivyRepo/options/x"],
-    )
-    def test_another_plugin_or_section_is_not_refused(self, path: str) -> None:
+    def test_another_plugin_is_not_refused(self) -> None:
         allowlist = RuntimeOverridesConfig(
             enabled=True,
             allowed_paths=["/**"],
             denied_paths=["/scanners/trivy-repo/options/ignore_file"],
         )
         check_runtime_ops(
-            [{"op": "add", "path": path, "value": "x"}], allowlist=allowlist
+            [
+                {
+                    "op": "add",
+                    "path": "/scanners/TrivyImage/options/ignore_file",
+                    "value": "x",
+                }
+            ],
+            allowlist=allowlist,
         )
+
+    def test_another_section_is_not_refused_by_the_plugins_denial(self) -> None:
+        """A reporters section named like the denied scanner is not that scanner's.
+
+        It is refused all the same, as the section of a reporter that is not one
+        of ASH's built-in reporters (TestOffHostReporterSections), and only for
+        that.
+        """
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/trivy-repo/options/ignore_file"],
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(
+                [{"op": "add", "path": "/reporters/TrivyRepo/options/x", "value": "x"}],
+                allowlist=allowlist,
+            )
+        assert "denied_paths" not in excinfo.value.rule, excinfo.value.rule
+        assert "'TrivyRepo'" in excinfo.value.rule, excinfo.value.rule
+
+
+#: Writes to the section of a reporter that can send findings off the host, under
+#: an allowlist that permits the whole reporters section and denies nothing:
+#: (op, the section the refusal names). The AWS reporters in each spelling the
+#: config lookup accepts, a plugin's reporter, which declares nothing about where
+#: it sends, and the reporters section or the whole document, which carry every
+#: section at once.
+_OFF_HOST_WRITES = {
+    "s3-enabled": (
+        {
+            "op": "add",
+            "path": "/reporters/s3",
+            "value": {"enabled": True, "options": {"bucket_name": "clients-bucket"}},
+        },
+        "s3",
+    ),
+    "s3-bucket": (
+        {
+            "op": "replace",
+            "path": "/reporters/s3/options/bucket_name",
+            "value": "clients-bucket",
+        },
+        "s3",
+    ),
+    "security-hub": (
+        {"op": "replace", "path": "/reporters/aws-security-hub/enabled", "value": True},
+        "aws-security-hub",
+    ),
+    "security-hub-spelled-as-a-class": (
+        {"op": "add", "path": "/reporters/SecurityHub", "value": {"enabled": True}},
+        "SecurityHub",
+    ),
+    "cloudwatch-underscores": (
+        {
+            "op": "add",
+            "path": "/reporters/cloudwatch_logs/options/log_group_name",
+            "value": "clients-group",
+        },
+        "cloudwatch_logs",
+    ),
+    "bedrock": (
+        {
+            "op": "add",
+            "path": "/reporters/bedrock-summary-reporter/enabled",
+            "value": True,
+        },
+        "bedrock-summary-reporter",
+    ),
+    "a-plugins-reporter": (
+        {
+            "op": "add",
+            "path": "/reporters/webhook",
+            "value": {"options": {"url": "https://clients.example"}},
+        },
+        "webhook",
+    ),
+    "remove": ({"op": "remove", "path": "/reporters/s3"}, "s3"),
+    "test-reads-the-bucket": (
+        {"op": "test", "path": "/reporters/s3/options/bucket_name", "value": "x"},
+        "s3",
+    ),
+    "the-whole-section-with-s3": (
+        {
+            "op": "replace",
+            "path": "/reporters",
+            "value": {"s3": {"options": {"bucket_name": "clients-bucket"}}},
+        },
+        "s3",
+    ),
+    "remove-the-whole-section": ({"op": "remove", "path": "/reporters"}, "reporters"),
+    "test-the-whole-section": (
+        {"op": "test", "path": "/reporters", "value": {}},
+        "reporters",
+    ),
+}
+
+
+class TestOffHostReporterSections:
+    """Only the operator's trusted config sets an off-host reporter's section.
+
+    A reporter that sends findings off the host (the AWS reporters, or any
+    reporter a plugin module brings, which says nothing about where it sends)
+    sends them where its section says, with the server's credentials. Under an
+    allowlist that permitted ``/reporters/**``, an MCP client enabled S3 with a
+    bucket of its own and the scan uploaded its findings there. Each such
+    section is refused whatever the allowlist says; ASH's built-in reporters,
+    which write their reports on the host, are not.
+    """
+
+    _ALLOWLIST = RuntimeOverridesConfig(
+        enabled=True, allowed_paths=["", "/reporters/**"], denied_paths=[]
+    )
+
+    @pytest.mark.parametrize("case", sorted(_OFF_HOST_WRITES))
+    def test_a_write_to_an_off_host_reporters_section_is_refused(
+        self, case: str
+    ) -> None:
+        """The rule names the section. The AWS reporters' sections, and a write that
+        covers one of them, are also always-denied entries, which are checked
+        first, so their refusal can name the entry instead."""
+        op, section = _OFF_HOST_WRITES[case]
+
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+
+        rule = excinfo.value.rule
+        assert repr(section) in rule or "denied_paths entry '/reporters/" in rule, rule
+        assert _off_host_reporter_section(op) == section
+
+    @pytest.mark.parametrize(
+        "path, section",
+        [
+            ("/reporters/webhook", "webhook"),
+            ("/reporters/SecurityHub", "SecurityHub"),
+            ("/reporters/webhook/enabled", "webhook"),
+        ],
+    )
+    def test_a_section_no_entry_denies_is_refused_by_this_rule(
+        self, path: str, section: str
+    ) -> None:
+        """A plugin's reporter, or a spelling no always-denied entry reads as an AWS
+        reporter's: only this rule refuses it, ``enabled: false`` included."""
+        value: Any = False if path.endswith("/enabled") else {"enabled": True}
+
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(
+                [{"op": "add", "path": path, "value": value}],
+                allowlist=self._ALLOWLIST,
+            )
+
+        assert f"reaches the {section!r} reporters section" in excinfo.value.rule, (
+            excinfo.value.rule
+        )
+
+    def test_a_whole_document_with_an_off_host_section_is_refused(self) -> None:
+        """Even where the allowlist names the root. The always-denied entries it
+        covers refuse it first; the rule names the section all the same."""
+        swapped = _base_config().model_dump(mode="json", by_alias=False)
+        swapped["reporters"]["s3"] = {"options": {"bucket_name": "clients-bucket"}}
+        op = {"op": "replace", "path": "", "value": swapped}
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+        assert _off_host_reporter_section(op) == "s3"
+
+    def test_a_test_of_the_whole_document_is_refused(self) -> None:
+        """It compares every reporters section, the operator's bucket included."""
+        op = {"op": "test", "path": "", "value": {}}
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+        assert _off_host_reporter_section(op) == "reporters"
+
+    def test_control_the_rule_leaves_a_whole_built_in_reporters_section(
+        self,
+    ) -> None:
+        """A replace of all of /reporters that holds only built-in sections is not
+        this rule's. It is still refused, because it covers the always-denied
+        entries of the AWS reporters."""
+        sections = _base_config().model_dump(mode="json", by_alias=False)["reporters"]
+        sections["markdown"]["enabled"] = False
+        op = {"op": "replace", "path": "/reporters", "value": sections}
+        assert _off_host_reporter_section(op) is None
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops([op], allowlist=self._ALLOWLIST)
+        assert "denied_paths entry '/reporters/" in excinfo.value.rule
+
+    @pytest.mark.parametrize(
+        "reporter",
+        ["s3", "aws-security-hub", "cloudwatch-logs", "bedrock-summary-reporter"],
+    )
+    def test_an_aws_reporters_enabled_false_is_still_accepted(
+        self, reporter: str
+    ) -> None:
+        """It asks for nothing beyond the profile and takes no effect
+        (runtime_patch._turns_an_off_host_reporter_off), so neither the always-
+        denied entries nor this rule refuse it: written at the leaf, or as a
+        section holding only it where the config has none."""
+        for op in (
+            {"op": "add", "path": f"/reporters/{reporter}/enabled", "value": False},
+            {
+                "op": "add",
+                "path": f"/reporters/{reporter}",
+                "value": {"enabled": False},
+            },
+        ):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=_base_config())
+
+    @pytest.mark.parametrize(
+        "reporter, option",
+        [
+            ("s3", "bucket_name"),
+            ("s3", "aws_region"),
+            ("cloudwatch-logs", "log_group_name"),
+            ("bedrock-summary-reporter", "model_id"),
+        ],
+    )
+    def test_enabled_false_with_a_destination_is_refused(
+        self, reporter: str, option: str
+    ) -> None:
+        op = {
+            "op": "add",
+            "path": f"/reporters/{reporter}",
+            "value": {"enabled": False, "options": {option: "the-clients"}},
+        }
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops([op], allowlist=self._ALLOWLIST, config=_base_config())
+        assert _off_host_reporter_section(op) == reporter
+
+    @pytest.mark.parametrize(
+        "path, value",
+        [
+            ("/reporters/markdown/enabled", False),
+            ("/reporters/unused_suppressions/enabled", False),
+            ("/reporters/flat_json/enabled", False),
+            ("/reporters/sarif/options", {}),
+        ],
+    )
+    def test_control_a_built_in_reporters_section_is_still_patched(
+        self, path: str, value: object
+    ) -> None:
+        # The patch applies to the config as dumped, whose sections are keyed by
+        # field name (unused_suppressions, not unused-suppressions).
+        patched = apply_runtime_patch(
+            _base_config(),
+            [{"op": "replace", "path": path, "value": value}],
+            allowlist=self._ALLOWLIST,
+        )
+        assert isinstance(patched, AshConfig)
+
+    def test_control_a_built_in_reporter_is_matched_under_its_alias(self) -> None:
+        """unused-suppressions is the built-in reporter's own section, not a plugin's."""
+        check_runtime_ops(
+            [
+                {
+                    "op": "replace",
+                    "path": "/reporters/unused-suppressions/enabled",
+                    "value": False,
+                }
+            ],
+            allowlist=self._ALLOWLIST,
+        )
+
+
+def _lookup_reads(section: str, written: str, plugin_key: str) -> bool:
+    """Whether get_plugin_config reads a section keyed ``written`` as ``plugin_key``'s."""
+    plugin_type = {"scanners": "scanner", "reporters": "reporter"}[section]
+    config = AshConfig.model_validate({section: {written: {"options": {}}}})
+    return config.get_plugin_config(plugin_type, plugin_key) is not None
+
+
+def _spellings(key: str) -> List[str]:
+    """Spellings of a kebab-case plugin key that the lookup may read as it."""
+    words = key.split("-")
+    camel = "".join(word.capitalize() for word in words)
+    return [
+        camel,
+        camel.lower(),
+        key.upper(),
+        "--".join(words),
+        " ".join(words),
+        "/".join(words),
+        "~".join(words),
+        camel + "Scanner",
+        camel + "Reporter",
+        camel + "ReporterConfig",
+        "_".join(word.upper() for word in words),
+    ]
+
+
+# (denial, section, field written below the plugin's section, plugin keys the
+# glob covers, plugin keys it does not). The keys it does not cover are local
+# plugins: a plugin that sends data off the host is denied whole whatever the
+# list (ALWAYS_DENIED_PATHS), so it would be refused under any glob.
+_GLOB_DENIALS = [
+    (
+        "/scanners/trivy-*/options/ignore_file",
+        "scanners",
+        "options/ignore_file",
+        ["trivy-repo"],
+        ["bandit", "ferret-scan", "grype"],
+    ),
+    (
+        "/scanners/trivy?repo/options/ignore_file",
+        "scanners",
+        "options/ignore_file",
+        ["trivy-repo"],
+        ["grype", "bandit"],
+    ),
+    (
+        "/reporters/bedrock-*/**",
+        "reporters",
+        "options/aws_region",
+        ["bedrock-summary-reporter"],
+        ["csv", "gitlab-sast", "sarif"],
+    ),
+    (
+        "/reporters/bedrock*/options/aws_*",
+        "reporters",
+        "options/aws_region",
+        ["bedrock-summary-reporter"],
+        ["csv", "gitlab-sast"],
+    ),
+]
+
+
+def _write(section: str, written: str, field: str) -> Dict[str, Any]:
+    plugin = written.replace("~", "~0").replace("/", "~1")
+    return {"op": "add", "path": f"/{section}/{plugin}/{field}", "value": "x"}
+
+
+class TestGlobPluginDenials:
+    """A denial whose plugin segment is a glob covers every plugin key the glob
+    matches, so it has to refuse every spelling get_plugin_config reads as one of
+    those keys, not only spellings the glob matches as written.
+    """
+
+    @pytest.mark.parametrize(
+        "denial,section,field,covered,_",
+        _GLOB_DENIALS,
+        ids=[case[0] for case in _GLOB_DENIALS],
+    )
+    def test_every_spelling_the_lookup_reads_is_refused(
+        self,
+        denial: str,
+        section: str,
+        field: str,
+        covered: List[str],
+        _: List[str],
+    ) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=[denial]
+        )
+        checked = 0
+        for key in covered:
+            for written in [key, *_spellings(key)]:
+                if not _lookup_reads(section, written, key):
+                    continue
+                checked += 1
+                with pytest.raises(RuntimePatchDeniedError) as excinfo:
+                    check_runtime_ops(
+                        [_write(section, written, field)], allowlist=allowlist
+                    )
+                assert "denied_paths" in excinfo.value.rule, written
+        # The lookup reads most of the generated spellings; a run that checked
+        # only the canonical keys would not exercise the glob at all.
+        assert checked >= 5 * len(covered)
+
+    @pytest.mark.parametrize(
+        "denial,section,field,_,uncovered",
+        _GLOB_DENIALS,
+        ids=[case[0] for case in _GLOB_DENIALS],
+    )
+    def test_another_plugins_spellings_are_not_refused(
+        self,
+        denial: str,
+        section: str,
+        field: str,
+        _: List[str],
+        uncovered: List[str],
+    ) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=[denial]
+        )
+        for key in uncovered:
+            for written in [key, *_spellings(key)]:
+                check_runtime_ops(
+                    [_write(section, written, field)], allowlist=allowlist
+                )
+
+    def test_a_value_pattern_bound_through_a_glob_covers_every_spelling(self) -> None:
+        # A local scanner: one that sends data off the host is denied whole by
+        # ALWAYS_DENIED_PATHS before any value pattern is read.
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+            denied_value_patterns={"/scanners/cdk-*/options/nag_packs": r"."},
+        )
+        ops = [
+            {
+                "op": "add",
+                "path": "/scanners/CdkNag",
+                "value": {"options": {"nag_packs": "standin"}},
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            check_runtime_ops(ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+
+class TestGlobDenialsNameKnownPlugins:
+    """A glob plugin segment is matched against the keys of known plugins, so it
+    refuses another spelling only of a plugin whose key it matches."""
+
+    @pytest.mark.parametrize(
+        "section,glob",
+        [
+            ("scanners", "c*"),
+            ("scanners", "[a-c]*"),
+            ("scanners", "*-scan*"),
+            ("reporters", "s*"),
+            ("reporters", "*-reporter"),
+            ("reporters", "*json*"),
+        ],
+    )
+    def test_only_keys_the_glob_matches_are_refused(
+        self, section: str, glob: str
+    ) -> None:
+        import fnmatch
+
+        from automated_security_helper.config.ash_config import ALWAYS_DENIED_PATHS
+        from automated_security_helper.config.runtime_patch import known_plugin_keys
+
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[f"/{section}/{glob}/options/field"],
+        )
+        keys = sorted(known_plugin_keys()[section])
+        assert keys
+        for key in keys:
+            ops = [_write(section, key, "options/field")]
+            folded = key.replace("-", "_")
+            # A plugin that sends data off the host is denied whole whatever the
+            # list, so it is refused whether or not the glob matches it.
+            always = any(
+                f"/{section}/{spelled}/**" in ALWAYS_DENIED_PATHS
+                for spelled in (key, key.replace("_", "-"))
+            )
+            if (
+                always
+                or fnmatch.fnmatchcase(key, glob)
+                or fnmatch.fnmatchcase(folded, glob.replace("-", "_"))
+            ):
+                with pytest.raises(RuntimePatchDeniedError):
+                    check_runtime_ops(ops, allowlist=allowlist)
+            else:
+                check_runtime_ops(ops, allowlist=allowlist)
+
+    @pytest.mark.parametrize(
+        "denial",
+        [
+            "/*/trivy-repo/options/ignore_file",
+            "/scanner?/trivy-*/options/ignore_file",
+            "/[s]canners/trivy-repo/options/ignore_file",
+        ],
+    )
+    def test_a_glob_section_segment_is_respelled_too(self, denial: str) -> None:
+        allowlist = RuntimeOverridesConfig(
+            enabled=True, allowed_paths=["/**"], denied_paths=[denial]
+        )
+        with pytest.raises(RuntimePatchDeniedError):
+            check_runtime_ops(
+                [_write("scanners", "TrivyRepo", "options/ignore_file")],
+                allowlist=allowlist,
+            )
+
+    def test_a_section_the_config_already_has_is_a_known_key(self) -> None:
+        base = AshConfig.model_validate({"scanners": {"acme-scan": {"enabled": False}}})
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=["/scanners/acme-*/options/ignore_file"],
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(
+                base,
+                [
+                    {
+                        "op": "add",
+                        "path": "/scanners/AcmeScan",
+                        "value": {"options": {"ignore_file": "standin.txt"}},
+                    }
+                ],
+                allowlist=allowlist,
+            )
+        assert "denied_paths" in excinfo.value.rule
+
+    def test_the_shipped_table_matches_the_plugin_packages(self, tmp_path) -> None:
+        """The table stands in for importing the packages; this imports them, apart.
+
+        Compared with the plugins the manager resolves after loading every module
+        under ``plugin_modules``, which is the set a scan iterates, so a plugin
+        its decorator registers but its package's ``ASH_*`` list leaves out is
+        caught too.
+        """
+        import json as json_module
+        import subprocess
+        import sys
+
+        from automated_security_helper.config.runtime_patch import (
+            _SHIPPED_PLUGIN_KEYS,
+        )
+
+        code = (
+            "import json, pkgutil\n"
+            "from automated_security_helper.base.plugin_config import plugin_config_key\n"
+            "from automated_security_helper.plugins import ash_plugin_manager\n"
+            "from automated_security_helper.plugins.loader import (\n"
+            "    load_additional_plugin_modules, load_internal_plugins)\n"
+            "import automated_security_helper.plugin_modules as pm\n"
+            "load_internal_plugins()\n"
+            "load_additional_plugin_modules(\n"
+            "    [pm.__name__ + '.' + info.name for info in pkgutil.iter_modules(pm.__path__)])\n"
+            "print(json.dumps({\n"
+            "    section: sorted({plugin_config_key(c)\n"
+            "                     for c in ash_plugin_manager.plugin_modules(kind)})\n"
+            "    for section, kind in (('scanners', 'scanner'), ('reporters', 'reporter'),\n"
+            "                          ('converters', 'converter'))}))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        resolved = json_module.loads(result.stdout.strip().splitlines()[-1])
+        assert resolved == {
+            section: sorted(keys) for section, keys in _SHIPPED_PLUGIN_KEYS.items()
+        }
+
+    def test_building_the_keys_imports_no_plugin_module(self, tmp_path) -> None:
+        """Importing a plugin module registers its plugins, and a scan runs them all."""
+        import subprocess
+        import sys
+
+        code = (
+            "import sys\n"
+            "from automated_security_helper.plugins.loader import load_internal_plugins\n"
+            "from automated_security_helper.config.ash_config import AshConfig\n"
+            "from automated_security_helper.config.runtime_patch import known_plugin_keys\n"
+            "load_internal_plugins()\n"
+            "def loaded():\n"
+            "    return sorted(m for m in sys.modules if 'plugin_modules.ash_' in m)\n"
+            "before = loaded()\n"
+            "config = AshConfig.model_validate(\n"
+            "    {'ash_plugin_modules': ['standin_not_imported']})\n"
+            "known_plugin_keys(config)\n"
+            "assert loaded() == before, sorted(set(loaded()) - set(before))\n"
+            "assert 'standin_not_imported' not in sys.modules\n"
+            "print('unchanged')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        assert result.stdout.strip().endswith("unchanged")

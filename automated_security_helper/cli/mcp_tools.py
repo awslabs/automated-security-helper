@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -35,24 +35,84 @@ from automated_security_helper.core.resource_management.error_handling import (
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import (
+    WHY as OUTPUT_LINK_WHY,
+    OutputDirLinkRefused,
+)
 
 if TYPE_CHECKING:
     # Typing only: the runtime import stays local to the tools that need it.
+    from automated_security_helper.cli.mcp.sandbox import ConfigInputCheck
     from automated_security_helper.config.ash_config import AshConfig
 
 # Configure module logger (without affecting global logging)
 # The MCP logging patch will ensure this logger is properly isolated
 _logger = ASH_LOGGER
 
+#: The remedy for a scan this server started: it writes to .ash/ash_output in the
+#: scanned directory, which the client cannot redirect.
+MCP_SCAN_OUTPUT_REMEDY = (
+    f"{OUTPUT_LINK_WHY} This server writes a scan's output to .ash/ash_output in the "
+    "scanned directory: replace the link there with a directory."
+)
+
 #: ``error_type`` of every refusal of a config input outside the permitted roots,
 #: whichever tool refused it. The same value ``run_ash_scan`` returns.
 CONFIG_INPUT_NOT_PERMITTED = "config_input_not_permitted"
+#: ``error_type`` for a client-delivered config that sets a field the session's
+#: runtime-override policy denies; see ``config/client_config_policy.py``.
+CONFIG_FIELD_DENIED = "config_field_denied"
+#: ``error_type`` for a client-delivered config whose policy cannot be established.
+CONFIG_POLICY_UNREADABLE = "config_policy_unreadable"
+#: ``error_type`` for a scan refused because the check of the config sources in
+#: its target could not finish (an unreadable entry, a link loop). The config is
+#: not known to be outside the permitted roots, so this is not
+#: ``CONFIG_INPUT_NOT_PERMITTED``.
+CONFIG_CHECK_FAILED = "config_check_failed"
+
+#: ``error_type`` of the refusal of a config an MCP client delivered that uses
+#: ``!ENV``, which such a file may not (``ASHConfigEnvNotResolvedError``).
+CONFIG_ENV_NOT_RESOLVED = "config_env_not_resolved"
+
+
+def _config_load_failure(error: Exception, path: Optional[Path]) -> Dict[str, Any]:
+    """The get_config response for a config that could not be loaded.
+
+    ``file_not_found`` when the file does not exist (a missing path, a link to
+    nothing), ``invalid_format`` for anything else. ``path`` is None when
+    discovery itself refused, before a file was selected.
+    """
+    from automated_security_helper.core.exceptions import ASHConfigFileNotFoundError
+
+    not_found = isinstance(error, (ASHConfigFileNotFoundError, FileNotFoundError))
+    category = (
+        ErrorCategory.FILE_NOT_FOUND if not_found else ErrorCategory.INVALID_FORMAT
+    )
+    context: Dict[str, Any] = {"error_category": category.value}
+    if path is not None:
+        context["config_path"] = str(path)
+        message = f"Configuration file {path} cannot be loaded: {error}"
+    else:
+        message = f"The configuration cannot be loaded: {error}"
+    return create_error_response(
+        MCPResourceError(message, context=context), "get_config"
+    )
+
+
+class ConfigCheckFailedError(MCPResourceError):
+    """The check of a scan target's config sources could not finish."""
 
 
 def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
     """The response for a config input outside the permitted roots.
+
+    A check that could not finish is ``CONFIG_CHECK_FAILED`` instead: it did not
+    find the config outside the roots, so the fix for that refusal does not apply.
 
     No ``context`` key, unlike ``create_error_response``: it would carry the
     resolved path, and the caller's own spelling in ``error`` already identifies
@@ -62,9 +122,315 @@ def _config_refusal(error: MCPResourceError, operation: str) -> Dict[str, Any]:
         "success": False,
         "operation": operation,
         "error": str(error),
-        "error_type": CONFIG_INPUT_NOT_PERMITTED,
+        "error_type": (
+            CONFIG_CHECK_FAILED
+            if isinstance(error, ConfigCheckFailedError)
+            else CONFIG_INPUT_NOT_PERMITTED
+        ),
         "error_category": error.context["error_category"],
     }
+
+
+def _scan_owner(session_id: Optional[str]) -> str:
+    """The session whose scans a registry tool acts on.
+
+    A caller that names no session is the default session -- stdio's single
+    client, or an in-process caller -- and sees the scans registered the same
+    way, never every session's.
+    """
+    return session_id or _default_session_id()
+
+
+def _config_env_refusal(error: Exception, operation: str) -> Dict[str, Any]:
+    """The response for a config an MCP client delivered that uses ``!ENV``.
+
+    The error names the file and the line or key, never a value: the refusal is
+    raised before anything is read from the environment.
+    """
+    return {
+        "success": False,
+        "operation": operation,
+        "error": str(error),
+        "error_type": CONFIG_ENV_NOT_RESOLVED,
+        "error_category": ErrorCategory.INVALID_FORMAT.value,
+    }
+
+
+def _discovered_config_refusal(
+    target: Path, session_id: Optional[str]
+) -> Optional[MCPResourceError]:
+    """The refusal for a config source in ``target`` outside this session's grant, or None.
+
+    ``target`` is a directory this session may scan, but a config source in it
+    -- ``pyproject.toml``, a dedicated config name, a linked ``.ash/`` -- may be a
+    symbolic link to a file anywhere on the server. Each one that exists is
+    checked by the path it resolves to, opening none of them, so the answer is
+    the same whether that file is missing, unreadable or readable. The scan's own
+    discovery checks them the same way (``run_ash_scan``'s config_base_gate).
+
+    The file discovery selects is then checked as ``get_config`` checks a file
+    it finds (``validate_config_input``), before anything reads it, and the
+    refusal names it as found. The scan's own resolution refuses it the same
+    way (``config_sources.check_discovered_source``).
+
+    A check of the candidates that fails for any other reason is a refusal too.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        config_base_gate,
+        config_chain_refusal,
+        validate_config_input,
+    )
+    from automated_security_helper.config.config_sources import (
+        check_discovery_candidates,
+        discover_config_source,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigInputNotPermittedError,
+    )
+
+    permit = config_base_gate(session_id)
+    try:
+        check_discovery_candidates(target, permit)
+    except ASHConfigInputNotPermittedError as exc:
+        return config_chain_refusal(target, exc)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        # Not left to the scan: this check decides whether a source in the
+        # target may be read at all, so one that cannot finish stops the scan
+        # here, as a refusal the caller can read.
+        _logger.warning(f"Config sources not checked before the scan: {exc}")
+        return ConfigCheckFailedError(
+            f"The configuration found in {target.as_posix()} could not be checked "
+            f"against the permitted roots: {type(exc).__name__}",
+            context={
+                "directory_path": str(target),
+                "error_category": ErrorCategory.INVALID_PATH.value,
+            },
+        )
+    try:
+        # Under the gate again: a source can change after the check above.
+        selected = discover_config_source(target, permit=permit).selected
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config not discovered before the scan ({exc})")
+        return None
+    if selected is None:
+        return None
+    return validate_config_input(selected.path, session_id=session_id)
+
+
+def _discovered_config_path(
+    target: Path, *, permit: Callable[[Path], bool]
+) -> Tuple[Optional[Path], Optional[MCPResourceError]]:
+    """The config file a scan of ``target`` would discover, under ``permit``.
+
+    ``permit`` is the session's ``config_base_gate``. Returns ``(path, None)``,
+    ``(None, None)`` when there is none, or ``(None, error)`` when discovery
+    refuses the source it would select: a pyproject.toml that declares
+    ``[tool.ash]`` but cannot be read or parsed, as the scan's own discovery
+    refuses it. Discovery names the file in that message and gives the parser's
+    position, not the file's text. Any other failure is left to the scan;
+    ``_discovered_config_refusal`` has already refused a source outside the grant.
+    """
+    from automated_security_helper.config.config_sources import (
+        discover_config_source,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigValidationError
+
+    try:
+        selected = discover_config_source(target, permit=permit).selected
+    except ASHConfigValidationError as exc:
+        return None, MCPResourceError(
+            f"The configuration found in {target.as_posix()} cannot be loaded: {exc}",
+            context={
+                "directory_path": str(target),
+                "error_category": ErrorCategory.INVALID_FORMAT.value,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config not discovered before the scan ({exc})")
+        return None, None
+    return (selected.path if selected is not None else None), None
+
+
+def _load_error_response(
+    checked: Any,
+    config_path: Optional[str],
+    target: Path,
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    """The refusal of a config, named or discovered, that does not load or validate.
+
+    Refused here rather than by the scan, which would start and then fail on its
+    first read of the config. ``checked.load_error`` names the file, in the
+    text that repeats no client's or repository's value
+    (``sandbox.check_config_input``). A file a client delivered that also sets a
+    field it may not is refused for that first, as the scan would refuse it while
+    resolving: the denial names what to remove. So is one this session's policy
+    cannot be read for. A denial check that cannot finish on a file that does not
+    validate leaves the load error to report.
+    """
+    if checked.document is not None:
+        denial = _client_config_denial(
+            config_path,
+            target,
+            session_id,
+            "scan_directory",
+            document=checked.document,
+        )
+        if denial is not None and denial.get("error_type") in (
+            CONFIG_FIELD_DENIED,
+            CONFIG_POLICY_UNREADABLE,
+        ):
+            return denial
+    return create_error_response(
+        error=checked.load_error,
+        operation="scan_directory",
+        suggestions=[
+            "Fix the error the message names; a syntax error names its line",
+            "Run 'ash config lint' on the file to check it",
+        ],
+    )
+
+
+def _session_client_rules(session_id: Optional[str]) -> Any:
+    """The ClientConfigRules a config this session's client delivers is checked against.
+
+    From the registered profile the session bound, never from its materialized
+    config; see ``profile_registry.session_client_rules``. Raises when the bound
+    profile is gone, so a scan is refused rather than checked against another
+    policy.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_client_rules,
+    )
+
+    return session_client_rules(session_id)
+
+
+def _denied_response(exc: Exception, operation: str) -> Dict[str, Any]:
+    """The response for a client-delivered config that was refused."""
+    from automated_security_helper.core.exceptions import (
+        ASHConfigPolicyUnreadableError,
+    )
+
+    return {
+        "success": False,
+        "operation": operation,
+        "error": str(exc),
+        "error_type": (
+            CONFIG_POLICY_UNREADABLE
+            if isinstance(exc, ASHConfigPolicyUnreadableError)
+            else CONFIG_FIELD_DENIED
+        ),
+    }
+
+
+def _client_config_denial(
+    config_path: Optional[str],
+    source_dir: Path,
+    session_id: Optional[str],
+    operation: str,
+    document: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    """Refuse up front a client-delivered config the scan would refuse while resolving.
+
+    The scan resolves the config in the background, so the same check runs here
+    first and the client is told which field to remove at once. The chain is read
+    the way the scan reads it: the named file, or the file discovered in
+    ``source_dir``. ``document`` is that chain when the caller has read it already
+    (``sandbox.ConfigInputCheck.document`` for ``config_path``), so it is not read
+    again. Any other chain problem is left to the scan, which reports it as it
+    always has. The scan's own check is the one that decides; this one only
+    reports early.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
+        client_named_config_is_untrusted,
+        config_base_gate,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        apply_client_config_rules,
+    )
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        discover_config_source,
+        env_refused_for,
+        resolve_config_document,
+    )
+    from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
+        ASHConfigPolicyUnreadableError,
+    )
+
+    try:
+        rules = _session_client_rules(session_id)
+    except Exception as exc:  # noqa: BLE001 -- rules that cannot be read refuse
+        # The scan reads the same rules and refuses on the same failure
+        # (``_run_scan_async``); refused here too, as a response the caller can
+        # read rather than an exception out of the tool.
+        _logger.warning(f"Session config rules not read before the scan: {exc}")
+        return {
+            "success": False,
+            "operation": operation,
+            "error": (
+                "The config could not be checked against this session's "
+                f"runtime-override policy: {exc}"
+            ),
+            "error_type": CONFIG_POLICY_UNREADABLE,
+        }
+    permit_base = config_base_gate(session_id)
+    # A named path the client chose is the client's wherever it is, as the scan
+    # reads it (resolve_config's untrusted_config).
+    named_by_client = config_path is not None and client_named_config_is_untrusted(
+        config_path, session_id=session_id
+    )
+    try:
+        if document is None:
+            if config_path is not None:
+                path = Path(config_path)
+                confine = default_confinement_root(path, source_dir)
+            else:
+                # Under the session's gate, as the scan discovers it.
+                selected = discover_config_source(
+                    source_dir, permit=permit_base
+                ).selected
+                if selected is None:
+                    return None
+                path, confine = selected.path, source_dir
+            document = resolve_config_document(
+                path,
+                confine_to=confine,
+                permit_base=permit_base,
+                refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
+            )
+    except Exception as exc:  # noqa: BLE001 -- reported by the scan's own read
+        _logger.debug(f"Config chain not read before the scan: {exc}")
+        return None
+    try:
+        apply_client_config_rules(
+            AshConfig(),
+            document.documents,
+            rules=rules,
+            trusted_config_path=None,
+            source_dir=source_dir,
+            permit_base=permit_base,
+            all_delivered=named_by_client,
+            names=document.names,
+        )
+    except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
+        return _denied_response(exc, operation)
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        # Not left to the scan: the check is what decides whether the client's
+        # file may be used, so one that cannot finish stops the scan here, as a
+        # refusal the caller can read rather than an exception out of the tool.
+        _logger.warning(f"Config policy check failed before the scan: {exc}")
+        response = create_error_response(error=exc, operation=operation)
+        response["error"] = (
+            "The config could not be checked against this session's "
+            f"runtime-override policy: {exc}"
+        )
+        return response
+    return None
 
 
 async def mcp_scan_directory(
@@ -72,6 +438,8 @@ async def mcp_scan_directory(
     severity_threshold: str = "MEDIUM",
     config_path: Optional[str] = None,
     session_id: Optional[str] = None,
+    *,
+    config_check: Optional["ConfigInputCheck"] = None,
 ) -> Dict[str, Any]:
     """
     Start a security scan with file-based progress tracking.
@@ -89,11 +457,34 @@ async def mcp_scan_directory(
         session_id: Optional MCP session id. When set, the scan acquires the
             per-session lock (Track 10.5 #63) so two concurrent scans on the
             same session serialize instead of racing on the shared output
-            dir. Distinct sessions never contend.
+            dir. Distinct sessions never contend. A caller the server could not
+            identify is refused before anything is checked or written: its scan
+            would be one it can neither poll nor cancel.
+        config_check: What ``sandbox.check_config_input`` found for
+            ``config_path``, this session and this target, when the caller has
+            already run it (``run_ash_scan`` does, before it acts on the
+            target). The file is then not read again here.
 
     Returns:
         Dictionary with scan ID and status information
     """
+    from automated_security_helper.cli.mcp.session_identity import (
+        session_identity_refusal,
+    )
+
+    # No session id is an in-process caller, not a network caller the server
+    # could not identify (UNIDENTIFIED_SESSION_ID), so there is nothing to refuse.
+    # A passed-down id has no request behind it here, so the refusal claims no
+    # cause and gives the mode-less advice; the resolver that produced the id
+    # (run_ash_scan) already refused with its own request's context.
+    refusal = (
+        session_identity_refusal(session_id, "scan_directory")
+        if session_id is not None
+        else None
+    )
+    if refusal is not None:
+        return refusal
+
     from automated_security_helper.cli.mcp.scan_target import (
         ASH_MCP_ALLOWED_ROOTS_ENV,
         resolve_scan_target,
@@ -173,14 +564,37 @@ async def mcp_scan_directory(
 
     # Validate config path if provided. Confinement first, covering every base the
     # config extends, so a refused path is reported as refused and not as missing.
-    if config_path:
-        from automated_security_helper.cli.mcp.sandbox import validate_config_chain
+    # `is not None`: an empty path is a config input too, and is refused here
+    # rather than starting a scan that fails on it.
+    # The chain the check below read, which the denial check reads from.
+    chain_document: Optional[Any] = None
+    if config_path is not None:
+        from automated_security_helper.cli.mcp.sandbox import check_config_input
 
-        chain_error = validate_config_chain(
-            config_path, session_id=session_id, source_dir=resolved_target
+        if not config_path.strip():
+            return create_error_response(
+                error=MCPResourceError(
+                    "The configuration file path is empty. Name a config file, or "
+                    "omit config_path to use the configuration found in the "
+                    "directory.",
+                    context={
+                        "error_category": ErrorCategory.INVALID_PARAMETER.value,
+                    },
+                ),
+                operation="scan_directory",
+            )
+
+        # One read of the file and its chain answers both checks below: a base
+        # outside the grant (a refusal) and a config that does not load.
+        checked = (
+            config_check
+            if config_check is not None
+            else check_config_input(
+                config_path, session_id=session_id, source_dir=resolved_target
+            )
         )
-        if chain_error is not None:
-            return _config_refusal(chain_error, "scan_directory")
+        if checked.refusal is not None:
+            return _config_refusal(checked.refusal, "scan_directory")
 
         config_error = validate_config_path(config_path)
         if config_error:
@@ -194,7 +608,126 @@ async def mcp_scan_directory(
                 ],
             )
 
+        # A delivered config that uses !ENV is refused before the scan starts and
+        # in the words the scan would use, rather than by a scan that ends with
+        # exit code 3; the same read found it.
+        if checked.env_error is not None:
+            return _config_env_refusal(checked.env_error, "scan_directory")
+        chain_document = checked.document
+        if checked.load_error:
+            return _load_error_response(
+                checked, config_path, resolved_target, session_id
+            )
+    else:
+        link_out = _discovered_config_refusal(resolved_target, session_id)
+        if link_out is not None:
+            return _config_refusal(link_out, "scan_directory")
+        # The file the scan will discover, checked as a named one is, in one
+        # read: a delivered one that uses !ENV, and one that does not load or
+        # validate, are refused before the scan starts, naming the file.
+        from automated_security_helper.cli.mcp.sandbox import config_base_gate
+
+        discovered, not_discovered = _discovered_config_path(
+            resolved_target, permit=config_base_gate(session_id)
+        )
+        if not_discovered is not None:
+            return create_error_response(
+                error=not_discovered,
+                operation="scan_directory",
+                suggestions=[
+                    "Fix the error the message names; a syntax error names its line",
+                    "Run 'ash config lint' on the file to check it",
+                ],
+            )
+        if discovered is not None:
+            from automated_security_helper.cli.mcp.sandbox import check_config_input
+
+            checked = check_config_input(
+                discovered, session_id=session_id, source_dir=resolved_target
+            )
+            if checked.refusal is not None:
+                return _config_refusal(checked.refusal, "scan_directory")
+            if checked.env_error is not None:
+                return _config_env_refusal(checked.env_error, "scan_directory")
+            chain_document = checked.document
+            if checked.load_error:
+                return _load_error_response(checked, None, resolved_target, session_id)
+
+    denial = _client_config_denial(
+        config_path,
+        resolved_target,
+        session_id,
+        "scan_directory",
+        document=chain_document,
+    )
+    if denial is not None:
+        return denial
+
+    # Claimed before the scan id is returned, because the scan takes the
+    # session's lock only later, on a worker thread: from here on a change to
+    # the delivered tree is refused and the session's removal waits for the
+    # scan. Refused while such a change is in progress. See
+    # MCPSession.try_claim_scan. The claim is on the in-memory session: a scan
+    # creates nothing under the workspace root, so it starts even when that root
+    # can't be created.
+    #
+    # The block below begins before the claim, so that whatever raises after it
+    # reaches the ``finally``, which releases the claim and the count. A name is
+    # bound to ``claimed_session`` only once the claim is held, and to
+    # ``counted`` only once the scan is counted, so the ``finally`` releases
+    # exactly what was taken.
+    claimed_session = None
+    counted: Optional[Any] = None
+    scan_task_started = False
+
     try:
+        if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+            from automated_security_helper.cli.mcp.sessions import (
+                get_default_registry as _get_session_registry,
+            )
+            from automated_security_helper.cli.mcp.source_delivery import (
+                SOURCE_DELIVERY_BUSY,
+            )
+
+            session = _get_session_registry().session_for(session_id)
+            if not session.try_claim_scan():
+                return {
+                    "success": False,
+                    "operation": "scan_directory",
+                    "error_type": SOURCE_DELIVERY_BUSY,
+                    "error": (
+                        "the delivered source of this session is being changed; "
+                        "start the scan after the change finishes"
+                    ),
+                }
+            claimed_session = session
+        # Counted against the operator's per-session limit from here until the
+        # scan returns; the task uncounts it. A limited caller with no session
+        # counts on the count all such callers share. See
+        # sessions.per_session_scan_limit.
+        from automated_security_helper.cli.mcp.sessions import (
+            per_session_scan_limit,
+            session_scan_limit_refusal,
+            sessionless_scan_count,
+        )
+
+        limit = per_session_scan_limit(session_id)
+        if claimed_session is not None:
+            if limit is None:
+                # No limit applies, and with none try_start_scan always counts.
+                # The scan is counted anyway, so a limit set later sees it
+                # running.
+                claimed_session.try_start_scan(None)
+            elif not claimed_session.try_start_scan(limit):
+                # Refused: the ``finally`` releases the claim.
+                return session_scan_limit_refusal("scan_directory", limit)
+            counted = claimed_session
+        elif limit is not None:
+            shared = sessionless_scan_count()
+            if not shared.try_start_scan(limit):
+                return session_scan_limit_refusal("scan_directory", limit, shared=True)
+            counted = shared
+
         # Create a unique scan ID
         scan_id = str(uuid.uuid4())
 
@@ -213,6 +746,7 @@ async def mcp_scan_directory(
             severity_threshold=severity_threshold,
             config_path=config_path,
             scan_id=scan_id,
+            session_id=session_id,
         )
 
         # Start the scan process asynchronously
@@ -224,8 +758,11 @@ async def mcp_scan_directory(
                 severity_threshold=severity_threshold,
                 config_path=config_path,
                 session_id=session_id,
+                scan_claim=claimed_session,
+                scan_counted=counted,
             )
         )
+        scan_task_started = True
 
         # Return scan ID and initial status with standardized format
         return {
@@ -267,9 +804,60 @@ async def mcp_scan_directory(
             ),
             operation="scan_directory",
         )
+    finally:
+        # The task releases the claim and the count once it has started; a scan
+        # that never started releases them here.
+        if not scan_task_started:
+            if counted is not None:
+                counted.scan_returned()
+            if claimed_session is not None:
+                claimed_session.release_scan()
 
 
 async def _run_scan_async(
+    scan_id: str,
+    directory_path: str,
+    output_dir: str,
+    severity_threshold: str,
+    config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
+    scan_claim: Optional[Any] = None,
+    scan_counted: Optional[Any] = None,
+) -> None:
+    """Run an ASH scan asynchronously, then release what it held of its session.
+
+    Arguments as :func:`_run_scan`, plus ``scan_claim``: the ``MCPSession``
+    whose scan claim :func:`mcp_scan_directory` took, released when the scan
+    returns, before a session that ended meanwhile is removed; and
+    ``scan_counted``: what counted this scan against the per-session limit (its
+    ``MCPSession``, or for a caller with no session the shared
+    ``sessions.ScanCount``), uncounted at the same time.
+    """
+    try:
+        await _run_scan(
+            scan_id=scan_id,
+            directory_path=directory_path,
+            output_dir=output_dir,
+            severity_threshold=severity_threshold,
+            config_path=config_path,
+            session_id=session_id,
+        )
+    finally:
+        if scan_counted is not None:
+            scan_counted.scan_returned()
+        if scan_claim is not None:
+            scan_claim.release_scan()
+        if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+            # A session that ended while this scan held or claimed it has its
+            # workspace removed now that the scan no longer reads it.
+            from automated_security_helper.cli.mcp.sessions import (
+                finish_ended_session,
+            )
+
+            finish_ended_session(session_id)
+
+
+async def _run_scan(
     scan_id: str,
     directory_path: str,
     output_dir: str,
@@ -309,11 +897,12 @@ async def _run_scan_async(
     )
 
     from automated_security_helper.cli.mcp.profile_registry import (
-        resolve_session_config_path,
+        resolve_session_trusted_config_path,
     )
     from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
         config_base_gate,
-        config_is_client_supplied,
+        client_named_config_is_untrusted,
     )
 
     registry = get_scan_registry()
@@ -330,13 +919,30 @@ async def _run_scan_async(
     # A config the client delivered into a session sandbox (an upload or a clone)
     # is the client's, not the operator's, wherever the scan target is. It is
     # resolved restrict-only for sandbox settings, with the profile this session
-    # bound, if any, as the trusted base the grants come from.
-    untrusted_config = config_path is not None and config_is_client_supplied(
-        config_path
+    # bound, if any, as the trusted base the grants come from: the registered
+    # profile, not the session's copy of it after the client's patch, which is
+    # itself a config the client supplied.
+    # A config path the client named is the client's unless the operator set it
+    # aside (client_named_config_is_untrusted), even when it is a file in another
+    # repository the server may scan.
+    untrusted_config = config_path is not None and client_named_config_is_untrusted(
+        config_path, session_id=session_id
     )
     trusted_config_path = (
-        resolve_session_config_path(session_id) if untrusted_config else None
+        resolve_session_trusted_config_path(session_id) if untrusted_config else None
     )
+    # For a remote caller, every config file the operator did not set aside
+    # resolves no !ENV, the target's own .ash.yaml included; see "Environment
+    # variables" in config/config_sources.py.
+    remote_client = caller_is_remote(session_id)
+    # Every file of the chain a client delivered, the named upload or the
+    # target's own .ash.yaml, is checked against this session's policy.
+    try:
+        client_config_policy = _session_client_rules(session_id)
+    except Exception as exc:  # noqa: BLE001 -- an entry left PENDING reads as running
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, str(exc))
+        _logger.error(f"Scan {scan_id} refused: {exc}")
+        return
 
     # Resolve the per-session lock if a session_id was supplied. The lock is
     # acquired inside the executor wrapper below — we MUST NOT hold it on the
@@ -348,12 +954,13 @@ async def _run_scan_async(
     # check_scan_progress lets a RUNNING entry's runner decide its status, so an
     # entry left RUNNING would read as running forever.
     session_lock = None
-    if session_id is not None:
+    # A caller the server could not identify has no session to serialize on.
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
         from automated_security_helper.cli.mcp.sessions import (
             get_default_registry as _get_session_registry,
         )
 
-        session_lock = _get_session_registry().get_or_create(session_id).lock
+        session_lock = _get_session_registry().session_for(session_id).lock
 
     # Mark the scan as running
     registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
@@ -369,9 +976,15 @@ async def _run_scan_async(
         Wrapped in a function so the lock is acquired on the executor
         worker thread, not the asyncio event-loop thread. Returns what
         ``run_ash_scan`` returned, which on exit 0 is the results model.
+
+        The scan also holds its session's ``ScanPresence`` while it runs, so the
+        TTL sweep of another server sharing the workspace root skips the
+        session.
         """
+        from automated_security_helper.cli.mcp.sessions import ScanPresence
+
         if session_lock is not None:
-            with session_lock:
+            with session_lock, ScanPresence(session_id):
                 return run_ash_scan(
                     source_dir=directory_path,
                     output_dir=output_dir,
@@ -383,6 +996,8 @@ async def _run_scan_async(
                     config_base_gate=base_gate,
                     untrusted_config=untrusted_config,
                     trusted_config_path=trusted_config_path,
+                    client_config_policy=client_config_policy,
+                    remote_client=remote_client,
                 )
         else:
             return run_ash_scan(
@@ -396,6 +1011,8 @@ async def _run_scan_async(
                 config_base_gate=base_gate,
                 untrusted_config=untrusted_config,
                 trusted_config_path=trusted_config_path,
+                client_config_policy=client_config_policy,
+                remote_client=remote_client,
             )
 
     try:
@@ -470,6 +1087,23 @@ async def _run_scan_async(
             _logger.info(f"Scan {scan_id} completed successfully")
         else:
             error_message = f"ASH exited with code {e.code}"
+            # An output directory refused before the scan started says why, since
+            # the client cannot read the console it was printed to, and with a
+            # remedy an MCP client can act on: it has no --output-dir to pass.
+            # OutputDirRefusedExit's own reason gives the command line's remedy, so
+            # only the link it found is used.
+            found = getattr(e, "found", None)
+            reason = getattr(e, "reason", None)
+            if found:
+                error_message = (
+                    f"{error_message}: "
+                    f"{OutputDirLinkRefused(found, MCP_SCAN_OUTPUT_REMEDY)}"
+                )
+            elif isinstance(reason, str) and reason:
+                # A refusal that carries its reason (ReportPathRefusedExit: a link
+                # at a report path, or a report file name outside the reports
+                # directory) says why, for the same reason.
+                error_message = f"{error_message}: {reason}"
             registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
             _logger.error(f"Scan {scan_id} failed: {error_message}")
 
@@ -489,7 +1123,9 @@ async def _run_scan_async(
         raise
 
 
-async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
+async def mcp_get_scan_progress(
+    scan_id: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Get current progress and partial results for a running scan using file-based tracking.
 
@@ -498,6 +1134,9 @@ async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
 
     Args:
         scan_id: The scan ID returned from scan_directory
+        session_id: The calling session. Another session's scan id answers
+            exactly like one that was never issued. None is the default
+            session, which is stdio's and an in-process caller's.
 
     Returns:
         Dictionary with scan progress information
@@ -521,7 +1160,9 @@ async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
             )
 
         # Check scan progress using the scan management function
-        progress_info = await check_scan_progress(scan_id)
+        progress_info = await check_scan_progress(
+            scan_id, session_id=_scan_owner(session_id)
+        )
 
         # Add timestamp and operation to the response for consistency
         progress_info["timestamp"] = datetime.now().isoformat()
@@ -678,29 +1319,35 @@ async def mcp_get_scan_results(
         )
 
 
-async def mcp_list_active_scans() -> Dict[str, Any]:
+async def mcp_list_active_scans(session_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    List all active and recent scans with their current status using file-based tracking.
+    List the calling session's active and recent scans with their current status.
 
     This tool uses the scan registry to list all active and recent scans,
     providing more reliable information than event-based tracking.
 
+    Args:
+        session_id: The calling session. Only its own scans are listed, and the
+            statistics count only those, so nothing in the response shows that
+            another session exists. None is the default session.
+
     Returns:
-        Dictionary with information about all scans in the registry
+        Dictionary with information about the session's scans in the registry
     """
+    owner = _scan_owner(session_id)
     try:
         # Get active scans from the scan management function
-        active_scans = await list_active_scans()
+        active_scans = await list_active_scans(session_id=owner)
 
         # Get all scans (including completed ones)
         registry = get_scan_registry()
-        all_scans = registry.list_scans()
+        all_scans = registry.list_scans(session_id=owner)
 
         # Get scan statistics
         stats = {
-            "total_scans": registry.get_scan_count(),
-            "active_scans": registry.get_active_scan_count(),
-            "status_counts": registry.get_scan_status_counts(),
+            "total_scans": registry.get_scan_count(session_id=owner),
+            "active_scans": registry.get_active_scan_count(session_id=owner),
+            "status_counts": registry.get_scan_status_counts(session_id=owner),
         }
 
         # Return standardized successful response
@@ -729,7 +1376,9 @@ async def mcp_list_active_scans() -> Dict[str, Any]:
         )
 
 
-async def mcp_cancel_scan(scan_id: str) -> Dict[str, Any]:
+async def mcp_cancel_scan(
+    scan_id: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Cancel a running scan and clean up its resources using file-based tracking.
 
@@ -738,6 +1387,8 @@ async def mcp_cancel_scan(scan_id: str) -> Dict[str, Any]:
 
     Args:
         scan_id: The scan ID to cancel
+        session_id: The calling session. Another session's scan id answers
+            exactly like one that was never issued, and nothing is cancelled.
 
     Returns:
         Dictionary with cancellation result information
@@ -761,7 +1412,7 @@ async def mcp_cancel_scan(scan_id: str) -> Dict[str, Any]:
             )
 
         # Cancel the scan using the scan management function
-        result = await cancel_scan(scan_id)
+        result = await cancel_scan(scan_id, session_id=_scan_owner(session_id))
 
         # Add timestamp and operation to the response for consistency
         if isinstance(result, dict):
@@ -1152,17 +1803,26 @@ def mcp_get_config(
         Its ``sandbox`` section is the one a scan of this session's default
         target would apply, so a file the client delivered shows no grants of
         its own. A refused path returns ``success`` False with ``error_type``
-        ``config_input_not_permitted``.
+        ``config_input_not_permitted``, and a file the client delivered that
+        uses ``!ENV`` the same with ``config_env_not_resolved``. A named file
+        that does not exist, and a named or discovered file that cannot be
+        loaded, return ``success`` False with ``error_category``
+        ``file_not_found`` or ``invalid_format``; the default config is returned
+        only when no file is named or found.
     """
+    import json as _json
+
     import yaml as _yaml
+
     from automated_security_helper.cli.mcp.profile_registry import (
         DEFAULT_SESSION_ID,
-        resolve_session_config_path,
+        resolve_session_trusted_config_path,
     )
     from automated_security_helper.cli.mcp.sandbox import (
         caller_is_remote,
         config_base_gate,
         config_chain_refusal,
+        client_named_config_is_untrusted,
         config_is_client_supplied,
         validate_config_input,
     )
@@ -1170,19 +1830,39 @@ def mcp_get_config(
         get_session_source_dir,
     )
     from automated_security_helper.config.resolve_config import (
+        check_config_path,
         resolve_config,
         find_config_file,
     )
+    from automated_security_helper.config.ash_config import load_yaml_config
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
-        read_config_file,
+        env_refused_for,
+        file_identity,
+        named_text_stream,
+        read_config_bytes,
+        read_config_file_and_references,
     )
-    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.default_config import (
+        default_config_document,
+        get_default_config,
+    )
+    from automated_security_helper.config.environment_record import (
+        environment_marker,
+        record_environment_references,
+    )
     from automated_security_helper.core.exceptions import (
+        ASHConfigFieldDeniedError,
+        ASHConfigEnvNotResolvedError,
         ASHConfigInputNotPermittedError,
+        ASHConfigPolicyUnreadableError,
+        ASHConfigValidationError,
     )
 
     if config_path is not None:
+        # The file the name leads to before it is checked: the raw read below must
+        # open that same file, so one swapped in after the check is refused.
+        checked = file_identity(Path(config_path))
         # Before the existence check: the default config for an absent path and
         # the file for a present one would otherwise answer whether it exists.
         refusal = validate_config_input(config_path, session_id=session_id)
@@ -1190,7 +1870,19 @@ def mcp_get_config(
             return _config_refusal(refusal, "get_config")
         path: Optional[Path] = Path(config_path)
         if not path.exists():
-            return get_default_config().model_dump()
+            # A named file that is gone is an error, as it is for a scan, not the
+            # default config: answering with the defaults would tell the client
+            # that file resolves to a config with none of its settings.
+            return create_error_response(
+                MCPResourceError(
+                    f"Configuration file not found: {config_path}",
+                    context={
+                        "config_path": str(config_path),
+                        "error_category": ErrorCategory.FILE_NOT_FOUND.value,
+                    },
+                ),
+                "get_config",
+            )
     else:
         search = Path(search_dir) if search_dir else Path.cwd()
         # For a remote caller the directory is checked first, so a refusal names
@@ -1203,21 +1895,72 @@ def mcp_get_config(
             else None
         )
         path = None
+        checked = None
         if refusal is None:
-            path = find_config_file(search_dir=search)
+            try:
+                # Under the session's gate, so a source in the directory that is a
+                # link out of the grant is refused before discovery opens it.
+                path = find_config_file(
+                    search_dir=search, permit=config_base_gate(session_id)
+                )
+            except ASHConfigInputNotPermittedError as exc:
+                return _config_refusal(config_chain_refusal(search, exc), "get_config")
+            except ASHConfigValidationError as exc:
+                # Discovery refused a source it could not read.
+                return _config_load_failure(exc, None)
             if path is not None:
+                checked = file_identity(path)
                 refusal = validate_config_input(path, session_id=session_id)
         if refusal is not None:
             return _config_refusal(refusal, "get_config")
 
     if path is None:
-        return get_default_config().model_dump()
+        # The default config is the file ASH_CONFIG names, when it names one.
+        # Each value it read from the environment is shown as `<from ${VAR}>`.
+        default_document = default_config_document()
+        return record_environment_references(
+            get_default_config().model_dump(),
+            default_document.environment_references if default_document else (),
+            mark=environment_marker,
+        )
+
+    # Which files resolve no !ENV for this caller: for a remote one, every file
+    # the operator did not set aside, named or discovered; see "Environment
+    # variables" in config/config_sources.py.
+    remote_client = caller_is_remote(session_id)
+    refuse_env = env_refused_for(remote_client, session_id)
 
     if raw:
-        if path.name.endswith(".toml"):
-            # pyproject.toml yields its [tool.ash] table, as when it is loaded.
-            return read_config_file(path) or {}
-        return _yaml.safe_load(path.read_text()) or {}
+        try:
+            check_config_path(path)
+            # Parsed as when it is loaded: pyproject.toml yields its [tool.ash]
+            # table, and JSON is parsed as JSON, not as YAML. A file that may not
+            # use !ENV is read by the loader too, which returns what the YAML
+            # parser would unless the file uses !ENV, and refuses it then as a
+            # scan of it would.
+            if path.name.endswith((".toml", ".json")) or refuse_env(path):
+                # A TOML string read from the environment is shown as the file
+                # wrote it, as a YAML reference is below.
+                data, references = read_config_file_and_references(
+                    path, expect=checked, refuse_env=refuse_env
+                )
+                return record_environment_references(data, references) or {}
+            # Any other YAML file shows a reference as written, without resolving
+            # it, which read_config_file would do.
+            text = read_config_bytes(path, expect=checked).decode("utf-8")
+            return load_yaml_config(named_text_stream(text, path), env="keep") or {}
+        except ASHConfigEnvNotResolvedError as exc:
+            # Before the arm below, which would catch it: it is an
+            # ASHConfigSourceError.
+            return _config_env_refusal(exc, "get_config")
+        except (
+            ASHConfigValidationError,
+            OSError,
+            UnicodeDecodeError,
+            _yaml.YAMLError,
+            _json.JSONDecodeError,
+        ) as exc:
+            return _config_load_failure(exc, path)
 
     # resolve_config short-circuits to default when source_dir is None, so
     # supply one to force it to read the specified file. It is also where
@@ -1243,7 +1986,11 @@ def mcp_get_config(
         scanned_root = (
             delivered if delivered is not None and delivered.is_dir() else Path.cwd()
         )
-    untrusted_config = config_is_client_supplied(path)
+    untrusted_config = (
+        client_named_config_is_untrusted(path, session_id=session_id)
+        if config_path is not None
+        else config_is_client_supplied(path)
+    )
     try:
         resolved = resolve_config(
             config_path=path,
@@ -1252,12 +1999,30 @@ def mcp_get_config(
             scanned_root=scanned_root,
             untrusted_config=untrusted_config,
             trusted_config_path=(
-                resolve_session_config_path(session_id) if untrusted_config else None
+                resolve_session_trusted_config_path(session_id)
+                if untrusted_config
+                else None
             ),
+            client_config_policy=_session_client_rules(session_id),
+            remote_client=remote_client,
         )
     except ASHConfigInputNotPermittedError as exc:
         return _config_refusal(config_chain_refusal(path, exc), "get_config")
-    return resolved.model_dump()
+    except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as exc:
+        return _denied_response(exc, "get_config")
+    except ASHConfigEnvNotResolvedError as exc:
+        return _config_env_refusal(exc, "get_config")
+    except ASHConfigValidationError as exc:
+        # After the arms above, which are ASHConfigValidationErrors too.
+        return _config_load_failure(exc, path)
+    # Each value the config's files read from the environment as `<from ${VAR}>`,
+    # the reference the file writes, never the value: the server's environment is
+    # not the client's.
+    return record_environment_references(
+        resolved.model_dump(),
+        resolved._environment_references,
+        mark=environment_marker,
+    )
 
 
 def mcp_validate_config(
@@ -1266,6 +2031,19 @@ def mcp_validate_config(
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Validate an ASH config supplied as a content string or file path.
+
+    The client's config is also checked against the session's runtime-override
+    policy, as a scan of it would be: ``config_content`` from a remote caller,
+    and a ``config_path`` a client delivered or outside the directories
+    ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, unless it is a profile file the server
+    wrote in the calling session's ``config/`` directory
+    (``sandbox.client_named_config_is_untrusted``). Each field it denies is a
+    ``denied_by_runtime_policy`` error. A ``${VAR}`` or ``${VAR:default}``
+    reference at the start of a plain value, or an ``!ENV`` tag, is a
+    ``config_env_not_resolved`` error in the files
+    ``config_sources.env_refused_for`` gives for the caller: for a remote caller
+    the client's config as above, content included; otherwise only a file a
+    client delivered.
 
     Args:
         config_content: YAML/JSON string to validate. Mutually exclusive with config_path.
@@ -1282,18 +2060,33 @@ def mcp_validate_config(
     import tempfile
 
     from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
         config_base_gate,
         validate_config_input,
+    )
+    from automated_security_helper.config.config_sources import (
+        env_refused_for,
+        refuse_env_everywhere,
     )
     from automated_security_helper.config.config_validator import ConfigValidator
 
     permit_base = config_base_gate(session_id)
+    remote_client = caller_is_remote(session_id)
 
     def _classify(raw: str) -> Dict[str, Any]:
         # First: a refused base's message names its file, and a file name such as
         # "base.yaml" would otherwise match the YAML branch below.
         if raw.startswith(ConfigValidator.NOT_PERMITTED_ERROR_PREFIX):
             return {"field": "", "message": raw, "type": CONFIG_INPUT_NOT_PERMITTED}
+        if raw.startswith(ConfigValidator.ENV_NOT_RESOLVED_ERROR_PREFIX):
+            return {"field": "", "message": raw, "type": CONFIG_ENV_NOT_RESOLVED}
+        # Also before the generic branches: the message quotes module names.
+        if raw.startswith(ConfigValidator.PLUGIN_MODULES_ERROR_PREFIX):
+            return {
+                "field": "ash_plugin_modules",
+                "message": raw,
+                "type": "invalid_field",
+            }
         if "YAML parsing error" in raw or "yaml" in raw.lower():
             return {"field": "", "message": raw, "type": "yaml_parse_error"}
         if "JSON parsing error" in raw:
@@ -1324,11 +2117,16 @@ def mcp_validate_config(
         # A private, otherwise empty directory rather than the shared temp dir:
         # the file's directory is where an `extends` in the content may look
         # for bases, and nothing a client did not send should be found there.
+        # Content a remote client sent may not use !ENV, wherever the file is
+        # written. On stdio the caller launched this server, and the same text
+        # as a local file of its own would resolve.
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / "config.yaml"
             tmp_path.write_text(config_content, encoding="utf-8")
             valid, raw_errors = ConfigValidator.validate_config_file(
-                tmp_path, permit_base=permit_base
+                tmp_path,
+                permit_base=permit_base,
+                refuse_env=refuse_env_everywhere if remote_client else None,
             )
     elif config_path is not None:
         # Before the existence check, so a refused path is reported as refused
@@ -1358,7 +2156,9 @@ def mcp_validate_config(
                 ],
             }
         valid, raw_errors = ConfigValidator.validate_config_file(
-            path, permit_base=permit_base
+            path,
+            permit_base=permit_base,
+            refuse_env=env_refused_for(remote_client, session_id),
         )
     else:
         return {
@@ -1372,10 +2172,126 @@ def mcp_validate_config(
             ],
         }
 
+    errors = [_classify(e) for e in raw_errors]
+    denied = _validated_document_denials(config_content, config_path, session_id)
     return {
-        "valid": valid,
-        "errors": [_classify(e) for e in raw_errors],
+        "valid": valid and not denied,
+        "errors": errors + denied,
     }
+
+
+def _validated_document_denials(
+    config_content: Optional[str],
+    config_path: Optional[str],
+    session_id: Optional[str],
+) -> list:
+    """The fields a client's config sets that this session's policy denies, as errors.
+
+    A named file is checked with every base its ``extends`` chain reaches, under
+    the session's config-root gate, the way a scan reads it; each file of the
+    chain a client delivered is checked. Content is the caller's own text, so it
+    is checked only for a remote caller: on stdio the caller launched this
+    server, and the same text as a local file is not a client's.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        caller_is_remote,
+        client_named_config_is_untrusted,
+        config_base_gate,
+    )
+    from automated_security_helper.config.ash_config import load_config_yaml
+    from automated_security_helper.config.client_config_policy import (
+        client_file_denials,
+    )
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        env_refused_for,
+        resolve_config_document,
+    )
+
+    rules = _session_client_rules(session_id)
+    checked = (
+        caller_is_remote(session_id)
+        if config_content is not None
+        else config_path is not None
+        and client_named_config_is_untrusted(config_path, session_id=session_id)
+    )
+    if rules.unreadable is not None and checked:
+        return [
+            {"field": "", "message": rules.unreadable, "type": CONFIG_POLICY_UNREADABLE}
+        ]
+    if config_content is not None and not checked:
+        return []
+    # Reading is kept apart from checking. A file or chain that cannot be read is
+    # reported by the validator already, so it adds nothing here; a check that
+    # cannot finish on what was read makes the config invalid, because passing it
+    # would report a client's config as one the policy accepts.
+    try:
+        if config_content is not None:
+            # Parsed as the validator parsed it: no aliases, which the policy
+            # check below would otherwise walk.
+            documents: Dict[Path, Any] = {
+                Path("config_content"): load_config_yaml(config_content)
+            }
+            names = None
+        elif config_path is not None:
+            path = Path(config_path)
+            # Read as the validator reads it, so an `extends` whose value !ENV
+            # would choose is refused rather than followed.
+            document = resolve_config_document(
+                path,
+                confine_to=default_confinement_root(path),
+                permit_base=config_base_gate(session_id),
+                refuse_env=env_refused_for(caller_is_remote(session_id), session_id),
+            )
+            documents, names = document.documents, document.names
+        else:
+            return []
+    except Exception:  # noqa: BLE001 -- a read or chain error is reported already
+        return []
+    found: List[Tuple[str, str]]
+    try:
+        if config_content is not None:
+            # The same check a scan of a delivered file gets, the restrict-only
+            # settings and the moved scanner exclusions included.
+            found = [
+                (denial.key, denial.reason)
+                for _file, denials in client_file_denials(
+                    documents, rules, all_delivered=True, moved_exclusions=True
+                )
+                for denial in denials
+            ]
+        else:
+            # A named path the client chose counts as delivered, every file of
+            # its chain with it, as resolve_config(untrusted_config=True) does.
+            found = [
+                (denial.key, f"{denial.reason}, in {file.name}")
+                for file, denials in client_file_denials(
+                    documents,
+                    rules,
+                    all_delivered=checked,
+                    names=names,
+                    moved_exclusions=True,
+                )
+                for denial in denials
+            ]
+    except Exception as exc:  # noqa: BLE001 -- a check that cannot finish refuses
+        return [
+            {
+                "field": "",
+                "message": "The config could not be checked against this "
+                f"session's runtime-override policy: {exc}",
+                "type": "validation_error",
+            }
+        ]
+    return [
+        {
+            "field": key,
+            "message": f"{key} may not be set by a config an MCP client delivers: "
+            f"{reason}",
+            "type": "denied_by_runtime_policy",
+        }
+        for key, reason in found
+    ]
 
 
 def mcp_suggest_suppression(
@@ -1522,11 +2438,51 @@ def mcp_select_profile(
     scan that names no config is handed this path. Before that, the resolved
     config was stored in a field nothing read, so this call returned
     ``success: True`` and changed nothing a client could detect.
+
+    Where it is written decides whose it is. The registered profile always goes
+    to the session's ``config/`` directory, which counts as the operator's. A
+    profile a client changed (a non-empty ``patch_ops``, or any ``override_yaml``)
+    goes to ``client-config/``, which counts as the client's: the allowlist lets
+    the client set those keys, and does not make its values the operator's. That
+    copy is what ``config_path`` names, and every consumer resolves it with the
+    client's rules against the registered profile in ``config/`` as the trusted
+    base (``resolve_session_trusted_config_path``).
+
+    Refused with ``error_type`` ``session_workspace_busy`` while another
+    request holds the session's workspace (``sessions.writing_session_state``):
+    the server removing a session unused longer than its time to live,
+    ``clear_source``, or the end of the session; select the profile again once
+    the hold ends. A ``set_source_git`` or ``set_source_zip_finalize`` in
+    progress does not refuse it.
     """
+    from automated_security_helper.cli.mcp.sessions import (
+        SessionWorkspaceBusyError,
+        writing_session_state,
+    )
+
+    try:
+        with writing_session_state(session_id):
+            return _select_profile(
+                profile_name,
+                patch_ops=patch_ops,
+                override_yaml=override_yaml,
+                session_id=session_id,
+            )
+    except SessionWorkspaceBusyError as e:
+        return {"success": False, "error": str(e), "error_type": e.error_type}
+
+
+def _select_profile(
+    profile_name: str,
+    *,
+    patch_ops: Optional[list],
+    override_yaml: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    """:func:`mcp_select_profile`, once the session is held against the sweep."""
     from automated_security_helper.cli.mcp.profile_registry import (
         bind_session_config,
         get_profile_registry,
-        materialize_session_config,
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
@@ -1535,8 +2491,8 @@ def mcp_select_profile(
     )
     from automated_security_helper.config.ash_config import (
         AshConfig,
-        AshMcpConfig,
         RuntimeOverridesConfig,
+        load_config_yaml,
     )
     import yaml as _yaml
     from pydantic import ValidationError as _ValidationError
@@ -1544,15 +2500,11 @@ def mcp_select_profile(
     def _runtime_overrides_policy(profile_cfg: AshConfig) -> RuntimeOverridesConfig:
         # One reading of the profile's allowlist for both mutating modes, so
         # override_yaml cannot be checked against a different policy than
-        # patch_ops.
-        mcp_cfg: Optional[AshMcpConfig] = getattr(
-            profile_cfg.global_settings, "mcp", None
-        )
-        return (
-            mcp_cfg.runtime_overrides
-            if mcp_cfg is not None
-            else RuntimeOverridesConfig()
-        )
+        # patch_ops, and the same reading the delivered-file check uses
+        # (client_config_policy.policy_of), stale shipped defaults included.
+        from automated_security_helper.config.client_config_policy import policy_of
+
+        return policy_of(profile_cfg)
 
     if patch_ops is not None and override_yaml is not None:
         return {
@@ -1578,7 +2530,7 @@ def mcp_select_profile(
 
     if override_yaml is not None:
         try:
-            raw = _yaml.safe_load(override_yaml)
+            raw = load_config_yaml(override_yaml)
         except _yaml.YAMLError as exc:
             return {"success": False, "error": f"override_yaml parse error: {exc}"}
         # Strict-extra gate: AshConfig.model_config has extra='ignore' for
@@ -1612,24 +2564,24 @@ def mcp_select_profile(
             )
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"override denied: {exc}"}
-        materialized = _materialize_or_error(
-            materialize_session_config, session_id, new_cfg
-        )
+        materialized = _materialize_or_error(session_id, base_cfg, new_cfg)
         if isinstance(materialized, dict):
             return materialized
+        config_path, trusted_config_path = materialized
         bind_session_config(
             session_id,
             config=new_cfg,
             profile_name=profile_name,
             override_yaml=override_yaml,
-            config_path=materialized,
+            config_path=config_path,
+            trusted_config_path=trusted_config_path,
         )
         return {
             "success": True,
             "mode": "override",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
-            "config_path": materialized,
+            "config_path": config_path,
         }
 
     if patch_ops is not None:
@@ -1639,55 +2591,61 @@ def mcp_select_profile(
             )
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
+        # An empty patch changes nothing, so there is no client value to keep apart.
         materialized = _materialize_or_error(
-            materialize_session_config, session_id, patched
+            session_id, base_cfg, patched if patch_ops else None
         )
         if isinstance(materialized, dict):
             return materialized
+        config_path, trusted_config_path = materialized
         bind_session_config(
             session_id,
             config=patched,
             profile_name=profile_name,
             patch_ops=patch_ops,
-            config_path=materialized,
+            config_path=config_path,
+            trusted_config_path=trusted_config_path,
         )
         return {
             "success": True,
             "mode": "inherit_and_patch",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
-            "config_path": materialized,
+            "config_path": config_path,
         }
 
-    materialized = _materialize_or_error(
-        materialize_session_config, session_id, base_cfg
-    )
+    materialized = _materialize_or_error(session_id, base_cfg, None)
     if isinstance(materialized, dict):
         return materialized
+    config_path, trusted_config_path = materialized
     bind_session_config(
         session_id,
         config=base_cfg,
         profile_name=profile_name,
-        config_path=materialized,
+        config_path=config_path,
+        trusted_config_path=trusted_config_path,
     )
     return {
         "success": True,
         "mode": "static",
         "profile_name": profile_name,
         "session_id": session_id or _default_session_id(),
-        "config_path": materialized,
+        "config_path": config_path,
     }
 
 
 def _materialize_or_error(
-    materialize: Callable[[Optional[str], "AshConfig"], str],
     session_id: Optional[str],
-    config: "AshConfig",
-) -> Union[str, Dict[str, Any]]:
-    """Write the resolved config out, or return this tool's failure shape.
+    registered: "AshConfig",
+    patched: Optional["AshConfig"],
+) -> Union[Tuple[str, str], Dict[str, Any]]:
+    """Write the binding out, or return this tool's failure shape.
 
-    Returns the path on success and an error dict on failure, which the caller
-    distinguishes with ``isinstance(..., dict)``. The alternative -- letting the
+    ``profile_registry.materialize_session_binding`` writes ``registered`` to
+    the session's ``config/`` and ``patched``, the client's version, to its
+    ``client-config/``. Returns ``(config_path, trusted_config_path)`` on success
+    and an error dict on failure, which the caller distinguishes with
+    ``isinstance(..., dict)``. The alternative -- letting the
     exception escape -- would surface as an unhandled error from a tool whose
     other failure modes all return ``success: False``, so a client would need two
     ways to detect the same class of problem.
@@ -1697,12 +2655,15 @@ def _materialize_or_error(
     missing file and fail with a config error naming a path the client never
     supplied.
     """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        materialize_session_binding,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         ErrorCategory,
     )
 
     try:
-        return materialize(session_id, config)
+        return materialize_session_binding(session_id, registered, patched)
     except (OSError, RuntimeError) as exc:
         _logger.error(f"Could not materialize the session config: {exc}")
         return {
@@ -1739,23 +2700,42 @@ def mcp_set_source_git(
 ) -> Dict[str, Any]:
     """Clone ``url`` at ``ref`` into the per-session workspace.
 
+    The client names the URL and the server runs git, so what git can reach is
+    the server's to decide. Refused before anything is created or cloned: an
+    option-like or command-executing URL, a local path or ``file://`` URL
+    (never cloned, whatever the scan roots allow), a scheme other than https
+    or ssh, a host the operator did not list in ``ASH_MCP_GIT_ALLOWED_HOSTS``
+    (empty by default, so every remote is refused until the operator names
+    one), and any ``ssh_key_id``, because no keys are registered. git then runs
+    without the server's credentials or configuration; see
+    ``source_delivery._git_environment``.
+
     Args:
-        url: Remote URL to clone (https or ssh). A local path or ``file://`` URL
-            must be inside the session's scan roots.
+        url: Remote URL to clone: ``https://``, ``ssh://`` or ``user@host:path``.
         ref: Optional branch/tag/commit. ``None`` uses the remote default.
-        ssh_key_id: Opaque, server-side keyring identifier. Raw private keys
-            are not accepted over the wire.
+        ssh_key_id: Must be None; no ssh keys are registered on the server.
+            Raw private keys are not accepted over the wire.
         depth: Shallow-clone depth. Defaults to 1.
         session_id: MCP session identifier scoping the workspace.
 
     Returns:
         ``{"success": True, "source_dir": str}`` on success;
-        ``{"success": False, "error": str}`` on git failure.
+        ``{"success": False, "error": str}`` on a refusal or a git failure,
+        with ``error_type`` naming the refusal. While a scan of the session
+        runs, ``error_type`` is ``source_delivery_busy``, as
+        ``set_source_zip_finalize`` reports the same refusal.
     """
-    from automated_security_helper.cli.mcp.scan_target import validate_scan_target
     from automated_security_helper.cli.mcp.source_delivery import (
+        ASH_MCP_GIT_ALLOWED_HOSTS_ENV,
+        SOURCE_DELIVERY_BUSY,
+        CloneRefusedError,
+        SourceDeliveryBusyError,
+        _refuse_ssh_key_id,
         _validate_clone_url,
+        clone_endpoint_allowed,
+        git_allowed_hosts,
         local_clone_path,
+        remote_clone_endpoint,
         set_source_git,
     )
 
@@ -1766,18 +2746,59 @@ def mcp_set_source_git(
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-    # A local clone source reads the server's filesystem, so it gets the scan
-    # roots a scan target gets. Checked before anything is created or cloned.
-    local_source = local_clone_path(url)
-    if local_source is not None:
-        target_error = validate_scan_target(local_source, session_id=session_id)
-        if target_error is not None:
-            return {
-                "success": False,
-                "error": str(target_error),
-                "error_type": "scan_target_not_permitted",
-                "error_category": target_error.context["error_category"],
-            }
+    if local_clone_path(url) is not None:
+        return {
+            "success": False,
+            "error": (
+                "set_source_git clones from a remote https or ssh url only; a "
+                "local path or file:// url would read the server's own "
+                "filesystem. Name a directory the operator granted as "
+                "run_ash_scan's source_dir instead."
+            ),
+            "error_type": "local_clone_source_refused",
+            "error_category": ErrorCategory.INVALID_PATH.value,
+        }
+
+    try:
+        scheme, host, port = remote_clone_endpoint(url)
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "clone_url_not_permitted",
+        }
+    if not clone_endpoint_allowed(scheme, host, port):
+        if host in git_allowed_hosts():
+            where = (
+                f"Refusing to clone over {scheme} on port {port} from {host!r}: "
+                f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV} lists the host, but not for "
+                f"that scheme and port. An entry is [scheme://]host[:port], and a "
+                f"bare host stands for the default port (https 443, ssh 22). "
+            )
+        else:
+            where = (
+                f"Refusing to clone from {host!r}: it is not in "
+                f"{ASH_MCP_GIT_ALLOWED_HOSTS_ENV}, the hosts the operator lets "
+                f"this server clone from. The list is empty unless the operator "
+                f"sets it. "
+            )
+        return {
+            "success": False,
+            "error": (
+                where + "Ask the operator to add the host, or deliver the tree "
+                "with set_source_zip_chunk and set_source_zip_finalize."
+            ),
+            "error_type": "clone_host_not_permitted",
+        }
+
+    try:
+        _refuse_ssh_key_id(ssh_key_id)
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "ssh_key_not_registered",
+        }
 
     try:
         source_dir = set_source_git(
@@ -1787,6 +2808,12 @@ def mcp_set_source_git(
             depth=depth,
             session_id=session_id,
         )
+    except SourceDeliveryBusyError as e:
+        # A RuntimeError too, so it is caught first: a client retries this one
+        # after the scan ends, and branches on error_type to know that.
+        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
+    except CloneRefusedError as e:
+        return {"success": False, "error": str(e), "error_type": e.error_type}
     except (RuntimeError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
@@ -1813,8 +2840,17 @@ def mcp_set_source_zip_chunk(
     Returns:
         ``{"success": True, "received": int, "next_sequence": int, "last": bool}``
         on success; ``{"success": False, "error": str}`` on validation
-        failure (out-of-order, oversize, malformed b64).
+        failure (out-of-order, oversize, malformed b64), and with
+        ``error_type`` ``session_workspace_busy`` while another request holds
+        the session's workspace: the server removing a session unused longer
+        than its time to live, ``clear_source``, or the end of the session.
+        The hold can end without removing the upload, so send the same chunk
+        again once it has finished; only an out-of-order answer then means the
+        upload was removed, and the upload restarts from its first chunk.
     """
+    from automated_security_helper.cli.mcp.sessions import (
+        SessionWorkspaceBusyError,
+    )
     from automated_security_helper.cli.mcp.source_delivery import set_source_zip_chunk
 
     try:
@@ -1825,6 +2861,8 @@ def mcp_set_source_zip_chunk(
             last=last,
             session_id=session_id,
         )
+    except SessionWorkspaceBusyError as e:
+        return {"success": False, "error": str(e), "error_type": e.error_type}
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -1851,6 +2889,8 @@ def mcp_set_source_zip_finalize(
         path-traversal/symlink-out-of-tree entry.
     """
     from automated_security_helper.cli.mcp.source_delivery import (
+        SOURCE_DELIVERY_BUSY,
+        SourceDeliveryBusyError,
         set_source_zip_finalize,
     )
 
@@ -1860,6 +2900,8 @@ def mcp_set_source_zip_finalize(
             expected_sha256=expected_sha256,
             session_id=session_id,
         )
+    except SourceDeliveryBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     except (FileNotFoundError, ValueError) as e:
         return {"success": False, "error": str(e)}
 
@@ -1869,15 +2911,24 @@ def mcp_set_source_zip_finalize(
 def mcp_clear_source(session_id: str) -> Dict[str, Any]:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
-    Idempotent: missing workspaces succeed.
+    Idempotent: missing workspaces succeed. Refused while a scan of the session
+    runs, because the scan is reading the tree.
 
     Args:
         session_id: MCP session identifier.
 
     Returns:
-        ``{"success": True}``.
+        ``{"success": True}``, or ``{"success": False, "error": str,
+        "error_type": "source_delivery_busy"}`` while a scan of the session runs.
     """
-    from automated_security_helper.cli.mcp.source_delivery import clear_source
+    from automated_security_helper.cli.mcp.source_delivery import (
+        SOURCE_DELIVERY_BUSY,
+        SourceDeliveryBusyError,
+        clear_source,
+    )
 
-    clear_source(session_id=session_id)
+    try:
+        clear_source(session_id=session_id)
+    except SourceDeliveryBusyError as e:
+        return {"success": False, "error": str(e), "error_type": SOURCE_DELIVERY_BUSY}
     return {"success": True}

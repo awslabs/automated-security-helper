@@ -49,6 +49,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
 
@@ -217,6 +219,7 @@ def test_reporter_check_passes_on_the_generated_table():
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        timeout=CHILD_TIMEOUT_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     failures = json.loads(result.stdout.strip().splitlines()[-1])
@@ -504,6 +507,94 @@ def test_cli_flags_check_can_fail(gate, tmp_path, monkeypatch):
     assert gate.check_cli_flags() == [], "documenting both halves still failed"
 
 
+def test_cli_flags_check_passes_on_the_real_tree(gate):
+    """The gate run on the committed scan.py and cli-reference.md.
+
+    The lint job runs this check, and nothing in the unit suite did, so a hidden
+    option named config_files_from_scanned_repository failed the gate while the
+    suite was green, the way check_reporters once did (see
+    test_reporter_check_passes_on_the_generated_table).
+    """
+    assert gate.check_cli_flags() == []
+
+
+def test_every_scan_option_is_named_for_its_flag():
+    """Each scan option's parameter name is its flag, so the two cannot drift apart.
+
+    check_cli_flags used to turn every option's parameter name into a flag, so a
+    parameter named unlike its flag made the gate ask cli-reference.md for a flag
+    the CLI does not have: config_files_from_scanned_repository, whose flag is
+    --config-file-from-scanned-repository, asked for
+    --config-files-from-scanned-repository. It now takes an Option's own flags
+    (test_a_parameter_that_names_its_flag_gets_no_flag_from_its_name); this test
+    keeps the names honest for readers too. Hidden options count: they are
+    documented in cli-reference.md like the rest.
+    """
+    import typer
+    from typer.models import OptionInfo
+
+    from automated_security_helper.cli.scan import run_ash_scan_cli_command
+
+    params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
+    misnamed = {}
+    for name, meta in params.items():
+        option = meta.default
+        if not isinstance(option, OptionInfo) or not option.param_decls:
+            continue
+        flags = {
+            flag
+            for decl in option.param_decls
+            for flag in decl.split("/")
+            if flag.startswith("--")
+        }
+        if "--" + name.replace("_", "-") not in flags:
+            misnamed[name] = sorted(flags)
+    assert misnamed == {}
+
+
+def test_a_parameter_that_names_its_flag_gets_no_flag_from_its_name(
+    gate, tmp_path, monkeypatch
+):
+    """typer uses an Option's own flag strings and ignores the parameter's name.
+
+    The check derived `--config-files-from-scanned-repository` from scan.py's
+    parameter of that name (since renamed), whose flag is
+    `--config-file-from-scanned-repository`, and failed on a flag that does not
+    exist. A parameter whose Option names no flag still gets one from its name.
+    """
+    source = tmp_path / "scan.py"
+    source.write_text(
+        "def scan(\n"
+        "    files_from_repo: Annotated[\n"
+        "        Optional[List[str]],\n"
+        "        typer.Option(\n"
+        '            "--file-from-repo",\n'
+        "            hidden=True,\n"
+        "        ),\n"
+        "    ] = None,\n"
+        "    plain_name: Annotated[\n"
+        "        bool,\n"
+        '        typer.Option(help="names no flag"),\n'
+        "    ] = False,\n"
+        "): ...\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "CLI_SCAN_PY", source)
+    docs = tmp_path / "cli-reference.md"
+    monkeypatch.setattr(gate, "CLI_REFERENCE_MD", docs)
+
+    docs.write_text("`--file-from-repo` and `--plain-name`\n", encoding="utf-8")
+    assert gate.check_cli_flags() == [], (
+        "a flag was derived from the name of a parameter whose Option names its own"
+    )
+
+    docs.write_text("`--file-from-repo`\n", encoding="utf-8")
+    failures = gate.check_cli_flags()
+    assert failures and all("--plain-name" in f for f in failures), (
+        f"a parameter whose Option names no flag lost its derived flag: {failures}"
+    )
+
+
 def test_suppression_check_can_fail(gate, tmp_path, monkeypatch):
     doc = tmp_path / "suppressions.md"
     doc.write_text(
@@ -597,3 +688,62 @@ def test_the_md_corpus_includes_the_templates_docs_are_generated_from(gate):
         assert template[: -len(".template")] in files, (
             f"{template} is collected but its rendered doc is not"
         )
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    return path
+
+
+def test_the_md_corpus_is_what_git_counts_as_the_tree(gate, tmp_path, monkeypatch):
+    """Tracked and untracked docs are in; ignored, excluded and deleted ones are not.
+
+    The list comes from git so that it never enters an ignored directory: the unit
+    tests run this on the real checkout while other workers create and remove
+    directories under the ignored tests/pytest-temp.
+    """
+    repo = _git_repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text("tests/pytest-temp/\n", encoding="utf-8")
+    (repo / "docs").mkdir()
+    for name in ("README.md", "docs/guide.md.template", "docs/gone.md"):
+        (repo / name).write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    (repo / "docs/gone.md").unlink()
+    (repo / "docs/new.md").write_text("not added yet\n", encoding="utf-8")
+    (repo / "tests/pytest-temp/worker").mkdir(parents=True)
+    (repo / "tests/pytest-temp/worker/scratch.md").write_text("x\n", encoding="utf-8")
+    (repo / "node_modules/pkg").mkdir(parents=True)
+    (repo / "node_modules/pkg/README.md").write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr(gate, "REPO_ROOT", repo)
+
+    files = {path.relative_to(repo).as_posix() for path in gate.collect_md_files()}
+
+    assert files == {"README.md", "docs/guide.md.template", "docs/new.md"}
+
+
+def test_the_md_corpus_refuses_a_tree_git_cannot_read(gate, tmp_path, monkeypatch):
+    """No listing is an error, not an empty corpus every check would pass on."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "README.md").write_text("x\n", encoding="utf-8")
+    # Stop git searching above tmp_path, so an enclosing repository cannot answer.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.setattr(gate, "REPO_ROOT", plain)
+
+    with pytest.raises(RuntimeError, match="git ls-files failed"):
+        gate.collect_md_files()
+
+
+def test_the_md_corpus_refuses_to_run_without_git(gate, monkeypatch):
+    monkeypatch.setattr(gate.shutil, "which", lambda name: None)
+
+    with pytest.raises(RuntimeError, match="git is not on PATH"):
+        gate.collect_md_files()
+
+
+def test_an_empty_md_corpus_is_refused(gate, tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, "REPO_ROOT", _git_repo(tmp_path / "repo"))
+
+    with pytest.raises(RuntimeError, match="found no markdown"):
+        gate.collect_md_files()

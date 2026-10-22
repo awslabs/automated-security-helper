@@ -26,6 +26,8 @@ between a partial merge and a false clean bill of health.
 """
 
 import json
+import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -57,8 +59,12 @@ from automated_security_helper.core.sharding import (
 from automated_security_helper.core.unified_metrics import (
     populate_metrics_from_unified_source,
 )
+from automated_security_helper.interactions.run_ash_scan import incomplete_converters
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
+    ConverterStatusInfo,
+    FailedInputInfo,
+    RefusedInputInfo,
     ScannerStatusInfo,
     ScannerTargetStatusInfo,
 )
@@ -448,6 +454,25 @@ class TestShardedEqualsUnsharded:
         assert [
             name for name, entry in merged.scanner_results.items() if entry.excluded
         ] == []
+
+    def test_the_shards_run_records_are_not_merged(self):
+        """Each shard's completion marker, refusal record and report list is its own."""
+        shards = build_shards(3)
+        for index, shard in enumerate(shards):
+            shard.validation_checkpoints.extend(
+                [
+                    {"type": "run_completed", "metadata": {"run_id": f"{index}" * 32}},
+                    {"type": "report_path_refused", "message": f"shard {index}"},
+                    {"type": "reports_written", "metadata": {"files": ["ash.sarif"]}},
+                    {"type": "config_warning", "message": f"kept {index}"},
+                ]
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [cp["type"] for cp in merged.validation_checkpoints] == [
+            "config_warning"
+        ] * 3
 
     def test_one_collapsed_sarif_run(self):
         # Shards share a single root, so one run is the honest shape. N runs would
@@ -1675,6 +1700,105 @@ class TestMergeCli:
         assert result.exit_code != 0
         assert "not a valid format" in result.output
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_link_at_a_report_path_refuses_the_reports(self, tmp_path):
+        """A link already at ``reports/ash.sarif`` exits 1 naming it; nothing is written through it."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        output_dir = tmp_path / "merged"
+        (output_dir / "reports").mkdir(parents=True)
+        outside = tmp_path / "outside.sarif"
+        outside.write_text("unchanged", encoding="utf-8")
+        link = output_dir / "reports" / "ash.sarif"
+        link.symlink_to(outside)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif,csv"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        # Compared without styling or whitespace: the console styles the path and
+        # wraps long lines.
+        console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        assert "".join(f"{link.as_posix()} is a symlink".split()) in console, (
+            result.output
+        )
+        assert outside.read_text(encoding="utf-8") == "unchanged"
+        assert sorted(path.name for path in (output_dir / "reports").iterdir()) == [
+            "ash.sarif"
+        ]
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    @pytest.mark.parametrize("target", ["a directory", "nothing"])
+    def test_a_reports_directory_that_is_a_link_refuses_the_reports(
+        self, tmp_path, target
+    ):
+        """A link at ``reports/`` itself, to a directory or dangling, exits 3 naming it.
+
+        3, as for every output directory refused through a link, in a scan too.
+        """
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        output_dir = tmp_path / "merged"
+        output_dir.mkdir()
+        outside = tmp_path / "outside"
+        if target == "a directory":
+            outside.mkdir()
+            (outside / "keep.txt").write_text("unchanged", encoding="utf-8")
+        reports = output_dir / "reports"
+        reports.symlink_to(outside, target_is_directory=True)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 3, result.output
+        assert not isinstance(result.exception, OSError), repr(result.exception)
+        console = "".join(re.sub(r"\x1b\[[0-9;]*m", "", result.output).split())
+        expected = f"{reports.as_posix()} is a symlink"
+        assert "".join(expected.split()) in console, result.output
+        assert reports.is_symlink()
+        if target == "a directory":
+            assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+        else:
+            assert not outside.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    @pytest.mark.parametrize("linked", ["output", "reports"])
+    def test_a_linked_output_or_reports_directory_is_refused(self, tmp_path, linked):
+        """Merge writes the merged results and reports there, as a scan would."""
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        host = tmp_path / "host"
+        host.mkdir()
+        output_dir = tmp_path / "merged"
+        if linked == "output":
+            output_dir.symlink_to(host, target_is_directory=True)
+        else:
+            output_dir.mkdir()
+            (output_dir / "reports").symlink_to(host, target_is_directory=True)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 3, result.output
+        output = " ".join(result.output.split())
+        assert "is a symlink" in output
+        assert "--output-dir" in output
+        assert list(host.iterdir()) == [], "the merge wrote through the link"
+
 
 def _incomplete_entries(
     model: AshAggregatedResults, scanner: str, status: ScannerStatus
@@ -1736,9 +1860,9 @@ class TestRequireScannerCompletionResolution:
         """The literal, reached only when no shard carries a config at all.
 
         Agrees with ``AshConfig.fail_on_incomplete_scanners`` rather than being
-        independently lenient. This is the least trustworthy input ``ash merge``
-        accepts -- results it cannot attribute to any configuration -- so defaulting
-        to permissive here would give it the most trusting treatment.
+        independently lenient. ``merge_shard_results`` refuses these shards right
+        after this runs (``TestShardsWithoutAStoredConfigAreRefused``), so the
+        value never decides a merge; it still must not be the permissive one.
         """
         from automated_security_helper.cli.merge import (
             _resolve_require_scanner_completion,
@@ -2303,3 +2427,492 @@ class TestMergedExitCodeIncompleteScanners:
         merged = merge_shard_results(as_loaded(shards))
 
         assert _merged_exit_code(merged, tmp_path, "low", None, False) == 2
+
+
+class TestConverterRowsAcrossShards:
+    """Each shard converts the whole tree, but its converter row is its own record.
+
+    A conversion that failed in one shard -- a notebook nbconvert timed out on, an
+    archive that could not be extracted, a tool missing on that runner -- is lost
+    coverage for the union exactly as it would be for one scan, so the merged row
+    carries every shard's record and the completeness gate reads it.
+    """
+
+    @staticmethod
+    def _with_rows(**rows_by_shard):
+        shards = build_shards(3)
+        for index, row in rows_by_shard.items():
+            shards[int(index.removeprefix("shard"))].converter_results["jupyter"] = row
+        return shards
+
+    def test_a_failed_input_in_a_later_shard_reaches_the_merged_row(self, tmp_path):
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(
+                converted_paths=[],
+                failed_inputs=[
+                    FailedInputInfo(path="nb.ipynb", reason="nbconvert timed out")
+                ],
+            ),
+            shard2=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.converter_results["jupyter"]
+        assert [(r.path, r.reason) for r in row.failed_inputs] == [
+            ("nb.ipynb", "nbconvert timed out")
+        ]
+        assert incomplete_converters(merged) == [
+            ("jupyter", "could not convert 1 input: nb.ipynb")
+        ]
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
+
+    def test_inputs_recorded_by_several_shards_are_listed_once(self):
+        def failed():
+            return [FailedInputInfo(path="nb.ipynb", reason="exited with code 1")]
+
+        def refused():
+            return [
+                RefusedInputInfo(path="a.zip", reason="it is a symbolic link"),
+                RefusedInputInfo(
+                    path="b.tar", member="../x.py", reason="its path contains '..'"
+                ),
+            ]
+
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(
+                failed_inputs=failed(), refused_inputs=refused()
+            ),
+            shard1=ConverterStatusInfo(
+                failed_inputs=failed()
+                + [FailedInputInfo(path="other.ipynb", reason="timed out")],
+                refused_inputs=refused(),
+            ),
+            shard2=ConverterStatusInfo(
+                failed_inputs=failed(), refused_inputs=refused()
+            ),
+        )
+
+        row = merge_shard_results(as_loaded(shards)).converter_results["jupyter"]
+
+        assert [r.path for r in row.failed_inputs] == ["nb.ipynb", "other.ipynb"]
+        assert [(r.path, r.member) for r in row.refused_inputs] == [
+            ("a.zip", None),
+            ("b.tar", "../x.py"),
+        ]
+
+    def test_a_crash_in_any_shard_is_kept(self, tmp_path):
+        shards = self._with_rows(
+            shard2=ConverterStatusInfo(failure="RuntimeError: nbconvert crashed"),
+        )
+        for model in shards[:2]:
+            model.converter_results["jupyter"] = ConverterStatusInfo(
+                converted_paths=["converted/nb.py"]
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert incomplete_converters(merged) == [
+            ("jupyter", "RuntimeError: nbconvert crashed")
+        ]
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
+
+    def test_a_tool_missing_on_one_runner_is_lost_coverage(self):
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(
+                dependencies_satisfied=False, candidate_inputs=2
+            ),
+            shard2=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        row = merged.converter_results["jupyter"]
+        assert row.dependencies_satisfied is False
+        assert row.candidate_inputs == 2
+        assert [name for name, _ in incomplete_converters(merged)] == ["jupyter"]
+
+    def test_a_tool_missing_with_nothing_to_convert_stays_exempt(self):
+        """The candidate count is what exempts an absent tool, as in one scan."""
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(
+                dependencies_satisfied=False, candidate_inputs=0
+            ),
+            shard1=ConverterStatusInfo(),
+            shard2=ConverterStatusInfo(),
+        )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert incomplete_converters(merged) == []
+
+    def test_agreeing_rows_merge_to_the_base_shards_row(self):
+        """The common case is unchanged, down to which fields a simple dump omits."""
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard2=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+        )
+
+        row = merge_shard_results(as_loaded(shards)).converter_results["jupyter"]
+
+        assert row.model_dump(exclude_unset=True) == {
+            "converted_paths": ["converted/nb.py"]
+        }
+
+    def test_the_shards_are_not_mutated(self):
+        shards = self._with_rows(
+            shard0=ConverterStatusInfo(converted_paths=["converted/nb.py"]),
+            shard1=ConverterStatusInfo(
+                failed_inputs=[FailedInputInfo(path="nb.ipynb", reason="timed out")]
+            ),
+            shard2=ConverterStatusInfo(failure="RuntimeError: crashed"),
+        )
+        before = [m.converter_results["jupyter"].model_dump() for m in shards]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert [m.converter_results["jupyter"].model_dump() for m in shards] == before
+
+
+class TestConfigWarningsAreMergedOnce:
+    """Every shard of one scan reads the same config, so each records the same
+    config warnings; the merged report lists each one once."""
+
+    @staticmethod
+    def _warning(message: str) -> Dict:
+        return {
+            "type": "config_warning",
+            "severity": "warning",
+            "message": message,
+            "metadata": {"source": "config_resolution"},
+        }
+
+    def test_a_config_warning_every_shard_carries_appears_once(self):
+        shards = build_shards(3)
+        for shard in shards:
+            shard.validation_checkpoints.append(self._warning("ignored source"))
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [
+            c
+            for c in merged.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ] == [self._warning("ignored source")]
+
+    def test_control_different_config_warnings_are_all_kept(self):
+        shards = build_shards(2)
+        shards[0].validation_checkpoints.append(self._warning("first"))
+        shards[1].validation_checkpoints.append(self._warning("second"))
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [
+            c["message"]
+            for c in merged.validation_checkpoints
+            if c.get("type") == "config_warning"
+        ] == ["first", "second"]
+
+
+class TestShardsWithoutAStoredConfigAreRefused:
+    """Every shard must record the configuration it scanned under.
+
+    The merged verdict, the aggregated suppression pass and the report settings
+    come from that configuration. A shard whose results record none
+    (``"ash_config": null``) cannot be merged under ASH's defaults in its place,
+    so the merge is refused and names the shard.
+    """
+
+    @pytest.mark.parametrize("missing", [0, 2], ids=["lowest_index", "later_shard"])
+    def test_a_shard_with_no_stored_config_is_refused(self, missing):
+        shards = build_shards(3)
+        shards[missing].ash_config = None
+
+        with pytest.raises(ShardCoverageError, match=f"shard-{missing}\\.json"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_the_refusal_says_the_configuration_is_missing(self):
+        shards = build_shards(2)
+        shards[1].ash_config = None
+
+        with pytest.raises(ShardCoverageError, match="no scan configuration"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_through_the_command_it_exits_one_and_writes_nothing(self, tmp_path):
+        shards = build_shards(3)
+        shards[1].ash_config = None
+        shard_paths = write_shards(tmp_path / "artifacts", shards)
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(tmp_path / "merged")]
+
+        result = TestMergeCli()._invoke(args)
+
+        assert result.exit_code == 1, result.output
+        assert "Refusing to merge" in result.output
+        assert "no scan configuration" in " ".join(result.output.split())
+        assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
+
+    def test_control_shards_that_all_record_a_config_merge(self):
+        merged = merge_shard_results(as_loaded(build_shards(3)))
+
+        assert merged.ash_config is not None
+
+
+class TestScanSetRecordsAcrossShards:
+    """The scan-set records in ``metadata`` are every shard's, not shard 0's.
+
+    Each shard builds ASH's scan set itself, so each records what it left out:
+    ``metadata.inputs_not_scanned`` (the links leaving the tree) and
+    ``metadata.ignore_file_exclusions``. Shards scan the same tree and normally
+    agree, but a shard that ran on a different checkout, or with
+    ``--no-honor-ignore-files``, does not, and the merged report took shard 0's
+    alone (``model_copy`` of the lowest-indexed shard), so what another shard's
+    scan-set readers did not scan was dropped from the report.
+    """
+
+    @staticmethod
+    def _not_scanned(*paths):
+        from automated_security_helper.models.asharp_model import InputNotScanned
+
+        return [
+            InputNotScanned(path=path, reason="link leaves the scanned tree")
+            for path in paths
+        ]
+
+    @staticmethod
+    def _exclusions(honored=True, by=None, output_dir=0, count=None):
+        from automated_security_helper.models.core import IgnoreFileExclusions
+
+        by = dict(by or {})
+        return IgnoreFileExclusions(
+            honored=honored,
+            excluded_file_count=sum(by.values()) if count is None else count,
+            by_ignore_file=by,
+            output_dir_file_count=output_dir,
+        )
+
+    def test_every_shards_inputs_not_scanned_are_listed_once(self):
+        shards = build_shards(3)
+        shards[0].metadata.inputs_not_scanned = self._not_scanned("a.py", "b.py")
+        shards[1].metadata.inputs_not_scanned = self._not_scanned("b.py", "c/d.py")
+        shards[2].metadata.inputs_not_scanned = None
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [row.path for row in merged.metadata.inputs_not_scanned] == [
+            "a.py",
+            "b.py",
+            "c/d.py",
+        ]
+
+    def test_a_row_only_a_later_shard_recorded_is_kept(self):
+        shards = build_shards(2)
+        shards[1].metadata.inputs_not_scanned = self._not_scanned("only/here.py")
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert [row.path for row in merged.metadata.inputs_not_scanned] == [
+            "only/here.py"
+        ]
+
+    def test_no_shard_with_a_row_leaves_none(self):
+        merged = merge_shard_results(as_loaded(build_shards(3)))
+
+        assert merged.metadata.inputs_not_scanned is None
+
+    def test_ignore_file_exclusions_take_every_shards_counts(self):
+        shards = build_shards(3)
+        shards[0].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 2, "sub/.ignore": 0}
+        )
+        shards[1].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 1, "sub/.ignore": 3}, output_dir=4
+        )
+        shards[2].metadata.ignore_file_exclusions = None
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        record = merged.metadata.ignore_file_exclusions
+        assert record.by_ignore_file == {".gitignore": 2, "sub/.ignore": 3}
+        assert record.excluded_file_count == 5
+        assert record.output_dir_file_count == 4
+        assert record.honored is True
+
+    def test_a_shard_that_did_not_honor_the_ignore_files_says_so(self):
+        shards = build_shards(2)
+        shards[0].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 2}
+        )
+        shards[1].metadata.ignore_file_exclusions = self._exclusions(honored=False)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        record = merged.metadata.ignore_file_exclusions
+        assert record.honored is False
+        # What the honoring shard's scan-set readers left out still counts.
+        assert record.by_ignore_file == {".gitignore": 2}
+        assert record.excluded_file_count == 2
+
+    def test_agreeing_shards_give_the_shards_record(self):
+        shards = build_shards(3)
+        for shard in shards:
+            shard.metadata.ignore_file_exclusions = self._exclusions(
+                by={".gitignore": 2}, output_dir=1
+            )
+            shard.metadata.inputs_not_scanned = self._not_scanned("x.py")
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.metadata.ignore_file_exclusions == self._exclusions(
+            by={".gitignore": 2}, output_dir=1
+        )
+        assert merged.metadata.inputs_not_scanned == self._not_scanned("x.py")
+
+    @pytest.mark.parametrize(
+        "honored, expected",
+        [
+            (
+                [True, True],
+                (
+                    "the scanned repository's .gitignore and .ignore files excluded "
+                    "2 files from ASH's scan set"
+                ),
+            ),
+            (
+                [False, False],
+                (
+                    "not honored for this scan (honor_ignore_files: false), so the "
+                    "scanned repository's .gitignore and .ignore files excluded no "
+                    "files from ASH's scan set"
+                ),
+            ),
+            (
+                [True, False],
+                (
+                    "honored by 1 of 2 merged scans and not by the other 1 "
+                    "(honor_ignore_files: false); the ignore files that were "
+                    "applied excluded 2 files from ASH's scan sets"
+                ),
+            ),
+            (
+                [False, True, True],
+                (
+                    "honored by 2 of 3 merged scans and not by the other 1 "
+                    "(honor_ignore_files: false); the ignore files that were "
+                    "applied excluded 2 files from ASH's scan sets"
+                ),
+            ),
+        ],
+        ids=["every-shard", "no-shard", "one-of-two", "two-of-three"],
+    )
+    def test_the_merged_summary_sentence_is_true_for_every_combination(
+        self, honored, expected
+    ):
+        """Mixed shards said "excluded no files" and "named by the caller": both false."""
+        shards = build_shards(len(honored))
+        for shard, honors in zip(shards, honored):
+            shard.metadata.ignore_file_exclusions = (
+                self._exclusions(by={".gitignore": 2})
+                if honors
+                else self._exclusions(honored=False)
+            )
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        record = merged.metadata.ignore_file_exclusions
+        assert record.summary_text() == expected
+        # The stored results file says the same when a report is built from it.
+        stored = AshAggregatedResults.model_validate_json(merged.model_dump_json())
+        assert stored.metadata.ignore_file_exclusions.summary_text() == expected
+
+    def test_one_of_three_shards(self):
+        shards = build_shards(3)
+        shards[0].metadata.ignore_file_exclusions = self._exclusions(honored=False)
+        shards[1].metadata.ignore_file_exclusions = self._exclusions(
+            by={".gitignore": 2}
+        )
+        shards[2].metadata.ignore_file_exclusions = self._exclusions(honored=False)
+
+        record = merge_shard_results(as_loaded(shards)).metadata.ignore_file_exclusions
+
+        assert (record.honored_scan_count, record.scan_count) == (1, 3)
+        assert record.summary_text().startswith(
+            "honored by 1 of 3 merged scans and not by the other 2 "
+        )
+
+    @pytest.mark.parametrize(
+        "second, counts",
+        [("mixed", (2, 4)), ("honored", (2, 3)), ("not-honored", (1, 3))],
+    )
+    def test_records_that_are_already_merged_keep_their_counts(self, second, counts):
+        """A record merged from 1 of 2 honoring scans counts as two scans, not one."""
+        from automated_security_helper.models.core import IgnoreFileExclusions
+
+        mixed = IgnoreFileExclusions(
+            honored=False,
+            excluded_file_count=2,
+            by_ignore_file={".gitignore": 2},
+            honored_scan_count=1,
+            scan_count=2,
+        )
+        other = {
+            "mixed": mixed.model_copy(),
+            "honored": self._exclusions(by={".gitignore": 2}),
+            "not-honored": self._exclusions(honored=False),
+        }[second]
+        shards = build_shards(2)
+        shards[0].metadata.ignore_file_exclusions = mixed
+        shards[1].metadata.ignore_file_exclusions = other
+
+        record = merge_shard_results(as_loaded(shards)).metadata.ignore_file_exclusions
+
+        assert record.honored is False
+        assert (record.honored_scan_count, record.scan_count) == counts
+
+    def test_agreeing_shards_write_no_scan_counts(self):
+        shards = build_shards(2)
+        for shard in shards:
+            shard.metadata.ignore_file_exclusions = self._exclusions(
+                by={".gitignore": 2}
+            )
+
+        dumped = json.loads(merge_shard_results(as_loaded(shards)).model_dump_json())
+
+        record = dumped["metadata"]["ignore_file_exclusions"]
+        assert "honored_scan_count" not in record and "scan_count" not in record
+
+    def test_the_merge_does_not_depend_on_the_order_shards_are_given(self):
+        def shards():
+            built = build_shards(3)
+            built[0].metadata.inputs_not_scanned = self._not_scanned("a.py")
+            built[2].metadata.inputs_not_scanned = self._not_scanned("z.py", "a.py")
+            built[1].metadata.ignore_file_exclusions = self._exclusions(
+                by={".gitignore": 1}
+            )
+            return built
+
+        forward = merge_shard_results(as_loaded(shards()))
+        backward = merge_shard_results(as_loaded(list(reversed(shards()))))
+
+        assert (
+            forward.metadata.inputs_not_scanned == backward.metadata.inputs_not_scanned
+        )
+        assert (
+            forward.metadata.ignore_file_exclusions
+            == backward.metadata.ignore_file_exclusions
+        )
+
+    def test_the_shards_are_not_changed(self):
+        shards = build_shards(2)
+        shards[0].metadata.inputs_not_scanned = self._not_scanned("a.py")
+        shards[1].metadata.inputs_not_scanned = self._not_scanned("b.py")
+        before = [shard.model_dump_json() for shard in shards]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert [shard.model_dump_json() for shard in shards] == before

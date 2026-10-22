@@ -19,6 +19,7 @@ from __future__ import annotations
 import fnmatch
 import importlib.util
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -125,7 +126,13 @@ def test_every_snapshot_belongs_to_an_existing_test_module(trailers) -> None:
     assert trailers.find_orphans(REPO_ROOT) == []
 
 
+def _git_init(path: Path) -> None:
+    """find_orphans reads the tree through git, so a synthetic tree has to be a repo."""
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+
+
 def test_orphan_check_reports_a_deleted_module(trailers, tmp_path: Path) -> None:
+    _git_init(tmp_path)
     snaps = tmp_path / "tests/x/__snapshots__"
     (snaps / "test_kept").mkdir(parents=True)
     (snaps / "test_kept/case.md").write_text("x")
@@ -140,6 +147,48 @@ def test_orphan_check_reports_a_deleted_module(trailers, tmp_path: Path) -> None
     assert "test_deleted.ambr belongs to test_deleted.py" in problems
     assert "test_renamed belongs to test_renamed.py" in problems
     assert "tests/y/__snapshots__/ is empty" in problems
+
+
+def test_orphan_check_counts_tracked_and_untracked_but_not_ignored(
+    trailers, tmp_path: Path
+) -> None:
+    """The tree is what git counts: tracked, untracked, never ignored.
+
+    tests/pytest-temp is ignored, and other test workers create and remove
+    directories there while this runs on the real checkout, so the check must not
+    look inside it. A snapshot that is committed and one that is not yet added are
+    both checked.
+    """
+    _git_init(tmp_path)
+    (tmp_path / ".gitignore").write_text("tests/pytest-temp/\n")
+    snaps = tmp_path / "tests/x/__snapshots__"
+    snaps.mkdir(parents=True)
+    (tmp_path / "tests/x/test_kept.py").write_text("")
+    (snaps / "test_committed_orphan.ambr").write_text("x")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    (snaps / "test_new_orphan.ambr").write_text("x")
+    scratch = tmp_path / "tests/pytest-temp/worker"
+    (scratch / "__snapshots__").mkdir(parents=True)
+    (scratch / "__snapshots__/test_scratch.ambr").write_text("x")
+    (scratch / "empty/__snapshots__").mkdir(parents=True)
+
+    problems = "\n".join(trailers.find_orphans(tmp_path))
+
+    assert "test_committed_orphan.ambr belongs to" in problems
+    assert "test_new_orphan.ambr belongs to" in problems
+    assert "pytest-temp" not in problems
+
+
+def test_orphan_check_refuses_a_tree_git_cannot_read(
+    trailers, tmp_path: Path, monkeypatch
+) -> None:
+    """A tree git cannot list is an error, not a tree with no snapshots in it."""
+    plain = tmp_path / "plain"
+    (plain / "tests/x/__snapshots__").mkdir(parents=True)
+    # Stop git searching above tmp_path, so an enclosing repository cannot answer.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    with pytest.raises(trailers.GitError):
+        trailers.find_orphans(plain)
 
 
 # ---------------------------------------------------------------------------

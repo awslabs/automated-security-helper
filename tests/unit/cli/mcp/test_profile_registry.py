@@ -135,6 +135,32 @@ class TestRegisterProfiles:
             register_profiles([f"badschema={bad}"])
         assert "badschema" in str(exc.value)
 
+    def test_a_profile_using_tagged_env_registers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The top-level key check reads the file as from_file does, so a tag the
+        # loader resolves is not refused by a plain YAML parser first.
+        monkeypatch.setenv("ASH_PROFILE_NAME_PROBE", "from-env")
+        cfg = _write_yaml(
+            tmp_path / "env.yaml",
+            "project_name: !ENV ${ASH_PROFILE_NAME_PROBE:unset}\n",
+        )
+        registry = register_profiles([f"env={cfg}"])
+        assert registry["env"].config.project_name == "from-env"
+
+    def test_a_toml_profile_registers_and_is_still_checked(
+        self, tmp_path: Path
+    ) -> None:
+        good = _write_yaml(tmp_path / "good.ashrc.toml", 'project_name = "toml"\n')
+        bad = _write_yaml(tmp_path / "bad.ashrc.toml", "not_a_field = 1\n")
+
+        registry = register_profiles([f"toml={good}"])
+        with pytest.raises(ProfileRegistryError) as exc:
+            register_profiles([f"bad={bad}"])
+
+        assert registry["toml"].config.project_name == "toml"
+        assert "not_a_field" in str(exc.value)
+
     def test_atomic_failure_does_not_partially_install(self, tmp_path: Path) -> None:
         # The registry singleton must remain empty when registration fails;
         # callers like ``mcp_command`` rely on "all-or-nothing" so a half-

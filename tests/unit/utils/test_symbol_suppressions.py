@@ -19,8 +19,10 @@ missing extra is a failure rather than a skip.
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import os
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -35,6 +37,7 @@ from automated_security_helper.config.config_linter import (
     LintResult,
     LintSeverity,
 )
+from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
@@ -54,12 +57,15 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils import symbol_spans
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.symbol_spans import (
     GRAMMARS_BY_EXTENSION,
+    SYMBOLS_EXTRA,
     SymbolResolver,
     grammar_for_path,
     index_symbols,
 )
+from tests.utils.bare_install_names import find_bare_installs, normalize
 
 
 def _require_symbols_extra() -> None:
@@ -189,6 +195,94 @@ def _suppression(**overrides) -> AshSuppression:
     fields = {"rule_id": "B602", "path": "src/app.py", "reason": "r"}
     fields.update(overrides)
     return AshSuppression(**fields)
+
+
+def _extra_distributions(extra: str) -> list[str]:
+    """The distributions ASH's installed metadata lists for ``extra``, normalized."""
+    names = []
+    for requirement in importlib.metadata.requires("automated-security-helper") or []:
+        spec, _, marker = requirement.partition(";")
+        if re.search(rf"""extra\s*==\s*["']{re.escape(extra)}["']""", marker):
+            name = re.match(r"[A-Za-z0-9._-]+", spec.strip())
+            names.append(normalize(name.group(0)))
+    # An empty list would make "names every package of the extra" vacuously true.
+    assert names, f"ASH's metadata lists no packages for the {extra!r} extra"
+    return sorted(names)
+
+
+def _git_requirement(version: str) -> str:
+    return (
+        f"automated-security-helper[{SYMBOLS_EXTRA}] @ "
+        f"git+{ASH_REPO_URL}.git@v{version}"
+    )
+
+
+def _symbols_install(message: str):
+    """The install a symbols-extra hint names that resolves to ASH, or None.
+
+    Either ASH's own requirement as a git reference pinned to the running
+    version, ``automated-security-helper[symbols] @ git+<repo>.git@v<version>``,
+    or every package of the extra by name. PyPI resolves the bare name
+    ``automated-security-helper`` to an unrelated project, so the extra spelled
+    without a git reference installs that project instead.
+    """
+    git_requirement = re.compile(
+        rf"automated-security-helper\[{SYMBOLS_EXTRA}\]\s*@\s*git\+"
+        rf"{re.escape(ASH_REPO_URL)}(?:\.git)?@v{re.escape(get_ash_version())}"
+        r"(?![\w.+-])",
+        re.IGNORECASE,
+    )
+    match = git_requirement.search(message)
+    if match:
+        return re.sub(r"\s+", " ", match.group(0))
+
+    def named(package: str) -> bool:
+        spelling = "[-_.]".join(re.escape(part) for part in package.split("-"))
+        pattern = rf"(?<![\w.-]){spelling}(?![\w-])"
+        return re.search(pattern, message, re.IGNORECASE) is not None
+
+    packages = _extra_distributions(SYMBOLS_EXTRA)
+    if all(named(package) for package in packages):
+        return tuple(packages)
+    return None
+
+
+def _symbols_hint_problems(message: str) -> list[str]:
+    """Why ``message`` gives no install that resolves to ASH; empty if it does."""
+    problems = [f"bare-name install {s!r}" for s in find_bare_installs(message)]
+    for match in re.finditer(
+        r"(?<![\w/\\.@:-])automated-security-helper(?![\w-])", message, re.IGNORECASE
+    ):
+        rest = message[match.start() :]
+        if not re.match(
+            r"automated-security-helper(?:\[[^\]]*\])?\s*@\s*git\+", rest, re.IGNORECASE
+        ):
+            problems.append(f"distribution name without a git reference: {rest[:50]!r}")
+    if _symbols_install(message) is None:
+        problems.append(
+            f"no install that resolves to ASH: expected {_git_requirement(get_ash_version())!r}"
+            f" or every package of the extra ({', '.join(_extra_distributions(SYMBOLS_EXTRA))})"
+        )
+    return problems
+
+
+def _missing_extra_scan_hints(tmp_path, caplog, monkeypatch) -> list[str]:
+    """The scan-time warnings logged for a symbol entry when the extra is absent."""
+    _write(tmp_path, "src/app.py", PYTHON_SOURCE)
+    # A None entry in sys.modules makes `import tree_sitter` raise
+    # ImportError, which is what an install without the extra does.
+    monkeypatch.setitem(sys.modules, "tree_sitter", None)
+    monkeypatch.setattr(symbol_spans, "_language_cache", {})
+    inside = _line(PYTHON_SOURCE, "MARK module_function body")
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert not _suppression(symbol="module_function").matches(
+            _finding("src/app.py", inside), SymbolResolver(tmp_path)
+        )
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if f"'{SYMBOLS_EXTRA}' extra" in record.getMessage()
+    ]
 
 
 class TestPythonSpans:
@@ -503,19 +597,14 @@ class TestFailClosed:
         assert "outside the scan root" in caplog.text
 
     def test_missing_extra(self, tmp_path, caplog, monkeypatch):
-        _write(tmp_path, "src/app.py", PYTHON_SOURCE)
-        # A None entry in sys.modules makes `import tree_sitter` raise
-        # ImportError, which is what an install without the extra does.
-        monkeypatch.setitem(sys.modules, "tree_sitter", None)
-        monkeypatch.setattr(symbol_spans, "_language_cache", {})
-        inside = _line(PYTHON_SOURCE, "MARK module_function body")
-        with caplog.at_level(logging.WARNING, logger="ash"):
-            assert not _suppression(symbol="module_function").matches(
-                _finding("src/app.py", inside), SymbolResolver(tmp_path)
-            )
+        hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
         assert "'symbols' extra" in caplog.text
-        assert "automated-security-helper[symbols]" in caplog.text
         assert not symbol_spans.symbols_extra_available()
+        # The warning's install advice must resolve to ASH. The bare
+        # "automated-security-helper[symbols]" resolves, on PyPI, to an unrelated
+        # project that has no such extra.
+        assert len(hints) == 1, hints
+        assert _symbols_hint_problems(hints[0]) == []
 
     def test_each_reason_warns_once_per_resolver(self, tmp_path, caplog):
         _write(tmp_path, "src/main.go", "package main\n")
@@ -612,7 +701,145 @@ class TestLint:
             )
         )
         assert len(issues) == 1
-        assert "automated-security-helper[symbols]" in issues[0].message
+        assert "'symbols' extra" in issues[0].message
+        assert _symbols_hint_problems(issues[0].message) == []
+
+    def test_lint_and_scan_name_the_same_install(self, tmp_path, caplog, monkeypatch):
+        """The config lint and the scan-time warning give the same install."""
+        scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
+        lint_issues = _symbol_issues(
+            _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        )
+        assert len(scan_hints) == 1, scan_hints
+        assert len(lint_issues) == 1, lint_issues
+        scan_install = _symbols_install(scan_hints[0])
+        lint_install = _symbols_install(lint_issues[0].message)
+        assert scan_install is not None, scan_hints[0]
+        assert scan_install == lint_install, (scan_hints[0], lint_issues[0].message)
+        # The whole command, version ranges included: the same package names
+        # without the extra's bounds would install versions outside them.
+        scan_commands = re.findall(r"`([^`]*)`", scan_hints[0])
+        lint_commands = re.findall(r"`([^`]*)`", lint_issues[0].message)
+        assert (
+            scan_commands
+            == lint_commands
+            == [symbol_spans.symbols_extra_install_command()]
+        ), (scan_hints[0], lint_issues[0].message)
+
+    def test_each_message_starts_the_hint_as_its_sentence_needs(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """The lint message starts the hint as a new sentence, capitalized.
+
+        The scan warning puts the same hint after a colon, where it stays
+        lowercase. Both carry the rest of the hint unchanged.
+        """
+        hint = symbol_spans.symbols_extra_install_hint()
+        assert hint.startswith("install it with `"), hint
+        scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
+        lint_issues = _symbol_issues(
+            _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        )
+        assert len(scan_hints) == 1 and len(lint_issues) == 1, (scan_hints, lint_issues)
+        assert lint_issues[0].message.endswith(f"stay visible. I{hint[1:]}"), (
+            lint_issues[0].message
+        )
+        assert f"'{SYMBOLS_EXTRA}' extra: {hint}" in scan_hints[0], scan_hints[0]
+
+    def test_the_hint_is_built_once_however_many_files_need_it(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """Building the hint reads every installed distribution's metadata.
+
+        Measured at about 0.46 s a call with 205 distributions, and the scan
+        builds the reason once per file a symbol suppression is checked against,
+        under the index lock. It is built once per process.
+        """
+        from automated_security_helper.utils import ash_install
+
+        calls = []
+        real = ash_install.extra_requirements_from_metadata
+
+        def counting(extra):
+            calls.append(extra)
+            return real(extra)
+
+        monkeypatch.setattr(ash_install, "extra_requirements_from_metadata", counting)
+        # Start and end with nothing cached, so the count is this test's own.
+        clear = getattr(
+            symbol_spans.symbols_extra_install_command, "cache_clear", lambda: None
+        )
+        clear()
+        monkeypatch.setitem(sys.modules, "tree_sitter", None)
+        monkeypatch.setattr(symbol_spans, "_language_cache", {})
+        for index in range(5):
+            _write(tmp_path, f"src/mod{index}.py", PYTHON_SOURCE)
+        resolver = SymbolResolver(tmp_path)
+        inside = _line(PYTHON_SOURCE, "MARK module_function body")
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            for index in range(5):
+                assert not _suppression(
+                    path=f"src/mod{index}.py", symbol="module_function"
+                ).matches(_finding(f"src/mod{index}.py", inside), resolver)
+        _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        clear()
+
+        hints = [r for r in caplog.records if "'symbols' extra" in r.getMessage()]
+        assert len(hints) == 5, [r.getMessage() for r in hints]
+        assert calls == ["symbols"], calls
+
+    def test_both_hints_point_at_the_docs_for_other_installers(
+        self, tmp_path, caplog, monkeypatch
+    ):
+        """The printed command is pip's; uv tool, pipx and uvx users need the page."""
+        url = f"{ASH_DOCS_URL}/docs/suppressions/#installing-the-extra"
+        scan_hints = _missing_extra_scan_hints(tmp_path, caplog, monkeypatch)
+        lint_issues = _symbol_issues(
+            _lint([{"path": "src/app.py", "reason": "r", "symbol": "module_function"}])
+        )
+        assert len(scan_hints) == 1 and url in scan_hints[0], scan_hints
+        assert len(lint_issues) == 1 and url in lint_issues[0].message, lint_issues
+
+
+class TestInstallHintChecker:
+    """The checker the hint tests above use accepts exactly the resolving installs."""
+
+    @pytest.mark.parametrize(
+        "form",
+        ["git-reference", "git-reference-without-dot-git", "extra-packages"],
+    )
+    def test_accepts_an_install_that_resolves_to_ash(self, form):
+        git = _git_requirement(get_ash_version())
+        hint = {
+            "git-reference": f"Install it with: pip install '{git}'",
+            "git-reference-without-dot-git": f"install '{git.replace('.git@', '@')}'",
+            "extra-packages": "pip install "
+            + " ".join(_extra_distributions(SYMBOLS_EXTRA)),
+        }[form]
+        assert _symbols_hint_problems(hint) == []
+
+    @pytest.mark.parametrize(
+        "form",
+        [
+            "bare-extra",
+            "bare-extra-after-pip",
+            "unpinned-git-reference",
+            "other-version",
+            "git-reference-without-the-extra",
+            "some-packages-of-the-extra",
+        ],
+    )
+    def test_rejects_an_install_that_does_not(self, form):
+        version = get_ash_version()
+        hint = {
+            "bare-extra": "Install automated-security-helper[symbols]",
+            "bare-extra-after-pip": 'pip install "automated-security-helper[symbols]"',
+            "unpinned-git-reference": f"pip install 'automated-security-helper[symbols] @ git+{ASH_REPO_URL}.git'",
+            "other-version": f"pip install '{_git_requirement('0.0.1')}'",
+            "git-reference-without-the-extra": f"pip install 'automated-security-helper @ git+{ASH_REPO_URL}.git@v{version}'",
+            "some-packages-of-the-extra": "pip install tree-sitter",
+        }[form]
+        assert _symbols_hint_problems(hint)
 
     def test_linter_id_matches_model_id(self):
         raw = {"path": "a.py", "rule_id": "B602", "reason": "r", "symbol": "A.b"}

@@ -380,3 +380,222 @@ def test_dry_run_without_policy_does_not_mention_it(tmp_path):
     rendered = resolve_workspace(workspace).render()
     assert "workspace policy" not in rendered
     assert "policy:" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# A policy file an MCP client delivered
+# ---------------------------------------------------------------------------
+
+_POLICY_WITH_ENTRIES = (
+    "workspace:\n"
+    "  suppressions:\n"
+    "    - path: 'api/tests/**'\n"
+    "      reason: tests\n"
+    "      client_supplied: {mark}\n"
+    "  ignore_paths:\n"
+    "    - path: '**/vendor'\n"
+    "      reason: third party\n"
+    "      client_supplied: {mark}\n"
+)
+
+
+def _policy_entries(plan):
+    project = _by_key(plan)["api"]
+    return list(project.policy_suppressions) + list(project.policy_ignore_paths)
+
+
+@pytest.fixture
+def _mcp_root(tmp_path, monkeypatch):
+    root = tmp_path / "mcp-workspaces"
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(root))
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    return root
+
+
+def test_a_delivered_policys_entries_are_marked_client_supplied(tmp_path, _mcp_root):
+    """Kept and marked in the results, as a delivered config's own entries are."""
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, _POLICY_WITH_ENTRIES.format(mark="false"))
+
+    entries = _policy_entries(resolve_workspace(workspace))
+
+    assert len(entries) == 2
+    assert all(entry.client_supplied is True for entry in entries)
+
+
+def test_a_policy_elsewhere_cannot_mark_its_own_entries(tmp_path, _mcp_root):
+    """Only ASH marks an entry, so a file's own ``client_supplied`` is not kept."""
+    _project(tmp_path, "api")
+    workspace = _workspace(tmp_path, ["api"])
+    _policy_file(tmp_path, _POLICY_WITH_ENTRIES.format(mark="true"))
+
+    entries = _policy_entries(resolve_workspace(workspace))
+
+    assert len(entries) == 2
+    assert all(entry.client_supplied is False for entry in entries)
+
+
+def test_a_delivered_policy_is_refused_under_a_profile_denying_suppressions(
+    tmp_path, _mcp_root
+):
+    """An operator who lists suppressions in ``denied_paths`` refuses a client's."""
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, _POLICY_WITH_ENTRIES.format(mark="false"))
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(denied_paths=["/global_settings/suppressions"]),
+        base=AshConfig(),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError) as excinfo:
+        resolve_workspace(workspace, client_config_rules=rules)
+
+    assert "global_settings.suppressions" in str(excinfo.value)
+
+
+def test_an_operators_value_pattern_applies_to_a_delivered_policy(tmp_path, _mcp_root):
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, _POLICY_WITH_ENTRIES.format(mark="false"))
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(
+            denied_value_patterns={"/global_settings/ignore_paths": "vendor"}
+        ),
+        base=AshConfig(),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError):
+        resolve_workspace(workspace, client_config_rules=rules)
+
+
+def test_a_delivered_policy_is_checked_as_each_project_gets_it(tmp_path, _mcp_root):
+    """A rewritten entry the rules deny is refused even when the written one is not.
+
+    ``api/**`` is pushed down to the project ``api`` as ``**``, which the
+    operator's pattern denies.
+    """
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api")
+    workspace = _workspace(root, ["api"])
+    _policy_file(
+        root,
+        "workspace:\n  suppressions:\n    - path: 'api/**'\n      reason: all of it\n",
+    )
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(
+            denied_value_patterns={"/global_settings/suppressions": r"^\*\*$"}
+        ),
+        base=AshConfig(),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError):
+        resolve_workspace(workspace, client_config_rules=rules)
+
+
+def test_a_delivered_policy_adding_a_scanner_the_operator_denies_is_refused(
+    tmp_path, _mcp_root
+):
+    """``additional_scanners`` is checked as ``scanners.<name>.enabled: true``."""
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        RuntimeOverridesConfig,
+    )
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api", disabled_scanners=["bandit"])
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, "workspace:\n  additional_scanners: [bandit]\n")
+    rules = ClientConfigRules(
+        policy=RuntimeOverridesConfig(denied_paths=["/scanners/bandit/enabled"]),
+        base=AshConfig.model_validate({"scanners": {"bandit": {"enabled": False}}}),
+    )
+
+    with pytest.raises(ASHConfigFieldDeniedError) as excinfo:
+        resolve_workspace(workspace, client_config_rules=rules)
+
+    assert "scanners.bandit.enabled" in str(excinfo.value)
+
+
+def test_a_delivered_policy_adding_a_scanner_scans_under_the_default_rules(
+    tmp_path, _mcp_root
+):
+    """Positive control: the default rules leave ``enabled`` to a client's config."""
+    root = _mcp_root / "session-1" / "source"
+    _project(root, "api", disabled_scanners=["bandit"])
+    workspace = _workspace(root, ["api"])
+    _policy_file(root, "workspace:\n  additional_scanners: [bandit]\n")
+
+    plan = resolve_workspace(workspace)
+
+    assert list(_by_key(plan)["api"].policy_scanners) == ["bandit"]
+
+
+def test_the_plan_takes_its_trusted_base_from_the_registered_profile(
+    tmp_path, _mcp_root
+):
+    """``trusted_config`` reaches the plan's resolution, as it reaches the scan's.
+
+    The patched copy repeats the registered profile's ``ash_aws_plugins``, which
+    only the operator's config may load. With the client's copy as the trusted
+    base, the plan would drop the module the scan then loads.
+    """
+    import yaml
+
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.client_config_policy import rules_from
+
+    module = "automated_security_helper.plugin_modules.ash_aws_plugins"
+    profile = {"project_name": "operator", "ash_plugin_modules": [module]}
+    operator_copy = _mcp_root / "session-1" / "config" / "ash.yaml"
+    client_copy = _mcp_root / "session-1" / "client-config" / "ash.yaml"
+    for path in (operator_copy, client_copy):
+        path.parent.mkdir(parents=True)
+        path.write_text(yaml.safe_dump(profile), encoding="utf-8")
+    # Outside the MCP root's parent, which would put both copies in the tree.
+    checkouts = tmp_path / "checkouts"
+    _project(checkouts, "api")
+    workspace = _workspace(checkouts, ["api"])
+
+    plan = resolve_workspace(
+        workspace,
+        default_config=client_copy,
+        trusted_config=operator_copy,
+        client_config_rules=rules_from(AshConfig.model_validate(profile)),
+    )
+
+    assert module in _by_key(plan)["api"].ash_plugin_modules

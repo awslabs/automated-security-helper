@@ -30,9 +30,16 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
+from automated_security_helper.utils.link_exclusions import (
+    ignored_entries,
+    walked_files,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
@@ -190,7 +197,7 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to Checkov configuration file, relative to current source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
+            description="Path to Checkov configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.checkov.yaml` and `.checkov.yml` in the root of the source directory.",
         ),
     ] = None
     skip_path: Annotated[
@@ -486,13 +493,17 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         # Added for this resolution only and then removed, as bandit does with its
         # excluded paths: the pattern depends on the target, and extra_args
-        # persists across scan() calls.
-        original_extra_args = list(self.args.extra_args)
+        # persists across scan() calls. A new list: the one extra_args holds is
+        # put back as it was, unchanged.
+        original_extra_args = self.args.extra_args
         output_skip = self._output_dir_skip_pattern(target)
-        if output_skip is not None:
-            self.args.extra_args.append(
-                ToolExtraArg(key="--skip-path", value=output_skip)
-            )
+        skips = [] if output_skip is None else [output_skip]
+        skips.extend(self._link_skip_patterns(target))
+        skips.extend(self._ignore_skip_patterns(target, global_ignore_paths))
+        self.args.extra_args = [
+            *original_extra_args,
+            *(ToolExtraArg(key="--skip-path", value=skip) for skip in skips),
+        ]
         try:
             final_args = self._resolve_arguments(
                 target=target,
@@ -503,6 +514,84 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         finally:
             self.args.extra_args = original_extra_args
         return _directory_as_one_token(final_args), results_file, None
+
+    def _ignore_skip_patterns(
+        self, target: Path, global_ignore_paths: List[IgnorePathWithReason]
+    ) -> List[str]:
+        """One ``--skip-path`` for each path the global ignore paths ignore.
+
+        The paths come from ``ignored_entries``, which matches each pattern as ASH
+        does when it drops findings. A file is written as a link's path is
+        (``_link_skip_patterns``): anchored at both ends, so it matches that file
+        alone. A directory whose every file is ignored is anchored at the start and
+        ends with ``/``, so it matches every path below it and not a sibling that
+        shares its name's start; no group, since checkov's Terraform module finder
+        joins every value into one regex. None on Windows, where checkov's walked
+        paths are not ``/``-joined; checkov then reads those files, and ASH drops
+        their findings.
+        """
+        if os.sep != "/" or not global_ignore_paths:
+            return []
+        files, _ = walked_files(target)
+        entries = ignored_entries(
+            target, self.context.source_dir, global_ignore_paths, files
+        )
+        root = Path(target).as_posix()
+        escaped_dot = "\\."
+        patterns = []
+        for entry in entries:
+            literal = re.escape(f"{root}/{entry}").replace(escaped_dot, "[.]")
+            patterns.append("^" + literal + ("" if entry.endswith("/") else "$"))
+        return patterns
+
+    def _link_skip_patterns(self, target: Path) -> List[str]:
+        """One ``--skip-path`` for each link to a file whose target leaves ``target``.
+
+        checkov 3.3.26 reads a link to a file in directory mode, relative or
+        absolute, and reports it at the link's path (measured), so a link the
+        repository committed would have checkov read a file outside the scanned tree.
+        The links come from ``file_links_leaving_tree``, which walks as checkov
+        does: it does not descend links to directories, and it ignores ignore files.
+
+        Built here, for links ASH found, and kept apart from the operator's
+        ``skip_path`` values, which are passed as they are: each is the link's path
+        as checkov walks it (the ``--directory`` value joined with the link's path
+        below it), ``re.escape``d and anchored at both ends, so it matches that path
+        and no other -- ``a/main.tf`` does not also skip ``a/main.tf.json``. checkov
+        applies a value with ``re.search`` and as a substring, and the substring
+        test cannot match a path either, since the value starts with ``^``. Escaped
+        values with parentheses, brackets, braces, spaces, commas, quotes and
+        ``? * + | $ ^ #`` were measured against checkov 3.3.26, including the regex
+        its Terraform module finder builds from every value: each skipped exactly
+        its own link.
+
+        Raises:
+            ScannerError: When there is such a link and checkov's walked paths use
+                a separator other than ``/`` (Windows), where the values cannot
+                match them. checkov is then not run on ``target``, rather than read
+                the file the link points at.
+        """
+        links = file_links_leaving_tree(target)
+        if not links:
+            return []
+        if os.sep != "/":
+            raise ScannerError(
+                f"Not running checkov on {Path(target).as_posix()}: {links[0]!r}: "
+                f"{REASON_LINK_LEAVES_TREE}, and checkov's --skip-path cannot leave "
+                "out a single file on this platform, so checkov would read the file "
+                "it points at."
+            )
+        root = Path(target).as_posix()
+        # Every dot as "[.]", not "\.": checkov's secrets runner, with
+        # --enable-secret-scan-all-files (or CKV_SECRETS_SCAN_ENABLE_ALL), compiles
+        # each value after replacing ".terraform" with "\.terraform"
+        # (checkov/secrets/utils.py filter_excluded_paths), which would turn an
+        # escaped "\.terraform" into "\\.terraform", and that matches no path.
+        escaped_dot = "\\."
+        return [
+            "^" + re.escape(f"{root}/{relative}").replace(escaped_dot, "[.]") + "$"
+            for relative in links
+        ]
 
     def _subprocess_cwd(self, results_dir: Path) -> Path | None:
         """Run checkov from the filesystem root, outside the scanned tree.

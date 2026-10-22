@@ -378,18 +378,24 @@ class TestCapturedChildOutputIsDecodedExplicitly:
         with subprocess.Popen(
             self._child(self.PAYLOAD), stdout=subprocess.PIPE, encoding="cp1252"
         ) as proc:
-            with _exceptions_raised_on_threads() as on_threads:
+            try:
+                with _exceptions_raised_on_threads() as on_threads:
 
-                def _readerthread(fh, buf):  # Popen._communicate's body, verbatim.
-                    buf.append(fh.read())
-                    fh.close()
+                    def _readerthread(fh, buf):  # Popen._communicate's body, verbatim.
+                        buf.append(fh.read())
+                        fh.close()
 
-                reader = threading.Thread(
-                    target=_readerthread, args=(proc.stdout, buffer)
-                )
-                reader.start()
-                reader.join(timeout=60)
-            assert not reader.is_alive(), "the reader thread never finished"
+                    reader = threading.Thread(
+                        target=_readerthread, args=(proc.stdout, buffer)
+                    )
+                    reader.start()
+                    reader.join(timeout=60)
+                assert not reader.is_alive(), "the reader thread never finished"
+            finally:
+                # Popen.__exit__ waits for the child with no timeout, so a child
+                # still running here would hold the test past the join's bound.
+                if proc.poll() is None:
+                    proc.kill()
 
         assert [type(exc) for exc in on_threads] == [UnicodeDecodeError], (
             f"expected one decode failure on the reader thread, got {on_threads!r}"

@@ -124,3 +124,48 @@ def test_error_line_keeps_the_failed_command(monkeypatch, capsys):
     out = _plain(capsys.readouterr().out)
     assert "pip install ash[sarif,toml]" in out
     assert "no such extra [toml]" in out
+
+
+def test_an_unloaded_community_scanner_names_its_module(tmp_path, monkeypatch):
+    """`--tool snyk-code` without its module loaded is not a typo; say what to add."""
+    _patch_one_plugin(monkeypatch, tmp_path, [])
+
+    result = runner.invoke(
+        dependencies_app,
+        [
+            "--plugin-type",
+            "scanner",
+            "--bin-path",
+            str(tmp_path / "bin"),
+            "--tool",
+            "snyk-code",
+        ],
+    )
+
+    output = _plain(result.output)
+    assert result.exit_code == EXIT_BAD_SELECTION
+    assert "snyk-code is a community plugin scanner" in output
+    # Brackets survive rich: the override is printed as typed (COLUMNS=200).
+    assert (
+        "ash_plugin_modules+=[automated_security_helper.plugin_modules."
+        "ash_snyk_plugins]" in output
+    )
+
+
+def test_a_plain_typo_gets_no_community_hint(tmp_path, monkeypatch):
+    _patch_one_plugin(monkeypatch, tmp_path, [])
+
+    result = runner.invoke(
+        dependencies_app,
+        [
+            "--plugin-type",
+            "scanner",
+            "--bin-path",
+            str(tmp_path / "bin"),
+            "--tool",
+            "zizmr",
+        ],
+    )
+
+    assert result.exit_code == EXIT_BAD_SELECTION
+    assert "community plugin scanner" not in _plain(result.output)

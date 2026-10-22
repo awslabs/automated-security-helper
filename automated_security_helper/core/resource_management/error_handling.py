@@ -202,9 +202,12 @@ def safe_write_json_file(
                 },
             )
 
-        # Write the file
+        # Write the file. Below an output directory, as ASH's other writes there:
+        # never through a link (fs_guard).
+        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+
         try:
-            with open(path_obj, "w", encoding="utf-8") as f:
+            with open_for_write(path_obj) as f:
                 json.dump(data, f, indent=2)
             return None
         except PermissionError:

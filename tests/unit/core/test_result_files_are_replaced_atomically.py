@@ -36,6 +36,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from tests.utils.helpers import sarif_report_written
 
 PREVIOUS = "previous contents, complete"
 _REAL_REPLACE = os.replace
@@ -104,7 +105,9 @@ def test_a_failed_report_write_leaves_the_previous_report_intact(tmp_path):
         "The report was overwritten in place: a reader opening it during the write "
         "would have seen it truncated."
     )
-    assert intercepted == [str(report)], (
+    # The output directory is guarded, so the rename names the report relative to
+    # its directory's descriptor (fs_guard.open_for_atomic_write).
+    assert [Path(target).name for target in intercepted] == [report.name], (
         "The report write never reached a rename, so it is not atomic."
     )
     assert _leftover_staging_files(reports_dir) == []
@@ -132,7 +135,11 @@ def test_a_failed_changed_files_sarif_rewrite_leaves_the_previous_sarif_intact(
         source_dir=tmp_path, output_dir=output_dir, changed_files_only=True
     )
     orchestrator = MagicMock()
-    orchestrator.execute_scan.return_value = AshAggregatedResults()
+    # As the report phase records it: the SARIF reporter wrote reports/ash.sarif,
+    # so the rewrite replaces it.
+    orchestrator.execute_scan.return_value = sarif_report_written(
+        AshAggregatedResults()
+    )
     orchestrator.config.fail_on_findings = True
 
     intercepted: List[str] = []

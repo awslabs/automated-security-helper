@@ -29,16 +29,26 @@ resolve_ash_workspace(
 | Argument | Meaning |
 |---|---|
 | `workspace_file` | Absolute path to the `.code-workspace` definition. |
-| `workspace_config` | Path to a workspace policy file. Must exist when given; ASH does not fall back to searching for one, because that would apply different policy than the one you named. Omit it and the workspace root is searched, and having no policy is not an error. A policy file an MCP client delivered (under the MCP workspace root), named here or found beside the definition, is refused: it sets suppressions and ignore paths for every project. |
+| `workspace_config` | Path to a workspace policy file. Must exist when given; ASH does not fall back to searching for one, because that would apply different policy than the one you named. Omit it and the workspace root is searched, and having no policy is not an error. A policy file, named here or found beside the definition, is used only from a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names. One anywhere else, including any file an MCP client delivered, is refused: a policy sets suppressions and ignore paths for every project, so it has to be the operator's. A delivered policy that is a symlink is the client's wherever it points, and one that reaches a file outside the directories the session may read config from is refused before it is read, with `error_type: config_input_not_permitted`. A project's own `.ash.yaml` that links outside them is refused the same way. |
 | `allow_missing_projects` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. They stay in the plan, so the response still accounts for every folder the definition listed. |
-| `config_overrides` | `key=value` overrides, applied to each project's config during resolution. Applied here and not only at scan time, so the threshold the plan reports is the threshold a scan will enforce. They come from the client, so they are checked against the session config's `runtime_overrides` allowlist first, as `select_profile`'s `patch_ops` are; with runtime overrides off (the default), any override is refused. Each override is checked by the key it names (in either `-` or `_` spelling) as well as by what it changes, so setting a key to the value the session config already holds still needs that key to be allowed. |
+| `config_overrides` | `key=value` overrides, applied to each project's config during resolution. Applied here and not only at scan time, so the threshold the plan reports is the threshold a scan will enforce. They come from the client, so they are checked against the session config's `runtime_overrides` allowlist first, as `select_profile`'s `patch_ops` are; with runtime overrides off (the default), any override is refused. Each override is checked by the key it names (in either `-` or `_` spelling) as well as by what it changes, so setting a key to the value the session config already holds still needs that key to be allowed. An accepted override is still the client's value: what it sets is marked, reported or confined as a config the client delivered is (see [A patched value is the client's](streamable-http.md#a-patched-value-is-the-clients)). |
 
 The response carries:
 
 - `plan` — the rendered plan, the same text `ash --workspace ... --dry-run` prints. Written for a human to read; its layout is not a contract.
-- `projects` — the same decisions as structured data. Read this if you need to branch on a threshold or a scanner list.
+- `projects` — the same decisions as structured data. Read this if you need to branch on a threshold or a scanner list. Each entry's `config_source` is the project's own config file, or the session's profile for a project with none, and `operator_config` is the profile layered over a project's own config, or `null`. See [Which config each project gets](#which-config-each-project-gets).
 - `skipped_projects` — one entry per dropped project, with a reason.
 - `exit_code` — `0` on success. See [Exit codes](#exit-codes).
+
+### Which config each project gets
+
+The session's profile (the one `select_profile` bound, or the one the call names with `profile`) is the operator's config, as `--config` is on the CLI (see [The operator's config](../cli-reference.md#the-operators-config)). Every field the profile sets is final for every project, and a project's own `.ash.yaml` fills only the fields the profile leaves unset. A project without a config of its own runs under the session's config alone.
+
+What is layered over a project's own config is the profile as the operator registered it, not a copy the client patched with `patch_ops` or `override_yaml`. A value the client patched in is never final over a project's own config: it applies only to a project with no config of its own, and there it is limited as a config the client delivered is (see [A patched value is the client's](streamable-http.md#a-patched-value-is-the-clients)). If the session's copy of the registered profile is gone while the patched copy is not, the call is refused with exit code `3`; bind the profile again with `select_profile`.
+
+A session that bound no profile, and a call that names none, run under the server's own config, the file `ASH_CONFIG` names: it is layered over each project's own config the same way. Not when that file, or a base it extends, is under the MCP workspace root, which makes it a file a client delivered; then nothing is layered.
+
+A profile a call names with `profile` is written to a file of its own per profile in the session's `config/` directory, so two calls in one session that name different profiles do not change each other's plan.
 
 ## run_ash_workspace_scan
 
@@ -89,7 +99,7 @@ The denominator is projects and not scanners on purpose. ASH's per-scanner progr
 
 ## Allowed roots govern the projects, not the workspace file
 
-`ASH_MCP_ALLOWED_ROOTS` is the setting that bounds what the MCP server may scan. It applies to a workspace scan project by project: every project directory the workspace resolves to is checked against it.
+`ASH_MCP_ALLOWED_ROOTS` is the setting that bounds what the MCP server may scan. It applies to a workspace project by project, for `resolve_ash_workspace` and `run_ash_workspace_scan` alike: every project directory the workspace resolves to is checked against it, before any project's own `.ash.yaml` is read.
 
 That is a wider reach than the single-directory tools have, arrived at indirectly. `run_ash_scan` is handed one directory by the client. A workspace scan is handed one *file* and gets N directories out of it, none of which the client stated — so checking the workspace root alone would be worse than useless, since the resolver already guarantees every project sits below the root and one allowlisted root would then authorize the whole tree beneath it.
 
@@ -116,11 +126,13 @@ Say this plainly, because it is easy to assume otherwise: leaving the variable u
 
 That list is a safety net, not a security boundary. It declines the handful of directories that hold host configuration and kernel interfaces rather than source code, and it says nothing about the rest of the filesystem. A `.code-workspace` file can list any folder below its own root, so on a server with the variable unset, a workspace definition is free to point the scanner at essentially any tree the server process can read. If you need the surface actually bounded, set `ASH_MCP_ALLOWED_ROOTS`; nothing else here does that job. Setting it replaces the default list rather than adding to it, which is also how a deliberate scan of a system directory is arranged.
 
-## Ordering: resolve, then confine, then scan
+## Ordering: read the definition, confine, then read project configs and scan
 
 The order is forced by what each step needs, and it shows up in the errors you get.
 
-Confinement cannot run first, because it needs the resolved project directories and only resolution produces them. So a workspace file that is both malformed and outside the permitted roots reports the malformation — a folder nobody cloned, say — rather than the confinement refusal. That is the right way round: the malformation is the part you can act on, and reporting the refusal would send you to edit an environment variable when the real problem is a line in the workspace file.
+Confinement needs the project directories, which come from the workspace definition, so the definition is read and checked first. A workspace file that is both malformed and outside the permitted roots reports the malformation — a folder nobody cloned, say — rather than the confinement refusal. That is the right way round: the malformation is the part you can act on, and reporting the refusal would send you to edit an environment variable when the real problem is a line in the workspace file.
+
+Confinement then runs before any project's own config is read. A project outside the permitted roots refuses the workspace, with exit code 4, without its `.ash.yaml` being opened, so neither tool reports anything from a config the server may not read: not its label, scanners or threshold in a plan, and not its parse errors.
 
 Every filesystem write happens after the confinement check, including the `clean_output` deletion and the creation of each project's output directory. A refused workspace leaves nothing behind.
 

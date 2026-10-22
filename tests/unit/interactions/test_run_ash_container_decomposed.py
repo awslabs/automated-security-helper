@@ -204,6 +204,46 @@ def test_assemble_run_command_image_argument_position():
     assert img_idx < ash_idx
 
 
+def test_assemble_run_command_names_the_outer_run_id_without_its_value():
+    """The in-container run writes it into its results file.
+
+    By name only: the runner reads the value from its own environment
+    (``_run_environment``), so it is not in the command line other processes on
+    the host can read, nor in the command ``--debug`` prints.
+    """
+    run_id = "0123456789abcdef0123456789abcdef"
+    cmd = _assemble_run_command(**_base_assemble_kwargs(outer_run_id=run_id))
+    index = cmd.index("ASH_OUTER_RUN_ID")
+    assert cmd[index - 1] == "-e"
+    assert index < cmd.index("automated-security-helper:non-root")
+    assert not any(run_id in arg for arg in cmd), cmd
+
+
+def test_assemble_run_command_passes_the_outer_run_id_through_a_wrapper():
+    """OCI_RUNNER_WRAPPER (sudo, for one) need not pass the environment on."""
+    run_id = "0123456789abcdef0123456789abcdef"
+    cmd = _assemble_run_command(
+        **_base_assemble_kwargs(outer_run_id=run_id, oci_command_prefix=["sudo"])
+    )
+    index = cmd.index(f"ASH_OUTER_RUN_ID={run_id}")
+    assert cmd[index - 1] == "-e"
+
+
+def test_the_run_environment_carries_the_outer_run_id(monkeypatch):
+    from automated_security_helper.interactions.run_ash_container import (
+        _run_environment,
+    )
+
+    monkeypatch.setenv("ASH_TEST_INHERITED", "kept")
+    run_id = "0123456789abcdef0123456789abcdef"
+
+    environment = _run_environment(run_id)
+
+    assert environment["ASH_OUTER_RUN_ID"] == run_id
+    assert environment["ASH_TEST_INHERITED"] == "kept"
+    assert _run_environment(None) is None
+
+
 def test_assemble_run_command_offline_uses_network_none():
     """--network=none is added when offline=True."""
     cmd = _assemble_run_command(**_base_assemble_kwargs(offline=True))
@@ -214,3 +254,25 @@ def test_assemble_run_command_online_no_network_flag():
     """--network=none is NOT present when offline=False."""
     cmd = _assemble_run_command(**_base_assemble_kwargs(offline=False))
     assert "--network=none" not in cmd
+
+
+class TestTheInTreeToolOptInReachesTheContainer:
+    """The container's ASH makes the same in-tree decision as the host's."""
+
+    def env_values(self):
+        cmd = _assemble_run_command(**_base_assemble_kwargs())
+        return [cmd[i + 1] for i, a in enumerate(cmd) if a == "-e"]
+
+    def test_forwarded_when_the_scan_allows_it(self, monkeypatch, tmp_path):
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        monkeypatch.setenv("ASH_ALLOW_IN_TREE_TOOLS", "1")
+        with scanning_tree(tmp_path):
+            assert "ASH_ALLOW_IN_TREE_TOOLS=1" in self.env_values()
+
+    def test_not_forwarded_otherwise(self, monkeypatch, tmp_path):
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        monkeypatch.delenv("ASH_ALLOW_IN_TREE_TOOLS", raising=False)
+        with scanning_tree(tmp_path):
+            assert not [v for v in self.env_values() if "IN_TREE" in v]

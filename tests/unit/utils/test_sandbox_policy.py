@@ -3,8 +3,10 @@
 
 """The backend-neutral sandbox policy and the scope that decides when it applies."""
 
+import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,12 +23,14 @@ from automated_security_helper.utils.sandbox import (
     scanner_sandbox_scope,
 )
 from automated_security_helper.utils.sandbox import backends as backends_module
+from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox import scope as scope_module
 from automated_security_helper.utils.sandbox.backends import (
     BACKENDS,
     LANDLOCK_EXEC,
     BwrapBackend,
     FirejailBackend,
+    LandlockBackend,
     SandboxExecBackend,
     SpawnPlan,
 )
@@ -34,6 +38,28 @@ from automated_security_helper.utils.sandbox.policy import (
     build_scanner_policy,
     refuse_symlinked_output_dir,
 )
+
+
+def _fake_passwd_home(monkeypatch, home):
+    """Make ``home`` the passwd entry's home everywhere it is read.
+
+    backends imports policy's _passwd_home by name, so each module has its own
+    binding, and a test that fakes only one sees two different passwd homes.
+    """
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", lambda: home, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _home_is_the_passwd_home(monkeypatch):
+    """HOME is the passwd entry's home here, as on most hosts.
+
+    Every test sets HOME to a directory of its own; the cases where the two differ
+    are TestFirejailHidesBothHomes, TestHomeElsewhereThanThePasswdEntry and the
+    tests after it, which override this.
+    """
+    for module in (policy_module, backends_module):
+        monkeypatch.setattr(module, "_passwd_home", Path.home, raising=False)
 
 
 @pytest.fixture
@@ -46,6 +72,10 @@ def layout(tmp_path, monkeypatch):
     # Path.home() reads USERPROFILE on Windows, where these tests run too: the
     # policy builder is path logic, independent of the platform it runs on.
     monkeypatch.setenv("USERPROFILE", str(home))
+    # uv's directories follow these before $HOME, so a value from the environment
+    # running the tests would move them away from the ones planted under home.
+    for variable in ("XDG_DATA_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR"):
+        monkeypatch.delenv(variable, raising=False)
     source = tmp_path / "src"
     source.mkdir()
     output = source / ".ash" / "ash_output"
@@ -76,6 +106,62 @@ def _as_argv(path):
 
 def _resolved(paths):
     return {Path(os.path.realpath(p)) for p in paths}
+
+
+class TestUvDirectoriesAreScreened:
+    """uv's directories named in ASH's environment get the breadth rule too.
+
+    UV_TOOL_DIR, UV_PYTHON_INSTALL_DIR and UV_CACHE_DIR name directories mounted for
+    every scanner, so uv can run tools. A value that is "/", a home or a directory
+    holding one would mount far more than uv's files, so it is not mounted, with a
+    warning, the way the rule cache variables are treated.
+    """
+
+    @pytest.fixture
+    def warnings(self, monkeypatch):
+        from automated_security_helper.utils import log
+
+        said = []
+        monkeypatch.setattr(
+            log.ASH_LOGGER, "warning", lambda message, *a, **k: said.append(message)
+        )
+        return said
+
+    @pytest.mark.parametrize("named", ["home", "holding-home", "root"])
+    @pytest.mark.parametrize(
+        "variable", ["UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR"]
+    )
+    def test_a_broad_value_is_not_mounted(
+        self, layout, monkeypatch, warnings, variable, named
+    ):
+        value = {
+            "home": layout.home,
+            "holding-home": layout.home.parent,
+            "root": Path(os.path.abspath(os.sep)),
+        }[named]
+        monkeypatch.setenv(variable, str(value))
+
+        policy = _policy(layout)
+
+        granted = _resolved([*policy.read_only, *policy.cache])
+        assert Path(os.path.realpath(value)) not in granted
+        assert any(variable in str(said) for said in warnings), warnings
+
+    @pytest.mark.parametrize(
+        "variable", ["UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR"]
+    )
+    def test_a_directory_of_uvs_own_is_still_mounted(
+        self, layout, monkeypatch, warnings, variable
+    ):
+        value = layout.home / ".local" / "share" / "uv" / variable.lower()
+        value.mkdir(parents=True)
+        monkeypatch.setenv(variable, str(value))
+
+        policy = _policy(layout)
+
+        granted = _resolved([*policy.read_only, *policy.cache])
+        assert Path(os.path.realpath(value)) in granted
+        assert not any(variable in str(said) for said in warnings), warnings
 
 
 class TestNetwork:
@@ -218,6 +304,15 @@ class TestEnvironment:
             "HTTPS_PROXY",
         ):
             assert dropped not in env, dropped
+
+    def test_the_outer_run_id_is_dropped_even_when_named(self, layout):
+        """A scanner never gets the ID its run writes into the results file."""
+        policy = _policy(layout, SandboxRequirements(env_names=("ASH_OUTER_RUN_ID",)))
+        env = policy.filter_env(
+            {"ASH_OUTER_RUN_ID": "0" * 32, "ASH_OFFLINE": "YES", "PATH": "/usr/bin"}
+        )
+        assert "ASH_OUTER_RUN_ID" not in env
+        assert env["ASH_OFFLINE"] == "YES"
 
     def test_proxy_settings_pass_only_with_a_network(self, layout):
         online = _policy(layout, SandboxRequirements(network=True))
@@ -415,7 +510,7 @@ class TestHostCachesAreNotWrittenInPlace:
     def test_bundled_scanners_that_write_a_cache_declare_where(self):
         """Measured under Landlock with the caches read-only: these failed or lost
         findings until redirected (semgrep and opengrep cannot open their log under
-        ~/.semgrep or ~/.opengrep; npm-audit lost the vulnerable ranges it reads
+        ~/.semgrep or ~/.opengrep; npm-audit lost the advisory ranges it reads
         from registry metadata it caches). grype's and trivy's databases are only
         read, so they are not redirected."""
         declared = {
@@ -621,22 +716,69 @@ class TestScope:
         assert result.returncode == SPAWN_FAILURE_RETURNCODE
         assert "shell" in result.stderr
 
+    def test_a_backend_that_fails_while_planning_starts_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """plan() raising RecursionError (a deep or looping directory layout) is
+        reported as a command that could not start, or raised, by every spawn
+        helper: no process starts, sandboxed or not."""
+        import subprocess
 
-class TestReviewFindings:
-    """Regressions for the gaps the policy review found."""
+        from automated_security_helper.utils import subprocess_utils
+
+        class Exploding:
+            name = "exploding"
+
+            def plan(self, argv, env, policy):
+                raise RecursionError("maximum recursion depth exceeded")
+
+        started = []
+
+        def record(*args, **kwargs):
+            started.append(args)
+            raise AssertionError("a process was started")
+
+        monkeypatch.setattr(subprocess, "run", record)
+        monkeypatch.setattr(subprocess, "Popen", record)
+        scope = scope_module.SandboxScope(
+            backend=Exploding(),  # type: ignore[arg-type]
+            scanner_name="grype",
+            requirements=SandboxRequirements(),
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            results_dir=tmp_path / "r",
+            scan_target=None,
+            offline=True,
+        )
+        true = "/usr/bin/true"
+        with sandbox_scope(scope):
+            result = subprocess_utils.run_command([true])
+            streamed = subprocess_utils.run_command_stream_output([true])
+            with pytest.raises(RecursionError):
+                subprocess_utils.spawn_run([true])
+            with pytest.raises(RecursionError):
+                subprocess_utils.create_process_with_pipes([true])
+
+        assert result.returncode == subprocess_utils.SPAWN_FAILURE_RETURNCODE
+        assert streamed == subprocess_utils.SPAWN_FAILURE_RETURNCODE
+        assert started == []
+
+
+class TestPolicyEdges:
+    """Symlinked results directories, tool prefixes under home, and the env filter."""
 
     def test_a_symlinked_results_directory_is_refused(self, layout, tmp_path):
-        victim = tmp_path / "victim"
-        victim.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
         (layout.output / "scanners").mkdir(parents=True)
-        layout.results.symlink_to(victim, target_is_directory=True)
+        layout.results.symlink_to(elsewhere, target_is_directory=True)
         with pytest.raises(SandboxUnavailable, match="symlink"):
             _policy(layout)
 
     def test_a_symlink_above_the_results_directory_is_refused(self, layout, tmp_path):
-        victim = tmp_path / "victim"
-        (victim / "grype").mkdir(parents=True)
-        (layout.output / "scanners").symlink_to(victim, target_is_directory=True)
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "grype").mkdir(parents=True)
+        (layout.output / "scanners").symlink_to(elsewhere, target_is_directory=True)
         with pytest.raises(SandboxUnavailable, match="symlink"):
             _policy(layout)
 
@@ -777,7 +919,7 @@ class TestSymlinkedOutputDirectory:
         refuse_symlinked_output_dir(source, link / "out")
 
     @pytest.mark.parametrize("mode", ["off", "landlock"])
-    def test_a_sandboxed_scan_stops_before_writing_through_it(self, tree, mode):
+    def test_a_scan_stops_before_writing_through_it_in_every_mode(self, tree, mode):
         # The orchestrator checks before ensure_directories, which would create
         # and clear subdirectories under the link's target.
         from automated_security_helper.core.exceptions import ASHValidationError
@@ -788,11 +930,9 @@ class TestSymlinkedOutputDirectory:
             source_dir=tree.source, output_dir=tree.source / "build" / "ash"
         )
         orchestrator.config = AshConfig(sandbox=SandboxConfig(mode=mode))
-        if mode == "off":
-            orchestrator._refuse_symlinked_output_dir()
-        else:
-            with pytest.raises(ASHValidationError, match="build is a symlink"):
-                orchestrator._refuse_symlinked_output_dir()
+        # Whatever the mode: the check is not the sandbox's alone.
+        with pytest.raises(ASHValidationError, match="build is a symlink"):
+            orchestrator._refuse_linked_output_dir()
         assert sorted(p.name for p in tree.target.iterdir()) == ["deep"]
 
     def test_every_spawn_policy_refuses_it(self, layout, tmp_path):
@@ -805,6 +945,9 @@ class TestSymlinkedOutputDirectory:
                 output_dir=layout.source / "build" / "ash",
                 results_dir=layout.source / "build" / "ash" / "scanners" / "grype",
             )
+
+
+_BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
 
 
 class TestProbeScope:
@@ -836,6 +979,1141 @@ class TestProbeScope:
             assert active_scope() is None
         finally:
             clear_backend_cache()
+
+    @pytest.mark.parametrize(
+        "plugin_path, own_name",
+        [
+            (f"{_BUILTIN}.scanners.bandit_scanner.BanditScanner", "bandit"),
+            (f"{_BUILTIN}.converters.jupyter_converter.JupyterConverter", "jupyter"),
+        ],
+        ids=["scanner", "converter"],
+    )
+    def test_a_plugin_class_gets_a_sandbox_for_its_construction_probes(
+        self, tmp_path, monkeypatch, plugin_path, own_name
+    ):
+        """Before an instance exists, the probes run under the plugin's own name.
+
+        The class is what the scan and convert phases pass while constructing a
+        plugin, whose model_post_init runs ``uv tool run <tool> --version``. It has
+        no config instance, so it must not be judged a plugin a config file renamed.
+        """
+        import importlib
+
+        from automated_security_helper.utils.sandbox.scope import (
+            SandboxScope,
+            active_scope,
+            plugin_probe_scope,
+        )
+
+        module_name, _, attribute = plugin_path.rpartition(".")
+        plugin_class = getattr(importlib.import_module(module_name), attribute)
+
+        class Recorder:
+            name = "recorder"
+
+            def probe(self):
+                return None
+
+        clear_backend_cache()
+        monkeypatch.setitem(scope_module.BACKENDS, "bwrap", Recorder)
+        try:
+            with plugin_probe_scope(plugin_class, _context(tmp_path)):
+                active = active_scope()
+                assert isinstance(active, SandboxScope), (
+                    f"the construction probes of {own_name} were refused: "
+                    f"{getattr(active, 'reason', active)!r}"
+                )
+                assert active.scanner_name == own_name
+        finally:
+            clear_backend_cache()
+
+
+class TestFirejailHidesBothHomes:
+    """firejail hides the passwd entry's home; HOME's directory needs its own blacklist.
+
+    firejail is setuid and takes the home it makes private, and the one a whitelist
+    inside $HOME applies to, from getpwuid() (init_cfg in firejail's main.c), never
+    from HOME. The plan decided ``--private`` and its whitelists against HOME's
+    directory, so with HOME elsewhere it hid the passwd home by luck (``--private``)
+    or not at all (a whitelist under HOME), and HOME's own directory, where the
+    scanner is told its home is, stayed readable unless it was under /tmp.
+    """
+
+    @pytest.fixture
+    def fake_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp, so no test writes to the real one."""
+        root = tmp_path / "fake-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
+    def _argv(self, layout):
+        backend = FirejailBackend()
+        backend._executable = "/fj"
+        return backend.plan(["/usr/bin/true"], {}, _policy(layout)).argv
+
+    def test_home_is_the_passwd_home(self, layout, fake_tmp):
+        """Unchanged: --private hides the one home, and nothing is blacklisted."""
+        argv = self._argv(layout)
+        assert "--private" in argv
+        assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
+
+    def test_home_elsewhere_with_nothing_in_the_passwd_home(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        passwd_home = tmp_path / "passwd-home"
+        passwd_home.mkdir()
+        _fake_passwd_home(monkeypatch, passwd_home)
+        argv = self._argv(layout)
+        assert "--private" in argv
+        assert f"--blacklist={_as_argv(layout.home)}" in argv
+
+    def test_home_elsewhere_with_a_tool_in_the_passwd_home(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        """The whitelist applies to the passwd home, so it is decided against that."""
+        passwd_home = tmp_path / "passwd-home"
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        _fake_passwd_home(monkeypatch, passwd_home)
+        monkeypatch.setenv("PATH", str(venv_bin))
+        argv = self._argv(layout)
+        assert f"--whitelist={_as_argv(venv_bin)}" in argv
+        assert "--private" not in argv
+        assert f"--blacklist={_as_argv(layout.home)}" in argv
+
+    def test_home_elsewhere_under_tmp_needs_no_blacklist(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        """/tmp is already hidden by --private-tmp or by its own whitelists."""
+        home = fake_tmp / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        passwd_home = tmp_path / "passwd-home"
+        passwd_home.mkdir()
+        _fake_passwd_home(monkeypatch, passwd_home)
+        argv = self._argv(layout)
+        assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
+        assert "--private" in argv
+
+
+class TestTheBackendsHideADirectoryAHomeLinksTo:
+    """~/.local -> /persist/me/.local: the backends hide the target like a home.
+
+    sandbox-exec reads from "/" and takes back the homes, and firejail shows all
+    that is outside the home, so a directory a link at the top of a home names
+    stayed readable whatever the policy granted. sandbox-exec now denies reading it
+    with the homes, before the policy's allows, and firejail blacklists it, or,
+    where the policy grants a path inside it, every entry beside the way to that
+    path. A link to a system directory is not hidden.
+    """
+
+    @pytest.fixture(params=["HOME", "passwd home"])
+    def linked(self, request, layout, tmp_path, monkeypatch):
+        if request.param == "HOME":
+            home = layout.home
+            # The layout's own ~/.local makes way for the link.
+            shutil.rmtree(home / ".local")
+        else:
+            home = tmp_path / "passwd-home"
+            (home / ".ssh").mkdir(parents=True)
+            _fake_passwd_home(monkeypatch, home)
+        elsewhere = tmp_path / "persist" / "me" / ".local"
+        (elsewhere / "share" / "keyrings").mkdir(parents=True)
+        (elsewhere / "share" / "keyrings" / "login.keyring").write_text("x")
+        tool = elsewhere / "bin" / "tool"
+        tool.parent.mkdir()
+        tool.write_bytes(b"\x7fELF")
+        tool.chmod(0o755)
+        (home / ".local").symlink_to(elsewhere)
+        return SimpleNamespace(
+            home=home, elsewhere=elsewhere, tool=home / ".local/bin/tool"
+        )
+
+    @staticmethod
+    def _sbpl_after_deny(policy, tmp_path, target):
+        lines = SandboxExecBackend().profile(policy, tmp_path / "ptmp").splitlines()
+        deny = f'(deny file-read* (subpath "{_as_argv(target)}"))'
+        assert deny in lines, deny
+        at = lines.index(deny)
+        allows = [
+            line for line in lines[at + 1 :] if line.startswith("(allow file-read")
+        ]
+        return at, lines, set().union(*(_subpaths(line) for line in allows))
+
+    @staticmethod
+    def _firejail(policy, argv0="/usr/bin/true"):
+        backend = FirejailBackend()
+        backend._executable = "/fj"
+        return backend.plan([str(argv0)], {}, policy).argv
+
+    def test_sandbox_exec_denies_it_before_the_policys_allows(
+        self, layout, linked, tmp_path
+    ):
+        at, lines, allowed = self._sbpl_after_deny(
+            _policy(layout, argv0="/usr/bin/true"), tmp_path, linked.elsewhere
+        )
+        read_everywhere = lines.index('(allow file-read* (subpath "/"))')
+        assert read_everywhere < at
+        keyring = linked.elsewhere / "share" / "keyrings" / "login.keyring"
+        for kept in (linked.elsewhere, linked.elsewhere / "share", keyring):
+            real = Path(_as_argv(kept))
+            covering = [
+                p for p in allowed if Path(p) == real or Path(p) in real.parents
+            ]
+            assert not covering, (kept, covering)
+
+    def test_sandbox_exec_gives_a_tools_own_bin_back(self, layout, linked, tmp_path):
+        policy = _policy(layout, argv0=str(linked.tool))
+        _at, _lines, allowed = self._sbpl_after_deny(policy, tmp_path, linked.elsewhere)
+        assert _as_argv(linked.elsewhere / "bin") in allowed
+        assert _as_argv(linked.elsewhere / "share") not in allowed
+        assert _as_argv(linked.elsewhere) not in allowed
+
+    def test_firejail_blacklists_it(self, layout, linked):
+        argv = self._firejail(_policy(layout, argv0="/usr/bin/true"))
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" in argv
+
+    def test_firejail_hides_all_but_a_tools_own_bin(self, layout, linked):
+        policy = _policy(layout, argv0=str(linked.tool))
+        argv = self._firejail(policy, linked.tool)
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
+
+    def test_firejail_hides_a_directory_a_link_inside_it_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/extra -> /persist/other: a link beside the way to the tool's
+        bin names a directory of the user's too, and firejail shows it."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" not in argv
+
+    def test_firejail_ends_for_links_that_lead_back(self, layout, linked, tmp_path):
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+        (other / "back").symlink_to(linked.elsewhere)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_leaves_a_link_to_a_system_directory_inside_it(
+        self, layout, linked
+    ):
+        (linked.elsewhere / "system").symlink_to("/usr")
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv('/usr')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
+    def test_firejail_hides_a_directory_a_link_inside_a_hidden_entry_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/share/extra -> /persist/other: share is blacklisted whole, and
+        what a link inside it names is a directory of the user's too."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "share" / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_hides_a_directory_a_link_inside_an_ungranted_target_names(
+        self, layout, linked, tmp_path
+    ):
+        """The policy grants nothing inside ~/.local's target, so the target is
+        blacklisted whole; a link at its top still names another directory."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "extra").symlink_to(other)
+
+        argv = self._firejail(_policy(layout, argv0="/usr/bin/true"))
+
+        assert f"--blacklist={_as_argv(linked.elsewhere)}" in argv
+        assert f"--blacklist={_as_argv(other)}" in argv
+
+    def test_firejail_follows_a_link_below_the_first_directory_level(
+        self, layout, linked, tmp_path
+    ):
+        """The tool sits at ~/.local/a/b/bin; the link is in ~/.local/a, beside
+        the way to it and one level down."""
+        other = tmp_path / "persist" / "other"
+        (other / "keyrings").mkdir(parents=True)
+        tool = linked.elsewhere / "a" / "b" / "bin" / "tool"
+        tool.parent.mkdir(parents=True)
+        tool.write_bytes(b"\x7fELF")
+        tool.chmod(0o755)
+        (linked.elsewhere / "a" / "extra").symlink_to(other)
+
+        argv = self._firejail(
+            _policy(layout, argv0=str(linked.home / ".local/a/b/bin/tool")),
+            linked.home / ".local/a/b/bin/tool",
+        )
+
+        assert f"--blacklist={_as_argv(other)}" in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'a' / 'b')}" not in argv
+
+    def test_firejail_hides_the_other_entries_of_a_directory_above_the_target(
+        self, layout, linked, tmp_path
+    ):
+        """~/.local/up -> /persist (which holds me/.local): the rest of /persist is
+        the user's, and the way to the tool's bin stays."""
+        persist = tmp_path / "persist"
+        (persist / "other" / "keyrings").mkdir(parents=True)
+        (linked.elsewhere / "up").symlink_to(persist)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(persist / 'other')}" in argv
+        assert f"--blacklist={_as_argv(persist)}" not in argv
+        assert f"--blacklist={_as_argv(persist / 'me')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'bin')}" not in argv
+
+    def test_firejail_ends_for_two_linked_directories_that_both_hold_grants(
+        self, layout, linked, tmp_path
+    ):
+        """Each links to the other and the policy grants a path in each."""
+        other = tmp_path / "persist" / "other"
+        (other / "data").mkdir(parents=True)
+        (other / "junk").mkdir()
+        (linked.elsewhere / "extra").symlink_to(other)
+        (other / "back").symlink_to(linked.elsewhere)
+
+        argv = self._firejail(
+            _policy(
+                layout, argv0=str(linked.tool), extra_read_paths=[str(other / "data")]
+            ),
+            linked.tool,
+        )
+
+        assert f"--blacklist={_as_argv(other / 'junk')}" in argv
+        assert f"--blacklist={_as_argv(other / 'data')}" not in argv
+        assert f"--blacklist={_as_argv(other)}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
+    def test_firejail_leaves_a_link_to_a_home_directory_inside_it_to_the_home(
+        self, layout, linked
+    ):
+        """~/.local/mine -> ~/.ssh: a home is handled as a home, and is not hidden
+        a second time as the directory a link names."""
+        (linked.elsewhere / "mine").symlink_to(linked.home / ".ssh")
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(linked.home / '.ssh')}" not in argv
+        assert f"--blacklist={_as_argv(linked.elsewhere / 'share')}" in argv
+
+    def test_firejail_hides_a_file_a_link_at_the_top_of_a_home_names(
+        self, layout, linked, tmp_path
+    ):
+        """~/.netrc -> /persist/me/netrc: a file of the user's outside the home."""
+        netrc = tmp_path / "persist" / "me" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (linked.home / ".netrc").symlink_to(netrc)
+
+        argv = self._firejail(_policy(layout, argv0=str(linked.tool)), linked.tool)
+
+        assert f"--blacklist={_as_argv(netrc)}" in argv
+
+    def test_sandbox_exec_denies_a_file_a_link_at_the_top_of_a_home_names(
+        self, layout, linked, tmp_path
+    ):
+        netrc = tmp_path / "persist" / "me" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (linked.home / ".netrc").symlink_to(netrc)
+
+        at, lines, allowed = self._sbpl_after_deny(
+            _policy(layout, argv0="/usr/bin/true"), tmp_path, netrc
+        )
+
+        read_everywhere = lines.index('(allow file-read* (subpath "/"))')
+        assert read_everywhere < at
+        # No allow after the deny covers the file or a directory above it.
+        real = Path(_as_argv(netrc))
+        covering = [p for p in allowed if Path(p) == real or Path(p) in real.parents]
+        assert not covering, covering
+
+    def test_firejail_keeps_a_scanned_tree_kept_in_a_linked_directory(
+        self, layout, tmp_path
+    ):
+        """~/code -> /data/code with the scanned repository in it: the repository is
+        the policy's own path there, so only what is beside it is blacklisted."""
+        code = tmp_path / "data" / "code"
+        repo = code / "repo"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (code / "other" / "notes").mkdir(parents=True)
+        (layout.home / "code").symlink_to(code)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        argv = self._firejail(policy)
+
+        blacklisted = [a.split("=", 1)[1] for a in argv if a.startswith("--blacklist=")]
+        assert _as_argv(code / "other") in blacklisted
+        for shown in (code, repo, output):
+            assert _as_argv(shown) not in blacklisted, shown
+
+    def test_firejail_leaves_a_file_a_link_names_inside_the_scanned_tree(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """~/.gitconfig -> /persist/dotfiles/gitconfig, with /persist/dotfiles the
+        tree being scanned: the policy grants that tree, and the file in it is
+        read like the rest of it, not blacklisted."""
+        repo = tmp_path / "persist" / "dotfiles"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        config = repo / "gitconfig"
+        config.write_text("[user]\n\tname = me\n")
+        (layout.home / ".gitconfig").symlink_to(config)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        blacklisted = self._blacklisted(self._firejail(policy))
+
+        inside = [
+            b
+            for b in blacklisted
+            if b == _as_argv(repo) or b.startswith(_as_argv(repo) + "/")
+        ]
+        assert not inside, inside
+
+    def test_firejail_still_hides_a_file_a_link_names_beside_the_scanned_tree(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """The control: a file outside the granted tree is hidden as before."""
+        repo = tmp_path / "persist" / "dotfiles"
+        output = repo / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        netrc = tmp_path / "persist" / "netrc"
+        netrc.write_text("machine example login me password x\n")
+        (layout.home / ".netrc").symlink_to(netrc)
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            source_dir=repo,
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+            scan_target=repo,
+            cwd=repo,
+        )
+        blacklisted = self._blacklisted(self._firejail(policy))
+
+        assert _as_argv(netrc) in blacklisted
+
+    def test_a_link_to_a_system_directory_is_not_hidden(self, layout, tmp_path):
+        (layout.home / "u").symlink_to("/usr")
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "ptmp").splitlines()
+        assert not [
+            line
+            for line in lines
+            if line.startswith("(deny file-read*") and _as_argv("/usr") in line
+        ]
+        argv = self._firejail(policy)
+        assert f"--blacklist={_as_argv('/usr')}" not in argv
+
+    @pytest.fixture
+    def stand_in_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp, so the tests neither depend on nor write the real one."""
+        root = tmp_path / "stand-in-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
+    @pytest.fixture
+    def stand_in_pseudo_fs(self, tmp_path, monkeypatch):
+        """Stand in for /dev/shm and /run: a few entries, not the real ones."""
+        shm = tmp_path / "stand-in-shm"
+        run = tmp_path / "stand-in-run"
+        for root in (shm, run):
+            root.mkdir()
+            (root / "segment").write_text("x")
+        monkeypatch.setattr(
+            policy_module, "_PSEUDO_FS_ROOTS", (shm, run), raising=False
+        )
+        return SimpleNamespace(shm=shm, run=run)
+
+    @staticmethod
+    def _blacklisted(argv):
+        return [a.split("=", 1)[1] for a in argv if a.startswith("--blacklist=")]
+
+    def test_firejail_leaves_tmp_alone_for_a_link_inside_a_hidden_directory(
+        self, layout, stand_in_tmp, tmp_path
+    ):
+        """~/data -> /persist/other, which holds a link into /tmp: /tmp is covered
+        by --private-tmp, so what the link names there is not blacklisted, however
+        few or many entries it has."""
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        scratch = stand_in_tmp / "scratch"
+        scratch.mkdir()
+        for name in ("a", "b", "c"):
+            (scratch / name).write_text("x")
+        (other / "scratch").symlink_to(scratch)
+        (layout.home / "data").symlink_to(other)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        assert _as_argv(other) in blacklisted
+        under_tmp = [
+            b
+            for b in blacklisted
+            if b == _as_argv(stand_in_tmp) or b.startswith(_as_argv(stand_in_tmp) + "/")
+        ]
+        assert not under_tmp, under_tmp
+
+    def test_firejail_does_not_hide_shared_memory_a_home_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs
+    ):
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / ".run").symlink_to(stand_in_pseudo_fs.run)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        for root in (stand_in_pseudo_fs.shm, stand_in_pseudo_fs.run):
+            hidden = [
+                b
+                for b in blacklisted
+                if b == _as_argv(root) or b.startswith(_as_argv(root) + "/")
+            ]
+            assert not hidden, (root, hidden)
+
+    def test_firejail_keeps_shared_memory_a_nested_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs, tmp_path
+    ):
+        """The control sits beside it: the directory the link is in is still hidden."""
+        other = tmp_path / "persist" / "other"
+        other.mkdir(parents=True)
+        (other / "shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / "data").symlink_to(other)
+
+        blacklisted = self._blacklisted(self._firejail(_policy(layout)))
+
+        assert _as_argv(other) in blacklisted
+        assert _as_argv(stand_in_pseudo_fs.shm) not in blacklisted
+
+    def test_sandbox_exec_does_not_deny_shared_memory_a_home_link_names(
+        self, layout, stand_in_tmp, stand_in_pseudo_fs, tmp_path
+    ):
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+
+        assert _as_argv(stand_in_pseudo_fs.shm) not in profile
+
+    def test_the_breadth_rules_agree_on_a_link_into_shared_memory(
+        self, layout, stand_in_pseudo_fs, tmp_path
+    ):
+        """The breadth checks read the same list of links as the backends: a link
+        into shared memory or the runtime directory names no directory of the
+        user's, so a path at it is not refused as holding part of the home. A link
+        to a directory of the user's beside it still counts."""
+        persist = tmp_path / "persist-data"
+        persist.mkdir()
+        (layout.home / ".shm").symlink_to(stand_in_pseudo_fs.shm)
+        (layout.home / ".run").symlink_to(stand_in_pseudo_fs.run)
+        (layout.home / ".data").symlink_to(persist)
+        homes = [Path(os.path.realpath(layout.home))]
+
+        targets = policy_module._home_link_targets(homes)
+
+        assert targets == [Path(os.path.realpath(persist))]
+        for root in (stand_in_pseudo_fs.shm, stand_in_pseudo_fs.run):
+            assert not policy_module._broader_than_a_tool(root, homes)
+        assert policy_module._broader_than_a_tool(persist, homes)
+
+
+class TestHomeElsewhereThanThePasswdEntry:
+    """HOME and the passwd entry's home can be two directories; deny reading both.
+
+    The policy's home is Path.home(), which reads HOME. sandbox-exec allows reading
+    everything and then denied that one home, so with HOME set elsewhere the passwd
+    entry's home (the real ~/.ssh, ~/.aws, ~/Library/Keychains) stayed readable.
+    The policy's own paths under it are allowed again after the denies.
+    """
+
+    @pytest.fixture
+    def passwd_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "passwd-home"
+        (home / "Library" / "Keychains").mkdir(parents=True)
+        _fake_passwd_home(monkeypatch, home)
+        return home
+
+    def test_sandbox_exec_denies_reading_both_homes(
+        self, layout, passwd_home, tmp_path
+    ):
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        for home in (layout.home, passwd_home):
+            assert f'(deny file-read* (subpath "{_as_argv(home)}"))' in profile, home
+            assert _as_argv(home / "Library" / "Keychains") in profile, home
+
+    def test_a_policy_path_under_the_passwd_home_is_readable_again(
+        self, layout, passwd_home, monkeypatch, tmp_path
+    ):
+        """ASH's own venv can live in the passwd home; its allow comes after the deny."""
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        monkeypatch.setenv("PATH", str(venv_bin))
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        lines = profile.splitlines()
+        deny = lines.index(f'(deny file-read* (subpath "{_as_argv(passwd_home)}"))')
+        allow = next(
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("(allow file-read*") and _as_argv(venv_bin) in line
+        )
+        assert allow > deny
+
+    def test_the_passwd_home_itself_on_path_is_not_readable_again(
+        self, layout, passwd_home, monkeypatch, tmp_path
+    ):
+        """The negative case: what the policy must not list stays behind the deny.
+
+        A PATH entry naming the passwd home is no tool directory. No allow after
+        that home's deny may name it, nor its .ssh, while the venv's bin beside it
+        is allowed again.
+        """
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (passwd_home / ".ssh").mkdir()
+        monkeypatch.setenv("PATH", os.pathsep.join([str(passwd_home), str(venv_bin)]))
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        lines = profile.splitlines()
+        deny = lines.index(f'(deny file-read* (subpath "{_as_argv(passwd_home)}"))')
+        after = [line for line in lines[deny + 1 :] if line.startswith("(allow")]
+
+        assert any(_as_argv(venv_bin) in line for line in after)
+        for hidden in (passwd_home, passwd_home / ".ssh"):
+            assert not [
+                line for line in after if f'(subpath "{_as_argv(hidden)}")' in line
+            ], hidden
+
+    def test_one_home_changes_nothing(self, layout, monkeypatch, tmp_path):
+        """Positive control: HOME is the passwd home, as on most hosts."""
+        _fake_passwd_home(monkeypatch, layout.home)
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        home_denials = [
+            line
+            for line in profile.splitlines()
+            if line.startswith("(deny file-read* (subpath")
+            and '"/private/tmp"' not in line
+        ]
+        assert home_denials == [
+            f'(deny file-read* (subpath "{_as_argv(layout.home)}"))'
+        ], home_denials
+
+    @pytest.mark.parametrize(
+        "pw_dir", ["/", "", "relative/home", "link-to-home"], ids=repr
+    )
+    def test_an_unusable_passwd_home_adds_no_deny(
+        self, layout, monkeypatch, tmp_path, pw_dir
+    ):
+        """No entry to deny: "/" would take back every read the policy does not
+        re-grant, a relative or empty pw_dir names no directory, and a link to
+        HOME is the home already denied."""
+        if pw_dir == "link-to-home":
+            value = tmp_path / "home-link"
+            value.symlink_to(layout.home, target_is_directory=True)
+        else:
+            value = Path(pw_dir)
+        _fake_passwd_home(monkeypatch, value)
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        home_denials = [
+            line
+            for line in profile.splitlines()
+            if line.startswith("(deny file-read* (subpath")
+            and '"/private/tmp"' not in line
+        ]
+        assert home_denials == [
+            f'(deny file-read* (subpath "{_as_argv(layout.home)}"))'
+        ], home_denials
+
+
+def _reopened_after_deny(profile, home, paths):
+    """The rules after ``home``'s deny that allow reading one of ``paths`` again."""
+    lines = profile.splitlines()
+    deny = lines.index(f'(deny file-read* (subpath "{_as_argv(home)}"))')
+    return [
+        line
+        for line in lines[deny + 1 :]
+        if line.startswith("(allow")
+        and any(f'(subpath "{_as_argv(p)}")' in line for p in paths)
+    ]
+
+
+class TestPolicyPathsUnderThePasswdHome:
+    """The breadth filters measure a path against both homes, not only HOME's.
+
+    sandbox-exec denies reading the passwd entry's home and then allows the policy's
+    read-only paths again, and bwrap, firejail and landlock mount the same set. With
+    HOME elsewhere the filters screened only paths under HOME, so a PATH entry naming
+    the passwd home or a configuration directory in it, a tool's prefix directly
+    under it (~/.local for ~/.local/bin/uv, ~/.cargo for ~/.cargo/bin/x), a sys.path
+    entry of the passwd home (``python -m`` run from it) and an import root equal to
+    it each re-opened that home, or part of it.
+    """
+
+    @pytest.fixture
+    def pw(self, tmp_path, monkeypatch):
+        home = tmp_path / "passwd-home"
+        for name in (
+            ".ssh",
+            ".config/t",
+            ".local/bin",
+            ".local/share",
+            ".cargo/bin",
+            "bin",
+        ):
+            (home / name).mkdir(parents=True)
+        _fake_passwd_home(monkeypatch, home)
+        return home
+
+    @staticmethod
+    def _tool(directory):
+        """An executable that is not a script, so no interpreter is added."""
+        program = directory / "tool"
+        program.write_bytes(b"\x7fELF")
+        program.chmod(0o755)
+        return program
+
+    def test_path_entries_and_a_tool_in_dot_local_bin(
+        self, layout, pw, monkeypatch, tmp_path
+    ):
+        argv0 = self._tool(pw / ".local" / "bin")
+        monkeypatch.setenv(
+            "PATH",
+            os.pathsep.join([str(pw), str(pw / ".config" / "t"), str(argv0.parent)]),
+        )
+        policy = _policy(layout, argv0=str(argv0))
+        exposed = _resolved(policy.read_only)
+        assert _resolved([pw / ".local" / "bin"]) <= exposed
+        for hidden in (pw, pw / ".config" / "t", pw / ".local"):
+            assert Path(os.path.realpath(hidden)) not in exposed, hidden
+        profile = SandboxExecBackend().profile(policy, tmp_path / "ptmp")
+        children = [pw, pw / ".config" / "t", *pw.iterdir()]
+        assert _reopened_after_deny(profile, pw, children) == []
+
+    @pytest.mark.parametrize("bin_dir", [".local/bin", ".cargo/bin", "bin"])
+    def test_a_tools_prefix_directly_under_the_passwd_home(
+        self, layout, pw, monkeypatch, bin_dir
+    ):
+        argv0 = self._tool(pw / bin_dir)
+        monkeypatch.setenv("PATH", str(argv0.parent))
+        exposed = _resolved(_policy(layout, argv0=str(argv0)).read_only)
+        assert Path(os.path.realpath(argv0.parent)) in exposed
+        assert Path(os.path.realpath(argv0.parent.parent)) not in exposed
+
+    def test_a_deeper_prefix_under_the_passwd_home_stays_readable(
+        self, layout, pw, monkeypatch
+    ):
+        """Positive control: one installation, such as ~/.nvm/versions/node/v22."""
+        prefix = pw / ".nvm" / "versions" / "node" / "v22"
+        (prefix / "bin").mkdir(parents=True)
+        argv0 = self._tool(prefix / "bin")
+        monkeypatch.setenv("PATH", str(argv0.parent))
+        exposed = _resolved(_policy(layout, argv0=str(argv0)).read_only)
+        assert Path(os.path.realpath(prefix)) in exposed
+
+    @pytest.mark.parametrize("entry", ["", ".config/t"], ids=["home", "config-dir"])
+    def test_a_sys_path_entry_under_the_passwd_home(
+        self, layout, pw, monkeypatch, entry
+    ):
+        """``python -m ...`` run from the passwd home puts it first on sys.path."""
+        path = pw / entry if entry else pw
+        monkeypatch.setattr(sys, "path", [str(path), *sys.path])
+        assert Path(os.path.realpath(path)) not in _resolved(_policy(layout).read_only)
+
+    def test_an_import_root_that_is_the_passwd_home(self, layout, pw, monkeypatch):
+        """ASH checked out directly in the passwd home: mount the package, not it."""
+        module = pw / "automated_security_helper" / "utils" / "sandbox" / "policy.py"
+        module.parent.mkdir(parents=True)
+        module.touch()
+        monkeypatch.setattr(policy_module, "__file__", str(module))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(pw)) not in exposed
+        assert Path(os.path.realpath(pw / "automated_security_helper")) in exposed
+
+
+class TestAshsInterpreterThroughAHome:
+    """ASH's interpreter paths are mounted unfiltered, so a home among them is refused.
+
+    _ash_paths adds sys.prefix, sys.base_prefix, sys.exec_prefix, the interpreter's
+    real prefix and the directory of every link sys.executable passes through, so
+    that exec of the interpreter by the path it was started with works inside the
+    sandbox. None of them went through a breadth filter. A venv created by a python
+    reached through a link in the home (``~/python3 -m venv ~/env``) has
+    env/bin/python3 -> ~/python3, which made the home itself, ~/.ssh included, a
+    read-only path of every scanner. Mounting less would break that exec, so the
+    spawn is refused instead, measured against both homes.
+    """
+
+    @staticmethod
+    def _interpreter_through(link, tmp_path, monkeypatch):
+        """sys.executable is env/bin/python -> ``link`` -> a stand-in binary."""
+        binary = tmp_path / "real-python" / "bin" / "python3.14"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"\x7fELF")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(binary)
+        venv_python = tmp_path / "env" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.symlink_to(link)
+        monkeypatch.setattr(sys, "executable", str(venv_python))
+
+    @pytest.mark.parametrize("where", ["python3", ".config/python3"])
+    def test_a_link_in_the_home(self, layout, tmp_path, monkeypatch, where):
+        self._interpreter_through(layout.home / where, tmp_path, monkeypatch)
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    def test_a_link_in_the_passwd_home(self, layout, tmp_path, monkeypatch):
+        passwd_home = tmp_path / "passwd-home"
+        (passwd_home / ".ssh").mkdir(parents=True)
+        _fake_passwd_home(monkeypatch, passwd_home)
+        self._interpreter_through(passwd_home / "python3", tmp_path, monkeypatch)
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    @pytest.mark.parametrize("prefix", ["sys.prefix", "sys.base_prefix"])
+    def test_an_interpreter_prefix_that_is_the_home(self, layout, monkeypatch, prefix):
+        """A python built with --prefix=$HOME: its prefix is the home itself."""
+        monkeypatch.setattr(sys, prefix.split(".")[1], str(layout.home))
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    @pytest.mark.parametrize("in_home", ["HOME", "passwd home"])
+    def test_a_python_built_with_the_home_as_its_prefix(
+        self, layout, tmp_path, monkeypatch, in_home
+    ):
+        """--prefix=<home>: a real <home>/bin/python3, every prefix the home itself.
+
+        Refused whichever home it is, rather than mounting that home for every
+        scanner; argv0 is a system tool, so only ASH's own paths are in play.
+        """
+        home = layout.home
+        if in_home == "passwd home":
+            home = tmp_path / "passwd-home"
+            _fake_passwd_home(monkeypatch, home)
+        python = home / "bin" / "python3"
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_bytes(b"\x7fELF")
+        (home / "lib" / "python3.12").mkdir(parents=True)
+        monkeypatch.setattr(sys, "executable", str(python))
+        for name in ("prefix", "exec_prefix", "base_prefix"):
+            monkeypatch.setattr(sys, name, str(home))
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout, argv0="/usr/bin/true")
+
+    @pytest.mark.parametrize("where", ["bin/python3", ".local/opt/py/bin/python3"])
+    def test_a_link_in_a_bin_directory_in_the_home(
+        self, layout, tmp_path, monkeypatch, where
+    ):
+        """Positive control: ~/bin/python3, like a PATH entry named bin."""
+        link = layout.home / where
+        self._interpreter_through(link, tmp_path, monkeypatch)
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(link.parent)) in exposed
+        assert Path(os.path.realpath(layout.home)) not in exposed
+
+    def test_a_venv_directly_under_the_home(self, layout, monkeypatch):
+        """Positive control: sys.prefix ~/env is one installation, mounted as is."""
+        venv = layout.home / "env"
+        venv.mkdir()
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        monkeypatch.setattr(sys, "prefix", str(venv))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(venv)) in exposed
+        assert Path(os.path.realpath(layout.home)) not in exposed
+
+    @pytest.mark.parametrize("in_home", ["HOME", "passwd home"])
+    def test_a_real_python_in_dot_local_bin(
+        self, layout, tmp_path, monkeypatch, in_home
+    ):
+        """Its prefix is ~/.local, which holds ~/.local/share and its keyrings."""
+        home = layout.home
+        if in_home == "passwd home":
+            home = tmp_path / "passwd-home"
+            _fake_passwd_home(monkeypatch, home)
+        python = home / ".local" / "bin" / "python3.12"
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_bytes(b"\x7fELF")
+        (home / ".local" / "lib" / "python3.12").mkdir(parents=True)
+        monkeypatch.setattr(sys, "executable", str(python))
+        for name in ("prefix", "exec_prefix", "base_prefix"):
+            monkeypatch.setattr(sys, name, str(home / ".local"))
+        with pytest.raises(SandboxUnavailable, match="home directory"):
+            _policy(layout)
+
+    def test_the_refusal_names_the_path_escaped_and_the_way_out(
+        self, layout, tmp_path, monkeypatch
+    ):
+        odd = layout.home / "odd\n::error::name"
+        self._interpreter_through(odd / "python3", tmp_path, monkeypatch)
+        with pytest.raises(SandboxUnavailable) as refused:
+            _policy(layout)
+        message = str(refused.value)
+        assert repr(odd.as_posix()) in message
+        assert "\n" not in message
+        assert "outside the home directory" in message
+
+
+class TestAshBinPathUnderAHome:
+    """ASH_BIN_PATH is mounted for every scanner, so it gets the same breadth rule."""
+
+    @pytest.mark.parametrize("value", ["home", "holding-home", ".local"])
+    def test_a_broad_bin_path_is_refused(self, layout, monkeypatch, value):
+        named = {
+            "home": layout.home,
+            "holding-home": layout.home.parent,
+            ".local": layout.home / ".local",
+        }[value]
+        monkeypatch.setenv("ASH_BIN_PATH", str(named))
+        with pytest.raises(SandboxUnavailable, match="ASH_BIN_PATH"):
+            _policy(layout)
+
+    @pytest.mark.parametrize("where", ["bin", ".ash/bin"])
+    def test_a_bin_directory_in_the_home_is_mounted(self, layout, monkeypatch, where):
+        named = layout.home / where
+        named.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("ASH_BIN_PATH", str(named))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(named)) in exposed
+        assert Path(os.path.realpath(layout.home)) not in exposed
+
+
+class TestCommonInterpreterLayoutsStayAllowed:
+    """The refusal above does not refuse the usual places a Python lives in a home.
+
+    Each layout is built in HOME, and again in the passwd home with HOME elsewhere,
+    and is mounted without the home itself.
+    """
+
+    @staticmethod
+    def _binary(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\x7fELF")
+        return path
+
+    @classmethod
+    def _pyenv(cls, home):
+        prefix = home / ".pyenv" / "versions" / "3.12.1"
+        cls._binary(prefix / "bin" / "python3.12")
+        (prefix / "bin" / "python3").symlink_to("python3.12")
+        (prefix / "lib" / "python3.12").mkdir(parents=True)
+        return prefix / "bin" / "python3", prefix, prefix
+
+    @classmethod
+    def _uv(cls, home):
+        prefix = home / ".local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu"
+        cls._binary(prefix / "bin" / "python3.14")
+        (prefix / "bin" / "python3").symlink_to("python3.14")
+        (prefix / "lib" / "python3.14").mkdir(parents=True)
+        return prefix / "bin" / "python3", prefix, prefix
+
+    @classmethod
+    def _venv_at(cls, home, venv):
+        _executable, base, _ = cls._uv(home)
+        (venv / "bin").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text(f"home = {base / 'bin'}\n")
+        (venv / "bin" / "python").symlink_to(base / "bin" / "python3.14")
+        (venv / "bin" / "python3").symlink_to("python")
+        return venv / "bin" / "python3", venv, base
+
+    @classmethod
+    def _venv(cls, home):
+        """An in-tree .venv, as uv sync makes it."""
+        return cls._venv_at(home, home / "work" / "project" / ".venv")
+
+    @classmethod
+    def _dot_venv(cls, home):
+        """A venv directly under the home."""
+        return cls._venv_at(home, home / ".venv")
+
+    @classmethod
+    def _conda(cls, home):
+        prefix = home / "miniconda3"
+        cls._binary(prefix / "bin" / "python3.12")
+        (prefix / "bin" / "python3").symlink_to("python3.12")
+        (prefix / "lib" / "python3.12").mkdir(parents=True)
+        (prefix / "conda-meta").mkdir()
+        return prefix / "bin" / "python3", prefix, prefix
+
+    @pytest.mark.parametrize("which", ["pyenv", "uv", "venv", "dot_venv", "conda"])
+    @pytest.mark.parametrize("in_home", ["HOME", "passwd home"])
+    def test_it_is_mounted_and_the_home_is_not(
+        self, layout, tmp_path, monkeypatch, which, in_home
+    ):
+        home = layout.home
+        if in_home == "passwd home":
+            home = tmp_path / "passwd-home"
+            home.mkdir()
+            _fake_passwd_home(monkeypatch, home)
+        executable, prefix, base_prefix = getattr(self, f"_{which}")(home)
+        monkeypatch.setattr(sys, "executable", str(executable))
+        monkeypatch.setattr(sys, "prefix", str(prefix))
+        monkeypatch.setattr(sys, "exec_prefix", str(prefix))
+        monkeypatch.setattr(sys, "base_prefix", str(base_prefix))
+        exposed = _resolved(_policy(layout).read_only)
+        assert Path(os.path.realpath(prefix)) in exposed
+        assert Path(os.path.realpath(base_prefix)) in exposed
+        assert Path(os.path.realpath(home)) not in exposed
+
+
+@pytest.mark.parametrize(
+    "pw_dir", [None, "/", "", "relative/home", "HOME", "link to HOME"], ids=repr
+)
+def test_no_second_home(tmp_path, pw_dir):
+    """A passwd home that is not a second directory to measure against or deny."""
+    home = tmp_path / "home"
+    home.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(home, target_is_directory=True)
+    special = {"HOME": home, "link to HOME": link}
+    value = special.get(pw_dir) or (None if pw_dir is None else Path(pw_dir))
+    assert policy_module._distinct_home(home, value) is None
+
+
+def test_a_home_of_root_is_not_a_home(tmp_path, monkeypatch):
+    """A HOME of "/", as in some containers, names no home: every path is inside it."""
+    monkeypatch.setenv("HOME", "/")
+    monkeypatch.setenv("USERPROFILE", "/")
+    other = tmp_path / "passwd-home"
+    other.mkdir()
+    _fake_passwd_home(monkeypatch, other)
+    assert policy_module._homes() == [Path(os.path.realpath(other))]
+
+
+def test_a_second_home(tmp_path):
+    home = tmp_path / "home"
+    other = tmp_path / "other"
+    home.mkdir()
+    other.mkdir()
+    assert policy_module._distinct_home(home, other) == Path(os.path.realpath(other))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no backend runs on Windows")
+class TestBwrapAndLandlockGrantNothingInThePasswdHome:
+    """With HOME elsewhere, no bwrap or Landlock grant opens the passwd entry's home.
+
+    The plan-level stand-in for the escape suite's planted passwd-home files, which
+    are written only in a throwaway CI job. Both backends show only the paths the
+    policy lists. The passwd home here holds what a user's often does: a tool in
+    ~/bin and one in ~/.local/bin, with PATH naming the home itself and a
+    configuration directory in it, ~/.config/tool. No grant may be the passwd home
+    or hold it, and inside it only a bin directory may be granted: the home, its
+    ~/.local (keyrings in ~/.local/share) and ~/.config/tool must stay out. The
+    tool's own bin directory is granted, which shows the check reads the plan.
+    """
+
+    @pytest.fixture
+    def pw(self, tmp_path, monkeypatch):
+        home = tmp_path / "passwd-home"
+        for name in (".ssh", ".config/tool", ".local/bin", ".local/share/keyrings"):
+            (home / name).mkdir(parents=True)
+        (home / "bin").mkdir()
+        _fake_passwd_home(monkeypatch, home)
+        return home
+
+    @staticmethod
+    def _tool(directory):
+        """An executable that is not a script, so no interpreter is added."""
+        program = directory / "tool"
+        program.write_bytes(b"\x7fELF")
+        program.chmod(0o755)
+        return program
+
+    @staticmethod
+    def _granted(backend_class, layout, argv0):
+        backend = backend_class()
+        backend._executable = "/usr/bin/bwrap"
+        policy = _policy(layout, argv0=str(argv0))
+        plan = backend.plan([str(argv0)], {"PATH": "/usr/bin"}, policy)
+        try:
+            if backend_class is LandlockBackend:
+                document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+                paths = document["read_only"] + document["writable"]
+            else:
+                # bwrap's own options end at its first "--"; what follows is the
+                # command it runs, not a mount.
+                options = plan.argv[1 : plan.argv.index("--")]
+                paths = [a for a in options if a.startswith("/")]
+        finally:
+            plan.run_cleanup()
+        return {Path(p) for p in paths}
+
+    @pytest.mark.parametrize("tool_dir", ["bin", ".local/bin"])
+    @pytest.mark.parametrize("backend_class", [BwrapBackend, LandlockBackend])
+    def test_no_grant_opens_the_passwd_home(
+        self, layout, pw, monkeypatch, backend_class, tool_dir
+    ):
+        argv0 = self._tool(pw / tool_dir)
+        monkeypatch.setenv(
+            "PATH",
+            os.pathsep.join(
+                [str(pw), str(pw / ".config" / "tool"), str(argv0.parent), "/usr/bin"]
+            ),
+        )
+        granted = self._granted(backend_class, layout, argv0)
+        hidden = Path(_as_argv(pw))
+
+        assert Path(_as_argv(argv0.parent)) in granted
+        opening = sorted(
+            str(p)
+            for p in granted
+            if p == hidden
+            or p in hidden.parents
+            or (hidden in p.parents and p.name not in ("bin", "sbin", "Scripts"))
+        )
+        assert opening == [], opening
+
+
+class TestSandboxExecLeavesTheRealCacheUnwritten:
+    """filter_env drops XDG_CACHE_HOME, so tools fall back to $HOME/.cache.
+
+    Under sandbox-exec HOME is the real path. The profile denies by default and
+    allows writing only the results directory, the private TMPDIR, an unpack
+    directory and uv's lock files, so a write to the real $HOME/.cache is refused
+    rather than landing there.
+    """
+
+    def test_no_write_rule_reaches_home(self, layout, tmp_path):
+        profile = SandboxExecBackend().profile(_policy(layout), tmp_path / "ptmp")
+        writes = [line for line in profile.splitlines() if "file-write*" in line]
+        assert writes
+        home = _as_argv(layout.home)
+        for line in writes:
+            if line.startswith("(deny"):
+                continue
+            assert f'"{home}"' not in line and f'"{home}/' not in line, line
 
 
 class TestWritableWinsOverReadOnly:
@@ -1179,6 +2457,24 @@ class TestSandboxExecProfile:
         finally:
             plan.run_cleanup()
 
+    def test_a_root_cwd_is_not_scan_data_and_the_tree_stays_exec_denied(
+        self, layout, tmp_path
+    ):
+        # checkov and ferret-scan run from the filesystem root so that they read no
+        # config file from the scanned tree. The root is not the scan's data: the
+        # read list already leaves it out, and the exec deny must too, or it holds
+        # every tool path only because each one is given back after it.
+        root = Path(os.path.abspath(os.sep))
+        lines = _sbpl(layout, tmp_path, cwd=root)
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(root) not in _subpaths(deny), deny
+        for still_denied in (layout.source, layout.output, layout.results):
+            assert _as_argv(still_denied) in _subpaths(deny), still_denied
+        policy = _policy(layout, cwd=root)
+        assert Path(os.path.realpath(root)) not in _resolved(policy.scan_data)
+        for data in (layout.source, layout.output):
+            assert Path(os.path.realpath(data)) in _resolved(policy.scan_data)
+
     def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
         # A tool path that holds the scanned tree, as /opt holds a repository
         # checked out under it.
@@ -1199,6 +2495,131 @@ class TestSandboxExecProfile:
         assert len(allows) == 2, allows
         assert allows[1][0] > deny_at
         assert _subpaths(allows[1][1]) == {_as_argv(venv_bin)}
+
+    def test_a_path_entry_inside_the_scanned_tree_is_no_exec_grant(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """A PATH entry in the repository or the output is the scan's data.
+
+        The tree's exec deny would otherwise be given back for it after the deny,
+        so the repository's programs ran under sandbox-exec. A tool directory on
+        PATH outside the tree is still granted, which shows PATH was read.
+        """
+        inside = [layout.source / ".venv" / "bin", layout.output / "bin"]
+        outside = tmp_path / "tools" / "bin"
+        for directory in [*inside, outside]:
+            directory.mkdir(parents=True)
+        monkeypatch.setenv(
+            "PATH", os.pathsep.join(str(p) for p in [*inside, outside, "/usr/bin"])
+        )
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+        landlock = LandlockBackend()
+        plan = landlock.plan(["/usr/bin/true"], {"PATH": "/usr/bin"}, policy)
+        try:
+            document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
+        finally:
+            plan.run_cleanup()
+
+        assert Path(os.path.realpath(outside)) in _resolved(policy.executable)
+        assert _as_argv(outside) in allowed
+        for directory in inside:
+            assert Path(os.path.realpath(directory)) not in _resolved(
+                policy.executable
+            ), directory
+            assert _as_argv(directory) not in allowed, directory
+            assert _as_argv(directory) not in document["read_only"], directory
+
+    def test_an_import_entry_inside_the_scanned_tree_is_readable_and_not_executable(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """PYTHONPATH=src: ASH's sys.path names a directory of the repository.
+
+        Workers started with ASH's interpreter import from it, so it stays readable,
+        but it is the scan's data: no exec grant gives it back after sandbox-exec
+        denies running anything from the tree. An import entry outside the tree
+        stays executable, which shows the entry was read.
+        """
+        in_tree = layout.source / "src"
+        outside = tmp_path / "site" / "packages"
+        for directory in (in_tree, outside):
+            directory.mkdir(parents=True)
+        monkeypatch.setattr(sys, "path", [str(in_tree), str(outside), *sys.path])
+
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+
+        real = Path(os.path.realpath(in_tree))
+        assert real in _resolved(policy.read_only)
+        assert real not in _resolved(policy.executable)
+        assert _as_argv(in_tree) not in allowed
+        assert Path(os.path.realpath(outside)) in _resolved(policy.executable)
+
+    def test_a_path_entry_in_an_output_directory_outside_the_source_is_no_exec_grant(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """--output-dir outside the scanned tree: a PATH entry in it is still the
+        scan's data, not a tool directory, though the source does not hold it."""
+        output = tmp_path / "elsewhere" / "ash_output"
+        in_output = output / "bin"
+        in_output.mkdir(parents=True)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(in_output), "/usr/bin"]))
+
+        policy = _policy(
+            layout,
+            argv0="/usr/bin/true",
+            output_dir=output,
+            results_dir=output / "scanners" / "grype",
+        )
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+
+        assert Path(os.path.realpath(in_output)) not in _resolved(policy.executable)
+        assert _as_argv(in_output) not in allowed
+
+    def test_a_path_entry_outside_the_scanned_tree_is_still_a_tool_directory(
+        self, layout, monkeypatch, tmp_path
+    ):
+        """The positive counterpart: skipping in-tree entries keeps every other one.
+
+        A tool directory on PATH outside the scanned tree and the output directory,
+        named by nothing else in the policy, is readable, executable and allowed to
+        run under sandbox-exec. A PATH filter that dropped every entry fails here.
+        """
+        tools = tmp_path / "opt-tools" / "bin"
+        tools.mkdir(parents=True)
+        monkeypatch.setenv("PATH", os.pathsep.join([str(tools), "/usr/bin"]))
+
+        policy = _policy(layout, argv0="/usr/bin/true")
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        allowed = set().union(
+            *(
+                _subpaths(rule)
+                for _, rule in _indexed(lines.splitlines(), "(allow process-exec ")
+            )
+        )
+
+        real = Path(os.path.realpath(tools))
+        assert real in _resolved(policy.read_only)
+        assert real in _resolved(policy.executable)
+        assert _as_argv(tools) in allowed
 
     def test_the_keychain_files_are_denied_after_every_file_allow(
         self, layout, tmp_path
@@ -1303,41 +2724,81 @@ class TestSystemTrustRoots:
         ] * 2
 
 
-def _builtin_requirements():
-    from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
+def _scanner_requirements():
+    """Every scanner plugin ASH ships, by class name: each plugin module's
+    ASH_SCANNERS, so trivy-repo, snyk-code and ferret-scan are held to the same
+    guards as the builtin scanners, and a new plugin module is too."""
+    import importlib
+    import pkgutil
+
+    import automated_security_helper.plugin_modules as plugin_modules
 
     found = {}
-    for scanner in ASH_SCANNERS:
-        requirements = getattr(scanner, "sandbox_requirements", None)
-        if isinstance(requirements, SandboxRequirements):
-            found[scanner.__name__] = requirements
+    for module in pkgutil.iter_modules(plugin_modules.__path__):
+        package = importlib.import_module(f"{plugin_modules.__name__}.{module.name}")
+        for scanner in getattr(package, "ASH_SCANNERS", []):
+            requirements = getattr(scanner, "sandbox_requirements", None)
+            if isinstance(requirements, SandboxRequirements):
+                found[scanner.__name__] = requirements
     return found
 
 
+def test_the_guards_see_every_shipped_scanner_plugin():
+    found = set(_scanner_requirements())
+    assert {
+        "GrypeScanner",
+        "OpengrepScanner",
+        "TrivyRepoScanner",
+        "SnykCodeScanner",
+        "FerretScanScanner",
+    } <= found
+
+
+def _content_db_scanners():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+    )
+
+    return {"grype": GrypeScanner, "trivy": TrivyRepoScanner}
+
+
 class TestMacosScannerDeclarations:
-    """What each builtin scanner is granted for macOS, and how narrowly."""
+    """What each shipped scanner is granted for macOS, and how narrowly."""
 
-    def test_grype_reads_its_macos_database_read_only(self):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-            grype_scanner,
-        )
-
-        requirements = grype_scanner.GrypeScanner.sandbox_requirements
-        assert "~/Library/Caches/grype" in requirements.read_paths
-        assert "~/Library/Caches/grype" not in requirements.cache_paths
+    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    def test_the_macos_database_is_a_cache_not_a_read_path(self, tool):
+        """sandbox-exec runs programs from read paths, and never from a cache, which
+        it mounts read-only like every backend but bwrap's throwaway overlay."""
+        requirements = _content_db_scanners()[tool].sandbox_requirements
+        assert f"~/Library/Caches/{tool}" in requirements.cache_paths
+        assert f"~/Library/Caches/{tool}" not in requirements.read_paths
         # Not updated inside the sandbox: content_db_refresh updates the database
-        # outside it before an online scan and sets GRYPE_DB_AUTO_UPDATE=false.
+        # outside it before an online scan.
         assert dict(requirements.sandbox_exec_env) == {}
 
-    def test_trivy_repo_reads_its_macos_database_read_only(self):
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
-        )
-
-        requirements = trivy_repo_scanner.TrivyRepoScanner.sandbox_requirements
-        # Where content_db_refresh.default_cache_dir updates it on macOS.
-        assert "~/Library/Caches/trivy" in requirements.read_paths
-        assert "~/Library/Caches/trivy" not in requirements.cache_paths
+    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    def test_sandbox_exec_runs_nothing_from_the_database_directory(self, layout, tool):
+        database = layout.home / "Library" / "Caches" / tool
+        database.mkdir(parents=True)
+        requirements = _content_db_scanners()[tool].sandbox_requirements
+        policy = _policy(layout, requirements)
+        assert _resolved([database]) <= _resolved(policy.cache)
+        assert not _resolved([database]) & _resolved(policy.executable)
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        try:
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            assert _as_argv(database) not in allowed
+        finally:
+            plan.run_cleanup()
 
     def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -1353,13 +2814,13 @@ class TestMacosScannerDeclarations:
     def test_only_opengrep_unpacks_itself(self):
         declared = {
             name: requirements.unpack_dir_env
-            for name, requirements in _builtin_requirements().items()
+            for name, requirements in _scanner_requirements().items()
             if requirements.unpack_dir_env
         }
         assert declared == {"OpengrepScanner": "XDG_CACHE_HOME"}
 
     def test_no_grant_covers_the_whole_library_caches_directory(self):
-        for name, requirements in _builtin_requirements().items():
+        for name, requirements in _scanner_requirements().items():
             for path in requirements.read_paths + requirements.cache_paths:
                 parts = Path(path).parts
                 assert parts[-2:] != ("Library", "Caches"), (name, path)
@@ -1475,9 +2936,9 @@ class TestUvToolLock:
     ):
         tools = tmp_path / "uv-tools"
         tools.mkdir()
-        victim = tmp_path / "victim"
-        victim.write_text("")
-        (tools / ".lock").symlink_to(victim)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.write_text("")
+        (tools / ".lock").symlink_to(elsewhere)
         monkeypatch.setenv("UV_TOOL_DIR", str(tools))
         assert _policy(layout).uv_tool_locks == ()
 
@@ -1518,9 +2979,11 @@ class TestScriptInterpreter:
 
     def test_a_binary_is_not_read_as_a_script(self, layout, tmp_path):
         binary = tmp_path / "tool"
-        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/evil/bin/x")
+        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/unlisted-prefix/bin/x")
         policy = _policy(layout, argv0=str(binary))
-        assert not any("evil" in p.as_posix() for p in _resolved(policy.read_only))
+        assert not any(
+            "unlisted-prefix" in p.as_posix() for p in _resolved(policy.read_only)
+        )
 
 
 class TestSandboxExecWorkingDirectory:
@@ -1544,3 +3007,165 @@ class TestSandboxExecWorkingDirectory:
             assert self._chdir_arg(plan) == ""
         finally:
             plan.run_cleanup()
+
+
+class TestAToolGivenAStagedCopy:
+    """A tool handed a staged copy of its input reads that copy, not the scan's tree.
+
+    nbconvert converts one notebook ASH copied to a private directory, so the source
+    and output directories are left out of what it may read
+    (``SandboxRequirements.staged_input_only``). The policy names them, and the
+    backends that can hide a directory inside one they show do: bwrap mounts an
+    empty directory over each, and sandbox-exec denies reading them after the reads
+    it allows. Both give back what the policy lists inside them, the results
+    directory first. A scanner, the control, still reads both.
+    """
+
+    STAGED = SandboxRequirements(staged_input_only=True)
+
+    @pytest.fixture
+    def staging(self, tmp_path):
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "analysis.ipynb").write_text("{}")
+        return staging
+
+    @pytest.fixture
+    def under_a_tool_path(self, tmp_path, monkeypatch):
+        """A tree checked out inside a directory every tool reads, as under /opt."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        opt = tmp_path / "opt"
+        source = opt / "repo"
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (opt / "tool").mkdir()
+        return SimpleNamespace(
+            home=home,
+            opt=opt,
+            source=source,
+            output=output,
+            results=output / "converted" / "jupyter",
+        )
+
+    def _staged(self, layout, staging, **overrides):
+        kwargs = {"scan_target": staging, "cwd": staging, **overrides}
+        return _policy(layout, self.STAGED, **kwargs)
+
+    @staticmethod
+    def _reaches(paths, target) -> bool:
+        real = Path(os.path.realpath(target))
+        return any(p == real or p in real.parents or real in p.parents for p in paths)
+
+    def test_the_source_and_output_directories_are_not_readable(self, layout, staging):
+        policy = self._staged(layout, staging)
+
+        readable = _resolved([*policy.read_only, *policy.cache])
+        for withheld in (layout.source, layout.output):
+            assert not self._reaches(readable, withheld), (
+                f"a tool given a staged copy may read {withheld}: {sorted(readable)}"
+            )
+
+    def test_the_staged_copy_is_readable_and_the_results_directory_writable(
+        self, layout, staging
+    ):
+        policy = self._staged(layout, staging)
+
+        assert Path(os.path.realpath(staging)) in _resolved(policy.read_only)
+        assert _resolved(policy.writable) == _resolved([layout.results])
+
+    def test_the_policy_names_the_withheld_directories(self, layout, staging):
+        assert _resolved(self._staged(layout, staging).unread) == _resolved(
+            [layout.source, layout.output]
+        )
+
+    def test_a_scanner_still_reads_the_source_and_output_directories(
+        self, layout, staging
+    ):
+        policy = _policy(layout, scan_target=staging, cwd=staging)
+
+        readable = _resolved(policy.read_only)
+        for scanned in (layout.source, layout.output):
+            assert Path(os.path.realpath(scanned)) in readable
+        assert policy.unread == ()
+
+    def test_bwrap_hides_a_withheld_directory_inside_a_mounted_one(
+        self, under_a_tool_path, staging
+    ):
+        layout = under_a_tool_path
+        policy = self._staged(layout, staging, extra_read_paths=[str(layout.opt)])
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+
+        argv = backend.plan(["/usr/bin/true"], {}, policy).argv
+
+        def mount(flag, path):
+            spelled = _as_argv(path)
+            found = [
+                i for i, a in enumerate(argv) if a == flag and argv[i + 1] == spelled
+            ]
+            assert found, f"no {flag} {spelled} in {argv}"
+            return found[0]
+
+        opt = mount("--ro-bind", layout.opt)
+        hidden = mount("--tmpfs", layout.source)
+        results = mount("--bind", layout.results)
+        assert opt < hidden < results, (
+            "the empty directory has to cover the tree after the mount that shows "
+            "it, and before the results directory inside it is mounted"
+        )
+
+    def test_bwrap_mounts_no_empty_directory_for_a_scanner(self, under_a_tool_path):
+        layout = under_a_tool_path
+        policy = _policy(layout, extra_read_paths=[str(layout.opt)])
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+
+        argv = backend.plan(["/usr/bin/true"], {}, policy).argv
+
+        tmpfs = {argv[i + 1] for i, a in enumerate(argv) if a == "--tmpfs"}
+        assert _as_argv(layout.source) not in tmpfs
+        assert _as_argv(layout.output) not in tmpfs
+
+    def test_sandbox_exec_denies_the_withheld_directories_after_its_reads(
+        self, under_a_tool_path, staging, tmp_path
+    ):
+        layout = under_a_tool_path
+        tool_inside = layout.source / ".venv"
+        tool_inside.mkdir()
+        policy = self._staged(
+            layout, staging, extra_read_paths=[str(layout.opt), str(tool_inside)]
+        )
+
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        lines = lines.splitlines()
+
+        def last(prefix, path):
+            spelled = _as_argv(path)
+            found = [
+                i for i, line in _indexed(lines, prefix) if spelled in _subpaths(line)
+            ]
+            assert found, f"no {prefix} rule names {spelled}"
+            return found[-1]
+
+        shown = last("(allow file-read* (subpath", layout.opt)
+        denied = last("(deny file-read*", layout.source)
+        assert last("(deny file-read*", layout.output) == denied
+        given_back = last("(allow file-read* (subpath", tool_inside)
+        written = last("(allow file-read* file-write*", layout.results)
+        assert shown < denied < given_back, (
+            "the tree has to be denied after the read that shows it, and a tool "
+            "path inside it given back after that"
+        )
+        assert denied < written
+
+    def test_sandbox_exec_denies_nothing_more_for_a_scanner(self, layout, tmp_path):
+        lines = _sbpl(layout, tmp_path)
+
+        denied = set()
+        for _, line in _indexed(lines, "(deny file-read*"):
+            denied |= _subpaths(line)
+        assert _as_argv(layout.source) not in denied
+        assert _as_argv(layout.output) not in denied

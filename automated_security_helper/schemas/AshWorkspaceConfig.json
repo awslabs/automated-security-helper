@@ -3,6 +3,12 @@
     "AshSuppression": {
       "description": "Represents a finding suppression rule.",
       "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
         "expiration": {
           "anyOf": [
             {
@@ -128,6 +134,12 @@
     "IgnorePathWithReason": {
       "description": "Represents a path exclusion entry.",
       "properties": {
+        "client_supplied": {
+          "default": false,
+          "description": "Set by ASH: True when a config or workspace policy file an MCP client delivered supplied this entry, so results show which suppressions and ignored paths came from the client. A value written in a config file is ignored.",
+          "title": "Client Supplied",
+          "type": "boolean"
+        },
         "expiration": {
           "anyOf": [
             {

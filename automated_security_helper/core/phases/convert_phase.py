@@ -1,7 +1,7 @@
 """Implementation of the Convert phase."""
 
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
@@ -11,6 +11,10 @@ from automated_security_helper.models.asharp_model import (
     ConverterStatusInfo,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.sandbox.scope import (
+    converter_run_scope,
+    plugin_probe_scope,
+)
 
 
 def _converter_display_name(plugin_instance: Any) -> str:
@@ -26,16 +30,54 @@ def _converter_display_name(plugin_instance: Any) -> str:
     return name or plugin_instance.__class__.__name__
 
 
-def _refused_inputs_field(plugin_instance: Any) -> Dict[str, Any]:
-    """The ``refused_inputs`` keyword for a converter's row, or nothing.
+def _conversion_failure(run_scope: Any) -> str | None:
+    """Why a converter that returned normally still lost coverage, or None.
 
-    Omitted when the converter refused nothing, so ``to_simple_dict``, which dumps
-    with ``exclude_unset``, renders a clean tree's row as it did before the field
+    The spawns the scanner sandbox refused while its ``convert()`` ran, which
+    converted nothing. The inputs a converter itself could not convert are its
+    ``failed_inputs`` (``_input_record_fields``).
+    """
+    refused = getattr(run_scope, "refused_spawns", 0) or 0
+    if not refused:
+        return None
+    return (
+        f"could not convert: the scanner sandbox refused {refused} process(es) it "
+        f"started ({getattr(run_scope, 'last_refusal', None) or 'no reason given'})"
+    )
+
+
+def _failure_field(failure: str | None) -> Dict[str, Any]:
+    """The ``failure`` keyword for a converter's row, or nothing when there is none."""
+    return {"failure": failure} if failure else {}
+
+
+def _input_record_fields(plugin_instance: Any) -> Dict[str, Any]:
+    """The ``refused_inputs`` and ``failed_inputs`` keywords for a converter's row.
+
+    Each is omitted when empty, so ``to_simple_dict``, which dumps with
+    ``exclude_unset``, renders a clean tree's row as it did before the fields
     existed. Read with ``getattr`` because a third-party converter need not derive
     from ``ConverterPluginBase``.
     """
-    refused = list(getattr(plugin_instance, "refused_inputs", None) or [])
-    return {"refused_inputs": refused} if refused else {}
+    fields: Dict[str, Any] = {}
+    for name in ("refused_inputs", "failed_inputs"):
+        records = list(getattr(plugin_instance, name, None) or [])
+        if records:
+            fields[name] = records
+    return fields
+
+
+def _could_not_convert(plugin_instance: Any) -> str:
+    """``"2 files could not be converted"`` for a converter's failed inputs, or ``""``.
+
+    For the progress row and the CONVERT_COMPLETE message. A converter whose inputs
+    all failed returns no paths, and without this it was reported as having found
+    no files to convert -- the message a tree without notebooks gets.
+    """
+    count = len(list(getattr(plugin_instance, "failed_inputs", None) or []))
+    if not count:
+        return ""
+    return f"{count} {'file' if count == 1 else 'files'} could not be converted"
 
 
 class ConvertPhase(EnginePhase):
@@ -159,19 +201,21 @@ class ConvertPhase(EnginePhase):
         all_converter_instances = []
         for plugin_class in converter_classes:
             try:
-                plugin_instance = plugin_class(
-                    context=self.plugin_context,
-                    config=(
-                        self.plugin_context.config.get_plugin_config(
-                            plugin_type="converter",
-                            # EnginePhase annotates self.plugins as instances, but
-                            # this phase receives the plugin classes.
-                            plugin_name=plugin_config_key(cast(type, plugin_class)),
-                        )
-                        if self.plugin_context.config is not None
-                        else None
-                    ),
-                )
+                # Under a sandbox, what a converter runs while it is constructed and
+                # validated (nbconvert's version probe, its dependency check) runs
+                # sandboxed, as a scanner's probes do, and installs nothing.
+                with plugin_probe_scope(plugin_class, self.plugin_context):
+                    plugin_instance = plugin_class(
+                        context=self.plugin_context,
+                        config=(
+                            self.plugin_context.config.get_plugin_config(
+                                plugin_type="converter",
+                                plugin_name=plugin_config_key(plugin_class),
+                            )
+                            if self.plugin_context.config is not None
+                            else None
+                        ),
+                    )
                 all_converter_instances.append(plugin_instance)
             except Exception as e:
                 failed_name = getattr(plugin_class, "__name__", "Unknown")
@@ -209,9 +253,10 @@ class ConvertPhase(EnginePhase):
         # change the scan and report phases, which share it.
         for plugin_instance in all_converter_instances:
             try:
-                plugin_instance.dependencies_satisfied = (
-                    plugin_instance.validate_plugin_dependencies()
-                )
+                with plugin_probe_scope(plugin_instance, self.plugin_context):
+                    plugin_instance.dependencies_satisfied = (
+                        plugin_instance.validate_plugin_dependencies()
+                    )
             except Exception as e:
                 # Fail closed. A dependency check that raised has not shown the
                 # dependency to be present, and filter_enabled_plugins drops the
@@ -223,11 +268,18 @@ class ConvertPhase(EnginePhase):
                 )
                 plugin_instance.dependencies_satisfied = False
 
-        filtered_instances = self.filter_enabled_plugins(
-            plugin_instances=all_converter_instances,
-            plugin_context=self.plugin_context,
-            python_only=python_based_plugins_only,
-        )
+        # One at a time, so the dependency check the filter repeats runs in that
+        # converter's own probe scope too.
+        filtered_instances = []
+        for plugin_instance in all_converter_instances:
+            with plugin_probe_scope(plugin_instance, self.plugin_context):
+                filtered_instances.extend(
+                    self.filter_enabled_plugins(
+                        plugin_instances=[plugin_instance],
+                        plugin_context=self.plugin_context,
+                        python_only=python_based_plugins_only,
+                    )
+                )
 
         # A row for every converter the filter dropped, so a converter that did not
         # run is present in the machine-readable output instead of being absent from
@@ -342,8 +394,12 @@ class ConvertPhase(EnginePhase):
                         f"Failed to notify converter start event: {str(event_error)}"
                     )
 
-                # Pass the source directory as the target
-                convert_result_initial = plugin_instance.convert()
+                # Pass the source directory as the target. Under a sandbox, the
+                # converter's tool runs confined like a scanner's.
+                with converter_run_scope(
+                    plugin_instance, self.plugin_context
+                ) as run_scope:
+                    convert_result_initial = plugin_instance.convert()
                 # Ensure all convert_result are strings in case some are Paths
                 convert_result = []
                 if convert_result_initial is not None:
@@ -362,13 +418,19 @@ class ConvertPhase(EnginePhase):
                     )
                     plugin_converted_paths.extend(convert_result)
                     converted_paths.extend(convert_result)
+                    not_converted = _could_not_convert(plugin_instance)
+                    also = f", {not_converted}" if not_converted else ""
 
                     # Update converter task to 100%
                     self.progress_display.update_task(
                         phase=ExecutionPhase.CONVERT,
                         task_id=converter_task,
                         completed=100,
-                        description=f"[green]({display_name}) Converted {len(convert_result)} files",
+                        description=(
+                            f"[{'yellow' if not_converted else 'green'}]"
+                            f"({display_name}) Converted {len(convert_result)} files"
+                            f"{also}"
+                        ),
                     )
 
                     # Notify converter complete
@@ -383,7 +445,10 @@ class ConvertPhase(EnginePhase):
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=convert_result,
                             file_count=len(convert_result),
-                            message=f"Converter {display_name} completed: {len(convert_result)} files converted",
+                            message=(
+                                f"Converter {display_name} completed: "
+                                f"{len(convert_result)} files converted{also}"
+                            ),
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(
@@ -393,14 +458,20 @@ class ConvertPhase(EnginePhase):
                     ASH_LOGGER.debug(
                         f"Converter {display_name} returned None or empty result"
                     )
-                    converters_with_no_files.append(display_name)
+                    not_converted = _could_not_convert(plugin_instance)
+                    if not not_converted:
+                        converters_with_no_files.append(display_name)
 
                     # Update converter task to 100%
                     self.progress_display.update_task(
                         phase=ExecutionPhase.CONVERT,
                         task_id=converter_task,
                         completed=100,
-                        description=f"[yellow]({display_name}) No files to convert",
+                        description=(
+                            f"[red]({display_name}) {not_converted}"
+                            if not_converted
+                            else f"[yellow]({display_name}) No files to convert"
+                        ),
                     )
 
                     # Notify converter complete (no files)
@@ -415,7 +486,10 @@ class ConvertPhase(EnginePhase):
                             converter_class=plugin_instance.__class__.__name__,
                             converted_files=[],
                             file_count=0,
-                            message=f"Converter {display_name} completed: no files to convert",
+                            message=(
+                                f"Converter {display_name} completed: "
+                                f"{not_converted or 'no files to convert'}"
+                            ),
                         )
                     except Exception as event_error:
                         ASH_LOGGER.error(
@@ -427,7 +501,9 @@ class ConvertPhase(EnginePhase):
                         dependencies_satisfied=plugin_instance.dependencies_satisfied,
                         excluded=not plugin_instance.config.enabled or False,
                         converted_paths=plugin_converted_paths,
-                        **_refused_inputs_field(plugin_instance),
+                        **_input_record_fields(plugin_instance),
+                        # Omitted when nothing was lost, like refused_inputs.
+                        **_failure_field(_conversion_failure(run_scope)),
                     )
                 )
 
@@ -468,7 +544,7 @@ class ConvertPhase(EnginePhase):
                         excluded=False,
                         failure=f"{type(e).__name__}: {e}",
                         converted_paths=plugin_converted_paths,
-                        **_refused_inputs_field(plugin_instance),
+                        **_input_record_fields(plugin_instance),
                     )
                 )
 
@@ -494,8 +570,10 @@ class ConvertPhase(EnginePhase):
         if not converted_paths:
             unproductive = [
                 f"{name} ({row.failure})"
-                for name, row in aggregated_results.converter_results.items()
                 if getattr(row, "failure", None)
+                else f"{name} ({len(row.failed_inputs)} could not be converted)"
+                for name, row in aggregated_results.converter_results.items()
+                if getattr(row, "failure", None) or getattr(row, "failed_inputs", None)
             ]
             if unproductive:
                 ASH_LOGGER.warning(

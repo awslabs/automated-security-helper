@@ -1,18 +1,9 @@
 """Module containing the CDK Nag security scanner implementation."""
 
-import json
 import logging
 import re
-from importlib.metadata import (
-    PackageNotFoundError,
-    distributions,
-    packages_distributions,
-    requires,
-)
 from typing import Annotated, Any, ClassVar, List, Literal, Optional
 from pathlib import Path
-from urllib.parse import urlsplit
-from urllib.request import url2pathname
 
 from pydantic import BaseModel, ConfigDict, Field
 from yaml import YAMLError
@@ -44,9 +35,14 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
+from automated_security_helper.utils.ash_install import extra_requirements_from_metadata
 from automated_security_helper.utils.cdk_nag_worker import cdk_nag_worker_batch
 from automated_security_helper.utils.get_ash_version import get_ash_version
-from automated_security_helper.utils.get_scan_set import scan_set
+from automated_security_helper.utils.get_scan_set import (
+    honors_ignore_files,
+    scan_set,
+)
+from automated_security_helper.utils.link_exclusions import drop_ignored
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.cfn_template_model import describe_parse_error
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -550,215 +546,18 @@ def _reporting_descriptor_for(
     )
 
 
-# Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
-# renders the marker with single quotes while pyproject.toml and pip emit double
-# quotes, so neither style can be assumed.
-_CDK_EXTRA_MARKER = re.compile(r"""\bextra\s*==\s*['"]cdk['"]""")
-
-
-def _local_path_from_file_url(url: object) -> Optional[Path]:
-    """The path on this host that a PEP 610 ``file://`` URL names, or None.
-
-    Slicing the scheme off the front and handing the remainder to ``Path`` is
-    what this used to do inline, and it is wrong twice over. Both mistakes are
-    invisible on Linux, where the leftover text happens to be exactly the path:
-
-    * ``file:///D:/proj`` leaves ``/D:/proj``, which on Windows is *rooted with
-      no drive* -- ``PureWindowsPath("/D:/proj").drive`` is ``""`` -- so it
-      resolves against whichever drive is current and can never equal the real
-      ``D:\\proj``. Every comparison against it missed, which is what took out
-      all four Windows cells: on 3.12 and 3.13 only the two tests that force the
-      declared mapping empty, and on 3.10 and 3.11 the drift guards too, because
-      there this route is the only one that resolves at all.
-    * A directory whose name needs percent-encoding stays encoded, because
-      nothing unquoted it. That one misses on every platform; CI simply never
-      checks out into such a directory.
-
-    ``url2pathname`` is the standard library's inverse of the conversion pip and
-    uv perform when they write the file, and it is platform specific on purpose:
-    on Windows it turns ``/D:/proj`` into ``D:\\proj``, and on POSIX it unquotes
-    and does nothing else. A Windows-shaped URL read on POSIX therefore yields a
-    path that matches nothing, which is the right answer -- ``direct_url.json``
-    is written by the installer that ran on this host, so its URL always names a
-    path here.
-
-    Deliberately not ``workspace.aggregation._strip_file_scheme``, which is
-    textual for a reason of its own: it normalizes scanner-emitted SARIF URIs
-    that are frequently not valid URIs at all, and has to reduce ``file:///C:/x``
-    the same way on every host. This URL is machine-written and well formed, and
-    what is wanted from it is a path on *this* host, so the two cannot share an
-    implementation.
-    """
-    if not isinstance(url, str):
-        return None
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        # An unterminated IPv6 authority, e.g. "file://[::1/proj". One malformed
-        # sibling distribution must not take out the walk over all of them.
-        return None
-    if parts.scheme != "file":
-        return None
-    # Keep a host authority in the string handed to url2pathname: on Windows that
-    # is what turns "file://server/share/x" into the UNC path \\server\share\x,
-    # and dropping it would silently reinterpret a share as a local directory.
-    # "localhost" is RFC 8089's spelling of "this host" and names no path itself.
-    host = "" if parts.netloc.lower() == "localhost" else parts.netloc
-    try:
-        return Path(url2pathname(f"//{host}{parts.path}" if host else parts.path))
-    except (OSError, ValueError):
-        # nturl2path raises OSError for a drive specifier it cannot parse.
-        return None
-
-
-def _distributions_declaring_this_module(root_package: str) -> List[str]:
-    """Names of installed distributions that ship ``root_package``.
-
-    Two strategies, in order, because the first one silently fails for the
-    install mode this project's own CI uses.
-
-    ``packages_distributions()`` maps a top-level import name to distributions
-    using only what the ``*.dist-info`` declares about its contents, and for an
-    editable install there is nothing usable there. Hatchling writes no
-    ``top_level.txt``, and an editable RECORD lists the import shim rather than
-    the project's own files -- no ``.py`` under the package at all. So:
-
-    * 3.10 reads ``top_level.txt`` and nothing else. Absent, so no mapping, in
-      either install mode.
-    * 3.11 also infers from RECORD but filters on ``suffix == ".py"``, and an
-      editable RECORD has none, so the inferred set is empty. A non-editable
-      install works.
-    * 3.12 dropped that suffix filter, so non-Python files that happen to sit
-      under the package directory yield the name.
-
-    Measured at 804036ba on one editable install: 3.10.20 and 3.11.15 got
-    ``None``, 3.12.13 and 3.13.12 got ``['automated-security-helper']``. That is
-    why ``_cdk_extra_requirements`` had been returning the pinned fallback as its
-    NORMAL path on half the support matrix, and why the guard comparing the two
-    was comparing the fallback against itself and could not fail.
-
-    The second strategy does not ask what a distribution declares it contains. It
-    asks which distribution was installed FROM the directory this module lives
-    in, via the PEP 610 ``direct_url.json`` that pip and uv write for any install
-    from a local path. That file records the project directory as a ``file://``
-    URL -- see ``_local_path_from_file_url`` for why reading one back is not a
-    string slice -- and depends on neither RECORD nor ``top_level.txt``, so it
-    resolves on every version.
-
-    Still never names a distribution literally. A literal name is one someone
-    else can own on a package index, and installing by such a name is the defect
-    this whole path exists to remove -- so the fallback strategy is keyed on a
-    filesystem path this module can see from the inside, not on a string.
-    """
-    try:
-        mapped = packages_distributions().get(root_package) or []
-    except (PackageNotFoundError, OSError) as exc:
-        ASH_LOGGER.debug(
-            f"Could not enumerate the distributions providing {root_package!r} "
-            f"({exc}); trying the install-location strategy instead."
-        )
-        mapped = []
-    if mapped:
-        return list(mapped)
-
-    try:
-        here = Path(__file__).resolve()
-    except OSError:  # pragma: no cover - resolve() on an unreadable cwd
-        return []
-
-    located: List[str] = []
-    try:
-        candidates = list(distributions())
-    except OSError as exc:
-        ASH_LOGGER.debug(
-            f"Could not enumerate installed distributions ({exc}); falling back "
-            f"to the pinned requirement list."
-        )
-        return []
-
-    for dist in candidates:
-        # Every read here is defensive on purpose: this loop walks EVERY
-        # installed distribution, so one malformed sibling must not take out the
-        # command. read_text returns None for an absent file rather than raising.
-        try:
-            raw = dist.read_text("direct_url.json")
-            name = dist.metadata["Name"]
-        except (OSError, KeyError, ValueError):
-            continue
-        if not raw or not name:
-            continue
-        try:
-            url = json.loads(raw).get("url", "")
-        except (ValueError, AttributeError):
-            continue
-        project_dir = _local_path_from_file_url(url)
-        if project_dir is None:
-            continue
-        # Compare resolved paths rather than strings: the URL is absolute but may
-        # differ from this module's path by a symlink or a trailing separator.
-        try:
-            project_dir = project_dir.resolve()
-        except (OSError, ValueError):
-            continue
-        if project_dir == here or project_dir in here.parents:
-            if name not in located:
-                located.append(name)
-
-    if not located:
-        ASH_LOGGER.debug(
-            f"No installed distribution declares or contains {root_package!r}; "
-            f"falling back to the pinned requirement list."
-        )
-    return located
-
-
 def _cdk_extra_requirements_from_metadata() -> Optional[List[str]]:
     """The ``cdk`` extra exactly as the installed metadata declares it, or None.
 
     ``None`` means the metadata could not be read at all. It does NOT mean the
     extra is empty, and the distinction is the whole reason this is a separate
-    function from ``_cdk_extra_requirements`` below.
-
-    Collapsing the two is what hid a real defect. ``_cdk_extra_requirements``
-    returns the pinned fallback when the read fails, so a caller cannot tell
-    "metadata declares this" from "metadata was unreadable, here is the copy".
-    ``test_fallback_matches_installed_metadata`` compared the copy against that
-    return value, so on any interpreter taking the fallback it compared the copy
-    against itself -- a guard that passed for every possible value of the
-    constant, on py3.10 and py3.11, with no skip and no warning. Tests assert
-    against this function so that an unreadable read is visible as ``None``
-    instead of impersonating a successful one.
+    function from ``_cdk_extra_requirements`` below: that one substitutes the
+    pinned fallback, so a caller cannot tell "metadata declares this" from
+    "metadata was unreadable, here is the copy". The read itself is
+    ``ash_install.extra_requirements_from_metadata``, shared with the symbols
+    extra's install hint.
     """
-    root_package = __name__.split(".", 1)[0]
-    accumulated: List[str] = []
-
-    for dist_name in _distributions_declaring_this_module(root_package):
-        try:
-            declared = requires(dist_name)
-        except (PackageNotFoundError, OSError, ValueError) as exc:
-            ASH_LOGGER.debug(
-                f"Could not read requirements from distribution {dist_name!r} "
-                f"providing {root_package!r} ({exc}); skipping it."
-            )
-            continue
-        if declared is None:
-            continue
-        for requirement in declared:
-            if not _CDK_EXTRA_MARKER.search(requirement):
-                continue
-            # Keep the requirement, drop the marker. pip evaluates markers with
-            # ``extra`` undefined, so ``extra == "cdk"`` is false and pip skips
-            # the requirement while still exiting 0 -- an install that reports
-            # success and installs nothing.
-            bare = requirement.split(";", 1)[0].strip()
-            # Deduplicated in place rather than through a set, so the order
-            # pyproject.toml declares is what pip receives. A set would make the
-            # generated command vary run to run, which is noise in any log that
-            # records it.
-            if bare and bare not in accumulated:
-                accumulated.append(bare)
-
-    return accumulated or None
+    return extra_requirements_from_metadata("cdk")
 
 
 def _cdk_extra_requirements() -> List[str]:
@@ -923,9 +722,8 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             # "cdk-nag is not installed" as a bug in ASH and stops reading.
             #
             # Points at ASH's own command rather than at a pip install of
-            # "automated-security-helper[cdk]". That name belongs to an
-            # unrelated project on PyPI, so the old hint sent users to install a
-            # stranger's package to fix an ASH problem.
+            # "automated-security-helper[cdk]": on PyPI that name belongs to an
+            # unrelated project, which has no cdk extra.
             absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
                 _CDK_REQUIRED_DISTRIBUTIONS
             )
@@ -935,22 +733,24 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             )
             self.dependencies_satisfied = False
             return False
+        # Availability only. The node jsii starts is looked up again in the worker,
+        # outside the scanned tree; see cdk_nag_wrapper.run_cdk_nag_against_cfn_template.
         found = find_executable("node")
         return found is not None
 
     def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
         """Install the third-party packages behind ASH's ``cdk`` extra.
 
-        Names aws-cdk-lib, cdk-nag and constructs directly. This method used to
-        install ``automated-security-helper[cdk]`` instead, which made
-        ``ash dependencies install`` resolve a distribution by that name from
-        whatever index pip is pointed at. ASH is not published to any index --
-        it installs from git, as the README documents -- so that name resolves to
-        an unrelated third party's package, and it was being installed by a
-        security scanner running inside CI with repository access. Naming the
-        extra's real contents means this command cannot resolve ASH by name at
-        all, whoever ends up owning that name.
+        Names aws-cdk-lib, cdk-nag and constructs directly rather than asking an
+        index for ASH's own distribution with the extra. ASH is not published to
+        any index -- it installs from git, as the README documents -- and on
+        PyPI its distribution name belongs to an unrelated project, so naming
+        the extra's packages is what makes this command install what the extra
+        declares.
         """
+        # This method used to install "automated-security-helper[cdk]", which
+        # `ash dependencies install` resolved from the configured index, where
+        # that name belongs to an unrelated project.
         import sys
 
         commands = super().get_installation_commands(platform, arch)
@@ -1052,9 +852,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # third-party ones -- implements. Threading the container through it is a breaking API
         # change, and stashing it on ``self`` instead would be the same shared mutable state
         # wearing a different name.
+        #
+        # ``exit_code`` is per-call state by the same argument; see
+        # ScannerPluginBase.scan().
         self.targets_attempted = 0
         self.targets_failed = 0
         self.errors = []
+        self.exit_code = 0
 
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
@@ -1114,13 +918,19 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # emit the same rule descriptors in a different order and give ash-cdk-nag.sarif a
         # non-empty diff. The non-converted branch below already ends in
         # ``sorted(set(included))`` inside get_scan_set, so only this branch was unordered.
+        # The scan set, without the files the global ignore paths ignore.
         orig_scannable = (
             sorted(self.context.work_dir.glob("**/*.*"))
             if target_type == "converted"
-            else scan_set(
-                source=self.context.source_dir,
-                output=self.context.output_dir,
-                # filter_pattern=r"\.(yaml|yml|json)$",
+            else drop_ignored(
+                scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                    honor_ignore_files=honors_ignore_files(self.context.config),
+                    # filter_pattern=r"\.(yaml|yml|json)$",
+                ),
+                self.context.source_dir,
+                global_ignore_paths,
             )
         )
         ASH_LOGGER.debug(

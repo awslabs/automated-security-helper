@@ -17,6 +17,7 @@ import pytest
 from automated_security_helper.cli.mcp.profile_registry import DEFAULT_SESSION_ID
 from automated_security_helper.cli.mcp.session_identity import (
     MCP_SESSION_ID_HEADER,
+    resolve_caller_session_id,
     resolve_session_id,
 )
 
@@ -118,6 +119,42 @@ class TestUnusableHeaderIsRefused:
     def test_overlong_value_is_refused(self):
         with pytest.raises(ValueError, match="maximum"):
             resolve_session_id({MCP_SESSION_ID_HEADER: "a" * 129})
+
+    @pytest.mark.parametrize(
+        "reserved",
+        [
+            "__default__",
+            "__DEFAULT__",
+            "__unidentified__",
+            "__Unidentified__",
+            ".stdio-servers",
+            ".STDIO-SERVERS",
+            ".ash-mcp-scans",
+            ".ASH-MCP-SCANS",
+        ],
+    )
+    def test_a_stand_in_context_naming_a_reserved_id_is_refused(self, reserved):
+        """The non-SDK branch refuses the same ids the transport branch does."""
+
+        class _StandIn:
+            headers = {MCP_SESSION_ID_HEADER: reserved}
+
+        with pytest.raises(ValueError, match="reserved"):
+            resolve_caller_session_id(_StandIn())
+
+    def test_a_stand_in_context_naming_an_ordinary_id_is_served(self):
+        class _StandIn:
+            headers = {MCP_SESSION_ID_HEADER: "tenant-a"}
+
+        assert resolve_caller_session_id(_StandIn()) == "tenant-a"
+
+    def test_a_stand_in_context_with_no_headers_resolves_to_the_default_session(self):
+        """No headers attribute means no explicit header: the default session."""
+
+        class _HeaderlessStandIn:
+            pass
+
+        assert resolve_caller_session_id(_HeaderlessStandIn()) == DEFAULT_SESSION_ID
 
     def test_refusal_names_the_header(self):
         """The error has to say which header was wrong to be actionable."""

@@ -27,6 +27,8 @@ metadata:
   execution_discrepancy_report: {}
   expected_scanners: []
   generated_at: '2026-01-15T12:00:42+00:00'
+  ignore_file_exclusions: null
+  inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: workspace
   report_id: ASH-WORKSPACE-snapshot-with-skipped
@@ -624,8 +626,9 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 1
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -640,8 +643,9 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 1
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -656,8 +660,9 @@ scanner_results:
     dependencies_satisfied: false
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -672,8 +677,9 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: 125
     finding_count: 1
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -686,7 +692,7 @@ scanner_results:
 used_suppressions: []
 validation_checkpoints: []
 workspace:
-  exit_code: 2
+  exit_code: 1
   max_parallel_projects: 1
   project_timeout: null
   projects:
@@ -697,8 +703,11 @@ workspace:
     error: null
     exceeds_threshold: true
     finding_count: 1
+    ignore_file_exclusions: null
+    incomplete_converters: {}
     incomplete_scanners:
     - npm-audit
+    inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/api
@@ -721,7 +730,10 @@ workspace:
     error: null
     exceeds_threshold: true
     finding_count: 2
+    ignore_file_exclusions: null
+    incomplete_converters: {}
     incomplete_scanners: []
+    inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/web
@@ -744,7 +756,10 @@ workspace:
     error: null
     exceeds_threshold: false
     finding_count: 0
+    ignore_file_exclusions: null
+    incomplete_converters: {}
     incomplete_scanners: []
+    inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/docs

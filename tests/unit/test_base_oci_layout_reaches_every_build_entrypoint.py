@@ -43,6 +43,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from tests.utils.host_ids import with_fixed_ids
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import (
     BASE_OCI_LAYOUT_CONTEXT,
@@ -292,7 +293,12 @@ def _ash_build(tmp_path: Path, runner_name: str, value: str | None):
     (tmp_path / "src").mkdir(exist_ok=True)
     argv_log = tmp_path / "argv"
 
-    env = {**os.environ, "OCI_RUNNER": str(runner), "ARGV_LOG": str(argv_log)}
+    # An unprivileged `id`, so the default non-root build reaches the runner when the
+    # suite itself runs as root.
+    env = with_fixed_ids(
+        {**os.environ, "OCI_RUNNER": str(runner), "ARGV_LOG": str(argv_log)},
+        tmp_path / "fixed-id-bin",
+    )
     for name in (
         VAR,
         "ASH_BASE_IMAGE_OVERRIDE",
@@ -388,7 +394,7 @@ class TestThePowerShellEntrypoint:
         else_at = body.index("else", branch_at)
         branch = body[branch_at:else_at]
         assert (
-            '"--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""'
+            '"--build-context", \'"ash-base-image=oci-layout://$baseLayoutDir"\''
             in branch
         )
         assert '"--build-arg", "BASE_IMAGE=ash-base-image"' in branch

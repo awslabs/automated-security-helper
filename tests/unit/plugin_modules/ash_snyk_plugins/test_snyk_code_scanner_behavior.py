@@ -548,27 +548,13 @@ def test_nonzero_exit_code_raises_scanner_error(
     assert "exit code 2" in str(excinfo.value)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ScannerError,
-    reason=(
-        "scan() raises on any non-zero exit code, but snyk exits 1 when it finds "
-        "actionable items. _run_subprocess stores that 1 in self.exit_code via "
-        "_process_command_response, so the `if self.exit_code != 0` check fires "
-        "before the _post_scan override that exists to reset 1 back to 0 -- and "
-        "before the base class's own success_exit_codes = {0, 1}. A snyk run that "
-        "actually finds something therefore reports a scanner failure instead of "
-        "returning its findings. Remove this xfail once the check excludes 1."
-    ),
-)
 def test_exit_code_one_means_findings_not_failure(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
-    """Snyk exits 1 when it finds issues; that is a successful scan.
+    """Snyk exits 1 when it finds issues; that is a completed scan, not a failure.
 
-    The _post_scan override in this module documents exactly this ("Snyk
-    returns 1 on a successful scan when actionable items are detected") but
-    never gets the chance to act on it during a real scan.
+    The scan checks the scanner's accepted set, not ``exit_code != 0``, so a snyk run
+    that found something reports its findings rather than a scanner failure.
     """
     subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=1)
 
@@ -577,30 +563,38 @@ def test_exit_code_one_means_findings_not_failure(
     assert len(report.runs[0].results) == 1
 
 
-def test_post_scan_resets_exit_code_one_to_zero(scanner, snyk_on_path):
-    """The _post_scan override normalizes snyk's findings-detected exit code.
+def test_exit_code_one_is_kept_on_the_scanner_and_its_invocation(
+    scanner, snyk_on_path, populated_source, subprocess_double
+):
+    """An accepted 1 is recorded as the tool returned it, as bandit's 1 is."""
+    subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=1)
 
-    Reached here through the empty-target path, which calls _post_scan before
-    any exit-code check.
-    """
-    scanner.exit_code = 1
+    report = scanner.scan(target=populated_source, target_type="source")
+
+    assert scanner.exit_code == 1
+    assert report.runs[0].invocations[0].exitCode == 1
+
+
+def test_a_rejected_exit_code_is_kept_on_the_scanner(
+    scanner, snyk_on_path, populated_source, subprocess_double
+):
+    subprocess_double.side_effect = writes_sarif(snyk_sarif(), exit_code=2)
+
+    with pytest.raises(ScannerError):
+        scanner.scan(target=populated_source, target_type="source")
+
+    assert scanner.exit_code == 2
+
+
+def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):
+    """An earlier target's code is not carried into this one (the empty-target path
+    returns before snyk runs, so the code it ends with is this target's own)."""
+    scanner.exit_code = 3
 
     result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is True
-    assert scanner.exit_code == 0, (
-        "exit code 1 must be normalized to 0 so a findings-detected run is not "
-        "reported as a scanner failure"
-    )
-
-
-def test_post_scan_leaves_other_exit_codes_alone(scanner, snyk_on_path):
-    """Only 1 is normalized; a genuine failure code is preserved."""
-    scanner.exit_code = 3
-
-    scanner.scan(target=scanner.context.work_dir, target_type="converted")
-
-    assert scanner.exit_code == 3
+    assert scanner.exit_code == 0
 
 
 def test_malformed_results_file_logs_an_error_and_returns_none(

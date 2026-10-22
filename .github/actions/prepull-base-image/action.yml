@@ -509,6 +509,40 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # The steps below print their inputs, and so do git, the runtimes and the helper's
+    # errors. The runner reads a line of a step's output as a workflow command when it
+    # starts with `::` or holds `##[`, and it starts a new line at a carriage return as well
+    # as a line feed. So an input holding either break, or `##[`, is refused here first,
+    # by name and without printing it.
+    - name: Refuse an input that could start a workflow command
+      id: inputs
+      shell: bash
+      env:
+        OCI_RUNNER: ${{ inputs.oci-runner }}
+        RUNNER_WRAPPER: ${{ inputs.runner-wrapper }}
+        ATTEMPTS: ${{ inputs.attempts }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        BLOCK_REGISTRIES: ${{ inputs.block-registries-on-hit }}
+      run: |
+        set -euo pipefail
+        # Byte by byte, so the answer does not depend on the runner's locale: in C,
+        # [[:cntrl:]] is C0 and DEL, and the UTF-8 bytes of C1 (U+0080 to U+009F) and
+        # of U+2028 and U+2029 are named.
+        export LC_ALL=C
+        refuse_command_text() {
+          case "$2" in
+            *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
+              echo "::error::the $1 input holds a line break, another control character or the legacy command marker, so it is refused without being printed."
+              exit 1
+              ;;
+          esac
+        }
+        refuse_command_text oci-runner "${OCI_RUNNER}"
+        refuse_command_text runner-wrapper "${RUNNER_WRAPPER}"
+        refuse_command_text attempts "${ATTEMPTS}"
+        refuse_command_text dockerfile "${DOCKERFILE}"
+        refuse_command_text block-registries-on-hit "${BLOCK_REGISTRIES}"
+
     # Never fails the job. A key that cannot be computed means the Dockerfile's two ARG lines
     # are malformed, and the pull step below already reports each of those cases precisely; a
     # second, vaguer error here would only put itself ahead of the useful one.
@@ -691,6 +725,29 @@ runs:
         # happens to have a second matching line.
         base="$(sed -n '/^ARG BASE_IMAGE=/{s/^ARG BASE_IMAGE=//;p;q;}' "${DOCKERFILE}")"
         pin="$(sed -n '/^ARG BASE_IMAGE_DIGEST=/{s/^ARG BASE_IMAGE_DIGEST=//;p;q;}' "${DOCKERFILE}")"
+
+        # Both values are printed below, and sed keeps a carriage return (a Dockerfile
+        # saved with CRLF endings, or one put there) that the runner reads as the start of
+        # a new line, so a line could begin with a workflow command. Checked first, and
+        # refused without printing either one. Byte by byte, in the C locale, as in the
+        # input check above, so the runner's locale cannot change the answer.
+        holds_command_text() {
+          local LC_ALL=C
+          case "$1" in
+            *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
+              return 0
+              ;;
+          esac
+          return 1
+        }
+        for value in "${base}" "${pin}"; do
+          if holds_command_text "${value}"; then
+            echo "::error::ARG BASE_IMAGE or ARG BASE_IMAGE_DIGEST in ${DOCKERFILE} holds a \
+        carriage return, another control character or the legacy command marker, so it is \
+        refused without being printed. Save the Dockerfile with LF line endings."
+            exit 1
+          fi
+        done
 
         if [ -z "${base}" ]; then
           echo "::error::no 'ARG BASE_IMAGE=' line in ${DOCKERFILE}; nothing to pre-pull. \

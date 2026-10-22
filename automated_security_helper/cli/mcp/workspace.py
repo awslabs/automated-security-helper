@@ -109,9 +109,11 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import asyncio
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -121,10 +123,30 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
+from automated_security_helper.cli.mcp.profile_registry import session_client_rules
 from automated_security_helper.cli.mcp.progress_monitor import (
     monitor_workspace_progress,
+)
+from automated_security_helper.cli.mcp.sandbox import (
+    caller_is_remote,
+    config_base_gate,
+)
+from automated_security_helper.cli.mcp.session_identity import (
+    UNIDENTIFIED_SESSION_ID,
+)
+from automated_security_helper.cli.mcp.sessions import (
+    MCPSession,
+    ScanCount,
+    ScanPresence,
+    finish_ended_session,
+    get_default_registry,
+)
+from automated_security_helper.cli.mcp.source_delivery import (
+    SOURCE_DELIVERY_BUSY,
+    SourceDeliveryBusyError,
 )
 from automated_security_helper.cli.mcp.scan_target import (
     ASH_MCP_ALLOWED_ROOTS_ENV,
@@ -132,6 +154,8 @@ from automated_security_helper.cli.mcp.scan_target import (
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.core.exceptions import (
+    ASHConfigEnvNotResolvedError,
+    ASHConfigInputNotPermittedError,
     ASHConfigValidationError,
     WorkspaceDefinitionError,
 )
@@ -153,6 +177,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     build_project_scan_settings,
     incomplete_scanner_reason,
+    resolve_workspace_execution_config,
 )
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
@@ -161,9 +186,23 @@ from automated_security_helper.models.workspace import (
     WorkspaceResults,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.output_dir_links import (
+    WHY as OUTPUT_LINK_WHY,
+)
+from automated_security_helper.utils.output_dir_links import (
+    OutputDirLinkRefused,
+    ignore_output_dir_in_git,
+    refuse_linked_output_dir,
+)
+
+#: The remedy for this tool's caller, which names the output tree with output_dir.
+MCP_WORKSPACE_OUTPUT_REMEDY = (
+    f"{OUTPUT_LINK_WHY} Pass output_dir with a directory that is not a link, or "
+    "replace the link with a directory."
+)
 from automated_security_helper.utils.process_env import (
-    apply_environ_overrides,
-    restore_environ,
+    hold_environ,
+    release_environ,
 )
 from automated_security_helper.workspace.execution import (
     PROJECTS_DIR_NAME,
@@ -173,6 +212,11 @@ from automated_security_helper.workspace.execution import (
 )
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
+
+if TYPE_CHECKING:
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
 
 _logger = ASH_LOGGER
 
@@ -202,6 +246,10 @@ _UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
 _EXIT_CODE_BY_EXCEPTION: Tuple[Tuple[type, WorkspaceExitCode], ...] = (
     (WorkspaceDefinitionError, WorkspaceExitCode.WORKSPACE_ERROR),
     (ASHConfigValidationError, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+    # An output directory reached through a link: 3, as the CLI exits for every
+    # such refusal (OUTPUT_DIR_REFUSED_EXIT_CODE), and not 4, because the
+    # workspace definition is not what is wrong.
+    (OutputDirLinkRefused, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
 )
 
 #: How a project's outcome closes out its registry entry.
@@ -252,16 +300,69 @@ def _error_response(
     it rather than by catching it, and swallowing ``KeyboardInterrupt`` would leave
     the server unstoppable mid-scan.
     """
+    from automated_security_helper.cli.mcp_tools import (
+        CONFIG_ENV_NOT_RESOLVED,
+        CONFIG_INPUT_NOT_PERMITTED,
+    )
+
     response = create_error_response(error, operation)
+    if _caused_by(error, ASHConfigEnvNotResolvedError):
+        # A project config that may not use !ENV (resolve_config's
+        # remote_client), under the error_type every other tool reports it with.
+        response["error_type"] = CONFIG_ENV_NOT_RESOLVED
+    elif _caused_by(error, ASHConfigInputNotPermittedError):
+        # A project config that resolves outside the directories the session
+        # may read config from (``config_base_gate``): a confinement refusal,
+        # so 4, under the error_type the other tools report it with.
+        response["error_type"] = CONFIG_INPUT_NOT_PERMITTED
+        if exit_code is None:
+            exit_code = int(WorkspaceExitCode.WORKSPACE_ERROR)
     resolved = int(exit_code) if exit_code is not None else _exit_code_for(error)
     response["exit_code"] = resolved
     response["exit_code_meaning"] = ASH_EXIT_CODES.get(resolved, "unknown exit code")
     return response
 
 
+def _caused_by(error: BaseException, kind: type) -> bool:
+    """Whether ``error`` is, or was raised from, a ``kind``.
+
+    The resolver re-raises a project's config error with the project named,
+    from the original.
+    """
+    seen: Optional[BaseException] = error
+    while seen is not None:
+        if isinstance(seen, kind):
+            return True
+        seen = seen.__cause__
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
+
+class ProjectsOutsideTheRootsError(MCPResourceError):
+    """A workspace was refused because a project lies outside the permitted roots.
+
+    Raised from inside resolution, before any project's config is read, and
+    reported as the confinement refusal it carries.
+    """
+
+
+def _project_gate(
+    workspace_file: str, session_id: Optional[str]
+) -> Callable[[Sequence[Tuple[str, Path]]], None]:
+    """The confinement check resolution runs before it reads any project config."""
+
+    def gate(projects: Sequence[Tuple[str, Path]]) -> None:
+        refusal = _refuse_project_paths_outside_the_permitted_roots(
+            projects, workspace_file, session_id
+        )
+        if refusal is not None:
+            raise ProjectsOutsideTheRootsError(str(refusal), context=refusal.context)
+
+    return gate
 
 
 def _resolve(
@@ -270,8 +371,17 @@ def _resolve(
     allow_missing_projects: bool,
     config_overrides: Optional[Sequence[str]],
     default_config: Optional[str] = None,
+    client_config_rules: Optional["ClientConfigRules"] = None,
+    trusted_config: Optional[str] = None,
+    remote_client: bool = False,
+    permit_base: Optional[Callable[[Path], bool]] = None,
+    session_id: Optional[str] = None,
 ) -> WorkspacePlan:
     """Resolve the workspace, or raise.
+
+    Project confinement runs inside resolution, before any project's own config
+    is read (:func:`_project_gate`), so a config outside the permitted roots is
+    never parsed; a refusal raises :class:`ProjectsOutsideTheRootsError`.
 
     ``workspace_config`` is passed through as given rather than defaulted to a
     search when it is absent: ``resolve_workspace`` refuses a named policy file
@@ -284,6 +394,16 @@ def _resolve(
     ``mcp_resolve_workspace`` report a plan the scan does not run -- and a dry run
     that describes a different scan is worse than no dry run, because it is the
     artifact a client checks before committing to N repository scans.
+
+    ``trusted_config`` is the registered profile ``default_config`` is resolved
+    against, which differs from it when the client patched the session's profile
+    (``_resolve_session_config``).
+
+    ``remote_client`` is ``caller_is_remote`` for the session, and has to reach
+    the settings builder too (``_scan_options``), for the same reason. So does
+    ``permit_base``, the session's ``config_base_gate``: a project's config that
+    is a link out of the directories the session may read config from is refused
+    before it is read, as a single-directory scan refuses it.
     """
     return resolve_workspace(
         Path(workspace_file),
@@ -293,6 +413,11 @@ def _resolve(
         ),
         config_overrides=tuple(config_overrides or ()),
         default_config=Path(default_config) if default_config else None,
+        client_config_rules=client_config_rules,
+        trusted_config=Path(trusted_config) if trusted_config else None,
+        remote_client=remote_client,
+        permit_base=permit_base,
+        project_gate=_project_gate(workspace_file, session_id),
     )
 
 
@@ -310,6 +435,7 @@ def _plan_projects(plan: WorkspacePlan) -> List[Dict[str, Any]]:
             "path": project.path,
             "display_label": project.display_label,
             "config_source": project.config_source,
+            "operator_config": project.operator_config,
             "scanners": list(project.scanners),
             "severity_threshold": project.severity_threshold,
             "effective_severity_threshold": project.effective_severity_threshold,
@@ -343,9 +469,12 @@ def _refuse_config_inputs_outside_the_permitted_roots(
 
     Only these two. The per-project ``.ash.yaml`` files a workspace pulls in are
     not caller-named -- each is found inside a project directory that project
-    confinement has already accepted -- so gating them here would re-check a
-    decision already made and would refuse a legitimate in-tree config on a
-    deployment that granted the tree but not its own path as a config root.
+    confinement accepted before resolution read it (:func:`_project_gate`) --
+    so gating them here would re-check a decision already made and would refuse
+    a legitimate in-tree config on a deployment that granted the tree but not
+    its own path as a config root. A project's config that is a link out of
+    that directory is a different case, and resolution refuses it before
+    reading it (``_resolve``'s ``permit_base``).
     """
 
     from automated_security_helper.cli.mcp.sandbox import validate_config_input
@@ -367,28 +496,52 @@ def _refuse_config_inputs_outside_the_permitted_roots(
     return None
 
 
-def _refuse_a_client_delivered_policy(
+def _refuse_a_client_chosen_policy(
     plan: WorkspacePlan,
+    session_id: Optional[str] = None,
 ) -> Optional[MCPResourceError]:
-    """Refuse a plan whose workspace policy an MCP client delivered.
+    """Refuse a plan whose workspace policy the operator did not set aside.
 
     A policy sets suppressions and ignore paths for every project, the fields
-    the runtime-override denylist keeps from a client. Checked on the file the
-    resolver applied (``workspace_config_source``, already resolved) rather than
-    on a path worked out beforehand: discovery runs beside the resolved
-    definition, so a symlinked definition, or a file added between a check and
-    the resolution, would make a separate lookup check a different file.
+    the runtime-override denylist keeps from a client. Under the MCP tools the
+    client names the definition and may name the policy, so either way the
+    policy file is the client's choice unless it sits where the operator keeps
+    config: a directory ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` names, or a profile file
+    the server writes in the calling session's ``config/`` directory
+    (``client_named_config_is_untrusted``). A file a
+    client delivered is always the client's, and so is a policy in a checkout
+    the server may scan, named or found beside the definition.
+
+    Checked on the file the resolver applied (``workspace_config_source``, the
+    path it was found or named at, which ``client_named_config_is_untrusted``
+    judges together with the file it reaches) rather than on a path worked out
+    beforehand: discovery runs beside the resolved definition, so a symlinked
+    definition, or a file added between a check and the resolution, would make
+    a separate lookup check a different file. A policy that reaches a file
+    outside what the session may read is refused earlier, before it is read
+    (``_resolve``'s ``permit_base``).
     """
-    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.cli.mcp.sandbox import (
+        ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,
+        client_named_config_is_untrusted,
+        config_is_client_supplied,
+    )
 
     source = plan.workspace_config_source
-    if source is None or not config_is_client_supplied(Path(source)):
+    if source is None or not client_named_config_is_untrusted(
+        Path(source), session_id=session_id
+    ):
         return None
+    how = (
+        "was delivered by an MCP client"
+        if config_is_client_supplied(Path(source))
+        else f"is not in a directory {ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV} names"
+    )
     return MCPResourceError(
         "Workspace scan refused: the workspace policy file "
-        f"{Path(source).as_posix()} was delivered by an MCP client. A policy sets "
-        "suppressions and ignore paths for every project, so only an operator's "
-        "policy file is used.",
+        f"{Path(source).as_posix()} {how}. A policy sets suppressions and ignore "
+        "paths for every project, so only a policy file the operator keeps in a "
+        f"directory {ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV} names is used.",
         context={"config_input": "workspace policy"},
     )
 
@@ -397,7 +550,23 @@ def _refuse_projects_outside_the_permitted_roots(
     plan: WorkspacePlan,
     session_id: Optional[str] = None,
 ) -> Optional[MCPResourceError]:
+    """Validate every project that will be scanned; refuse the whole workspace if any fails."""
+    return _refuse_project_paths_outside_the_permitted_roots(
+        [(project.key, project.path) for project in plan.active_projects],
+        plan.workspace_file,
+        session_id,
+    )
+
+
+def _refuse_project_paths_outside_the_permitted_roots(
+    projects: Sequence[Tuple[str, Any]],
+    workspace_file: str,
+    session_id: Optional[str] = None,
+) -> Optional[MCPResourceError]:
     """Validate every project that will be scanned; refuse the whole workspace if any fails.
+
+    Run inside resolution, from the definition alone, before any project's own
+    config is read, and again on the resolved plan before a scan.
 
     Only the active projects. A skipped project is never read from and never
     written to, so refusing a workspace on its account would decline work the
@@ -415,16 +584,16 @@ def _refuse_projects_outside_the_permitted_roots(
     all of them.
     """
     offending: List[Tuple[str, MCPResourceError]] = []
-    for project in plan.active_projects:
+    for key, path in projects:
         # The session id is passed for the reason run_ash_scan passes it: this
         # session's own sandbox counts as a permitted root, so a workspace whose
         # projects live inside a tree the client delivered over the protocol is
         # scannable. Without it every such project is refused by the boundary
         # that exists to permit it, because no operator lists a directory the
         # server invented per connection.
-        refusal = validate_scan_target(project.path, session_id=session_id)
+        refusal = validate_scan_target(path, session_id=session_id)
         if refusal is not None:
-            offending.append((project.key, refusal))
+            offending.append((key, refusal))
 
     if not offending:
         return None
@@ -434,7 +603,7 @@ def _refuse_projects_outside_the_permitted_roots(
     }
     detail = "; ".join(f"{key} at {path}" for key, path in refused_paths.items())
     return MCPResourceError(
-        f"Workspace scan refused: {len(offending)} of {len(plan.active_projects)} "
+        f"Workspace scan refused: {len(offending)} of {len(projects)} "
         f"project(s) resolve outside the permitted roots, so none was scanned: "
         f"{detail}. Scanning the rest and reporting success would report a clean "
         f"result for code that was never examined. Set "
@@ -442,7 +611,7 @@ def _refuse_projects_outside_the_permitted_roots(
         f"or drop those folders from the workspace definition.",
         context={
             "error_category": ErrorCategory.INVALID_PATH.value,
-            "workspace_file": plan.workspace_file,
+            "workspace_file": workspace_file,
             "refused_projects": sorted(refused_paths),
             "refused_project_paths": refused_paths,
             "suggestions": [
@@ -472,7 +641,10 @@ class ProfileNotRegisteredError(ValueError):
 
 
 def _gate_client_overrides(
-    config_overrides: Optional[Sequence[str]], session_config: Optional[str]
+    config_overrides: Optional[Sequence[str]],
+    session_config: Optional[str],
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
 ) -> None:
     """Refuse ``config_overrides`` the session's runtime-override allowlist does not allow.
 
@@ -483,9 +655,11 @@ def _gate_client_overrides(
     gate ``select_profile``'s ``patch_ops`` and ``override_yaml`` go through
     applies: the overrides are applied to the session's config (its bound or
     per-call profile, else the defaults), and the change is checked with
-    ``apply_runtime_override`` against that config's
-    ``global_settings.mcp.runtime_overrides``. Runtime overrides are off by
-    default, so without a profile that enables them no override is accepted.
+    ``apply_runtime_override`` against the registered profile's
+    ``global_settings.mcp.runtime_overrides``. That is the profile as the operator
+    registered it, not the session's materialized copy, which a client's
+    ``patch_ops`` may have changed. Runtime overrides are off by default, so
+    without a profile that enables them no override is accepted.
 
     Each override is checked twice: by the key it names (``check_runtime_ops``
     on an ``add`` at the pointer it resolves to in the session config), and by
@@ -493,7 +667,9 @@ def _gate_client_overrides(
 
     Raises:
         RuntimePatchDeniedError: An override is not allowed.
-        ASHConfigValidationError: An override cannot be applied.
+        ASHConfigValidationError: An override is not ``key=value``
+            (``resolve_config.split_config_override``, as for ``--config-overrides``)
+            or cannot be applied.
     """
     if not config_overrides:
         return
@@ -504,21 +680,25 @@ def _gate_client_overrides(
     from automated_security_helper.config.resolve_config import (
         _parse_config_value,
         apply_config_overrides,
+        load_config_file,
+        split_config_override,
     )
     from automated_security_helper.config.runtime_patch import (
-        RuntimePatchDeniedError,
         apply_runtime_override,
         check_runtime_ops,
     )
 
-    base = (
-        AshConfig.from_file(config_path=Path(session_config))
-        if session_config
-        else AshConfig()
+    from automated_security_helper.cli.mcp.profile_registry import (
+        session_profile_entry,
     )
-    mcp_cfg = getattr(base.global_settings, "mcp", None)
+    from automated_security_helper.config.client_config_policy import policy_of
+
+    # load_config_file: a session config that does not load is a config error
+    # (exit 3), not the parser's own exception (exit 1, an internal error).
+    base = load_config_file(Path(session_config)) if session_config else AshConfig()
+    entry = session_profile_entry(session_id, profile)
     allowlist = (
-        mcp_cfg.runtime_overrides if mcp_cfg is not None else RuntimeOverridesConfig()
+        policy_of(entry.config) if entry is not None else RuntimeOverridesConfig()
     )
     # Each override is checked by the key it names, whatever it changes. A diff
     # against the session config alone misses one whose value the session config
@@ -529,9 +709,9 @@ def _gate_client_overrides(
     # their own (runtime_patch._denial_spellings).
     base_dump = base.model_dump()
     for override in config_overrides:
-        key, separator, raw = str(override).partition("=")
-        if not separator or not key.strip():
-            raise RuntimePatchDeniedError(None, f"invalid config override {override!r}")
+        # Not key=value: the same invalid config --config-overrides reports (exit
+        # 3), not a denial, since it asks to change nothing the policy could judge.
+        key, raw = split_config_override(str(override))
         append = key.endswith("+")
         resolved = _resolve_override_key(
             base_dump, (key[:-1] if append else key).split(".")
@@ -548,6 +728,7 @@ def _gate_client_overrides(
                 }
             ],
             allowlist=allowlist,
+            config=base,
         )
     after = apply_config_overrides(base, list(config_overrides))
     apply_runtime_override(base, after, allowlist=allowlist)
@@ -576,30 +757,51 @@ def _resolve_override_key(
 def _resolve_session_config(
     session_id: Optional[str],
     profile: Optional[str],
-) -> Optional[str]:
-    """Return the config path a workspace scan should run under, or None.
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return the config a workspace scan should run under and its trusted base.
 
-    Two sources, in order of specificity:
+    ``(config_path, trusted_config_path)``, or ``(None, None)``. Two sources, in
+    order of specificity:
 
     * ``profile``, naming a registered profile for this one call. Materialized
       into the session's sandbox the same way ``select_profile`` does, so one code
-      path produces the file and one boundary covers it.
-    * the config this session already bound with ``select_profile``.
+      path produces the file and one boundary covers it, under a name of its own
+      per profile (``call_profile_filename``), so the session's own binding is
+      left as it was and two calls naming different profiles do not rewrite each
+      other's file. It is the operator's profile, so it is its own trusted base.
+    * the config this session already bound with ``select_profile``, and the
+      registered profile it is resolved against. They differ when the client
+      patched the profile: the config is then the client's copy in
+      ``client-config/``, and the trusted base the profile in ``config/``.
+    * for a session that bound none, the server's own config, the file
+      ``ASH_CONFIG`` names, as both: it is the operator's config, layered over
+      each project's own as ``--config`` is on the CLI. Not when it, or a base
+      it extends, is a file an MCP client delivered: that is never layered, and
+      ``(None, None)`` is returned as for a server with no ``ASH_CONFIG``.
 
-    None means neither applies, and then nothing is passed -- each project's own
-    ``.ash.yaml`` discovery runs as it always has. Inventing a path here would
-    scan every project under configuration nobody chose.
+    None means none of these applies, and then nothing is passed -- each
+    project's own ``.ash.yaml`` discovery runs as it always has. Inventing a path
+    here would scan every project under configuration nobody chose.
 
     An unknown ``profile`` raises rather than falling back. A workspace scan is N
     repository scans; running them all under the default config because a profile
     name was misspelled, and reporting success, is the class of outcome this
-    module's confinement refusal exists to prevent.
+    module's confinement refusal exists to prevent. So does a bound session whose
+    registered copy is gone while its client copy is not: the client's copy is
+    never the operator's config, so there is nothing to layer over a project's
+    own config and nothing to resolve it against.
+
+    Raises:
+        ProfileNotRegisteredError: ``profile`` is not registered.
+        RuntimeError: The session's registered copy is missing; exit 3.
     """
 
     from automated_security_helper.cli.mcp.profile_registry import (
+        call_profile_filename,
         get_profile_registry,
         materialize_session_config,
         resolve_session_config_path,
+        resolve_session_trusted_config_path,
     )
 
     if profile is not None:
@@ -610,9 +812,44 @@ def _resolve_session_config(
             raise ProfileNotRegisteredError(
                 f"unknown profile {profile!r}; known: {known}"
             )
-        return materialize_session_config(session_id, entry.config)
+        path = materialize_session_config(
+            session_id, entry.config, filename=call_profile_filename(profile)
+        )
+        return path, path
 
-    return resolve_session_config_path(session_id)
+    config_path = resolve_session_config_path(session_id)
+    trusted_config_path = resolve_session_trusted_config_path(session_id)
+    if config_path is not None and trusted_config_path is None:
+        raise RuntimeError(
+            "This session's bound profile can no longer be read as the operator "
+            "registered it: its copy in the session's config/ directory is gone. "
+            "Bind the profile again with select_profile."
+        )
+    if config_path is None and trusted_config_path is None:
+        server_config = _server_config_path()
+        return server_config, server_config
+    return config_path, trusted_config_path
+
+
+def _server_config_path() -> Optional[str]:
+    """The file ``ASH_CONFIG`` names, unless a file of its chain is a client's."""
+    from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+    from automated_security_helper.config.config_sources import by_every_name
+    from automated_security_helper.config.default_config import (
+        default_config_document,
+    )
+
+    document = default_config_document()
+    if document is None:
+        return None
+    delivered = by_every_name(config_is_client_supplied, document.names)
+    if any(delivered(path) for path in document.chain):
+        _logger.warning(
+            "ASH_CONFIG names a file under the MCP workspace root, which an MCP "
+            "client delivered, so it is not layered over the workspace's projects."
+        )
+        return None
+    return document.chain[-1].as_posix()
 
 
 def _scan_options(
@@ -625,6 +862,10 @@ def _scan_options(
     offline: bool,
     allow_missing_projects: bool,
     config_path: Optional[str] = None,
+    client_config_rules: Optional["ClientConfigRules"] = None,
+    trusted_config_path: Optional[str] = None,
+    remote_client: bool = False,
+    config_base_gate: Optional[Callable[[Path], bool]] = None,
 ) -> ScanOptions:
     """Assemble the ``ScanOptions`` the shared settings builder reads.
 
@@ -652,9 +893,19 @@ def _scan_options(
         # the shared builder rather than set on the settings record afterwards, so
         # the CLI and MCP paths cannot disagree about which field carries it.
         config=config_path,
+        # The registered profile ``config`` is resolved against, as for the plan.
+        trusted_config_path=trusted_config_path,
+        # The same rules the plan was resolved with; see ``_resolve``.
+        client_config_policy=client_config_rules,
+        # And the same caller.
+        remote_client=remote_client,
+        # And the same gate, which each project's scan applies again.
+        config_base_gate=config_base_gate,
         workspace_plan=plan,
         allow_missing_projects=allow_missing_projects,
         config_overrides=list(config_overrides or []),
+        # A client's overrides: a tool path they name is not the operator's.
+        client_overrides=bool(config_overrides),
         scanners=list(scanners or []),
         excluded_scanners=list(excluded_scanners or []),
         offline=offline,
@@ -681,10 +932,23 @@ def _prepare_project_outputs(
     single-directory tool. A failure to remove one is logged and not raised: a
     leftover file makes the progress monitor report a project complete early,
     which is worse than the alternative but not worth refusing a scan over.
+
+    Nothing is created through a link: the workspace's output directory and each
+    project's are checked first (utils/output_dir_links.py), and a link raises
+    OutputDirLinkRefused, a ValueError the caller reports.
     """
+    refuse_linked_output_dir(
+        plan.workspace_root,
+        settings.output_dir,
+        workspace=True,
+        remedy=MCP_WORKSPACE_OUTPUT_REMEDY,
+    )
     outputs: Dict[str, Path] = {}
     for project in plan.active_projects:
         project_output = Path(settings.output_dir) / PROJECTS_DIR_NAME / project.key
+        refuse_linked_output_dir(
+            settings.output_dir, project_output, remedy=MCP_WORKSPACE_OUTPUT_REMEDY
+        )
         project_output.mkdir(parents=True, exist_ok=True)
         if clean_output:
             stale = project_output / AGGREGATED_RESULTS_FILENAME
@@ -698,13 +962,22 @@ def _prepare_project_outputs(
                         f"for this project may complete early."
                     )
         outputs[project.key] = project_output
+    # A project at the workspace root would read every project's output below it;
+    # see ignore_output_dir_in_git. A link at the name raises OutputLinkRefused,
+    # an OutputDirLinkRefused too.
+    ignore_output_dir_in_git(plan.workspace_root, settings.output_dir)
     return outputs
 
 
 def _register_projects(
-    plan: WorkspacePlan, project_outputs: Dict[str, Path]
+    plan: WorkspacePlan,
+    project_outputs: Dict[str, Path],
+    session_id: Optional[str] = None,
 ) -> Dict[str, str]:
     """Register one scan per active project and return ``{project key: scan id}``.
+
+    Each entry is recorded under ``session_id``, the session that asked for the
+    workspace scan, so the registry tools show it to that session only.
 
     N entries rather than one for the batch, because a client that wants to poll
     progress or fetch results needs a handle per project -- and because the
@@ -731,6 +1004,7 @@ def _register_projects(
                     project.gate_threshold or _UNSTATED_SEVERITY_THRESHOLD
                 ),
                 config_path=project.config_source,
+                session_id=session_id,
             )
     except Exception:
         for scan_id in registered.values():
@@ -812,12 +1086,12 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
 
     Built from the facts the project's outcome already carries, so a client
     polling a workspace project and one polling a single scan read the same keys.
-    ``incomplete_converters`` and ``unevaluated_rules`` are empty because a
-    project's outcome does not record them, and neither of them feeds
-    ``scan_incomplete``. ``stale_content_databases`` is empty for the first of
-    those reasons only: a stale database does fail the project, and the outcome
-    names its scanner in ``incomplete_scanners`` rather than carrying a record
-    of its own.
+    ``incomplete_converters`` has the shape ``ScanIncompleteness.to_payload``
+    gives it. ``unevaluated_rules`` is empty because a project's outcome does not
+    record it, and it does not feed ``scan_incomplete``.
+    ``stale_content_databases`` is empty for the first of those reasons only: a
+    stale database does fail the project, and the outcome names its scanner in
+    ``incomplete_scanners`` rather than carrying a record of its own.
     """
     statuses = outcome.scanners or {}
     rows = []
@@ -834,7 +1108,10 @@ def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
     return {
         "incomplete_scanners": rows,
         "no_scanner_ran": bool(outcome.no_scanner_ran),
-        "incomplete_converters": [],
+        "incomplete_converters": [
+            {"converter": name, "reason": reason}
+            for name, reason in (outcome.incomplete_converters or {}).items()
+        ],
         "unevaluated_rules": [],
         "stale_content_databases": [],
     }
@@ -910,13 +1187,114 @@ def _workspace_ceiling_unreachable(payload: WorkspaceResults) -> Dict[str, int]:
     return totals
 
 
+class _WorkspaceScanClaim:
+    """A workspace scan's claim on its session, held until nothing of the scan runs.
+
+    ``mcp_scan_workspace`` claims the session (``MCPSession.try_claim_scan``)
+    before it resolves the workspace. ``_execute`` then hands the run to a worker
+    thread, and cancelling the call (the client cancels it, or its request ends)
+    does not stop that thread: it goes on reading the session's tree and writing
+    under it. So the claim is released, and a session that ended meanwhile is
+    removed (``finish_ended_session``), by whichever of the two leaves last: the
+    call, or the worker it handed the run to. A worker that the call left before
+    it started never runs the scan.
+
+    The same object carries the scan's place in the per-session limit
+    (``try_start_scan``), released at the same time: its session's place, or, for
+    a caller with no session, a place in the count all such callers share
+    (``sessions.sessionless_scan_count``). ``claimed`` is the session whose tree
+    the scan holds, None when it delivered nothing. ``counted`` holds the scan's
+    place, None when no limit applies (stdio).
+    """
+
+    def __init__(
+        self,
+        session_id: Optional[str],
+        *,
+        claimed: Optional[MCPSession] = None,
+        counted: Optional[Union[MCPSession, ScanCount]] = None,
+    ) -> None:
+        self._session_id = session_id
+        self._claimed = claimed
+        self._counted = counted
+        self._lock = threading.Lock()
+        self._holder = "call"  # then "worker", then "released"
+
+    @property
+    def claimed(self) -> bool:
+        """True when the scan holds its session's tree."""
+        return self._claimed is not None
+
+    def worker_starts(self) -> bool:
+        """Take the claim over for the worker; False if the call already left."""
+        with self._lock:
+            if self._holder == "released":
+                return False
+            self._holder = "worker"
+            return True
+
+    def worker_returns(self) -> None:
+        with self._lock:
+            self._holder = "released"
+        self._release()
+
+    def call_returns(self) -> None:
+        """Release the claim, unless a worker that started holds it."""
+        with self._lock:
+            if self._holder != "call":
+                return
+            self._holder = "released"
+        self._release()
+
+    def _release(self) -> None:
+        if self._counted is not None:
+            self._counted.scan_returned()
+        if self._claimed is not None:
+            self._claimed.release_scan()
+            finish_ended_session(self._session_id)
+
+
+def _session_holds_something_on_disk(session_id: str, profile: Optional[str]) -> bool:
+    """True if the session's sandbox has what a workspace scan of it can read.
+
+    That is a delivered tree (``source``) or a config its profile put there
+    (``config``), or a ``profile`` named for this call, which is put there before
+    the scan reads it. Checked on disk, so it holds for a tree another server
+    sharing the workspace root delivered.
+    """
+    from automated_security_helper.cli.mcp.sandbox import (
+        CONFIG_DIR_NAME,
+        SOURCE_DIR_NAME,
+    )
+    from automated_security_helper.cli.mcp.session_paths import session_directory
+    from automated_security_helper.cli.mcp.source_delivery import (
+        resolve_workspace_root,
+    )
+
+    if profile is not None:
+        return True
+    try:
+        sandbox = session_directory(resolve_workspace_root(), session_id)
+        return any(
+            (sandbox / name).exists() for name in (SOURCE_DIR_NAME, CONFIG_DIR_NAME)
+        )
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
 async def _execute(
     plan: WorkspacePlan,
     settings: ProjectScanSettings,
     project_outputs: Dict[str, Path],
     progress_reporter: Optional[ProgressReporter],
+    session_id: Optional[str] = None,
+    claim: Optional[_WorkspaceScanClaim] = None,
 ) -> WorkspaceRunResult:
     """Run the workspace off the event loop, with a progress monitor beside it.
+
+    Under the session's scan lock, taken on the worker thread as the single-target
+    scan takes it, so a delivery into this session is refused while the scans
+    read the tree (``source_delivery._no_scan_running``).
 
     ``execute_workspace`` is synchronous and blocks for as long as the scans take,
     which for N repositories is minutes. Awaiting it inline would stall every
@@ -927,47 +1305,102 @@ async def _execute(
     execution has returned there is nothing left to report, and an orphaned poll
     loop would keep emitting progress for a scan that is over.
 
-    ``ASH_OFFLINE`` is set here because that environment variable is the only thing
-    scanners actually consult. ``settings.offline`` reaches the orchestrator as a
-    declared field (``core/orchestrator.py``) and is never read; the gate scanners use
-    is ``is_offline_mode()`` in ``core/constants.py``, which tests
-    ``os.environ["ASH_OFFLINE"]``. So before this, requesting ``offline=True`` over MCP
-    was accepted, threaded through two layers, and silently did nothing -- the scan ran
-    with full network access while reporting that it had not. The CLI already sets the
-    variable around its own invocations; this path bypassed that.
+    Everything the run itself needs is held by the worker thread, from when it
+    starts until ``execute_workspace`` returns, because a cancelled call does not
+    stop the thread: the session's claim (:class:`_WorkspaceScanClaim`), the
+    session's ``ScanPresence`` for the TTL sweep of other servers, and
+    ``ASH_OFFLINE`` for an offline scan.
 
-    The value is snapshotted and restored rather than set-and-popped: a long-lived MCP
-    server started with ``ASH_OFFLINE=YES`` in its own environment would otherwise have
-    that deployment-level setting silently cleared by the first offline workspace scan.
+    ``ASH_OFFLINE`` is set because that environment variable is the only thing
+    scanners consult. ``settings.offline`` reaches the orchestrator as a declared
+    field (``core/orchestrator.py``) and is never read; the gate scanners use is
+    ``is_offline_mode()`` in ``core/constants.py``, which tests
+    ``os.environ["ASH_OFFLINE"]``. The CLI sets the variable around its own
+    invocations, and this path sets it the same way.
+
+    The variable is held (``utils/process_env.hold_environ``) rather than set and
+    restored: with two sessions' offline scans overlapping, the first to end would put
+    back "unset" while the other still runs, and the last would put back the first
+    one's "YES". The last release restores what the server started with, so a
+    deployment-level ``ASH_OFFLINE=YES`` survives.
 
     Known limitation, stated because it is reachable here and not in the CLI: the variable
-    is process-global while this server can run sessions concurrently. Two overlapping
-    workspace scans with different ``offline`` values share one variable, so the restore
-    of the first can land inside the second. Closing that properly means having scanners
-    consume the resolved setting instead of the environment, which is a change across
-    every scanner rather than a fix to this call site.
+    is process-global while this server can run sessions concurrently. An online scan
+    that overlaps an offline one reads offline mode while the offline one holds it.
+    Closing that properly means having scanners consume the resolved setting instead of
+    the environment, which is a change across every scanner rather than a fix to this
+    call site.
     """
+
+    def run() -> WorkspaceRunResult:
+        if claim is not None and not claim.worker_starts():
+            raise RuntimeError("the workspace scan was cancelled before it started")
+        try:
+            claimed = claim is not None and bool(claim.claimed)
+            with ScanPresence(session_id if claimed else None):
+                # A session that delivered nothing has no tree of its own for the
+                # scan to hold, so the scan takes neither its claim nor its lock,
+                # and the session may deliver one meanwhile.
+                if claimed:
+                    return _under_session_lock(session_id, plan, settings)
+                return _offline_aware(plan, settings)
+        finally:
+            if claim is not None:
+                claim.worker_returns()
+
     monitor: Optional["asyncio.Task[None]"] = None
     if progress_reporter is not None and project_outputs:
         monitor = asyncio.create_task(
             monitor_workspace_progress(progress_reporter, dict(project_outputs))
         )
-    # Under the process-wide environment lock, because other sessions' scans may
-    # be copying the environment for a spawn on another thread right now.
-    offline_previous = (
-        apply_environ_overrides({"ASH_OFFLINE": "YES"}) if settings.offline else None
-    )
     try:
-        # Resolved from this module's globals at call time, so a test that
-        # replaces cli.mcp.workspace.execute_workspace is what runs.
-        return await asyncio.to_thread(execute_workspace, plan, settings)
+        return await asyncio.to_thread(run)
     finally:
-        if offline_previous is not None:
-            restore_environ(offline_previous)
         if monitor is not None:
             monitor.cancel()
             with suppress(asyncio.CancelledError):
                 await monitor
+
+
+def _under_session_lock(
+    session_id: Optional[str], plan: WorkspacePlan, settings: ProjectScanSettings
+) -> WorkspaceRunResult:
+    """``execute_workspace``, holding the session's scan lock when there is a session.
+
+    ``ASH_OFFLINE`` is set once the lock is held, not before: a workspace scan
+    waiting behind another scan of its session would otherwise hold the
+    process-wide variable for that scan's duration too.
+
+    The in-memory session only (``session_for``): taking its lock creates nothing
+    under the workspace root. A caller with no session the server issued
+    (``UNIDENTIFIED_SESSION_ID``) has no session to lock, and ``session_for``
+    refuses it; its scans are bounded by the count such callers share instead
+    (``sessions.sessionless_scan_count``).
+    """
+    if session_id is None or session_id == UNIDENTIFIED_SESSION_ID:
+        return _offline_aware(plan, settings)
+
+    with get_default_registry().session_for(session_id).lock:
+        return _offline_aware(plan, settings)
+
+
+def _offline_aware(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> WorkspaceRunResult:
+    """``execute_workspace`` with ``ASH_OFFLINE`` held for its duration when requested."""
+    # Held under the process-wide environment lock, because other sessions' scans
+    # may be copying the environment for a spawn on another thread right now, and
+    # counted, so overlapping offline scans keep it until the last one returns.
+    offline_held = bool(settings.offline)
+    if offline_held:
+        hold_environ("ASH_OFFLINE", "YES")
+    try:
+        # Resolved from this module's globals at call time, so a test that
+        # replaces cli.mcp.workspace.execute_workspace is what runs.
+        return execute_workspace(plan, settings)
+    finally:
+        if offline_held:
+            release_environ("ASH_OFFLINE")
 
 
 # ---------------------------------------------------------------------------
@@ -1035,7 +1468,7 @@ async def mcp_resolve_workspace(
         )
 
     try:
-        session_config = _resolve_session_config(session_id, profile)
+        session_config, trusted_config = _resolve_session_config(session_id, profile)
     except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
         return _error_response(
             exc,
@@ -1044,7 +1477,8 @@ async def mcp_resolve_workspace(
         )
 
     try:
-        _gate_client_overrides(config_overrides, session_config)
+        _gate_client_overrides(config_overrides, session_config, session_id, profile)
+        rules = session_client_rules(session_id, profile)
     except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
         return _error_response(
             exc,
@@ -1059,17 +1493,43 @@ async def mcp_resolve_workspace(
             allow_missing_projects,
             config_overrides,
             default_config=session_config,
+            client_config_rules=rules,
+            trusted_config=trusted_config,
+            remote_client=caller_is_remote(session_id),
+            permit_base=config_base_gate(session_id),
+            session_id=session_id,
+        )
+    except ProjectsOutsideTheRootsError as exc:
+        return _error_response(
+            exc,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
 
-    policy_refusal = _refuse_a_client_delivered_policy(plan)
+    policy_refusal = _refuse_a_client_chosen_policy(plan, session_id)
     if policy_refusal is not None:
         return _error_response(
             policy_refusal,
             "resolve_workspace",
             exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
         )
+
+    # The workspace root's config sets how the scan executes, and scan_workspace
+    # refuses one that cannot be loaded (exit 3); read as the scan reads it:
+    # under the session's gate, and with the caller's rule for which files may
+    # resolve !ENV (config_sources.env_refused_for).
+    try:
+        resolve_workspace_execution_config(
+            Path(plan.workspace_root),
+            session_config,
+            config_base_gate(session_id),
+            remote_client=caller_is_remote(session_id),
+            session_id=session_id,
+        )
+    except ASHConfigValidationError as exc:
+        return _error_response(exc, "resolve_workspace")
 
     return {
         "success": True,
@@ -1094,6 +1554,181 @@ async def mcp_resolve_workspace(
     }
 
 
+async def _scan_workspace(
+    workspace_file: str,
+    workspace_config: Optional[str] = None,
+    allow_missing_projects: bool = False,
+    config_overrides: Optional[List[str]] = None,
+    output_dir: Optional[str] = None,
+    scanners: Optional[List[str]] = None,
+    excluded_scanners: Optional[List[str]] = None,
+    offline: bool = False,
+    clean_output: bool = True,
+    progress_reporter: Optional[ProgressReporter] = None,
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
+    claim: Optional[_WorkspaceScanClaim] = None,
+) -> Dict[str, Any]:
+    """``mcp_scan_workspace`` once the session's tree is claimed, if it has one."""
+    # Before resolution, because resolution is the read this gate guards. Every
+    # other gate in this function runs after it, for the reasons the module
+    # docstring gives.
+    config_refusal = _refuse_config_inputs_outside_the_permitted_roots(
+        workspace_file, workspace_config, session_id
+    )
+    if config_refusal is not None:
+        return _error_response(
+            config_refusal,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+
+    # A caller-named output tree is written into, so it gets the scan roots a
+    # scan target gets, checked before anything below creates it. The default,
+    # beneath the workspace root, is not caller-named and is left as it was.
+    if output_dir is not None:
+        output_refusal = validate_scan_target(output_dir, session_id=session_id)
+        if output_refusal is not None:
+            return _error_response(
+                output_refusal,
+                "scan_workspace",
+                exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+            )
+
+    try:
+        session_config, trusted_config = _resolve_session_config(session_id, profile)
+    except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
+    try:
+        _gate_client_overrides(config_overrides, session_config, session_id, profile)
+        rules = session_client_rules(session_id, profile)
+    except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
+    try:
+        plan = _resolve(
+            workspace_file,
+            workspace_config,
+            allow_missing_projects,
+            config_overrides,
+            # Same value the settings builder gets below. They must agree; see
+            # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
+            default_config=session_config,
+            client_config_rules=rules,
+            trusted_config=trusted_config,
+            remote_client=caller_is_remote(session_id),
+            permit_base=config_base_gate(session_id),
+            session_id=session_id,
+        )
+    except ProjectsOutsideTheRootsError as exc:
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+    except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
+        return _error_response(exc, "scan_workspace")
+
+    policy_refusal = _refuse_a_client_chosen_policy(plan, session_id)
+    if policy_refusal is not None:
+        return _error_response(
+            policy_refusal,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+
+    refusal = _refuse_projects_outside_the_permitted_roots(plan, session_id)
+    if refusal is not None:
+        return _error_response(
+            refusal,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+
+    # `registered` is pre-declared because the failure handler reads it whether or
+    # not registration got that far. `settings` and `result` are not: both are
+    # assigned inside the try before anything below reads them, and the handler
+    # returns rather than falling through, so declaring them Optional would only
+    # tell a type checker they might be None on a path that cannot reach the
+    # reads.
+    registered: Dict[str, str] = {}
+    try:
+        settings = build_project_scan_settings(
+            _scan_options(
+                plan,
+                output_dir=output_dir,
+                config_overrides=config_overrides,
+                scanners=scanners,
+                excluded_scanners=excluded_scanners,
+                offline=offline,
+                allow_missing_projects=allow_missing_projects,
+                config_path=session_config,
+                client_config_rules=rules,
+                trusted_config_path=trusted_config,
+                remote_client=caller_is_remote(session_id),
+                config_base_gate=config_base_gate(session_id),
+            )
+        )
+        project_outputs = _prepare_project_outputs(
+            plan, settings, clean_output=clean_output
+        )
+        registered = _register_projects(plan, project_outputs, session_id)
+        result = await _execute(
+            plan,
+            settings,
+            project_outputs,
+            progress_reporter,
+            session_id=session_id,
+            claim=claim,
+        )
+    except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
+        _close_registrations(registered, None, error=str(exc))
+        return _error_response(exc, "scan_workspace")
+    except BaseException as exc:
+        # asyncio.CancelledError, KeyboardInterrupt, SystemExit. _register_projects
+        # claimed these entries as RUNNING, and a RUNNING entry's runner decides
+        # its status, so leaving them open would read as running forever. Closed
+        # as failed, then re-raised so cancellation still propagates.
+        _close_registrations(
+            registered,
+            None,
+            error=f"Workspace scan ended without a result: {type(exc).__name__}",
+        )
+        raise
+
+    _close_registrations(registered, result.payload)
+
+    exit_code = int(result.exit_code)
+    return {
+        "success": True,
+        "exit_code": exit_code,
+        "exit_code_meaning": ASH_EXIT_CODES.get(exit_code, "unknown exit code"),
+        "workspace_file": plan.workspace_file,
+        "workspace_root": plan.workspace_root,
+        "workspace_config_source": plan.workspace_config_source,
+        "output_dir": str(settings.output_dir),
+        "results_path": str(result.results_path),
+        "session_id": session_id,
+        "session_config_path": session_config,
+        "scan_ids": registered,
+        "scan_incomplete": _workspace_scan_incomplete(result.payload),
+        "ceiling_unreachable_findings": _workspace_ceiling_unreachable(result.payload),
+        "projects": _project_verdicts(result.payload, registered),
+        "skipped_projects": [
+            entry.model_dump(mode="json") for entry in plan.skipped_projects
+        ],
+    }
+
+
 async def mcp_scan_workspace(
     workspace_file: str,
     workspace_config: Optional[str] = None,
@@ -1115,6 +1750,17 @@ async def mcp_scan_workspace(
     registry entries out. That order is not a preference: confinement needs the
     resolved project directories, so it cannot precede resolution, and every
     filesystem write happens after it.
+
+    A scan by a session that has delivered a tree, or whose profile put a config
+    in its sandbox, claims the session (``MCPSession.try_claim_scan``) from before
+    the workspace is resolved until the scan's worker thread returns, even when
+    the call is cancelled first: ``clear_source``, ``set_source_git`` and
+    ``set_source_zip_finalize`` are refused meanwhile with ``source_delivery_busy``,
+    and a session that ends meanwhile is removed once the worker returns. The
+    scan is refused the same way while one of those calls is changing the tree.
+    A session that has delivered nothing has nothing of its own for the scan to
+    hold, so its scan of a directory the operator granted takes no claim and
+    creates nothing under the workspace root.
 
     Args:
         workspace_file: Path to the ``.code-workspace`` definition. Confined as a
@@ -1155,142 +1801,73 @@ async def mcp_scan_workspace(
 
         On failure, ``create_error_response``'s keys plus ``exit_code``: 4 for a
         workspace definition, policy or confinement refusal, 3 for a project whose
-        own config is invalid, 1 for anything else. Both stages are mapped --
+        own config is invalid or an output directory reached through a link, 1 for
+        anything else. Both stages are mapped --
         ``execute_workspace`` raises ``WorkspaceDefinitionError`` too, for an
         enabled reporter that cannot produce a workspace artifact or a project
         that is not a git repository under precommit.
     """
-    # Before resolution, because resolution is the read this gate guards. Every
-    # other gate in this function runs after it, for the reasons the module
-    # docstring gives.
-    config_refusal = _refuse_config_inputs_outside_the_permitted_roots(
-        workspace_file, workspace_config, session_id
+    from automated_security_helper.cli.mcp.sessions import (
+        per_session_scan_limit,
+        session_scan_limit_refusal,
+        sessionless_scan_count,
     )
-    if config_refusal is not None:
-        return _error_response(
-            config_refusal,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
-        )
 
-    # A caller-named output tree is written into, so it gets the scan roots a
-    # scan target gets, checked before anything below creates it. The default,
-    # beneath the workspace root, is not caller-named and is left as it was.
-    if output_dir is not None:
-        output_refusal = validate_scan_target(output_dir, session_id=session_id)
-        if output_refusal is not None:
-            return _error_response(
-                output_refusal,
-                "scan_workspace",
-                exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+    limit = per_session_scan_limit(session_id)
+    session: Optional[MCPSession] = None
+    claims_tree = False
+    if session_id is not None and session_id != UNIDENTIFIED_SESSION_ID:
+        claims_tree = _session_holds_something_on_disk(session_id, profile)
+        if claims_tree or limit is not None:
+            try:
+                # The in-memory session: neither hold creates anything on disk.
+                session = get_default_registry().session_for(session_id)
+            except ValueError:
+                # An id that names no directory has no delivered tree to hold;
+                # the checks below refuse it.
+                session = None
+    claimed = session if claims_tree else None
+    if claimed is not None and not claimed.try_claim_scan():
+        response = _error_response(
+            SourceDeliveryBusyError(
+                "the delivered source of this session is being changed; "
+                "start the workspace scan after the change finishes"
+            ),
+            "scan_workspace",
+        )
+        response["error_type"] = SOURCE_DELIVERY_BUSY
+        return response
+    counted: Optional[Union[MCPSession, ScanCount]] = None
+    if limit is not None:
+        # One place, however many projects: in the session's count, or, for a
+        # caller with no session, in the one all such callers share.
+        counted = session if session is not None else sessionless_scan_count()
+        if not counted.try_start_scan(limit):
+            if claimed is not None:
+                claimed.release_scan()
+            return session_scan_limit_refusal(
+                "scan_workspace", limit, shared=session is None
             )
-
+    claim: Optional[_WorkspaceScanClaim] = None
+    if claimed is not None or counted is not None:
+        claim = _WorkspaceScanClaim(session_id, claimed=claimed, counted=counted)
     try:
-        session_config = _resolve_session_config(session_id, profile)
-    except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
-        return _error_response(
-            exc,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        return await _scan_workspace(
+            workspace_file=workspace_file,
+            workspace_config=workspace_config,
+            allow_missing_projects=allow_missing_projects,
+            config_overrides=config_overrides,
+            output_dir=output_dir,
+            scanners=scanners,
+            excluded_scanners=excluded_scanners,
+            offline=offline,
+            clean_output=clean_output,
+            progress_reporter=progress_reporter,
+            session_id=session_id,
+            profile=profile,
+            claim=claim,
         )
-
-    try:
-        _gate_client_overrides(config_overrides, session_config)
-    except Exception as exc:  # noqa: BLE001 -- a refusal, reported not raised
-        return _error_response(
-            exc,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
-        )
-
-    try:
-        plan = _resolve(
-            workspace_file,
-            workspace_config,
-            allow_missing_projects,
-            config_overrides,
-            # Same value the settings builder gets below. They must agree; see
-            # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
-            default_config=session_config,
-        )
-    except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
-        return _error_response(exc, "scan_workspace")
-
-    policy_refusal = _refuse_a_client_delivered_policy(plan)
-    if policy_refusal is not None:
-        return _error_response(
-            policy_refusal,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
-        )
-
-    refusal = _refuse_projects_outside_the_permitted_roots(plan, session_id)
-    if refusal is not None:
-        return _error_response(
-            refusal,
-            "scan_workspace",
-            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
-        )
-
-    # `registered` is pre-declared because the failure handler reads it whether or
-    # not registration got that far. `settings` and `result` are not: both are
-    # assigned inside the try before anything below reads them, and the handler
-    # returns rather than falling through, so declaring them Optional would only
-    # tell a type checker they might be None on a path that cannot reach the
-    # reads.
-    registered: Dict[str, str] = {}
-    try:
-        settings = build_project_scan_settings(
-            _scan_options(
-                plan,
-                output_dir=output_dir,
-                config_overrides=config_overrides,
-                scanners=scanners,
-                excluded_scanners=excluded_scanners,
-                offline=offline,
-                allow_missing_projects=allow_missing_projects,
-                config_path=session_config,
-            )
-        )
-        project_outputs = _prepare_project_outputs(
-            plan, settings, clean_output=clean_output
-        )
-        registered = _register_projects(plan, project_outputs)
-        result = await _execute(plan, settings, project_outputs, progress_reporter)
-    except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
-        _close_registrations(registered, None, error=str(exc))
-        return _error_response(exc, "scan_workspace")
-    except BaseException as exc:
-        # asyncio.CancelledError, KeyboardInterrupt, SystemExit. _register_projects
-        # claimed these entries as RUNNING, and a RUNNING entry's runner decides
-        # its status, so leaving them open would read as running forever. Closed
-        # as failed, then re-raised so cancellation still propagates.
-        _close_registrations(
-            registered,
-            None,
-            error=f"Workspace scan ended without a result: {type(exc).__name__}",
-        )
-        raise
-
-    _close_registrations(registered, result.payload)
-
-    exit_code = int(result.exit_code)
-    return {
-        "success": True,
-        "exit_code": exit_code,
-        "exit_code_meaning": ASH_EXIT_CODES.get(exit_code, "unknown exit code"),
-        "workspace_file": plan.workspace_file,
-        "workspace_root": plan.workspace_root,
-        "workspace_config_source": plan.workspace_config_source,
-        "output_dir": str(settings.output_dir),
-        "results_path": str(result.results_path),
-        "session_id": session_id,
-        "session_config_path": session_config,
-        "scan_ids": registered,
-        "scan_incomplete": _workspace_scan_incomplete(result.payload),
-        "ceiling_unreachable_findings": _workspace_ceiling_unreachable(result.payload),
-        "projects": _project_verdicts(result.payload, registered),
-        "skipped_projects": [
-            entry.model_dump(mode="json") for entry in plan.skipped_projects
-        ],
-    }
+    finally:
+        # A worker that started holds the claim until it returns.
+        if claim is not None:
+            claim.call_returns()

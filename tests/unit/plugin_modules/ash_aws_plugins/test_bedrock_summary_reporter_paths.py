@@ -15,6 +15,7 @@ import json
 import botocore.exceptions
 import pytest
 
+from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
     BedrockSummaryReporter,
@@ -36,6 +37,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.utils.sarif_utils import attach_scanner_details
 
 MODULE = (
     "automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter"
@@ -96,8 +98,22 @@ def sarif_model(results):
     return model
 
 
-def finding(rule_id="R1", level=Level.error, uri="src/app.py", scanner_type="SAST"):
-    return Result(
+def finding(rule_id="R1", level=Level.error, uri="src/app.py", scanner="bandit"):
+    """One result as the engine hands it on for ``scanner``.
+
+    The properties are what ``attach_scanner_details`` writes, plus the tags
+    detect-secrets puts on its own results. No scanner sets ``scanner_type``.
+    """
+    tags = None
+    if scanner == "detect-secrets":
+        tags = [
+            "detect-secrets",
+            "secret",
+            "security",
+            "tool_name::detect-secrets",
+            f"tool_type::{ScannerToolType.SECRETS}",
+        ]
+    result = Result(
         ruleId=rule_id,
         rule=ReportingDescriptorReference(id=rule_id),
         level=level,
@@ -110,8 +126,14 @@ def finding(rule_id="R1", level=Level.error, uri="src/app.py", scanner_type="SAS
                 )
             )
         ],
-        properties=PropertyBag(scanner_type=scanner_type),
+        properties=PropertyBag(tags=tags) if tags else None,
     )
+    report = SarifReport(
+        version="2.1.0",
+        runs=[Run(tool=Tool(driver=ToolComponent(name=scanner)), results=[result])],
+    )
+    attach_scanner_details(report, scanner_name=scanner, scanner_version="1.0.0")
+    return report.runs[0].results[0]
 
 
 class TestValidatePluginDependencies:
@@ -251,9 +273,9 @@ class TestExtractFindings:
         reporter = make_reporter(context)
         model = sarif_model(
             [
-                finding("SAST1", scanner_type="SAST"),
-                finding("SECRET1", scanner_type="SECRET"),
-                finding("SAST2", scanner_type="SAST"),
+                finding("SAST1", scanner="bandit"),
+                finding("SECRET1", scanner="detect-secrets"),
+                finding("SAST2", scanner="bandit"),
             ]
         )
 
@@ -699,7 +721,7 @@ class TestFallbackModels:
         monkeypatch.setattr(f"{MODULE}.boto3.client", lambda *a, **k: object())
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
-            lambda client, model: (False, "not enabled"),
+            lambda client, model, label=None: (False, "not enabled"),
         )
         captured = {}
 
@@ -731,7 +753,7 @@ class TestFallbackModels:
         monkeypatch.setattr(f"{MODULE}.boto3.client", lambda *a, **k: object())
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
-            lambda client, model: (False, "not enabled"),
+            lambda client, model, label=None: (False, "not enabled"),
         )
 
         out = reporter._call_bedrock(RuntimeDouble(), "msg", "sys")

@@ -1,8 +1,16 @@
 """Module containing the PluginContext class for sharing context between plugins."""
 
+import uuid
 import warnings
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 from typing import Annotated, Any, TYPE_CHECKING
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
@@ -72,6 +80,20 @@ class PluginContext(BaseModel):
         bool, Field(description="Ignore all suppression rules")
     ] = False
 
+    # Private, so it is in no schema and no serialized context. See scan_id.
+    _scan_id: str = PrivateAttr(default_factory=lambda: uuid.uuid4().hex)
+
+    @property
+    def scan_id(self) -> str:
+        """A random id for the run this context was built for, fixed for its life.
+
+        For state kept per scan in a process that outlives the scan, such as the
+        once-per-scan content database refresh (utils/content_db_refresh.py) in the
+        MCP server. Not ``id(self)``: an address is reused once the context is
+        freed, so a later scan's context could inherit an earlier scan's state.
+        """
+        return self._scan_id
+
     @field_validator("config")
     def validate_config(cls, value):
         from automated_security_helper.config.ash_config import AshConfig
@@ -109,6 +131,25 @@ class PluginContext(BaseModel):
                     stacklevel=2,
                 )
         super().__setattr__(name, value)
+
+    @model_validator(mode="after")
+    def _guard_output_dir(self) -> "PluginContext":
+        # ASH's own writes below the output directory never follow a symlink, with
+        # or without a sandbox: the default output directory is inside the
+        # scanned tree. See utils/sandbox/fs_guard.py:open_for_write.
+        # Registered for as long as this context exists: released when it is
+        # collected, or when the scan that made it ends (fs_guard.run_roots), so a
+        # process that runs many scans does not keep every output directory it ever
+        # had registered.
+        output_dir = getattr(self, "output_dir", None)
+        if output_dir is not None:
+            from automated_security_helper.utils.sandbox.fs_guard import (
+                register_writable_root,
+                release_with_holder,
+            )
+
+            release_with_holder(self, register_writable_root(output_dir))
+        return self
 
     @model_validator(mode="after")
     def _derive_work_dir(self) -> "PluginContext":
