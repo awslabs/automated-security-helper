@@ -159,6 +159,12 @@ class _WatchedDigest:
     def hexdigest(self) -> str:
         return self._real.hexdigest()
 
+    def digest(self) -> bytes:
+        # The patched sd.hashlib also builds _upload_lock's stripe pick,
+        # hashlib.sha256(...).digest(), so the double must answer it; the real
+        # digest keeps the pick on the same lock _watch_hash captured.
+        return self._real.digest()
+
 
 def _watch_hash(monkeypatch, upload_id: str, seen: List[bool], during=None) -> None:
     lock = sd._upload_lock(SESSION, upload_id)
