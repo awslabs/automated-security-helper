@@ -1,0 +1,110 @@
+{
+  "errors": {},
+  "issues": 7,
+  "package": "<scanned-dir>/action_suspicious",
+  "results": {
+    "capability-filesystem-browser": {},
+    "capability-filesystem-delete": {},
+    "capability-filesystem-read": {},
+    "capability-filesystem-write-executable": {},
+    "capability-network-download": {},
+    "capability-network-lolbas": {},
+    "capability-network-outbound": {},
+    "capability-process-hooks": {},
+    "capability-process-schedule": {},
+    "capability-process-spawn": [
+      {
+        "code": "throw new Error(\"inert test fixture\");\neval(Buffer.from(\"Y29uc29sZS5sb2coJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\", \"base64\").toString());",
+        "location": "index.js:3",
+        "match": "eval(B",
+        "message": "Detects process execution and spawning"
+      }
+    ],
+    "capability-runtime-clipboard": {},
+    "threat-filesystem-autostart": {},
+    "threat-filesystem-destruction": {},
+    "threat-filesystem-read": {},
+    "threat-network-dns-exfil": {},
+    "threat-network-exfil-messenger": {},
+    "threat-network-exfil-sysinfo": {},
+    "threat-network-exfiltration": {},
+    "threat-network-outbound-shady-links": {},
+    "threat-network-reverse-shell": {},
+    "threat-npm-dependency-confusion": {},
+    "threat-npm-http-dependency": {},
+    "threat-npm-preinstall-script": {},
+    "threat-process-cryptomining": {},
+    "threat-process-download-exec": {},
+    "threat-process-hooks": {},
+    "threat-process-injection-dll": {},
+    "threat-process-memory": {},
+    "threat-process-powershell-encoded": {},
+    "threat-process-spawn-silent": {},
+    "threat-process-sysinfo": {},
+    "threat-runtime-dynamic-loader": {},
+    "threat-runtime-enumeration": {},
+    "threat-runtime-environment-read": {},
+    "threat-runtime-keylogging": {},
+    "threat-runtime-obfuscation": {},
+    "threat-runtime-obfuscation-api": {},
+    "threat-runtime-obfuscation-base64exec": [
+      {
+        "code": "// Inert test fixture. Never run.\nthrow new Error(\"inert test fixture\");\neval(Buffer.from(\"Y29uc29sZS5sb2coJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\", \"base64\").toString());",
+        "location": "index.js:2",
+        "match": "\neval(",
+        "message": "Detects base64 decoding followed by code execution"
+      }
+    ],
+    "threat-runtime-obfuscation-chr": {},
+    "threat-runtime-obfuscation-dynamic-eval": {},
+    "threat-runtime-obfuscation-general": {},
+    "threat-runtime-obfuscation-hidden-code": {},
+    "threat-runtime-obfuscation-import-exec": {},
+    "threat-runtime-obfuscation-js-mangling": {},
+    "threat-runtime-obfuscation-log-suppress": {},
+    "threat-runtime-obfuscation-pyarmor": {},
+    "threat-runtime-obfuscation-steganography": {},
+    "threat-runtime-obfuscation-unicode": {},
+    "threat-runtime-screencapture": {},
+    "threat-runtime-self-propagation": {},
+    "threat-runtime-system-info": {},
+    "threat-setup-import-aliasing": {},
+    "threat-setup-network-in-install": {},
+    "threat-setup-suspicious-imports": {}
+  },
+  "risk_score": {
+    "findings_count": 2,
+    "label": "high_risk",
+    "score": 7.3,
+    "score_breakdown": {
+      "chain_component": 0.08,
+      "dominant_sophistication": "medium",
+      "dominant_specificity": "medium",
+      "has_source_code_risks": true,
+      "max_severity": 3,
+      "num_stages": 1,
+      "severity_component": 0.3,
+      "sophistication_component": 0.14,
+      "specificity_component": 0.21
+    }
+  },
+  "risks": [
+    {
+      "capability_identifies": null,
+      "capability_rule": null,
+      "category": "runtime",
+      "file_path": "index.js",
+      "mitre_tactics": [
+        "defense-evasion"
+      ],
+      "name": "risk.runtime.obfuscation",
+      "severity": "high",
+      "threat_code": "// Inert test fixture. Never run.\nthrow new Error(\"inert test fixture\");\neval(Buffer.from(\"Y29uc29sZS5sb2coJ2luZXJ0IGd1YXJkZG9nIGZpeHR1cmUnKQ==\", \"base64\").toString());",
+      "threat_description": "Detects base64 decoding followed by code execution",
+      "threat_identifies": "threat.runtime.obfuscation.base64exec",
+      "threat_location": "index.js:2",
+      "threat_match": "\neval(",
+      "threat_rule": "threat-runtime-obfuscation-base64exec"
+    }
+  ]
+}
