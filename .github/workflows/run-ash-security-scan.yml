@@ -382,7 +382,9 @@ jobs:
             given="${!var}"
             value="${given%$'\n'}"
             name="${var#INPUT_}"
-            name="${name,,}"
+            # tr, not ${name,,}: macOS runners execute these steps with bash
+            # 3.2, which has no case substitution ("bad substitution").
+            name="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
             case "${value}" in
               *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
                 echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
@@ -459,7 +461,9 @@ jobs:
             exit 1
           fi
           if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            COMMIT="${ASH_VERSION,,}"
+            # tr, not ${ASH_VERSION,,}: bash 3.2 (macOS runners) has no case
+            # substitution.
+            COMMIT="$(printf '%s' "${ASH_VERSION}" | tr '[:upper:]' '[:lower:]')"
           else
             if [[ "${ASH_VERSION}" == refs/* ]]; then
               CANDIDATES=("${ASH_VERSION}")
@@ -583,8 +587,11 @@ jobs:
           # a merge landing in between cannot pair one commit's ASH with another's
           # config.
           FETCH="${CONFIG_REF}"
+          # tr, not ${VAR,,}: bash 3.2 (macOS runners) has no case substitution.
+          ASH_REPO_LOWER="$(printf '%s' "${ASH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          SCANNED_REPO_LOWER="$(printf '%s' "${SCANNED_REPO}" | tr '[:upper:]' '[:lower:]')"
           if [ -n "${ASH_COMMIT}" ] && [ "${CONFIG_REF}" = "${ASH_VERSION}" ] \
-              && [ "${ASH_REPO,,}" = "${SCANNED_REPO,,}" ]; then
+              && [ "${ASH_REPO_LOWER}" = "${SCANNED_REPO_LOWER}" ]; then
             FETCH="${ASH_COMMIT}"
           fi
           git fetch --no-tags --no-recurse-submodules --depth=1 origin "${FETCH}"
