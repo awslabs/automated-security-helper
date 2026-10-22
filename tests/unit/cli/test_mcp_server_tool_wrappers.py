@@ -324,7 +324,11 @@ class TestGetScanResults:
         assert result["success"] is False
         assert result["error_type"] == "ValueError"
         assert "corrupt results" in result["error"]
-        assert "Failed to send error message to client" in logger.error.call_args[0][0]
+        # The guarded sender logs a lost send at warning by design (the traceback
+        # stays at debug); with level "error" its message spells this phrase.
+        assert (
+            "Failed to send error message to client" in logger.warning.call_args[0][0]
+        )
 
 
 class TestGetScanResultPaths:
@@ -378,7 +382,11 @@ class TestGetScanResultPaths:
 
         assert result["success"] is False
         assert result["error_type"] == "ValueError"
-        assert "Failed to send error message to client" in logger.error.call_args[0][0]
+        # The guarded sender logs a lost send at warning by design (the traceback
+        # stays at debug); with level "error" its message spells this phrase.
+        assert (
+            "Failed to send error message to client" in logger.warning.call_args[0][0]
+        )
 
 
 def _stdio_ctx() -> MagicMock:

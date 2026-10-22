@@ -41,8 +41,10 @@ column, and without one two secrets of one type on one line are indistinguishabl
 ASH. The column is worked out here because only this process holds the secret's
 value; the value is not written to OUTPUT.
 
-Deliberately imports nothing from ASH beyond the standard library and detect-secrets,
-so starting it does not load the plugin registry.
+Deliberately imports nothing from ASH beyond ``utils.process_env`` (itself standard
+library only, and required so the environment write below lands under
+``ENVIRON_LOCK``), the standard library and detect-secrets, so starting it does not
+load the plugin registry.
 """
 
 import itertools
@@ -51,6 +53,11 @@ import multiprocessing
 import os
 import sys
 from typing import Any, Dict, List, Optional
+
+from automated_security_helper.utils.process_env import (
+    apply_environ_overrides,
+    restore_environ,
+)
 
 #: The key of the column in each secret written to OUTPUT.
 START_COLUMN_KEY = "ash_start_column"
@@ -165,13 +172,15 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
     from detect_secrets.settings import transient_settings
 
     refusing = request.get("verify") is not True
-    previous = os.environ.get(REFUSE_HTTP_ENV)
+    previous: Dict[str, Optional[str]] = {}
     if refusing:
         # Set before scan_files so that spawned pool processes, which import this
         # module again and inherit the environment, read it and refuse too. The
         # caller does not have to have set it. It is put back below, once the pool
-        # has shut down, so a caller of run() gets its own environment back.
-        os.environ[REFUSE_HTTP_ENV] = "1"
+        # has shut down, so a caller of run() gets its own environment back. The
+        # write goes through process_env so it lands under ENVIRON_LOCK, the
+        # package-wide rule for every runtime os.environ change.
+        previous = apply_environ_overrides({REFUSE_HTTP_ENV: "1"})
         refuse_http_requests()
 
     try:
@@ -201,10 +210,7 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
         ]
     finally:
         if refusing:
-            if previous is None:
-                os.environ.pop(REFUSE_HTTP_ENV, None)
-            else:
-                os.environ[REFUSE_HTTP_ENV] = previous
+            restore_environ(previous)
 
 
 def main(argv: List[str]) -> int:

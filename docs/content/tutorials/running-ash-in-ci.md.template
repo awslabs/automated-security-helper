@@ -121,48 +121,6 @@ jobs:
             .ash/ash_output/ash_aggregated_results.json
 ```
 
-### Using the reusable scan workflow
-
-`.github/workflows/run-ash-security-scan.yml` is a reusable workflow that installs ASH
-and the scanners' tools, runs the scan in `ash-mode: local` by default, and posts the
-results:
-
-```yaml
-jobs:
-  ash:
-    uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@main
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
-    with:
-      ash-version: main
-```
-
-`ash-version` selects the ASH the workflow installs, and the `uses:` ref selects the
-workflow file; keep them on the same ref. Each `install-*` input installs the tool of a
-scanner that is on by default and that ASH does not install for itself, and each
-defaults to `true`, so a caller that sets none of them gets every default scanner rather
-than MISSING ones. Each run downloads them (sizes measured on 2026-10-11):
-
-| Input | Downloads |
-| --- | --- |
-| `install-grype` | grype, about 32 MB, and its vulnerability database during the scan, about 190 MB compressed, unless a cached copy inside grype's bound is restored |
-| `install-syft` | syft, about 31 MB |
-| `install-opengrep` | OpenGrep, about 46 MB, reused from a weekly cache when it matches the pin |
-| `install-cfn-nag` | Ruby 3.3 and cfn-nag's pinned gems, about 2.1 MB |
-| `install-actionlint` | actionlint, about 2.4 MB |
-| `install-cfn-guard` | cfn-guard, about 3.4 MB, and its rules |
-| `install-gitleaks` | gitleaks, about 8.2 MB |
-| `install-trivy` | trivy, about 52 MB, and its vulnerability database during the scan, about 127 MB compressed |
-
-Set an input to `false` when the scan does not need the tool: in `ash-mode: container`,
-which brings its own tools, or with the scanner turned off
-(`scanners.<name>.enabled: false`). In local mode, a scanner that is on without its tool
-is MISSING, and the scan exits 1. The installs use `ash dependencies install`, so an
-`ash-version` older than the release that adds a tool's pin cannot install it: set that
-tool's input to `false` there.
-
 ### Using Container Mode
 
 ```yaml
@@ -414,6 +372,30 @@ Before you call it:
 - The next step resolves `ash-version` to a commit (a tag to the commit it points at) and every later step installs ASH and its cfn-nag Gemfile from that commit, so a branch that moves during the run changes nothing. A name that is both a branch and a tag on different commits is refused; pass `refs/heads/<name>` or `refs/tags/<name>`.
 - On `pull_request` and `merge_group` the workflow restores no cache (no uv cache, grype database or OpenGrep binary), because another job running the pull request's code in the same cache scope could have written those entries. Expect one uncached ASH install and one grype database download per run on those events.
 - `config-ref` does not stop everything a pull request can change: its `.gitignore` and `.ignore` files still shrink the set of files ASH scans, scanners still find their own config files by name when the config names none, and inline suppressions such as `# nosec` still apply. On `pull_request`, GitHub also runs your workflow file from the pull request, so a pull request can edit this call itself. A ruleset's required workflow, which GitHub runs from a ref the ruleset pins, is the control for that.
+
+`ash-version` selects the ASH the workflow installs, and the `uses:` ref selects the
+workflow file; keep them on the same ref. Each `install-*` input installs the tool of a
+scanner that is on by default and that ASH does not install for itself, and each
+defaults to `true`, so a caller that sets none of them gets every default scanner rather
+than MISSING ones. Each run downloads them (sizes measured on 2026-10-11):
+
+| Input | Downloads |
+| --- | --- |
+| `install-grype` | grype, about 32 MB, and its vulnerability database during the scan, about 190 MB compressed, unless a cached copy inside grype's bound is restored |
+| `install-syft` | syft, about 31 MB |
+| `install-opengrep` | OpenGrep, about 46 MB, reused from a weekly cache when it matches the pin |
+| `install-cfn-nag` | Ruby 3.3 and cfn-nag's pinned gems, about 2.1 MB |
+| `install-actionlint` | actionlint, about 2.4 MB |
+| `install-cfn-guard` | cfn-guard, about 3.4 MB, and its rules |
+| `install-gitleaks` | gitleaks, about 8.2 MB |
+| `install-trivy` | trivy, about 52 MB, and its vulnerability database during the scan, about 127 MB compressed |
+
+Set an input to `false` when the scan does not need the tool: in `ash-mode: container`,
+which brings its own tools, or with the scanner turned off
+(`scanners.<name>.enabled: false`). In local mode, a scanner that is on without its tool
+is MISSING, and the scan exits 1. The installs use `ash dependencies install`, so an
+`ash-version` older than the release that adds a tool's pin cannot install it: set that
+tool's input to `false` there.
 {{else}}
 ASH scans its own repository with `.github/workflows/run-ash-security-scan.yml`, and you can call the same workflow from yours. Its `config-ref` and `config-ref-missing` inputs, which read the scan's config from a pull request's base commit, its read-only scan job and its separate `Report ASH results` job are in ASH releases after v3.7.1. v{{VERSION}}, the release this page documents, does not have them yet, so this section describes them once the documented release does.
 {{/after}}
