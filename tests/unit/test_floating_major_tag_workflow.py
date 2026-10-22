@@ -1258,3 +1258,50 @@ class TestEveryLocalWorkflowCallIsCallable:
         with_call = yaml.safe_load("on:\n  workflow_call:\n    inputs: {}\n")
         assert "workflow_call" not in self._on(without)
         assert "workflow_call" in self._on(with_call)
+
+
+# The v* tags of a clone of this repository when the comparison was written:
+# 63 tags, among them a bare v3, a bare v3.0.0-beta and eleven v3.0.0-beta-YYYYMMDD
+# forms. The comparison must parse every one of them, because a tag it refuses fails
+# the step.
+REAL_TAGS = (
+    "v1.3.2 v1.3.3 v1.4.0 v1.4.1 v1.5.0 v1.5.1 v2.0.0 v2.0.1 v3 v3.0.0 v3.0.0-beta "
+    "v3.0.0-beta-20250528 v3.0.0-beta-20250602 v3.0.0-beta-20250603 "
+    "v3.0.0-beta-20250604 v3.0.0-beta-20250610 v3.0.0-beta-20250614 "
+    "v3.0.0-beta-20250708 v3.0.0-beta-20250709 v3.0.0-beta-20250714 "
+    "v3.0.0-beta-20250718 v3.0.0-beta-20250722 v3.0.1 v3.0.2 v3.0.3 v3.1.0 v3.1.1 "
+    "v3.1.10 v3.1.11 v3.1.12 v3.1.13 v3.1.2 v3.1.3 v3.1.4 v3.1.5 v3.1.6 v3.1.7 "
+    "v3.1.8 v3.1.9 v3.2.0 v3.2.1 v3.2.2 v3.2.3 v3.2.4 v3.2.5 v3.2.6 v3.2.7 v3.3.0 "
+    "v3.4.0 v3.5.0 v3.5.1 v3.5.2 v3.5.3 v3.5.4 v3.5.5 v3.5.6 v3.5.7 v3.5.8 v3.5.9 "
+    "v3.6.0 v3.6.1 v3.7.0 v3.7.1"
+)
+
+
+class TestTheComparisonReadsTheRepositorysRealTags:
+    pytestmark = _REQUIRES_BASH
+
+    def test_the_real_tag_list_is_63_tags(self):
+        assert len(REAL_TAGS.split()) == 63
+
+    def test_a_new_release_moves_the_tag_over_the_real_history(self, tmp_path: Path):
+        result = _run(
+            _floating_tag_script(),
+            "3.8.0",
+            tmp_path,
+            remote_tags=f"{REAL_TAGS} v3.8.0",
+        )
+        assert result.ok, result.describe()
+        assert result.mutations == [("PATCH", "v3")], result.describe()
+
+    def test_an_old_beta_rerun_over_the_real_history_moves_nothing(
+        self, tmp_path: Path
+    ):
+        result = _run(
+            _floating_tag_script(),
+            "3.0.0-beta-20250528",
+            tmp_path,
+            remote_tags=REAL_TAGS,
+        )
+        assert result.ok, result.describe()
+        assert result.refs_written == [], result.describe()
+        assert "::notice::" in result.proc.stdout, result.describe()
