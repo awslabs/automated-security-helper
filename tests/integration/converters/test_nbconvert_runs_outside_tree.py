@@ -222,8 +222,10 @@ def test_running_outside_the_tree_keeps_the_module_from_loading(
     """The copy keeps the key here, so only the working directory holds."""
     stage = JupyterConverter._stage_notebook
 
-    def stage_keeping_the_key(content: bytes, staged: Path) -> str:
-        exporter = stage(content, staged)
+    def stage_keeping_the_key(
+        content: bytes, staged: Path, notebook: dict | None = None
+    ) -> str:
+        exporter = stage(content, staged, notebook)
         staged.write_bytes(content)
         return exporter
 
