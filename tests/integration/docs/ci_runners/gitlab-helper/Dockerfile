@@ -10,6 +10,12 @@
 # reference; tests/unit/test_docs_ci_runner_launchers.py checks that the two agree.
 FROM public.ecr.aws/docker/library/debian@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
+# rsync is deliberately unpinned: the base image is already pinned by digest above,
+# so the resolved rsync version is reproducible, and pinning an exact Debian version
+# here would retire with the next bookworm point release, the drift the root
+# Dockerfile's weekly pin check exists to catch and which a test fixture should not
+# also be exposed to.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends rsync \
     && rm -rf /var/lib/apt/lists/*

@@ -37,6 +37,132 @@ global_settings:
     - path: pyproject.toml
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
+    # === GuardDog false positives, continued: the docs-CI and MCP waves ===
+    #
+    # The same dispositions as the line-pinned block below: heuristics matching
+    # docstrings that NAME sensitive paths, fixtures that PLANT the hazard a test
+    # asserts is refused, and a doc-claims harness talking to its own loopback
+    # server. One entry per finding, pinned to its line.
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/cli/dependencies.py
+      line_start: 224
+      line_end: 224
+      reason: "A docstring sentence naming .npmrc and gem configuration as what each package manager reads; prose, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/cli/mcp/source_delivery.py
+      line_start: 1381
+      line_end: 1381
+      reason: "A docstring bullet naming /etc/passwd as an example of the absolute archive paths delivery REJECTS; prose, not a read."
+    - rule_id: threat-filesystem-read
+      path: automated_security_helper/utils/path_matching.py
+      line_start: 148
+      line_end: 148
+      reason: "A docstring naming .env and .npmrc as dotfiles the detect-secrets scan set must keep; prose, not a read."
+    - rule_id: threat-filesystem-read
+      path: tests/integration/docs/docs_runner.py
+      line_start: 525
+      line_end: 525
+      reason: "state = session.root / \"state.env\" names the harness's OWN state file inside its session sandbox; the .env suffix is the match, nothing foreign is read."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/cli/mcp/test_git_environment_guards.py
+      line_start: 46
+      line_end: 46
+      reason: "Writes a planted .gitconfig (helper = planted-global) into the test's fake server HOME to assert the guards keep git from reading it."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/cli/test_dependencies_install_commands_start_outside_the_tree.py
+      line_start: 102
+      line_end: 103
+      reason: "NPM_FILES/NPM_USER plant .npmrc contents pointing at refused 127.0.0.1 registries, the fixture the test uses to prove install commands do not read the tree's rc files."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/plugin_modules/ash_aws_plugins/test_bedrock_summary_reporter.py
+      line_start: 188
+      line_end: 188
+      reason: "The assertion text \"'config/.env' at line 3\" quotes a finding location the reporter under test must render; a string compared, not a file read."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
+      line_start: 911
+      line_end: 911
+      reason: "source_with_planted_key(..., name=\".env\") plants the dotfile the detect-secrets scanner under test must find; the fixture is the subject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
+      line_start: 928
+      line_end: 928
+      reason: "Asserts the scanner reported the planted .env by name; an assertion over the fixture above."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/plugin_modules/ash_builtin/test_npm_audit_project_rc_ignored.py
+      line_start: 81
+      line_end: 81
+      reason: "Writes a planted project .npmrc the test asserts npm-audit IGNORES; the fixture is the subject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/plugin_modules/ash_builtin/test_npm_audit_project_rc_ignored.py
+      line_start: 303
+      line_end: 303
+      reason: "Writes a planted HOME .npmrc naming the operator registry, the control case of the same rc-ignored test."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/test_docs_ci_runner_rewrite.py
+      line_start: 2232
+      line_end: 2233
+      reason: "\"} > source.env\" / \". ./source.env\" are lines of a documentation shell snippet the rewrite test transforms as DATA; nothing is sourced."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/utils/test_ignore_path_ending_in_a_slash.py
+      line_start: 165
+      line_end: 169
+      reason: ".env and app/config/.npmrc are fixture SARIF paths in the ignore-matching assertions; strings matched, not files read."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/utils/test_ignore_path_ending_in_a_slash.py
+      line_start: 293
+      line_end: 294
+      reason: "Writes a one-line .env fixture inside tmp_path so the scan-set test can assert the dotfile is KEPT; the fixture is the subject."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/utils/test_ignore_path_ending_in_a_slash.py
+      line_start: 302
+      line_end: 302
+      reason: "Asserts the kept set includes the planted tmp_path .env from the fixture above."
+    - rule_id: threat-filesystem-read
+      path: tests/unit/utils/test_sandbox_policy.py
+      line_start: 1388
+      line_end: 1388
+      reason: "Symlinks a fixture HOME .gitconfig at a policy-controlled target to assert the sandbox policy resolves it; the link is the fixture under test."
+    - rule_id: threat-network-exfil-sysinfo
+      path: tests/unit/docs/test_page_claims.py
+      line_start: 9336
+      line_end: 9337
+      reason: "http.client.HTTPConnection(\"127.0.0.1\", self.port) is the doc-claims harness posting to the MCP child it just started on loopback; nothing leaves the host."
+    - rule_id: threat-network-exfil-sysinfo
+      path: tests/unit/docs/test_page_claims.py
+      line_start: 15892
+      line_end: 15892
+      reason: "getpass.getuser() resolves ~user expansion for a documented path claim the test verifies; read locally, asserted locally, sent nowhere."
+    - rule_id: threat-process-download-exec
+      path: tests/unit/test_docs_install_commands_can_fail.py
+      line_start: 363
+      line_end: 363
+      reason: "A documentation fence ('curl -sSf https://astral.sh/uv/install.sh | sh') held as DATA by the test that asserts such install commands are judged failable; never executed."
+    - rule_id: threat-process-download-exec
+      path: tests/unit/test_docs_install_commands_can_fail.py
+      line_start: 369
+      line_end: 369
+      reason: "The versioned variant of the same documentation fence, also held as data; never executed."
+    - rule_id: threat-process-download-exec
+      path: tests/unit/test_docs_install_commands_can_fail.py
+      line_start: 387
+      line_end: 387
+      reason: "The GitHub-Actions-step variant of the same documentation fence, also held as data; never executed."
+    - rule_id: threat-process-download-exec
+      path: tests/unit/test_no_bare_name_install_hints.py
+      line_start: 700
+      line_end: 700
+      reason: "subprocess.run of git -C <tmp fixture repo> with a fixed argv, isolated config and a timeout; builds the fixture repository, downloads nothing."
+    - rule_id: threat-process-download-exec
+      path: tests/unit/utils/test_ash_install.py
+      line_start: 61
+      line_end: 61
+      reason: "UV_PIP is the argv CONSTANT ([sys.executable, -m, uv, pip, install, ...]) the install-hint tests compare printed commands against; a list literal, not a run."
+    - rule_id: threat-process-download-exec
+      path: tests/utils/bare_install_names.py
+      line_start: 67
+      line_end: 67
+      reason: "A docstring example quoting the pip install argv shape the helper detects; prose, not a run."
     # === ferret-scan API_KEY_OR_SECRET: unquoted-assignment false positives ===
     # ferret-scan v2.3.3 added unquoted keyword-assignment detection to the SECRETS
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
@@ -982,14 +1108,19 @@ global_settings:
       reason: "urlopen in download(): every asset is digest-checked before extraction and nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 654
-      line_end: 654
+      line_start: 701
+      line_end: 701
       reason: "subprocess.run of `uv tool dir`; it runs nothing this script downloaded."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
-      line_start: 925
-      line_end: 925
+      line_start: 973
+      line_end: 973
       reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/assets/install-pinned-tool.py
+      line_start: 1050
+      line_end: 1050
+      reason: "The second `uv tool dir` run, uv resolved with shutil.which; it runs nothing this script downloaded."
     - rule_id: threat-filesystem-destruction
       path: deploy/cdk-constructs/test/ash-scan-step.test.ts
       line_start: 367
@@ -1027,8 +1158,8 @@ global_settings:
       reason: "'v1.0|cat /etc/passwd' is a revision string the test asserts is rejected."
     - rule_id: threat-filesystem-read
       path: tests/unit/test_pinned_tool_version_check.py
-      line_start: 472
-      line_end: 472
+      line_start: 1138
+      line_end: 1138
       reason: "file:///etc/passwd is a URL the test asserts is refused before opening."
     - rule_id: threat-runtime-obfuscation-base64exec
       path: tests/unit/utils/test_opengrep_pinned_download.py
@@ -1049,23 +1180,23 @@ global_settings:
       reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: tests/integration/scanners/test_gitleaks_real_binary.py
-      line_start: 364
-      line_end: 364
+      line_start: 365
+      line_end: 365
       reason: "Names the .git/config the test plants a generated token in, under tmp_path, to show gitleaks' .git allowlist."
     - rule_id: threat-filesystem-read
       path: tests/integration/scanners/test_gitleaks_real_binary.py
-      line_start: 401
-      line_end: 401
+      line_start: 402
+      line_end: 402
       reason: "Asserts gitleaks reports the token the test planted in its temporary .git/config."
     - rule_id: threat-filesystem-read
       path: tests/integration/scanners/test_gitleaks_real_binary.py
-      line_start: 403
-      line_end: 403
+      line_start: 404
+      line_end: 404
       reason: "Writes a .gitleaksignore entry naming the test's temporary .git/config."
     - rule_id: threat-filesystem-read
       path: tests/integration/scanners/test_gitleaks_real_binary.py
-      line_start: 405
-      line_end: 405
+      line_start: 406
+      line_end: 406
       reason: "Asserts ASH adds back the finding in the test's temporary .git/config."
     - rule_id: threat-process-download-exec
       path: tests/unit/assets/test_install_pinned_tool.py
@@ -1079,13 +1210,13 @@ global_settings:
       reason: "subprocess.run of install-pinned-tool.py --verify-third-party --help; it prints usage and downloads nothing."
     - rule_id: threat-process-download-exec
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 1727
-      line_end: 1727
+      line_start: 1770
+      line_end: 1770
       reason: "subprocess.run of install-pinned-tool.py --uv-tool-pins on a test pins directory; it prints pins and downloads nothing."
     - rule_id: threat-process-download-exec
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 1850
-      line_end: 1850
+      line_start: 1893
+      line_end: 1893
       reason: "subprocess.run of install-pinned-tool.py --assert-root-only on a test tree; it checks modes and downloads nothing."
     - rule_id: threat-process-download-exec
       path: tests/unit/assets/test_with_retry.py
@@ -1134,28 +1265,28 @@ global_settings:
       reason: "'; rm -rf /' is an extra-arg key the test asserts is skipped with a warning; nothing is run."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery.py
-      line_start: 497
-      line_end: 497
+      line_start: 590
+      line_end: 590
       reason: "An archive entry whose path leaves the workspace, which the test asserts source delivery rejects."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery.py
-      line_start: 510
-      line_end: 510
+      line_start: 603
+      line_end: 603
       reason: "An archive entry whose path leaves the workspace, which the test asserts source delivery rejects."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery.py
-      line_start: 523
-      line_end: 523
+      line_start: 616
+      line_end: 616
       reason: "An archive entry with an absolute path, which the test asserts source delivery rejects."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery.py
-      line_start: 537
-      line_end: 537
+      line_start: 630
+      line_end: 630
       reason: "A symlink entry pointing outside the workspace, which the test asserts is rejected before extraction."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery.py
-      line_start: 551
-      line_end: 551
+      line_start: 644
+      line_end: 644
       reason: "A symlink entry pointing outside the workspace, which the test asserts is rejected before extraction."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery_containment.py
@@ -1164,18 +1295,18 @@ global_settings:
       reason: "A symlink entry pointing outside the workspace, which the test asserts source delivery refuses."
     - rule_id: threat-filesystem-read
       path: tests/unit/cli/mcp/test_source_delivery_containment.py
-      line_start: 359
-      line_end: 359
+      line_start: 364
+      line_end: 364
       reason: "A symlink entry pointing outside the workspace, which the test asserts source delivery refuses."
     - rule_id: threat-filesystem-read
       path: tests/unit/converters/test_converters.py
-      line_start: 183
-      line_end: 183
+      line_start: 242
+      line_end: 242
       reason: "A traversal path the test asserts ArchiveConverter._is_path_traversal flags; nothing is read."
     - rule_id: threat-filesystem-read
       path: tests/unit/converters/test_converters.py
-      line_start: 189
-      line_end: 189
+      line_start: 248
+      line_end: 248
       reason: "An absolute path the test asserts ArchiveConverter._is_path_traversal flags; nothing is read."
     - rule_id: threat-filesystem-read
       path: tests/unit/converters/test_converters.py
@@ -1184,13 +1315,13 @@ global_settings:
       reason: "A traversal path the test asserts ArchiveConverter._is_path_traversal flags; nothing is read."
     - rule_id: threat-filesystem-read
       path: tests/unit/converters/test_converters.py
-      line_start: 262
-      line_end: 262
+      line_start: 321
+      line_end: 321
       reason: "Symlink target of a tar member the test asserts inspect_members drops; the link is never followed."
     - rule_id: threat-filesystem-read
       path: tests/unit/converters/test_converters.py
-      line_start: 285
-      line_end: 285
+      line_start: 344
+      line_end: 344
       reason: "Hard-link target of a tar member the test asserts inspect_members drops; the link is never followed."
     - rule_id: threat-runtime-environment-read
       path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
@@ -1199,8 +1330,8 @@ global_settings:
       reason: "The entrypoint line the test asserts is present, reading the one secret ARN variable; it is a string here."
     - rule_id: threat-filesystem-destruction
       path: tests/unit/plugin_modules/ash_builtin/test_cfn_lint_scanner.py
-      line_start: 270
-      line_end: 270
+      line_start: 284
+      line_end: 284
       reason: "'us-east-1; rm -rf /' is a regions value the test asserts the cfn-lint options refuse."
     - rule_id: threat-filesystem-read
       path: tests/unit/plugin_modules/ash_guarddog_plugins/test_guarddog_scanner.py
@@ -1348,6 +1479,142 @@ global_settings:
         confirmed from the SPDX license page. The package is minimatch 10.2.5,
         vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
         is covered by the entry above.
+    # === ferret-scan API_KEY_OR_SECRET, continued: names and generated templates ===
+    #
+    # The same unquoted-assignment and name-matching dispositions as the block
+    # above. Per-file entries naming the flagged value, as the existing ferret
+    # entries do.
+    - path: automated_security_helper/config/operator_paths.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        The match is '"detect-secrets": ("baseline_file",)' -- a scanner NAME
+        mapped to the names of its path-valued config keys. Names, not values.
+    - path: automated_security_helper/config/tool_config_trust.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        The same scanner-name-to-config-key table as operator_paths.py
+        ('"detect-secrets": ("baseline_file",)'). Names, not values.
+    - path: deploy/cdk/templates/AshFargate.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        A synthesized CloudFormation template. The matches are CloudFormation
+        LOGICAL IDS and Refs (VpcPrivateSubnet*RouteTable*,
+        ConfigMcpAuthHeaderSecret99D04B65): resource names whose words trip the
+        heuristic. The secret resource holds an ARN reference resolved at
+        deploy time; no value is in the template.
+    - path: deploy/cdk/templates/AshImagePipeline.template.json
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        The match is inside the template's embedded build script -- a git
+        fetch/checkout command string using ${ASH_REPOSITORY_URL} and
+        ${ASH_VERSION} build variables. Command text, not a credential.
+    - path: tests/unit/cli/mcp/test_scan_directory_start_failures.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        SESSION = "start-failures-session" is a fixture session NAME; the
+        heuristic fires on the unquoted assignment shape. Not a credential.
+    - path: tests/unit/cli/mcp/test_workspace_scan_holds_the_session_tree.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        SESSION = "workspace-session" is a fixture session NAME. Not a credential.
+    - path: tests/unit/config/test_config_link_bases.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        SESSION = "client-1" is a fixture session NAME. Not a credential.
+    - path: tests/unit/config/test_operator_configs_judged_by_every_name.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        SESSION = "client-1" is a fixture session NAME. Not a credential.
+    - path: tests/unit/workspace/test_workspace_project_config_links.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        SESSION = "client-1" is a fixture session NAME. Not a credential.
+    - path: tests/unit/test_docs_ci_runner_judgments.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        TOKEN = "0a1b2c3d4e5f60718293a4b5c6d7e8f9" is a pattern-built fixture
+        value the judgment tests use as the thing that must be redacted from
+        runner output. The fixture exists to prove redaction.
+    # === gitleaks: fixture tokens in tests (kept in step with .ash/.ash.yaml) ===
+    - rule_id: "generic-api-key"
+      path: "tests/unit/docs/test_page_claims.py"
+      reason: >-
+        The match is the docs' illustrative example DATABASE_PASSWORD =
+        "correct-horse-battery-staple-1234", embedded here because this test
+        executes the documentation's own snippets verbatim. A published doc
+        example, not a credential.
+    - rule_id: "generic-api-key"
+      path: "tests/unit/test_docs_ci_runner_judgments.py"
+      reason: >-
+        TOKEN = "0a1b2c3d4e5f60718293a4b5c6d7e8f9" is a pattern-built
+        (0a1b2c3d...) fixture value the judgment tests use as the thing that must
+        be redacted from runner output. The fixture exists to prove redaction.
+    # === bandit in tests and one log line (kept in step with .ash/.ash.yaml) ===
+    - rule_id: B103
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: >-
+        os.lchmod(link, 0o777) builds the hazard under test: a group/world-writable
+        SYMLINK inside a tool bundle, which the installer must refuse. The test
+        skips itself when the platform cannot produce that mode. The permissive
+        mask is the fixture, not a default.
+    - rule_id: B103
+      path: tests/unit/utils/test_tool_config_dir.py
+      reason: >-
+        os.chmod(tree.outside, 0o777) makes the shared directory world-writable so
+        the test can assert write_tool_config REFUSES to write there (pytest.raises
+        OSError matching TMPDIR). The unsafe mode is the input of a refusal test.
+    - rule_id: B104
+      path: automated_security_helper/cli/mcp/__init__.py
+      reason: >-
+        Not a bind. The flagged line is the startup LOG helper that reproduces
+        uvicorn's "running on" message: host = "0.0.0.0" if config.host is None
+        mirrors the display default uvicorn itself logs; the socket was bound
+        elsewhere, where tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+        asserts a non-loopback bind is refused without the explicit opt-in.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_loopback_accepts_only_its_own_origin.py
+      reason: >-
+        Tests OF host binding: "0.0.0.0" is the value under test in origin-check
+        assertions, not a careless default.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_non_loopback_bind_is_refused.py
+      reason: >-
+        The file exists to assert a non-loopback bind is REFUSED;
+        NON_LOOPBACK_HOSTS lists "0.0.0.0" and friends as the refused inputs. A
+        refusal test cannot avoid naming the address it refuses.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_upstream_host_check.py
+      reason: >-
+        The same disposition: "0.0.0.0" is the fixture host in assertions about
+        the upstream Host-header check. The address is the value under test.
+    - rule_id: B301
+      path: tests/unit/utils/test_link_refusal_family.py
+      reason: >-
+        pickle.loads(pickle.dumps(refusal)) round-trips an exception THIS test
+        just built, asserting the refusal family survives the worker-to-parent
+        handoff whole. The bytes never leave the process; nothing untrusted is
+        loaded.
+    - rule_id: B314
+      path: tests/integration/docs/ci_runners/reports.py
+      reason: >-
+        ET.parse reads the JUnit XML the harness's own pinned CI runners just
+        wrote inside the test sandbox, counting testcases; a parse failure is
+        skipped. Input produced by the fixture run itself, not attacker XML.
+    - rule_id: B314
+      path: tests/integration/docs/ci_runners/verdict.py
+      reason: >-
+        ET.fromstring parses the JUnit file Jenkins wrote inside the leg's own
+        container, after stripping the XML 1.1 declaration Jenkins emits. The
+        harness consumes its own run's output.
+    # === trivy-repo misconfiguration: the gitlab-ci-local helper fixture ===
+    - rule_id: "DS-0002"
+      path: "tests/integration/docs/ci_runners/gitlab-helper/Dockerfile"
+      reason: >-
+        The helper image gitlab-ci-local uses around a job must run as root: it
+        sets build-directory ownership and copies artifacts under /artifacts at
+        the filesystem root, as gitlab-ci-local's own helper image does. The
+        file's checkov:skip=CKV_DOCKER_3 header records the same decision for
+        checkov; this entry is trivy's spelling of it.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
@@ -1422,6 +1689,14 @@ global_settings:
       reason: This file is generated by a corresponding Pydantic model and does not contain any secrets or sensitive information. Findings on this file are false positives and should be addressed on the related Pydantic models, not on this JSON file.
     - path: "**/automated_security_helper/schemas/AshConfig.json"
       reason: This file is generated by a corresponding Pydantic model and does not contain any secrets or sensitive information. Findings on this file are false positives and should be addressed on the related Pydantic models, not on this JSON file.
+    # The same entry as in .ash/.ash.yaml, where the default mode already made
+    # this call. Without it here, the community scanners report the docs'
+    # illustrative DATABASE_PASSWORD example (gitleaks and ferret-scan, on
+    # platform-teams.md, its .template and reference/coverage.md) and the docs
+    # UI suite's browser assertions (guarddog, on docs/ui-tests/specs), none of
+    # which are shipped code or real credentials.
+    - path: "docs/**"
+      reason: Documentation content with example code snippets — secrets/keywords in examples are illustrative, not real credentials.
 reporters:
   security-hub:
     enabled: false

@@ -6,12 +6,18 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
+# No workflow-level write grant: each job asks for what it uses. tag-and-release
+# pushes the release and floating tags and creates the GitHub Release, so it holds
+# contents: write; publish-docs already declared its own block. zizmor
+# (excessive-permissions) flagged the old workflow-level `contents: write`, which
+# also reached any job added later without a block of its own.
+permissions: {}
 
 jobs:
   tag-and-release:
     name: Create tag and GitHub Release
+    permissions:
+      contents: write
     if: >-
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.title, 'chore(release):')
