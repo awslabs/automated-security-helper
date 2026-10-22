@@ -7,14 +7,6 @@ permissions:
   pull-requests: write # Required for writing comments with scan results to pull requests
 on:
   workflow_call:
-    outputs:
-      artifact-id:
-        description: >-
-          Id of the ash_output artifact the scan uploaded; empty when the scan
-          uploaded none (it failed before ASH wrote its reports). A caller job that
-          downloads ash_output, such as one calling upload-ash-sarif.yml, should
-          start only when this is set.
-        value: ${{ jobs.ash.outputs.artifact-id }}
     inputs:
       # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
       #
@@ -285,7 +277,12 @@ on:
       # actions/download-artifact `artifact-ids`. The ID names this run attempt's
       # upload whichever attempt the consumer runs in.
       artifact-id:
-        description: "ID of the artifact (artifact-name, ash_output by default) this run uploaded. Empty if the scan job did not reach the upload."
+        description: >-
+          ID of the artifact (artifact-name, ash_output by default) this run
+          uploaded; empty when the scan job did not reach the upload (it failed
+          before ASH wrote its reports). A caller job that downloads ash_output,
+          such as one calling upload-ash-sarif.yml, should start only when this
+          is set.
         value: ${{ jobs.ash.outputs.artifact-id }}
 
 env:
