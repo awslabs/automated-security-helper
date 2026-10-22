@@ -741,7 +741,9 @@ def run_cmd_direct(
         # Create process using subprocess_utils
         process = subprocess_utils.create_process_with_pipes(  # nosec B604 - Args for this command are evaluated for security prior to this internal method being invoked
             args=args,
-            env=env,
+            # The spawn takes a dict; this parameter admits any mapping, so the
+            # copy also keeps the caller's mapping unwritten.
+            env=dict(env) if env is not None else None,
             text=True,
             shell=shell,
         )

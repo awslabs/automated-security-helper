@@ -979,7 +979,7 @@ def _refused_link(
 def _refuse_a_home_among(
     interpreter_dirs: Sequence[Path],
     link_dirs: Sequence[Path],
-    bin_path: Path,
+    bin_path: Optional[Path],
     homes: Sequence[Path],
     interpreter_roots: Iterable[Path],
 ) -> None:
@@ -1042,7 +1042,7 @@ def _refuse_a_home_among(
             and not part_of_an_interpreter
         ):
             raise SandboxUnavailable(_refused_link(path, real, homes, links))
-    if os.path.isdir(bin_path):
+    if bin_path is not None and os.path.isdir(bin_path):
         real = Path(os.path.realpath(bin_path))
         if holds_a_home(real) or (
             directly_in_a_home(real) and not _a_bin_directory(bin_path, homes, links)

@@ -3636,7 +3636,14 @@ def _measured_in(
             else:
                 container = None
                 break
-        if isinstance(container, list) and 0 <= reference.path[place] < len(container):
+        index = reference.path[place]
+        # Only a concrete int indexes a list: a str names a dict key and an
+        # _AnyIndex is the wildcard, and comparing either ordered a crash here.
+        if (
+            isinstance(container, list)
+            and isinstance(index, int)
+            and 0 <= index < len(container)
+        ):
             measured.append(replace(reference, length=len(container), index_at=place))
         else:
             measured.append(reference)

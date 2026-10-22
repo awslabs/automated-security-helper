@@ -251,7 +251,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
         # check reads, so it reports the version that runs.
         self.defer_tool_version_probe(self.command)
 
-    def _probe_scope(self) -> ContextManager[None]:
+    def _probe_scope(self) -> ContextManager[Optional[SandboxUnavailable]]:
         """Sandbox this converter's probes, unless a caller already confined them.
 
         nbconvert is a third-party tool, and its version probe and dependency check

@@ -213,8 +213,14 @@ def open_tar_listing(
                 return member
 
     handle.seek(0)
+    # tarfile.open's stubs take mode as a Literal; this mode is a caller-chosen
+    # read mode ("r:*" or "r:"), which no str can satisfy statically.
     return open_tar(
-        fileobj=handle, mode=mode, ignore_zeros=True, tarinfo=_Recorded, **options
+        fileobj=handle,
+        mode=mode,  # type: ignore[call-overload]
+        ignore_zeros=True,
+        tarinfo=_Recorded,
+        **options,
     )
 
 

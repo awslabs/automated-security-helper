@@ -470,8 +470,8 @@ def plugin_probe_scope(
     from automated_security_helper.utils.offline_tool_env import offline_tool_scope
 
     with offline_tool_scope(_probe_offline(plugin, context)):
-        with _sandboxed_probe_scope(plugin, context):
-            yield
+        with _sandboxed_probe_scope(plugin, context) as refusal:
+            yield refusal
 
 
 def _probe_offline(plugin: Any, context: Any) -> bool:
@@ -508,7 +508,9 @@ def _probe_offline(plugin: Any, context: Any) -> bool:
 
 
 @contextmanager
-def _sandboxed_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
+def _sandboxed_probe_scope(
+    plugin: Any, context: Any
+) -> Iterator[Optional[SandboxUnavailable]]:
     """The sandbox half of :func:`plugin_probe_scope`."""
     import shutil
     import tempfile

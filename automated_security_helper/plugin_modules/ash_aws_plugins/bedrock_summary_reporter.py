@@ -902,7 +902,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             model_id = self.config.options.model_id
             label = self._model_label(model_id)
             is_valid, error_message = validate_bedrock_model(
-                bedrock_client, model_id, values, label=label
+                bedrock_client, model_id, values=values, label=label
             )
 
             if not is_valid:
@@ -2008,7 +2008,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         bedrock_client = self._session().client("bedrock")
         label = self._model_label(opts.model_id)
         is_valid, error_message = validate_bedrock_model(
-            bedrock_client, opts.model_id, self._redaction_values(), label=label
+            bedrock_client, opts.model_id, values=self._redaction_values(), label=label
         )
         if not is_valid:
             if opts.enable_fallback_models:
