@@ -165,13 +165,15 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
     from detect_secrets.settings import transient_settings
 
     refusing = request.get("verify") is not True
-    previous = os.environ.get(REFUSE_HTTP_ENV)
+    previous: Dict[str, Optional[str]] = {}
     if refusing:
         # Set before scan_files so that spawned pool processes, which import this
         # module again and inherit the environment, read it and refuse too. The
         # caller does not have to have set it. It is put back below, once the pool
-        # has shut down, so a caller of run() gets its own environment back.
-        os.environ[REFUSE_HTTP_ENV] = "1"
+        # has shut down, so a caller of run() gets its own environment back. The
+        # write goes through process_env so it lands under ENVIRON_LOCK, the
+        # package-wide rule for every runtime os.environ change.
+        previous = apply_environ_overrides({REFUSE_HTTP_ENV: "1"})
         refuse_http_requests()
 
     try:
