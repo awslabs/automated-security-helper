@@ -1162,14 +1162,42 @@ jobs:
           INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
         run: |
           set -euo pipefail
+          # ASH_DEPENDENCIES_UNKNOWN_TOOLS is honored by the ASH that READS it, and
+          # ash-version is the pull request's base commit, which can predate the
+          # variable itself. Until a base carries it, `skip` has to be applied here,
+          # in the pull request's own workflow file: in skip mode each tool installs
+          # on its own call, and a refusal whose output names the tool as unknown is
+          # skipped instead of failing the step. Any other failure still fails, and
+          # outside skip mode the one batched call keeps refusing a mistyped name.
+          ash_install() {
+            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+              uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+                "$@" \
+                --bin-path "${ASH_TOOL_BIN}")
+          }
           tools=()
           for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
-            if [ -n "${tool}" ]; then tools+=(--tool "${tool}"); fi
+            if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
-            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-              "${tools[@]}" \
-              --bin-path "${ASH_TOOL_BIN}")
+          if [ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" = "skip" ]; then
+            for tool in "${tools[@]}"; do
+              out=""
+              rc=0
+              out="$(ash_install --tool "${tool}" 2>&1)" || rc=$?
+              printf '%s\n' "${out}"
+              if [ "${rc}" -ne 0 ]; then
+                if printf '%s' "${out}" | grep -q "Unknown tool"; then
+                  echo "the installed ASH (${ASH_UVX_SOURCE}) has no plugin named '${tool}'; skipped, as ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip asks. The scan needs nothing from it: the base config cannot enable a scanner the base ASH does not have."
+                else
+                  exit "${rc}"
+                fi
+              fi
+            done
+          else
+            args=()
+            for tool in "${tools[@]}"; do args+=(--tool "${tool}"); done
+            ash_install "${args[@]}"
+          fi
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # OpenGrep goes through the same verified installer as Grype and Syft above.
