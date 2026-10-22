@@ -1405,7 +1405,7 @@ jobs:
       # both tests in test_repo_tool_configs_are_not_read.py skipped.
       # tests/unit/test_integration_job_installs_required_tools.py holds this list.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
+        run: uv run ash dependencies install --bin-path /tmp/ash-tools/bin --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
@@ -1416,11 +1416,17 @@ jobs:
       # binaries on PATH), and a test fails if it `uv tool install`s one, so a
       # pre-install that stops reaching the scanner shows up instead of being redone.
       #
-      # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
-      # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
-      # later step of the job runs an executable by name from either directory.
+      # The install above puts the pinned binaries in /tmp/ash-tools/bin (--bin-path)
+      # and the uv tools in ~/.local/bin. The suite gives every test its own HOME, so a
+      # HOME-derived install location (~/.ash/bin, and the rules bundle beside it) would
+      # vanish under the moved HOME; /tmp/ash-tools is outside any HOME, ASH_BIN_PATH
+      # and ASH_CFN_GUARD_RULES_DIR name it for the tests' ash children, and PATH gains
+      # both bin directories for this step only, not through GITHUB_PATH, so no later
+      # step of the job runs an executable by name from either directory.
       - name: Run the integration suite
         env:
+          ASH_BIN_PATH: /tmp/ash-tools/bin
+          ASH_CFN_GUARD_RULES_DIR: /tmp/ash-tools/share/cfn-guard-rules
           ASH_REQUIRE_ACTIONLINT: "1"
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_CFN_TOOLS: "1"
@@ -1428,7 +1434,7 @@ jobs:
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
           ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks
         run: |
-          export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
+          export PATH="/tmp/ash-tools/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
             tests/integration \
             tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \

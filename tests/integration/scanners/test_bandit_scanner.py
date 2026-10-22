@@ -39,14 +39,14 @@ def test_bandit_scanner_configure(test_plugin_context, test_source_dir):
         context=test_plugin_context,
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
-                config_file=test_config_file,
+                config_file=str(test_config_file),
                 excluded_paths=[
                     IgnorePathWithReason(path="tests/*", reason="Test files")
                 ],
             )
         ),
     )
-    assert scanner.config.options.config_file.name == ".bandit"
+    assert Path(scanner.config.options.config_file).name == ".bandit"
     assert len(scanner.config.options.excluded_paths) == 1
     assert scanner.config.options.excluded_paths[0].path == "tests/*"
 
@@ -75,7 +75,7 @@ def test_process_config_options_with_config_files(
         context=test_plugin_context,
         config=BanditScannerConfig(
             options=BanditScannerConfigOptions(
-                config_file=config_path,
+                config_file=str(config_path),
             )
         ),
     )
