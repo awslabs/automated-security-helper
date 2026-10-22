@@ -98,4 +98,4 @@ plugins:
 ash --plugins my-plugin
 ```
 
-> [!CAUTION] > **Community Plugin Security**: Community plugins are third-party packages that you install separately (e.g., via `pip install`). Always verify the source and trustworthiness of these packages before installation. ASH's built-in plugins are included directly in the ASH repository under `automated_security_helper/plugin_modules` and don't require separate package installation.
+> [!CAUTION] > **Community Plugin Security**: The community plugins listed above ship with ASH, in `automated_security_helper/plugin_modules`, and need no separate package. `ash scan` loads one only when its module is listed in `ash_plugin_modules` or passed with `--ash-plugin-modules`. Each runs an external tool: the container image includes trivy, and you install the Snyk CLI and ferret-scan yourself, so check where each tool comes from. A plugin published outside ASH is a third-party package you install separately (for example with `pip install`), and ASH imports it into its own process, so verify its source and trustworthiness before installing it.

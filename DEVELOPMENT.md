@@ -1,564 +1,71 @@
-# Local Development Setup Guide
+# Development
 
-This guide will help you set up your local development environment for the Automated Security Helper project.
+The development guide is part of the documentation site, under Contributing:
 
-## Prerequisites
+- [Contribute to ASH](docs/content/contributing/index.md): set up a development checkout, the project layout, running
+  ASH from your checkout, pull requests, commit messages, what CI runs, code style, and the pre-commit hooks.
+- [Test your change](docs/content/contributing/testing.md): the unit, integration, and snapshot tests, the rules the
+  suite enforces on new tests, and testing an MCP change locally.
+- [Test the documentation](docs/content/contributing/documentation.md): how the docs are checked and how to mark
+  a code block.
+- [Releases and versions](docs/content/contributing/releases.md): versions, the changelog, cutting a release, tags, and
+  the version-pinned pages.
 
-- Python 3.10 or later
-- UV (Python package manager) - **Note: Project has migrated from Poetry to UV**
+The short version, from a git clone:
 
-## Setting up UV
-
-1. Install UV on your system
-
-[Official instructions](https://docs.astral.sh/uv/getting-started/installation/)
-
-Linux, macOS, Windows (WSL)
-
+<!-- doctest: illustrative reason="installs packages from the network and runs the full test suite" -->
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Windows PowerShell:
-
-```ps1
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-2. Verify UV installation:
-
-```bash
-uv --version
-```
-
-### Windows: Enable Long Paths
-
-Windows has a 260-character path limit that can cause `git clone` or `git reset` failures due to deeply nested test file paths. Run this once before cloning:
-
-```ps1
-git config --global core.longpaths true
-```
-
-## Project Setup
-
-### Option 1: Manual Setup
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/awslabs/automated-security-helper.git
-cd automated-security-helper
-```
-
-2. Install project dependencies:
-
-```bash
-uv sync
-```
-
-This command will:
-- Create a virtual environment
-- Install all dependencies from pyproject.toml and uv.lock
-- Set up the project in development mode
-
-3. Activate the virtual environment:
-
-```bash
-source .venv/bin/activate
-```
-
-Or use UV's built-in environment management:
-
-```bash
-uv run <command>
-```
-
-### Option 2: Using Development Containers
-
-If you're using an IDE that supports devfiles (like Eclipse Che, Red Hat OpenShift Dev Spaces, or other devfile-compatible environments), you can use the provided `devfile.yaml`:
-
-The devfile includes pre-configured commands:
-- `install`: Sets up UV and installs dependencies
-- `build`: Builds the project using UV
-- `test`: Runs the test suite
-
-This provides a consistent development environment across different platforms and IDEs.
-
-## Testing
-
-Run the tests from a git checkout with `git` on `PATH`. Some of them list the
-repository's files with `git ls-files` rather than walking the directory tree (see
-[Do Not Walk the Repository Tree](docs/content/docs/testing/parallel_testing.md)), and so
-do `scripts/verify_docs_freshness.py` and `check-snapshot-trailers.py --orphans`; in a
-copy that is not a git work tree they fail instead of checking nothing.
-
-Run the test suite:
-
-```bash
+uv sync --extra cdk --extra symbols
 uv run pytest
 ```
 
-Run specific test categories:
+## Interface changes
 
+The [design system](docs/content/developer-guide/interface-design.md) covers the
+website, terminal, TUI, and human reports. The [surface review](docs/content/developer-guide/high-end-design-review.md)
+records the navigation architecture, motion vocabulary, and platform decisions.
+
+Follow the [preview workflow](docs/ui-tests/README.md) to generate representative
+reports and terminal screens, build the documentation, run browser checks, and
+inspect the gallery. Review the affected theme, width, keyboard, empty, and
+error states. The generated GitHub comment preview approximates GitHub's native
+renderer.
+
+Edit versioned content in its `.md.template` and regenerate the output with
+`uv run python scripts/version_template_manager.py generate`. Editor and agent
+content has its own canonical source in
+`ash-agent-plugins/agentic-coding/transpiler/_base/`.
+
+Refresh the README's report and terminal images with `npm run capture -- --readme`
+in `docs/ui-tests`. Rebuild the local MIT animation module with `npm run vendor:motion`
+after changing its pinned dependency.
+
+## Devfile environments
+
+`devfile.yaml` defines `install`, `build`, and `test` commands for IDEs that read
+devfiles (see [Devfile environments](docs/content/contributing/index.md#devfile-environments)).
+To run them by hand, for example when the IDE integration fails:
+
+<!-- doctest: illustrative reason="installs uv and packages from the network" -->
 ```bash
-# Unit tests
-uv run pytest tests/unit/ -v
+# install
+curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && export PATH="$HOME/.local/bin:$PATH" && uv sync
 
-# Integration tests
-uv run pytest tests/integration/ -v
+# build
+export PATH="$HOME/.local/bin:$PATH" && uv build
 
-# Scanner-specific integration tests
-uv run pytest tests/integration/scanners/ -v
+# test
+export PATH="$HOME/.local/bin:$PATH" && uv run pytest
 ```
 
 ## Snapshot tests
 
-What ASH prints and writes is pinned by snapshot tests, so a change to user-visible
-output fails CI until someone has looked at it and said why it changed.
+Moved to [Snapshot tests](docs/content/contributing/testing.md#snapshot-tests).
 
-### What is snapshotted
+## Release line
 
-- `tests/snapshot/`: syrupy snapshot tests of CLI output, reports and other rendered
-  output. Snapshots live next to their test module, in
-  `tests/snapshot/**/__snapshots__/<test_module>.ambr` for structured data and
-  `__snapshots__/<test_module>/<test_name>.<ext>` for whole rendered documents.
-- `.github/actions/validate-mcp/tool_surface.golden.json`: the MCP tool surface a client
-  sees, compared against the live server by the `validate-mcp` action.
+Moved to [The release line](docs/content/contributing/releases.md#the-release-line).
 
-The Snapshot-Update rule below also covers the other committed files that a generator
-writes in full and CI regenerates and compares: the JSON schemas in
-`automated_security_helper/schemas/*.json`, `docs/content/docs/cli-reference-generated.md`,
-and the MCP tool reference in
-`ash-agent-plugins/agentic-coding/transpiler/_base/references/tool-reference.md`. The full
-list, and why each candidate is in or out, is the `GOLDEN` table in
-`.github/scripts/check-snapshot-trailers.py`.
+## Release App setup
 
-### Normalization
-
-Snapshots must be identical on every machine, so values that change from run to run
-(temp paths, the repository root, the home directory, ids, versions) are masked by one
-normalizer, `SnapshotNormalizer` in `tests/snapshot/support/normalize.py`. The `snapshot`
-and `text_snapshot` fixtures in `tests/snapshot/conftest.py` apply it, and they also pin
-the terminal (width, no color, no TTY) and unset the CI variables that change ASH's
-output. Do not normalize inside a test. If a test produces a value that varies, register
-it with the normalizer (`add_root`, `add_literal`) or extend the normalizer, together with
-a test in `tests/snapshot/test_snapshot_normalizer.py` showing what it masks and what it
-leaves alone.
-
-Time is not masked by default. A wrong timestamp or duration is a defect a user reads,
-so a new test sees every instant and duration it renders. When output contains the
-wall clock, pin the clock rather than masking it: the `pinned_clock` fixture in
-`tests/snapshot/conftest.py` (built on `pin_clock` in
-`tests/snapshot/support/fixture_model.py`) replaces `datetime.now()` and `uuid4` in the
-modules that stamp them into output, and `pin_clock(monkeypatch, extra_modules=(...))`
-covers a module outside that list. Only when the time cannot be pinned cheaply, and
-only after the test has been shown to differ between runs or between time zones (run it
-several times, and under `TZ=Pacific/Kiritimati` and `TZ=America/Adak`), opt in to
-masking for that test or module:
-
-```python
-pytestmark = pytest.mark.snapshot_masking(mask_instants=True, mask_durations=True)
-```
-
-The switches, all `False` unless a marker turns them on:
-
-- `mask_instants`: ISO-8601 instants, `ASH-YYYYMMDD...` report ids, the
-  `scan-YYYYMMDDHHMMSS` id from MCP `get_scan_results`, today's date, and values under
-  instant keys such as `time`, `logged_time`, `generated_at`, `start_time`, `end_time`
-  and `timestamp`.
-- `mask_durations`: a number followed by a time unit in text (`1.2s`, `350ms`,
-  `0:00:01`).
-- `mask_duration_keys`: numbers under keys such as `duration` and `duration_seconds`.
-
-No snapshot test opts in at the moment: every one that renders the time runs under a
-pinned clock.
-
-The console log's time column is not a normalizer rule: the fixtures draw it as the
-constant `[<LOG_TIME>]`, so the column has one width under any clock, locale or
-timezone.
-
-### When a snapshot test fails
-
-1. Run the tests and read the diff syrupy prints:
-
-   ```bash
-   uv run pytest tests/snapshot
-   ```
-
-2. Decide whether the new output is what you intended. If it is not, fix the code.
-3. If it is, rewrite the snapshots for the tests you changed:
-
-   ```bash
-   uv run pytest tests/snapshot/<area>/test_snapshot_<area>_<topic>.py -n 0 --snapshot-update
-   ```
-
-   Pass `-n 0`. Under xdist several workers rewrite the same `.ambr` file at once, and
-   the last writer drops the others' snapshots without an error.
-
-4. Review what changed, file by file:
-
-   ```bash
-   git diff -- '**/__snapshots__/**'
-   ```
-
-5. Commit the code change and its snapshots together, with a trailer saying why the
-   output changed:
-
-   ```bash
-   git commit --trailer "Snapshot-Update: the summary table now shows suppressed findings"
-   ```
-
-The `snapshot-trailers` CI job fails if a golden file changed in a commit that has no
-non-empty `Snapshot-Update:` trailer. The trailer has to be on a commit that touched the
-file, so a separate follow-up commit that only adds it does not count. To fix:
-
-- if the change is in your latest commit, run
-  `git commit --amend --no-edit --trailer "Snapshot-Update: <why>"`;
-- if it is in an earlier commit, run the `git rebase ... --exec ...` command printed in the
-  CI error, which amends only the commits that touched that file.
-
-Then run `git push --force-with-lease`. Pull requests are squash-merged with every commit
-message kept, and the check reads trailers from each commit's section of the squash
-message, so the trailer survives the merge.
-
-CI never passes `--snapshot-update`, and `tests/snapshot/conftest.py` refuses it when the
-`CI` or `GITHUB_ACTIONS` environment variable equals `true` (exactly that string, so
-`CI=1` does not trigger the refusal). `tests/snapshot/test_snapshot_policy.py` fails if
-any workflow, action, script or pytest configuration passes `--snapshot-update` or
-`--snapshot-warn-unused`. A missing snapshot fails.
-
-### Orphaned snapshots
-
-A snapshot that no test asserts any more fails CI. syrupy reports an unused snapshot in a
-test module that still exists. If you delete or rename a test module, syrupy never opens
-its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
-`test_snapshot_policy.py`) checks that every file under a `tests/**/__snapshots__/`
-directory belongs to a `<test_module>.py` next to that directory, and that no
-`__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
-when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
-trailer like any other. The check takes its list from git: tracked snapshots and untracked
-ones that are not ignored, so a snapshot not yet added is checked, and anything under an
-ignored directory, such as `tests/pytest-temp`, is not. It needs a git work tree.
-
-### Output that differs by operating system
-
-When output really differs by platform (path separators, line endings, a Windows-only
-message), render every variant on every OS: call the code with the platform as an input
-and snapshot each variant under its own name, for example
-`text_snapshot("md")(name="windows")`. Do not skip a snapshot test on some platforms, and
-do not keep a separate snapshot per runner. A skipped variant is never compared, and its
-snapshot looks unused to the runs that skip it.
-
-### Output that needs a container runtime or Nix
-
-What container mode and Nix mode print before and after the runtime is snapshotted
-in-process, with only the runner process or the `nix develop` call replaced, under
-`tests/snapshot/container/`. What only a real runtime can produce (output from inside
-the image, a real container or Nix scan, the `./ash` and `ash_helpers.ps1` wrappers) is
-in `tests/snapshot/container/runtime/`, marked `container_runtime` or `nix_runtime`.
-`tests/conftest.py` deselects those unless `--run-container-snapshots` or
-`--run-nix-snapshots` is passed, which the scan-validation container legs and the Nix
-legs do after their scans. Keep such modules in `runtime/`: syrupy reads every file in a
-`__snapshots__` directory once one test beside it runs, so a deselected module's
-snapshots next to collected ones would fail the default run as unused. To update them,
-build the image (or have Nix) and run the module with its flag, `-n 0` and
-`--snapshot-update`; see the module docstrings for the environment they read.
-
-## Development Commands
-
-- Format and lint code:
-
-```bash
-uv run ruff check .
-uv run ruff format .
-```
-
-- Run a specific script:
-
-```bash
-uv run ash
-```
-
-## Project Dependencies
-
-Dependencies are managed in `pyproject.toml`. Key groups:
-
-- Runtime dependencies: defined under `[project] dependencies`
-- Dev dependencies: defined under `[dependency-groups] dev` (includes ruff, pytest, mypy, mkdocs, etc.)
-
-Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at runtime — they're not project dependencies.
-
-### Pinned tool versions
-
-`automated_security_helper/utils/tool_downloads.py` pins every tool ASH provisions
-itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
-upstream's latest release; to run the same check locally:
-
-```bash
-uv run python scripts/check_pinned_tool_versions.py
-uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
-```
-
-For each pin that is behind it lists every value the bump has to change: the entries
-in `tool_downloads.py`, the Dockerfile ARG, and each tracked file that repeats one of
-the pin's digests, found with `git grep` (nix's SRI copies, a CI install check, test
-fixtures). A gem (cfn-nag, Bundler) is compared with the newest release the image's
-Ruby can run, read from the Dockerfile's `ruby=` apt pin; a newer release that needs
-a newer Ruby is named in the report but does not count as outdated.
-
-It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
-behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and
-2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API
-requests an hour per address; set `GITHUB_TOKEN` or `GH_TOKEN` to lift that. A lookup
-GitHub refuses with 403 while the token is set is retried once without it, and GitHub's
-error message goes to stderr. The token is never printed, and it is sent across a
-redirect only to the same scheme, host and port.
-
-## Troubleshooting
-
-If you encounter any issues:
-
-1. Verify your Python version matches the required version (3.10+):
-
-```bash
-python --version
-```
-
-2. Try cleaning and rebuilding the environment:
-
-```bash
-rm -rf .venv
-uv sync
-```
-
-3. Update UV and dependencies:
-
-```bash
-uv self update
-uv sync --upgrade
-```
-
-4. If using a devfile-compatible IDE and encountering issues, try running the devfile commands manually:
-
-```bash
-# Install dependencies
-curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.cargo/env && uv sync
-
-# Build the project
-uv build
-
-# Run tests
-uv run pytest
-```
-
-### Migration Validation
-
-The project includes a migration validator to help diagnose UV-related issues:
-
-```bash
-# Check migration status
-uv run python -m automated_security_helper.utils.migration_validator
-
-# Get detailed JSON output for debugging
-uv run python -m automated_security_helper.utils.migration_validator --json
-```
-
-The validator checks:
-
-- UV installation and version compatibility
-- Project configuration (pyproject.toml) structure
-- Dependency resolution capability
-- CLI tool availability via UV tool run
-- Build system configuration
-
-## Version Management
-
-ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `pyproject.toml` and propagated to documentation files via a template system.
-
-### How It Works
-
-- `pyproject.toml` is the single source of truth for the version.
-- Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
-- The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
-- Text that is only true from a later release on goes in a version block of the template, `{{#after 3.7.1}}` ... `{{else}}` ... `{{/after}}`, each marker on its own line; `generate` keeps the first part when the version is after the one named and the `{{else}}` part (optional) otherwise. The docs publish on every push to `main`, so this is how a page can describe a feature `main` has without telling readers of the current release that it is theirs. A malformed or unclosed block stops `generate`.
-
-### Commit Messages
-
-PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format. A required check ("Validate PR title") enforces this. Since PRs are squash-merged, the PR title becomes the commit message that drives changelog generation.
-
-```
-feat: add OpenGrep scanner support
-fix(detect-secrets): apply global_ignore_paths
-chore: bump dependencies
-feat!: redesign plugin API (breaking change)
-```
-
-A pre-commit hook (`commitizen`) also validates local commit messages.
-
-### The ASH scan of this repository
-
-ASH scans its own repository on every pull request, in two workflows:
-
-- `ash / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan.yml`) is a required check. On a pull request it installs ASH, and the cfn-nag Gemfile it pins, from this repository at the pull request's base commit, for same-repository and fork pull requests alike. In the merge queue it installs from the branch the queue merges into (`merge_group.base_ref`), the default branch here. The job's first step resolves that ref to a commit, and every later step, the config fetch included, uses that commit, so a merge that lands mid-run cannot mix two versions of ASH or pair one version's ASH with another's config. A pull request is therefore never judged by the ASH it changes: a change that makes a scanner stop reporting, or the gate exit 0, has no effect on its own required check. On a pull request and in the merge queue the scan job also restores no cache (no uv cache, grype database or OpenGrep binary): another job running the pull request's code in the same cache scope could have written those entries. Each is downloaded and verified instead, which costs one uncached ASH install and one grype database download per run.
-- `ash (pull request head, informational only -- does not gate) / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan-pr-head.yml`) runs the pull request's own ASH against the same tree. It is not a required check and must not be added to a ruleset. It posts no PR comment, publishes no JUnit check and uploads no SARIF, and the job that runs the pull request's ASH holds a read-only token, so neither its inputs nor its code can post a result under the required scan's name; its findings are in the job summary and in the run's `ash_output` artifact. (In the reusable workflow the scan job always holds `contents: read` only; the PR comment, the JUnit check and the SARIF upload run in a separate job, `Report ASH results`, which downloads the scan's artifact and runs nothing from it.) When you change ASH itself, this is the run that shows what your change does.
-
-The required check also reads its ASH config from the base commit, not from the pull request: `.ash/.ash.yaml` as of the pull request's base commit (in the merge queue, as of the branch the queue merges into) is fetched outside the checkout and passed as `--config`. Every tool config file that config names by a relative path (`scanners.<name>.options.config_file`, here `.ash/bandit.yaml`, `.ash/.checkov.yaml` and `.ash/.grype.yaml`), and opengrep's or semgrep's `config` when it names a rules file or directory, is read from the same commit, and the scan fails if that commit lacks one. The fetched copies sit outside the checkout, so they apply as operator files: ASH honors them where it refuses a tool config file inside the scanned tree, such as `.ash/.checkov.yaml`. Paths written inside them still resolve in the checkout, so a fetched checkov config whose `external-checks-dir` or `config-file` is relative, which would load code from the pull request's tree, fails the scan; use an absolute path outside the repository. A pull request therefore cannot change `.ash/.ash.yaml`, or the tool config files it names, for the check that gates it. Config edits in a pull request affect the required check only after they are merged; until then the informational check, which scans with the pull request's own config, shows their effect. What still comes from the pull request: its `.gitignore` and `.ignore` files, which shrink the set of files ASH scans; config files a scanner finds by name in the scanned tree when the config names none; and inline suppression markers such as `# nosec` and `# pragma: allowlist secret`. Review changes to those like any other change to the gate. The reusable workflow exposes this as the `config-ref` input, which other callers can set the same way. If the base commit has no file at the configured path, the required check fails rather than scanning with ASH's defaults; a caller whose first config is still in a pull request can set `config-ref-missing: defaults` for that pull request.
-
-Because the required check runs the base commit's ASH, a workflow change that depends on an ASH change in the same pull request can fail its own required check. A new tool does not: `ash-repo-scan.yml` passes `skip-unknown-tools: true`, so the scan job sets `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` and the base commit's ASH names and skips a `--tool` it has no plugin for (the base config cannot enable a scanner that ASH lacks), and the pull request's own ASH installs and runs the tool in the informational check. Other callers of `run-ash-security-scan.yml` keep the refusal unless they pass the input too. Anything else the base commit's ASH does not know yet, such as a new `ash` flag the workflow passes, still fails. Land that kind of change in two pull requests, the ASH change first and the workflow change that uses it after. The same split works against you when the ASH on `main` cannot scan this repository at all (it crashes, or a scanner always ends in ERROR): every pull request's required check and every merge-queue run uses that ASH, including the pull request that fixes it. The way out is to merge the fix as the repository role that the "Protect main" ruleset exempts from its required checks, which the note at the top of `ash-unified-ci.yml` describes; the informational check on the fix's pull request shows whether its own ASH scans the repository again.
-
-On `pull_request`, GitHub runs the workflow files from the pull request's merge commit, so a pull request that edits `ash-repo-scan.yml` or `run-ash-security-scan.yml` still changes its own gate. Review changes to `.github/workflows/` with that in mind; nothing inside a workflow file can prevent it. The control for that gap sits outside the workflow files: a repository ruleset's required workflow, which GitHub runs from a ref the ruleset pins rather than from the pull request.
-
-### Releasing
-
-Releases are cut by maintainers via **Actions > ASH - Create Release > Run workflow**. The workflow:
-
-1. Determines the bump type from commit history (patch/minor/major based on conventional commits), subject to the release line described below
-2. Bumps the version in `pyproject.toml`, updates `CHANGELOG.md`
-3. Regenerates version references in documentation
-4. Creates a release PR
-
-After merging the release PR, a second workflow automatically:
-- Creates the git tag (`v{version}`)
-- Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
-- Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
-
-The documentation site is published by the `deploy-docs` job of `.github/workflows/ash-repo-docs.yml`, the only job there with `contents: write`, from every push to `main`. The release PR's merge publishes the release's docs that way. No tag push publishes them, and a hand-pushed release tag no longer republishes the site: the workflow has no tag trigger, and the job's `if:` admits only `refs/heads/main`. That holds for commits that carry the current workflow file. A tag pushed on an older commit runs that commit's copy, which still triggers on every tag, so tag creation and updates should be limited to the release path by a tag ruleset; nothing in a workflow file can cover those commits.
-
-#### Release App setup
-
-The release PR's required checks (`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
-
-1. Create a GitHub App owned by the organization. It needs no webhook and no callback URL.
-2. Repository permissions: **Pull requests: Read and write**. Metadata read is implicit; GitHub adds it automatically. No Contents permission, not even read, and nothing else. The branch push stays on `GITHUB_TOKEN`, so the App only opens the PR. The workflow requests exactly `pull-requests: write` when it mints the token, so the mint step fails if the App lacks it, and it would also fail if the workflow asked for a permission the App was not granted.
-3. Install the App on this repository only.
-4. Generate a private key for the App, and copy the App's **Client ID** from its settings page (the Client ID, not the numeric App ID).
-5. Add two repository secrets under **Settings > Secrets and variables > Actions**:
-   - `RELEASE_APP_CLIENT_ID`: the Client ID
-   - `RELEASE_APP_PRIVATE_KEY`: the full contents of the `.pem` file
-
-No repository variables are needed.
-
-The workflow only uses the App when both secrets are set. With neither or only one, it falls back to `GITHUB_TOKEN`, logs a warning, and the PR waits for approval as described above. Once both are set, a misconfigured App (not installed, wrong permissions, bad key) fails the release job at the token step, before any version bump or push, rather than silently falling back.
-
-To confirm the setup, run the release workflow and check that the **Mint a GitHub App token** step ran, that the PR author is the App rather than `github-actions`, and that the PR's checks start without an approval banner.
-
-### Manual Version Bumping
-
-```bash
-# Show current version
-uv run cz version --project
-
-# Bump version (auto-detects type from commits)
-uv run cz bump --changelog
-
-# Dry run to preview
-uv run cz bump --changelog --dry-run
-```
-
-### Release line
-
-`main` carries breaking (`feat!`) commits that ship in 3.x by maintainer decision, because 4.0.0 is reserved for the v4 packaging work. The `RELEASE_LINE` value committed at the top of `ash-create-release.yml` controls this. It is not a dispatch input, so the line a release lands on is decided in reviewed history:
-
-- `3.x` (the default): if commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
-- `auto`: commitizen's own semver, so a breaking change produces a major.
-
-A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading, and the tag workflow publishes that version's `CHANGELOG.md` entry, curated notes included, at the top of the GitHub Release body, ahead of GitHub's generated notes. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
-
-Hand-written notes go under `## Unreleased` in `CHANGELOG.md`. commitizen would replace that section with the generated entry, so before bumping, the workflow moves its body into `.github/release-notes/<next tag>.md`, below any curated notes already there, and removes the section. The new entry then carries the curated notes, the hand-written notes, and the generated sections, and so does the GitHub Release. The step fails before bumping if that text contains a Jinja delimiter (`{{`, `{%`, `{#`) or if the next tag cannot be determined. An empty or absent section is left alone.
-
-To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change that lands v4, then run the workflow. Once the version is 4.x, `3.x` refuses to run, so a setting left at `3.x` fails loudly rather than capping 4.x.
-
-Preview either line locally:
-
-```bash
-uv run cz bump --dry-run --changelog --increment MINOR   # what RELEASE_LINE 3.x produces when a major is detected
-uv run cz bump --dry-run --changelog                     # what RELEASE_LINE auto produces
-```
-
-## Scanner Plugin Development
-
-When developing custom scanner plugins for ASH, follow these guidelines:
-
-### Base Scanner Plugin
-
-All scanner plugins should inherit from `ScannerPluginBase` and implement the required methods:
-
-```python
-from automated_security_helper.base.scanner_plugin import (
-    ScannerPluginBase,
-    ScannerPluginConfigBase,
-)
-from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from typing import Optional
-
-
-@ash_scanner_plugin
-class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
-    def model_post_init(self, context):
-        # Initialize scanner properties
-        self.command = "my-tool"
-        self.use_uv_tool = True  # Enable UV tool management if needed
-        self.tool_type = "SAST"  # Scanner type
-
-        # Set up UV tool installation if using UV tool management
-        if self.use_uv_tool:
-            self._setup_uv_tool_install_commands()
-            self.tool_version = self._get_uv_tool_version("my-tool")
-
-        super().model_post_init(context)
-
-    def validate_plugin_dependencies(self) -> bool:
-        # Implement validation logic
-        return True
-
-    def scan(self, target, target_type, global_ignore_paths=None, config=None):
-        # Implement scanning logic
-        pass
-```
-
-### UV Tool Version Constraints (Optional)
-
-The `_get_tool_version_constraint()` method is **optional** and only needs to be implemented if your scanner requires specific version constraints for UV tool installation:
-
-```python
-def _get_tool_version_constraint(self) -> Optional[str]:
-    """Get version constraint for tool installation.
-
-    This method is optional - only implement if you need specific version constraints.
-
-    Returns:
-        Version constraint string (e.g., ">=1.0.0") or None for latest
-    """
-    # Optional: specify version constraints for UV tool installation
-    return ">=1.0.0"
-```
-
-**Key Points:**
-- This method is **not abstract** and doesn't require implementation
-- If not implemented, ASH will install the latest version of the tool
-- Use standard pip version specifiers (e.g., `>=1.0.0`, `==2.1.0`, `>=1.0.0,<2.0.0`)
-- Consider tool stability and compatibility when setting constraints
-
-### UV Tool Management
-
-ASH provides automatic tool management via UV's tool isolation system:
-
-- **Automatic Installation**: Tools are installed when needed during scanner validation
-- **Version Constraints**: Use `_get_tool_version_constraint()` to specify version requirements
-- **Isolation**: Tools run in isolated environments without affecting project dependencies
-- **Fallback Support**: ASH falls back to system-installed tools if UV installation fails
-
-### Testing Scanner Plugins
-
-When testing custom scanner plugins:
-
-1. Unit tests: test scanner logic in isolation
-2. Integration tests: test with actual tool execution
-
-```bash
-# Run scanner-specific unit tests
-uv run pytest tests/unit/plugin_modules/ -v
-
-# Run scanner integration tests
-uv run pytest tests/integration/scanners/ -v
-```
+Moved to [The release App](docs/content/contributing/releases.md#the-release-app).

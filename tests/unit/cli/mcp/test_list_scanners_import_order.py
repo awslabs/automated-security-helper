@@ -60,8 +60,16 @@ def _tool_writes_stay_in_tmp_path(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
 
 
-VENDORED_SCANNER_NAMES = {"ferret_scan", "snyk_code", "trivy_repo"}
-VENDORED_SCANNER_CLASSES = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}
+VENDORED_SCANNER_NAMES = {
+    "ferret_scan",
+    "snyk_code",
+    "trivy_repo",
+}
+VENDORED_SCANNER_CLASSES = {
+    "FerretScanScanner",
+    "SnykCodeScanner",
+    "TrivyRepoScanner",
+}
 
 
 def _resolve_without_the_vendored_packages() -> set:

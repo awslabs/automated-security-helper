@@ -26,7 +26,6 @@ image build checks both on every build (install-pinned-tool refuses a missing
 member or a digest mismatch), and the container legs re-check the finished image.
 """
 
-import importlib.util
 import re
 from pathlib import Path
 
@@ -47,20 +46,6 @@ from automated_security_helper.core.exceptions import ToolNotProvisionableError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
-
-
-def _load_installer():
-    """install-pinned-tool.py, imported by path: its name has hyphens."""
-    spec = importlib.util.spec_from_file_location(
-        "_install_pinned_tool_for_licenses",
-        REPO_ROOT / "automated_security_helper" / "assets" / "install-pinned-tool.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-installer = _load_installer()
 
 ENTRIES = sorted(THIRD_PARTY_LICENSES)
 
@@ -203,6 +188,18 @@ class TestEntryShape:
         for identifier in THIRD_PARTY_LICENSES[tool].spdx_identifiers:
             assert identifier in COPYLEFT_SPDX | PERMISSIVE_SPDX, (
                 f"{tool}: classify {identifier} in COPYLEFT_SPDX or PERMISSIVE_SPDX"
+            )
+
+    @pytest.mark.parametrize("tool", ENTRIES)
+    def test_every_license_exception_is_known(self, tool):
+        """The token after WITH is an exception, never a license to classify.
+
+        Known exceptions only, so a typo or a license placed after WITH fails here
+        instead of silently dropping out of the copyleft check.
+        """
+        for exception in THIRD_PARTY_LICENSES[tool].spdx_exceptions:
+            assert exception in tool_downloads.SPDX_EXCEPTIONS, (
+                f"{tool}: {exception} is not a known SPDX exception"
             )
 
     def test_the_two_classifications_do_not_overlap(self):
@@ -574,3 +571,14 @@ class TestTheHashBlock:
             used.add(entry.commit)
             used.update(f.sha256 for f in entry.files if f.sha256)
         assert sorted(set(tool_downloads._THIRD_PARTY_HASHES.values()) - used) == []
+
+
+def test_an_entry_without_a_source_note_is_unchanged():
+    notice = THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    assert "Hackage" not in notice
+
+
+def test_the_release_tag_defaults_to_the_version_as_upstream_spells_it():
+    assert "Release tag:         v1.30.2" in (
+        THIRD_PARTY_LICENSES["opengrep"].source_notice()
+    )

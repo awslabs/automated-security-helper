@@ -29,13 +29,6 @@ Anything else that fronts the load balancer — a Route 53 alias, a CloudFront
 distribution, a custom domain on the certificate — has to be added through
 `mcp_allowed_host`. The effective list is the `allowed_hosts` output.
 
-The module also sets `ASH_MCP_TRUST_UPSTREAM_HOST_CHECK=false`. The launcher's
-default is AgentCore's (`true`), which passes `--trust-upstream-host-check` whenever
-the allowlist is empty and lets ASH serve any Host. Behind a load balancer, an
-empty allowlist has to make ASH refuse to start on `0.0.0.0` instead. It does not
-set `ASH_MCP_TRUST_UPSTREAM_SESSION_ID`: a load balancer issues no `Mcp-Session-Id`,
-so a stateless service has no session identity, and the tools that need one refuse.
-
 ## Health checks, and an honest limitation
 
 ASH's MCP server exposes **no** health endpoint. It builds a Starlette app that
@@ -72,6 +65,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 
 ## Variables
 
+<!-- doctest: options of=terraform:deploy/terraform/modules/fargate complete -->
 | Variable | Contract | Type | Default | Notes |
 |---|---|---|---|---|
 | `container_image_uri` | — | `string` | *required* | Architecture must match `cpu_architecture`. |
@@ -84,14 +78,14 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `mcp_auth_header_value` | `McpAuthHeaderValue` | `string` (sensitive) | `null` | Secrets Manager. Requires TLS or an explicit opt-out. |
 | `mcp_allowed_host` | `McpAllowedHost` | `list(string)` | `[]` | *Additional* hosts; the ALB DNS name is added automatically. |
 | `ash_offline_mode` | `AshOfflineMode` | `bool` | `false` | Sets `ASH_OFFLINE`. |
-| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. |
+| `base_config_ssm_parameter_name` | `AshBaseConfigYaml` (indirect) | `string` | `null` | From the image module. A scan uses it only when the scanned directory has no config file and the client names none. |
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-mcp"` | Max 25 characters; ALB and target group names derive from it. |
-| `container_command` | — | `list(string)` | MCP launcher | Override for an image not built by `ash-image-pipeline`. |
-| `internal` | — | `bool` | `true` | Internet exposure should be deliberate. `false` is refused at plan time unless `mcp_auth_header_name` (not blank), `mcp_auth_header_value` and `certificate_arn` are all set, whatever `ingress_cidr_blocks` lists; `allow_plaintext_auth_header` does not lift the certificate requirement there. |
+| `container_command` | — | `list(string)` | `["/usr/local/bin/ash-mcp-serve"]` | The MCP launcher. Override for an image not built by `ash-image-pipeline`. |
+| `internal` | — | `bool` | `true` | Internet exposure should be deliberate. |
 | `certificate_arn` | — | `string` | `null` | Set to get an HTTPS listener. |
 | `allow_plaintext_auth_header` | — | `bool` | `false` | Opt out of the TLS requirement above. |
-| `ssl_policy` | — | `string` | TLS 1.3 policy | HTTPS listeners only. |
+| `ssl_policy` | — | `string` | `"ELBSecurityPolicy-TLS13-1-2-2021-06"` | A TLS 1.3 policy. HTTPS listeners only. |
 | `listener_port` | — | `number` | `null` | Defaults to 443 with a certificate, else 80. |
 | `container_port` | — | `number` | `8000` | ASH's own MCP default. |
 | `ingress_cidr_blocks` | — | `list(string)` | `[]` | Empty means unreachable. Set this or the SG list. |

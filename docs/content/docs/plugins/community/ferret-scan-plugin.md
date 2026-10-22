@@ -43,7 +43,7 @@ Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--de
 |---------|---------------|-------|
 | **Output Directory** | `.ash/ash_output/scanners/ferret-scan/` | Follows ASH conventions |
 | **Offline Mode** | `ASH_OFFLINE=true` | Respects ASH offline mode |
-| **Suppressions** | `.ash/suppressions.yaml` | Managed centrally by ASH |
+| **Suppressions** | `global_settings.suppressions` in the ASH config file | Managed centrally by ASH |
 
 ### Unsupported Options
 
@@ -73,9 +73,12 @@ This plugin is tested and compatible with specific ferret-scan versions. Using v
 
 ### Install Ferret Scan
 
-The plugin requires Ferret Scan to be installed and available in your system PATH.
+The plugin runs the `ferret-scan` command. ASH finds it on `PATH`, or beside the
+Python interpreter that runs ASH, which is where `ash dependencies install` puts it.
 
-**ASH (Recommended)** — installs the version the plugin is tested against:
+**ASH (Recommended)** — installs the version the plugin is tested against into
+the Python environment that runs ASH, with pip or uv, whichever owns that
+environment (a uv tool, uvx or `uv venv` install has no pip):
 ```bash
 ash dependencies install --config .ash/.ash_community_plugins.yaml
 ```
@@ -110,7 +113,7 @@ The ferret-scan plugin is a community plugin that must be explicitly enabled. Th
 
 #### Option 1: Add to ASH Configuration File (Recommended)
 
-Include the plugin module in your `.ash/.ash.yaml` configuration file:
+Include the plugin module in your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 ash_plugin_modules:
@@ -144,7 +147,7 @@ You should see `ferret-scan` in the list of scanners.
 
 ### Basic Configuration
 
-Add scanner configuration to your `.ash/.ash.yaml`:
+Add scanner configuration to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 scanners:
@@ -205,7 +208,7 @@ scanners:
 | `config_file` | string | `null` | Path to custom Ferret YAML config file |
 | `use_default_config` | bool | `true` | Use the default config bundled with this plugin. Set by the operator only; see [Using profiles](#using-profiles) |
 | `profile` | string | `null` | Profile name from config file. Set by the operator only; see [Using profiles](#using-profiles) |
-| `exclude_patterns` | list | `[]` | Glob patterns to exclude |
+| `exclude_patterns` | list | `[]` | Glob patterns to exclude. ASH also excludes its own output directories inside the scanned directory, except one whose path holds a comma, which ferret-scan's comma-separated `--exclude` cannot hold; ferret-scan then reads it, ASH logs a warning naming it, and the findings ferret-scan reports there are dropped. The files `global_settings.ignore_paths` ignores are excluded too, each by its full path, as ASH matches the ignore paths: an ignore path ASH matches to no file, such as a bare `api` (write `api/` for the directory), excludes nothing. |
 | `show_match` | bool | `false` | Display matched text in ferret-scan's own output (see [show_match](#show_match) below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
@@ -222,7 +225,19 @@ scanners:
 
 ### Options NOT Supported (Will Raise Error)
 
-The following options are **not supported** because they conflict with ASH conventions:
+The following options are **not supported** because they conflict with ASH conventions.
+Setting one stops the scan with exit code 3 when ASH loads the plugins, before
+anything is converted or scanned. The error names the option's location and gives the
+message in the table, for example:
+
+```
+Configuration validation failed: scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported option 'debug' in ferret-scan plugin configuration. Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
+```
+
+Any other option the plugin does not declare is refused the same way, as `Unknown
+key '<option>'` with the accepted options listed. `ash config validate` and `ash
+config lint` do not import the plugin, so they do not catch either kind; both say
+its section is not checked there, and a scan checks it.
 
 | Option | Error Message |
 |--------|--------------|
@@ -557,10 +572,9 @@ pip install ferret-scan
 ```
 
 **Unsupported option error**:
-If you see an error like:
+If the scan exits 3 with an error like:
 ```
-ValueError: Unsupported option 'debug' in ferret-scan plugin configuration. 
-Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
+Configuration validation failed: scanners.ferret-scan.options (scanner 'ferret-scan'): Value error, Unsupported option 'debug' in ferret-scan plugin configuration. Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.
 ```
 
 This means you used a bare option name that's blocked. Use the `ferret_` prefixed version instead:

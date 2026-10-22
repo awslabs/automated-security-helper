@@ -485,7 +485,7 @@ RUN set -ue; mkdir -p "${TRIVY_CACHE_DIR}"; chmod 755 "${TRIVY_CACHE_DIR}"; \
     fi
 
 # cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates
-# templates against. The binary comes from its pinned release asset like the three
+# templates against. The binary comes from its pinned release asset like the tools
 # above. The rules archive is pinned the same way (RULES_BUNDLES in
 # utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan
 # user cannot rewrite the rules a later scan trusts. `ash dependencies install`
@@ -682,6 +682,9 @@ RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
     if [ "${OFFLINE}" != "YES" ]; then \
         chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR} ${TRIVY_CACHE_DIR}; \
     fi
+
+# The rules bundle a scan trusts is still root's after every change above.
+RUN install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"
 
 # The rules bundle a scan trusts is still root's after every change above.
 RUN install-pinned-tool --assert-root-only "${ASH_CFN_GUARD_RULES_DIR}"

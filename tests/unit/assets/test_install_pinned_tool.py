@@ -1029,8 +1029,8 @@ class TestVerifyThirdParty:
 
     @pytest.fixture(autouse=True)
     def _bundled_components(self, tmp_path, monkeypatch):
-        """What the version probe of the rules bundle reads in the image: its
-        manifest under ASH_CFN_GUARD_RULES_DIR."""
+        """What the version probes of non-executable entries read in the image:
+        the rules bundle's manifest under ASH_CFN_GUARD_RULES_DIR."""
         rules = tmp_path / "cfn-guard-rules"
         registry = THIRD_PARTY_LICENSES["aws-guard-rules-registry"].version
         manifest_dir = rules / f"aws-guard-rules-registry-{registry}"
@@ -1039,7 +1039,6 @@ class TestVerifyThirdParty:
             json.dumps({"version": registry})
         )
         monkeypatch.setenv("ASH_CFN_GUARD_RULES_DIR", str(rules))
-
         self.rules = rules
 
     @staticmethod

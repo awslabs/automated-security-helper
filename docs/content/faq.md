@@ -1,434 +1,229 @@
-# Frequently Asked Questions
+# Frequently asked questions
 
-## General Questions
+Short answers, each with a link to the page that has the details. The config examples are
+keys to add to your ASH config file. `ash config init` writes one, `.ashrc.yaml`, in the
+current directory.
 
-### What is ASH?
-ASH (Automated Security Helper) is a security scanning tool designed to help you identify potential security issues in your code, infrastructure, and IAM configurations as early as possible in your development process.
+## Why does my first scan exit 1?
 
-### What's new in ASH v3?
-ASH v3 has been completely rewritten in Python with significant improvements:
-- Python-based CLI with multiple execution modes
-- Enhanced configuration system
-- Improved reporting formats
-- Customizable plugin system
-- Better Windows support
-- Programmatic API for integration
+At least one scanner is MISSING: its tool is not installed, or ASH found the tool only
+inside the scanned directory, such as in the project's `.venv`, and did not run it (see
+[Tools inside the scanned directory](docs/advanced-usage.md#tools-inside-the-scanned-directory)).
+A scan with a MISSING scanner is incomplete, and an incomplete scan exits 1 even when it
+also found something. Run `ash dependencies install` to install the tools it can install.
+A scanner with nothing to scan shows as SKIPPED whether or not its tool is installed, so
+npm-audit and cdk-nag need Node.js, and cfn-nag needs Ruby with a C compiler, only in a
+project they have something to scan in: CloudFormation templates for cdk-nag and cfn-nag,
+and a lockfile beside a `package.json` for npm-audit. To scan without a tool you cannot install, leave its scanner out with
+`ash --exclude-scanners cdk-nag,npm-audit`. See
+[A scanner shows MISSING](how-to/troubleshoot.md#a-scanner-shows-missing) and
+[Exit codes](reference/exit-codes.md).
 
-### Is ASH a replacement for human security reviews?
-No. ASH is designed to help identify common security issues early in the development process, but it's not a replacement for human security reviews or team/customer security standards.
+In a project without CloudFormation templates, cdk-nag shows as SKIPPED in this scan,
+with or without Node.js, so the exit code is detect-secrets' verdict alone:
 
-## Installation and Setup
-
-### How do I install ASH v3?
-You have several options:
+<!-- doctest: run expect-exit=2 -->
 ```bash
-# Using uvx (recommended)
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
-
-# Using pipx
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
-
-# Using pip
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+ash --scanners cdk-nag,detect-secrets --no-progress
 ```
 
-### What are the prerequisites for ASH v3?
+## How do I install ASH, and which version should I pin?
 
-### What is the `v3` floating tag?
-We maintain a `v3` Git tag that always points to the latest stable v3.x release. This means you can use `@v3` in your installation commands instead of a specific version like `@v3.7.0`:
+Install from GitHub, with a git URL or with Homebrew from the repository's tap;
+[Install ASH](how-to/install.md) shows each method. ASH is not published on PyPI. The
+PyPI project named `automated-security-helper` is not published by this project, so do not
+install ASH by that name. Pin an exact release tag or a commit. The floating `v3` tag moves to
+every new 3.x release, including releases with breaking changes. A pin fixes ASH's own
+code, not every dependency: uv, pipx, and pip resolve ASH's dependencies again when they
+install it. Homebrew installs the release its formula names, the latest one, with the
+dependency versions locked in that release's `uv.lock`.
 
+## Is there a container image?
+
+ASH publishes no image. `ash build-image` builds one from a release tag, and
+`ash --mode container` builds one and runs the scan in it. ASH uses the first of finch,
+docker, nerdctl, and podman that it finds on your `PATH`, or the one you name with
+`--oci-runner`. The default image runs as a non-root user whose UID and GID you can set;
+`--build-target ci` builds the image that runs as root, which a job running as root
+needs. See [Run ASH in a container](how-to/run-in-a-container.md#build-target).
+
+## Which scanners run on my code?
+
+In local and container mode, every enabled scanner runs on every scan. A scanner that
+finds nothing of its kind to check, such as actionlint in a repository without GitHub
+Actions workflows, shows as SKIPPED, whether or not its tool is installed. [Scanner coverage](reference/coverage.md) lists the
+languages and file types each scanner checks, and the
+[scanners reference](reference/scanners.md) lists each scanner's options.
+
+## Does ASH scan my CDK app?
+
+It scans the CloudFormation templates the app synthesizes, not the CDK source. Run
+`cdk synth` before the scan, so that the templates exist under `cdk.out`. ASH scans the
+`*.template.json` files there even when a `.gitignore` excludes `cdk.out`, at the root of
+the scanned directory or inside your CDK app's directory, and the rest of `cdk.out`
+stays out of the scan. The same holds for an assembly that `cdk synth -o` writes to
+another directory. cdk-nag, cfn-nag, cfn-lint, and the other CloudFormation scanners then
+evaluate the templates. To check, look for a template in the list of files the scan
+read:
+
+<!-- doctest: run expect-exit=2 -->
 ```bash
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3"
+mkdir -p cdk.out
+echo '{"Resources": {"Bucket": {"Type": "AWS::S3::Bucket"}}}' > cdk.out/App.template.json
+echo cdk.out >> .gitignore
+ash --scanners detect-secrets --offline --no-progress
 ```
 
-This is convenient for local development where you always want the latest version. For CI/CD pipelines or environments where reproducibility matters, we recommend pinning to a specific release tag (e.g., `@v3.7.0`).
-
-### What are the prerequisites for ASH v3?
-- For local mode: Python 3.10 or later, UV package manager
-- For container mode: Any OCI-compatible container runtime (Docker, Podman, Finch, etc.)
-- On Windows with container mode: WSL2 is typically required
-
-### How do I run ASH on Windows?
-ASH v3 can run directly on Windows in local mode with Python 3.10+. Simply install ASH using pip, pipx, or uvx and run with `--mode local`. For container mode, you'll need WSL2 and a container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop.
-
-## Usage
-
-### What are the different execution modes in ASH v3?
-ASH v3 supports three execution modes:
-- **Local Mode**: Runs entirely in the local Python process
-- **Container Mode**: Runs non-Python scanners in a container
-- **Precommit Mode**: Runs a subset of fast scanners optimized for pre-commit hooks
-
-### How do I run a basic scan?
 ```bash
-# Run in local mode (Python-based scanners only)
-ash --mode local
-
-# Run in container mode (all scanners)
-ash --mode container
-
-# Run in precommit mode (fast subset of scanners)
-ash --mode precommit
+grep cdk.out/App.template.json .ash/ash_output/ash-scan-set-files-list.txt
 ```
 
-### How do I specify which files to scan?
-```bash
-# Scan a specific directory
-ash --source-dir /path/to/code
+## A scanner hangs. What can I do?
 
-# Configure ignore paths in .ash/.ash.yaml
+ASH stops a scanner's tool after its `scan_timeout`, 1800 seconds by default. Set a lower
+value under that scanner's options, `scanners.<name>.options.scan_timeout`, and see
+[A scanner hangs](how-to/troubleshoot.md#a-scanner-hangs) for common causes.
+
+## How do I suppress a finding?
+
+Add a suppression with the finding's rule ID, its path, and your reason:
+
+```yaml
+global_settings:
+  suppressions:
+    - rule_id: B602
+      path: src/build.py
+      reason: The command is a constant string; no user input reaches it.
+```
+
+`ash report` shows each finding's rule ID. You can add `expiration` with a date in quotes,
+such as `"2027-06-30"`; from that date the suppression stops applying, and
+`ash config lint` reports it as expired. ASH also honors inline `ash-ignore` comments, and
+scanners honor their own, such as bandit's `# nosec`. See
+[Suppress findings](how-to/suppress-findings.md).
+
+## How do I keep files or directories out of the results?
+
+Add them to `global_settings.ignore_paths`, each with a reason:
+
+```yaml
 global_settings:
   ignore_paths:
-    - path: 'tests/test_data'
-      reason: 'Test data only'
+    - path: tests/fixtures/**
+      reason: Test data with deliberate findings.
 ```
 
-### How do I exclude files from scanning?
-ASH leaves out of its scan set every file a `.gitignore` or `.ignore` file in the scanned tree matches. You can also configure ignore paths in your `.ash/.ash.yaml` configuration file. The summaries and `ash_aggregated_results.json` (`metadata.ignore_file_exclusions`) record how many files the ignore files excluded.
+ASH passes the ignore paths to every scanner. Some scanners skip those files and others
+scan them, and either way ASH drops every finding located in an ignored path. ASH also
+reads `.gitignore`, so directories it excludes, such as `.venv/` and `node_modules/` in
+most projects, are not scanned. If they are not in `.gitignore`, add them to
+`ignore_paths`. See
+[Suppressions, ignore paths, and scanner exclusions](concepts/suppressions.md).
 
-### How do I scan files that a `.gitignore` excludes?
-Pass `--no-honor-ignore-files`, or set `honor_ignore_files: false` in a config file outside the scanned tree. A config file inside the repository being scanned cannot change this setting. See [Ignore files and the scan set](docs/configuration-guide.md#ignore-files-and-the-scan-set).
+ASH leaves its own output out of the scan, whether or not `.gitignore` lists it: this
+scan's output directory, and `.ash/ash_output` under the scanned directory and under the
+directory ASH runs from. In a git checkout, files committed to those directories are
+scanned, in this scan's own output directory too, and ASH warns that its output directory
+holds committed files. Scanners that ASH cannot tell to skip a directory, such as gitleaks
+and the trivy-repo plugin, read ASH's own files there, and ASH drops the findings they
+report in them. The snyk-code plugin tests a copy of the scan set, which holds the
+committed files and leaves ASH's own files and the ignore paths out. Any other directory is scanned, even one that
+holds an earlier run's or another shard's results, so write shard output outside the
+scanned directory or list it in `.gitignore`.
 
-### How do I run specific scanners?
-```bash
-# Run only specific scanners
-ash --scanners bandit,semgrep
+## How do I fail only on high-severity findings, or never fail on findings?
 
-# Exclude specific scanners
-ash --exclude-scanners cfn-nag,cdk-nag
-```
-
-### How do I generate specific report formats?
-```bash
-# Generate specific report formats
-ash --output-formats markdown,html,json
-
-# Generate a report from existing results
-ash report --format html --output-dir ./my-scan-results
-```
-
-## Configuration
-
-### Where is the ASH configuration file located?
-By default, ASH looks for a configuration file in the following locations (in order):
-1. `.ash.yml`
-2. `.ash/.ash.yml`
-3. `.ash.yaml`
-4. `.ash/.ash.yaml`
-5. `.ash.json`
-6. `.ash/.ash.json`
-7. `ash.yml`
-8. `.ash/ash.yml`
-9. `ash.yaml`
-10. `.ash/ash.yaml`
-11. `ash.json`
-12. `.ash/ash.json`
-13. `.ashrc.toml`
-14. `.ashrc.yaml`
-15. `.ashrc.yml`
-16. `.ashrc.json`
-17. `ashrc.toml`
-18. `ashrc.yaml`
-19. `ashrc.yml`
-20. `ashrc.json`
-21. `pyproject.toml`
-
-The first match wins, and the order for items 1-12 is per-filename rather than
-per-directory: for each name ASH checks the source directory first, then its
-`.ash/` subdirectory. Items 13-21 are checked in the source directory only, and
-`pyproject.toml` counts only when it has a `[tool.ash]` table. Sources are never
-merged; ASH logs the one it used and warns about any it ignored. See the
-configuration guide for `[tool.ash]` and for `extends`.
-
-### How do I create a configuration file?
-```bash
-# Initialize a new configuration file
-ash config init
-```
-
-### How do I override configuration values at runtime?
-```bash
-# Enable a specific scanner
-ash --config-overrides 'scanners.bandit.enabled=true'
-
-# Change severity threshold
-ash --config-overrides 'global_settings.severity_threshold=LOW'
-```
-
-## Scanners and Tools
-
-### What security scanners are included in ASH v3?
-ASH v3 integrates multiple open-source security tools. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments:
-- Bandit (Python SAST) - Managed via UV tool isolation (auto-installed: `bandit>=1.7.0,<2.0.0`)
-- Semgrep (Multi-language SAST) - Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0,<2.0.0`)
-- detect-secrets (Secret detection) - Included with ASH
-- Checkov (IaC scanning) - Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`)
-- cfn_nag (CloudFormation scanning) - Requires separate installation
-- cdk-nag (CloudFormation scanning) - Included with ASH
-- npm-audit (JavaScript/Node.js SCA) - Requires Node.js/npm
-- Grype (Multi-language SCA) - Requires separate installation
-- Syft (SBOM generation) - Requires separate installation
-
-### I am trying to scan a CDK application, but ASH does not show CDK Nag scan results -- why is that?
-ASH uses CDK Nag underneath to apply NagPack rules to *CloudFormation templates* via the `CfnInclude` CDK construct. This is purely a mechanism to ingest a bare CloudFormation template and apply CDK NagPacks to it; doing this against a template emitted by another CDK application causes a collision in the `CfnInclude` construct due to the presence of the `BootstrapVersion` parameter on the template added by CDK. For CDK applications, we recommend integrating CDK Nag directly in your CDK code. ASH will still apply other CloudFormation scanners (cfn-nag, checkov) against templates synthesized via CDK, but the CDK Nag scanner will not scan those templates.
-
-### How do I add custom scanners?
-You can create custom scanners by implementing the scanner plugin interface and adding your plugin module to the ASH configuration:
+Set the threshold under `global_settings`, and `fail_on_findings` at the top level of the
+file, not under `global_settings`:
 
 ```yaml
-# .ash/.ash.yaml
-ash_plugin_modules:
-  - my_ash_plugins
+fail_on_findings: true
+global_settings:
+  severity_threshold: HIGH
 ```
 
-## CI/CD Integration
+With `fail_on_findings: false`, or `--no-fail-on-findings` on the command line, findings
+never fail the scan. An incomplete scan, or one with a vulnerability database or offline
+ruleset past its age bound, still exits 1. See [Set the gate](how-to/set-the-gate.md).
 
-### How do I run ASH in CI/CD pipelines?
-ASH can be run in container mode in any CI/CD environment that supports containers. See the [tutorials](tutorials/running-ash-in-ci.md) for examples.
+## Why do two scanners report the same problem?
 
-### How do I use ASH with pre-commit?
-Add this to your `.pre-commit-config.yaml`:
+ASH runs scanners whose checks overlap and does not deduplicate their findings: semgrep and
+opengrep run the same ruleset, grype and trivy both check dependencies, and detect-secrets
+and gitleaks both look for secrets. Each finding carries its scanner's own rule ID, so a
+suppression for one does not cover the other. To keep one of a pair, turn the other off
+by setting `scanners.opengrep.enabled` to `false` in the config or by passing
+`--exclude-scanners opengrep`. See
+[Choose scanners](how-to/choose-scanners.md).
 
-```yaml
-repos:
-  - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.7.0
-    hooks:
-      - id: ash-simple-scan
-```
+## Does ASH work on Windows?
 
-### How do I fail CI builds on security findings?
+Local mode installs and runs on Windows, but semgrep and opengrep are off there and show as
+SKIPPED, and there is no scanner sandbox. If another program named `ash` comes first on
+your `PATH` (Git for Windows and MSYS2 ship a shell by that name), run ASH as `ashv3`, which
+is the same command. Container mode is not tested on Windows. See
+[Install ASH](how-to/install.md).
+
+## Which GitHub Actions permissions does ASH need?
+
+The job that calls the reusable workflow
+[`run-ash-security-scan.yml`](https://github.com/awslabs/automated-security-helper/blob/main/.github/workflows/run-ash-security-scan.yml)
+must grant `contents: read`, `checks: write` for its JUnit check, and `pull-requests: write`
+for its pull request comment. GitHub refuses to start a call that grants fewer. Uploading results to code scanning outside same-repository pull requests
+needs `security-events: write`, granted to a separate job that calls
+[`upload-ash-sarif.yml`](https://github.com/awslabs/automated-security-helper/blob/main/.github/workflows/upload-ash-sarif.yml).
+See [Run ASH in GitHub Actions](how-to/ci/github-actions.md).
+
+## Can ASH run offline or in an air-gapped network?
+
+Yes. With `--offline`, ASH runs every scanner in its offline mode and installs nothing,
+except npm-audit, which does not run offline. Some scanners still make requests; only the
+scanner sandbox, or container mode with `--offline`, removes the network itself. The rules and vulnerability databases must be in
+place first; an image built with `ash build-image --offline` contains them. Each database
+has an age bound, from a day to a month, and by default a scan fails when one is past it
+(an image built with `OFFLINE=YES` only warns for trivy's database), so plan to rebuild
+offline images often. See [Run ASH offline](how-to/run-offline.md) and
+[Content databases](concepts/content-databases.md).
+
+npm, yarn, and pnpm audit a lockfile by asking the registry, so in an offline scan
+npm-audit is MISSING, and the scan exits 1, for a project with a lockfile beside a
+`package.json`. For a project without one it is SKIPPED. To scan such a project offline,
+add `--exclude-scanners npm-audit`:
+
+<!-- doctest: run expect-exit=1 -->
 ```bash
-# Exit with non-zero code if findings are found
-ash --mode local --fail-on-findings
+echo '{"name": "demo", "version": "1.0.0"}' > package.json
+echo '{"name": "demo", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}' > package-lock.json
+ash --offline --scanners npm-audit,detect-secrets --no-progress
 ```
 
-## Advanced Usage
+## What does a scan send over the network?
 
-### How do I run ASH in an offline/air-gapped environment?
-Build an offline image with `ash --mode container --offline --offline-semgrep-rulesets p/ci --no-run`, push to your private registry, then use `ash --mode container --offline --no-build` in your air-gapped environment.
+ASH itself sends no telemetry. The scanners download rules and vulnerability databases, and
+some send data to their own services: for example, semgrep sends usage metrics to Semgrep
+when it uses registry rules, and npm-audit sends your dependency tree to the npm registry.
+See [what leaves the machine during a scan](concepts/scanning-untrusted-code.md#what-leaves-the-machine-during-a-scan).
 
-### Can I use ASH programmatically?
-Yes, ASH v3 can be used programmatically in Python:
+## Can I use ASH programmatically?
 
+Yes. `run_ash_scan` runs a scan from Python:
+
+<!-- doctest: illustrative reason="scans a placeholder path; reference/python-api.md has runnable examples" -->
 ```python
-from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import RunMode
+from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
 results = run_ash_scan(
-    source_dir="/path/to/code", output_dir="/path/to/output", mode=RunMode.local
+    source_dir="/path/to/code",
+    output_dir="/path/to/output",
+    mode=RunMode.local,
+    # Return the results even when there are actionable findings
+    fail_on_findings=False,
 )
+print(f"{results.metadata.summary_stats.actionable} actionable findings")
 ```
 
-### How do I customize the container image?
-```bash
-# Specify a custom container image
-export ASH_IMAGE_NAME="my-registry/ash:custom"
-ash --mode container
-
-# Build a custom image
-ash build-image --build-target ci --custom-containerfile ./my-dockerfile
-```
-
-## Troubleshooting
-
-### ASH is not finding any files to scan
-Ensure you're running ASH inside the folder you intend to scan or using the `--source-dir` parameter. If the folder where the files reside is part of a git repository, ensure the files are added (committed) before running ASH.
-
-### I'm getting "command not found" errors for scanners in local mode
-Some scanners require external dependencies. Either install the required dependencies locally or use container mode (`--mode container`).
-
-### ASH is running slowly
-Try these options:
-- Use `--mode precommit` for faster scans
-- Use `--scanners` to run only specific scanners
-- Use `--strategy parallel` (default) to run scanners in parallel
-
-### Some scanners seem to be missing from my scan results
-ASH v3 includes a comprehensive Scanner Validation System that monitors scanner registration, enablement, and execution throughout the scan process. If scanners are missing:
-
-1. Check the scan logs for validation warnings about missing or disabled scanners
-2. Verify scanner dependencies are installed (for local mode)
-3. Check your configuration for excluded scanners
-4. Use `--debug` to see detailed validation information
-5. Run the integration verification test: `python verify_integration.py` (if available in your installation)
-
-The validation system will log specific reasons why scanners might be disabled (missing dependencies, configuration exclusions, etc.) and attempt automatic recovery where possible. Additionally, the system ensures all originally registered scanners appear in the final results with appropriate status, even if they failed or were disabled during the scan.
-
-For detailed information about the scanner validation system, see the [Scanner Validation System](developer-guide/scanner-validation-system.md) developer guide.
-
-### Why is a scanner MISSING when I run ASH with `uv run` or `npm run`?
-ASH does not start tools from inside the directory it scans, and `uv run` and `npm run` put the project's `.venv/bin` or `node_modules/.bin` first on `PATH`. Install the scanner outside the repository (for example `uv tool install bandit`), or allow in-tree tools for one run with `ash scan --allow-in-tree-tools` or `ASH_ALLOW_IN_TREE_TOOLS=1`. `ash mcp` never runs in-tree tools. See [Troubleshooting](docs/troubleshooting.md#a-scanner-is-missing-because-it-was-found-only-inside-the-scanned-tree).
-
-### Why does ASH refuse my output directory?
-Because it, a working directory or file ASH writes in it, or a directory inside the scanned tree on the way to it is a symlink. ASH clears and writes the output directory before a scan, so it refuses to do that through a link, whatever the sandbox mode. Pass `--output-dir` with a directory that is not a link. See [Troubleshooting](docs/troubleshooting.md#the-scan-stops-because-something-in-the-output-directory-is-a-symlink).
-
-### Why does the scan fail when a notebook or archive could not be converted?
-Those files went unscanned in converted form, so the scan is incomplete and exits 1, as it does when a scanner did not run. The reason for each file is in `converter_results.<converter>.failed_inputs`. A single compressed file such as `data.json.gz` is decompressed and scanned; it is a failed input only when it cannot be decompressed. See [Troubleshooting](docs/troubleshooting.md#the-scan-exits-1-because-conversion-was-incomplete).
-
-### How do I debug ASH?
-```bash
-# Enable debug logging
-ash --debug
-
-# Enable verbose logging
-ash --verbose
-```
-
-## AI Integration and MCP
-
-### What is MCP and how does ASH support it?
-Model Context Protocol (MCP) is a standardized way for AI applications to access external tools and data sources. ASH includes an MCP server that allows AI assistants to perform security scans, monitor progress, and analyze results through natural language interactions.
-
-### How do I set up ASH with MCP?
-1. **Install UV and Python 3.10+**:
-   - Install `uv` from [Astral](https://docs.astral.sh/uv/getting-started/installation/) or the [GitHub README](https://github.com/astral-sh/uv#installation)
-   - Install Python 3.10+ using `uv python install 3.10` (or a more recent version)
-
-2. **Configure your AI client** to use the ASH MCP server:
-
-   **Amazon Q Developer CLI** - Add to `~/.aws/amazonq/mcp.json`:
-   ```json
-   {
-     "mcpServers": {
-       "ash": {
-         "command": "uvx",
-         "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-           "ash",
-           "mcp"
-         ],
-         "disabled": false,
-         "autoApprove": []
-       }
-     }
-   }
-   ```
-
-   **Claude Desktop** - Add to `claude_desktop_config.json`:
-   ```json
-   {
-     "mcpServers": {
-       "ash-security": {
-         "command": "uvx",
-         "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-           "ash",
-           "mcp"
-         ]
-       }
-     }
-   }
-   ```
-
-   **Cline (VS Code)**:
-   ```json
-   {
-     "mcpServers": {
-       "ash": {
-         "command": "uvx",
-         "args": [
-           "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
-           "ash",
-           "mcp"
-         ],
-         "disabled": false,
-         "autoApprove": [
-           "get_scan_progress",
-           "list_active_scans",
-           "get_scan_results"
-         ]
-       }
-     }
-   }
-   ```
-
-### What can I do with ASH through MCP?
-- Start security scans with natural language commands
-- Monitor scan progress in real-time
-- Analyze and prioritize security findings
-- Generate security reports and remediation plans
-- Manage multiple concurrent scans
-- Configure resource limits and performance settings
-- Monitor system resource usage and health
-
-### How do I configure resource management for the MCP server?
-
-ASH v3 includes comprehensive resource management that can be configured through your ASH configuration file:
-
-```yaml
-# .ash/ash.yaml
-mcp-resource-management:
-  max_concurrent_scans: 5          # Limit simultaneous scans
-  max_concurrent_tasks: 25         # Limit async tasks
-  thread_pool_max_workers: 6       # Thread pool size
-  scan_timeout_seconds: 2400       # 40 minute scan timeout
-  memory_warning_threshold_mb: 2048 # Memory usage warnings
-  enable_health_checks: true       # Enable monitoring
-```
-
-This prevents memory leaks, manages system resources, and ensures stable operation under load.
-
-### I'm getting "Maximum concurrent scans exceeded" errors
-
-This is a resource protection feature. You can adjust the limits in your configuration:
-
-```yaml
-# .ash/ash.yaml
-mcp-resource-management:
-  max_concurrent_scans: 10  # Increase from default of 3
-  max_concurrent_tasks: 50  # Increase task limit if needed
-```
-
-Or wait for existing scans to complete before starting new ones.
-
-### I'm getting MCP dependency errors
-MCP dependencies are included by default in ASH v3. If you're still getting errors:
-
-1. **Check UV installation**: Ensure UV is installed and available: `uv --version`
-2. **Check Python version**: Ensure Python 3.10+ is available: `uv python list`
-3. **Test the MCP server**: Try running the server directly:
-   ```bash
-   uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp --help
-   ```
-
-### How do I test the ASH MCP server?
-```bash
-# Test MCP server startup
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash mcp --debug
-
-# Check ASH version
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.7.0 ash --version
-```
-
-### How do I monitor MCP server performance?
-
-Enable resource monitoring in your configuration:
-
-```yaml
-# .ash/ash.yaml
-mcp-resource-management:
-  enable_health_checks: true
-  enable_resource_logging: true
-  log_resource_operations: true
-```
-
-Then ask your AI assistant:
-```
-"Show me the current resource usage of the MCP server"
-"How many scans are currently running?"
-"What's the memory usage of the security scanner?"
-```
-
-For more details, see the [MCP Tutorial](tutorials/using-ash-with-mcp.md).
-
-## Getting Help
-
-### Where can I find more documentation?
-Visit the [ASH Documentation](https://awslabs.github.io/automated-security-helper/).
-
-### How do I report issues or request features?
-Create an issue on [GitHub](https://github.com/awslabs/automated-security-helper/issues).
-
-### How do I contribute to ASH?
-See the [CONTRIBUTING](contributing.md) guide for contribution guidelines.
+It returns the results only when the scan's exit code is 0. Otherwise it raises
+`SystemExit` with that code, as `ash scan` exits with it, which is why the example passes
+`fail_on_findings=False`. An incomplete scan still raises. A keyword that `run_ash_scan`
+does not take raises `TypeError`. See [Python API](reference/python-api.md).
