@@ -1362,6 +1362,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
             # through removes what this archive wrote and nothing else.
             created_target: Optional[Path] = None
             refused_before = len(self.refused_inputs)
+            # The in-part record is a FAILED input (the category the
+            # completeness gate reads), so the whole-recording gate below
+            # watches this count too, or a partially-extracted archive would
+            # be recorded whole for whole-archive consumers.
+            failed_before = len(self.failed_inputs)
             unscannable: List[str] = []
             archive_display = relative_display(archive_file, self.context.source_dir)
             try:
@@ -1573,7 +1578,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                             "extension"
                         )
                     )
-                if len(self.refused_inputs) == refused_before and not unscannable:
+                if (
+                    len(self.refused_inputs) == refused_before
+                    and len(self.failed_inputs) == failed_before
+                    and not unscannable
+                ):
                     extracted_whole.append(archive_display)
             except _ExtractionLimitExceeded as exceeded:
                 # The whole archive, not a member: none of it reaches the scanners,

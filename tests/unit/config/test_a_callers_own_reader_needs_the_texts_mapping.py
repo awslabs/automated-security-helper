@@ -42,16 +42,35 @@ def test_a_callers_own_reader_without_texts_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_patched_global_is_not_a_callers_reader(tmp_path: Path) -> None:
-    """A default call under the recording idiom resolves, and the wrapper records."""
+    """A default call under a patched ``read_config_file`` resolves (no raise).
+
+    The stock chain read keeps each file's text itself and never calls the
+    ``read_config_file`` callable, so the wrapper sees nothing here by design;
+    the recording idiom's seam is ``read_config_bytes`` (the next test).
+    """
+    config = _config(tmp_path)
+    real = config_sources.read_config_file
+
+    def recording(path: Path, *args: Any, **kwargs: Any) -> Any:
+        return real(path, *args, **kwargs)
+
+    with patch.object(config_sources, "read_config_file", recording):
+        document = resolve_config_document(config)
+
+    assert document.chain, "the default call resolved under the patch"
+
+
+def test_the_recording_idiom_sees_every_read_at_the_bytes(tmp_path: Path) -> None:
+    """A wrapper on ``read_config_bytes`` records the stock chain read."""
     config = _config(tmp_path)
     read: List[Path] = []
-    real = config_sources.read_config_file
+    real = config_sources.read_config_bytes
 
     def recording(path: Path, *args: Any, **kwargs: Any) -> Any:
         read.append(Path(path).resolve())
         return real(path, *args, **kwargs)
 
-    with patch.object(config_sources, "read_config_file", recording):
+    with patch.object(config_sources, "read_config_bytes", recording):
         document = resolve_config_document(config)
 
     assert [p.name for p in read] == ["ash.yaml"], "the wrapper saw the read"

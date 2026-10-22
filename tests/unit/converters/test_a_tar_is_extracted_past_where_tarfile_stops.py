@@ -455,7 +455,7 @@ def test_each_conversion_has_a_budget_of_its_own(test_plugin_context, monkeypatc
         converter = _convert_many(
             test_plugin_context, monkeypatch, _past_the_limit_in_bz2(), 5
         )
-        named_the_run = ["this run" in row.reason for row in converter.refused_inputs]
+        named_the_run = ["this run" in row.reason for row in converter.failed_inputs]
         assert named_the_run == [False, False, False, False, True]
 
 
@@ -477,7 +477,8 @@ def test_an_archive_whose_listing_stopped_is_extracted_only_in_part(
 
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
     assert _extracted(converter) == ["ok.js"]
-    (row,) = converter.refused_inputs
+    (row,) = converter.failed_inputs
+    assert converter.refused_inputs == []
     assert "extracted only in part" in row.reason, row.reason
     assert "stopped" in row.reason, row.reason
     (warning,) = _partly_warnings(caplog)
@@ -517,10 +518,10 @@ def test_a_tar_whose_first_header_cannot_be_read_has_a_results_row(
 
     assert _extracted(converter) == []
     assert archive_converter.archives_extracted_whole(test_plugin_context) == set()
-    assert [(row.path, row.member) for row in converter.refused_inputs] == [
-        (f"lib/{name}", None)
-    ]
-    reason = converter.refused_inputs[0].reason
+    # One FAILED record, the category the completeness gate reads.
+    assert [row.path for row in converter.failed_inputs] == [f"lib/{name}"]
+    assert converter.refused_inputs == []
+    reason = converter.failed_inputs[0].reason
     assert "named as a tar but could not be read" in reason, reason
     assert any(f"lib/{name}" in record.getMessage() for record in caplog.records)
 
@@ -542,10 +543,9 @@ def test_a_file_named_as_an_archive_it_cannot_be_read_as_has_a_results_row(
     converter = _convert(test_plugin_context, monkeypatch, name, content)
 
     assert _extracted(converter) == []
-    assert [(row.path, row.member) for row in converter.refused_inputs] == [
-        (f"lib/{name}", None)
-    ]
-    assert "could not be read as" in converter.refused_inputs[0].reason
+    assert [row.path for row in converter.failed_inputs] == [f"lib/{name}"]
+    assert converter.refused_inputs == []
+    assert "could not be read as" in converter.failed_inputs[0].reason
 
 
 def test_a_gzip_of_one_file_has_no_results_row(test_plugin_context, monkeypatch):
@@ -556,3 +556,4 @@ def test_a_gzip_of_one_file_has_no_results_row(test_plugin_context, monkeypatch)
     )
 
     assert converter.refused_inputs == []
+    assert converter.failed_inputs == []

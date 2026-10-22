@@ -94,16 +94,23 @@ def clone(
 
 
 def reads(during: Callable[[], Any]) -> List[Path]:
-    """The config files read while ``during`` runs, resolved."""
+    """The config files read while ``during`` runs, resolved.
+
+    Recorded at ``read_config_bytes``, the one read every config file goes
+    through whatever its format and whichever reader the resolution uses: the
+    stock chain read keeps each file's text itself and never calls the
+    ``read_config_file`` callable, so a recording wrapper on that name sees
+    nothing and a NEGATIVE membership assert passes vacuously.
+    """
     from automated_security_helper.config import config_sources
 
     read: List[Path] = []
-    real = config_sources.read_config_file
+    real = config_sources.read_config_bytes
 
     def recording(path: Path, *args: Any, **kwargs: Any) -> Any:
         read.append(Path(path).resolve())
         return real(path, *args, **kwargs)
 
-    with patch.object(config_sources, "read_config_file", recording):
+    with patch.object(config_sources, "read_config_bytes", recording):
         during()
     return read
