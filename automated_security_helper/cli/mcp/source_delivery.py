@@ -2399,6 +2399,27 @@ def set_source_zip_finalize(
         )
 
 
+class _ZipRefused(Exception):
+    """A finalized zip the finalize refuses before it extracts anything.
+
+    Raised inside the ``with`` that holds the zip open, so the zip is removed and
+    the refusal raised as a ``ValueError`` only after the handle is closed:
+    Windows does not delete a file that is open.
+    """
+
+
+@contextlib.contextmanager
+def _refusing_after_close(handle: Any, final: Path) -> Iterator[None]:
+    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, remove ``final``, refuse."""
+
+    try:
+        with handle:
+            yield
+    except _ZipRefused as refused:
+        final.unlink(missing_ok=True)
+        raise ValueError(str(refused)) from None
+
+
 def _finalize_zip_upload(
     upload_id: str,
     expected_sha256: str,
