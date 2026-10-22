@@ -17,7 +17,12 @@
         },
         "options": {
           "$ref": "#/$defs/ArchiveConverterConfigOptions",
-          "default": {},
+          "default": {
+            "max_compression_ratio": 100,
+            "max_member_bytes": 268435456,
+            "max_members": 100000,
+            "max_total_bytes": 1073741824
+          },
           "description": "Configure Archive converter"
         }
       },
@@ -26,7 +31,37 @@
     },
     "ArchiveConverterConfigOptions": {
       "additionalProperties": true,
-      "properties": {},
+      "description": "Limits on what extracting one archive may write.\n\nEach is an inclusive maximum, checked against what the archive declares, for\nevery member, before anything is written. An archive over any of them is not\nextracted at all. The defaults are far above an ordinary source archive. Set\ninside the scanned tree (``.ash/.ash.yaml``), by a config an MCP client\nsupplied, or by a workspace project's own config, a value can only lower a\nlimit; raise one with ``--config-overrides`` or a config file outside the tree.",
+      "properties": {
+        "max_compression_ratio": {
+          "default": 100,
+          "description": "The most times its own size on disk that an archive's members may declare added up. An archive that declares more is not extracted. Checked only once the members declare more than 512 KiB in all.",
+          "exclusiveMinimum": 0,
+          "title": "Max Compression Ratio",
+          "type": "integer"
+        },
+        "max_member_bytes": {
+          "default": 268435456,
+          "description": "The largest size in bytes one member of an archive may declare. An archive with a larger member is not extracted. Default 256 MiB.",
+          "exclusiveMinimum": 0,
+          "title": "Max Member Bytes",
+          "type": "integer"
+        },
+        "max_members": {
+          "default": 100000,
+          "description": "The most members an archive may have, directories included. An archive with more is not extracted. All the archives one scan extracts may hold four times this many together.",
+          "exclusiveMinimum": 0,
+          "title": "Max Members",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 1073741824,
+          "description": "The most bytes an archive's members may declare added up, each counted as at least 512. An archive whose members declare more is not extracted. All the archives one scan extracts may declare four times this together. Default 1 GiB.",
+          "exclusiveMinimum": 0,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        }
+      },
       "title": "ArchiveConverterConfigOptions",
       "type": "object"
     },
@@ -79,7 +114,12 @@
             "archive": {
               "enabled": true,
               "name": "archive",
-              "options": {}
+              "options": {
+                "max_compression_ratio": 100,
+                "max_member_bytes": 268435456,
+                "max_members": 100000,
+                "max_total_bytes": 1073741824
+              }
             },
             "jupyter": {
               "enabled": true,
@@ -128,7 +168,7 @@
         },
         "fail_on_incomplete_scanners": {
           "default": true,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
@@ -144,17 +184,22 @@
                   "/fail_on_incomplete_scanners",
                   "/content_db_staleness",
                   "/content_db_staleness_overrides",
+                  "/honor_ignore_files",
                   "/sandbox",
                   "/sandbox/**",
                   "/ash_plugin_modules",
                   "/ash_plugin_modules/**",
+                  "/scanners/detect-secrets/options/scan_settings/filters_used",
+                  "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+                  "/scanners/detect-secrets/options/scan_settings/plugins_used",
+                  "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+                  "/scanners/detect-secrets/options/baseline_file",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/global_settings/mcp",
                   "/global_settings/mcp/**",
                   "/scanners/opengrep/options/exclude_rule",
                   "/scanners/semgrep/options/exclude_rule",
-                  "/scanners/detect-secrets/options/baseline_file",
                   "/scanners/bandit/options/confidence_level",
                   "/scanners/checkov/options/frameworks",
                   "/scanners/checkov/options/skip_frameworks",
@@ -201,7 +246,17 @@
                   "/reporters/bedrock-summary-reporter/options/output_technical_file",
                   "/reporters/s3/**",
                   "/reporters/bedrock-summary-reporter/**",
-                  "/reporters/gitlab-sast/options/exclude_suppressed"
+                  "/reporters/gitlab-sast/options/exclude_suppressed",
+                  "/scanners/detect-secrets/**",
+                  "/scanners/npm-audit/**",
+                  "/scanners/opengrep/**",
+                  "/scanners/semgrep/**",
+                  "/scanners/snyk-code/**",
+                  "/scanners/trivy-repo/**",
+                  "/converters/archive/options/max_members",
+                  "/converters/archive/options/max_member_bytes",
+                  "/converters/archive/options/max_total_bytes",
+                  "/converters/archive/options/max_compression_ratio"
                 ],
                 "denied_value_patterns": {},
                 "enabled": false,
@@ -213,6 +268,12 @@
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
         },
+        "honor_ignore_files": {
+          "default": true,
+          "description": "Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set, the file list detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read. True (the default) leaves out every file they match. False scans those files too; ASH's own exclusions (.git, CDK assets, its own output directory) still apply. An operator setting: a config file inside the scanned tree, or one an MCP client supplied, cannot change it, and its value there is ignored with a warning. Set it in a config file outside the tree, with --config-overrides, or with --no-honor-ignore-files / --honor-ignore-files. Every scan records the outcome in metadata.ignore_file_exclusions.",
+          "title": "Honor Ignore Files",
+          "type": "boolean"
+        },
         "mcp-resource-management": {
           "$ref": "#/$defs/MCPResourceManagementConfig",
           "default": {
@@ -221,6 +282,7 @@
             "health_check_interval_seconds": 60,
             "log_resource_operations": false,
             "max_concurrent_scans": 3,
+            "max_concurrent_scans_per_session": 2,
             "max_concurrent_tasks": 20,
             "max_directory_size_mb": 1000,
             "max_message_size_bytes": 10485760,
@@ -388,9 +450,11 @@
         "sandbox": {
           "$ref": "#/$defs/SandboxConfig",
           "default": {
+            "env_scanners": [],
             "extra_read_paths": [],
             "mode": "off",
-            "network_scanners": null
+            "network_scanners": null,
+            "read_path_scanners": []
           },
           "description": "OS-level sandboxing of scanner subprocesses."
         },
@@ -583,17 +647,22 @@
                 "/fail_on_incomplete_scanners",
                 "/content_db_staleness",
                 "/content_db_staleness_overrides",
+                "/honor_ignore_files",
                 "/sandbox",
                 "/sandbox/**",
                 "/ash_plugin_modules",
                 "/ash_plugin_modules/**",
+                "/scanners/detect-secrets/options/scan_settings/filters_used",
+                "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+                "/scanners/detect-secrets/options/scan_settings/plugins_used",
+                "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+                "/scanners/detect-secrets/options/baseline_file",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/global_settings/mcp",
                 "/global_settings/mcp/**",
                 "/scanners/opengrep/options/exclude_rule",
                 "/scanners/semgrep/options/exclude_rule",
-                "/scanners/detect-secrets/options/baseline_file",
                 "/scanners/bandit/options/confidence_level",
                 "/scanners/checkov/options/frameworks",
                 "/scanners/checkov/options/skip_frameworks",
@@ -640,7 +709,17 @@
                 "/reporters/bedrock-summary-reporter/options/output_technical_file",
                 "/reporters/s3/**",
                 "/reporters/bedrock-summary-reporter/**",
-                "/reporters/gitlab-sast/options/exclude_suppressed"
+                "/reporters/gitlab-sast/options/exclude_suppressed",
+                "/scanners/detect-secrets/**",
+                "/scanners/npm-audit/**",
+                "/scanners/opengrep/**",
+                "/scanners/semgrep/**",
+                "/scanners/snyk-code/**",
+                "/scanners/trivy-repo/**",
+                "/converters/archive/options/max_members",
+                "/converters/archive/options/max_member_bytes",
+                "/converters/archive/options/max_total_bytes",
+                "/converters/archive/options/max_compression_ratio"
               ],
               "denied_value_patterns": {},
               "enabled": false,
@@ -688,17 +767,22 @@
               "/fail_on_incomplete_scanners",
               "/content_db_staleness",
               "/content_db_staleness_overrides",
+              "/honor_ignore_files",
               "/sandbox",
               "/sandbox/**",
               "/ash_plugin_modules",
               "/ash_plugin_modules/**",
+              "/scanners/detect-secrets/options/scan_settings/filters_used",
+              "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+              "/scanners/detect-secrets/options/scan_settings/plugins_used",
+              "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+              "/scanners/detect-secrets/options/baseline_file",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/global_settings/mcp",
               "/global_settings/mcp/**",
               "/scanners/opengrep/options/exclude_rule",
               "/scanners/semgrep/options/exclude_rule",
-              "/scanners/detect-secrets/options/baseline_file",
               "/scanners/bandit/options/confidence_level",
               "/scanners/checkov/options/frameworks",
               "/scanners/checkov/options/skip_frameworks",
@@ -745,7 +829,17 @@
               "/reporters/bedrock-summary-reporter/options/output_technical_file",
               "/reporters/s3/**",
               "/reporters/bedrock-summary-reporter/**",
-              "/reporters/gitlab-sast/options/exclude_suppressed"
+              "/reporters/gitlab-sast/options/exclude_suppressed",
+              "/scanners/detect-secrets/**",
+              "/scanners/npm-audit/**",
+              "/scanners/opengrep/**",
+              "/scanners/semgrep/**",
+              "/scanners/snyk-code/**",
+              "/scanners/trivy-repo/**",
+              "/converters/archive/options/max_members",
+              "/converters/archive/options/max_member_bytes",
+              "/converters/archive/options/max_total_bytes",
+              "/converters/archive/options/max_compression_ratio"
             ],
             "denied_value_patterns": {},
             "enabled": false,
@@ -1623,7 +1717,12 @@
           "default": {
             "enabled": true,
             "name": "archive",
-            "options": {}
+            "options": {
+              "max_compression_ratio": 100,
+              "max_member_bytes": 268435456,
+              "max_members": 100000,
+              "max_total_bytes": 1073741824
+            }
           },
           "description": "Configure the options for the ArchiveConverter"
         },
@@ -2506,6 +2605,14 @@
           "title": "Max Concurrent Scans",
           "type": "integer"
         },
+        "max_concurrent_scans_per_session": {
+          "default": 2,
+          "description": "Maximum number of scans one session of a network transport (streamable-http, sse) may run at once; 0 for no per-session limit. A run_ash_workspace_scan counts once. Read from the operator's config (ASH_CONFIG) only, never from a scanned or delivered one. stdio's single session is not limited.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Max Concurrent Scans Per Session",
+          "type": "integer"
+        },
         "max_concurrent_tasks": {
           "default": 20,
           "description": "Maximum number of concurrent async tasks allowed",
@@ -2709,7 +2816,7 @@
       "properties": {
         "offline": {
           "default": false,
-          "description": "Run in offline mode, using locally cached data. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
+          "description": "Run offline. npm, pnpm and yarn audit only against the package registry's advisory service, so offline npm-audit audits nothing: each lockfile is listed as not scanned, and with a lockfile the scanner is reported MISSING. When true, this scanner runs offline even if ASH does not. ASH's own offline mode (--offline or ASH_OFFLINE) applies whatever this is set to; false follows it.",
           "title": "Offline",
           "type": "boolean"
         },
@@ -3294,17 +3401,22 @@
             "/fail_on_incomplete_scanners",
             "/content_db_staleness",
             "/content_db_staleness_overrides",
+            "/honor_ignore_files",
             "/sandbox",
             "/sandbox/**",
             "/ash_plugin_modules",
             "/ash_plugin_modules/**",
+            "/scanners/detect-secrets/options/scan_settings/filters_used",
+            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+            "/scanners/detect-secrets/options/baseline_file",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/global_settings/mcp",
             "/global_settings/mcp/**",
             "/scanners/opengrep/options/exclude_rule",
             "/scanners/semgrep/options/exclude_rule",
-            "/scanners/detect-secrets/options/baseline_file",
             "/scanners/bandit/options/confidence_level",
             "/scanners/checkov/options/frameworks",
             "/scanners/checkov/options/skip_frameworks",
@@ -3351,9 +3463,19 @@
             "/reporters/bedrock-summary-reporter/options/output_technical_file",
             "/reporters/s3/**",
             "/reporters/bedrock-summary-reporter/**",
-            "/reporters/gitlab-sast/options/exclude_suppressed"
+            "/reporters/gitlab-sast/options/exclude_suppressed",
+            "/scanners/detect-secrets/**",
+            "/scanners/npm-audit/**",
+            "/scanners/opengrep/**",
+            "/scanners/semgrep/**",
+            "/scanners/snyk-code/**",
+            "/scanners/trivy-repo/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio"
           ],
-          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out.",
+          "description": "JSON-Pointer glob patterns that are never allowed (denied wins over allowed). Each entry starts with '/'. The defaults block the fields that decide whether a scan fails, what it runs and reports, where findings are sent, the scanner sandbox, and this policy. A list equal to a default ASH has shipped counts as the current default list. Any other list is added to the current defaults, unless replace_default_denied_paths is true. When it is added, a list that holds some default entries and leaves others out still gets them, and a warning names the ones it leaves out. Whatever the list, and with replace_default_denied_paths too, the entries ASH always denies (the scanner sandbox, ash_plugin_modules, the detect-secrets verification, plugin and baseline settings, the archive converter's extraction limits, and the sections of the plugins that send data off the host: the s3, aws-security-hub, cloudwatch-logs and bedrock-summary-reporter reporters and the detect-secrets, npm-audit, opengrep, semgrep, snyk-code and trivy-repo scanners) are added to it.",
           "items": {
             "type": "string"
           },
@@ -3455,9 +3577,18 @@
       "additionalProperties": false,
       "description": "OS-level sandboxing of scanner subprocesses. Off by default.\n\nSee docs/content/docs/scanner-sandbox.md for the policy each scanner gets.",
       "properties": {
+        "env_scanners": {
+          "default": [],
+          "description": "Scanners allowed the environment variables their own options ask for (a token for an online check, for example). Without this, such variables are not passed. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Env Scanners",
+          "type": "array"
+        },
         "extra_read_paths": {
           "default": [],
-          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Ignored when set by a config file inside the scanned tree.",
+          "description": "Additional host paths every sandboxed scanner may read, for example a corporate CA bundle or a shared rule directory. '~' and $VARS expand. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
           "items": {
             "type": "string"
           },
@@ -3466,7 +3597,7 @@
         },
         "mode": {
           "default": "off",
-          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. Ignored in container mode, where the container is the boundary.",
+          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Ignored in container mode, where the container is the boundary.",
           "enum": [
             "off",
             "auto",
@@ -3491,8 +3622,17 @@
             }
           ],
           "default": null,
-          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside the scanned tree; set inside the tree, a list can only remove network.",
+          "description": "Scanners allowed a network when the scan is online. Null (the default) uses each scanner's declared need: semgrep, opengrep, grype, trivy, npm-audit and snyk-code fetch rules, databases or audit data. A list replaces those defaults. Under --offline no scanner gets a network. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory; set by any other config file, a list can only remove network.",
           "title": "Network Scanners"
+        },
+        "read_path_scanners": {
+          "default": [],
+          "description": "Scanners allowed the extra host paths their own options ask for (a rules file or baseline outside the source tree, for example). Under a sandbox, without this, a scanner whose read paths come from its options gets only the default policy, and ASH does not read a detect-secrets baseline_file outside the source tree. With it, a granted path, that baseline included, is used only when it resolves inside the source tree or an extra_read_paths entry. Honored only from --config-overrides or a config file outside every git checkout and the scanned directory.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Read Path Scanners",
+          "type": "array"
         }
       },
       "title": "SandboxConfig",
@@ -4259,7 +4399,7 @@
         },
         "exclude": {
           "default": [],
-          "description": "Path (file or directory) to skip, using regular expression logic, relative to current working directory. Word boundaries are not implicit; i.e., specifying \"dir1\" will skip any directory or subdirectory named \"dir1\". Ignored with -f. Can be specified multiple times.",
+          "description": "Paths (files or directories) to skip, each a glob relative to the scanned directory and passed to syft as one --exclude. A glob must start with \"./\", \"*/\" or \"**/\", and syft fails the scan on any other. \"*\" does not match across \"/\" and \"**\" does: \"./dir1/**\" skips the top-level \"dir1\", and \"**/dir1/**\" skips every directory named \"dir1\".",
           "items": {
             "$ref": "#/$defs/IgnorePathWithReason"
           },

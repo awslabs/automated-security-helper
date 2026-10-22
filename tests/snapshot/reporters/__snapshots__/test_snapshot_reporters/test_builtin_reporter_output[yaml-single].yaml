@@ -25,6 +25,9 @@ additional_reports:
     source:
       duration: 0.25
       end_time: '2026-01-15T12:00:18.500000Z'
+      errors:
+      - 'infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation
+        template'
       finding_count: 0
       metadata:
         scanner_version: 0.8.10
@@ -128,7 +131,11 @@ ash_config:
     archive:
       enabled: true
       name: archive
-      options: {}
+      options:
+        max_compression_ratio: 100
+        max_member_bytes: 268435456
+        max_members: 100000
+        max_total_bytes: 1073741824
     jupyter:
       enabled: true
       name: jupyter
@@ -148,17 +155,22 @@ ash_config:
         - /fail_on_incomplete_scanners
         - /content_db_staleness
         - /content_db_staleness_overrides
+        - /honor_ignore_files
         - /sandbox
         - /sandbox/**
         - /ash_plugin_modules
         - /ash_plugin_modules/**
+        - /scanners/detect-secrets/options/scan_settings/filters_used
+        - /scanners/detect-secrets/options/scan_settings/filters_used/**
+        - /scanners/detect-secrets/options/scan_settings/plugins_used
+        - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+        - /scanners/detect-secrets/options/baseline_file
         - /global_settings/ignore_paths
         - /global_settings/suppressions
         - /global_settings/mcp
         - /global_settings/mcp/**
         - /scanners/opengrep/options/exclude_rule
         - /scanners/semgrep/options/exclude_rule
-        - /scanners/detect-secrets/options/baseline_file
         - /scanners/bandit/options/confidence_level
         - /scanners/checkov/options/frameworks
         - /scanners/checkov/options/skip_frameworks
@@ -206,6 +218,16 @@ ash_config:
         - /reporters/s3/**
         - /reporters/bedrock-summary-reporter/**
         - /reporters/gitlab-sast/options/exclude_suppressed
+        - /scanners/detect-secrets/**
+        - /scanners/npm-audit/**
+        - /scanners/opengrep/**
+        - /scanners/semgrep/**
+        - /scanners/snyk-code/**
+        - /scanners/trivy-repo/**
+        - /converters/archive/options/max_members
+        - /converters/archive/options/max_member_bytes
+        - /converters/archive/options/max_total_bytes
+        - /converters/archive/options/max_compression_ratio
         denied_value_patterns: {}
         enabled: false
         replace_default_denied_paths: false
@@ -233,12 +255,14 @@ ash_config:
       reason: Stale suppression for a check that no longer exists
       rule_id: CKV_AWS_999
       symbol: null
+  honor_ignore_files: true
   mcp-resource-management:
     enable_health_checks: true
     enable_resource_logging: true
     health_check_interval_seconds: 60
     log_resource_operations: false
     max_concurrent_scans: 3
+    max_concurrent_scans_per_session: 2
     max_concurrent_tasks: 20
     max_directory_size_mb: 1000
     max_message_size_bytes: 10485760
@@ -351,9 +375,11 @@ ash_config:
       name: yaml
       options: {}
   sandbox:
+    env_scanners: []
     extra_read_paths: []
     mode: 'off'
     network_scanners: null
+    read_path_scanners: []
   scanners:
     bandit:
       enabled: true
@@ -658,6 +684,8 @@ metadata:
   execution_discrepancy_report: {}
   expected_scanners: []
   generated_at: '2026-01-15T12:00:00+00:00'
+  ignore_file_exclusions: null
+  inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: ASH
   report_id: ASH-20260115
@@ -844,7 +872,7 @@ sarif:
         id: null
         markdown: null
         properties: null
-        text: 'Possible hardcoded password: ''hunter2-not-a-real-secret'''
+        text: 'Possible hardcoded password: ''hu**********************t'''
       occurrenceCount: null
       partialFingerprints: null
       properties:
@@ -2062,6 +2090,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 1
@@ -2075,9 +2104,10 @@ scanner_results:
     actionable_finding_count: 0
     dependencies_satisfied: true
     duration: 0.0
-    excluded: false
+    excluded: true
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2094,6 +2124,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2110,6 +2141,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 4
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 1
@@ -2126,6 +2158,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2142,6 +2175,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 1
       high: 0
@@ -2153,11 +2187,12 @@ scanner_results:
     suppressed_finding_count: 0
   npm-audit:
     actionable_finding_count: 0
-    dependencies_satisfied: true
+    dependencies_satisfied: false
     duration: 0.0
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2174,6 +2209,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 2
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2190,6 +2226,7 @@ scanner_results:
     excluded: false
     exit_code: 0
     finding_count: 0
+    missing_reason: null
     severity_counts:
       critical: 0
       high: 0
@@ -2199,6 +2236,11 @@ scanner_results:
       suppressed: 0
     status: PASSED
     suppressed_finding_count: 0
+secret_value_shapes:
+- length: 25
+  prefix: hu
+  spans_whitespace: false
+  suffix: t
 used_suppressions:
 - app/app.py|SECRET-SECRET-KEYWORD|5|5
 validation_checkpoints: []

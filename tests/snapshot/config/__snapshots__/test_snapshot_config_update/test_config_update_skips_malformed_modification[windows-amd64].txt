@@ -16,17 +16,22 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /honor_ignore_files
       - /sandbox
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
+      - /scanners/detect-secrets/options/scan_settings/filters_used
+      - /scanners/detect-secrets/options/scan_settings/filters_used/**
+      - /scanners/detect-secrets/options/scan_settings/plugins_used
+      - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+      - /scanners/detect-secrets/options/baseline_file
       - /global_settings/ignore_paths
       - /global_settings/suppressions
       - /global_settings/mcp
       - /global_settings/mcp/**
       - /scanners/opengrep/options/exclude_rule
       - /scanners/semgrep/options/exclude_rule
-      - /scanners/detect-secrets/options/baseline_file
       - /scanners/bandit/options/confidence_level
       - /scanners/checkov/options/frameworks
       - /scanners/checkov/options/skip_frameworks
@@ -74,14 +79,27 @@ global_settings:
       - /reporters/s3/**
       - /reporters/bedrock-summary-reporter/**
       - /reporters/gitlab-sast/options/exclude_suppressed
+      - /scanners/detect-secrets/**
+      - /scanners/npm-audit/**
+      - /scanners/opengrep/**
+      - /scanners/semgrep/**
+      - /scanners/snyk-code/**
+      - /scanners/trivy-repo/**
+      - /converters/archive/options/max_members
+      - /converters/archive/options/max_member_bytes
+      - /converters/archive/options/max_total_bytes
+      - /converters/archive/options/max_compression_ratio
       denied_value_patterns: {}
       replace_default_denied_paths: false
 fail_on_findings: false
 fail_on_incomplete_scanners: true
+honor_ignore_files: true
 sandbox:
   mode: 'off'
   network_scanners: null
   extra_read_paths: []
+  read_path_scanners: []
+  env_scanners: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
 ash_plugin_modules: []
@@ -91,7 +109,11 @@ converters:
   archive:
     name: archive
     enabled: true
-    options: {}
+    options:
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
   jupyter:
     name: jupyter
     enabled: true
@@ -322,6 +344,7 @@ reporters:
     extension: yaml
 mcp-resource-management:
   max_concurrent_scans: 3
+  max_concurrent_scans_per_session: 2
   max_concurrent_tasks: 20
   thread_pool_max_workers: 4
   scan_timeout_seconds: 1800
