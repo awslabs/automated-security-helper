@@ -37,7 +37,12 @@ def test_a_value_the_file_cannot_encode_is_refused_naming_the_variable(tmp_path)
     with pytest.raises(ContainerInputError, match="ASH_RECV_TOKEN"):
         run_ash_container._write_env_file(
             ["ASH_RECV_TOKEN"],
-            {"ASH_RECV_TOKEN": "a\udce9b"},
+            # The suppression must be bandit's own, not an ASH suppression rule:
+            # bandit 1.9.4's SARIF and JSON writers crash on a lone surrogate in
+            # a finding's text (issue.as_dict's utf-8 encode), exit 1 with a
+            # 0-byte results file, and ASH suppressions act only on the output
+            # that never gets written.
+            {"ASH_RECV_TOKEN": "a\udce9b"},  # nosec B105 - an unencodable fixture value, not a credential
             "docker",
             source,
             out,
