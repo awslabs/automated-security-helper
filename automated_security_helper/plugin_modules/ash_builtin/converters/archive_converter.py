@@ -460,17 +460,20 @@ class _BoundedTarStream(io.RawIOBase):
         if self._allowance is not None:
             self._allowance += _TAR_HEADER_BYTES_PER_MEMBER
 
-    def allow_skipped_blocks(self, limit: int) -> None:
-        """Grow the header pass's allowance by what a listing may skip.
+    def allow_skipped_blocks(self, size: int) -> None:
+        """Credit the header pass's allowance for a skipped block's bytes.
 
         Under ``open_tar_listing`` (utils/tar_listing.py) the zero and damaged
         blocks a listing skips are read through this stream during the header
-        pass, up to ``limit`` bytes, and the listing's own budgets are what
-        bound them; without this headroom those reads would spend the header
-        allowance and refuse a tar the listing would have extracted in part.
+        pass, spending the allowance as they are read. The listing calls this
+        with each such block's size as it classifies it, crediting those bytes
+        back, so skipped blocks are charged to the listing's own budgets and
+        never to the header allowance: a skip-free tar is bounded by exactly
+        the base plus the per-member allowance, and a skipping tar gets only
+        the headroom its skips used, bounded by the listing's limits.
         """
         if self._allowance is not None:
-            self._allowance += limit
+            self._allowance += size
 
     def end_header_pass(self) -> None:
         self._allowance = None
@@ -1466,9 +1469,11 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                         stopped: List[int] = []
                         tar_stream = stack.enter_context(_tar_stream(archive_handle))
                         # The blocks the listing skips are read through the
-                        # bounded stream; its budgets bound them, not the
-                        # header allowance.
-                        tar_stream.allow_skipped_blocks(SKIPPED_BYTES_LIMIT)
+                        # bounded stream; the listing credits each one back
+                        # to the header allowance as it classifies it
+                        # (allow_skipped_blocks), so its budgets bound them,
+                        # not the header allowance, and a skip-free tar keeps
+                        # the strict base-plus-per-member bound.
                         with open_tar_listing(
                             tar_stream,
                             unreadable,

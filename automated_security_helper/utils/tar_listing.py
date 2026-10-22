@@ -151,6 +151,11 @@ def open_tar_listing(
         tarfile.TarError, OSError, EOFError: The tar could not be opened or read.
     """
     skipped = [0]
+    # A handle that meters its header reads (the archive converter's bounded
+    # stream) is credited each skipped block's bytes as the block is
+    # classified, so skips are charged to this listing's own budgets and
+    # never to the handle's header allowance.
+    credit = getattr(handle, "allow_skipped_blocks", None)
 
     class _Recorded(TarInfo):
         @classmethod
@@ -165,6 +170,8 @@ def open_tar_listing(
                 if not isinstance(error, _ZERO_BLOCK) and not unreadable:
                     unreadable.append(offset)
                 skipped[0] += _BLOCK
+                if credit is not None:
+                    credit(_BLOCK)
                 over = skipped[0] > SKIPPED_BYTES_LIMIT
                 if budget is not None and skipped[0] > ORDINARY_END_BYTES:
                     budget.used += _BLOCK
