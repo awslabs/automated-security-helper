@@ -141,6 +141,7 @@ def ash_env(child_env: dict[str, str], tmp_path: pathlib.Path) -> dict[str, str]
         {
             "ASH_SCANNERS": "detect-secrets",
             "HOME": str(home),
+            "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
             "XDG_CACHE_HOME": str(home / ".cache"),
             "XDG_CONFIG_HOME": str(home / ".config"),
             "XDG_DATA_HOME": str(home / ".local" / "share"),

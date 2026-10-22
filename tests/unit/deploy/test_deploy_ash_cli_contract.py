@@ -413,8 +413,16 @@ def terraform_gate_invocations() -> list[Invocation]:
                     gate,
                     "_run",
                     lambda argv, cwd=None, env=None: (
-                        captured.append(list(argv))
-                        or SimpleNamespace(returncode=0, stdout="", stderr="")
+                        SimpleNamespace(
+                            returncode=0,
+                            stdout=f"Usage: ash scan [OPTIONS]\n  {gate.COMPLETENESS_FLAG}\n",
+                            stderr="",
+                        )
+                        if argv == ["ash", "scan", "--help"]
+                        else (
+                            captured.append(list(argv))
+                            or SimpleNamespace(returncode=0, stdout="", stderr="")
+                        )
                     ),
                 ),
                 mock.patch.object(gate, "WORK_ROOT", Path(work) / "ash-gate"),

@@ -86,8 +86,16 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
         gate,
         "_run",
         lambda argv, cwd=None, env=None: (
-            captured.append(list(argv))
-            or SimpleNamespace(returncode=0, stdout="", stderr="")
+            SimpleNamespace(
+                returncode=0,
+                stdout=f"Usage: ash scan [OPTIONS]\n  {gate.COMPLETENESS_FLAG}\n",
+                stderr="",
+            )
+            if argv == ["ash", "scan", "--help"]
+            else (
+                captured.append(list(argv))
+                or SimpleNamespace(returncode=0, stdout="", stderr="")
+            )
         ),
     )
     monkeypatch.setattr(gate, "WORK_ROOT", tmp_path / "ash-gate")
