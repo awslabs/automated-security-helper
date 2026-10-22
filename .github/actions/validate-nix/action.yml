@@ -70,6 +70,9 @@ runs:
         YAML
         printf '{ "name": "ash-nix-selftest", "version": "1.0.0", "dependencies": {} }\n' \
           > /tmp/ash-nix-selftest/package.json
+        # For hadolint, a community scanner whose module the scan below lists. Unpinned base
+        # image tag, so DL3007 fires and the scanner has something to report.
+        printf 'FROM ubuntu:latest\nRUN echo fixture\n' > /tmp/ash-nix-selftest/Dockerfile
 
     - name: "nix: scan"
       shell: bash
@@ -96,6 +99,7 @@ runs:
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
+          --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --simple
         rc=$?
         set -e
@@ -146,6 +150,11 @@ runs:
         # cfn-guard comes from nix/cfn-guard.nix (nixpkgs has no package), with the Guard
         # Rules Registry seeded by the shellHook; trivy's vulnerability database is
         # seeded the same way. Without the seeding both would be MISSING here.
+        #
+        # hadolint is a community scanner, so the scan above lists its module with
+        # --ash-plugin-modules; otherwise it would be absent from the report and this
+        # list could not check that the flake supplies it. The GuardDog module is not
+        # listed: nixpkgs has no GuardDog package, so the flake does not supply it.
         flake_supplied = [
             "actionlint",
             "bandit",
@@ -156,6 +165,7 @@ runs:
             "detect-secrets",
             "gitleaks",
             "grype",
+            "hadolint",
             "npm-audit",
             "opengrep",
             "semgrep",

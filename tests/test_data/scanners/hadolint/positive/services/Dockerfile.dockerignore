@@ -1,0 +1,2 @@
+# BuildKit per-Dockerfile ignore file: must not be linted.
+node_modules

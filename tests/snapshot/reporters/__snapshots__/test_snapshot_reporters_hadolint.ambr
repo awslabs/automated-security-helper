@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_hadolint_row
+  dict({
+    'actionable_finding_count': 8,
+    'dependencies_satisfied': True,
+    'duration': 0.25,
+    'excluded': False,
+    'exit_code': 0,
+    'finding_count': 13,
+    'severity_counts': dict({
+      'critical': 0,
+      'high': 2,
+      'info': 1,
+      'low': 4,
+      'medium': 6,
+      'suppressed': 0,
+    }),
+    'status': 'FAILED',
+    'suppressed_finding_count': 0,
+  })
+# ---
