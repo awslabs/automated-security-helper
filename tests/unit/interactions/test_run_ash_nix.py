@@ -350,10 +350,13 @@ class TestRunAshNix:
             fake_run,
         )
 
-        run_ash_nix(argv=["scan"], outer_run_id="0123456789abcdef0123456789abcdef")
+        run_ash_nix(
+            argv=["scan"],
+            outer_run_id="0123456789abcdef0123456789abcdef",  # pragma: allowlist secret
+        )
 
         assert captured["env"]["ASH_OUTER_RUN_ID"] == (
-            "0123456789abcdef0123456789abcdef"
+            "0123456789abcdef0123456789abcdef"  # pragma: allowlist secret
         )
 
     def test_nonzero_exit_is_returned_rather_than_raised(self, monkeypatch):

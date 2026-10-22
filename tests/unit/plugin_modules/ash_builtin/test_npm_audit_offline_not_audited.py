@@ -287,5 +287,5 @@ def test_excluding_npm_audit_is_the_offline_opt_out(
     )
     statuses = {name: row["status"] for name, row in results["scanner_results"].items()}
     assert statuses["npm-audit"] == "SKIPPED", statuses
-    assert statuses["detect-secrets"] == "PASSED", statuses
+    assert statuses["detect-secrets"] == "PASSED", statuses  # pragma: allowlist secret
     assert code == 0, f"offline scan excluding npm-audit exited {code}: {statuses}"

@@ -118,7 +118,7 @@ def test_dependencies_are_always_satisfied_because_the_import_succeeded(scanner)
     assert scanner.validate_plugin_dependencies() is True
 
 
-_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+_COMMIT = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
 
 
 def test_missing_library_log_line_prints_a_bracketed_path_as_is(

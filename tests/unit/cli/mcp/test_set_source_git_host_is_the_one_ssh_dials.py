@@ -51,7 +51,7 @@ URLS = [
     "ssh://other.example%2F@allowed.example/repo",
     "ssh://allowed.example#@other.example/repo",
     "ssh://allowed.example?@other.example/repo",
-    "ssh://other.example:2222%2f@allowed.example/repo",
+    "ssh://other.example:2222%2f@allowed.example/repo",  # pragma: allowlist secret
     "ssh://allowed.example%23@other.example/repo",
     "ssh://user@other.example@allowed.example/repo",
     "ssh://allowed.example:22@other.example/repo",
