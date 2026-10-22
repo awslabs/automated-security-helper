@@ -910,6 +910,7 @@ jobs:
               shift 2
             fi
             rm -f -- "${git_ran}"
+            # shellcheck disable=SC2016  # the single quotes are deliberate: $0/$@ are the inner shell's positionals
             with_commands_stopped "${out[@]}" sh -c ': > "$0" && exec git "$@"' "${git_ran}" "$@" || status=$?
             [ -e "${git_ran}" ] || exit 1
             return "${status}"
@@ -1453,6 +1454,7 @@ jobs:
           help=""
           uvx_ran="${RUNNER_TEMP}/ash-install-preflight-uvx.ran"
           rm -f -- "${uvx_ran}"
+          # shellcheck disable=SC2016  # the single quotes are deliberate: $0/$@ are the inner shell's positionals
           with_commands_stopped --capture help bash -c ': > "$0" && exec "$@" 2>&1' "${uvx_ran}" \
             uvx --from "${ASH_UVX_SOURCE}" ash dependencies install --help || status=$?
           [ -e "${uvx_ran}" ] || exit 1
