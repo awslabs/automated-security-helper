@@ -3628,10 +3628,20 @@ def _resolve_config(
                 # operator's too, so both still refuse the run. Fail-closed:
                 # with no repository judge, the refusal stands.
                 refused_files = list(refusal.document.chain) or [Path(config_path)]
+                # The judge reads the file AND the name that reached it
+                # (is_repository_file(real, named)); a file the names map
+                # does not know is judged under its own path, and a file
+                # reached by several names must be the repository's under
+                # every one of them.
+                refused_names = refusal.document.names
                 if (
                     not refusal.after_overrides
                     and repository_file is not None
-                    and all(repository_file(path) for path in refused_files)
+                    and all(
+                        repository_file(path, named)
+                        for path in refused_files
+                        for named in (refused_names.get(path) or (path,))
+                    )
                 ):
                     ASH_LOGGER.warning(
                         shown_on_one_line(
