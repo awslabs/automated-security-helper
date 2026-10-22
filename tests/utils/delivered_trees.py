@@ -59,6 +59,7 @@ def clone(
     tmp: Path, files: Dict[str, str], links: Dict[str, Path], session_id: str
 ) -> Path:
     """Deliver a tree holding ``files`` and ``links`` through the real git clone."""
+    from automated_security_helper.cli.mcp import source_delivery
     from automated_security_helper.cli.mcp.source_delivery import set_source_git
 
     origin = tmp / "origin"
@@ -70,7 +71,14 @@ def clone(
     _git(origin, "init", "-q")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "-m", "tree")
-    source = set_source_git(url=origin.as_uri(), session_id=session_id)
+    # set_source_git clones from a remote https or ssh host only. These tests
+    # need the real clone (a zip upload refuses symlinks) without a network, so
+    # the host check alone is bypassed for the local fixture origin; every other
+    # validation and the clone itself stay real.
+    with patch.object(
+        source_delivery, "remote_clone_host", lambda url: "origin.invalid"
+    ):
+        source = set_source_git(url=origin.as_uri(), session_id=session_id)
     for name in links:
         assert (source / name).is_symlink(), f"the clone dropped the link {name}"
     return source
