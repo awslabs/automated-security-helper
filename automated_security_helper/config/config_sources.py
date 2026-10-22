@@ -4038,7 +4038,7 @@ def resolve_config_document(
     permit_base: Optional[PermitBase] = None,
     refuse_env: Optional[RefuseEnv] = None,
     anchor_relative_paths: Optional[AnchorPaths] = None,
-    reader: Callable[[Path], Any] = read_config_file,
+    reader: Optional[Callable[[Path], Any]] = None,
     texts: Optional[Dict[Path, str]] = None,
     confine: Optional[Callable[[Path, Path, Any], Any]] = None,
     repository_file: Optional[Callable[[Path, Path], bool]] = None,
@@ -4099,8 +4099,18 @@ def resolve_config_document(
     from it. With ``read_config_file_literally`` as the reader, nothing is read
     from the environment and the error is raised as it is.
     """
+    # The None sentinel exists so the check below measures CALLER INTENT,
+    # not a rebinding of the module global: a test idiom patches
+    # read_config_file to record which files a resolution reads, and a
+    # default call under that patch is still a default call. None resolves
+    # to the call-time global, so such a recording wrapper is picked up
+    # and records, which is its purpose.
+    caller_supplied = reader is not None
+    if reader is None:
+        reader = read_config_file
     if (
-        reader is not read_config_file
+        caller_supplied
+        and reader is not read_config_file
         and reader is not read_config_file_literally
         and texts is None
     ):
