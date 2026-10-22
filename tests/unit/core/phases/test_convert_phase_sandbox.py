@@ -190,7 +190,7 @@ class TestRefusedSpawnsAreLostCoverage:
         results = _run(_context(tmp_path, "bwrap"))
 
         assert _ran() == []
-        assert [name for name, _ in incomplete_converters(results)] == ["spawning"], (
+        assert [row.name for row in incomplete_converters(results)] == ["spawning"], (
             results.converter_results["spawning"].model_dump(mode="json")
         )
 

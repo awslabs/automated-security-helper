@@ -500,7 +500,7 @@ class TestAnUnconfinableNotebookFailsTheScan:
 
         results = _run_convert_phase(_context(tree, "bwrap"))
 
-        assert [name for name, _reason in incomplete_converters(results)] == ["jupyter"]
+        assert [row.name for row in incomplete_converters(results)] == ["jupyter"]
 
     def test_without_notebooks_nothing_is_refused(
         self, tmp_path, tree, backend, monkeypatch

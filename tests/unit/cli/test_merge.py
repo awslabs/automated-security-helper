@@ -4611,7 +4611,7 @@ class TestConverterRowsAcrossShards:
         row = merged.converter_results["jupyter"]
         assert row.dependencies_satisfied is False
         assert row.candidate_inputs == 2
-        assert [name for name, _ in incomplete_converters(merged)] == ["jupyter"]
+        assert [row.name for row in incomplete_converters(merged)] == ["jupyter"]
 
     def test_a_tool_missing_with_nothing_to_convert_stays_exempt(self):
         """The candidate count is what exempts an absent tool, as in one scan."""

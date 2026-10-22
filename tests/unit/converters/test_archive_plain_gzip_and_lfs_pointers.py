@@ -156,7 +156,7 @@ def gate(converter) -> List[str]:
         refused_inputs=list(converter.refused_inputs),
         failed_inputs=list(converter.failed_inputs),
     )
-    return [name for name, _ in incomplete_converters(model)]
+    return [row.name for row in incomplete_converters(model)]
 
 
 class TestPlainGzip:
