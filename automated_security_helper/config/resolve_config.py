@@ -3634,8 +3634,16 @@ def _resolve_config(
                 # reached by several names must be the repository's under
                 # every one of them.
                 refused_names = refusal.document.names
+                # Containment is for DISCOVERED configs only: a discovered
+                # in-tree file is advisory by design, but a config the caller
+                # NAMED (--config, ASH_CONFIG, an MCP delivery) is a request,
+                # and a request's refusal belongs to the requester — the same
+                # trust position as the operator clause. A swallowed refusal
+                # here once let a scan proceed where the caller was owed
+                # "exited with code 3".
                 if (
-                    not refusal.after_overrides
+                    discovered_label is not None
+                    and not refusal.after_overrides
                     and repository_file is not None
                     and all(
                         repository_file(path, named)

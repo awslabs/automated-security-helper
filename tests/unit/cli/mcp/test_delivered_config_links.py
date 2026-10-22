@@ -539,8 +539,14 @@ def test_positive_control_an_operator_file_keeps_the_detailed_error(
         resolve_config(config_path=host_file, source_dir=elsewhere)
 
     message = str(raised.value)
-    assert "validation error for AshConfig" in message, message
-    assert "[type=model_type]" in message, message
+    # The refusal wording is the renderer's own, a ruled and documented
+    # contract (the restack merge d9644331: refusal messages name the
+    # container by its own kind and the location by the config's path), not
+    # pydantic's raw text, which quoted the superseded shape.
+    assert "Invalid value at '(top level)'" in message, message
+    assert "Input should be a valid dictionary or instance of AshConfig" in message, (
+        message
+    )
     assert CANARY not in message, message
 
 
