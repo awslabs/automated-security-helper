@@ -910,7 +910,8 @@ class RuntimeOverridesConfig(BaseModel):
         # default is listed: turning another on reports more.
         "/scanners/opengrep/options/exclude_rule",
         "/scanners/semgrep/options/exclude_rule",
-        "/scanners/detect-secrets/options/baseline_file",
+        # detect-secrets' baseline_file is listed with its scan_settings entries
+        # above; it drops findings by baseline too.
         "/scanners/bandit/options/confidence_level",
         "/scanners/checkov/options/frameworks",
         "/scanners/checkov/options/skip_frameworks",
