@@ -59,10 +59,18 @@ def root(tmp_path, monkeypatch) -> Path:
     sessions.reset_default_registry_for_tests()
     sessions.reset_guard_refusal_warning_for_tests()
     sessions._ended_while_scanning.clear()
+    # The delivered-source records live for the process. Two cells below assert
+    # delivered_session_count() against absolute values, so a record another
+    # test module left behind on this xdist worker would shift every count by
+    # one. Start from empty and put the stranger's records back afterwards.
+    saved_sources = dict(source_delivery._SESSION_SOURCE_DIRS)
+    source_delivery._SESSION_SOURCE_DIRS.clear()
     yield workspace
     sessions.reset_default_registry_for_tests()
     sessions.reset_guard_refusal_warning_for_tests()
     sessions._ended_while_scanning.clear()
+    source_delivery._SESSION_SOURCE_DIRS.clear()
+    source_delivery._SESSION_SOURCE_DIRS.update(saved_sources)
 
 
 def _sandbox(root: Path, session_id: str) -> Path:
