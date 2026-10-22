@@ -3636,12 +3636,13 @@ def _measured_in(
             else:
                 container = None
                 break
+        # ``place`` was found with isinstance(segment, int) above, so the
+        # segment is an int; the isinstance here is the narrowing mypy needs
+        # to admit the comparison, not a new condition.
         index = reference.path[place]
-        # Only a concrete int indexes a list: a str names a dict key and an
-        # _AnyIndex is the wildcard, and comparing either ordered a crash here.
         if (
-            isinstance(container, list)
-            and isinstance(index, int)
+            isinstance(index, int)
+            and isinstance(container, list)
             and 0 <= index < len(container)
         ):
             measured.append(replace(reference, length=len(container), index_at=place))

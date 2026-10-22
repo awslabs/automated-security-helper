@@ -761,7 +761,9 @@ def _log_where_the_server_listens(config, listen_socket) -> None:
     """
     import logging
 
-    host = "0.0.0.0" if config.host is None else config.host
+    # nosec B104 - uvicorn's own default-host spelling, reproduced for the log
+    # line only; the socket this logs about was bound and validated elsewhere.
+    host = "0.0.0.0" if config.host is None else config.host  # nosec B104
     address = "%s://[%s]:%d" if ":" in host else "%s://%s:%d"
     logging.getLogger("uvicorn.error").info(
         f"Uvicorn running on {address} (Press CTRL+C to quit)",

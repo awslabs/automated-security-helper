@@ -353,10 +353,16 @@ import json
 import os
 import sys
 
-if sys.argv[1:] == ["mcp", "--help"]:
-    print("Usage: ash mcp [OPTIONS]\\n  --auth-header-name TEXT\\n  --auth-header-value TEXT")
-    if os.environ.get("STAND_IN_HAS_FD") == "1":
-        print("  --auth-header-value-fd INTEGER")
+if sys.argv[1:2] == ["mcp"] and "--help" in sys.argv:
+    # The capability probe: ash-mcp-serve asks with the flag itself and reads
+    # the exit code, the way click answers an unknown option before --help.
+    if (
+        "--auth-header-value-fd" in sys.argv
+        and os.environ.get("STAND_IN_HAS_FD") != "1"
+    ):
+        print("No such option: --auth-header-value-fd", file=sys.stderr)
+        sys.exit(2)
+    print("Usage: ash mcp [OPTIONS]")
     sys.exit(0)
 record = {{"argv": sys.argv[1:]}}
 if "--auth-header-value-fd" in sys.argv:

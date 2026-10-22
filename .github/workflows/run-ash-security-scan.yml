@@ -431,7 +431,9 @@ jobs:
             given="${!var}"
             value="${given%$'\n'}"
             name="${var#INPUT_}"
-            name="${name,,}"
+            # tr, not ${name,,}: macOS runners execute these steps with bash
+            # 3.2, which has no case substitution ("bad substitution").
+            name="$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')"
             case "${value}" in
               *[[:cntrl:]]* | *$'\xc2'[$'\x80'-$'\x9f']* | *$'\xe2\x80'[$'\xa8\xa9']* | *'##['*)
                 echo "::error::the ${name//_/-} input holds a line break, another control character or the legacy command marker, so it is refused without being printed. A block scalar of one line is fine; more than one line is refused."
@@ -747,7 +749,9 @@ jobs:
             exit 1
           fi
           if [[ "${ASH_VERSION}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            COMMIT="${ASH_VERSION,,}"
+            # tr, not ${ASH_VERSION,,}: bash 3.2 (macOS runners) has no case
+            # substitution.
+            COMMIT="$(printf '%s' "${ASH_VERSION}" | tr '[:upper:]' '[:lower:]')"
           else
             if [[ "${ASH_VERSION}" == refs/* ]]; then
               CANDIDATES=("${ASH_VERSION}")
@@ -1040,8 +1044,11 @@ jobs:
           # a merge landing in between cannot pair one commit's ASH with another's
           # config.
           FETCH="${CONFIG_REF}"
+          # tr, not ${VAR,,}: bash 3.2 (macOS runners) has no case substitution.
+          ASH_REPO_LOWER="$(printf '%s' "${ASH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          SCANNED_REPO_LOWER="$(printf '%s' "${SCANNED_REPO}" | tr '[:upper:]' '[:lower:]')"
           if [ -n "${ASH_COMMIT}" ] && [ "${CONFIG_REF}" = "${ASH_VERSION}" ] \
-              && [ "${ASH_REPO,,}" = "${SCANNED_REPO,,}" ]; then
+              && [ "${ASH_REPO_LOWER}" = "${SCANNED_REPO_LOWER}" ]; then
             FETCH="${ASH_COMMIT}"
           fi
           git fetch --no-tags --no-recurse-submodules --depth=1 origin "${FETCH}"
@@ -1678,14 +1685,42 @@ jobs:
           INSTALL_TRIVY: ${{ inputs.install-trivy && 'trivy' || '' }}
         run: |
           set -euo pipefail
+          # ASH_DEPENDENCIES_UNKNOWN_TOOLS is honored by the ASH that READS it, and
+          # ash-version is the pull request's base commit, which can predate the
+          # variable itself. Until a base carries it, `skip` has to be applied here,
+          # in the pull request's own workflow file: in skip mode each tool installs
+          # on its own call, and a refusal whose output names the tool as unknown is
+          # skipped instead of failing the step. Any other failure still fails, and
+          # outside skip mode the one batched call keeps refusing a mistyped name.
+          ash_install() {
+            (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
+              uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
+                "$@" \
+                --bin-path "${ASH_TOOL_BIN}")
+          }
           tools=()
           for tool in "${INSTALL_ACTIONLINT}" "${INSTALL_CFN_GUARD}" "${INSTALL_GITLEAKS}" "${INSTALL_TRIVY}"; do
-            if [ -n "${tool}" ]; then tools+=(--tool "${tool}"); fi
+            if [ -n "${tool}" ]; then tools+=("${tool}"); fi
           done
-          (cd "${RUNNER_TEMP}" && env -u ASH_CONFIG \
-            uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
-              "${tools[@]}" \
-              --bin-path "${ASH_TOOL_BIN}")
+          if [ "${ASH_DEPENDENCIES_UNKNOWN_TOOLS:-}" = "skip" ]; then
+            for tool in "${tools[@]}"; do
+              out=""
+              rc=0
+              out="$(ash_install --tool "${tool}" 2>&1)" || rc=$?
+              printf '%s\n' "${out}"
+              if [ "${rc}" -ne 0 ]; then
+                if printf '%s' "${out}" | grep -q "Unknown tool"; then
+                  echo "the installed ASH (${ASH_UVX_SOURCE}) has no plugin named '${tool}'; skipped, as ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip asks. The scan needs nothing from it: the base config cannot enable a scanner the base ASH does not have."
+                else
+                  exit "${rc}"
+                fi
+              fi
+            done
+          else
+            args=()
+            for tool in "${tools[@]}"; do args+=(--tool "${tool}"); done
+            ash_install "${args[@]}"
+          fi
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       # OpenGrep goes through the same verified installer as Grype and Syft above.

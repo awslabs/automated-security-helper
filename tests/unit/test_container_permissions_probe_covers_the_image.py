@@ -71,9 +71,29 @@ def _write(path: Path, mode: int) -> Path:
     return path
 
 
+def _find_supports_printf() -> bool:
+    """Whether the host's find has GNU -printf.
+
+    The probe's find runs inside the Linux image, where find is GNU. This
+    test runs it against a local tree, and BSD find (the macOS runners)
+    refuses -printf with "unknown primary or operator".
+    """
+    find = shutil.which("find")
+    if find is None:
+        return False
+    completed = subprocess.run(  # nosec B603 - fixed argv, reads one directory
+        [find, "/", "-maxdepth", "0", "-printf", ""],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
 @pytest.mark.skipif(
-    os.name == "nt" or shutil.which("find") is None,
-    reason="POSIX find and file modes",
+    os.name == "nt" or not _find_supports_printf(),
+    reason="POSIX file modes and GNU find -printf, as inside the image",
 )
 def test_the_probe_lists_what_every_user_may_write_and_nothing_else(probe, tmp_path):
     image = tmp_path / "image"
