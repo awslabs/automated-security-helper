@@ -118,18 +118,27 @@ def _take_header_value() -> str:
 
 
 def _ash_mcp_supports(flag: str) -> bool:
-    """Whether this image's ``ash mcp`` accepts ``flag``; AshVersion decides that."""
+    """Whether this image's ``ash mcp`` accepts ``flag``; AshVersion decides that.
+
+    Asked with the flag itself, never read from the rendered help text: rich
+    renders help at width 80 under GitHub Actions whatever COLUMNS says, and
+    its option column then truncates long names (``--auth-header-value-…``),
+    so the flag's spelling is not reliably in the text. The parser is: an
+    unknown option is refused before the eager ``--help`` runs, so the exit
+    code is the answer. ``3`` stands in for the flag's value; ``--help`` exits
+    before the value is used, and without a value the parser would swallow
+    ``--help`` as the value and start the server.
+    """
     try:
         result = subprocess.run(  # nosec B603 B607 - fixed argv, the image's ash
-            ["ash", "mcp", "--help"],
-            env={**os.environ, "COLUMNS": "200"},
+            ["ash", "mcp", flag, "3", "--help"],
             capture_output=True,
             text=True,
             timeout=120,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return flag in result.stdout + result.stderr
+    return result.returncode == 0
 
 
 def _hand_over(value: str) -> int:
