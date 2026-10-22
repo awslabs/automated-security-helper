@@ -189,23 +189,24 @@ jobs:
             echo "::error::VERSION is '${VERSION}', which is not a release version. Refusing to derive a floating tag name from it. The release itself was created; move the floating tag by hand and fix the 'Read version' step."
             exit 1
           fi
-          CORE="${BASH_REMATCH[1]}"
           MAJOR="${BASH_REMATCH[2]}"
           FLOATING="v${MAJOR}"
 
           # Never move the floating tag to an older release than one that exists. The
           # job is serialized by its concurrency group, but a re-run of an old run, or
           # two runs that finish out of order, still arrive here with an older version
-          # after a newer release was tagged. Compare against the remote's stable
-          # v<major>.<minor>.<patch> tags, whose list includes this run's own tag, by
-          # version order. CORE is the X.Y.Z part of VERSION, taken from the capture
-          # group above. A prerelease (VERSION is not equal to CORE) sorts before the
-          # stable release with the same core, so 4.0.0rc1 is older than v4.0.0: a
-          # re-run of the rc1 job after 4.0.0 shipped must not move the tag back. A
-          # prerelease moves the tag only when no stable release of its major has
-          # the same or a newer core, and no later prerelease of its own core
-          # exists: that second comparison is made below, against the unfiltered
-          # listing, because neither prerelease is in the stable list.
+          # after a newer release was tagged. The comparison is one version-order
+          # test of VERSION against every tag in the remote listing, which includes
+          # this run's own tag, in PEP 440 order via packaging.version (a declared
+          # dependency of this project, installed by `uv sync` and reached through
+          # `uv run python`): VERSION is older when any tag parses to a newer
+          # version. It is deliberately not sort -V and not scoped to stable or
+          # same-core tags: sort -V strips a trailing alphanumeric "file suffix" and
+          # compares it only on a tie, so it ranks 4.1.0rc1.dev1 after 4.1.0rc1, the
+          # inverse of PEP 440, and a suffix rule that calls every suffix a
+          # prerelease never moves the tag for 3.8.0.post1 over 3.8.0. A tag the
+          # parser refuses fails the step: an order the step cannot read must stop
+          # the move, not be skipped over.
           #
           # The remote is read in its own assignment so that a failing `git ls-remote`
           # stops the step under `bash -e`: inside a pipeline its status is lost to the
@@ -223,41 +224,23 @@ jobs:
             echo "::error::v${VERSION} is not on the remote: the release may be a draft, or its tag may have been deleted, and neither leaves a tag for ${FLOATING} to follow. Refusing to compare against a tag list that lacks this release."
             exit 1
           fi
-          STABLE_TAGS=$(printf '%s\n' "$REMOTE_REFS" \
+          # The comparison program is a file so that the tag list keeps stdin.
+          RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
+          cat > "$RUNNER_TEMP/compare_versions.py" <<'PY'
+          import sys
+          from packaging.version import Version
+          version = Version(sys.argv[1])
+          tags = [line.strip() for line in sys.stdin if line.strip()]
+          newer = [tag for tag in tags if Version(tag) > version]
+          print(max(newer, key=Version) if newer else "")
+          PY
+          NEWEST=$(printf '%s\n' "$REMOTE_REFS" \
             | sed 's|.*refs/tags/v||' \
-            | grep -E "^${MAJOR}\.[0-9]+\.[0-9]+$" || true)
-          NEWEST=$(printf '%s\n' "$STABLE_TAGS" | sort -V | tail -n1)
+            | uv run python "$RUNNER_TEMP/compare_versions.py" "$VERSION"
+          )
           OLDER=false
           if [[ -n "$NEWEST" ]]; then
-            if [[ "$NEWEST" == "$CORE" ]]; then
-              if [[ "$VERSION" != "$CORE" ]]; then
-                OLDER=true
-              fi
-            elif [[ "$(printf '%s\n%s\n' "$NEWEST" "$CORE" | sort -V | tail -n1)" == "$NEWEST" ]]; then
-              OLDER=true
-            fi
-          fi
-          # A prerelease must not step over a later prerelease of its own core either:
-          # after v4.1.0rc2 moved the tag, a re-run of the rc1 job arrives here with
-          # OLDER still false, because neither rc is in the stable list. Compare
-          # against the remote tags that share CORE and carry a suffix. The bare
-          # stable tag is left out of this comparison on purpose: sort -V orders
-          # 4.1.0rc1 AFTER 4.1.0, so folding the stable tag in would read the rc as
-          # the newer one; a stable release of the same core is already decided
-          # above, where NEWEST equal to CORE with a prerelease VERSION reads as
-          # older. The dots in CORE are escaped so grep -E matches them literally.
-          if [[ "$VERSION" != "$CORE" && "$OLDER" == false ]]; then
-            CORE_RE="${CORE//./\\.}"
-            SAME_CORE=$(printf '%s\n' "$REMOTE_REFS" \
-              | sed 's|.*refs/tags/v||' \
-              | grep -E "^${CORE_RE}[^0-9]" || true)
-            if [[ -n "$SAME_CORE" ]]; then
-              NEWEST_SAME_CORE=$(printf '%s\n%s\n' "$SAME_CORE" "$VERSION" | sort -V | tail -n1)
-              if [[ "$NEWEST_SAME_CORE" != "$VERSION" ]]; then
-                NEWEST="$NEWEST_SAME_CORE"
-                OLDER=true
-              fi
-            fi
+            OLDER=true
           fi
           if [[ "$OLDER" == true ]]; then
             echo "::notice::v${VERSION} is older than v${NEWEST}, so ${FLOATING} stays where it is."
@@ -285,21 +268,3 @@ jobs:
               --field sha="$MAIN_SHA"
             echo "Created ${FLOATING} tag at $MAIN_SHA (v${VERSION})"
           fi
-
-  # The docs workflow publishes a docs version for each release tag, but the tag above
-  # is created with GITHUB_TOKEN, and a push made with that token starts no workflow:
-  # v3.6.0 and v3.7.0 have no docs run at all. So this job calls the docs workflow on
-  # the tag. A call needs no write access to Actions, which could start any workflow in the
-  # repository; the called job gets `contents: write` from here and nothing more. A
-  # job that calls a workflow cannot run steps, so the docs workflow checks the shape
-  # of the tag it is given before it deploys.
-  # It runs when the release already existed too: publishing a version again only
-  # rebuilds it from the same tag.
-  publish-docs:
-    name: Publish the release's docs
-    needs: tag-and-release
-    permissions:
-      contents: write
-    uses: ./.github/workflows/ash-repo-docs.yml
-    with:
-      ref: v${{ needs.tag-and-release.outputs.version }}

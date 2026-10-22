@@ -80,7 +80,9 @@ def delivered() -> Path:
     # change lock (``_while_no_scan_runs``), so on a leaked claim it raises its
     # busy refusal, and run first it would bury the message that names the leak.
     session = get_default_registry().session_for(SESSION)
-    idle = session.try_begin_change()
+    # try_begin_change answers None when the change began, and the reason it was
+    # refused otherwise.
+    idle = session.try_begin_change() is None
     if idle:
         session.end_change()
     try:
@@ -261,7 +263,7 @@ def test_control_a_scan_refused_at_its_limit_releases_only_its_own_claim(
         assert not started.called
         # The other scan's claim is still held: the refused call released one
         # claim, its own, and no more.
-        assert session.try_begin_change() is False
+        assert session.try_begin_change() == sessions.CHANGE_REFUSED_BY_SCAN
     finally:
         session.release_scan()
         session.scan_returned()

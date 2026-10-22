@@ -101,6 +101,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -203,6 +204,19 @@ if [ "$1" = "rev-list" ] && [ "$2" = "-n1" ]; then
   esac
 fi
 echo "harness: unexpected git invocation: $*" >&2
+exit 1
+"""
+
+# The step compares versions with `uv run python`, which runs the interpreter of the
+# project environment that `uv sync` built. This stub stands in for it: `uv run python
+# <args>` runs the interpreter that runs these tests, which has `packaging`. Any other
+# uv invocation fails loudly, so a change to the step's uv use is not stubbed away.
+UV_STUB = f"""#!/usr/bin/env bash
+if [ "$1" = "run" ] && [ "$2" = "python" ]; then
+  shift 2
+  exec "{sys.executable}" "$@"
+fi
+echo "harness: unexpected uv invocation: $*" >&2
 exit 1
 """
 
@@ -322,7 +336,7 @@ def _run(
     git_log = tmp_path / "git-calls.log"
     git_log.write_text("", encoding="utf-8")
 
-    for name, body in (("gh", GH_STUB), ("git", GIT_STUB)):
+    for name, body in (("gh", GH_STUB), ("git", GIT_STUB), ("uv", UV_STUB)):
         path = bin_dir / name
         path.write_text(body, encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -705,6 +719,12 @@ class TestTheFloatingTagNeverMovesBackward:
             # this one -- neither rc is in it.
             ("4.1.0rc1", "v4.0.0 v4.1.0rc1 v4.1.0rc2"),
             ("3.0.0-beta-20250528", "v3.0.0-beta-20250528 v3.0.0-beta-20250601"),
+            # PEP 440 order, which sort -V does not follow: a .devN of a prerelease
+            # is older than the prerelease, and a post-release is newer than its
+            # base, so the base is older than the post-release.
+            ("4.1.0rc1.dev1", "v4.1.0rc1.dev1 v4.1.0rc1"),
+            ("3.8.0", "v3.8.0 v3.8.0.post1"),
+            ("3.8.0", "v3.8.0 v3.8.0+build5"),
         ],
     )
     def test_an_older_release_does_not_move_the_floating_tag(
@@ -753,6 +773,12 @@ class TestTheFloatingTagNeverMovesBackward:
             # The newest prerelease of a core is not a backward move over its own
             # earlier prereleases.
             ("4.1.0rc2", "v4.0.0 v4.1.0rc1 v4.1.0rc2", [("PATCH", "v4")]),
+            # PEP 440: a post-release and a local version are newer than their base,
+            # and rc1 is newer than rc1.dev1, so each is the newest release and moves
+            # the tag.
+            ("3.8.0.post1", "v3.8.0 v3.8.0.post1", [("PATCH", "v3")]),
+            ("3.8.0+build5", "v3.8.0 v3.8.0+build5", [("PATCH", "v3")]),
+            ("4.1.0rc1", "v4.1.0rc1 v4.1.0rc1.dev1", [("PATCH", "v4")]),
         ],
     )
     def test_the_newest_release_still_moves_the_floating_tag(
@@ -1196,3 +1222,86 @@ class TestTheCuratedNotesFailureNamesTheRecovery:
         assert result.ok, result.describe()
         created = [c for c in result.calls if c.startswith("release create")]
         assert len(created) == 1, result.describe()
+
+
+class TestEveryLocalWorkflowCallIsCallable:
+    """A job that ``uses`` a workflow of this repository makes GitHub read that
+    workflow when it loads the caller. If the callee declares no ``workflow_call``
+    trigger, the caller fails to load and none of its jobs run, so the release is
+    never created."""
+
+    @staticmethod
+    def _on(doc: dict) -> dict:
+        # PyYAML reads the bare key ``on`` as the boolean True.
+        triggers = doc.get("on", doc.get(True))
+        return triggers if isinstance(triggers, dict) else {}
+
+    def test_every_local_callee_declares_workflow_call(self):
+        doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        callees = [
+            job["uses"]
+            for job in doc["jobs"].values()
+            if str(job.get("uses", "")).startswith("./")
+        ]
+        for uses in callees:
+            callee = yaml.safe_load((REPO_ROOT / uses[2:]).read_text(encoding="utf-8"))
+            assert "workflow_call" in self._on(callee), (
+                f"{uses} is called from {WORKFLOW.name} but declares no "
+                "workflow_call trigger"
+            )
+
+    def test_the_check_can_fail(self):
+        """Controls for the helper: a callee with only push and dispatch triggers
+        reads as missing, and one that declares the trigger reads as present, under
+        both spellings of the ``on`` key."""
+        without = yaml.safe_load("on:\n  push: {}\n  workflow_dispatch: {}\n")
+        with_call = yaml.safe_load("on:\n  workflow_call:\n    inputs: {}\n")
+        assert "workflow_call" not in self._on(without)
+        assert "workflow_call" in self._on(with_call)
+
+
+# The v* tags of a clone of this repository when the comparison was written:
+# 63 tags, among them a bare v3, a bare v3.0.0-beta and eleven v3.0.0-beta-YYYYMMDD
+# forms. The comparison must parse every one of them, because a tag it refuses fails
+# the step.
+REAL_TAGS = (
+    "v1.3.2 v1.3.3 v1.4.0 v1.4.1 v1.5.0 v1.5.1 v2.0.0 v2.0.1 v3 v3.0.0 v3.0.0-beta "
+    "v3.0.0-beta-20250528 v3.0.0-beta-20250602 v3.0.0-beta-20250603 "
+    "v3.0.0-beta-20250604 v3.0.0-beta-20250610 v3.0.0-beta-20250614 "
+    "v3.0.0-beta-20250708 v3.0.0-beta-20250709 v3.0.0-beta-20250714 "
+    "v3.0.0-beta-20250718 v3.0.0-beta-20250722 v3.0.1 v3.0.2 v3.0.3 v3.1.0 v3.1.1 "
+    "v3.1.10 v3.1.11 v3.1.12 v3.1.13 v3.1.2 v3.1.3 v3.1.4 v3.1.5 v3.1.6 v3.1.7 "
+    "v3.1.8 v3.1.9 v3.2.0 v3.2.1 v3.2.2 v3.2.3 v3.2.4 v3.2.5 v3.2.6 v3.2.7 v3.3.0 "
+    "v3.4.0 v3.5.0 v3.5.1 v3.5.2 v3.5.3 v3.5.4 v3.5.5 v3.5.6 v3.5.7 v3.5.8 v3.5.9 "
+    "v3.6.0 v3.6.1 v3.7.0 v3.7.1"
+)
+
+
+class TestTheComparisonReadsTheRepositorysRealTags:
+    pytestmark = _REQUIRES_BASH
+
+    def test_the_real_tag_list_is_63_tags(self):
+        assert len(REAL_TAGS.split()) == 63
+
+    def test_a_new_release_moves_the_tag_over_the_real_history(self, tmp_path: Path):
+        result = _run(
+            _floating_tag_script(),
+            "3.8.0",
+            tmp_path,
+            remote_tags=f"{REAL_TAGS} v3.8.0",
+        )
+        assert result.ok, result.describe()
+        assert result.mutations == [("PATCH", "v3")], result.describe()
+
+    def test_an_old_beta_rerun_over_the_real_history_moves_nothing(
+        self, tmp_path: Path
+    ):
+        result = _run(
+            _floating_tag_script(),
+            "3.0.0-beta-20250528",
+            tmp_path,
+            remote_tags=REAL_TAGS,
+        )
+        assert result.ok, result.describe()
+        assert result.refs_written == [], result.describe()
+        assert "::notice::" in result.proc.stdout, result.describe()

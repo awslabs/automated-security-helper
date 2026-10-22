@@ -15,7 +15,10 @@ pinned to ``<4`` look, would not have said what breaks or how to opt out.
 What this asserts
 -----------------
 It runs the release step's own shell, extracted from the YAML, with ``gh`` stubbed
-to record its argv.
+to record its argv, and ``origin`` a local bare repository: the step's tag-collision
+guard reads the release tag off the remote with ``git ls-remote origin`` before it
+creates anything, and an empty origin answers "no such tag", as the remote does for
+a fresh release run.
 
 * End to end: a scratch repository is bumped by a real commitizen through the real
   template and the real v3.8.0 notes file. The step then publishes a body that
@@ -64,7 +67,14 @@ pytestmark = [
     pytest.mark.skipif(
         shutil.which("bash") is None, reason="the step under test is a bash script"
     ),
+    pytest.mark.skipif(
+        shutil.which("git") is None,
+        reason="the step under test reads the release tag off its remote with git",
+    ),
 ]
+
+#: The release pull request's merge commit, as the workflow's env would carry it.
+MERGE_SHA = "5555555555555555555555555555555555555555"
 
 # `gh release view` answers "no such release"; every call's argv is logged as JSON.
 GH_STUB = f"""#!{sys.executable}
@@ -131,6 +141,29 @@ class Result:
         )
 
 
+def _give_an_origin(workdir: Path, tmp_path: Path) -> None:
+    """Make `workdir` a repository whose `origin` is an empty local bare repository.
+
+    The step's tag-collision guard runs `git ls-remote origin` before anything else,
+    so a workdir with no repository, or a repository with no origin, exits the script
+    at 128 before the behavior under test. The origin holds no tag, which is the
+    guard's passing case: the release tag does not exist yet.
+    """
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": str(tmp_path),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+    }
+    origin = tmp_path / "origin.git"
+    if not origin.exists():
+        origin.mkdir()
+        _git(origin, "init", "-q", "--bare", ".", env=env)
+    _git(workdir, "init", "-q", env=env)
+    _git(workdir, "remote", "add", "origin", f"file://{origin}", env=env)
+
+
 def _run(script: str, workdir: Path, version: str, tmp_path: Path) -> Result:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -143,11 +176,14 @@ def _run(script: str, workdir: Path, version: str, tmp_path: Path) -> Result:
     runner_temp.mkdir(exist_ok=True)
     script_path = tmp_path / "step.sh"
     script_path.write_text(script, encoding="utf-8")
+    _give_an_origin(workdir, tmp_path)
 
     env = {
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "HOME": str(tmp_path),
+        "GIT_CONFIG_NOSYSTEM": "1",
         "VERSION": version,
+        "MERGE_SHA": MERGE_SHA,
         "GITHUB_REPOSITORY": "awslabs/automated-security-helper",
         "GH_TOKEN": "stub-token",
         "GH_CALL_LOG": str(log),

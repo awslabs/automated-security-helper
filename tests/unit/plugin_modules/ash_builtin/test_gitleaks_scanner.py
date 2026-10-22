@@ -20,6 +20,7 @@ that, a check that compared nothing would pass here too.
 from __future__ import annotations
 
 import copy
+import errno
 import json
 import os
 import stat
@@ -1327,6 +1328,18 @@ def test_a_four_part_entry_is_normalized_where_gitleaks_normalizes_it(
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file names")
 def test_a_name_that_is_not_utf_8_is_kept_byte_for_byte(tmp_path, monkeypatch):
     name = b"app/\xff\xfe.py"
+    # APFS (the macOS runners) refuses a name that is not valid UTF-8 with
+    # EILSEQ, so the fixture cannot exist there; the property is about trees
+    # on filesystems that do hold such names.
+    probe_dir = tmp_path / "fs-probe"
+    probe_dir.mkdir()
+    try:
+        with open(os.path.join(os.fsencode(probe_dir), b"\xff\xfe"), "wb"):
+            pass
+    except OSError as error:
+        if error.errno in (errno.EILSEQ, errno.EINVAL):
+            pytest.skip("this filesystem refuses a non-UTF-8 file name")
+        raise
     assert _copied_for(tmp_path, monkeypatch, name + b":github-pat:1\n", name) == [name]
 
 

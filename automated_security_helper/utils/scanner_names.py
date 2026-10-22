@@ -131,7 +131,7 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "cfn-lint": "IAC",
     "cfn-nag": "IAC",
     "checkov": "IAC",
-    "detect-secrets": "SECRETS",
+    "detect-secrets": "SECRETS",  # pragma: allowlist secret
     "ferret-scan": "SECRETS",
     "gitleaks": "SECRETS",
     "grype": "SCA",

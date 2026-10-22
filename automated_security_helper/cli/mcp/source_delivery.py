@@ -165,8 +165,9 @@ def _no_scan_running(
     replaces ``source/`` and its staging sibling and touches neither
     ``incoming/`` nor ``config/``; a finalize replaces the same two and also
     reads and removes its own upload's ``incoming/<id>.zip`` (it opens the zip
-    to hash and extract it, and deletes it), under the upload's lock
-    (:func:`_upload_lock`), so only a chunk of that same upload waits for it.
+    under the upload's lock (:func:`_upload_lock`), hashes and extracts the open
+    handle without the lock, and deletes the path under the lock again), so
+    only a chunk of that same upload waits for either step.
 
     Takes the in-memory session only: a change that is refused leaves no session
     directory, and each change that writes creates and marks the directory
@@ -1407,12 +1408,14 @@ def set_source_zip_finalize(
 ) -> Path:
     """Finalize a chunked upload: verify checksum and extract.
 
-    Holds the upload's lock (:func:`_upload_lock`) for the whole finalize, so a
-    chunk of the same upload sent meanwhile -- a retry of its last chunk
-    included -- waits instead of renaming a new ``incoming/<id>.zip`` over the
-    path between the steps here. The checksum and the extraction also read one
-    open handle, so the bytes extracted are exactly the bytes hashed whatever
-    happens to the path; see :func:`_finalize_zip_upload`.
+    Holds the upload's lock (:func:`_upload_lock`) only to open the zip and to
+    remove its path afterwards, not while the zip is hashed and extracted: the
+    lock is one of 64 shared by every session, and holding it across up to the
+    size limit of work would starve the delivery pool. The checksum and the
+    extraction read one open handle, so the bytes extracted are exactly the bytes
+    hashed whatever happens to the path meanwhile, and the removal deletes the
+    path only while it still names the file that was read, so a zip a chunk
+    assembled over it meanwhile is kept; see :func:`_finalize_zip_upload`.
 
     Args:
         upload_id: Identifier matching the prior ``set_source_zip_chunk`` calls.
@@ -1437,13 +1440,53 @@ def set_source_zip_finalize(
             this is a client-side packaging error rather than corruption.
     """
 
+    return _finalize_zip_upload(
+        upload_id,
+        expected_sha256,
+        workspace_root=workspace_root,
+        session_id=session_id,
+    )
+
+
+class _ZipRefused(Exception):
+    """A finalized zip the finalize refuses before it extracts anything.
+
+    Raised inside the ``with`` that holds the zip open, so the zip is removed and
+    the refusal raised as a ``ValueError`` only after the handle is closed:
+    Windows does not delete a file that is open.
+    """
+
+
+@contextlib.contextmanager
+def _refusing_after_close(
+    handle: Any, remove_zip: Callable[[], None]
+) -> Iterator[None]:
+    """Hold ``handle`` open; on :class:`_ZipRefused`, close it, ``remove_zip()``, refuse."""
+
+    try:
+        with handle:
+            yield
+    except _ZipRefused as refused:
+        remove_zip()
+        raise ValueError(str(refused)) from None
+
+
+def _remove_zip_still_at(
+    final: Path, opened: os.stat_result, session_id: str, upload_id: str
+) -> None:
+    """Remove ``final`` if it still names the file ``opened`` describes.
+
+    Under the upload's lock, so no chunk of the upload assembles a zip over the
+    path between the comparison and the removal. A zip a chunk assembled over the
+    path while the finalize ran is a different file and is kept.
+    """
+
     with _upload_lock(session_id, upload_id):
-        return _finalize_zip_upload(
-            upload_id,
-            expected_sha256,
-            workspace_root=workspace_root,
-            session_id=session_id,
-        )
+        try:
+            if os.path.samestat(opened, final.stat()):
+                final.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
 
 
 def _finalize_zip_upload(
@@ -1453,29 +1496,38 @@ def _finalize_zip_upload(
     workspace_root: Optional[Path],
     session_id: str,
 ) -> Path:
-    """:func:`set_source_zip_finalize`, once the upload's lock is held."""
+    """:func:`set_source_zip_finalize`: the work behind its docstring."""
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
     session_dir = mark_session_workspace(_session_workspace(root, session_id))
     final = _final_zip_path(session_dir, upload_id)
-    try:
-        handle = final.open("rb")
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            f"no finalized zip for upload_id={upload_id!r} "
-            f"(did the last chunk arrive with last=True?)"
-        ) from None
+    # The lock covers the open only: a chunk of this upload holds it while it
+    # writes the zip, so the zip opened here is a complete one.
+    with _upload_lock(session_id, upload_id):
+        try:
+            handle = final.open("rb")
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"no finalized zip for upload_id={upload_id!r} "
+                f"(did the last chunk arrive with last=True?)"
+            ) from None
+        opened = os.fstat(handle.fileno())
+
+    def remove_zip() -> None:
+        _remove_zip_still_at(final, opened, session_id, upload_id)
 
     # The size check, the checksum and the extraction all read this one handle.
     # A handle names the bytes it was opened on, so what is extracted below is
     # exactly what was hashed, even if the path is unlinked or renamed over
     # meanwhile.
-    with handle:
+    #
+    # A refusal raises _ZipRefused inside the block; _refusing_after_close removes
+    # the zip and raises the ValueError once the handle is closed.
+    with _refusing_after_close(handle, remove_zip):
         # Hard limit on the on-disk zip size.
         actual_size = os.fstat(handle.fileno()).st_size
         if actual_size > _MAX_ZIP_BYTES:
-            final.unlink(missing_ok=True)
-            raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
+            raise _ZipRefused(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
         # Verify checksum before opening the archive.
         digest = hashlib.sha256()
@@ -1483,8 +1535,7 @@ def _finalize_zip_upload(
             digest.update(block)
         actual_sha = digest.hexdigest()
         if actual_sha.lower() != expected_sha256.lower():
-            final.unlink(missing_ok=True)
-            raise ValueError(
+            raise _ZipRefused(
                 f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
             )
 
@@ -1567,9 +1618,9 @@ def _finalize_zip_upload(
 
     _set_session_source_dir(session_id, target)
     # The on-disk zip is no longer needed. Its path is unlinked under the
-    # upload's lock, so what is removed is the zip that was hashed and
+    # upload's lock and only while it still names the file that was hashed and
     # extracted, never one a chunk assembled meanwhile.
-    final.unlink(missing_ok=True)
+    remove_zip()
     return target
 
 

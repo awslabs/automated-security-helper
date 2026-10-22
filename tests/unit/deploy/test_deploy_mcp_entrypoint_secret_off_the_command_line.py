@@ -109,7 +109,7 @@ def _run(
         "ASH_MCP_ALLOWED_HOST": "alb.example.com",
         "ASH_MCP_AUTH_HEADER_NAME": "X-Ash-Token",
         # Only checked for being set; the stand-in python3 answers for the read.
-        "ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN": "probe-secret-arn",
+        "ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN": "probe-secret-arn",  # pragma: allowlist secret
     }
     result = subprocess.run(  # nosec B603 - the committed entrypoint, list argv
         [posix_shell(env), str(script)],
