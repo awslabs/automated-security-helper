@@ -3617,6 +3617,34 @@ def _resolve_config(
                         ),
                         extra=NO_MARKUP,
                     )
+                # A refused config whose files are all the scanned repository's
+                # is refused as a FILE, not as the run: the in-tree config is
+                # advisory, so its invalidity must not veto the operator's
+                # scan. It contributes nothing (no partial parse, no
+                # best-effort keys) and the resolution continues on the
+                # operator/default chain, as if the file were absent. A
+                # refusal after overrides is the operator's own, and a chain
+                # that reaches any file outside the repository is judged the
+                # operator's too, so both still refuse the run. Fail-closed:
+                # with no repository judge, the refusal stands.
+                refused_files = list(refusal.document.chain) or [Path(config_path)]
+                if (
+                    not refusal.after_overrides
+                    and repository_file is not None
+                    and all(repository_file(path) for path in refused_files)
+                ):
+                    ASH_LOGGER.warning(
+                        shown_on_one_line(
+                            "The scanned repository's configuration file was "
+                            "refused and contributes nothing to this "
+                            f"resolution: {refusal}"
+                        ),
+                        extra=NO_MARKUP,
+                    )
+                    config = overlaid_fallback(config)
+                    if config_overrides and config:
+                        return apply_config_overrides(config, config_overrides)
+                    return config
                 raise
             chain.extend(document.chain)
             if merged is not None:
