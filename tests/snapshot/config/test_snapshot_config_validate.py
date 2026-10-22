@@ -55,13 +55,14 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return project
 
 
+# 3 is the exit code a scan gives for a config it refuses; validate gives the same.
+# invalid.yaml's `build_mode: online` is the one value the model refuses; every
+# other problem in it is a warning, because a scan accepts it.
 @pytest.mark.parametrize(
     "config, exit_code",
     [
         pytest.param("valid.yaml", 0, id="valid"),
-        pytest.param("invalid.yaml", 1, id="invalid"),
-        # 3, as `ash scan` exits on a config it cannot load: broken and missing
-        # are not configs with problems (1) but files that do not load.
+        pytest.param("invalid.yaml", 3, id="invalid"),
         pytest.param("broken.yaml", 3, id="broken"),
         pytest.param("missing.yaml", 3, id="missing"),
     ],
@@ -78,8 +79,9 @@ def test_config_validate_numbers_every_error(project_dir):
 
     # Guards the snapshot above against an input that stops exercising a check.
     for expected in (
-        "Missing required top-level field: 'project_name'",
-        "Invalid top-level field 'build'",
+        "Invalid value at 'build.build_mode'",
+        "Top-level field 'project_name' is not set",
+        "Top-level field 'build' is an internal field",
         "Unknown top-level field 'legacy_option'",
         "Duplicate top-level field 'fail_on_findings'",
         "Scanner 'bandit' contains internal-only field 'name'",
@@ -94,9 +96,9 @@ def test_config_validate_numbers_every_error(project_dir):
     "args, exit_code",
     [
         (["valid.yaml"], 0),
-        (["invalid.yaml"], 1),
-        (["missing.yaml"], 1),
-        (["valid.yaml", "--config-overrides", "fail_on_findings=maybe"], 1),
+        (["invalid.yaml"], 3),
+        (["missing.yaml"], 3),
+        (["valid.yaml", "--config-overrides", "fail_on_findings=maybe"], 3),
     ],
     ids=["valid", "invalid", "missing", "bad-override"],
 )

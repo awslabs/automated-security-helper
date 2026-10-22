@@ -96,19 +96,85 @@ ENV PATH="/root/.local/bin:$PATH"
 RUN uv --version
 
 WORKDIR /src
-RUN [ "${INSTALL_ASH_REVISION}" != "LOCAL" ] && \
-    git clone \
-    --branch ${INSTALL_ASH_REVISION} \
-    ${ASH_REPO_CLONE_URL} \
-    . || echo "Skipping clone of repo for LOCAL revision"
 
-# For LOCAL builds the build context is the repo root and supplies all sources.
-# For non-LOCAL builds git clone above already populated /src; the COPY brings
-# in any build-context overrides and is otherwise a no-op for files that only
-# exist in the full repo.
-# Using "COPY . ." instead of targeted globs avoids Podman/buildah errors on
-# glob patterns that match nothing (Docker/Finch silently skip them, Podman doesn't).
-COPY . .
+# The build context, set aside until the step below has decided where the source
+# comes from. "COPY . <dir>" rather than targeted globs: Podman/buildah fail on a
+# glob that matches nothing, where Docker and Finch skip it.
+COPY . /ash-context
+
+# Re-runs the clone below when it has a new value. run_ash_container.py passes
+# ASH_CLONE_DATE_EPOCH=<now> when INSTALL_ASH_REVISION names a branch and the build
+# context is not ASH's source tree, and nothing for LOCAL, a release tag or a commit
+# id. A branch moves, but the clone step is the same command on every build, so
+# without a new value the build cache served the branch's first clone to every later
+# build. Docker passes an ARG to every later RUN of its stage as an environment
+# variable, so a new value is a cache miss for each of them ("Impact on build
+# caching" in the Dockerfile reference). Declared here, directly above the clone, so
+# the steps before it stay cached.
+ARG ASH_CLONE_DATE_EPOCH="-1"
+
+# Where the source comes from, in this order:
+#   - LOCAL: the build context, and nothing is cloned.
+#   - A build context that is ASH's source tree (its pyproject.toml names
+#     automated-security-helper): that tree, and nothing is cloned. ./ash, which
+#     always builds its own checkout, and the CDK image pipeline, which builds its own
+#     clone, both build such a context with a revision other than LOCAL. A clone
+#     there would only be overwritten by the context file by file, so it would buy
+#     nothing but a way to fail.
+#     The name is read as run_ash_container._is_ash_source_tree reads it: the
+#     [project] table's name, parsed as TOML and normalized as
+#     packaging.utils.canonicalize_name does. A grep for one exact line took another
+#     table's `name` line, or one inside a string, for ASH's, and missed ASH's own
+#     name written any other valid way. The base image's python3 (3.12) has tomllib;
+#     tomli is the fallback for an older one, and without either the step clones.
+#     tests/unit/interactions/test_container_clone_step_runs.py runs this step and
+#     _is_ash_source_tree on the same files and requires the same answer.
+#   - A full commit id, built only if a branch or a tag of the repository reaches
+#     it. Package builds record the commit they were built from (hatch_build.py),
+#     and an install from a git URL with no ref records one. The step clones the
+#     repository's branches and tags without file contents (`--filter=blob:none`)
+#     and with nothing checked out, looks for the id among the commits they reach,
+#     and only then checks it out; otherwise it fails with exit 3.
+#     It does not fetch the id itself (`git fetch <url> <id>`): GitHub serves any
+#     object in a repository's fork network by id, a commit that only a fork or a
+#     pull request holds included, so that would build such a commit as ASH. A clone takes
+#     refs/heads/* and refs/tags/*, never refs/pull/*. The lookup is rev-list over
+#     the fetched refs rather than `git merge-base --is-ancestor <id> <ref>`: in a
+#     partial clone, asking about a commit it does not hold makes git fetch that
+#     commit from the remote to answer, as git 2.50 did with a pull request's commit,
+#     and GIT_NO_LAZY_FETCH, which stops that, is newer than this image's git 2.39.
+#     tests/unit/interactions/test_container_clone_step_runs.py runs this against a
+#     local repository with a commit only refs/pull/7/head reaches.
+#     A commit id is the whole value, 40 lowercase hex digits and nothing else. The
+#     value is checked whole, not line by line, so two ids on two lines do not
+#     take this path.
+#   - Anything else, cloned as a branch or a tag. `git clone --branch` takes only
+#     those, so it reaches no pull request's commit either.
+# The context is then copied over /src. A clone that fails fails this step with
+# git's own message, so the build never goes on with the context alone, which from
+# the packaged Dockerfile, whose context holds no pyproject.toml, would fail later
+# at `uv build`.
+RUN if [ "${INSTALL_ASH_REVISION}" = "LOCAL" ]; then \
+        echo "Skipping clone of repo for LOCAL revision"; \
+    elif python3 -c 'import re, sys; \
+            toml = __import__("tomllib" if sys.version_info >= (3, 11) else "tomli"); \
+            name = toml.load(open(sys.argv[1], "rb")).get("project", {}).get("name"); \
+            sys.exit(not (isinstance(name, str) and re.sub(r"[-_.]+", "-", name).lower() == "automated-security-helper"))' \
+            /ash-context/pyproject.toml 2>/dev/null; then \
+        echo "The build context is an ASH checkout; building it instead of cloning ${INSTALL_ASH_REVISION}"; \
+    elif [ "${#INSTALL_ASH_REVISION}" -eq 40 ] && \
+            case "${INSTALL_ASH_REVISION}" in *[!0123456789abcdef]*) false ;; *) true ;; esac; then \
+        git clone --quiet --filter=blob:none --no-checkout "${ASH_REPO_CLONE_URL}" . && \
+        if ! git rev-list --remotes=origin --tags | grep -Fqx "${INSTALL_ASH_REVISION}"; then \
+            echo "${INSTALL_ASH_REVISION} is not on a branch or tag of ${ASH_REPO_CLONE_URL}, so it is not built; pass a branch, a tag, or a commit one of them reaches" >&2; \
+            exit 3; \
+        fi && \
+        git checkout --quiet --detach "${INSTALL_ASH_REVISION}"; \
+    else \
+        git clone --branch "${INSTALL_ASH_REVISION}" "${ASH_REPO_CLONE_URL}" .; \
+    fi && \
+    cp -a /ash-context/. . && \
+    rm -rf /ash-context
 RUN tree .
 RUN git status --short || true
 RUN uv build
@@ -142,7 +208,6 @@ FROM ${BASE_IMAGE} AS core
 # ENV SHELL is unrelated and stays: it is an environment variable for processes in
 # the running container, not the shell `RUN` uses at build time.
 ENV SHELL="bash"
-ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
 ARG OFFLINE_SEMGREP_RULESETS="p/ci"
 ARG ASH_BIN_PATH="/.ash/bin"
@@ -190,7 +255,30 @@ RUN mkdir -p ${HOME}/.ssh && \
 # ruby-dev, which meant removing ruby-dev would have taken the interpreter
 # cfn-nag runs on. Installing it explicitly also marks it manual, so the
 # --auto-remove in the gem build cannot collect it.
-RUN apt-get update && \
+#
+# BUILD_DATE_EPOCH re-runs this step, and every later RUN of the stage, when its value
+# changes. Two of those steps fetch content that goes stale while the step itself
+# stays the same: the `apt-get upgrade` here (OS security updates) and the offline
+# download of the grype database and the semgrep and opengrep rulesets further down.
+# Without a new value both are served from the build cache, and a rebuilt image keeps
+# whatever the build that filled the cache fetched. Docker passes an ARG to every
+# later RUN of its stage as an environment variable, so a new value is a cache miss
+# for each of them whether or not the command reads it ("Impact on build caching" in
+# the Dockerfile reference); this step echoes it so the dependency is visible here.
+#
+# Every entrypoint passes UTC midnight of the current day, in epoch seconds, for
+# online and offline builds alike: run_ash_container.py (ash build-image,
+# --mode container), ./ash, utils/ash_helpers.ps1, the Terraform image pipeline's
+# buildspec and the CDK image build construct (deploy/cdk/lib/ash-image-build.ts).
+# Rebuilds on the same day come from the cache (unless --force, which is --no-cache),
+# so an offline host can rebuild without network once a day has been built. The
+# first build of a new day re-runs the stage from here down, so OS packages and
+# offline databases are at most a day old when built. A plain `docker build` that
+# passes no value gets the default and caches this step for good.
+# tests/unit/test_build_date_reaches_every_build_entrypoint.py holds all of this.
+ARG BUILD_DATE_EPOCH="-1"
+RUN echo "Upgrading OS packages for BUILD_DATE_EPOCH=${BUILD_DATE_EPOCH}" && \
+    apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
     ca-certificates=20250419~deb12u2 \
@@ -615,16 +703,9 @@ RUN find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
 ENV ASH_IN_CONTAINER="YES"
 
 #
-# Build metadata, deliberately last in this stage.
-#
-# BUILD_DATE_EPOCH changes on every invocation - run_ash_container.py passes
-# --build-arg BUILD_DATE_EPOCH=<now>. Referencing it near the top of the stage
-# invalidated every layer below it, so the apt/node/ruby/uv installs, the
-# pinned syft+grype+trivy downloads and `ash dependencies install` were all
-# rebuilt from scratch on every build, and no layer cache of any kind could
-# ever hit. Nothing reads this value at runtime - it is referenced only here
-# and in the ARG declaration - so evaluating it last keeps the metadata while
-# leaving everything above it cacheable.
+# Build metadata, recorded in the image: the BUILD_DATE_EPOCH the build was given
+# (see its ARG above the apt-get upgrade step), or -1 when it was given none. Nothing
+# reads the value at runtime.
 #
 ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 

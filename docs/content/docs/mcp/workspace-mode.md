@@ -76,6 +76,8 @@ The first four arguments mean what they mean for `resolve_ash_workspace`. The re
 | `offline` | Run without network access. |
 | `clean_output` | Remove each project's previous `ash_aggregated_results.json` before scanning. Runs after the confinement check, never before it. |
 
+A scanner that `scanners` or `excluded_scanners` leaves out is `SKIPPED` with a `skipped_reason` naming the parameter (`not named by the scanners parameter`, `excluded from this run (the excluded_scanners parameter)`), and a selection no project could run is refused naming both parameters; a CLI scan names `--scanners` and `--exclude-scanners` instead.
+
 The response carries:
 
 - `scan_ids` — a map from project key to registry scan ID. One entry per project that will actually be scanned.
@@ -90,6 +92,16 @@ The response carries:
 Every existing MCP scan is one directory and one registry entry, so "which scan is this" and "which directory is this" have always been the same question. A workspace scan is one tool call over N directories, so it registers N entries. Each project key in `scan_ids` maps to an ID you can hand to `get_scan_progress` and `get_scan_results` for that project alone.
 
 A project skipped at resolution gets no entry and no ID. A registry entry is a claim that a scan is pending or running on a directory; making that claim for a directory nobody will scan would block a later legitimate scan of the same path and would make `list_active_scans` report work nobody is doing.
+
+`cancel_scan` with one project's ID stops that project the way it stops a single scan. The other projects carry on, and the response reports the cancelled project as `failed`.
+
+### Server limits
+
+The server's `max_concurrent_scans` and `scan_timeout_seconds` (see [Server limits](../mcp-server-guide.md#server-limits)) apply to a workspace scan as to a single one, with the workspace as the unit:
+
+- The workspace scan counts as one scan against `max_concurrent_scans`, however many projects it has. Counted per project, a workspace with more projects than the limit could never start. Beyond the limit it is refused before anything is written, with the same error a `run_ash_scan` gets.
+- Because the whole workspace is one scan, how many of its projects run at once is capped too: at most `min(4, cpu_count)`, the bound a workspace gets when its config sets none. A scanned workspace's `workspace.max_parallel_projects` can lower it but not raise it over MCP. The CLI honors the configured value.
+- `scan_timeout_seconds` covers the whole workspace scan, counted from when it starts running. Past it, every project's entry is marked `failed` with an `error_message` naming the limit, a project that had already finished included (its files on disk are complete), every project still running is stopped, and the call returns `success: false` with `error_category` `operation_timeout` and the `scan_ids`. The unified results file and the workspace reports are not written, unless the limit is reached while they are being written.
 
 ### Progress reporting
 
@@ -110,7 +122,9 @@ Two paths are deliberately **not** subject to the roots:
 - the `.code-workspace` file itself, and
 - the `workspace_config` policy file.
 
-Both are config inputs. `ASH_MCP_ALLOWED_ROOTS` answers "which directories may the server read source from and write an output tree into", and neither of these is that — each is read once, nothing is written near it, and they are supplied by the same caller who supplies `config_path` on `run_ash_scan`, which the roots also leave alone. Confining them would break the ordinary arrangement where workspace definitions sit beside a checkout rather than inside one, and where one policy file governs several checkouts.
+Both are config inputs. `ASH_MCP_ALLOWED_ROOTS` answers "which directories may the server read source from and write an output tree into", and neither of these is that — each is read once, nothing is written near it, and they are supplied by the same caller who supplies `config_path` on `run_ash_scan`, which the roots also leave alone. Confining them would break the ordinary arrangement where workspace definitions sit beside a checkout rather than inside one, and where one policy file governs several checkouts. On a network transport they are checked instead against the directories the session may read config from, as `config_path` is: one outside them is refused with `config_input_not_permitted` and exit code 3 before it is read.
+
+A policy file the workspace root holds, which ASH finds when `workspace_config` is omitted (`.ash-workspace.yaml` and the other names, at the root or in its `.ash/`), is checked as a project's own config is. On a network transport, an entry there that resolves outside the directories the session may read config from, a link to a missing file included, refuses the workspace with `config_input_not_permitted` before anything is read, and the refusal names neither the outside path nor anything in the file. A `.ash` that is itself a link outside those directories is refused the same way before any name in it is looked at, so the answer is the same whatever the directory it leads to holds. On Windows a junction counts as a link. A directory bind-mounted at `.ash`, which takes root to make, can't be told from one of the workspace's own and is looked in.
 
 So a working configuration looks like this:
 
@@ -144,8 +158,9 @@ Both tools return an `exit_code` alongside the standard error keys, carrying the
 |---|---|---|
 | `0` | Success. | — |
 | `2` | Actionable findings above a threshold. The scan ran. | The owners of the projects listed with `exceeds_threshold` true. |
-| `3` | Invalid project config. The workspace is fine and one project's own config is not. | That project's owner. The message names the project. |
-| `4` | Workspace definition, policy, or confinement refusal. | Whoever owns the workspace file or the server's allowed roots. |
+| `3` | Invalid project config. The workspace is fine and one project's own config is not. Also a workspace definition, policy file or project config outside the directories the session may read config from, whether you named it (`workspace_file`, `workspace_config`) or ASH found it (`error_type` `config_input_not_permitted`, the code `run_ash_scan` gives the same refusal), and a link in the output tree, refused before anything is written, as `run_ash_scan` refuses one. | That project's owner, whoever sets the server's config roots, or for a link whoever controls the output directory. The message names the project, the file, or the component that is a link. |
+| `4` | Workspace definition or policy refusal, or a project or output directory outside the allowed roots. | Whoever owns the workspace file or the server's allowed roots. |
+| `5` | Usage error: a `scanners` selection no project can run, or a file where the output directory or a project's `projects/<key>` directory goes (`error_type` `output_dir_not_usable`, `Output directory is not a directory: <path>`, as `run_ash_scan` refuses it), refused before any project is registered, or one of those directories that cannot be created (`Output directory cannot be created: <path> (<reason>)`, the same `error_type`). | The caller, or for a file whoever controls the output directory. |
 | `1` | Internal error — an ASH bug, not your input. | File an issue. |
 
 An unexpected failure is reported as `1` and not as `4` on purpose. Reporting an ASH bug as a workspace error would send you to inspect a workspace file that is correct.

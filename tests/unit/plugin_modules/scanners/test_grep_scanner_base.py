@@ -34,6 +34,27 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
 )
 
 
+@pytest.fixture(autouse=True)
+def no_tool_starts(tmp_path_factory, monkeypatch):
+    """Recording stand-ins first on PATH; no test here may start a tool.
+
+    Building and configuring the two grep scanners probed ``opengrep --version``
+    and ``uv --version`` on the host's tools; the probes are answered as on a host
+    without the tools (``stub_tool_probes``).
+    """
+    from tests.utils.tool_guard import (
+        install_tool_guard,
+        reset_tool_lookup_caches,
+        stub_tool_probes,
+    )
+
+    guard = install_tool_guard(monkeypatch, tmp_path_factory.mktemp("guard-bin"))
+    stub_tool_probes(monkeypatch)
+    yield guard
+    reset_tool_lookup_caches()
+    assert guard.started == [], f"the test started tools: {guard.started}"
+
+
 # ---------------------------------------------------------------------------
 # A minimal test stub. Real subclasses live in semgrep_scanner /
 # opengrep_scanner; this stub is just enough to exercise the shared

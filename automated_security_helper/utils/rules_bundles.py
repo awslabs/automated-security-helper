@@ -150,9 +150,16 @@ def rules_root() -> Path:
     from_env = os.environ.get(RULES_DIR_ENV)
     if from_env:
         return Path(from_env)
-    from automated_security_helper.utils.download_utils import current_bin_path
+    from automated_security_helper.utils.download_utils import (
+        NO_BIN_DIRECTORY,
+        current_bin_path,
+    )
 
-    return current_bin_path().parent.joinpath("share", "cfn-guard-rules")
+    bin_path = current_bin_path()
+    if bin_path is None:
+        # No usable bin directory means no install prefix for rules either.
+        raise RuntimeError(NO_BIN_DIRECTORY)
+    return bin_path.parent.joinpath("share", "cfn-guard-rules")
 
 
 def bundle_dir_name(bundle: "RulesBundle") -> str:

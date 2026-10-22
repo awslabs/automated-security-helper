@@ -40,12 +40,19 @@ class TestTotalFailureIsNotPassed:
 
     @pytest.mark.parametrize(
         "attempted,failed",
-        [(3, 2), (10, 1), (2, 0)],
+        [(3, 2), (10, 1)],
     )
-    def test_partial_failure_is_not_error(self, attempted, failed):
-        # Some targets succeeded, so the scan produced real information. Reporting ERROR here
-        # would make any single unparseable file fail an otherwise good scan.
+    def test_partial_failure_is_error(self, attempted, failed):
+        # Fail-closed over the attempted targets: a target the scanner could not
+        # evaluate carries no verdict, so a clean sibling must not roll the run
+        # up as PASSED. An earlier revision pinned the opposite -- ERROR only
+        # when ALL attempted targets failed -- as the then-current behavior;
+        # the fail-closed rule has since been decided.
         c = _container(targets_attempted=attempted, targets_failed=failed)
+        assert c.determine_status("MEDIUM") == ScannerStatus.ERROR
+
+    def test_no_failures_among_attempts_is_not_error(self):
+        c = _container(targets_attempted=2, targets_failed=0)
         assert c.determine_status("MEDIUM") == ScannerStatus.PASSED
 
     def test_untracked_scanners_keep_existing_behavior(self):
@@ -71,8 +78,12 @@ class TestScanSucceededProperty:
     def test_false_when_everything_failed(self):
         assert _container(targets_attempted=4, targets_failed=4).scan_succeeded is False
 
-    def test_true_when_something_succeeded(self):
-        assert _container(targets_attempted=4, targets_failed=3).scan_succeeded is True
+    def test_false_when_any_target_failed(self):
+        # Fail-closed over the attempted targets: three failed of four is not a
+        # successful execution, however clean the fourth was. An earlier
+        # revision pinned the opposite (False only when ALL attempted targets
+        # failed); the fail-closed rule has since been decided.
+        assert _container(targets_attempted=4, targets_failed=3).scan_succeeded is False
 
     def test_true_when_nothing_was_attempted(self):
         # An empty scan set is not a failure; there was simply nothing to examine.

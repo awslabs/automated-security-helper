@@ -37,6 +37,7 @@ import yaml
 
 from automated_security_helper.utils import content_databases as cdb
 from tests.utils import workflow_commands as wc
+from tests.utils.helpers import checkout_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = REPO_ROOT / "automated_security_helper" / "utils" / "content_databases.py"
@@ -159,6 +160,7 @@ class TestTheCommandLine:
             capture_output=True,
             text=True,
             cwd=str(REPO_ROOT),
+            env=checkout_env(),
             timeout=60,
         )
 
@@ -512,6 +514,18 @@ class TestTheCommandLineInProcess:
         out = capsys.readouterr().out
         assert ("allowed" if code == 0 else "REFUSED") in out
 
+    def test_check_age_help_names_every_exit_code(self, capsys):
+        """A workflow branches on the code, so the help names each one: 2 is a
+        usage error (an unknown name, or a --built that does not parse), not a
+        refusal."""
+        with pytest.raises(SystemExit):
+            cdb.main(["--help"])
+        listing = " ".join(capsys.readouterr().out.split())
+
+        assert "exit 0 if" in listing, listing
+        assert "1 if not" in listing, listing
+        assert "2 for a usage error" in listing, listing
+
     def test_check_age_on_an_unbounded_database_refuses(self, capsys):
         built = datetime.now(UTC).isoformat()
         assert (
@@ -573,3 +587,90 @@ class TestTheCommandLineInProcess:
         assert cdb.go_duration(timedelta(hours=96)) == "96h"
         assert cdb.go_duration(timedelta(hours=1, minutes=2, seconds=3)) == "1h2m3s"
         assert cdb.go_duration(timedelta(seconds=-60)) == "-0h1m0s"
+
+
+class TestTheGrypeStatusErrorIsRedactedBeforeItsCut:
+    def test_a_value_straddling_the_cut_is_hidden_whole(self, monkeypatch):
+        """`grype db status` without a build time raises with the status
+        document quoted, cut at 300 characters: the redaction runs BEFORE
+        the cut, so an env-read value straddling character 300 is hidden
+        whole. The pad is sized so the value CROSSES the cut (checked
+        below): with a longer pad the value sat wholly past 300 and the
+        cut alone hid it, so the cell measured nothing about the order.
+        This pins the site's own order -- reverting only this
+        shown_tool_stderr leaves every other cell green."""
+        from automated_security_helper.utils import content_db_staleness as cds
+
+        value = "Zq7Kx9Lm2Pw4Nv"
+        status = {"schemaVersion": 5, "pad": "p" * 210, "path": value}
+        unredacted = f"`grype db status` reported no build time: {status!r}"
+        start = unredacted.index(value)
+        assert start < 300 < start + len(value), (
+            "premise: the value no longer straddles the 300 cut",
+            start,
+        )
+        monkeypatch.setattr(cds, "_run_json", lambda command, env, values=(): status)
+        ctx = cds.ProbeContext(env={}, executable="grype", values=(value,))
+
+        with pytest.raises(ValueError) as excinfo:
+            cds._built_from_grype(ctx)
+
+        message = str(excinfo.value)
+        assert "reported no build time" in message, message
+        assert "Zq7K" not in message, message
+
+
+class TestTheProbeContextCarriesThePluginsValues:
+    def test_the_hooks_values_reach_the_context(self):
+        """The probe's excerpts are redacted with ProbeContext.values, and
+        the builder wires the plugin's _values_to_redact into it: a context
+        built with values=() leaves every probe excerpt unredacted while
+        every committed cell stays green (the MO2 wiring mutant)."""
+        from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+        class _Scanner:
+            command = ""
+
+            def _values_to_redact(self):
+                return ("Zq7Kx9Lm2Pw4Nv",)
+
+        context = ScannerPluginBase.content_database_probe_context(_Scanner())
+
+        assert context.values == ("Zq7Kx9Lm2Pw4Nv",), context.values
+
+
+class TestARaisingProbeContextHook:
+    def test_the_scan_keeps_its_verdict_and_the_database_is_unmeasurable(self):
+        """content_database_probe_context calls the plugin's overridable
+        _values_to_redact hook and deliberately lets a raise escape: the one
+        caller, assess_scanner, catches it, runs NO probe (so no probe text
+        can print unredacted), and records an unmeasurable verdict for each
+        declared database instead of failing the finished scan. This pins
+        the catch assess_scanner's docstring promises, which is why the
+        builder itself carries no guard."""
+        from automated_security_helper.utils.content_db_staleness import (
+            STALENESS_FAIL,
+            assess_scanner,
+        )
+
+        class _Config:
+            name = "grype"
+
+        class _Scanner:
+            config = _Config()
+
+            def content_databases_in_use(self):
+                return [e for e in cdb.CONTENT_DATABASES if e.scanner == "grype"]
+
+            def content_database_probe_context(self):
+                raise TypeError("hook drift")
+
+        records = assess_scanner(_Scanner(), None, STALENESS_FAIL)
+
+        assert records, "grype declares a database, so a record must exist"
+        for record in records:
+            assert record.built is None
+            assert "could not describe its database" in (record.error or ""), (
+                record.error
+            )
+            assert "TypeError" in record.error, record.error

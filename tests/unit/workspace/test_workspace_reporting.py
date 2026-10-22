@@ -25,6 +25,7 @@ subject here, since it is the shape that broke ``runs[0]``.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -435,6 +436,27 @@ class TestPerProjectReporters:
         _emit(workspace, FakePerProjectReporter)
         entry = _manifest(output_dir)["reporters"]["fake-per-project"]
         assert entry["missing_per_project_artifacts"] == ["web"]
+
+    def test_the_missing_artefact_warning_names_output_formats(self, workspace, caplog):
+        """A project's own ``output_formats`` is a reason its report is absent.
+
+        The warning listed skipped, failed and disabled; a project whose config
+        leaves the reporter out of ``output_formats`` writes nothing for it either,
+        and an operator reading the warning would look everywhere but there.
+        """
+        _, output_dir, _ = workspace
+        (output_dir / "projects" / "web" / REPORTS_DIR_NAME / "ash.ghas.sarif").unlink()
+
+        with caplog.at_level(logging.WARNING):
+            _emit(workspace, FakePerProjectReporter)
+
+        warning = next(
+            record.getMessage()
+            for record in caplog.records
+            if "has no artefact for project(s)" in record.getMessage()
+        )
+        assert "web" in warning
+        assert "output_formats" in warning
 
 
 class _DefaultOffPerProjectConfig(ReporterPluginConfigBase):

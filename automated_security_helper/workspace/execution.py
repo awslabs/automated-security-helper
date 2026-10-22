@@ -165,11 +165,13 @@ fifth project can be recorded as timed out before it has started.
 
 An abandoned worker costs a pool slot permanently
 ------------------------------------------------
-The worker thread is not killed, because Python cannot preempt a thread. So an
-abandoned project keeps its slot for as long as it runs, and the pool
+The worker thread is not killed, because Python cannot preempt a thread. The
+abandon does set the project's cancel event, so a scan that checks its scope
+stops and frees its slot; until that check -- or forever, for a scan that
+never makes one -- the abandoned project keeps its slot, and the pool
 effectively shrinks. Once every slot is held by an abandoned project, nothing
-still queued can ever start, and waiting on it would block on threads that are
-not coming back.
+still queued can ever start, and waiting on it would block on threads that
+may not be coming back.
 
 That was a real defect rather than a theoretical one: the deadline check skipped
 any project with no start time, which is exactly a queued one, so a workspace
@@ -207,6 +209,37 @@ residual case is an in-process scanner stuck in Python. Fixing that properly
 means a subprocess per project, which is a larger change than this phase and
 would move the per-project scan out of ``core/orchestrator.py``.
 
+Stopping a project, or the whole run, from outside
+--------------------------------------------------
+The MCP server runs a workspace scan in its own process, so it stops one the way
+it stops a single scan: cooperatively (core/cancellation.py). It passes
+``cancel_events``, one event per project key. Each project's worker runs inside
+its project's cancel scope, so setting one event stops that project at its next
+check, its running scanner's child process included, and the project is recorded
+FAILED while the others carry on. A project whose event is set before it starts
+does not start. The caller can also run ``execute_workspace`` itself inside a
+cancel scope: once that event is set, the run raises ``ScanCancelled`` before the
+projects start, before the unified results file is written, and before the
+workspace reports, so a run stopped there writes neither. The server's
+``scan_timeout_seconds`` sets every event.
+
+With events, a project abandoned at its ``project_timeout`` has its event set
+too, and the pool is waited for before the run goes on: the abandoned project
+stops as a cancelled one does instead of running on unseen, and the caller can
+hold what it reserved for the run until its scanners have stopped. Its worker
+is then free again, so it does not count toward the bound in "An abandoned
+worker costs a pool slot permanently", which is about workers nothing can stop:
+a project still queued starts on it once the stop is done. Counted, it would fail
+every queued project as never started at a bound of one, the moment the first was
+abandoned, with its worker about to be free.
+
+The CLI passes no events. The pool then builds one per project, chained to the
+submitting thread's ambient scan-wide event when there is one, so an abandoned
+CLI project is stopped the way a cancelled scan stops, and a cancel of the
+whole run reaches CLI projects too. What only caller-given events add is the
+shutdown wait: without them the workspace result does not wait for an
+abandoned project's stop to finish.
+
 The changed-files gate is per project, per repository
 ----------------------------------------------------
 ``--changed-files-only`` is evaluated against each project's own git repository,
@@ -229,8 +262,8 @@ is the wrong one besides: ``<base_ref>...HEAD`` cannot see the staged content a
 pre-commit hook is called about. A diff-scoped precommit needs its own flag and
 ``git diff --cached``.
 
-A project that is not a git repository falls back to a full scan, matching
-``--changed-files-only``'s documented behaviour.
+A project that is not a git repository is scanned with every finding reported,
+matching ``--changed-files-only``'s documented behaviour.
 
 Failure modes and known limitations
 -----------------------------------
@@ -238,11 +271,11 @@ Failure modes and known limitations
 * A project that fails is FAILED, not skipped, and fails the workspace. A project
   that resolution skipped -- missing under ``--allow-missing-projects``, or
   unchanged -- does not, because failing there would make both features useless.
-* Findings are filtered to the changed set with
-  ``run_ash_scan._filter_results_to_changed_files``, imported lazily. The lazy
-  import is what keeps ``workspace`` free of an import-time dependency on
-  ``interactions``; duplicating the filter instead would give two
-  implementations of "is this finding in the changed set" to keep in step.
+* Findings are filtered to the changed set by the project's own scan engine
+  (``changed_files`` on the orchestrator), before its summary counts and
+  reports are written, with the same ``utils.changed_files`` filter
+  single-directory mode uses; two implementations of "is this finding in the
+  changed set" would have to be kept in step.
 * ``max_parallel_projects`` bounds concurrency, and therefore also peak memory:
   the aggregator holds one project's SARIF at a time, so peak is roughly the
   bound times a single scan, not the project count times a single scan.
@@ -255,6 +288,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import json
+import os
 import time
 import contextvars
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -279,11 +313,24 @@ if TYPE_CHECKING:
         ClientConfigRules,
     )
 
+from automated_security_helper.core.cancellation import (
+    CancelEvent,
+    ScanCancelled,
+    cancel_scope,
+    current_cancel_event,
+    link_parent,
+    raise_if_cancelled,
+)
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
+from automated_security_helper.core.scanner_selection import (
+    SelectionOrigin,
+    selection_after_exclusions,
+)
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.core.unified_metrics import recorded_error
 from automated_security_helper.models.core import IgnoreFileExclusions
 from automated_security_helper.models.workspace import (
     SCANNER_EXIT_CODE_UNRECORDED,
@@ -294,20 +341,23 @@ from automated_security_helper.models.workspace import (
     WorkspaceResults,
     workspace_exit_code,
 )
-from automated_security_helper.utils.content_db_staleness import (
-    stale_content_databases,
-)
 from automated_security_helper.utils.get_scan_set import (
     get_changed_files,
     git_repository_root,
+    git_repository_root_problem,
     validate_base_ref,
 )
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+)
 from automated_security_helper.utils.output_dir_links import (
     OutputDirLinkRefused,
     refuse_linked_output_dir,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.scan_source import recorded_scan_source
 from automated_security_helper.utils.secret_masking import (
     exposed_secret_values,
     mask_secret_values_in_text,
@@ -321,10 +371,9 @@ from automated_security_helper.workspace.aggregation import (
     count_actionable_results,
     has_finding_at_min_severity,
     incomplete_converters_for_project,
-    incomplete_scanners_for_project,
     inputs_not_scanned_for_project,
-    no_scanner_ran_for_project,
     rewrite_workspace_block,
+    stale_content_databases_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import (
@@ -374,6 +423,10 @@ class ProjectScanSettings:
     phases: Tuple[str, ...] = ("convert", "scan", "report")
     enabled_scanners: Tuple[str, ...] = ()
     excluded_scanners: Tuple[str, ...] = ()
+    #: Who gave the two selections above: "mcp" from the MCP workspace tool, whose
+    #: SKIPPED rows and selection refusals name its scanners and excluded_scanners
+    #: parameters; "cli" for the flags.
+    selection_origin: SelectionOrigin = "cli"
     output_formats: Tuple[str, ...] = ()
     config_overrides: Tuple[str, ...] = ()
     #: ``config_overrides`` came from an MCP client, not the operator; see
@@ -436,6 +489,12 @@ class ProjectScanSettings:
     #: permits, as for the plan (``resolver.resolve_workspace``'s
     #: ``permit_base``), so a link changed after the plan is refused too.
     config_base_gate: Optional[Callable[[Path], bool]] = None
+    #: Keep each project's previous results until its scan has its own, instead
+    #: of deleting them when it starts (core/previous_results.py). The MCP
+    #: workspace tool sets it, and puts back the previous results of every
+    #: project that did not finish; the CLI does not, and deletes them, as it
+    #: always has.
+    keep_previous_results: bool = False
 
 
 @dataclass
@@ -472,9 +531,12 @@ def workspace_plugin_modules(
 ) -> List[str]:
     """The plugin modules the workspace's scans name, sorted.
 
-    Every active project has the same list by now, so the projects speak for all
-    of them; settings may add more from the CLI. Each entry is split on commas and
+    Every active project has the same list by now (resolution refuses a
+    workspace whose projects disagree), so the projects speak for all of them;
+    settings may add more from the CLI. Each entry is split on commas and
     stripped, the way a scan reads its own list.
+    :func:`prewarm_plugin_registry` loads these, and the workspace report step
+    considers only ASH's built-in reporters and theirs.
     """
     from automated_security_helper.config.plugin_module_trust import (
         split_plugin_modules,
@@ -484,6 +546,54 @@ def workspace_plugin_modules(
     for project in plan.active_projects:
         declared.update(split_plugin_modules(project.ash_plugin_modules))
     return sorted(declared)
+
+
+def workspace_module_names(plan: WorkspacePlan) -> Dict[str, str]:
+    """How one workspace run names its plugin modules: the projects' maps merged.
+
+    ``plugin_module_trust.merged_module_names`` over every active project's
+    ``plugin_module_names``. Used by the prewarm and given to every project's
+    engine, so a name any project read from the environment stays masked in the
+    whole run's output -- a project that writes the same name literally would
+    otherwise print the other project's value from its own engine.
+    """
+    from automated_security_helper.config.plugin_module_trust import (
+        merged_module_names,
+    )
+
+    return merged_module_names(
+        *(
+            getattr(project, "plugin_module_names", None) or {}
+            for project in plan.active_projects
+        )
+    )
+
+
+def _budget_token(limit: Any) -> str:
+    """``project_timeout`` as every timeout message prints its limit
+    (error_text.timeout_limit_token): whole, in its quoted token, '60' s.
+
+    With no values: the workspace block is read from the root's config file,
+    whose strict load refuses a reference to the environment there, so no
+    environment value is this limit.
+    """
+    from automated_security_helper.utils.error_text import timeout_limit_token
+
+    return timeout_limit_token(limit, ())
+
+
+def workspace_environment_values(plan: WorkspacePlan) -> Tuple[str, ...]:
+    """The values and keys every active project's config read from the
+    environment, each once (``ProjectPlan._environment_values``).
+
+    What the prewarm carries on an error it raises, for the run's failure
+    handlers, which hold no project config: a plugin module that crashes at
+    import can quote any of them, not only its own name.
+    """
+    merged: Dict[str, None] = {}
+    for project in plan.active_projects:
+        merged.update(dict.fromkeys(getattr(project, "_environment_values", ())))
+    return tuple(merged)
 
 
 def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) -> int:
@@ -503,6 +613,10 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
     Resolution has already refused any workspace whose projects ask for different
     module sets (see ``resolver._validate_plugin_modules``), so there is exactly
     one set and registering it here is correct for every project.
+    ``plugin_modules`` does not rely on the pre-warm to avoid the
+    concurrent-registration race (another thread registering a key while it
+    iterates the registry would raise ``RuntimeError: dictionary changed size
+    during iteration``): it iterates a copy of the registrations.
 
     This does not change *which* scanners run for a project. Registration and
     selection are separate mechanisms: this fills the registry, each project's
@@ -523,39 +637,87 @@ def prewarm_plugin_registry(plan: WorkspacePlan, settings: ProjectScanSettings) 
     from automated_security_helper.plugins import ash_plugin_manager
     from automated_security_helper.plugins.discovery import discover_plugins
     from automated_security_helper.plugins.loader import (
+        PluginLoadRecord,
         load_additional_plugin_modules,
         load_internal_plugins,
+        refuse_failed_plugin_imports,
         refuse_plugin_modules_outside_namespace,
     )
 
     modules = workspace_plugin_modules(plan, settings)
+    # How the refusal and every log line below name each entry: the run-wide
+    # map, so an entry any project's config read from the environment is
+    # named by its masked form; a name in no map, the command line's, is
+    # named as it is. Each project's engine is given the same map.
+    shown = workspace_module_names(plan)
     # Before anything is imported or any project starts: a name outside the plugin
-    # namespace refuses the workspace with exit 3, as it refuses a single scan.
-    refuse_plugin_modules_outside_namespace(modules)
+    # namespace refuses the workspace with exit 3, as it refuses a single scan,
+    # and nothing is imported.
+    refuse_plugin_modules_outside_namespace(modules, shown=shown)
 
     load_internal_plugins()
     # The run's own --ash-plugin-modules; the rest only the projects name.
     operator, _ = _workspace_plugin_modules(plan, settings)
 
     if modules:
-        ASH_LOGGER.info(f"Loading workspace plugin modules: {modules}")
-        # A named module that does not import refuses the workspace with exit 3,
-        # before any project starts.
-        if operator:
-            load_additional_plugin_modules(operator, fail_on_import_error=True)
-            discover_plugins(plugin_modules=operator)
-        # A module only the projects name is imported as an untrusted config's,
-        # like ScanExecutionEngine imports one, so that a later scan in this
-        # process that does not load it is not offered what it registered. The
-        # plan does not say which project configs are the operator's, so each
-        # project's engine records those its own config trusts
-        # (ash_plugin_manager.trust_plugin_modules) when it is built.
-        for module_name in modules:
-            if module_name in operator:
-                continue
-            with ash_plugin_manager.untrusted_import(module_name):
-                load_additional_plugin_modules([module_name], fail_on_import_error=True)
-                discover_plugins(plugin_modules=[module_name])
+        ASH_LOGGER.info(
+            f"Loading workspace plugin modules: {[shown.get(m, m) for m in modules]}"
+        )
+        # A configured module that fails to import refuses the run with exit 3,
+        # as a single scan does, whatever the selection: without this, --dry-run
+        # exited 0 for a command line the real run refuses, and a --scanners
+        # selection naming the failed module's scanner was answered as a usage
+        # error. One record, scoped to this call: the three workspace callers
+        # all come through here. Raised inside the carrying try below, so the
+        # env-read values ride on the refusal too; the bare raise keeps its
+        # type, so the exit-3 mapping holds.
+        record: PluginLoadRecord = {}
+        # One list for both arms: what the loader redacts recorded text with (a
+        # tolerated import failure never reaches the except arm), and what that
+        # arm carries on an error raised out of this span.
+        environment_values = (
+            *workspace_environment_values(plan),
+            *(name for name, label in shown.items() if label != name),
+        )
+        try:
+            if operator:
+                load_additional_plugin_modules(
+                    operator,
+                    shown=shown,
+                    record=record,
+                    values=environment_values,
+                )
+                discover_plugins(plugin_modules=operator, shown=shown)
+            # A module only the projects name is imported as an untrusted config's,
+            # like ScanExecutionEngine imports one, so that a later scan in this
+            # process that does not load it is not offered what it registered. The
+            # plan does not say which project configs are the operator's, so each
+            # project's engine records those its own config trusts
+            # (ash_plugin_manager.trust_plugin_modules) when it is built.
+            for module_name in modules:
+                if module_name in operator:
+                    continue
+                with ash_plugin_manager.untrusted_import(module_name):
+                    load_additional_plugin_modules(
+                        [module_name],
+                        shown=shown,
+                        record=record,
+                        values=environment_values,
+                    )
+                    discover_plugins(plugin_modules=[module_name], shown=shown)
+            refuse_failed_plugin_imports(modules, record, shown=shown)
+        except Exception as error:
+            # A module that crashes at import can quote its own name, or any
+            # other value a project's config read from the environment, and the
+            # run's failure handler has no project config to redact that text
+            # with: every such value rides on the error
+            # (error_text.carried_environment_values).
+            from automated_security_helper.utils.error_text import (
+                carry_environment_values,
+            )
+
+            carry_environment_values(error, environment_values)
+            raise
     ash_plugin_manager.trust_plugin_modules(operator)
 
     # Resolve once so the memoised list is complete and identical for every
@@ -608,6 +770,84 @@ def workspace_reporter_classes(
     return ash_plugin_manager.plugins_loaded_by({"reporter": reporters}, modules)[
         "reporter"
     ]
+
+
+def refuse_unresolvable_scanner_selection(
+    plan: WorkspacePlan, settings: ProjectScanSettings
+) -> None:
+    """Refuse a ``--scanners`` selection no project could run, before any project starts.
+
+    A single scan makes these two checks inside the scan:
+    ``ScanExecutionEngine`` refuses a selection that ``--exclude-scanners`` cancels,
+    and ``ScanPhase`` one that names no registered scanner. In a workspace each
+    project runs its own scan, and ``_scan_one_project`` records any exception as
+    that project's failure, so a mistyped name ran every project and the workspace
+    exited 1 instead of refusing the command line. Made here instead, once, after
+    :func:`prewarm_plugin_registry` has loaded the one plugin-module set every
+    project shares, with the builders every selection refusal shares --
+    ``core.scanner_selection.selection_after_exclusions`` for the cancelled
+    selection and ``refuse_selection_matching_no_scanner`` for the one that
+    matches nothing -- so the answer is the one each project's scan phase would
+    reach, in the same words, named for the selection's origin. That this
+    refusal lands before any project ran is this function's position in
+    :func:`execute_workspace`, not a sentence of the message.
+
+    Judged against this workspace's plugins only, not the whole registry. The
+    registry is process-wide: in a process that runs more than one scan -- the
+    MCP server above all -- it holds every module any earlier scan, session or
+    tool loaded. Read whole, it would leak another session's scanner names into a
+    refusal the client sees, and would accept a name only another session's
+    plugins provide, which then selects nothing in any project here. The scope is
+    the
+    engine's own: ASH's built-ins plus :func:`workspace_plugin_modules`, through
+    the same ``plugins_of`` filter each project's engine resolves with. A
+    project's config may narrow further, never widen, so this scope refuses
+    nothing a project would run.
+
+    Refused only when the names are certain. A scanner class that declares no
+    name is configured under a name only its built config carries, which this
+    check cannot read, so a selection that matches nothing is deferred to each
+    project's scan phase instead of refused. Every scanner ASH ships declares
+    its name, so for stock ASH the deferral never happens.
+
+    Raises:
+        ScannerSelectionError: For either case; the CLI exits with the usage-error
+            code for it.
+    """
+    from automated_security_helper.base.plugin_config import (
+        declared_plugin_name,
+        split_plugin_names,
+    )
+    from automated_security_helper.core.scanner_selection import (
+        refuse_selection_matching_no_scanner,
+    )
+    from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.loader import plugins_of
+
+    # Split as the engine splits, so `--scanners bandit,semgrep` is two names here
+    # too. Read whole, it was one name no scanner has, and the workspace refused a
+    # selection every single scan accepts.
+    requested = split_plugin_names(settings.enabled_scanners)
+    if not requested:
+        return
+    # The flags for a CLI run, the MCP workspace tool's parameters for its own.
+    remaining = selection_after_exclusions(
+        requested,
+        split_plugin_names(settings.excluded_scanners),
+        settings.selection_origin,
+    )
+    scope = plugins_of(workspace_plugin_modules(plan, settings))
+    declared_names = []
+    for plugin_class in ash_plugin_manager.plugin_modules(
+        "scanner", filter_callback=scope
+    ):
+        declared = declared_plugin_name(plugin_class)
+        if declared is None:
+            return
+        declared_names.append(declared)
+    refuse_selection_matching_no_scanner(
+        remaining, declared_names, settings.selection_origin
+    )
 
 
 def _project_output_dir(settings: ProjectScanSettings, project: ProjectPlan) -> Path:
@@ -683,27 +923,34 @@ def changed_file_set(
 
     Returns:
         ``None`` when the gate does not apply -- either it was not requested, or
-        git could not answer and the documented fallback is a full scan. An empty
-        set when the project is a repository with nothing changed inside it, which
-        is the skip signal. Otherwise the absolute paths of the changed files that
-        lie within the project.
+        git could not answer and the documented fallback is to report every
+        finding. An empty set when the project is a repository with nothing
+        changed inside it, which is the skip signal. Otherwise the absolute paths
+        of the changed files that lie within the project.
     """
     if not settings.changed_files_only:
         return None
 
     project_path = Path(project.path)
-    repository_root = git_repository_root(project_path)
+    # The project's own environment-read values, for the git stderr line a
+    # root-problem clause can quote.
+    values = tuple(getattr(project, "_environment_values", ()) or ())
+    repository_root = git_repository_root(project_path, values=values)
     if repository_root is None:
+        # NO_MARKUP: the problem carries the path and git's own text, and a "[/"
+        # in either is a closing Rich tag that raises instead of printing.
         ASH_LOGGER.warning(
-            f"Project '{project.key}' is not a git repository; scanning it in "
-            f"full rather than by diff."
+            f"Project '{project.key}': "
+            f"{git_repository_root_problem(project_path, values=values)}; "
+            f"reporting all of its findings, not only those in changed files.",
+            extra=NO_MARKUP,
         )
         return None
 
     changed = get_changed_files(base_ref=settings.base_ref, cwd=project_path)
     if changed is None:
         # git is missing, or the base ref does not exist. get_changed_files has
-        # already warned; its documented fallback is a full scan.
+        # already warned; its documented fallback is to report every finding.
         return None
 
     resolved_project = project_path.resolve()
@@ -716,19 +963,50 @@ def changed_file_set(
     return inside
 
 
+def _coverage_fields(results: Any) -> Dict[str, Any]:
+    """The four ``WorkspaceProjectResult`` coverage fields, from one read of *results*.
+
+    The read is ``scan_incompleteness(results, gate=True)``, the object
+    ``_compute_exit_code`` asks the same questions of, so a project's outcome and
+    ``ash --source-dir P`` on it answer from one source. This function makes the
+    call itself, and is its only production consumer, so the choice of ``gate=True``
+    (the facts whatever the gate resolves to; the gate decides ``scan_incomplete``
+    separately) lives here and a test that calls this function exercises it. A
+    workspace project is never one shard of a split (``ProjectScanSettings`` carries
+    no shard fields), so ``one_shard_of_a_split`` is not passed and
+    ``no_scanner_ran`` is the plain set-level answer.
+
+    Imported inside the function because ``run_ash_scan`` imports this module for
+    workspace mode; a module-level import closes that into a cycle.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        scan_incompleteness,
+    )
+
+    coverage = scan_incompleteness(results, gate=True)
+    return {
+        "incomplete_scanners": [name for name, _status in coverage.scanners],
+        "incomplete_scanner_details": dict(coverage.scanners),
+        "partial_coverage_scanners": list(coverage.partial_coverage),
+        "no_scanner_ran": coverage.no_scanner_ran,
+    }
+
+
 def _scan_one_project(
     project: ProjectPlan,
     settings: ProjectScanSettings,
     orchestrator_factory: OrchestratorFactory,
     abandoned: Optional[Event] = None,
+    module_names: Optional[Mapping[str, str]] = None,
 ) -> _ProjectRun:
     """Scan one project in its own scope and reduce it to an outcome plus a run.
 
     Args:
         abandoned: Set by the outer loop when this project has been given up on
-            at its timeout. The worker cannot be interrupted, so it keeps running
-            -- but it checks this before writing, because the workspace has
-            already recorded the project as FAILED and a later write would leave
+            at its timeout. The abandon also sets the project's cancel event,
+            but a scan between scope checks keeps running -- so this is checked
+            before writing, because the workspace has already recorded the
+            project as FAILED and a later write would leave
             ``projects/<key>/ash_aggregated_results.json`` holding real findings
             that the unified file says do not exist.
     """
@@ -774,8 +1052,13 @@ def _scan_one_project(
             source_dir=Path(project.path),
             output_dir=project_output,
             work_dir=project_output / ASH_WORK_DIR_NAME,
+            # The workspace's output directory holds every project's output and
+            # the unified results: for a project at the workspace root it is in
+            # the scanned tree, and it is ASH's own output like project_output.
+            workspace_output_dir=Path(settings.output_dir),
             enabled_scanners=list(settings.enabled_scanners),
             excluded_scanners=list(settings.excluded_scanners),
+            selection_origin=settings.selection_origin,
             # A pre-resolved config, and NOT config_path or config_overrides
             # alongside it -- the orchestrator refuses that combination, because
             # those are inputs to a resolution it is being told to skip. The
@@ -798,9 +1081,18 @@ def _scan_one_project(
             color_system=settings.color_system,
             offline=settings.offline,
             existing_results_path=None,
+            # None or non-empty here: an empty set skipped the project above. The
+            # project's engine drops findings outside these files before its
+            # summary counts and reports are written.
+            changed_files=changed,
+            keep_previous_results=settings.keep_previous_results,
             python_based_plugins_only=settings.python_based_plugins_only,
             ignore_suppressions=settings.ignore_suppressions,
             ash_plugin_modules=list(settings.ash_plugin_modules),
+            # The run-wide naming the prewarm used (workspace_module_names), so
+            # this project's engine never prints a name another project read
+            # from the environment.
+            plugin_module_names=dict(module_names or {}),
             # The project's own identity, so that its per-project reports can say
             # which project they describe. Ten of the nineteen reporters are ruled
             # PER_PROJECT, and that ruling is only honest if the N artefacts are
@@ -809,33 +1101,50 @@ def _scan_one_project(
             metadata={
                 "project_name": project.display_label,
                 "workspace_project": project.key,
+                # As in single-directory mode: True when the changed-files filter
+                # narrows this project's results to this changed-file set, so what
+                # they leave out is not fixed; an explicit False on a full scan.
+                "changed_files_only": changed is not None,
+                # The project's directory within its repository; see
+                # utils/scan_source.py. The container launcher's label names the
+                # workspace mount, not this project.
+                "scan_source": recorded_scan_source(
+                    Path(project.path),
+                    git_repository_root,
+                    os.environ,
+                    workspace_project=True,
+                ),
             },
         )
         results = orchestrator.execute_scan(phases=list(settings.phases))
     except ASHConfigValidationError as exc:
-        ASH_LOGGER.error(f"Project '{project.key}' has an invalid configuration: {exc}")
+        # The label the single-directory CLI prints ("Scan refused" for committed
+        # files in the way), and the text logged as data: a committed file's name
+        # can hold Rich markup. error_text: the error goes to the log, the unified
+        # results and the MCP response, and a pydantic error's own text quotes
+        # the refused input.
+        from automated_security_helper.core.committed_output import refusal_label
+        from automated_security_helper.utils.log import NO_MARKUP
+
+        label = refusal_label(exc)
+        ASH_LOGGER.error(
+            f"Project '{project.key}': {label}: {error_text(exc)}", extra=NO_MARKUP
+        )
         return _failed_outcome(
             project,
             settings,
-            f"invalid configuration: {exc}",
+            f"{label}: {error_text(exc)}",
             invalid_config=True,
             duration_seconds=time.monotonic() - started,
         )
     except Exception as exc:  # noqa: BLE001 -- one project must not sink the workspace
-        ASH_LOGGER.error(f"Project '{project.key}' failed: {exc}")
+        ASH_LOGGER.error(f"Project '{project.key}' failed: {error_text(exc)}")
         return _failed_outcome(
             project,
             settings,
-            f"{type(exc).__name__}: {exc}",
+            f"{type(exc).__name__}: {error_text(exc)}",
             duration_seconds=time.monotonic() - started,
         )
-
-    if changed:
-        from automated_security_helper.interactions.run_ash_scan import (
-            _filter_results_to_changed_files,
-        )
-
-        results = _filter_results_to_changed_files(results, changed, Path(project.path))
 
     # Before _extract_run, so the tag is present in both the model written to
     # projects/<key>/ and the dict carried into the unified file.
@@ -877,27 +1186,28 @@ def _scan_one_project(
     # Without it a project whose scanners never ran reported zero findings and
     # SUCCESS, while `ash --source-dir P` on the same project exited 1 -- the
     # workspace layer mirrored only the threshold pass.
-    incomplete = incomplete_scanners_for_project(results)
-    # Two reads of the completeness question, not one, because the second is not
-    # implied by the first. The per-entry pass has to tolerate SKIPPED -- that is
-    # how --exclude-scanners records work this run was never meant to do -- so a
-    # project in which every entry is SKIPPED clears it having measured nothing.
-    # _compute_exit_code asks both, in this order, and the workspace layer asked
-    # only the first: such a project reported zero findings and SUCCESS while
-    # `ash --source-dir P` on it exited 1.
     #
-    # No shard exclusion here, unlike _compute_exit_code, which excuses one shard
-    # of a split because a shard genuinely can own nothing. A workspace project is
-    # never one shard: ProjectScanSettings carries no shard fields and nothing
-    # under workspace/ passes shard_index or shard_count to an orchestrator, so a
-    # guard for it could not fire and would only imply the case was handled.
-    measured_nothing = no_scanner_ran_for_project(results)
+    # One scan_incompleteness read, taken inside _coverage_fields, supplies four
+    # coverage fields below (the names, the display details, the partial-audit names
+    # and the set-level "nothing ran" answer), so they cannot disagree with each
+    # other or with what _compute_exit_code reads.
+    coverage_fields = _coverage_fields(results)
+    incomplete = coverage_fields["incomplete_scanners"]
+    # The set-level question is not implied by the per-entry list. The per-entry
+    # pass has to tolerate SKIPPED -- that is how --exclude-scanners records work
+    # this run was never meant to do -- so a project in which every entry is SKIPPED
+    # clears it having measured nothing. Without this field such a project reported
+    # zero findings and SUCCESS while `ash --source-dir P` on it exited 1.
+    measured_nothing = coverage_fields["no_scanner_ran"]
     # The converter question _compute_exit_code also asks: a notebook that could
     # not be converted, or a converter that crashed, is coverage the scanners never
     # had. Without it a project inside a workspace passed where `ash --source-dir P`
     # exited 1. Not subject to the policy-scanner exclusion below, which is about
     # scanners a policy added; converters are not added by policy.
     incomplete_conversions = incomplete_converters_for_project(results)
+    # Reported in a field of its own, as a single scan's payload does, and not in
+    # `incomplete` above, which leaves out a scanner listed only for it.
+    stale = stale_content_databases_for_project(results)
     fail_on_incomplete = _resolve_fail_on_incomplete_scanners(settings, results)
     # The same policy_scanners_gate exclusion, applied to the completeness half.
     # Without it the flag is honoured for findings and ignored for the exit code:
@@ -970,14 +1280,17 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=statuses,
-        incomplete_scanners=incomplete,
+        scanner_reasons=_scanner_reasons(
+            results, config_environment_values(resolved_config)
+        ),
+        **coverage_fields,
         # The unified results carry no per-target reports, so without this the
         # merged summaries and the console could not name what went unscanned.
         inputs_not_scanned=inputs_not_scanned_for_project(
             results, project.relative_path
         ),
-        no_scanner_ran=measured_nothing,
         incomplete_converters=incomplete_conversions,
+        stale_content_databases=stale,
         # A stale content database under `content_db_staleness: fail` fails the project
         # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
         # `ash --source-dir P` exits 1 on it, so P inside a workspace must not pass.
@@ -989,7 +1302,7 @@ def _scan_one_project(
             )
             and fail_on_incomplete
         )
-        or bool(stale_content_databases(results, enforced_only=True)),
+        or bool(stale),
         ceiling_unreachable_findings=unreachable,
         ignore_file_exclusions=_ignore_file_exclusions_of(results),
     )
@@ -1546,6 +1859,35 @@ def _remask_results_file(path: Path, values: Set[str], shapes: List[Any]) -> Non
     write_text_atomically(path, model.model_dump_json(indent=2, by_alias=True))
 
 
+def _scanner_reasons(results: Any, values: Iterable[str] = ()) -> Dict[str, str]:
+    """Per-scanner reason for one project's SKIPPED, MISSING and ERROR rows.
+
+    For SKIPPED and MISSING, the row's own skipped_reason or missing_reason,
+    whichever its status takes, as the project's results file has it (the
+    metrics rebuild has already put its "no reason was recorded" wording on a
+    row that had none). For ERROR, which has no reason field, the first error
+    the scanner's reports recorded (``recorded_error``), redacted with *values*,
+    the project config's environment values: a scanner whose constructor raised
+    says so here, where an MCP client reads it. A row with no text to give is
+    left out, so the rollup names only what a project's own row says.
+    """
+    reasons: Dict[str, str] = {}
+    for name, info in (getattr(results, "scanner_results", None) or {}).items():
+        status = getattr(info, "status", None)
+        value = str(getattr(status, "value", status))
+        if value == "SKIPPED":
+            reason = getattr(info, "skipped_reason", None)
+        elif value == "MISSING":
+            reason = getattr(info, "missing_reason", None)
+        elif value == "ERROR":
+            reason = recorded_error(results, str(name), values)
+        else:
+            continue
+        if isinstance(reason, str) and reason:
+            reasons[str(name)] = reason
+    return reasons
+
+
 def _write_project_results(project_output: Path, results: Any) -> None:
     """Write the project's own ``ash_aggregated_results.json``.
 
@@ -1569,6 +1911,7 @@ def execute_workspace(
     *,
     orchestrator_factory: Optional[OrchestratorFactory] = None,
     reporter_classes: Optional[List[type]] = None,
+    cancel_events: Optional[Mapping[str, Event]] = None,
 ) -> WorkspaceRunResult:
     """Scan every active project in *plan* and write the unified results.
 
@@ -1584,6 +1927,13 @@ def execute_workspace(
             plugin modules (:func:`workspace_plugin_modules`), and of those only
             the ones this run's plugin modules load
             (:func:`workspace_reporter_classes`); injected only by tests.
+        cancel_events: Per project key, the event that cancels that project's
+            scan; see "Stopping a project, or the whole run, from outside" in the
+            module docstring. A project with no event gets one the pool builds,
+            chained to the submitting thread's ambient scan-wide event, so it
+            still stops on abandon and on a scan-wide cancel; what only
+            caller-given events add is that the pool waits for their stops at
+            shutdown. None, as the CLI passes, for none.
 
     Returns:
         The unified results path, the process exit code, and the payload. A run
@@ -1604,6 +1954,9 @@ def execute_workspace(
             subclass, when a path a workspace report would be written to is a
             link: before any project is scanned, or when the report step starts if
             the link appeared during the scan).
+        ScanCancelled: When run inside a cancel scope whose event is set, at the
+            first check after it was set: before the projects start, before the
+            unified results file is written, or before the workspace reports.
     """
     if settings.changed_files_only:
         validate_base_ref(settings.base_ref)
@@ -1656,6 +2009,7 @@ def execute_workspace(
             )
             if cls in loaded
         ]
+    refuse_unresolvable_scanner_selection(plan, settings)
 
     reports_requested = _REPORT_PHASE in settings.phases
     if reports_requested:
@@ -1667,11 +2021,9 @@ def execute_workspace(
         # models.workspace's exit-code contract exists to avoid.
         #
         # After prewarm_plugin_registry, and that order is load-bearing rather
-        # than incidental: reading the reporter set from a cold registry would
-        # memoise whatever was resolvable at that moment into
-        # ``_resolved_plugins["reporter"]``, and prewarm would then hand every
-        # project the memoised subset. That is exactly the defect prewarm exists
-        # to fix, reintroduced from the other end.
+        # than incidental: the reporter set read from a cold registry is whatever
+        # was resolvable at that moment, a subset of what prewarm registers, and
+        # the check would then pass or refuse on the wrong set.
         #
         # Gated on the report phase because a reporter that cannot produce a
         # workspace artefact is not an operator's problem until they ask for one.
@@ -1681,6 +2033,7 @@ def execute_workspace(
             output_formats=settings.output_formats,
             python_based_plugins_only=settings.python_based_plugins_only,
             reporter_classes=reporter_classes,
+            plugin_modules=workspace_plugin_modules(plan, settings),
         )
         if refusing:
             raise WorkspaceDefinitionError(
@@ -1699,19 +2052,34 @@ def execute_workspace(
             reporter_classes=reporter_classes,
         )
 
+    raise_if_cancelled()
     bound = min(configured_bound, len(active) or 1)
     ASH_LOGGER.info(
         f"Scanning {len(active)} workspace project(s), "
         f"up to {bound} at a time"
         + (
-            f", {settings.project_timeout}s per project"
+            f", {_budget_token(settings.project_timeout)} per project"
             if settings.project_timeout
             else ""
         )
     )
 
-    collected.update(_run_projects(active, settings, orchestrator_factory, bound))
+    collected.update(
+        _run_projects(
+            active,
+            settings,
+            orchestrator_factory,
+            bound,
+            cancel_events,
+            # One naming of the run's plugin modules for every project's engine,
+            # the map the prewarm named them by.
+            module_names=workspace_module_names(plan),
+        )
+    )
 
+    # Stopped while the projects ran: nothing below runs, so a stopped run writes
+    # no unified results and no workspace reports.
+    raise_if_cancelled()
     # A value one project's secret finding exposed is masked in every project's
     # output, not only its own: one password used by two services is reported in
     # one and passed on a command line in the other. Each project's scan masked
@@ -1767,6 +2135,7 @@ def execute_workspace(
     # impossible for the workspace reports to disagree with it.
     report_outcome: Optional[WorkspaceReportOutcome] = None
     if reports_requested:
+        raise_if_cancelled()
         report_outcome = emit_workspace_reports(
             plan=plan,
             output_dir=output_dir,
@@ -1775,6 +2144,7 @@ def execute_workspace(
             python_based_plugins_only=settings.python_based_plugins_only,
             ignore_suppressions=settings.ignore_suppressions,
             reporter_classes=reporter_classes,
+            plugin_modules=workspace_plugin_modules(plan, settings),
         )
         # After the results file, so the file is restamped when this changes the
         # answer: it records "the process status this run exited with", and a
@@ -1810,12 +2180,45 @@ def _run_projects(
     settings: ProjectScanSettings,
     orchestrator_factory: OrchestratorFactory,
     bound: int,
+    cancel_events: Optional[Mapping[str, Event]] = None,
+    module_names: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, _ProjectRun]:
     """Run the active projects on a bounded pool, honouring per-project deadlines.
+
+    ``module_names`` is the run-wide naming of the plugin modules
+    (:func:`workspace_module_names`), handed to every project's engine.
 
     The deadline is measured from when a project *starts*, which is why the worker
     publishes its own start time. Measuring from submission would time out a
     project that had merely been waiting for a slot.
+
+    Every project runs inside a cancel scope, entered in its worker because a
+    pool thread does not inherit the caller's context. The scope's event is
+    the caller's where ``cancel_events`` gave one, linked on the submitting
+    thread to its ambient scan-wide event; a project without one gets an
+    event the pool builds with that ambient event as its parent
+    (:func:`link_parent`), so a cancel of the whole scan reaches every
+    project either way. A project's ``ScanCancelled`` is its own outcome,
+    FAILED, and not the workspace's: caught here, it does not escape and
+    stop the other projects.
+
+    A project given up on at its ``project_timeout``, or because no worker is
+    left to run it, has its effective event set, so it stops the way a
+    cancelled scan stops, child processes included. With ``cancel_events``
+    its worker then comes back, does not count among the workers lost to
+    abandoned projects that decide when a queued project is given up on, and
+    the pool is waited for before this returns, which is bounded by how long
+    a stop takes. That is what lets the MCP server hold the workspace's
+    max_concurrent_scans slot and its projects' directories until the scanners
+    have stopped: ``project_timeout`` comes from the scanned workspace's own
+    config, and without the wait a short one would leave scanners running
+    outside both server limits. Without ``cancel_events`` (the CLI) an
+    abandoned worker is still stopped through its pool-built event, but the
+    pool is shut down without waiting for the stop to finish, so the
+    workspace result is not delayed by it; the interpreter joins the worker
+    at exit (see the module docstring), and until its scan next checks its
+    scope the worker's slot stays occupied, which is what the give-up
+    bookkeeping below still counts.
     """
     if not active:
         return {}
@@ -1827,12 +2230,52 @@ def _run_projects(
     # up on and stop before writing output the workspace has already contradicted.
     abandoned: Dict[str, Event] = {project.key: Event() for project in active}
 
+    # Each project's effective cancel event, built here on the submitting
+    # thread because the pool worker that enters its scope has no ambient
+    # context for cancel_scope's own linking to read (link_parent's
+    # docstring). A caller-given event is linked to this thread's ambient
+    # scan-wide event; a project without one gets its own, constructed with
+    # that ambient event as its parent, so abandoning it stops it the way a
+    # cancelled scan stops and a scan-wide cancel reaches it. Before this, a
+    # project without a caller event could not be stopped at all.
+    ambient = current_cancel_event()
+    events: Dict[str, Event] = {}
+    for project in active:
+        event = (cancel_events or {}).get(project.key)
+        if event is None:
+            event = CancelEvent(parent=ambient)
+        else:
+            link_parent(event, ambient)
+        events[project.key] = event
+
+    def _cancel(project: ProjectPlan) -> None:
+        """Stop a project given up on, through its effective event."""
+        events[project.key].set()
+
     def worker(project: ProjectPlan) -> _ProjectRun:
         with start_lock:
             start_times[project.key] = time.monotonic()
-        return _scan_one_project(
-            project, settings, orchestrator_factory, abandoned[project.key]
-        )
+        cancel_event = events[project.key]
+        began = time.monotonic()
+        try:
+            with cancel_scope(cancel_event):
+                # A project cancelled while it waited for a worker does not start.
+                raise_if_cancelled()
+                return _scan_one_project(
+                    project,
+                    settings,
+                    orchestrator_factory,
+                    abandoned[project.key],
+                    module_names=module_names,
+                )
+        except ScanCancelled:
+            ASH_LOGGER.info(f"Project '{project.key}' stopped: it was cancelled")
+            return _failed_outcome(
+                project,
+                settings,
+                "cancelled",
+                duration_seconds=time.monotonic() - began,
+            )
 
     pool = ThreadPoolExecutor(max_workers=bound)
     try:
@@ -1845,9 +2288,15 @@ def _run_projects(
         }
         pending: Set[Future] = set(futures)
         timeout = settings.project_timeout
-        # Workers lost to abandoned projects. Each one is a pool slot that will
-        # never come back, because the thread cannot be interrupted.
-        lost_workers = 0
+        # Workers held by abandoned projects whose stop the pool will not wait
+        # for: each is a pool slot that does not come back until the project's
+        # scan next checks its scope. A project with a caller-given event is
+        # not counted: its worker comes back once the stop is done, and the
+        # pool waits for it at shutdown. Counted from the futures, not kept as
+        # a tally, so a worker whose project has since ended counts as free: a
+        # project still queued then starts on it instead of being failed as
+        # never started.
+        unstoppable: List[Future] = []
 
         while pending:
             done, pending = wait(
@@ -1861,7 +2310,7 @@ def _run_projects(
                     collected[project.key] = future.result()
                 except Exception as exc:  # noqa: BLE001 -- worker already guards
                     collected[project.key] = _failed_outcome(
-                        project, settings, f"{type(exc).__name__}: {exc}"
+                        project, settings, f"{type(exc).__name__}: {error_text(exc)}"
                     )
 
             if not timeout:
@@ -1880,24 +2329,32 @@ def _run_projects(
                 if now - begin <= timeout:
                     continue
                 elapsed = now - begin
+                stoppable = (cancel_events or {}).get(project.key) is not None
                 ASH_LOGGER.error(
-                    f"Project '{project.key}' exceeded its {timeout}s budget "
-                    f"after {elapsed:.1f}s and was abandoned. Its worker cannot "
-                    f"be interrupted and will run to completion in the "
-                    f"background."
+                    f"Project '{project.key}' exceeded its {_budget_token(timeout)} "
+                    f"budget after {elapsed:.1f}s and was abandoned. "
+                    + (
+                        "It is being stopped, the way a cancelled scan stops."
+                        if stoppable
+                        else "It is being stopped, the way a cancelled scan "
+                        "stops; the workspace result does not wait for its "
+                        "stop to finish."
+                    )
                 )
                 abandoned[project.key].set()
-                lost_workers += 1
+                if not stoppable:
+                    unstoppable.append(future)
+                _cancel(project)
                 collected[project.key] = _failed_outcome(
                     project,
                     settings,
                     f"timed out after {elapsed:.1f}s, exceeding the "
-                    f"{timeout}s project_timeout budget",
+                    f"{_budget_token(timeout)} project_timeout budget",
                     duration_seconds=elapsed,
                 )
                 pending.discard(future)
 
-            if lost_workers < bound:
+            if sum(1 for held in unstoppable if not held.done()) < bound:
                 continue
 
             # Every worker is held by an abandoned project, so nothing still
@@ -1918,10 +2375,12 @@ def _run_projects(
                 # stops it starting after we have already reported it failed.
                 future.cancel()
                 abandoned[project.key].set()
+                _cancel(project)
                 ASH_LOGGER.error(
                     f"Project '{project.key}' never started: all {bound} worker "
                     f"slot(s) are held by project(s) abandoned at the "
-                    f"{timeout}s project_timeout, and an abandoned worker cannot "
+                    f"{_budget_token(timeout)} project_timeout, and an abandoned "
+                    f"worker cannot "
                     f"be reclaimed. Raise max_parallel_projects, raise "
                     f"project_timeout, or scan the slow project separately."
                 )
@@ -1929,7 +2388,8 @@ def _run_projects(
                     project,
                     settings,
                     f"never started: all {bound} worker slot(s) were held by "
-                    f"project(s) that exceeded the {timeout}s project_timeout",
+                    f"project(s) that exceeded the {_budget_token(timeout)} "
+                    f"project_timeout",
                 )
                 pending.discard(future)
             if pending:
@@ -1938,9 +2398,13 @@ def _run_projects(
                 continue
             break
     finally:
-        # wait=False so an abandoned worker does not delay the workspace result.
-        # The interpreter still joins it at exit; see the module docstring.
-        pool.shutdown(wait=False)
+        # Without caller-given events, wait=False: an abandoned worker is told
+        # to stop through its pool-built event, but its scan may not check its
+        # scope for a while, and waiting would delay the workspace result; the
+        # interpreter still joins it at exit (see the module docstring). With
+        # them every worker was told to stop, and the caller holds its limits
+        # until the stops are done.
+        pool.shutdown(wait=cancel_events is not None)
 
     return collected
 

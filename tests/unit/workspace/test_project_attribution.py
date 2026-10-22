@@ -107,21 +107,42 @@ def _reset_recorder():
 
 
 class TestTheWorkspaceHandsEachProjectItsOwnIdentity:
-    def test_each_project_is_given_its_label_and_key(self, tmp_path):
+    def test_each_project_is_given_its_label_and_key(self, tmp_path, monkeypatch):
         plan = _plan(tmp_path / "ws", ("api", "Payments API"), ("web", "web"))
+        # The workspace is one repository, so each project's scan_source is its
+        # path within it.
+        monkeypatch.setattr(
+            "automated_security_helper.workspace.execution.git_repository_root",
+            lambda path: (tmp_path / "ws").resolve(),
+        )
+        # The stand-in root holds a .git entry, as a repository root does. The
+        # enclosing-repository check reads the real filesystem above tmp_path, so
+        # it is stood in for as well.
+        (tmp_path / "ws" / ".git").mkdir()
+        monkeypatch.setattr(
+            "automated_security_helper.utils.scan_source.repository_is_nested",
+            lambda root: False,
+        )
         execute_workspace(
             plan,
             ProjectScanSettings(output_dir=tmp_path / "out", phases=("scan",)),
             orchestrator_factory=_RecordingOrchestrator.create,
         )
 
+        # changed_files_only and scan_source are recorded for the
+        # aws-security-hub reporter; see
+        # tests/unit/interactions/test_changed_files_scan_marker.py.
         assert _RecordingOrchestrator.seen["api"] == {
             "project_name": "Payments API",
             WORKSPACE_PROJECT_KEY: "api",
+            "changed_files_only": False,
+            "scan_source": "api",
         }
         assert _RecordingOrchestrator.seen["web"] == {
             "project_name": "web",
             WORKSPACE_PROJECT_KEY: "web",
+            "changed_files_only": False,
+            "scan_source": "web",
         }
 
     def test_two_projects_never_receive_the_same_identity(self, tmp_path):
@@ -175,12 +196,16 @@ class TestTheOrchestratorHonoursWhatItIsHanded:
         assert metadata.project_name == "Payments API"
         assert getattr(metadata, WORKSPACE_PROJECT_KEY) == "api"
 
-    def test_no_metadata_leaves_the_defaults_alone(self, tmp_path):
-        """A single-directory scan is unchanged, so no existing output moves."""
+    def test_no_metadata_leaves_the_configured_name_alone(self, tmp_path):
+        """A single-directory scan is named by its config and has no project key.
+
+        It is not the model's placeholder "ASH";
+        test_reports_name_the_configured_project covers the naming.
+        """
         orchestrator = self._orchestrator(tmp_path, None)
         metadata = orchestrator.execution_engine._asharp_model.metadata
 
-        assert metadata.project_name == "ASH"
+        assert metadata.project_name == orchestrator.config.project_name
         assert getattr(metadata, WORKSPACE_PROJECT_KEY, None) is None
 
     def test_an_empty_name_is_refused_rather_than_written(self, tmp_path):
@@ -188,11 +213,12 @@ class TestTheOrchestratorHonoursWhatItIsHanded:
 
         Assigning past a pydantic validator is easy to do by accident and the
         result is a model that cannot be serialised later, a long way from the
-        assignment. Better to ignore an unusable value here and keep the default.
+        assignment. Better to ignore an unusable value here and keep the configured name.
         """
         orchestrator = self._orchestrator(tmp_path, {"project_name": "   "})
         assert (
-            orchestrator.execution_engine._asharp_model.metadata.project_name == "ASH"
+            orchestrator.execution_engine._asharp_model.metadata.project_name
+            == orchestrator.config.project_name
         )
 
 

@@ -4,11 +4,24 @@ import random
 import threading
 import time
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 import botocore.exceptions
 
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.redacted_model import value_tuple
 
 # Type variable for the return type of the function
 T = TypeVar("T")
@@ -198,13 +211,16 @@ def retry_with_backoff(
     return decorator
 
 
-def get_available_models(bedrock_client: Any) -> List[Dict[str, Any]]:
+def get_available_models(
+    bedrock_client: Any, values: Iterable[str] = ()
+) -> List[Dict[str, Any]]:
     """Get available foundation models in the current region
 
     Returns:
         List of available models with their details, including inference profile ARNs for models
         that only support inference profiles
     """
+    values = list(value_tuple(values))
     try:
         final_model_list = []
         inference_profiles = bedrock_client.list_inference_profiles()
@@ -260,11 +276,17 @@ def get_available_models(bedrock_client: Any) -> List[Dict[str, Any]]:
         error_code = e.response.get("Error", {}).get("Code")
         error_message = e.response.get("Error", {}).get("Message")
         ASH_LOGGER.warning(
-            f"Bedrock API error when getting available models ({error_code}): {error_message}"
+            text_without_values(
+                f"Bedrock API error when getting available models "
+                f"({error_code}): {error_message}",
+                values,
+            )
         )
         return []
     except Exception as e:
-        ASH_LOGGER.warning(f"Unexpected error getting available models: {str(e)}")
+        ASH_LOGGER.warning(
+            f"Unexpected error getting available models: {error_text(e, values)}"
+        )
         return []
 
 
@@ -331,7 +353,10 @@ def get_fallback_model(current_model_id: str) -> Optional[str]:
 
 
 def validate_bedrock_model(
-    bedrock_client: Any, model_id: str, label: Optional[str] = None
+    bedrock_client: Any,
+    model_id: str,
+    label: Optional[str] = None,
+    values: Iterable[str] = (),
 ) -> tuple[bool, Optional[str]]:
     """
     Validate that a Bedrock model is available and accessible.
@@ -342,14 +367,19 @@ def validate_bedrock_model(
         label: How the log lines and the error message name the model, when not
             by its ID: the reference a config file wrote for an ID it read from
             the environment (config/environment_record.py).
+        values: The values and keys the caller's config read from the
+            environment, as for ``error_text``. The model id is a configured
+            value, so every line logged here and every returned error string
+            (the caller records them) is redacted with these.
 
     Returns:
         Tuple of (is_valid, error_message)
     """
     shown = label or model_id
+    values = list(value_tuple(values))
     try:
         # Get all available models
-        available_models = get_available_models(bedrock_client)
+        available_models = get_available_models(bedrock_client, values)
         if not available_models:
             ASH_LOGGER.warning("No available models found in the current region")
             return False, "No available models found in the current region"
@@ -359,15 +389,18 @@ def validate_bedrock_model(
 
         # Check if the requested model is in the available models
         if model_id in available_model_ids:
-            ASH_LOGGER.debug(f"Model {shown} is available")
+            ASH_LOGGER.debug(text_without_values(f"Model {shown} is available", values))
             return True, None
 
         # If model not found directly, try to find a matching model ID (case insensitive)
         for available_id in available_model_ids:
             if available_id and model_id and available_id.lower() == model_id.lower():
                 ASH_LOGGER.debug(
-                    f"Found model {available_id if label is None else 'one'} "
-                    f"matching {shown} (case insensitive)"
+                    text_without_values(
+                        f"Found model {available_id if label is None else 'one'} "
+                        f"matching {shown} (case insensitive)",
+                        values,
+                    )
                 )
                 return True, None
 
@@ -377,27 +410,46 @@ def validate_bedrock_model(
                 model.get("inferenceType") == "INFERENCE_PROFILE"
                 and model.get("modelId") == model_id
             ):
-                ASH_LOGGER.debug(f"Model {shown} is available as an inference profile")
+                ASH_LOGGER.debug(
+                    text_without_values(
+                        f"Model {shown} is available as an inference profile",
+                        values,
+                    )
+                )
                 return True, None
 
         # Model not found in available models
         ASH_LOGGER.warning(
-            f"Model {shown} not found in available models: {available_model_ids}"
+            text_without_values(
+                f"Model {shown} not found in available models: {available_model_ids}",
+                values,
+            )
         )
-        return False, f"Model {shown} not found in available models"
+        return False, text_without_values(
+            f"Model {shown} not found in available models", values
+        )
 
     except botocore.exceptions.ClientError as e:
         error_code = e.response.get("Error", {}).get("Code")
         error_message = e.response.get("Error", {}).get("Message")
 
-        ASH_LOGGER.warning(f"Bedrock API error ({error_code}): {error_message}")
+        ASH_LOGGER.warning(
+            text_without_values(
+                f"Bedrock API error ({error_code}): {error_message}", values
+            )
+        )
 
         if error_code == "AccessDeniedException":
-            return False, f"Access denied to model {shown}: {error_message}"
+            reason = f"Access denied to model {shown}: {error_message}"
         elif error_code == "ResourceNotFoundException":
-            return False, f"Model {shown} not found: {error_message}"
+            reason = f"Model {shown} not found: {error_message}"
         else:
-            return False, f"Error validating model {shown}: {error_message}"
+            reason = f"Error validating model {shown}: {error_message}"
+        return False, text_without_values(reason, values)
     except Exception as e:
-        ASH_LOGGER.warning(f"Unexpected error validating model {shown}: {str(e)}")
-        return False, f"Unexpected error validating model {shown}: {str(e)}"
+        described = text_without_values(
+            f"Unexpected error validating model {shown}: {error_text(e, values)}",
+            values,
+        )
+        ASH_LOGGER.warning(described)
+        return False, described

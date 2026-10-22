@@ -33,6 +33,7 @@ import pytest
 
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.utils.subprocess_utils import find_executable
+from tests.utils.helpers import ash_tool_not_found_reason
 
 RULE_DIR = ASH_ASSETS_DIR.joinpath("appsec_cfn_rules")
 FIXTURE = (
@@ -63,7 +64,7 @@ def _cfn_nag_scan() -> str:
             "RUN where cfn-nag is provisioned: it is the only test that executes the "
             "shipped Ruby rules at all."
         )
-    pytest.skip("cfn_nag_scan is not installed on this machine")
+    pytest.skip(ash_tool_not_found_reason("cfn_nag_scan"))
 
 
 def _run(*extra: str) -> subprocess.CompletedProcess:

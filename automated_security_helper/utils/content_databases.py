@@ -370,16 +370,13 @@ CONTENT_DATABASES: tuple[ContentDatabase, ...] = (
 #: database whose age matters, each with the reason. A scanner of that strategy that is in
 #: neither this table nor ``CONTENT_DATABASES`` fails
 #: ``tests/unit/utils/test_content_db_staleness.py``, so a new database-reading scanner cannot
-#: arrive without a bound.
+#: arrive without a bound. npm-audit is not here: it reads its advisories from the registry
+#: at scan time and does not run offline (``OfflineStrategy.SKIP_OFFLINE``).
 SCANNERS_WITHOUT_CONTENT_DATABASE: dict[str, str] = {
     "checkov": (
         "its policies ship inside the checkov package ASH pins, so they age with the "
         "package version rather than with a separately downloaded database; offline mode "
         "only stops it fetching platform policies"
-    ),
-    "npm-audit": (
-        "advisories come from the npm registry's audit endpoint at scan time; npm keeps no "
-        "local advisory database for offline mode to read"
     ),
     "syft": (
         "it catalogs packages and matches nothing against advisories; offline mode only "
@@ -502,7 +499,11 @@ def main(argv: list[str] | None = None) -> int:
     p_key.add_argument("name")
     p_check = sub.add_parser(
         "check-age",
-        help="exit 0 if a database built at --built may be used or saved now, 1 if not",
+        help=(
+            "exit 0 if a database built at --built may be used or saved now, 1 if "
+            "not, 2 for a usage error (an unknown name, or a --built that is not an "
+            "RFC 3339 timestamp)"
+        ),
     )
     p_check.add_argument("name")
     p_check.add_argument("--built", required=True, help="RFC 3339 build timestamp")
@@ -514,26 +515,33 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_env.add_argument("name")
     args = parser.parse_args(argv)
+    # Here rather than at the top: this module imports nothing but the standard
+    # library, so the drift gate can load it by path and CI can run it before ASH's
+    # dependencies are installed. terminal_text is the standard library only too.
+    from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
     try:
         entry = get(args.name)
     except KeyError as exc:
-        print(exc.args[0], file=sys.stderr)
+        # Quotes the name as given, which CI passes in.
+        print(shown_not_obeyed(exc.args[0]), file=sys.stderr)
         return 2
     now = datetime.now(timezone.utc)
 
     if args.command == "cache-key":
         if not entry.cacheable:
             print(
-                f"{entry.name} is not declared cacheable in CI and must not be cached",
+                shown_not_obeyed(
+                    f"{entry.name} is not declared cacheable in CI and must not be cached"
+                ),
                 file=sys.stderr,
             )
             return 2
-        print(cache_key_suffix(entry, now))
+        print(cache_key_suffix(entry, now))  # print-ok: the bucket CI keys on
         return 0
     if args.command == "bound-env":
         for name, value in entry.bound_env.items():
-            print(f"{name}={value}")
+            print(f"{name}={value}")  # print-ok: lines CI reads, from the table
         return 0
 
     # The value comes from the database's own metadata, and the workflows print this
@@ -544,8 +552,10 @@ def main(argv: list[str] | None = None) -> int:
         built = parse_timestamp(args.built)
     except ValueError:
         print(
-            "--built is not an RFC 3339 timestamp with a timezone, so the database's "
-            "age cannot be checked; it is neither used nor saved.",
+            shown_not_obeyed(
+                "--built is not an RFC 3339 timestamp with a timezone, so the "
+                "database's age cannot be checked; it is neither used nor saved."
+            ),
             file=sys.stderr,
         )
         return 2
@@ -561,8 +571,10 @@ def main(argv: list[str] | None = None) -> int:
     verdict = "allowed" if allowed else "REFUSED"
     limit_text = go_duration(limit) if limit is not None else "not cacheable in CI"
     print(
-        f"{entry.name}: built {built.isoformat()}, {go_duration(age)} old; "
-        f"{args.purpose} {verdict} (limit {limit_text})"
+        shown_not_obeyed(
+            f"{entry.name}: built {built.isoformat()}, {go_duration(age)} old; "
+            f"{args.purpose} {verdict} (limit {limit_text})"
+        )
     )
     return 0 if allowed else 1
 

@@ -690,3 +690,28 @@ class TestDescribeScannerProbeFallback:
         assert entry["dependencies_satisfied"] is None
         assert entry["version"] is None
         assert recorder == []  # could not determine reachability; no probe
+
+
+def test_concurrent_inventory_keeps_the_order_it_was_given(monkeypatch):
+    """check_installation describes the scanners side by side; the order holds."""
+    import threading
+    import time
+
+    from automated_security_helper.core import scanner_inventory
+
+    classes = [type(f"Scanner{n}", (), {}) for n in range(4)]
+    threads = set()
+
+    def describe(cls, context, default_config):
+        threads.add(threading.get_ident())
+        # The first scanner finishes last, so a result list built in completion
+        # order would come back reversed.
+        time.sleep(0.05 * (len(classes) - classes.index(cls)))
+        return {"name": cls.__name__}
+
+    monkeypatch.setattr(scanner_inventory, "describe_scanner", describe)
+
+    listed = scanner_inventory.list_scanner_inventory(lambda: classes, concurrent=True)
+
+    assert [entry["name"] for entry in listed] == [c.__name__ for c in classes]
+    assert len(threads) > 1, "the scanners were not described concurrently"

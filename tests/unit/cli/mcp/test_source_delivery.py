@@ -17,6 +17,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from automated_security_helper.cli.mcp import source_delivery as sd
+from automated_security_helper.utils.git_command import GIT_SAFETY_OPTIONS
 
 
 _SESSION = "session-test"
@@ -171,6 +172,44 @@ class TestSetSourceGit:
         assert clone[at + 4] == "https://example.com/foo.git"
         # Workspace was recorded.
         assert sd.get_session_source_dir(_SESSION) == target
+        sd.clear_source(_SESSION, workspace_root=tmp_path)
+
+    def test_every_git_run_gets_no_stdin(self, tmp_path):
+        """A clone source can be a repository on this machine, and git reads the
+        files it names: cloning a linked worktree whose admin commondir was
+        linked to /dev/stdin, git waited on an open stdin (git 2.50.1, measured)
+        and returned at once on /dev/null. On the stdio transport the server's
+        stdin carries the client's requests."""
+        seen = []
+
+        def fake_run(cmd, **kw):
+            seen.append((cmd, kw))
+            res = MagicMock()
+            res.returncode = 0
+            res.stdout = ""
+            res.stderr = ""
+            return res
+
+        with patch.object(sd, "_run_git", side_effect=fake_run):
+            sd.set_source_git(
+                url="https://example.com/foo.git",
+                ref="main",
+                workspace_root=tmp_path,
+                session_id=_SESSION,
+            )
+
+        # Past git and git_argv's options, then past -C <dir> where it is given.
+        subcommands = []
+        for cmd, _ in seen:
+            rest = cmd[1 + len(GIT_SAFETY_OPTIONS) :]
+            subcommands.append(rest[0] if rest[0] != "-C" else rest[2])
+        assert subcommands == ["clone", "fetch", "checkout"]
+        # The no-stdin rule moved inside the runner: _run_git opens every git
+        # process with stdin=subprocess.DEVNULL itself, so it is pinned at the
+        # source rather than observed at this seam.
+        import inspect
+
+        assert "stdin=subprocess.DEVNULL" in inspect.getsource(sd._run_git)
         sd.clear_source(_SESSION, workspace_root=tmp_path)
 
     def test_clone_failure_raises_runtime_error(self, tmp_path):

@@ -3,6 +3,7 @@ additional_reports:
     source:
       duration: 1.25
       end_time: '2026-01-15T12:00:01.250000Z'
+      exit_code: 0
       finding_count: 2
       metadata:
         scanner_version: 1.8.6
@@ -28,6 +29,7 @@ additional_reports:
       errors:
       - 'infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation
         template'
+      exit_code: 1
       finding_count: 0
       metadata:
         scanner_version: 0.8.10
@@ -44,6 +46,7 @@ additional_reports:
     source:
       duration: 7.5
       end_time: '2026-01-15T12:00:08.750000Z'
+      exit_code: 0
       finding_count: 4
       metadata:
         scanner_version: 3.2.469
@@ -61,6 +64,7 @@ additional_reports:
     source:
       duration: 0.5
       end_time: '2026-01-15T12:00:13.250000Z'
+      exit_code: 0
       finding_count: 1
       metadata:
         scanner_version: 1.5.0
@@ -76,6 +80,7 @@ additional_reports:
     source:
       duration: 3.0
       end_time: '2026-01-15T12:00:16.250000Z'
+      exit_code: 0
       finding_count: 2
       metadata:
         scanner_version: 0.100.0
@@ -98,6 +103,7 @@ additional_reports:
     source:
       duration: 4.0
       end_time: '2026-01-15T12:00:12.750000Z'
+      exit_code: 0
       finding_count: 2
       metadata:
         scanner_version: 1.140.0
@@ -114,6 +120,7 @@ additional_reports:
     source:
       duration: 2.0
       end_time: '2026-01-15T12:00:18.250000Z'
+      exit_code: 0
       metadata:
         scanner_version: 1.33.0
       report_type: cyclonedx
@@ -300,6 +307,7 @@ ash_config:
     shutdown_timeout_seconds: 30
     task_count_warning_threshold: 15
     thread_pool_max_workers: 4
+  output_formats: []
   project_name: snapshot-fixture
   reporters:
     csv:
@@ -426,6 +434,7 @@ ash_config:
         excluded_paths: []
         ignore_nosec: false
         install_timeout: 300
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
         tool_version: '>=1.7.0,<2.0.0'
@@ -440,6 +449,7 @@ ash_config:
           NIST80053R4Checks: false
           NIST80053R5Checks: false
           PCIDSS321Checks: false
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
     cfn-guard:
@@ -468,6 +478,7 @@ ash_config:
       enabled: true
       name: cfn-nag
       options:
+        offline: false
         scan_timeout: 1800
         severity_threshold: null
     checkov:
@@ -492,6 +503,8 @@ ash_config:
       name: detect-secrets
       options:
         baseline_file: null
+        max_worker_output_mib: 256
+        offline: false
         scan_settings:
           filters_used: []
           generated_at: null
@@ -782,7 +795,7 @@ metadata:
   inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: ASH
-  report_id: ASH-20260115
+  report_id: ASH-20260115120000-000000000001
   shard: null
   summary_stats:
     actionable: 6
@@ -2156,7 +2169,7 @@ sarif:
             tool_invocation:
               duration: 0.25
               end_time: '2026-01-15T12:00:18.500000+00:00'
-              exit_code: 0
+              exit_code: 1
               start_time: '2026-01-15T12:00:18.250000+00:00'
             tool_name: cfn-nag
             tool_version: 0.8.10
@@ -2192,6 +2205,7 @@ scanner_results:
       low: 1
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: FAILED
     suppressed_finding_count: 0
   cdk-nag:
@@ -2199,7 +2213,7 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.0
     excluded: true
-    exit_code: 0
+    exit_code: null
     finding_count: 0
     missing_reason: null
     severity_counts:
@@ -2209,6 +2223,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: left out of this run
     status: SKIPPED
     suppressed_finding_count: 0
   cfn-nag:
@@ -2216,7 +2231,7 @@ scanner_results:
     dependencies_satisfied: true
     duration: 0.25
     excluded: false
-    exit_code: 0
+    exit_code: 1
     finding_count: 0
     missing_reason: null
     severity_counts:
@@ -2226,6 +2241,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: ERROR
     suppressed_finding_count: 0
   checkov:
@@ -2243,6 +2259,7 @@ scanner_results:
       low: 1
       medium: 2
       suppressed: 0
+    skipped_reason: null
     status: FAILED
     suppressed_finding_count: 0
   detect-secrets:
@@ -2260,6 +2277,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 1
+    skipped_reason: null
     status: PASSED
     suppressed_finding_count: 1
   grype:
@@ -2277,6 +2295,7 @@ scanner_results:
       low: 0
       medium: 1
       suppressed: 0
+    skipped_reason: null
     status: FAILED
     suppressed_finding_count: 0
   npm-audit:
@@ -2284,9 +2303,10 @@ scanner_results:
     dependencies_satisfied: false
     duration: 0.0
     excluded: false
-    exit_code: 0
+    exit_code: null
     finding_count: 0
-    missing_reason: null
+    missing_reason: its dependencies were not available; no reason was recorded, and
+      ash.log has the scanner's own message
     severity_counts:
       critical: 0
       high: 0
@@ -2294,6 +2314,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: MISSING
     suppressed_finding_count: 0
   semgrep:
@@ -2311,6 +2332,7 @@ scanner_results:
       low: 1
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: PASSED
     suppressed_finding_count: 0
   syft:
@@ -2328,6 +2350,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: PASSED
     suppressed_finding_count: 0
 secret_value_shapes:

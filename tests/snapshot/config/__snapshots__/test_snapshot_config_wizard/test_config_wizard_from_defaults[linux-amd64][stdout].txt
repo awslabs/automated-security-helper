@@ -81,8 +81,7 @@ Output format configuration
   Enable yaml? [y/N]: y
 
 Offline mode
-  Offline mode skips tool installation. Set the ASH_OFFLINE environment variable at runtime to
-activate it.
+  Offline mode skips tool installation. Set the ASH_OFFLINE environment variable at runtime to activate it.
   Set ASH_OFFLINE=YES in the generated config comments as a reminder? [y/N]: y
 
 Community plugin modules
@@ -90,6 +89,6 @@ Community plugin modules
   Add a plugin module (blank to finish): my_org.ash_plugins
   Add a plugin module (blank to finish):
 ╭────────────────────────────────────────────── Done ──────────────────────────────────────────────╮
-│ Config written to <WORKSPACE>/.ash/.ash.yaml                                                     │
+│ Config written to <WORKSPACE>/.ashrc.yaml                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 0]

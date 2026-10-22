@@ -30,6 +30,7 @@ import pytest
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
 from automated_security_helper.utils.subprocess_utils import find_executable
+from tests.utils.helpers import ash_tool_not_found_reason, checkout_env
 
 pytestmark = pytest.mark.integration
 
@@ -123,12 +124,13 @@ def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
             "--sandbox",
             mode,
             "--no-progress",
-            "--fail-on-findings",
-            "false",
+            # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
+            # takes no extra arguments.
+            "--no-fail-on-findings",
             "--config-overrides",
             "ash_plugin_modules=[automated_security_helper.plugin_modules.ash_trivy_plugins]",
         ],
-        env=env,
+        env=checkout_env(env),
         capture_output=True,
         text=True,
         timeout=900,
@@ -156,12 +158,19 @@ def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
     return found
 
 
-@pytest.mark.parametrize("backend", ["bwrap", "firejail", "landlock"])
+@pytest.mark.parametrize(
+    "backend",
+    [
+        pytest.param("bwrap", marks=pytest.mark.requires_userns),
+        "firejail",
+        "landlock",
+    ],
+)
 def test_a_jar_and_a_stale_java_database_change_nothing_in_the_sandbox(
     tmp_path, backend
 ):
     if not find_executable("trivy"):
-        pytest.skip("trivy is not installed")
+        pytest.skip(ash_tool_not_found_reason("trivy"))
     _require(backend)
     repo = _fixture_repo(tmp_path)
     cache = tmp_path / "trivy-cache"

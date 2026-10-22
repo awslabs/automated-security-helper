@@ -37,6 +37,15 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scann
     SemgrepScannerConfigOptions,
 )
 from automated_security_helper.core.exceptions import ScannerError
+from tests.utils.tool_guard import stub_tool_probes
+
+
+@pytest.fixture(autouse=True)
+def _no_tool_probe(monkeypatch):
+    """Building the scanner probed uv and ran ``uv tool run ... semgrep --version``;
+    these tests are about the rule cache, and answer the probes as a host without
+    semgrep would."""
+    stub_tool_probes(monkeypatch)
 
 
 def _make_scanner(test_plugin_context):

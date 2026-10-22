@@ -68,6 +68,27 @@ def _row(model: AshAggregatedResults, key: str) -> dict:
 
 
 class TestIncompleteScanIsNotPassed:
+    def test_a_stale_database_is_named_in_its_own_note(self):
+        """A scanner listed only for a stale database is not in incomplete_scanners.
+
+        So the row names the database, as a single scan's console does, rather than
+        reading FAILED (incomplete) with nothing to say why.
+        """
+        model = _model(
+            _project(
+                "svc",
+                scan_incomplete=True,
+                incomplete_scanners=[],
+                stale_content_databases=[{"name": "grype-db", "scanner": "grype"}],
+            )
+        )
+
+        row = _row(model, "svc")
+
+        assert row["result"].startswith("FAILED"), row
+        assert "stale content database: grype-db" in row["detail"], row
+        assert "did not complete" not in row["detail"], row
+
     def test_incomplete_project_does_not_render_passed(self):
         """The fixture the cascade had no arm for: incomplete, no error, under threshold."""
         model = _model(

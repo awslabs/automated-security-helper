@@ -70,37 +70,37 @@ The testing framework provides a utility to run tests related to changed files:
 
 ```bash
 # Run tests for files changed compared to the main branch
-python -m tests.utils.test_selection --changed
+python -m tests.utils.selection --changed
 
 # Run tests for files changed compared to a specific branch
-python -m tests.utils.test_selection --changed --base-branch develop
+python -m tests.utils.selection --changed --base-branch develop
 
 # Include related test files
-python -m tests.utils.test_selection --changed --include-related
+python -m tests.utils.selection --changed --include-related
 ```
 
 ## Command-Line Interface
 
-The `test_selection.py` module provides a command-line interface for running selected tests:
+`tests/utils/selection.py` provides a command-line interface for running selected tests. Run it from the repository root:
 
 ```bash
 # Run tests with specific markers
-python -m tests.utils.test_selection --marker unit --marker config
+python -m tests.utils.selection --marker unit --marker config
 
 # Run tests with specific keywords
-python -m tests.utils.test_selection --keyword parse --keyword validate
+python -m tests.utils.selection --keyword parse --keyword validate
 
 # Exclude tests with specific markers
-python -m tests.utils.test_selection --exclude-marker slow
+python -m tests.utils.selection --exclude-marker slow
 
 # Exclude tests with specific keywords
-python -m tests.utils.test_selection --exclude-keyword error
+python -m tests.utils.selection --exclude-keyword error
 
 # Run specific test files
-python -m tests.utils.test_selection tests/unit/test_config.py tests/unit/test_parser.py
+python -m tests.utils.selection tests/unit/test_config.py tests/unit/test_parser.py
 
 # Pass additional arguments to pytest
-python -m tests.utils.test_selection --marker unit -- -v --no-header
+python -m tests.utils.selection --marker unit -- -v --no-header
 ```
 
 ## Programmatic Usage
@@ -108,7 +108,7 @@ python -m tests.utils.test_selection --marker unit -- -v --no-header
 You can also use the test selection utilities programmatically in your scripts:
 
 ```python
-from tests.utils.test_selection import run_selected_tests, run_tests_for_changed_files
+from tests.utils.selection import run_selected_tests, run_tests_for_changed_files
 
 # Run tests with specific markers
 run_selected_tests(markers=["unit", "config"])
@@ -122,7 +122,7 @@ run_tests_for_changed_files(base_branch="main", include_related=True)
 
 ## Utility Functions
 
-The `test_selection.py` module provides several utility functions:
+`tests/utils/selection.py` provides several utility functions:
 
 - `get_changed_files(base_branch)`: Get a list of files changed compared to the base branch
 - `get_related_test_files(changed_files)`: Get a list of test files related to the changed files
@@ -167,7 +167,7 @@ pytest -k sarif_reporter
 
 ```bash
 # In a CI pipeline, run tests for files changed in the pull request
-python -m tests.utils.test_selection --changed --base-branch main --include-related
+python -m tests.utils.selection --changed --base-branch main --include-related
 ```
 
 ### Example 4: Excluding Slow Tests During Development

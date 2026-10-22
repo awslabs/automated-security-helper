@@ -69,6 +69,17 @@ from automated_security_helper.utils.tool_downloads import (
 
 PAYLOAD = b"#!/bin/sh\necho pinned-tool-fixture\n"
 
+pytestmark = pytest.mark.usefixtures("receipt_home")
+
+
+def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
+    """An install writes its receipt under Path.home(), here the test's own home.
+
+    Only some tests here patched Path.home; the rest wrote nine grype.json receipts
+    into the developer's real ~/.ash/install-receipts.
+    """
+    assert receipt_root().is_relative_to(tmp_path), receipt_root()
+
 
 def _make_tarball(path: Path, member_names) -> bytes:
     with tarfile.open(path, "w:gz") as archive:

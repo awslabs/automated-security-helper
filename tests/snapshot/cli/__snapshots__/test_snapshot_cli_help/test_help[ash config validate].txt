@@ -1,32 +1,67 @@
 
  Usage: ash config validate [OPTIONS]
 
- Validate an ASH configuration file for common issues.
+ Validate an ASH configuration file the way a scan loads it.
 
- This command checks for:
- - Invalid or internal-only fields in scanners/reporters/converters
- - Duplicate top-level field definitions
- - Missing required fields
- - Invalid top-level sections
- - YAML/JSON syntax errors
+ The file is loaded as a scan loads it: parsed (with ${VAR} and !ENV
+ references resolved), its extends chain followed, and checked against the
+ AshConfig model the JSON schema is generated from, with strict types. A
+ config a scan would refuse is reported with every field it refuses, and the
+ command exits 3, the exit code a scan gives for an invalid configuration.
+
+ It also warns about things a scan accepts but that are probably mistakes:
+ internal-only fields in scanners/reporters/converters, unknown or internal
+ top-level sections, duplicate top-level keys, a missing project_name, and
+ directory paths without a '**' glob. Warnings do not change the exit code;
+ 'ash config lint' reports the same checks and can fix some of them, with
+ one exception: lint judges the file as written, so it reads neither
+ --config-overrides nor ASH_PLUGIN_MODULES, and an input this command
+ refuses for an environment-named module can still lint clean.
+
+ Exit codes: 0 valid (warnings may be printed), 1 no config file found and
+ none of the scan's other inputs given (--config-overrides,
+ ASH_PLUGIN_MODULES), 3 invalid, or the named config file does not exist
+ or cannot be read. A file that does not parse is invalid too, and a scan
+ refuses it as well. With --config-overrides or ASH_PLUGIN_MODULES and no
+ config file, the default configuration with those scan inputs applied is
+ validated -- the config a scan of the directory would run with, and the
+ one `ash config get` prints or refuses for the same input, exiting 3 when
+ the environment names a module the scan's plugin loader refuses.
 
  Examples:
-     # Validate default config
+     # Validate the config a scan of the current directory would use
      ash config validate
 
      # Validate specific config file
      ash config validate --config path/to/config.yaml
 
-     # Validate with verbose output
-     ash config validate --verbose
+     # Validate with the overrides a scan will be given
+     ash config validate --config-overrides 'fail_on_findings=false'
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --config   -c      <str>  The path to the configuration file to validate. By default, ASH        │
-│                           validates the config a scan of the current directory would use (see    │
-│                           the configuration guide for the discovery order), falling back to      │
-│                           .ash/.ash.yaml.                                                        │
-│                           [env var: ASH_CONFIG]                                                  │
-│ --verbose  -v             Enable verbose logging                                                 │
-│ --debug    -d             Enable debug logging                                                   │
-│ --help                    Show this message and exit.                                            │
+│ --config            -c                <str>  The path to the configuration file. By default, the │
+│                                              config a scan of the current directory would use:   │
+│                                              ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml',   │
+│                                              'ash.yaml', 'ash.json'] (each at the root, then in  │
+│                                              .ash/), then ['.ashrc.toml', '.ashrc.yaml',         │
+│                                              '.ashrc.yml', '.ashrc.json', 'ashrc.toml',          │
+│                                              'ashrc.yaml', 'ashrc.yml', 'ashrc.json'] at the     │
+│                                              root, then the tool.ash table of pyproject.toml at  │
+│                                              the root; the first found is used.                  │
+│                                              [env var: ASH_CONFIG]                               │
+│ --config-overrides                    <str>  Configuration overrides specified as key-value      │
+│                                              pairs (e.g.,                                        │
+│                                              'global_settings.severity_threshold=LOW'), checked  │
+│                                              as a scan given the same --config-overrides would   │
+│                                              apply them.                                         │
+│ --source-dir                          <str>  The directory a scan would scan, as `ash scan       │
+│                                              --source-dir`: the config is discovered there       │
+│                                              unless --config names one, and a config inside it   │
+│                                              may only extend files inside it. Defaults to the    │
+│                                              current directory.                                  │
+│                                              [env var: ASH_SOURCE_DIR]                           │
+│ --verbose           -v                       Enable verbose logging                              │
+│ --debug             -d                       Enable debug logging                                │
+│ --color                 --no-color           Enable/disable colorized output [default: color]    │
+│ --help                                       Show this message and exit.                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

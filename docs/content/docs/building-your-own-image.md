@@ -152,6 +152,55 @@ it (for example, ASH installed from a wheel file) is refused before anything is
 built. Pass `--ash-revision-to-install <tag>`, reinstall ASH from its source
 directory, or run an image you already have with `--no-build`.
 
+## Which ASH goes into the image
+
+The image installs ASH from source. Which source depends on how the ASH that runs the
+build was installed:
+
+| ASH running the build | Source of the image's ASH |
+|---|---|
+| A clone of the ASH repository, an editable install of one, or `pip install <directory>` | That source tree, the same ASH as the one running. If the directory has since been deleted, or no longer holds ASH's source, the image installs the commit the package build recorded, as in the last row. The directory is trusted by its path, so install from one only you can write, not from under `/tmp`. |
+| From a git URL with a tag or a branch, such as `@v3.7.0` or `@main` | That tag or branch of the ASH repository on GitHub, cloned during the build. A `git+file://` URL is no different: its ref is cloned from GitHub, not from the repository the URL names. |
+| From a git URL with no ref | The installed commit, checked out of a clone of the ASH repository on GitHub. |
+| Anything else: Homebrew, a wheel or sdist file, an archive URL | The commit the package was built from, checked out of a clone of the ASH repository. A package build records it when it runs in a git checkout of ASH. With none recorded (a build from a source tarball), the release tag of the installed version, such as `v3.7.0`, and a warning that this is a guess: a build of an unreleased commit carries the version of the release before it. |
+
+A development or pre-release version has no release tag, so with nothing recorded the
+build stops before it starts and asks for `--ash-revision-to-install`. That option
+overrides the table: pass a tag, a branch, or a full 40-character commit id.
+`--ash-revision-to-install LOCAL` builds the running ASH's own source tree, and is
+refused when there is none, for example for a wheel install.
+
+A commit id, given or recorded, is built only if a branch or a tag of the ASH
+repository reaches it. Otherwise the Dockerfile's clone step stops with exit status 3,
+the image build fails, and `ash` exits with the build's status (1 for a failed
+`docker build`). Every
+branch counts, the ones GitHub and its apps create included, such as the merge
+queue's `gh-readonly-queue/*`, Dependabot's `dependabot/*` and `gh-pages`, and so
+does every tag; a pull request's ref (`refs/pull/*`) does not. GitHub serves a
+commit that only a fork or a pull request holds under the ASH repository's URL as
+well, so the id alone does not show that the commit is ASH's. A package built
+from a commit that is on no branch or tag there yet, a local one for example,
+records that commit: run the ASH installed from that source tree with
+`--ash-revision-to-install LOCAL`, or name a branch instead.
+
+Container mode and `ash build-image` never build a Dockerfile from the working
+directory, which is usually the project being scanned. A LOCAL build uses the ASH
+source tree above, and any other revision uses the Dockerfile packaged with ASH,
+which clones that revision. ASH v3.0.1 to v3.7.1 could build a Dockerfile they
+found in or above the working directory and tag the result as ASH's image
+(`automated-security-helper:<target>`, or your `ASH_IMAGE_NAME`), and `--no-build`
+runs whatever image has that tag. If you ran one of them in or under a project with
+its own Dockerfile, remove that image, run `ash build-image --force`, and push again
+any copy you host in a registry.
+
+A build whose context is ASH's own source tree builds that tree, whatever the
+revision. `./ash` always builds its own checkout, and the image pipelines under
+`deploy/` build the clone they check out.
+
+A branch, or the floating `v3` tag, is cloned again on every build, because it can have
+moved since the last one. A release tag or a commit id is cloned once, and later builds
+take that clone from the build cache.
+
 ## Keeping it current
 
 ASH orchestrates external scanners, and their versions are not all pinned. A rebuild
@@ -187,6 +236,13 @@ databases are fetched. The image keeps trivy's database in `TRIVY_CACHE_DIR`
 databases are frozen at build time, which makes the rebuild cadence above load-bearing
 rather than optional.
 
+npm-audit has no database to cache: npm, yarn and pnpm audit a lockfile by asking the
+registry, so an offline image cannot run it. A scan with the image reports npm-audit
+`MISSING`, and exits 1, for a project that has a `package-lock.json`,
+`npm-shrinkwrap.json`, `yarn.lock` or `pnpm-lock.yaml` beside a `package.json`, and
+`SKIPPED` for one that has none. Add `--exclude-scanners npm-audit` to the scan
+command to scan such a project with the offline image.
+
 **An offline image stops passing once grype's database or its rulesets are past
 their bound.** ASH reads each database's own build time after the scan and holds it
 to a bound: trivy's database 24 hours after it was published, which is trivy's own
@@ -209,9 +265,31 @@ refresh the image anyway. Rebuild it with `ash build-image --offline`, which
 downloads current databases and rulesets, and move the new image across the air
 gap: at least every 5 days to keep grype's scans passing (every 30 days, for the
 rulesets, with `scanners.grype.enabled: false`), and as often as you want trivy's
-findings current. To scan with an image older than that anyway, pass
-`--allow-stale-content-db` or set `content_db_staleness: warn`; the scan passes, and
-the same reports say which databases were stale and how old they were. See
+findings current. Without `--force`, a build upgrades the OS packages and, offline,
+downloads a current grype database and current rulesets once per UTC day; with it
+(`--force` is `--no-cache`), on every build. The same holds for `./ash` and
+`Invoke-ASH`, online or offline. Rebuilds later the same day come from the build
+cache. The first one on a new day re-runs the Dockerfile's `core` stage from its
+`apt-get upgrade` step down (the OS packages, the scanner tools, the ASH package and,
+offline, the download), so it needs network access.
+
+On the air-gapped host, scan with the image you moved there instead of rebuilding
+it: `ash scan --mode container --offline --no-build`, `./ash --offline --no-build`, or
+`Invoke-ASH -Offline -NoBuild`. Container mode builds the image before every scan
+unless told not to, and a build on a new day needs network access. The image has to
+carry the name ASH runs, `automated-security-helper:<build target>`, or the one
+`ASH_IMAGE_NAME` names.
+
+A `docker build` of the Dockerfile run by hand gets the same result by passing
+`OFFLINE=YES` and, as `BUILD_DATE_EPOCH`, UTC midnight of the day in epoch seconds:
+`now=$(date +%s); docker build --build-arg OFFLINE=YES --build-arg
+BUILD_DATE_EPOCH=$((now - now % 86400)) ...`. Pass `BUILD_DATE_EPOCH` for an online
+build too. Without a new value the `apt-get upgrade` step and the download step are
+served from the build cache, with the OS packages and databases they held then.
+
+To scan with an image older than that anyway, pass `--allow-stale-content-db` or set
+`content_db_staleness: warn`; the scan passes, and the same reports say which
+databases were stale and how old they were. See
 [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
 
 ## If you would rather not run a container

@@ -63,7 +63,16 @@ NESTED = [
 def converter(test_plugin_context, monkeypatch):
     tree = Path(test_plugin_context.source_dir)
     tree.mkdir(parents=True, exist_ok=True)
-    members = {"top.py": b"print(1)\n", "data.json": b"{}\n", "x.zip.py": b"x = 1\n"}
+    members = {
+        "top.py": b"print(1)\n",
+        "data.json": b"{}\n",
+        "x.zip.py": b"x = 1\n",
+        # Deliberate semantics, not accidents: a member's extension is read
+        # through _archive_suffix (lowercased, trailing dots and spaces
+        # stripped), so an upper-cased or trailing-dot name is scannable.
+        "APP.PY": b"X = 1\n",
+        "trail.py.": b"y = 2\n",
+    }
     members.update(dict.fromkeys(NESTED, b"not scanned"))
     archive = tree / "outer.zip"
     archive.write_bytes(zip_bytes(members))
@@ -84,6 +93,14 @@ def test_every_nested_archive_suffix_is_recorded_as_not_scanned(converter):
     assert converter.failed_inputs == []
     assert (extracted / "top.py").is_file()
     assert (extracted / "x.zip.py").is_file(), "a .py member is not an archive"
+    assert (extracted / "APP.PY").is_file(), (
+        "an upper-cased extension is scannable: the member extension is read "
+        "through _archive_suffix, which lowercases, by design"
+    )
+    assert (extracted / "trail.py.").is_file(), (
+        "a trailing dot does not hide a scannable member: _archive_suffix "
+        "strips trailing dots and spaces, by design"
+    )
 
 
 @pytest.mark.parametrize("suffix", NESTED_ARCHIVE_SUFFIXES)

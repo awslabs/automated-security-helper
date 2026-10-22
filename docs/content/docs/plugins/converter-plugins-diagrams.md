@@ -23,7 +23,7 @@ sequenceDiagram
     ASH->>CP: Validate Converter
     CP-->>ASH: Return Validation Status
 
-    ASH->>CP: convert(target)
+    ASH->>CP: convert()
     CP->>FS: Read Source Files
     FS-->>CP: Return File Contents
 
@@ -33,7 +33,7 @@ sequenceDiagram
     CP->>FS: Write Converted Files
     FS-->>CP: Files Written
 
-    CP-->>ASH: Return Converted Path
+    CP-->>ASH: Return Converted Paths
 
     ASH->>ES: Emit ConversionCompleted Event
 ```
@@ -71,8 +71,8 @@ classDiagram
     }
 
     class ConverterPluginBase {
-        +convert(target) Path
-        +converted_dir: Path
+        +convert() List[Path]
+        +results_dir: Path
     }
 
     class ConverterPluginConfigBase {
@@ -81,13 +81,10 @@ classDiagram
         +options: ConverterOptionsBase
     }
 
-    class ConverterOptionsBase {
-        +file_extensions: List[str]
-        +preserve_line_numbers: bool
-    }
+    class ConverterOptionsBase
 
     class CustomConverter {
-        +convert(target) Path
+        +convert() List[Path]
     }
 
     PluginBase <|-- ConverterPluginBase
@@ -102,7 +99,7 @@ The following diagram shows how configuration flows through a converter plugin:
 
 ```mermaid
 flowchart TD
-    A[.ash/.ash.yaml] --> B[Configuration Parser]
+    A[ASH config file] --> B[Configuration Parser]
     C[CLI Arguments] --> B
     B --> D[ASH Configuration]
     D --> E[Converter Configuration]

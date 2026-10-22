@@ -19,13 +19,13 @@
  * `--results` repeatable on the merge side. Shards also pass
  * `--no-fail-on-findings` to state the intent.
  *
- * That flag was NOT verified from this worktree — ASH is not installed here, so
- * `ash scan --help` could not be run. Correctness deliberately does not depend on
- * it. A shard succeeds if and only if ASH wrote `ash_aggregated_results.json`, and
- * the merge independently requires that file from every shard. Exit codes are only
- * recorded, never trusted, because Click reports a usage error as exit 2 and ASH
- * reports actionable findings as exit 2 — indistinguishable, and one of them means
- * nothing was scanned.
+ * Correctness deliberately does not depend on that flag. A shard succeeds if and
+ * only if ASH wrote `ash_aggregated_results.json`, and the merge independently
+ * requires that file from every shard. Exit codes are only recorded, never trusted.
+ * ASH 3.7.0 and 3.7.1 report a usage error as exit 2, the same code as actionable
+ * findings, and one of the two means nothing was scanned. ASH releases after 3.7.1
+ * exit 5 for a usage error, but `AshVersion` can name an older release, so the shard still
+ * decides on the results file rather than on the code.
  *
  * WHY SHARD RESULTS TRAVEL THROUGH S3 AND NOT PIPELINE ARTIFACTS
  * -------------------------------------------------------------
@@ -543,10 +543,11 @@ export class AshDistributedPipelineStack extends Stack {
               // --no-fail-on-findings states the intent: findings are the merge
               // action's business, not this shard's. But the shard's success does
               // NOT depend on that flag behaving, or on any exit code, because
-              // exit-code semantics here are genuinely ambiguous — Click uses
-              // exit 2 for a usage error and ASH uses exit 2 for actionable
-              // findings. So the shard succeeds if and only if ASH produced its
-              // aggregated results file, which is the thing the merge actually
+              // exit-code semantics here are ambiguous across releases — ASH 3.7.0
+              // and 3.7.1 exit 2 for a usage error, the code they use for
+              // actionable findings, and releases after 3.7.1 exit 5. So the
+              // shard succeeds if and only if ASH produced its aggregated
+              // results file, which is the thing the merge actually
               // consumes. That is robust whether the flag is absent (usage error,
               // no results), a scanner crashed (no results), findings were found
               // (results present) or the shard was clean (results present).
@@ -563,11 +564,10 @@ export class AshDistributedPipelineStack extends Stack {
                 'echo "shard ${ASH_SHARD_INDEX} finished with ASH exit code $ASH_EXIT"',
                 'if [ ! -f ./ash-shard-output/ash_aggregated_results.json ]; then',
                 '  echo "shard ${ASH_SHARD_INDEX} produced no ash_aggregated_results.json." >&2',
-                '  echo "ASH exit code was $ASH_EXIT. Exit 2 from a usage error (for example an" >&2',
-                '  echo "unrecognized --no-fail-on-findings on an older ASH) looks identical to" >&2',
-                '  echo "exit 2 for findings, which is why this check looks for the results file" >&2',
-                '  echo "instead. Failing here rather than letting the merge report a clean scan" >&2',
-                '  echo "for scanners that never ran." >&2',
+                '  echo "ASH exit code was $ASH_EXIT. ASH 3.7.0 and 3.7.1 exit 2 for a usage error," >&2',
+                '  echo "the code they use for findings (releases after 3.7.1 exit 5), which is why this" >&2',
+                '  echo "check looks for the results file instead. Failing here rather than" >&2',
+                '  echo "letting the merge report a clean scan for scanners that never ran." >&2',
                 '  exit 1',
                 'fi',
               ].join('\n'),

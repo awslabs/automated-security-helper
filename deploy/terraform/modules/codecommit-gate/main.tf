@@ -542,8 +542,9 @@ resource "aws_lambda_function" "gate" {
   environment {
     variables = {
       # Handed to `ash scan --min-severity`. ASH evaluates the threshold; the
-      # handler only reports what ASH decided.
-      ASH_MIN_SEVERITY          = var.min_severity
+      # handler only reports what ASH decided. Lowered, because the validation
+      # accepts any case and ASH should get the spelling it ranks.
+      ASH_MIN_SEVERITY          = lower(var.min_severity)
       ASH_FAIL_ON_FINDINGS      = var.fail_on_findings ? "true" : "false"
       ASH_MAX_COMMENT_CHARS     = tostring(var.max_comment_chars)
       ASH_MANAGE_APPROVAL_STATE = var.manage_approval_state ? "true" : "false"

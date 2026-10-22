@@ -12,7 +12,7 @@
       'message': "Possible hardcoded password: 'h******'",
       'rule_id': 'B105',
       'scanner': 'bandit',
-      'severity': 'high',
+      'severity': 'critical',
       'suppressed': False,
     }),
     dict({

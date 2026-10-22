@@ -92,29 +92,11 @@
     'client_messages': list([
       list([
         'error',
-        '''
-          override_yaml parse error: while parsing a flow sequence
-            in "<unicode string>", line 1, column 6:
-              key: [unclosed
-                   ^
-          expected ',' or ']', but got '<stream end>'
-            in "<unicode string>", line 2, column 1:
-          
-              ^
-        ''',
+        "override_yaml parse error: expected ',' or ']', but got '<stream end>' (ParserError at line 2, column 1; started at line 1, column 6)",
       ]),
     ]),
     'result': dict({
-      'error': '''
-        override_yaml parse error: while parsing a flow sequence
-          in "<unicode string>", line 1, column 6:
-            key: [unclosed
-                 ^
-        expected ',' or ']', but got '<stream end>'
-          in "<unicode string>", line 2, column 1:
-        
-            ^
-      ''',
+      'error': "override_yaml parse error: expected ',' or ']', but got '<stream end>' (ParserError at line 2, column 1; started at line 1, column 6)",
       'session_id': '__default__',
       'success': False,
     }),
@@ -197,6 +179,7 @@
     ]),
     'result': dict({
       'error': "git clone failed (exit 128): fatal: repository 'https://example.com/org/missing.git/' not found",
+      'error_type': 'git_clone_failed',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -245,6 +228,7 @@
     ]),
     'result': dict({
       'error': "refusing url with 'ext::' transport: it instructs git to execute an arbitrary command",
+      'error_type': 'clone_url_not_permitted',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -381,6 +365,7 @@
     ]),
     'result': dict({
       'error': "ref must not begin with '-': git would parse '--output=owned' as an option rather than a value",
+      'error_type': 'clone_ref_not_permitted',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -397,6 +382,7 @@
     ]),
     'result': dict({
       'error': "url must not begin with '-': git would parse '--upload-pack=touch owned' as an option rather than a value",
+      'error_type': 'clone_url_not_permitted',
       'session_id': 'session-a',
       'success': False,
     }),
@@ -732,6 +718,8 @@
     'result': dict({
       'error': "mcp-session-id must not contain path separators: '../escape'",
       'error_type': 'invalid_session_id',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'success': False,
     }),
     'tool': 'resolve_ash_workspace',
@@ -746,19 +734,13 @@
       ]),
       list([
         'error',
-        '''
-          Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
-            - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
-        ''',
+        "Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:\\x0a  - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
       ]),
     ]),
     'result': dict({
       'context': dict({
       }),
-      'error': '''
-        Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:
-          - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'
-      ''',
+      'error': "Workspace '<TMP>/allowed/work/dev.code-workspace' names projects that cannot be scanned. Nothing was scanned, because scanning the rest and exiting 0 would report a clean result for code that was never examined. Pass '--allow-missing-projects' to skip them instead:\\x0a  - 'gone' does not exist as a directory at '<TMP>/allowed/work/gone'",
       'error_category': 'unexpected_error',
       'error_type': 'WorkspaceDefinitionError',
       'exit_code': 4,
@@ -794,7 +776,7 @@
       'error_category': 'unexpected_error',
       'error_type': 'ProfileNotRegisteredError',
       'exit_code': 3,
-      'exit_code_meaning': 'invalid config',
+      'exit_code_meaning': 'invalid config or refused input',
       'operation': 'resolve_workspace',
       'success': False,
       'suggestions': list([
@@ -850,6 +832,8 @@
     'result': dict({
       'error': "mcp-session-id must not contain path separators: '../escape'",
       'error_type': 'invalid_session_id',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'success': False,
     }),
     'tool': 'run_ash_workspace_scan',
@@ -904,6 +888,8 @@
           'ignore_file_exclusions': None,
           'incomplete_converters': dict({
           }),
+          'incomplete_scanner_details': dict({
+          }),
           'incomplete_scanners': list([
           ]),
           'inputs_not_scanned': list([
@@ -911,17 +897,23 @@
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/api',
+          'partial_coverage_scanners': list([
+          ]),
           'policy_origin_finding_count': 0,
           'project': 'api',
           'relative_path': 'api',
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': 'MEDIUM',
           'skip_detail': None,
           'skip_reason': None,
+          'stale_content_databases': list([
+          ]),
           'status': 'completed',
         }),
         dict({
@@ -936,6 +928,8 @@
           'ignore_file_exclusions': None,
           'incomplete_converters': dict({
           }),
+          'incomplete_scanner_details': dict({
+          }),
           'incomplete_scanners': list([
           ]),
           'inputs_not_scanned': list([
@@ -943,17 +937,23 @@
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/web',
+          'partial_coverage_scanners': list([
+          ]),
           'policy_origin_finding_count': 0,
           'project': 'web',
           'relative_path': 'web',
           'sarif_run_index': None,
           'scan_id': '<PROJECT_SCAN_ID>',
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': 'HIGH',
           'skip_detail': None,
           'skip_reason': None,
+          'stale_content_databases': list([
+          ]),
           'status': 'completed',
         }),
         dict({
@@ -968,6 +968,8 @@
           'ignore_file_exclusions': None,
           'incomplete_converters': dict({
           }),
+          'incomplete_scanner_details': dict({
+          }),
           'incomplete_scanners': list([
           ]),
           'inputs_not_scanned': list([
@@ -975,17 +977,23 @@
           'invalid_config': False,
           'no_scanner_ran': False,
           'output_path': 'projects/gone',
+          'partial_coverage_scanners': list([
+          ]),
           'policy_origin_finding_count': 0,
           'project': 'gone',
           'relative_path': 'gone',
           'sarif_run_index': None,
           'scan_id': None,
           'scan_incomplete': False,
+          'scanner_reasons': dict({
+          }),
           'scanners': dict({
           }),
           'severity_threshold': None,
           'skip_detail': None,
           'skip_reason': None,
+          'stale_content_databases': list([
+          ]),
           'status': 'completed',
         }),
       ]),
@@ -1021,19 +1029,13 @@
       ]),
       list([
         'error',
-        '''
-          Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:
-            - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)
-        ''',
+        "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)",
       ]),
     ]),
     'result': dict({
       'context': dict({
       }),
-      'error': '''
-        Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:
-          - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)
-      ''',
+      'error': "Workspace '<TMP>/allowed/escaping/dev.code-workspace' lists folder entries that cannot be used:\\x0a  - '<TMP>/outside-project' resolves to '<TMP>/outside-project', which is outside '<TMP>/allowed/escaping' (outside-root)",
       'error_category': 'unexpected_error',
       'error_type': 'WorkspaceDefinitionError',
       'exit_code': 4,
@@ -1229,6 +1231,8 @@
     'result': dict({
       'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
       'error_type': 'no_source_delivered',
+      'exit_code': 5,
+      'exit_code_meaning': 'usage error',
       'session_id': 'session-a',
       'success': False,
     }),

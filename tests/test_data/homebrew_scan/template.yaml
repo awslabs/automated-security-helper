@@ -1,0 +1,5 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: An S3 bucket with no encryption, logging or TLS-only policy, for cdk-nag to report.
+Resources:
+  Bucket:
+    Type: AWS::S3::Bucket

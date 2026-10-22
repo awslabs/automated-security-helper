@@ -13,14 +13,17 @@
 **Symptom:** `get_scan_results` returns an empty `findings` list, but the project clearly has issues.
 
 **Causes & fixes:**
-1. `actionable_only=True` is dropping suppressed findings — set it to `false` to see everything.
-2. `severities` filter is too tight — try `severities=None` first.
-3. `severity_threshold` at scan time was too high — re-scan with `severity_threshold="LOW"`.
-4. Scanners didn't run — check `get_scan_summary` output for scanner-level failures.
+1. `findings` is only in a response with `actionable_only=True` and `filter_level="full"`. A `summary` or `minimal` response, or one without `actionable_only`, has counts and no `findings` list.
+2. `actionable_only=True` lists the actionable findings only, the ones that make the scan exit 2: unsuppressed and at or above the severity threshold the scan was judged by. To see the suppressed ones and those below the threshold too, read the SARIF or `ash_aggregated_results.json` file that `get_scan_result_paths` names.
+3. `severities` filter is too tight — try `severities=None` first.
+4. `severity_threshold` decides which findings are actionable. The scan still reports the findings below it, but `findings` leaves them out, so a high threshold can empty the list. Re-scan with `severity_threshold="LOW"` to make LOW findings actionable too.
+5. Scanners didn't run — check `get_scan_summary` output for scanner-level failures.
 
 ## "ASH not installed"
 
-**Symptom:** `check_installation` returns failure or `run_ash_scan` errors with "command not found."
+**Symptom:** `check_installation` returns failure or `installed: false`, or `run_ash_scan` errors with "command not found."
+
+`installed: false` means no enabled built-in scanner has its tool available, so a scan would run nothing. `ready: false` with `installed: true` means some scanners will not run: `missing_dependencies` names them, and a scan reports them as not run. On the server's host, `ash dependencies install` installs the tools ASH can install itself.
 
 **Fix:** The MCP server needs ASH on its PATH. The standard install via `uvx`:
 ```
@@ -33,7 +36,7 @@ This always uses the pinned ASH version regardless of system installs.
 **Symptom:** `get_scan_progress` shows `status: running` indefinitely.
 
 **Causes:**
-1. Project too large — default scan timeout is 2400s (40 min). For larger codebases, set `scan_timeout_seconds` higher in `.ash/.ash.yaml` or scan a subdirectory.
+1. Project too large — the server stops a scan after `scan_timeout_seconds` (default 1800 s) and reports it `failed`. The operator sets that limit in the server's `ASH_CONFIG` file; a repository's `.ash/.ash.yaml` cannot raise it. Ask the operator for a higher limit, or scan a subdirectory.
 2. Stuck scanner — call `cancel_scan(scan_id)` and retry. To isolate which scanner is hanging, narrow the scanner set in `.ash/.ash.yaml` and re-scan.
 3. Server-side dependency stalled — restart the MCP server. The previous scan's state is lost, but the next scan will start clean.
 
@@ -49,7 +52,7 @@ Note: container-mode hangs are not possible via the MCP server — it always run
 
 ## Empty `scanners` map in progress
 
-**Symptom:** `get_scan_progress` shows `scanners: {}` and `completed_scanners: 0`, `total_scanners: 0` for a long time.
+**Symptom:** `get_scan_progress` shows `scanners: {}` and `finished_scanners: 0`, `total_scanners: 0` for a long time.
 
 **Cause:** The scan is still in the pre-flight phase (cloning, dependency analysis). This is normal for the first 5-15 seconds of a scan, longer for large projects.
 
@@ -61,4 +64,4 @@ Note: container-mode hangs are not possible via the MCP server — it always run
 
 **Cause:** Suppression rules are stored in `.ash/.ash.yaml` under `global_settings.ignore_paths` and per-scanner config blocks. If those aren't being read, suppressions don't apply.
 
-**Fix:** Confirm `.ash/.ash.yaml` exists at the project root and has the right syntax. Run with `actionable_only=False` to see ALL findings (including suppressed) and verify the suppression rules match.
+**Fix:** Confirm `.ash/.ash.yaml` exists at the project root and has the right syntax. Read the SARIF or `ash_aggregated_results.json` file that `get_scan_result_paths` names to see ALL findings (including suppressed) and verify the suppression rules match; a `get_scan_results` response lists findings only with `actionable_only=True`, which leaves the suppressed ones out.

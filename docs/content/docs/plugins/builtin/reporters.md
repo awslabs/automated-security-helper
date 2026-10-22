@@ -182,7 +182,7 @@ The standard SARIF reporter outputs a faithful representation of scanner results
 
 This reporter solves that by:
 
-1. Ensuring every rule has `properties["security-severity"]` — preserving scanner-provided values when present, or deriving from `defaultConfiguration.level` / `result.level` when missing
+1. Ensuring every rule has `properties["security-severity"]`: the scanner's own value when it provides one, else the most severe of the rule's results that the file contains, graded the way the summary and the exit code grade them (`properties.issue_severity` first, else the SARIF level), else the rule's `defaultConfiguration.level`, else 6.0 (Medium). A suppressed finding left out of the file does not raise its rule's score; a rule whose findings are all left out stays in the list with that default score. A rule that a result in the file names (as `ruleId` or `rule.id`) but the scanner did not declare gets an entry too, scored from its results
 2. Flattening rules from `tool.extensions[]` into `tool.driver.rules` for reliable rule resolution
 3. Stripping verbose fields to significantly reduce file size (~80% smaller than the standard SARIF)
 4. Excluding suppressed findings by default (GitHub has its own dismissal workflow)
@@ -198,14 +198,15 @@ reporters:
 
 **Output File**: `reports/ash.ghas.sarif`
 
-**Severity Mapping** (when `security-severity` is not provided by the scanner):
+**Severity Mapping** (when `security-severity` is not provided by the scanner), from the finding's ASH severity: `issue_severity` when the scanner declares one, else the SARIF level (`error` CRITICAL, `warning` MEDIUM, `note` LOW, `none` INFO; a missing level is `warning`):
 
-| SARIF Level | security-severity | GitHub displays as |
+| ASH severity | security-severity | GitHub displays as |
 |---|---|---|
-| `error` | 8.0 | High |
-| `warning` | 6.0 | Medium |
-| `note` | 3.0 | Low |
-| `none` | 1.0 | Low |
+| CRITICAL | 9.5 | Critical |
+| HIGH | 8.0 | High |
+| MEDIUM | 6.0 | Medium |
+| LOW | 3.0 | Low |
+| INFO | 1.0 | Low |
 
 When a scanner already provides `security-severity` (e.g., Grype with CVSS scores), that value is preserved as-is.
 
@@ -379,6 +380,7 @@ reporters:
 ```
 
 **Key Features**:
+- One run with ASH as `tool.driver` and each scanner as a `tool.extensions[]` entry with its own name, version and rules; each result's `rule.toolComponent` and `rule.index` point at its rule there (see [Output formats](../../output-formats.md#sarif))
 - IDE integration (VS Code, IntelliJ)
 - GitHub Security tab integration
 - Rich metadata and locations

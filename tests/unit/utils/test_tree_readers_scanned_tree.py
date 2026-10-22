@@ -81,7 +81,7 @@ class TestIgnoreFiles:
         (tree / ".gitignore").write_text("*.log\n")
         (tree / "noise.log").write_text("x\n")
 
-        files = scan_set(source=str(tree), output=str(out))
+        files = scan_set(source=str(tree), output=str(out), write_lists=True)
 
         report = (out / "ash-ignore-report.txt").read_text()
         assert MARKER not in report

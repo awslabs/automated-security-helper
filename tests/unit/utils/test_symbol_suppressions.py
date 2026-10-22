@@ -20,6 +20,7 @@ missing extra is a failure rather than a skip.
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import logging
 import os
 import re
@@ -676,12 +677,39 @@ class TestLint:
             _lint([{"path": "src/*.py", "reason": "r", "symbol": "A.b"}])
         )
 
-    def test_invalid_symbol_is_an_error(self):
-        issues = _symbol_issues(
-            _lint([{"path": "src/a.py", "reason": "r", "symbol": "A.b()"}])
+    def test_invalid_symbol_is_an_error(self, tmp_path):
+        """The model refuses a symbol that is not a dotted qualified name, in the
+        words a scan prints, and lint reports that refusal: through the full lint,
+        since the suppression check leaves an invalid symbol to the model."""
+        config = tmp_path / ".ash.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "global_settings": {
+                        "suppressions": [
+                            {"path": "src/a.py", "reason": "r", "symbol": "A.b()"}
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
         )
-        assert [i.severity for i in issues] == [LintSeverity.ERROR]
-        assert issues[0].path == "global_settings.suppressions[0]"
+
+        result = ConfigLinter.lint(config, source_dir=tmp_path)
+
+        issues = [
+            i
+            for i in result.issues
+            if (i.path or "").startswith("global_settings.suppressions[0]")
+            and "symbol" in i.message
+        ]
+        # Once: by the model's check, not again by the suppression check.
+        assert [i.severity for i in issues] == [LintSeverity.ERROR], [
+            (i.path, i.message) for i in result.issues
+        ]
+        # The model names the entry's field.
+        assert issues[0].path == "global_settings.suppressions[0].symbol"
+        assert "dotted qualified name" in issues[0].message
 
     def test_unsupported_extension_is_a_warning(self):
         issues = _symbol_issues(

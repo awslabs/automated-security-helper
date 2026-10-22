@@ -40,8 +40,8 @@ Built-in plugins can be customized through configuration files:
 scanners:
   bandit:
     enabled: true
-    severity_threshold: "MEDIUM"
     options:
+      severity_threshold: "MEDIUM"
       confidence_level: "high"    # lowercase only
 
   semgrep:

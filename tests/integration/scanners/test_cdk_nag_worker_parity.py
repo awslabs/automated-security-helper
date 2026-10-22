@@ -142,7 +142,7 @@ def test_the_worker_child_answers_what_the_in_process_wrapper_answers(
         for t in templates
     }
     with cdk_nag_worker.cdk_nag_worker_batch(
-        [t.as_posix() for t in templates], tmp_path / "b"
+        [t.as_posix() for t in templates], tmp_path / "b", values=()
     ):
         worker = {
             t.name: _outcome(

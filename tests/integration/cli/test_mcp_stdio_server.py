@@ -65,12 +65,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import pytest
+
+from tests.utils.helpers import checkout_env
 
 # Long enough that a cold import of ASH under a 192-wide run is not mistaken for a
 # hang. Startup measured 1.7 seconds unloaded.
@@ -91,8 +95,9 @@ def _server_env() -> Dict[str, str]:
     ``ASH_MCP_ALLOWED_ROOTS`` is cleared rather than inherited. Nothing here scans, but
     a value leaked from another test's environment would change what the child's policy
     permits, and a test whose behavior depends on a sibling's leftovers is not a test.
+    The child imports ASH from this checkout (``checkout_env``).
     """
-    env = dict(os.environ)
+    env = checkout_env()
     env.pop("ASH_MCP_ALLOWED_ROOTS", None)
     return env
 
@@ -144,7 +149,12 @@ def _frame(payload: Dict[str, Any]) -> bytes:
 
 
 def _exchange(
-    extra_args: List[str], frames: List[bytes], expect_ids: set[int]
+    extra_args: List[str],
+    frames: List[bytes],
+    expect_ids: set[int],
+    *,
+    cwd: Optional[Path] = None,
+    env: Optional[Dict[str, str]] = None,
 ) -> tuple[List[str], str, int]:
     """Send ``frames`` to a real `ash mcp` process and return everything it wrote.
 
@@ -167,7 +177,8 @@ def _exchange(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=_server_env(),
+        env=env if env is not None else _server_env(),
+        cwd=cwd,
     )
     watchdog = threading.Timer(PROCESS_TIMEOUT_SECONDS, process.kill)
     watchdog.start()
@@ -336,4 +347,128 @@ def test_closing_the_input_stream_ends_the_process() -> None:
         "run_mcp_server treats a closed stream as expected and logs a warning, so a "
         "non-zero status means shutdown took the unexpected-error branch. stderr tail: "
         f"{stderr.decode(errors='replace')[-2000:]}"
+    )
+
+
+#: A base config file name the scanned repository chose: an OSC 52 clipboard
+#: write, then a newline and a GitHub Actions command.
+_HOSTILE_BASE = "b\x1b]52;c;ZXZpbA==\x07\n::add-mask::hidden.yaml"
+
+#: Imported by the server process at startup: the plugin-module warning's own
+#: showing of its message turned off, so the logging sink alone decides what
+#: reaches stderr, as for a warning whose call site leaves it to the sink.
+#: confine_plugin_modules must call terminal_text's shown_on_one_line by that
+#: module-level name, or replacing the name turns nothing off: the warning is
+#: still shown at its call site, and a sink that writes it as given passes. So
+#: every use of the name in its bytecode must be a global load (an attribute
+#: load, as in terminal_text.shown_on_one_line(...), goes around the module's
+#: name), and that global must be terminal_text's function. Only then is it
+#: replaced, and the hook names the module it changed on stderr (_HOOK_MARKER),
+#: so the test also sees which tree the server imported.
+_SINK_ONLY = (
+    "import dis\n"
+    "import sys\n"
+    "from automated_security_helper.config import plugin_module_trust\n"
+    "from automated_security_helper.utils import terminal_text\n"
+    "confine = plugin_module_trust.confine_plugin_modules\n"
+    "uses = {\n"
+    "    instruction.opname\n"
+    "    for instruction in dis.get_instructions(confine)\n"
+    "    if instruction.argval == 'shown_on_one_line'\n"
+    "}\n"
+    "if (\n"
+    "    uses == {'LOAD_GLOBAL'}\n"
+    "    and confine.__globals__.get('shown_on_one_line')\n"
+    "    is terminal_text.shown_on_one_line\n"
+    "):\n"
+    "    plugin_module_trust.shown_on_one_line = lambda text: text\n"
+    "    sys.stderr.write('ash-test-hook replaced shown_on_one_line in '\n"
+    "                     + plugin_module_trust.__file__ + '\\n')\n"
+    "else:\n"
+    "    sys.stderr.write('ash-test-hook: confine_plugin_modules does not call '\n"
+    "                     'terminal_text.shown_on_one_line by that name\\n')\n"
+)
+
+#: The line _SINK_ONLY writes once it has replaced the name.
+_HOOK_MARKER = re.compile(
+    r"^ash-test-hook replaced shown_on_one_line in (.+)$", re.MULTILINE
+)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows file names cannot hold control characters"
+)
+def test_a_warning_before_logging_is_set_up_reaches_stderr_shown(tmp_path) -> None:
+    """get_config warns, before any logging is set up, about the repository's own
+    config files, naming them, and the ash command clears every handler of ASH's
+    logger before it runs one (cli/main.py's reset_logging_config). The warning
+    then went to logging's last resort, which wrote the file name's controls and
+    its "::add-mask::" line to the client's stderr as given. Through the real
+    entry point, it is shown.
+    """
+    from mcp.types import LATEST_PROTOCOL_VERSION
+
+    repo = tmp_path / "repo"
+    (repo / ".ash").mkdir(parents=True)
+    (repo / ".ash" / ".ash.yaml").write_text(
+        'project_name: x\nextends: "b\\e]52;c;ZXZpbA==\\a\\n::add-mask::hidden.yaml"\n',
+        encoding="utf-8",
+    )
+    (repo / ".ash" / _HOSTILE_BASE).write_text(
+        "ash_plugin_modules:\n  - not_an_installed_module_for_ash\n", encoding="utf-8"
+    )
+    hook = tmp_path / "hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(_SINK_ONLY, encoding="utf-8")
+    env = _server_env()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(hook), *filter(None, [env.get("PYTHONPATH")])]
+    )
+
+    lines, stderr, _ = _exchange(
+        [],
+        [
+            _frame(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": LATEST_PROTOCOL_VERSION,
+                        "capabilities": {},
+                        "clientInfo": {"name": "ash-integration-test", "version": "0"},
+                    },
+                }
+            ),
+            _frame({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            _frame(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "get_config", "arguments": {}},
+                }
+            ),
+        ],
+        expect_ids={1, 2},
+        cwd=repo,
+        env=env,
+    )
+
+    answered = {json.loads(line).get("id") for line in lines}
+    assert {1, 2} <= answered, (lines, stderr[-2000:])
+    # The hook turned the call site's showing off, in the tree under test.
+    import automated_security_helper
+
+    replaced = _HOOK_MARKER.search(stderr)
+    assert replaced, stderr[-2000:]
+    tested = Path(automated_security_helper.__file__).resolve().parent
+    assert Path(replaced.group(1)).resolve().is_relative_to(tested), (
+        replaced.group(1),
+        tested,
+    )
+    assert "not_an_installed_module_for_ash" in stderr, stderr[-2000:]
+    assert not re.search(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", stderr), repr(stderr[-2000:])
+    assert not re.search(r"^\s*::|##[A-Za-z]*\[", stderr, re.MULTILINE), repr(
+        stderr[-2000:]
     )

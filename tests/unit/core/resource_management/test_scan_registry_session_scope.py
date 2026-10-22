@@ -7,13 +7,16 @@
 tools over the transport. These pin the registry underneath them: every lookup
 that takes a ``session_id`` answers for that session's scans only, an unscoped
 lookup still sees everything (the scan runners use it), the statistics a listing
-reports count only the caller's scans, and the busy-directory refusal names the
-running scan's id only to the session that owns it.
+reports count only the caller's scans, the busy-directory refusal names the
+running scan's id, and how a stopping scan ended, only to the session that owns
+it, and the max_concurrent_scans refusal names the limit and not how many scans
+are running.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 import pytest
@@ -111,6 +114,81 @@ def test_a_busy_directory_refusal_names_the_scan_only_to_its_owner(
         other.value.context
     ), other.value.context
     assert same.value.context.get("scan_id") == owner_scan, same.value.context
+
+
+def test_a_stopping_scan_refusal_tells_only_its_owner_how_it_ended(
+    registry, tmp_path
+) -> None:
+    """A cancelled scan still stopping keeps its directory busy.
+
+    The refusal says "still stopping (cancelled)" only to the session that owns
+    the scan; any other session is told only that the directory is busy. Like
+    the scan id, the status is for the owner.
+    """
+    target = tmp_path / "stopping"
+    target.mkdir()
+    owner_scan = registry.register_scan(
+        directory_path=str(target), output_directory=str(target), session_id="owner"
+    )
+    entry = registry.get_scan(owner_scan)
+    entry.has_runner = True
+    registry.cancel_scan(owner_scan, session_id="owner")
+    assert entry.occupies_its_directory() and not entry.is_active()
+
+    with pytest.raises(MCPResourceError) as other:
+        registry.register_scan(
+            directory_path=str(target), output_directory=str(target), session_id="other"
+        )
+    with pytest.raises(MCPResourceError) as same:
+        registry.register_scan(
+            directory_path=str(target), output_directory=str(target), session_id="owner"
+        )
+
+    assert "still stopping" in str(other.value), other.value
+    assert MCScanStatus.CANCELLED.value not in str(other.value), other.value
+    assert MCScanStatus.CANCELLED.value not in str(other.value.context), (
+        other.value.context
+    )
+    assert MCScanStatus.CANCELLED.value in str(same.value), same.value
+
+
+def test_a_limit_refusal_tells_no_session_how_many_scans_are_running(
+    registry, tmp_path
+) -> None:
+    """The max_concurrent_scans refusal names the limit, and not the count.
+
+    The refusal names the server-wide limit and not a count of running scans, so
+    no session learns how many scans the others run. The limit is server-wide,
+    and the refused session needs to know it reached it; how many scans the
+    other sessions run is theirs. Three are registered without a limit,
+    so the count is above the limit of two and the two numbers differ.
+    """
+    for name in ("a1", "a2", "a3"):
+        _register(registry, tmp_path, name, "session-a")
+    target = tmp_path / "b1"
+    target.mkdir()
+
+    with pytest.raises(MCPResourceError) as refused:
+        registry.register_scan(
+            directory_path=str(target),
+            output_directory=str(target),
+            session_id="session-b",
+            max_active=2,
+        )
+
+    message = str(refused.value)
+    assert "max_concurrent_scans limit of 2" in message, message
+    assert re.search(r"\b3\b", message) is None, message
+    assert set(refused.value.context) == {
+        "directory_path",
+        "max_concurrent_scans",
+        "error_category",
+        "suggestions",
+    }, refused.value.context
+    assert refused.value.context["max_concurrent_scans"] == 2, refused.value.context
+    assert registry.list_scans(directory_path=str(target)) == [], (
+        "the refused scan was registered"
+    )
 
 
 def test_the_progress_monitor_reads_the_scan_in_the_session_that_started_it(

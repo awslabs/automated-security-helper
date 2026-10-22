@@ -13,6 +13,12 @@ This document provides comprehensive guidance for GenAI tools (AI assistants, LL
 ash get-genai-guide -o ash-genai-guide.md
 ```
 
+The guide ships with every installation of ASH (a wheel or sdist, an install from a
+git URL, a clone of the repository, and the container images ASH builds), so this
+writes the copy for the installed version without network access. `--from-github`
+downloads it from GitHub instead, from `main` or from the branch or release tag
+`--branch` names.
+
 ### Installation for AI Coding Tools
 
 Choose the installation method based on your AI coding tool:
@@ -168,7 +174,7 @@ command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found
 - **Simplified Results**: `reports/ash.flat.json` (recommended for most use cases)
 - **Human Reports**: HTML, Markdown, Text (NOT for machine parsing)
 - **Dependencies**: `reports/ash.cdx.json` (CycloneDX SBOM)
-- **Configuration**: `.ash/.ash.yaml` (YAML format with JSON schema)
+- **Configuration**: the ASH config file (`.ashrc.yaml` in a new project; a project's existing `.ash/.ash.yaml` is read first), YAML with a JSON schema
 - **Suppressions**: Defined in configuration file under `global_settings.suppressions`
 
 **Tool Requirements**:
@@ -248,35 +254,7 @@ else:
     pass
 ```
 
-### 4. Severity Discrepancies - Source of Truth
-
-**IMPORTANT**: Severity levels may differ between report formats due to underlying scanner behavior.
-
-**Source of Truth**: `ash_aggregated_results.json` contains the canonical severity levels.
-
-**Why This Matters**:
-- Some scanners report different severities in JSON vs text output
-- Markdown/HTML summaries may show "CRITICAL" while JSON shows "HIGH"
-- Always validate severity from `ash_aggregated_results.json` before taking action
-
-**Example**:
-```json
-// ash_aggregated_results.json (SOURCE OF TRUTH)
-{
-  "scanner_results": {
-    "bandit": {
-      "findings": [
-        {
-          "severity": "HIGH",  // ← Use this value
-          "rule_id": "B201"
-        }
-      ]
-    }
-  }
-}
-```
-
-### 5. Understanding Suppressed vs Actionable Findings
+### 4. Understanding Suppressed vs Actionable Findings
 
 **Key Concepts**:
 - **Total Findings**: All findings detected by scanners
@@ -305,6 +283,7 @@ else:
 ├── ash_aggregated_results.json    # PRIMARY: Complete scan results
 ├── ash.log                         # Scan execution log
 ├── ash-scan-set-files-list.txt    # List of files scanned
+├── ash-scan-set-run.json          # Which run wrote that list
 ├── reports/
 │   ├── ash.sarif                  # SARIF format (industry standard)
 │   ├── ash.flat.json              # Simplified JSON structure
@@ -427,9 +406,9 @@ for finding in findings:
   "name": "ASH Scan 2026-02-28T10:10:46.211371",
   "description": "Aggregated security scan results",
   "metadata": {
-    "report_id": "ASH-20261028",
+    "report_id": "ASH-20260228151046-3f9c0e2b7d1a",
     "generated_at": "2026-02-28T15:10:46+00:00",
-    "project_name": "ASH",
+    "project_name": "my-service",
     "tool_version": "3.2.2",
     "summary_stats": {
       "total": 156,
@@ -459,7 +438,7 @@ for finding in findings:
 
 #### metadata.summary_stats
 - `total`: Total findings detected
-- `actionable`: Findings requiring attention (not suppressed)
+- `actionable`: Findings that fail the scan: not suppressed, and at or above the severity threshold
 - `suppressed`: Findings marked as false positives/accepted risks
 - `critical`, `high`, `medium`, `low`, `info`: Counts by severity
 - `passed`: Scanners that completed successfully
@@ -835,7 +814,7 @@ grep -c '"id": "CVE-' reports/ash.cdx.json
 ## Configuration File Schema
 
 ### Location
-- Default: `.ash/.ash.yaml` in the project root
+- Default: the first config file discovery finds; `ash config init` creates `.ashrc.yaml` in the project root
 - Custom: Specify with `--config` flag or `ASH_CONFIG` environment variable
 
 ### Schema Structure
@@ -848,7 +827,7 @@ project_name: my-project
 fail_on_findings: true  # Exit with code 2 if actionable findings exist
 
 global_settings:
-  severity_threshold: MEDIUM  # CRITICAL, HIGH, MEDIUM, LOW, INFO
+  severity_threshold: MEDIUM  # ALL, LOW, MEDIUM, HIGH, CRITICAL
   
   ignore_paths:
     - path: 'tests/test_data/**'
@@ -903,7 +882,7 @@ reporters:
 ### Key Configuration Sections
 
 #### global_settings.severity_threshold
-Minimum severity level to report. Findings below this threshold are still detected but not counted as actionable.
+The least severe finding that counts as actionable. Findings below it are still detected and reported, but not counted as actionable: they do not fail the scan, and `get_scan_results(actionable_only=True)` leaves them out.
 
 #### global_settings.suppressions
 Array of suppression rules to mark findings as false positives or accepted risks.
@@ -1006,21 +985,7 @@ suppressions:
 
 ## Common Pitfalls and Known Issues
 
-### 1. Severity Inconsistencies
-**Issue**: Markdown summary shows "CRITICAL" but JSON shows "HIGH"
-
-**Solution**: Always use `ash_aggregated_results.json` as source of truth
-
-**Example**:
-```bash
-# Wrong - parsing markdown
-grep "CRITICAL" .ash/ash_output/reports/ash.summary.md
-
-# Correct - querying JSON
-jq '.scanner_results | to_entries[] | .value.findings[] | select(.severity == "CRITICAL")' .ash/ash_output/ash_aggregated_results.json
-```
-
-### 2. Suppression Not Applied
+### 1. Suppression Not Applied
 **Issue**: Suppression added but finding still shows as actionable
 
 **Common Causes**:
@@ -1036,7 +1001,7 @@ jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == 
 # Verify suppression in config matches exactly
 ```
 
-### 3. HTML Report Parsing Failures
+### 2. HTML Report Parsing Failures
 **Issue**: Attempting to parse HTML with regex or string matching
 
 **Solution**: Never parse HTML reports. Use JSON formats:
@@ -1044,7 +1009,7 @@ jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == 
 - `reports/ash.flat.json` - simplified structure
 - `reports/ash.sarif` - SARIF format
 
-### 4. Missing Scanner Results
+### 3. Missing Scanner Results
 **Issue**: Expected scanner results not in output
 
 **Check**:
@@ -1056,7 +1021,7 @@ jq '.metadata.validation_summary' ash_aggregated_results.json
 jq '.scanner_results | to_entries[] | select(.value.status == "FAILED")' ash_aggregated_results.json
 ```
 
-### 5. Dependency Analysis Confusion
+### 4. Dependency Analysis Confusion
 **Issue**: Trying to extract dependencies from scan findings
 
 **Solution**: Use CycloneDX SBOM:
@@ -1098,16 +1063,21 @@ sys.exit(0)
 
 **Using MCP Server:**
 ```python
-# Get only actionable findings for CI/CD gate
+import sys
+
+# Get only actionable critical/high findings for a CI/CD gate. actionable_only
+# adds `findings`, the findings that fail the scan (unsuppressed, at or above its
+# severity threshold) and match the filters; the list is in a filter_level="full"
+# response only.
 result = await get_scan_results(
     output_dir=".ash/ash_output",
     actionable_only=True,
     severities="critical,high",
-    filter_level="minimal",
+    filter_level="full",
 )
 
-if result["summary_stats"]["critical"] > 0:
-    print("FAILED: Critical actionable findings detected")
+if result["findings_count"] > 0:
+    print(f"FAILED: {result['findings_count']} actionable critical/high findings")
     sys.exit(1)
 ```
 
@@ -1149,7 +1119,7 @@ for finding in actionable_findings:
 
 **Using MCP Server:**
 ```python
-# Get actionable high/critical findings with full details
+# Get actionable high/critical findings, one entry per finding
 results = await get_scan_results(
     output_dir=".ash/ash_output",
     actionable_only=True,
@@ -1157,11 +1127,15 @@ results = await get_scan_results(
     filter_level="full",
 )
 
-# Process findings from SARIF
-for run in results["raw_results"]["sarif"]["runs"]:
-    for result in run["results"]:
-        # All results here are actionable (suppressed findings already filtered)
-        print(f"[{result['level']}] {result['ruleId']}: {result['message']['text']}")
+# `findings` holds the findings that fail the scan (unsuppressed, at or above its
+# severity threshold) and match the filters. The SARIF they come from is not part
+# of the response; read it from the file get_scan_result_paths names if you need
+# it, or the findings below the threshold.
+for finding in results["findings"]:
+    print(
+        f"[{finding['severity']}] {finding.get('file_path')}:{finding.get('line_start')} "
+        f"{finding['rule_id']} ({finding.get('scanner')}): {finding.get('message')}"
+    )
 ```
 
 ### Pattern 3: Dependency Vulnerability Report
@@ -1207,7 +1181,7 @@ If using ASH via the Model Context Protocol (MCP) server, follow these guideline
 - `get_scan_summary` - Get lightweight summary
 - `get_scan_result_paths` - Get file paths for all reports
 - `list_active_scans` - List running scans
-- `cancel_scan` - Cancel a running scan
+- `cancel_scan` - Cancel a running scan and stop it: its running scanner is stopped and no reports are written after the cancel
 
 ### Managing Long-Running Scans
 
@@ -1230,27 +1204,31 @@ summary = get_scan_summary()  # ERROR: Connection closed
 #### ✅ CORRECT: Poll Progress (Keep Connection Alive)
 
 ```python
-# 1. Start scan (returns immediately with scan_id)
-result = run_ash_scan(source_dir="/path/to/project")
+import time
+
+# 1. Start scan (returns immediately with scan_id). severity_threshold can make
+#    the config's global_settings.severity_threshold stricter for this scan,
+#    never looser; omit it to use the config's. LOW also counts LOW findings
+#    against the default MEDIUM; a looser value such as HIGH is ignored.
+result = run_ash_scan(source_dir="/path/to/project", severity_threshold="LOW")
 scan_id = result["scan_id"]
 
 # 2. Poll progress periodically to keep connection alive
 while True:
     progress = get_scan_progress(scan_id=scan_id)
 
-    # Check if scan is complete
-    if progress.get("is_complete") or progress.get("status") in [
-        "completed",
-        "failed",
-        "cancelled",
-    ]:
+    # is_complete is true for every ending: completed, incomplete, failed and
+    # cancelled
+    if progress.get("is_complete"):
         break
 
     # Wait 5 seconds before next check (keeps connection alive)
     time.sleep(5)
 
-# 3. Get results after completion
-if progress.get("status") == "completed":
+# 3. Get results if this scan has its own. A completed or incomplete scan does
+#    (an incomplete one's findings are real but partial). A failed or cancelled
+#    one does not: its output directory holds the previous scan's results.
+if progress.get("results_available"):
     # Use filtered queries to reduce data transfer
     results = get_scan_results(
         output_dir=progress["output_directory"],
@@ -1258,6 +1236,8 @@ if progress.get("status") == "completed":
         actionable_only=True,
         severities="critical,high",
     )
+else:
+    print(f"Scan {progress['status']}: {progress.get('error_message')}")
 ```
 
 #### Best Practice: Progress Monitoring with Status Updates
@@ -1288,17 +1268,18 @@ def run_ash_scan_with_monitoring(source_dir: str) -> dict:
             print(f"Status: {current_status}")
             last_status = current_status
 
-        # Check completion
+        # Check completion: is_complete is true for every ending
         if progress.get("is_complete"):
             break
 
-        if progress.get("status") in ["failed", "cancelled"]:
-            return {
-                "error": f"Scan {progress['status']}: {progress.get('error', 'Unknown error')}"
-            }
-
         # Wait before next poll (keeps connection alive)
         time.sleep(5)
+
+    # A failed or cancelled scan has no results of its own; the files in its
+    # output directory are the previous scan's.
+    if not progress.get("results_available"):
+        reason = progress.get("error_message") or "no results"
+        return {"error": f"Scan {progress['status']}: {reason}"}
 
     # Get filtered results
     output_dir = progress.get("output_directory", f"{source_dir}/.ash/ash_output")
@@ -1345,7 +1326,7 @@ results = await get_scan_results(output_dir=".ash/ash_output", filter_level="ful
 Filter by scanner, severity, or actionable status:
 
 ```python
-# Only actionable findings (exclude suppressed)
+# Only actionable findings: unsuppressed, at or above the severity threshold
 actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
 
 # Only critical findings
@@ -1477,7 +1458,7 @@ ash --mode local --verbose
 jq '.scanner_results | to_entries[] | .value.findings[] | select(.suppressed == false) | {file_path, rule_id, line_start, line_end}' .ash/ash_output/ash_aggregated_results.json
 
 # Verify suppression syntax
-yamllint .ash/.ash.yaml
+ash config validate
 ```
 
 ## Additional Resources

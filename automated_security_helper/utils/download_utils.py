@@ -22,7 +22,12 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import run_command
 from automated_security_helper.base.plugin_base import CustomCommand
-from automated_security_helper.core.constants import ASH_BIN_PATH
+from automated_security_helper.core.constants import (
+    ASH_BIN_PATH,
+    ash_bin_path_from_environment,
+    is_offline_mode,
+    warn_if_home_unusable,
+)
 from automated_security_helper.core.exceptions import (
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
@@ -743,9 +748,13 @@ def install_binary_from_url(
     Returns:
         Path to the installed binary
 
+    Offline mode (``ASH_OFFLINE``, set by ``--offline``) downloads nothing: a
+    receipted install is used, and with none the install is refused.
+
     Raises:
         ToolDownloadIntegrityError: if no digest is given, or the download does not
             match it.
+        ToolNotProvisionableError: if ASH is offline and nothing is installed.
     """
     if not expected_sha256:
         # This used to download, log "integrity was not verified", chmod +x and
@@ -766,6 +775,12 @@ def install_binary_from_url(
             f"{installed_as} already installed from {url}, skipping download"
         )
         return target
+
+    if is_offline_mode():
+        raise ToolNotProvisionableError(
+            f"{installed_as} is not installed and ASH is offline (ASH_OFFLINE), so "
+            f"{url} is not downloaded. Install it while online."
+        )
 
     # Download the file, keeping the digest that was verified as the bytes landed.
     binary_path, installed_digest = _download_verified(
@@ -1126,14 +1141,22 @@ def install_pinned_tool(
     Returns:
         Path to the installed executable
 
+    Offline mode (``ASH_OFFLINE``, set by ``--offline``) downloads nothing: an
+    installed copy or a verified copy already present is used as at any other time,
+    a verified copy in the release-asset cache is installed from there, and with
+    none of those the install is refused.
+
     Raises:
-        ToolNotProvisionableError: if the tool publishes nothing for this platform
+        ToolNotProvisionableError: if the tool publishes nothing for this platform,
+            or ASH is offline and has no verified copy to install from
         ToolDownloadIntegrityError: if the download does not match its pinned digest
     """
     from automated_security_helper.utils.tool_downloads import get_tool_asset
 
     asset = get_tool_asset(tool, target_platform, arch)
     bin_dir = Path(destination) if destination is not None else current_bin_path()
+    if bin_dir is None:
+        raise RuntimeError(NO_BIN_DIRECTORY)
     bin_dir.mkdir(parents=True, exist_ok=True)
     target = bin_dir.joinpath(asset.install_as)
 
@@ -1162,6 +1185,12 @@ def install_pinned_tool(
         # A verified cached copy, or a fresh verified download that is then cached.
         # Both are hashed against the pin in this private directory before use.
         downloaded = _restore_cached_asset(asset_name, asset.sha256, staging_dir)
+        if downloaded is None and is_offline_mode():
+            raise ToolNotProvisionableError(
+                f"{asset.tool} {asset.version} is not installed and ASH is offline "
+                "(ASH_OFFLINE), so nothing is downloaded. Install it while online, or "
+                f"put a copy that matches the pin in {bin_dir}."
+            )
         if downloaded is None:
             downloaded = download_file(
                 asset.url,
@@ -1290,7 +1319,13 @@ def find_verified_pinned_executable(
             return None
         candidate = Path(found)
         try:
-            allowed = {d.resolve() for d in subprocess_utils.path_independent_dirs()}
+            # Anchored only, as find_executable searches them: resolve() would
+            # read a relative ASH_BIN_PATH against the working directory.
+            allowed = {
+                d.resolve()
+                for d in subprocess_utils.path_independent_dirs()
+                if subprocess_utils._is_anchored(str(d))
+            }
             in_allowed = candidate.parent.resolve() in allowed
         except OSError:
             in_allowed = False
@@ -1323,7 +1358,7 @@ def find_verified_pinned_executable(
     )
 
 
-def current_bin_path() -> Path:
+def current_bin_path() -> Optional[Path]:
     """Resolve ASH_BIN_PATH at call time rather than at import time.
 
     ``core.constants.ASH_BIN_PATH`` is computed when that module is first imported.
@@ -1334,9 +1369,41 @@ def current_bin_path() -> Path:
     Absolute, because the install commands built from it run in an empty directory
     of their own (``utils/python_child.py``), where a relative path names another
     place.
+
+    None when ASH_BIN_PATH is unset and there is no default either, because there
+    is no usable home for ``~/.ash/bin`` (``core.constants.home_bin_path``):
+    nothing can be installed then (:data:`NO_BIN_DIRECTORY`).
     """
-    from_env = os.environ.get("ASH_BIN_PATH")
-    return Path(from_env).absolute() if from_env else ASH_BIN_PATH
+    from_env = ash_bin_path_from_environment()
+    if from_env:
+        return Path(from_env)
+    if ASH_BIN_PATH is None:
+        warn_if_home_unusable()
+    return ASH_BIN_PATH
+
+
+#: Why nothing is installed when :func:`current_bin_path` has no directory.
+NO_BIN_DIRECTORY = (
+    "ASH has no bin directory to install tools into: ASH_BIN_PATH is not an "
+    "absolute path, and HOME is empty or relative, so ~/.ash/bin is not used. Set "
+    "ASH_BIN_PATH or HOME to an absolute path, or give ash dependencies install a "
+    "--bin-path."
+)
+
+
+def refusing_install_command(reason: str) -> CustomCommand:
+    """An install command that writes ``reason`` to stderr and exits 1.
+
+    Plugins build their install commands whenever they are constructed, a scan
+    included, so one that cannot install is declared as this rather than raised:
+    ``ash dependencies install`` runs it, counts it as failed and shows why. The
+    reason travels as an argument rather than inside the ``-c`` source, so nothing
+    in it is read as code.
+    """
+    return CustomCommand(
+        args=[sys.executable, "-c", "import sys; sys.exit(sys.argv[1])", reason],
+        shell=False,
+    )
 
 
 # The script every pinned-tool install command runs. A constant so that
@@ -1358,12 +1425,17 @@ def create_pinned_tool_install_command(
 
     Mirrors ``create_url_download_command``, which installs an opengrep version the
     configuration pins itself, so the installer keeps one execution model for every
-    tool: plugins declare commands, the CLI runs them and counts them.
+    tool: plugins declare commands, the CLI runs them and counts them. With no
+    destination and no bin directory, the command only refuses.
     """
     # Absolute either way: the command runs in an empty directory of its own.
-    destination = str(
-        current_bin_path() if destination is None else Path(destination).absolute()
-    ).replace("\\", "/")
+    if destination is None:
+        bin_dir = current_bin_path()
+        if bin_dir is None:
+            return refusing_install_command(NO_BIN_DIRECTORY)
+        destination = str(bin_dir).replace("\\", "/")
+    else:
+        destination = str(Path(destination).absolute()).replace("\\", "/")
 
     return CustomCommand(
         args=[
@@ -1449,15 +1521,21 @@ def create_url_download_command(
     # `ash dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
     # installed into the default directory while the installer reported the
     # requested one, and the post-install sweep then found nothing there.
-    # Forward slashes for cross-platform compatibility, and absolute either way: the
-    # command runs in an empty directory of its own.
-    destination = str(
-        current_bin_path() if destination is None else Path(destination).absolute()
-    ).replace("\\", "/")
+    # With no bin directory the command only refuses, and nothing is created here.
+    # Forward slashes for cross-platform compatibility, and absolute either way:
+    # the command runs in an empty directory of its own.
+    if destination is None:
+        bin_dir = current_bin_path()
+        if bin_dir is None:
+            return refusing_install_command(NO_BIN_DIRECTORY)
+        destination = str(bin_dir).replace("\\", "/")
+    else:
+        destination = str(Path(destination).absolute()).replace("\\", "/")
 
-    if not Path(destination).exists():
-        ASH_LOGGER.verbose(f"Creating ASH bin path directory @ {destination}")
-        Path(destination).mkdir(parents=True, exist_ok=True)
+    # No directory is created here. OpengrepScanner builds this command when it is
+    # constructed, during a scan, so creating current_bin_path() here made a
+    # relative ASH_BIN_PATH under the scanned checkout (and raised in a read-only
+    # one). install_binary_from_url creates it when the command runs.
 
     script = (
         "import sys; from pathlib import Path; "

@@ -35,9 +35,19 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
 )
+from automated_security_helper.models.scan_results_container import (
+    ScanResultsContainer,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.redacted_model import (
+    EnvResolvedScalar,
+    without_env_scalars,
+)
 from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
-from automated_security_helper.utils.severity_ladder import severity_fails_threshold
+from automated_security_helper.utils.severity_ladder import (
+    resolve_scanner_threshold,
+    severity_fails_threshold,
+)
 
 
 class ScannerStatisticsCalculator:
@@ -95,6 +105,8 @@ class ScannerStatisticsCalculator:
             - duration: Time taken by the scanner in seconds
             - threshold: Severity threshold used for this scanner
             - threshold_source: Source of the threshold ("global", "config", etc.)
+            - threshold_from_env: Whether ``threshold`` is the written reference of a
+              value read from the environment (provenance, not the text's shape)
             - excluded: Whether the scanner was explicitly excluded
             - dependencies_missing: Whether the scanner has missing dependencies
             - error: Whether the scanner failed to run or produced no usable results
@@ -155,8 +167,11 @@ class ScannerStatisticsCalculator:
                 )
             )
 
-            threshold, threshold_source = (
-                ScannerStatisticsCalculator.get_scanner_threshold_info(
+            # The grading value and the shown form from one resolution: the
+            # actionable count below judges by the value, and the stats row,
+            # which every report surface renders, carries the shown form.
+            threshold, shown_threshold, threshold_source, threshold_from_env = (
+                ScannerStatisticsCalculator._threshold_resolution(
                     asharp_model, scanner_name
                 )
             )
@@ -249,8 +264,9 @@ class ScannerStatisticsCalculator:
                 "total": total,
                 "actionable": actionable,
                 "duration": duration,
-                "threshold": threshold,
+                "threshold": shown_threshold,
                 "threshold_source": threshold_source,
+                "threshold_from_env": threshold_from_env,
                 "excluded": excluded,
                 "dependencies_missing": dependencies_missing,
                 "error": error,
@@ -505,9 +521,32 @@ class ScannerStatisticsCalculator:
             one of "global", "config", or "unavailable" when the results record
             no configuration (the threshold is then ASH_DEFAULT_SEVERITY_LEVEL)
         """
-        # Get global severity threshold from config
-        global_threshold = ASH_DEFAULT_SEVERITY_LEVEL
+        threshold, _shown, source, _from_env = (
+            ScannerStatisticsCalculator._threshold_resolution(
+                asharp_model, scanner_name
+            )
+        )
+        return threshold, source
 
+    @staticmethod
+    def _threshold_resolution(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> Tuple[str, str, str, bool]:
+        """(grading value, shown form, source, from env) for one scanner's threshold.
+
+        The shown form is what report surfaces print: an external section's
+        env-read threshold answers its written reference (``${VARIABLE}``)
+        instead of the resolved text, because the value came from the
+        environment and printing it in a report row would publish it. The
+        grading value is for grading only. The stats row reads all of it from
+        this one resolution (``extract_scanner_statistics``), which is how the
+        shown form reaches the emitter and the metrics table.
+
+        ``from env`` is provenance: True only when the resolver marked the
+        threshold as read from the environment. A ``${...}`` text the resolver
+        left as written (a name it refuses to read, a quoted reference) is a
+        plain str and answers False, whatever its shape.
+        """
         # The configuration the results record. When there is none, or it cannot
         # be read, the threshold source says so; the configuration of the process
         # reading the results (ASH's defaults, or the file ASH_CONFIG names) is not
@@ -518,15 +557,12 @@ class ScannerStatisticsCalculator:
             ASH_LOGGER.error(f"The recorded configuration could not be read: {e}")
             ash_conf = None
         if ash_conf is None:
-            return global_threshold, "unavailable"
-
-        # Check for global_settings.severity_threshold
-        if (
-            ash_conf
-            and hasattr(ash_conf, "global_settings")
-            and hasattr(ash_conf.global_settings, "severity_threshold")
-        ):
-            global_threshold = ash_conf.global_settings.severity_threshold
+            return (
+                ASH_DEFAULT_SEVERITY_LEVEL,
+                ASH_DEFAULT_SEVERITY_LEVEL,
+                "unavailable",
+                False,
+            )
 
         # Get scanner-specific configuration
         scanner_config_entry = None
@@ -541,6 +577,11 @@ class ScannerStatisticsCalculator:
         # Initialize scanner_threshold to None
         scanner_threshold = None
         scanner_threshold_def = "global"
+        # The form report surfaces show. None until a branch below finds a
+        # spelling that differs from the grading value (today: the written
+        # ${VARIABLE} reference of an env-read external threshold).
+        shown_threshold = None
+        threshold_from_env = False
 
         # Check for scanner-specific configuration overrides
         if (
@@ -553,7 +594,59 @@ class ScannerStatisticsCalculator:
                 "severity_threshold" in options
                 and options["severity_threshold"] is not None
             ):
-                scanner_threshold = options["severity_threshold"]
+                # A dict entry here is an external plugin's section, which the
+                # segment models keep as an extra and never validate, so the
+                # value can still be the env resolver's marker (a str
+                # subclass). This is a non-validating consumer: take the
+                # downcast view at the read, so the threshold returned for
+                # grading is a plain str whatever a later consumer stores or
+                # serializes it into. An env-read threshold is SHOWN as its
+                # written reference: the value came from the environment, and
+                # the summary row reaches every rendered report. The model
+                # branch below reads a validated section, whose fields are
+                # already plain.
+                raw_threshold = options["severity_threshold"]
+                scanner_threshold = without_env_scalars(raw_threshold)
+                if isinstance(raw_threshold, EnvResolvedScalar):
+                    # Read from the environment only when the variable was set;
+                    # a used default is the file's own level and graded as such.
+                    # An instance copied from older state has no such slot and
+                    # reads as set, like a marker built from the name alone.
+                    threshold_from_env = getattr(
+                        raw_threshold, "from_environment", True
+                    )
+                    # What the resolver says the row shows: the reference
+                    # without its default (a glued tail kept) when the variable
+                    # was read, the default's value when it was used. An
+                    # instance copied from older state has no shown slot and
+                    # degrades to the rebuilt name. Only a read carries a kept
+                    # form: a used default is the file's own literal, so its
+                    # raw text is not kept and the row shows what is graded.
+                    if threshold_from_env:
+                        shown_threshold = getattr(raw_threshold, "shown", None) or (
+                            "${" + raw_threshold.variable + "}"
+                        )
+                else:
+                    # A builtin scanner's section reaches here too:
+                    # get_plugin_config serializes the typed section to a
+                    # dict, and validation already made the value a plain
+                    # word, so no marker can carry the shown form. The load
+                    # recorded the read with its written reference; consult
+                    # that record at this field's own path.
+                    shown_threshold = (
+                        ScannerStatisticsCalculator._recorded_reference_shown(
+                            ash_conf,
+                            (
+                                "scanners",
+                                scanner_name,
+                                "options",
+                                "severity_threshold",
+                            ),
+                        )
+                    )
+                    # The record holds only a reference whose variable the
+                    # load read, so a recorded reference is an environment read.
+                    threshold_from_env = shown_threshold is not None
                 scanner_threshold_def = "config"
         elif scanner_config_entry and hasattr(scanner_config_entry, "options"):
             if hasattr(scanner_config_entry.options, "severity_threshold"):
@@ -563,13 +656,79 @@ class ScannerStatisticsCalculator:
                 if scanner_threshold_from_config is not None:
                     scanner_threshold = scanner_threshold_from_config
                     scanner_threshold_def = "config"
+                    # A typed (builtin) section validates an env-read value to
+                    # the plain resolved word, so no marker survives here. The
+                    # load recorded the read with its written reference, so
+                    # the shown form comes from that record at this field's
+                    # own path.
+                    shown_threshold = (
+                        ScannerStatisticsCalculator._recorded_reference_shown(
+                            ash_conf,
+                            ("scanners", scanner_name, "options", "severity_threshold"),
+                        )
+                    )
+                    threshold_from_env = shown_threshold is not None
 
-        # Use scanner-specific threshold for evaluation if available, otherwise use global
-        evaluation_threshold = (
-            scanner_threshold if scanner_threshold is not None else global_threshold
+        # The scanner's own threshold when it has one, otherwise the global one: the
+        # rule ScannerExecutor grades each target's report by, from the same helper.
+        evaluation_threshold, scanner_threshold_def = resolve_scanner_threshold(
+            scanner_threshold, ash_conf
+        )
+        # The kept reference form describes where the scanner's own threshold
+        # came from. Keep it while the resolver still sources the graded value
+        # from that config entry, and show what is graded, with its source,
+        # otherwise. The test is the source and not the text: should the
+        # resolver normalize the value (strip, upper-case) the source stays
+        # "config", and the graded text is still derived from the variable, so
+        # printing it would put the environment's value in every report. A
+        # literal config value has no kept form to drop and shows the graded
+        # value either way.
+        if scanner_threshold_def != "config":
+            shown_threshold = None
+            threshold_from_env = False
+        # resolve_scanner_threshold answers source "config" for every non-None
+        # scanner threshold and never substitutes the global one, so a kept
+        # reference form cannot be paired with another source.
+        if shown_threshold is None and scanner_threshold_def == "global":
+            # The global threshold is a validated field too; same record read.
+            shown_threshold = ScannerStatisticsCalculator._recorded_reference_shown(
+                ash_conf, ("global_settings", "severity_threshold")
+            )
+            threshold_from_env = shown_threshold is not None
+        if shown_threshold is None:
+            shown_threshold = evaluation_threshold
+        return (
+            evaluation_threshold,
+            shown_threshold,
+            scanner_threshold_def,
+            threshold_from_env,
         )
 
-        return evaluation_threshold, scanner_threshold_def
+    @staticmethod
+    def _recorded_reference_shown(
+        ash_conf: Any, path: Tuple[Any, ...]
+    ) -> Optional[str]:
+        """The bare ``${NAME}`` of the environment reference the config load
+        recorded at *path*, or None when the field was written literally.
+
+        Read-only consumption of ``AshConfig._environment_references`` (the
+        record resolve_config sets, the one a results file's ash_config dump
+        re-inserts references from); nothing here changes what is recorded or
+        its shape. The shown spelling matches the external branch above: the
+        variable alone, never a written default's text."""
+        from automated_security_helper.config.environment_record import (
+            referenced_name,
+        )
+
+        for reference in getattr(ash_conf, "_environment_references", ()) or ():
+            if getattr(reference, "key", False):
+                continue
+            if tuple(getattr(reference, "path", ())) != tuple(path):
+                continue
+            name = referenced_name(getattr(reference, "written", ""))
+            if name:
+                return "${" + name + "}"
+        return None
 
     @staticmethod
     def _status_info_from_report(report: Dict[str, Any]) -> Tuple[bool, bool, bool]:
@@ -622,16 +781,157 @@ class ScannerStatisticsCalculator:
         return excluded, dependencies_missing, error
 
     @staticmethod
-    def any_target_errored(
+    def _recorded_report(
+        asharp_model: AshAggregatedResults, scanner_name: str, target: str
+    ) -> Optional[Dict[str, Any]]:
+        """The report *scanner_name* recorded for *target*, or None when there is none
+        this code can read.
+
+        A report is the container ``ScanResultProcessor`` serializes, a mapping that
+        names its scanner, written under that name. A results file from another ASH
+        version, or one put together by hand and given to ``ash merge``, can hold a
+        mapping without ``scanner_name`` (the sample results under tests/test_data
+        do), one that names another scanner, or a value that is not a mapping. None
+        of them is this scanner's report: read as one, the first and last raised
+        KeyError or TypeError, which ``ash merge`` let out as a traceback, and the
+        second gave the other scanner's status as this one's. Treated as none
+        recorded, each leaves the scanner with no recorded status, which
+        ``get_scanner_status_info`` reports as an error.
+        """
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return None
+        report = reports.get(target)
+        if not isinstance(report, dict) or report.get("scanner_name") != scanner_name:
+            return None
+        return report
+
+    @staticmethod
+    def target_report_is_partial_loss(
+        report: Dict[str, Any], threshold: str | None
+    ) -> bool:
+        """True when one serialized ERROR report is the ERROR a partial loss earns.
+
+        ``0 < targets_failed < targets_attempted``, both real ints. Total loss
+        (``failed >= attempted``), a negative or non-int counter, and a report with no
+        counters at all are not partial: a tree that is ERROR with no counters to say it
+        evaluated anything is read as having evaluated nothing.
+
+        The counters are necessary and not enough. ``ScanResultsContainer.determine_status``
+        grades a partial loss ERROR only when the tree's own findings pass the gate, and
+        FAILED when they fail it. The executor writes ERROR over other grades for causes of
+        its own, and those trees keep partial counters: a killed tool, a ``scan()`` that
+        returned nothing, a tool ASH could not stop. Counted as partial losses they would
+        roll up FAILED beside a finding, and a killed tool would read as a graded partial
+        audit. So the report must also be the grade its own counts give
+        (``determine_status`` at *threshold* answers ERROR), and must carry neither
+        ``raw_results.status == "failed"`` nor ``could_not_stop``.
+
+        What this cannot tell apart: a tool killed on a tree whose own findings pass the
+        gate. That tree's counters and counts are what a partial loss writes, and the
+        report records the kill only in its error text. Telling them apart needs the
+        executor to mark the ERROR's cause on the container.
+        """
+        attempted = report.get("targets_attempted")
+        failed = report.get("targets_failed")
+        if isinstance(attempted, bool) or not isinstance(attempted, int):
+            return False
+        if isinstance(failed, bool) or not isinstance(failed, int):
+            return False
+        if not (attempted > 0 and 0 < failed < attempted):
+            return False
+
+        raw_results = report.get("raw_results")
+        if isinstance(raw_results, dict) and raw_results.get("status") == "failed":
+            return False
+        if report.get("could_not_stop"):
+            return False
+
+        counts = report.get("severity_counts")
+        try:
+            severity_counts = (
+                ScannerSeverityCount.model_validate(counts)
+                if isinstance(counts, dict)
+                else ScannerSeverityCount()
+            )
+        except ValueError:
+            return False
+        graded = ScanResultsContainer(
+            severity_counts=severity_counts,
+            targets_attempted=attempted,
+            targets_failed=failed,
+        ).determine_status(threshold)
+        return graded == ScannerStatus.ERROR
+
+    @staticmethod
+    def _is_partial_loss(
+        asharp_model: AshAggregatedResults,
+        scanner_name: str,
+        report: Dict[str, Any],
+    ) -> bool:
+        """``target_report_is_partial_loss`` at the scanner's own threshold."""
+        threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            asharp_model, scanner_name
+        )
+        return ScannerStatisticsCalculator.target_report_is_partial_loss(
+            report, threshold
+        )
+
+    @staticmethod
+    def recorded_error_is_partial_loss(
         asharp_model: AshAggregatedResults, scanner_name: str
     ) -> bool:
+        """True when the per-target reports explain a recorded ERROR with a partial loss.
+
+        At least one target report is ERROR and every ERROR target report is a partial
+        loss (``target_report_is_partial_loss``). A recorded ERROR for which no report is
+        ERROR is not explained: a run that raised leaves FAILED containers and an ERROR
+        row written by the completeness check, and that row is the only record of it.
+        """
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return False
+        errored = [
+            report
+            for report in reports.values()
+            if isinstance(report, dict)
+            and report.get("status") == ScannerStatus.ERROR.value
+        ]
+        return bool(errored) and all(
+            ScannerStatisticsCalculator._is_partial_loss(
+                asharp_model, scanner_name, report
+            )
+            for report in errored
+        )
+
+    @staticmethod
+    def any_target_errored(
+        asharp_model: AshAggregatedResults,
+        scanner_name: str,
+        *,
+        include_partial_loss: bool = True,
+    ) -> bool:
         """True when ANY target this scanner reported under came back ERROR.
+
+        With ``include_partial_loss=False`` an ERROR tree that lost only some of its
+        targets (``target_report_is_partial_loss``) is not counted, so True means a
+        tree evaluated nothing. ``get_scanner_status_info`` asks both ways: findings
+        outrank a partial loss and do not outrank total loss.
 
         ``ScanPhase`` gives each scanner one task carrying both the source tree and the
         converted tree, and ``ScanResultProcessor`` writes one serialized container per target
         under ``additional_reports[scanner][target_type]``. ERROR is what
-        ``ScanResultsContainer.determine_status`` returns when a tracking scanner failed every
-        target it attempted -- so an ERROR here means no rule was evaluated against that tree.
+        ``ScanResultsContainer.determine_status`` returns when the coverage loss is the loudest
+        fact about a tree: every attempted target failed, the counters are inconsistent (a
+        poisoned or negative count, a failure count beside no attempt claim, or a failure
+        count exceeding the attempt claim), or a
+        partial loss whose surviving findings pass the severity gate (one whose findings fail
+        the gate grades FAILED instead, so the findings stay visible to consumers that gate on
+        them). An ERROR here therefore means that tree's coverage cannot be trusted, whatever
+        its siblings yielded. What the scanner's status does with it differs by the kind of
+        loss: a tree that evaluated nothing sets ``error`` whatever the scanner found, and a
+        partial loss sets it only when no tree has gate-failing findings
+        (``include_partial_loss`` and ``get_scanner_status_info``).
 
         ``get_scanner_status_info`` used to derive its ``error`` flag from the ``"source"``
         report alone. A cdk-nag that passed on the source tree and errored on the converted one
@@ -641,9 +941,11 @@ class ScannerStatisticsCalculator:
 
         "Any", not "all", and the asymmetry with the severity gate is the point. A finding count
         of zero is ambiguous, so the guards in ``determine_status`` are careful about which
-        zero they are looking at. An ERROR is not ambiguous: one target that evaluated nothing
-        is a hole in the scan whether or not its sibling was fine, and a report that averages
-        it away against a passing sibling is asserting coverage it does not have.
+        zero they are looking at. An ERROR is a hole in the scan whether or not its sibling was
+        fine, and a report that averages it away against a passing sibling is asserting
+        coverage it does not have. It does not always set the scanner's ``error`` flag: a tree
+        that lost only some of its targets yields to gate-failing findings on any tree, so the
+        scanner reads FAILED and the loss stays visible through ``incomplete_scanners``.
 
         Modelled on ``scanner_evaluated_nothing``, which already reads across every target for
         the same structural reason. That function existed with that quantifier and this one did
@@ -656,9 +958,69 @@ class ScannerStatisticsCalculator:
         for target_report in reports.values():
             if not isinstance(target_report, dict):
                 continue
-            if target_report.get("status") == ScannerStatus.ERROR.value:
+            if target_report.get("status") != ScannerStatus.ERROR.value:
+                continue
+            if (
+                not include_partial_loss
+                and ScannerStatisticsCalculator._is_partial_loss(
+                    asharp_model, scanner_name, target_report
+                )
+            ):
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def any_target_missing(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when ANY target this scanner reported under came back MISSING.
+
+        The same quantifier as ``any_target_errored``, for the same reason. The scan phase
+        records a dependency it checks before the scanner runs on the scanner-level report,
+        but the executor records MISSING per target when ``scan()`` returns a falsy value,
+        so a scanner can evaluate the source tree and find its dependencies unavailable on
+        the converted one. No rule ran against that tree. Read off the source report or the
+        ``scanner_results`` row alone, the scanner rolled up to PASSED, which is the "PASSED
+        with an unevaluated target" contract clause 3i forbids.
+
+        Which reports count is ``target_report_is_missing``. Only this scanner's own
+        reports count, as in ``_recorded_report``: a mapping that names another
+        scanner is no report of this one's.
+        """
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return False
+
+        for target_report in reports.values():
+            if (
+                not isinstance(target_report, dict)
+                or target_report.get("scanner_name") != scanner_name
+            ):
+                continue
+            if ScannerStatisticsCalculator.target_report_is_missing(target_report):
                 return True
         return False
+
+    @staticmethod
+    def target_report_is_missing(report: Dict[str, Any]) -> bool:
+        """True when one serialized target report says its dependencies were unavailable.
+
+        Its status says MISSING, or it says ``dependencies_satisfied: false`` whatever
+        status it reached. The second is a scanner whose ``scan()`` override recorded
+        its tool absent and still returned a report: the executor copies that onto the
+        container, which then grades PASSED on the nothing it found. No rule ran for
+        want of the tool, so the target is as unevaluated as a MISSING one.
+
+        The status is read directly rather than through ``_status_info_from_report``,
+        which maps an unrecognized status to ``excluded=True``. A MISSING report that
+        says ``dependencies_satisfied: true`` (the scan phase's filtering-raised
+        record) still counts, by its status.
+        """
+        status = report.get("status")
+        if getattr(status, "value", status) == ScannerStatus.MISSING.value:
+            return True
+        return report.get("dependencies_satisfied") is False
 
     @staticmethod
     def scanner_evaluated_nothing(
@@ -672,8 +1034,9 @@ class ScannerStatisticsCalculator:
         report means the scanner does not track per-target outcomes and is making no claim
         (``exclude_none=True`` drops the None), while a present 0 means it tracked and attempted
         none. Absent must never read as zero -- bandit, checkov, semgrep, grype, syft,
-        detect-secrets, opengrep, cfn-nag and npm-audit are all in the no-claim state, and
-        reading them as tracked-zero would turn every row of a clean report yellow.
+        detect-secrets and opengrep are all in the no-claim state (cdk-nag, cfn-nag and
+        npm-audit track targets), and reading them as tracked-zero would turn every row of a
+        clean report yellow.
 
         Read across every target the scanner reported under, because ``ScanPhase`` gives each
         scanner a task carrying both the source and the converted tree and only one of them may
@@ -696,12 +1059,48 @@ class ScannerStatisticsCalculator:
             if not isinstance(target_report, dict):
                 continue
             attempted = target_report.get("targets_attempted")
-            # bool is an int subclass, and a True/False counter is a caller bug rather than a
-            # claim about targets, so it is not read as 1/0 here.
+            failed = target_report.get("targets_failed")
+            # A counter that is present but not a genuine int (bool is an int
+            # subclass, and a True/False counter is a caller bug rather than a
+            # claim about targets) poisons the scanner's accounting. SKIPPED is
+            # a complete status, so answering True off the readable half of a
+            # poisoned report would complete a scan whose counters cannot be
+            # trusted; unified_metrics.target_counts classifies the same report
+            # as untrustworthy and the incomplete-scan check lists it instead.
+            for value in (attempted, failed):
+                if value is not None and (
+                    isinstance(value, bool) or not isinstance(value, int)
+                ):
+                    return False
             if isinstance(attempted, int) and not isinstance(attempted, bool):
                 claims.append(attempted)
 
         return bool(claims) and all(attempted <= 0 for attempted in claims)
+
+    @staticmethod
+    def _has_actionable_findings(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when the scanner's SARIF findings fail its severity threshold.
+
+        The count ``get_scanner_status`` and ``get_unified_scanner_metrics`` rank
+        against the did-not-run statuses, so the flag
+        ``get_scanner_status_info`` returns is decided on the same number.
+        """
+        suppressed, critical, high, medium, low, info = (
+            ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
+                asharp_model, scanner_name
+            )
+        )
+        threshold, _ = ScannerStatisticsCalculator.get_scanner_threshold_info(
+            asharp_model, scanner_name
+        )
+        return (
+            ScannerStatisticsCalculator.calculate_actionable_count(
+                critical, high, medium, low, info, threshold
+            )
+            > 0
+        )
 
     @staticmethod
     def get_scanner_status_info(
@@ -732,28 +1131,29 @@ class ScannerStatisticsCalculator:
         folded into ``excluded`` here -- see ``_status_info_from_report`` for what folding it in
         used to cost.
 
-        ``error`` is the one of the three read across every target rather than off a single
-        report, and that asymmetry is deliberate. A scanner is switched off, or its tool is
-        absent, for the whole run -- those are facts about configuration, and the scanner-level
-        report states them correctly. Whether a rule was evaluated is a fact about one tree, and
-        a scanner gets two. See ``any_target_errored`` for what reading only the source report
-        cost. Widening ``excluded`` the same way would be actively wrong: one target carrying an
-        unrecognized status makes ``_status_info_from_report`` return ``excluded=True`` for
-        backward compatibility, which would then claim the operator had switched the scanner off.
+        ``error`` and ``dependencies_missing`` are read across every target rather than off a
+        single report, and ``excluded`` is not. A scanner is switched off for the whole run --
+        a fact about configuration, which the scanner-level report states correctly. Whether a
+        rule was evaluated is a fact about one tree, and a scanner gets two: a target can come
+        back ERROR, or MISSING when ``scan()`` found its dependencies unavailable there. See
+        ``any_target_errored`` and ``any_target_missing`` for what reading only the source
+        report cost. Widening ``excluded`` the same way would be actively wrong: one target
+        carrying an unrecognized status makes ``_status_info_from_report`` return
+        ``excluded=True`` for backward compatibility, which would then claim the operator had
+        switched the scanner off.
         """
         excluded = False
         dependencies_missing = False
         error = False
-        if (
-            scanner_name in asharp_model.additional_reports
-            and "None" in asharp_model.additional_reports[scanner_name]
-            and asharp_model.additional_reports[scanner_name]["None"]["scanner_name"]
-            == scanner_name
-        ):
+        none_report = ScannerStatisticsCalculator._recorded_report(
+            asharp_model, scanner_name, "None"
+        )
+        source_report = ScannerStatisticsCalculator._recorded_report(
+            asharp_model, scanner_name, "source"
+        )
+        if none_report is not None:
             excluded, dependencies_missing, error = (
-                ScannerStatisticsCalculator._status_info_from_report(
-                    asharp_model.additional_reports[scanner_name]["None"]
-                )
+                ScannerStatisticsCalculator._status_info_from_report(none_report)
             )
         elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
@@ -792,29 +1192,65 @@ class ScannerStatisticsCalculator:
             status_value = getattr(
                 getattr(scanner_status_info, "status", None), "value", None
             ) or getattr(scanner_status_info, "status", None)
+            #
+            # An ERROR row is deferred to the walk below, like the source
+            # report's ERROR in the branch after this one, when the per-target
+            # reports account for it with a partial loss alone
+            # (``recorded_error_is_partial_loss``). This is the branch a scan
+            # reaches for such a scanner: a scanner whose run returned an ERROR
+            # tree is not recorded as completed, the scan phase's completeness
+            # check writes it an ERROR row, and the rebuild reads that row first.
+            # A rule kept only in the source-report branch never ran for it. An
+            # ERROR row that no report explains (a run that raised leaves FAILED
+            # containers) stays ERROR.
             if status_value == ScannerStatus.ERROR.value:
-                error = True
-        elif (
-            scanner_name in asharp_model.additional_reports
-            and "source" in asharp_model.additional_reports[scanner_name]
-            and asharp_model.additional_reports[scanner_name]["source"]["scanner_name"]
-            and asharp_model.additional_reports[scanner_name]["source"]["status"]
-        ):
-            excluded, dependencies_missing, error = (
-                ScannerStatisticsCalculator._status_info_from_report(
-                    asharp_model.additional_reports[scanner_name]["source"]
+                error = not ScannerStatisticsCalculator.recorded_error_is_partial_loss(
+                    asharp_model, scanner_name
                 )
+        elif source_report is not None and source_report.get("status"):
+            excluded, dependencies_missing, error = (
+                ScannerStatisticsCalculator._status_info_from_report(source_report)
             )
+            # The source report is one tree's. A partial-loss ERROR on it is judged with
+            # the other trees below, like any other tree's, so it does not set the flag
+            # ahead of the scanner's findings.
+            if error and ScannerStatisticsCalculator._is_partial_loss(
+                asharp_model, scanner_name, source_report
+            ):
+                error = False
         else:
-            # If the scanner is not found in the dictionary, check for errors
+            # No status recorded for the scanner, so nothing says it ran.
             error = True
 
         # ORed in after the branches above rather than replacing them. Those branches also
-        # produce ``excluded`` and ``dependencies_missing``, which stay scanner-level, and the
-        # first branch reads a report keyed ``"None"`` -- a scanner that never reached a target
-        # at all -- which ``any_target_errored`` covers as well since it walks every key.
-        error = error or ScannerStatisticsCalculator.any_target_errored(
-            asharp_model, scanner_name
+        # produce ``excluded``, which stays scanner-level, and the first branch reads a report
+        # keyed ``"None"`` -- a scanner that never reached a target at all -- which both walks
+        # cover as well since they read every key.
+        #
+        # Findings outrank lost coverage except total loss, the rule
+        # ``ScanResultsContainer.determine_status`` applies on one tree. A tree that
+        # evaluated nothing sets ``error`` whatever its siblings found. A tree that lost
+        # only SOME targets sets it only when the scanner has no gate-failing findings on
+        # any tree, so 13 attempted, 4 lost and one HIGH finding reads FAILED whether the
+        # loss and the finding share a tree or not. This matches the findings-outrank-MISSING
+        # precedence and the exit code, which fails on the findings; the partial loss stays
+        # visible through ``incomplete_scanners``, not through status precedence.
+        if not error:
+            if ScannerStatisticsCalculator.any_target_errored(
+                asharp_model, scanner_name, include_partial_loss=False
+            ):
+                error = True
+            elif ScannerStatisticsCalculator.any_target_errored(
+                asharp_model, scanner_name
+            ):
+                error = not ScannerStatisticsCalculator._has_actionable_findings(
+                    asharp_model, scanner_name
+                )
+        dependencies_missing = (
+            dependencies_missing
+            or ScannerStatisticsCalculator.any_target_missing(
+                asharp_model, scanner_name
+            )
         )
 
         return excluded, dependencies_missing, error

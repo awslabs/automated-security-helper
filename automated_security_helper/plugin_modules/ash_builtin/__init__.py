@@ -83,7 +83,13 @@ def _plugin_classes(module, base) -> list[type]:
     return sorted(found, key=lambda cls: cls.__name__)
 
 
-def _load_builtin_plugins():
+def _load_builtin_plugins() -> Tuple[
+    List[type],
+    List[type],
+    List[type],
+    Dict[AshEventType, List[object]],
+    Dict[str, str],
+]:
     """Import each built-in plugin group in isolation and report what was lost.
 
     The @ash_scanner_plugin / @ash_converter_plugin / @ash_reporter_plugin

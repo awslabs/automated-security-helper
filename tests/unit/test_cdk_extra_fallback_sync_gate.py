@@ -77,9 +77,15 @@ from pathlib import Path
 
 import pytest
 
-if sys.version_info >= (3, 11):
+try:
     import tomllib
-else:  # pragma: no cover - the whole module is skipped below on 3.10
+except ModuleNotFoundError:  # pragma: no cover - measured on the 3.10 legs
+    # Mirrors the script's own guarded import. On 3.10 these tests run with the
+    # script's _parse_cdk_extra fallback on both sides of the gate, which is then
+    # also the script's live path, so the 3.10 leg exercises the fallback end to
+    # end rather than skipping the module as it did while the script required
+    # 3.11+. The parser itself is held equal to tomllib by the 3.11+ legs
+    # (TestTheFallbackParse).
     tomllib = None  # type: ignore[assignment]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -92,11 +98,6 @@ REAL_SCANNER = (
     / "ash_builtin"
     / "scanners"
     / "cdk_nag_scanner.py"
-)
-
-pytestmark = pytest.mark.skipif(
-    sys.version_info < (3, 11),
-    reason="the script needs tomllib; it runs in pre-commit and CI, not inside ASH",
 )
 
 
@@ -138,7 +139,19 @@ _LOAD_BEARING = frozenset({"aws-cdk-lib", "cdk-nag", "constructs"})
 
 
 def _declared() -> list[str]:
-    """``[project.optional-dependencies] cdk``, read live from the real pyproject."""
+    """``[project.optional-dependencies] cdk``, read live from the real pyproject.
+
+    On 3.11+ this is an independent read through tomllib. On 3.10 the only parser
+    on hand is the script's own fallback, so there the perturbation INPUTS are
+    derived through code under test; what keeps the drift comparisons honest on
+    every leg is that declared and committed are read from different files by
+    different functions, and the parser itself is held equal to tomllib on the
+    3.11+ legs of the same matrix (TestTheFallbackParse).
+    """
+    if tomllib is None:
+        return _load_script()._parse_cdk_extra(
+            REAL_PYPROJECT.read_text(encoding="utf-8")
+        )
     with REAL_PYPROJECT.open("rb") as handle:
         return list(tomllib.load(handle)["project"]["optional-dependencies"]["cdk"])
 
@@ -448,3 +461,137 @@ class TestTheGateCannotPassVacuously:
         assert declared != committed
         assert moved in declared
         assert moved not in committed
+
+
+class TestTheFallbackParse:
+    """The 3.10 path: ``_parse_cdk_extra`` instead of tomllib.
+
+    ``requires-python`` starts at 3.10 and tomllib entered the standard library
+    in 3.11, so on the oldest supported interpreter the script reads the extra
+    with a deliberately narrow parser. It is held to two bars. It must agree
+    with tomllib on the real file -- checked on the 3.11+ legs, which is what
+    licenses the 3.10 leg (where the fallback is the live path for this whole
+    module) to trust it. And on anything outside the committed shape it must
+    refuse with a named line rather than guess, because a guessed list is what
+    ``--fix`` would write into the scanner.
+    """
+
+    #: A pyproject in the committed shape, cut down to what the parser walks:
+    #: an earlier table, an earlier extra whose own array must be stepped over,
+    #: a full-line comment inside the cdk array (the real extra carries one),
+    #: and a table after it.
+    _SHAPE = (
+        "[project]\n"
+        'name = "x"\n'
+        "[project.optional-dependencies]\n"
+        "sym = [\n"
+        '    "other>=1,<2",\n'
+        "]\n"
+        "cdk = [\n"
+        "    # a full-line comment, as the committed extra carries\n"
+        '    "aws-cdk-lib>=2.0,<3.0.0",\n'
+        '    "cdk-nag>=3.0,<4.0.0",\n'
+        "]\n"
+        "[tool.something]\n"
+        'key = "value"\n'
+    )
+
+    def test_the_accepted_shape_parses(self):
+        assert _load_script()._parse_cdk_extra(self._SHAPE) == [
+            "aws-cdk-lib>=2.0,<3.0.0",
+            "cdk-nag>=3.0,<4.0.0",
+        ]
+
+    @pytest.mark.skipif(
+        tomllib is None, reason="tomllib is the 3.11+ side of this comparison"
+    )
+    def test_the_fallback_agrees_with_tomllib_on_the_real_pyproject(self):
+        """The equality that lets the 3.10 leg rely on the fallback at all."""
+        parsed = _load_script()._parse_cdk_extra(
+            REAL_PYPROJECT.read_text(encoding="utf-8")
+        )
+        with REAL_PYPROJECT.open("rb") as handle:
+            assert parsed == list(
+                tomllib.load(handle)["project"]["optional-dependencies"]["cdk"]
+            )
+
+    def test_the_fallback_reads_the_real_extra_non_degenerately(self):
+        """On every leg, 3.10 included: the real file parses and is not empty.
+
+        The floor is ``_LOAD_BEARING`` for the same reason the anti-vacuity
+        control uses it: a bound read from pyproject through the same parser
+        would be satisfied by the mechanism it controls.
+        """
+        parsed = _load_script()._parse_cdk_extra(
+            REAL_PYPROJECT.read_text(encoding="utf-8")
+        )
+        assert _LOAD_BEARING.issubset({_distribution_of(item) for item in parsed}), (
+            parsed
+        )
+
+    def test_declared_requirements_answers_the_same_without_tomllib(self, monkeypatch):
+        """The branch point itself: taking tomllib away must not change the answer.
+
+        On 3.10 both reads are the fallback and this is trivially true; on the
+        3.11+ legs it is the real cross-check of ``declared_requirements``'s two
+        branches against each other on the real file.
+        """
+        script = _load_script()
+        with_the_parser_of_record = script.declared_requirements()
+        monkeypatch.setattr(script, "tomllib", None)
+        assert script.declared_requirements() == with_the_parser_of_record
+
+    @pytest.mark.parametrize(
+        "mutate,named_in_the_refusal",
+        [
+            (
+                lambda t: t.replace(
+                    "[project.optional-dependencies]", "[project.other-things]"
+                ),
+                "optional-dependencies",
+            ),
+            (
+                lambda t: t.replace("cdk = [", "cdk-renamed = ["),
+                "optional-dependencies",
+            ),
+            (
+                lambda t: t.replace(
+                    '    "cdk-nag>=3.0,<4.0.0",\n',
+                    '    "cdk-nag>=3.0,<4.0.0", "two-on-one-line>=1",\n',
+                ),
+                "double-quoted requirement",
+            ),
+            (
+                lambda t: t.replace(
+                    '    "cdk-nag>=3.0,<4.0.0",\n',
+                    "    'cdk-nag>=3.0,<4.0.0',\n",
+                ),
+                "double-quoted requirement",
+            ),
+            (
+                lambda t: t.replace(
+                    '"cdk-nag>=3.0,<4.0.0",\n]\n', '"cdk-nag>=3.0,<4.0.0",\n'
+                ),
+                "never closes",
+            ),
+        ],
+        ids=[
+            "the table is renamed",
+            "the extra is renamed",
+            "two requirements on one line",
+            "a single-quoted requirement",
+            "the array never closes",
+        ],
+    )
+    def test_anything_outside_the_committed_shape_is_refused(
+        self, mutate, named_in_the_refusal
+    ):
+        """Refusal, not a guess: each mutation is one plausible future edit."""
+        script = _load_script()
+        mutated = mutate(self._SHAPE)
+        assert mutated != self._SHAPE, "the mutation must actually change the text"
+
+        with pytest.raises(SystemExit) as excinfo:
+            script._parse_cdk_extra(mutated)
+
+        assert named_in_the_refusal in str(excinfo.value)

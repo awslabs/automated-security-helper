@@ -168,7 +168,8 @@ class TestByteExactness:
         name = secure_parameter(CONFIG_YAML)
         config = tmp_path / "ash-config" / ".ash.yaml"
 
-        assert run_ssm_command(child_env, config, name).returncode == 0
+        returncode = run_ssm_command(child_env, config, name).returncode
+        assert returncode == 0
 
         written = config.read_bytes()
         assert not written.endswith(b"\n"), (
@@ -184,7 +185,8 @@ class TestByteExactness:
         name = secure_parameter(CONFIG_YAML + "\n")
         config = tmp_path / "ash-config" / ".ash.yaml"
 
-        assert run_ssm_command(child_env, config, name).returncode == 0
+        returncode = run_ssm_command(child_env, config, name).returncode
+        assert returncode == 0
         assert config.read_bytes() == (CONFIG_YAML + "\n").encode("utf-8")
 
     def test_multiline_structure_survives(
@@ -194,7 +196,8 @@ class TestByteExactness:
         name = secure_parameter(CONFIG_YAML)
         config = tmp_path / "ash-config" / ".ash.yaml"
 
-        assert run_ssm_command(child_env, config, name).returncode == 0
+        returncode = run_ssm_command(child_env, config, name).returncode
+        assert returncode == 0
 
         lines = config.read_text(encoding="utf-8").splitlines()
         assert lines == CONFIG_YAML.splitlines()
@@ -223,7 +226,8 @@ class TestDecryption:
         )
 
         config = tmp_path / "ash-config" / ".ash.yaml"
-        assert run_ssm_command(child_env, config, name).returncode == 0
+        returncode = run_ssm_command(child_env, config, name).returncode
+        assert returncode == 0
 
         written = config.read_text(encoding="utf-8")
         assert written == CONFIG_YAML
@@ -252,7 +256,8 @@ class TestDecryption:
         )
 
         config = tmp_path / "ash-config" / ".ash.yaml"
-        assert run_ssm_command(child_env, config, name).returncode == 0
+        returncode = run_ssm_command(child_env, config, name).returncode
+        assert returncode == 0
         assert config.read_bytes() == CONFIG_YAML.encode("utf-8")
 
 

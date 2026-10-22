@@ -54,6 +54,7 @@ from automated_security_helper.core.exceptions import WorkspaceDefinitionError
 from automated_security_helper.workspace.execution import (
     ProjectScanSettings,
     prewarm_plugin_registry,
+    workspace_plugin_modules,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.resolver import (
@@ -77,11 +78,22 @@ def _acme_is_installed(tmp_path_factory, monkeypatch):
     (package / "__init__.py").write_text("", encoding="utf-8")
     for name in ("plugins", "one", "two", "from_cli"):
         (package / f"{name}.py").write_text("", encoding="utf-8")
+    # An operator-named module must be inside the plugin namespace, or the
+    # pre-warm refuses the run before any import; the CLI test names a module
+    # under this package.
+    namespaced = site / "acme_ash_plugins"
+    namespaced.mkdir()
+    (namespaced / "__init__.py").write_text("", encoding="utf-8")
     monkeypatch.syspath_prepend(str(site))
     yield
     import sys
 
-    for name in [n for n in sys.modules if n == "acme" or n.startswith("acme.")]:
+    for name in [
+        n
+        for n in sys.modules
+        if n in ("acme", "acme_ash_plugins")
+        or n.startswith(("acme.", "acme_ash_plugins."))
+    ]:
         del sys.modules[name]
 
 
@@ -259,24 +271,26 @@ class TestPrewarm:
         import sys
 
         site = tmp_path / "site"
-        (site / "zzfromcli_ash_plugins").mkdir(parents=True)
-        (site / "zzfromcli_ash_plugins" / "__init__.py").write_text(
-            "LOADED = True\n", encoding="utf-8"
-        )
+        (site / "acme_ash_plugins").mkdir(parents=True)
+        (site / "acme_ash_plugins" / "__init__.py").write_text("", encoding="utf-8")
+        (site / "acme_ash_plugins" / "from_cli.py").write_text("", encoding="utf-8")
         monkeypatch.syspath_prepend(str(site))
         plan = self._plan(tmp_path, ("api", []))
         settings = ProjectScanSettings(
             output_dir=tmp_path / "out",
-            ash_plugin_modules=("zzfromcli_ash_plugins",),
+            ash_plugin_modules=("acme_ash_plugins.from_cli",),
         )
-
+        # The CLI module is in the set the pre-warm loads, not only counted.
+        assert "acme_ash_plugins.from_cli" in workspace_plugin_modules(plan, settings)
         try:
             assert prewarm_plugin_registry(plan, settings) > 0
-            assert "zzfromcli_ash_plugins" in sys.modules, (
-                "pre-warm did not import the module the CLI named"
-            )
+            # The set it loads, not only the set it reports: the module was
+            # imported. (A module that fails to import refuses the run instead;
+            # that contract has its own cells.)
+            assert "acme_ash_plugins.from_cli" in sys.modules
         finally:
-            sys.modules.pop("zzfromcli_ash_plugins", None)
+            sys.modules.pop("acme_ash_plugins.from_cli", None)
+            sys.modules.pop("acme_ash_plugins", None)
 
     def test_a_cli_module_that_does_not_import_refuses_the_workspace(self, tmp_path):
         """Inside the plugin namespace and not installed: exit 3, as for one scan."""

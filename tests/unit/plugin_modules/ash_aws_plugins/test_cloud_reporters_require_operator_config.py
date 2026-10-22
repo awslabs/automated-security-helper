@@ -42,6 +42,11 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_repor
 )
 from tests.utils.secret_bearing_scan import isolate_from_aws
 
+# The scans here run detect-secrets, whose dependency check asked uv for its version
+# (``uv tool run detect-secrets --version``) and so started the tool. These tests are
+# about the reporters, so the probes answer without a process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
+
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 
 CLOUD_REPORTERS = (
@@ -61,6 +66,7 @@ reporters:
       aws_region: us-east-1
       aws_profile: null
       account_id: "123456789012"
+      findings_scope: fixture-project
 """
 
 

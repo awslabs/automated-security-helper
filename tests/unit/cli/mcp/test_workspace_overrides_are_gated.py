@@ -349,6 +349,14 @@ _OFF_HOST_REPORTERS = (
     "s3",
 )
 
+_OPERATORS_S3 = (
+    "reporters:\n"
+    "  s3:\n"
+    "    enabled: true\n"
+    "    options:\n"
+    "      bucket_name: operators-bucket\n"
+)
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
@@ -412,3 +420,91 @@ async def test_an_override_setting_an_off_host_reporter_option_is_refused(
     result = await _resolve(tmp_path, [f"reporters.{reporter}.{setting}"])
     assert result["success"] is False, result
     assert f"matches denied_paths entry '/reporters/{reporter}/" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_turning_an_off_host_reporter_off_is_accepted_and_not_passed_on(
+    tmp_path, monkeypatch, caplog
+):
+    """The overrides reach each project's resolution as the operator's, so one the
+    gate accepts there takes effect: ``reporters.s3.enabled=false`` turned off the
+    operator's upload for the workspace's projects. It is accepted, so a client
+    that sends it does not fail, and left out of what the projects get."""
+    import logging
+
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+    passed_on = []
+    resolve = workspace_module._resolve
+
+    def recording(*args, **kwargs):
+        passed_on.append(list(args[3] or []))
+        return resolve(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "_resolve", recording)
+
+    with caplog.at_level(logging.WARNING):
+        result = await _resolve(tmp_path, ["reporters.s3.enabled=false"])
+
+    assert result["success"] is True, result
+    assert passed_on == [[]], passed_on
+    assert any(
+        "reporters.s3.enabled" in record.getMessage()
+        or "/reporters/s3/enabled" in record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ), [record.getMessage() for record in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_control_another_override_beside_it_is_passed_on(tmp_path, monkeypatch):
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+    passed_on = []
+    resolve = workspace_module._resolve
+
+    def recording(*args, **kwargs):
+        passed_on.append(list(args[3] or []))
+        return resolve(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "_resolve", recording)
+
+    result = await _resolve(
+        tmp_path, ["reporters.s3.enabled=false", "reporters.markdown.enabled=false"]
+    )
+
+    assert result["success"] is True, result
+    assert passed_on == [["reporters.markdown.enabled=false"]], passed_on
+
+
+@pytest.mark.asyncio
+async def test_pointing_the_operators_reporter_elsewhere_is_refused(
+    tmp_path, monkeypatch
+):
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+    result = await _resolve(tmp_path, ["reporters.s3.options.bucket_name=clients"])
+    assert result["success"] is False, result
+
+
+@pytest.mark.asyncio
+async def test_a_refused_call_logs_no_ignored_turn_off(tmp_path, monkeypatch, caplog):
+    """A turn-off sent with a refused override: the call is refused, so nothing
+    was ignored, and saying so would describe an outcome the call did not have."""
+    import logging
+
+    _with_profile(monkeypatch, tmp_path, ["/reporters/**"], _OPERATORS_S3)
+
+    with caplog.at_level(logging.WARNING):
+        result = await _resolve(
+            tmp_path,
+            [
+                "reporters.s3.enabled=false",
+                "reporters.s3.options.bucket_name=clients",
+            ],
+        )
+
+    assert result["success"] is False, result
+    ignored = [
+        record.getMessage()
+        for record in caplog.records
+        if "Ignoring the config override" in record.getMessage()
+    ]
+    assert ignored == [], ignored

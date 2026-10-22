@@ -452,7 +452,12 @@ def _policy_for(
 
 @dataclass
 class ProbeContext:
-    """What a measurer needs from the scanner that used the database."""
+    """What a measurer needs from the scanner that used the database.
+
+    ``values`` are the scanner's env-read values: a probe's output excerpt is
+    redacted with them BEFORE it is cut, so a cut cannot split a value and
+    leave a fragment the downstream whole-spelling redaction misses.
+    """
 
     env: Dict[str, str]
     executable: Optional[str] = None
@@ -467,6 +472,9 @@ class ProbeContext:
     #: (``path_trust.cwd_outside_scanned_tree``). None runs it from the filesystem
     #: root of the temporary directory, which no repository writes.
     cwd: Optional[str] = None
+    #: The caller's env-read values: a probe's output quoted in an error is
+    #: redacted with them before it is cut.
+    values: Tuple[str, ...] = ()
 
 
 def _probe_cwd(ctx: ProbeContext) -> str:
@@ -477,7 +485,12 @@ def _probe_cwd(ctx: ProbeContext) -> str:
     return Path(os.path.abspath(tempfile.gettempdir())).anchor
 
 
-def _run_json(command: List[str], env: Mapping[str, str], cwd: str) -> Any:
+def _run_json(
+    command: List[str],
+    env: Mapping[str, str],
+    cwd: str,
+    values: Sequence[str] = (),
+) -> Any:
     """Run a tool's status command and parse its stdout as JSON, whatever it exits with.
 
     ``grype db status`` exits 1 when it considers the database invalid -- including when it
@@ -494,9 +507,15 @@ def _run_json(command: List[str], env: Mapping[str, str], cwd: str) -> Any:
     )
     text = (proc.stdout or "").strip()
     if not text:
+        from automated_security_helper.utils.error_text import shown_tool_stderr
+
+        # REDACTED BEFORE the excerpt is cut: a cut can split an env-read
+        # value, and the downstream whole-spelling redaction cannot match
+        # the fragment.
+        shown = shown_tool_stderr((proc.stderr or "").strip(), values)
         raise ValueError(
             f"`{' '.join(command)}` printed nothing (exit {proc.returncode}): "
-            f"{head_and_tail((proc.stderr or '').strip(), 300)}"
+            f"{head_and_tail(shown, 300)}"
         )
     return json.loads(text)
 
@@ -519,18 +538,27 @@ def _built_from_grype(ctx: ProbeContext) -> tuple[datetime, str]:
         ],
         env,
         _probe_cwd(ctx),
+        ctx.values,
     )
     built = status.get("built") if isinstance(status, dict) else None
     if not built:
+        from automated_security_helper.utils.error_text import shown_tool_stderr
+
         error = str(status.get("error") or "") if isinstance(status, dict) else ""
         path = status.get("path") if isinstance(status, dict) else None
         if "does not exist" in error or (
             isinstance(path, str) and path and not Path(path).exists()
         ):
+            # The error and path are grype's own output: REDACTED BEFORE the cut.
             raise ContentDatabaseAbsent(
-                f"`grype db status` reports no database at {path}: {error}"[:300]
+                shown_tool_stderr(
+                    f"`grype db status` reports no database at {path}: {error}",
+                    ctx.values,
+                )[:300]
             )
-        raise ValueError(f"`grype db status` reported no build time: {status!r}"[:300])
+        # The status document is grype's own output: REDACTED BEFORE the cut.
+        shown = shown_tool_stderr(f"{status!r}", ctx.values)
+        raise ValueError(f"`grype db status` reported no build time: {shown}"[:300])
     return parse_timestamp(str(built)), "`built` in `grype db status -o json`"
 
 
@@ -560,6 +588,7 @@ def _built_from_trivy(ctx: ProbeContext) -> tuple[datetime, str]:
         ],
         ctx.env,
         _probe_cwd(ctx),
+        ctx.values,
     )
     db = version.get("VulnerabilityDB") if isinstance(version, dict) else None
     updated = db.get("UpdatedAt") if isinstance(db, dict) else None
@@ -884,6 +913,46 @@ def stale_content_databases(
                 if key not in found or record.enforced:
                     found[key] = record
     return [found[key] for key in sorted(found)]
+
+
+def scanners_in_error_for_a_stale_database(results: Any) -> set[str]:
+    """Scanners recorded ERROR because a database the policy rejects gave a clean result.
+
+    Under ``content_db_staleness: fail`` the executor records a clean result from a
+    database past its bound as ERROR, and names the database in the per-target
+    report's ``rejected_content_databases``. That ERROR is the stale database: the
+    scanner ran and reached a verdict the policy does not accept. So it is reported
+    once, as the stale database with its refresh advice, and the scanner counts as
+    having run, as it did when such a result was recorded PASSED. A scanner in ERROR
+    for any other reason is not in this set and is still reported as incomplete.
+
+    A scanner qualifies when every per-target report of it in ERROR names a rejected
+    database, at least one does, and the results carry an enforced stale record for
+    it. A results file written before the marker existed has no such report, so its
+    ERROR rows keep the stricter reading.
+    """
+    from automated_security_helper.core.enums import ScannerStatus
+
+    enforced = {
+        record.scanner
+        for record in stale_content_databases(results, enforced_only=True)
+    }
+    found: set[str] = set()
+    for name, reports in (getattr(results, "additional_reports", None) or {}).items():
+        if name not in enforced or not isinstance(reports, Mapping):
+            continue
+        in_error = [
+            report
+            for report in reports.values()
+            if isinstance(report, Mapping)
+            and getattr(report.get("status"), "value", report.get("status"))
+            == ScannerStatus.ERROR.value
+        ]
+        if in_error and all(
+            report.get("rejected_content_databases") for report in in_error
+        ):
+            found.add(name)
+    return found
 
 
 def probe_env(extra: Optional[Mapping[str, str]]) -> Dict[str, str]:

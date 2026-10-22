@@ -25,10 +25,22 @@ class ReportContentEmitter:
     that can be used by different reporter implementations.
     """
 
-    def __init__(self, model: "AshAggregatedResults"):
-        """Initialize with an AshAggregatedResults."""
+    def __init__(
+        self, model: "AshAggregatedResults", *, human_presentation: bool = False
+    ):
+        """Initialize with an AshAggregatedResults.
+
+        ``human_presentation`` is accepted from the human reporters and grades
+        nothing differently: every report, the flat exports included, grades a
+        finding by the gate's rule (``utils.severity_ladder.result_severity``),
+        which the flattened findings already carry. It gives the emitter its own
+        copy of each row, as the model memoizes them for every reporter of a
+        run: a human report that writes one changes no later report's rows.
+        """
         self.model = model
         self.flat_vulns = model.to_flat_vulnerabilities()
+        if human_presentation:
+            self.flat_vulns = [vuln.model_copy() for vuln in self.flat_vulns]
         self.ash_conf = model.ash_config
 
         # Get unified scanner metrics - always compute from the model to ensure consistency
@@ -119,6 +131,11 @@ class ReportContentEmitter:
                     "status": metrics.status,
                     "excluded": metrics.excluded,
                     "dependencies_missing": metrics.dependencies_missing,
+                    # Why a SKIPPED or MISSING scanner did not run, the same text as
+                    # its scanner_results row in ash_aggregated_results.json. None
+                    # for every other status.
+                    "missing_reason": metrics.missing_reason,
+                    "skipped_reason": metrics.skipped_reason,
                     # Seconds the scanner took, or None when it did not run. The
                     # text and html reporters render a Duration column from this
                     # key with format_duration(result.get("duration", 0)); while
@@ -137,10 +154,123 @@ class ReportContentEmitter:
                     # "made no claim" from "attempted none".
                     "targets_attempted": metrics.targets_attempted,
                     "targets_failed": metrics.targets_failed,
+                    # True when the stored counters could not be read; both counts are then
+                    # null and the status is ERROR.
+                    "counters_unusable": metrics.counters_unusable,
                 }
             )
 
         return results
+
+    def get_scan_summary(self) -> Dict[str, Any]:
+        """Describe the outcome for people without changing the scan's exit policy.
+
+        A zero finding count is not a clean scan when no scanner completed, a
+        dependency is missing, a target failed, or a content database is stale.
+        Keep those conditions visible in every human-readable report.
+        """
+        from automated_security_helper.core.unified_metrics import coverage_shortfalls
+        from automated_security_helper.utils.content_db_staleness import (
+            stale_content_databases,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
+            skipped_projects,
+        )
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        results = self.get_scanner_results()
+        counts = {
+            level: sum(result[level] for result in results)
+            for level in ("critical", "high", "medium", "low", "info")
+        }
+        actionable = sum(result["actionable"] for result in results)
+        suppressed = sum(result["suppressed"] for result in results)
+        if not results:
+            # Imported SARIF can contain findings without execution metadata.
+            # Count those findings while making no completion claim.
+            counts = {
+                level: sum(
+                    not vuln.is_suppressed and vuln.severity.lower() == level
+                    for vuln in self.flat_vulns
+                )
+                for level in counts
+            }
+            actionable = sum(
+                self.is_finding_actionable(vuln) for vuln in self.flat_vulns
+            )
+            suppressed = sum(vuln.is_suppressed for vuln in self.flat_vulns)
+        completed = sum(result["status"] in ("PASSED", "FAILED") for result in results)
+        skipped = sum(result["status"] == "SKIPPED" for result in results)
+        unavailable = [
+            result["scanner_name"]
+            for result in results
+            if result["status"] not in ("PASSED", "FAILED", "SKIPPED")
+        ]
+        shortfalls = coverage_shortfalls(self.model)
+        stale = stale_content_databases(self.model)
+        skipped_workspace = skipped_projects(self.model)
+        coverage = scan_incompleteness(self.model, gate=True)
+        partial_scanners = {name for name, _, _ in shortfalls}
+        unavailable.extend(
+            name
+            for name, _ in coverage.scanners
+            if name not in unavailable and name not in partial_scanners
+        )
+        active = sum(counts.values())
+        incomplete = bool(
+            unavailable
+            or shortfalls
+            or skipped_workspace
+            or coverage.converters
+            or coverage.unevaluated_rules
+            or coverage.no_scanner_ran
+        )
+        finding_label = "finding" if actionable == 1 else "findings"
+
+        if not completed:
+            title, tone = "No scanners completed", "warning"
+            description = "Scanner coverage is unavailable."
+            next_step = (
+                "Check scanner results and dependencies, then run the scan again."
+            )
+        elif incomplete:
+            title, tone = "Scan incomplete", "warning"
+            description = f"{actionable} actionable {finding_label}. Some inputs or scanners were not evaluated."
+            next_step = "Review findings, resolve coverage gaps, and scan again."
+        elif stale:
+            title, tone = "Scan needs attention", "warning"
+            description = f"{actionable} actionable {finding_label}. Content database freshness needs review."
+            next_step = "Review the database notices, refresh the affected scanners, and scan again."
+        elif actionable or any(result["status"] == "FAILED" for result in results):
+            title, tone = "Review required", "danger"
+            description = f"{actionable} {finding_label} at or above the configured scanner thresholds."
+            next_step = "Review findings by severity, then inspect the source."
+        else:
+            title, tone = "No actionable findings", "success"
+            description = "Completed scanners reported no findings at or above their configured thresholds."
+            next_step = "Review scanner coverage and findings below the threshold."
+
+        return {
+            "title": title,
+            "tone": tone,
+            "description": description,
+            "next_step": next_step,
+            "actionable": actionable,
+            "active": active,
+            "below_threshold": max(0, active - actionable),
+            "suppressed": suppressed,
+            "counts": counts,
+            "completed": completed,
+            "scanners": len(results),
+            "skipped": skipped,
+            "unavailable": unavailable,
+            "shortfalls": shortfalls,
+            "stale": stale,
+            "converter_gaps": coverage.converters,
+            "unevaluated_rules": coverage.unevaluated_rules,
+        }
 
     def get_top_hotspots(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get top hotspots (files with most findings)."""
@@ -225,6 +355,15 @@ class ReportContentEmitter:
         ]
 
         # Limit the number of detailed findings
+        severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+        actionable_findings.sort(
+            key=lambda vuln: (
+                severity_order.get(str(vuln.severity).upper(), 5),
+                vuln.file_path or "",
+                vuln.line_start or 0,
+                vuln.rule_id or "",
+            )
+        )
         findings_to_show = actionable_findings[:max_findings]
 
         return [self._create_detailed_finding(vuln) for vuln in findings_to_show]

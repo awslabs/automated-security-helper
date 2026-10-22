@@ -17,6 +17,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_get_scan_results,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.terminal_text import raw_controls_on_one_line
 
 logger = ASH_LOGGER
 
@@ -80,8 +81,10 @@ async def _fetch_initial_scan_info(
         await _safe_send(
             True,
             lambda: ctx.error(
-                f"Failed to get scan info: "
-                f"{registry_info.get('error', 'Unknown error')}"
+                raw_controls_on_one_line(
+                    f"Failed to get scan info: "
+                    f"{registry_info.get('error', 'Unknown error')}"
+                )
             ),
             "Failed to send scan-info error",
         )
@@ -145,7 +148,7 @@ async def _handle_scan_completed(
 
     return await _safe_send(
         connection_alive,
-        lambda: ctx.info(summary),
+        lambda: ctx.info(raw_controls_on_one_line(summary)),
         "Failed to send completion summary",
     )
 
@@ -160,7 +163,7 @@ async def _handle_terminal_status(
         lambda: ctx.report_progress(
             progress=1.0,
             total=1.0,
-            message=f"Scan {status}",
+            message=raw_controls_on_one_line(f"Scan {status}"),
         ),
         "Failed to send final status progress",
     )
@@ -169,7 +172,9 @@ async def _handle_terminal_status(
         error_message = progress_info.get("error_message", "Unknown error")
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.error(f"Scan failed: {error_message}"),
+            lambda: ctx.error(
+                raw_controls_on_one_line(f"Scan failed: {error_message}")
+            ),
             "Failed to send completion message",
         )
     elif status == "incomplete":
@@ -180,8 +185,10 @@ async def _handle_terminal_status(
         connection_alive = await _safe_send(
             connection_alive,
             lambda: ctx.warning(
-                "Scan finished with incomplete coverage; its results are partial"
-                + (f". Did not complete: {names}" if names else "")
+                raw_controls_on_one_line(
+                    "Scan finished with incomplete coverage; its results are partial"
+                    + (f". Did not complete: {names}" if names else "")
+                )
             ),
             "Failed to send completion message",
         )
@@ -232,14 +239,17 @@ async def _emit_scanner_progress(
         lambda: ctx.report_progress(
             progress=progress,
             total=1.0,
-            message=message,
+            message=raw_controls_on_one_line(message),
         ),
         "Failed to send progress update",
     )
     connection_alive = await _safe_send(
         connection_alive,
         lambda: ctx.debug(
-            f"Scanner progress: {scanner_name}/{target_type} - {int(progress * 100)}%"
+            raw_controls_on_one_line(
+                f"Scanner progress: {scanner_name}/{target_type} - "
+                f"{int(progress * 100)}%"
+            )
         ),
         "Failed to send debug message",
     )
@@ -290,7 +300,7 @@ async def _process_scanner_result(
         logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(warning_message),
+            lambda: ctx.warning(raw_controls_on_one_line(warning_message)),
             "Failed to send warning message",
         )
 
@@ -313,7 +323,7 @@ async def _emit_heartbeat(
         lambda: ctx.report_progress(
             progress=progress,
             total=1.0,
-            message=(
+            message=raw_controls_on_one_line(
                 f"Scan in progress ({len(completed_scanners)}/"
                 f"{total_scanners_estimate} scanners completed)"
             ),
@@ -376,7 +386,9 @@ async def _run_monitor_loop(
             await _safe_send(
                 connection_alive,
                 lambda: ctx.warning(
-                    f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                    raw_controls_on_one_line(
+                        f"Scan monitoring timed out after {_MAX_WAIT_SECONDS} seconds"
+                    )
                 ),
                 "Failed to send timeout warning",
             )
@@ -486,7 +498,9 @@ async def monitor_workspace_progress(
         lambda: report_progress(
             progress=0.0,
             total=float(total),
-            message=f"Workspace scan started: 0/{total} projects complete",
+            message=raw_controls_on_one_line(
+                f"Workspace scan started: 0/{total} projects complete"
+            ),
         ),
         "Failed to send initial workspace progress update",
     )
@@ -505,7 +519,9 @@ async def monitor_workspace_progress(
                 lambda k=key, done=len(completed): report_progress(
                     progress=float(done),
                     total=float(total),
-                    message=f"{k} complete ({done}/{total} projects)",
+                    message=raw_controls_on_one_line(
+                        f"{k} complete ({done}/{total} projects)"
+                    ),
                 ),
                 "Failed to send workspace progress update",
             )
@@ -563,6 +579,6 @@ async def monitor_scan_progress(
         logger.exception(error_message)
         await _safe_send(
             connection_alive,
-            lambda: ctx.error(error_message),
+            lambda: ctx.error(raw_controls_on_one_line(error_message)),
             "Failed to send error message to client",
         )

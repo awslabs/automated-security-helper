@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression tests: ``ash scan`` refuses unusable input with a message and exit 1.
+"""Regression tests: ``ash scan`` refuses unusable input with a message, not a traceback.
 
 * ``--use-existing`` with no existing results raised an uncaught ``ValueError``,
   so the operator got a traceback and whatever exit code the interpreter chose.
@@ -11,9 +11,13 @@
 * A ``--base-ref`` starting with ``-`` went to ``git diff`` as an option, not a
   revision (see ``tests/unit/utils/test_base_ref.py``).
 
-All three now exit 1, the code scan already uses for a refused shard selection
-(``_fail_shard_selection``): 2 means "actionable findings", so a usage error
-that exited 2 would read to a CI gate as a scan that found problems.
+A missing ``--source-dir`` is a mistyped argument, so it exits
+``ASH_EXIT_USAGE_ERROR``, the code a refused shard selection
+(``_fail_shard_selection``) and click's own usage errors exit with: 2 means
+"actionable findings", so a usage error that exited 2 would read to a CI gate as
+a scan that found problems. ``--use-existing`` with no results is a state problem,
+not a mistake in the command line -- the results are not there yet -- so it exits 1,
+as ``ash report`` does for missing results.
 """
 
 from unittest.mock import patch
@@ -22,9 +26,10 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 
 RUN_ASH_SCAN = "automated_security_helper.cli.scan.run_ash_scan"
-USAGE_ERROR_EXIT = 1
+USAGE_ERROR_EXIT = ASH_EXIT_USAGE_ERROR
 
 
 @pytest.fixture
@@ -32,8 +37,8 @@ def runner():
     return CliRunner()
 
 
-def _assert_refused(result, *fragments):
-    assert result.exit_code == USAGE_ERROR_EXIT, result.output
+def _assert_refused(result, *fragments, code=USAGE_ERROR_EXIT):
+    assert result.exit_code == code, result.output
     # A clean exit, not an exception escaping the command.
     assert isinstance(result.exception, SystemExit), result.exception
     assert "Traceback" not in result.output
@@ -63,7 +68,9 @@ class TestNonexistentSourceDir:
         monkeypatch.setenv("ASH_SOURCE_DIR", str(missing))
         with patch(RUN_ASH_SCAN) as mock_run:
             result = runner.invoke(app, ["scan", "--output-dir", str(tmp_path / "o")])
-        _assert_refused(result, "ASH_SOURCE_DIR", str(missing))
+        # The same text as for --source-dir: it names the case and the path, and no
+        # option, so every surface can give it (utils/directory_refusals.py).
+        _assert_refused(result, f"Source directory does not exist: {missing}")
         mock_run.assert_not_called()
 
     def test_a_file_is_refused(self, runner, tmp_path):
@@ -122,6 +129,7 @@ class TestUseExistingWithoutResults:
             result,
             "--use-existing",
             (output / "ash_aggregated_results.json").as_posix(),
+            code=1,
         )
         mock_run.assert_not_called()
 

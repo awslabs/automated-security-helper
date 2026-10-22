@@ -98,7 +98,7 @@ class TestTheGate:
     def test_an_archive_over_a_limit_is_incomplete_conversion(self):
         listed = incomplete_converters(_model(OVER_LIMIT, NESTED))
 
-        assert [name for name, _ in listed] == ["archive"]
+        assert [row.name for row in listed] == ["archive"]
         assert "vendor/declared.zip (max_member_bytes)" in listed[0][1]
 
     def test_member_and_input_refusals_alone_are_not_incomplete_conversion(self):

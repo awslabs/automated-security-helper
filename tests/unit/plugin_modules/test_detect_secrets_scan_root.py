@@ -45,6 +45,12 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
 )
 
+# The scanner's dependency check asked uv for detect-secrets' version (``uv tool run
+# detect-secrets --version``), so every scan here started the tool wherever uv could
+# reach it. The scan itself runs in ASH's worker, so the probes answer without a
+# process (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
+
 # A fake value. Written to a file it trips detect-secrets' keyword plugin, which
 # is all these tests need from it.
 _KEYWORD_LINE = 'secret = "base64_encoded_secret=="'  # pragma: allowlist secret

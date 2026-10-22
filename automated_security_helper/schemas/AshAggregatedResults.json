@@ -29,6 +29,7 @@
           "$ref": "#/$defs/ActionlintScannerConfigOptions",
           "default": {
             "config_file": null,
+            "offline": false,
             "pyflakes": null,
             "scan_timeout": 1800,
             "severity_threshold": null,
@@ -55,6 +56,12 @@
           "default": null,
           "description": "Path to an actionlint config file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Otherwise actionlint runs with an empty config, and a .github/actionlint.yaml in the scanned repository is not read. A path set here that does not exist fails the scan.",
           "title": "Config File"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "pyflakes": {
           "anyOf": [
@@ -1521,7 +1528,7 @@
         },
         "fail_on_incomplete_scanners": {
           "default": true,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). A SKIPPED scanner, one not selected or one with nothing of its kind to scan, does not trip this by itself, but a run in which every scanner is SKIPPED, such as one where no selected scanner had a file to scan, exits 1 while this is on. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Converters count too: one that crashed, one that could not convert some of its inputs, and one whose tool is missing while it had inputs make the scan exit non-zero the same way. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured. One ending overrides this setting: a run where ASH could not stop a scanner's tool exits 1 either way, because the tool may still be running and writing into the output directory.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
@@ -1674,6 +1681,25 @@
             "thread_pool_max_workers": 4
           },
           "description": "Configuration for MCP server resource management and limits"
+        },
+        "output_formats": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ExportFormat"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/$defs/ExportFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Reports to write, by reporter name (for example sarif, markdown, github-ghas): a list, one name, or names separated by commas. Narrows the enabled reporters; it does not enable a disabled one. Empty or null writes every enabled reporter. A --output-formats list on the command line replaces this list.",
+          "title": "Output Formats"
         },
         "patch": {
           "anyOf": [
@@ -1844,6 +1870,7 @@
               "name": "actionlint",
               "options": {
                 "config_file": null,
+                "offline": false,
                 "pyflakes": null,
                 "scan_timeout": 1800,
                 "severity_threshold": null,
@@ -1860,8 +1887,9 @@
                 "excluded_paths": [],
                 "ignore_nosec": false,
                 "install_timeout": 300,
+                "offline": false,
                 "scan_timeout": 1800,
-                "severity_threshold": null,
+                "severity_threshold": "ALL",
                 "tool_version": ">=1.7.0,<2.0.0"
               }
             },
@@ -1877,6 +1905,7 @@
                   "NIST80053R5Checks": false,
                   "PCIDSS321Checks": false
                 },
+                "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
@@ -1885,6 +1914,7 @@
               "enabled": true,
               "name": "cfn-guard",
               "options": {
+                "offline": false,
                 "rule_sets": [
                   "wa-Security-Pillar"
                 ],
@@ -1902,6 +1932,7 @@
                 "ignore_checks": [],
                 "include_checks": [],
                 "install_timeout": 300,
+                "offline": false,
                 "regions": [],
                 "scan_timeout": 1800,
                 "severity_threshold": null,
@@ -1912,6 +1943,7 @@
               "enabled": true,
               "name": "cfn-nag",
               "options": {
+                "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
@@ -1942,6 +1974,8 @@
               "name": "detect-secrets",
               "options": {
                 "baseline_file": null,
+                "max_worker_output_mib": 256,
+                "offline": false,
                 "scan_settings": {
                   "filters_used": [],
                   "generated_at": null,
@@ -1962,6 +1996,7 @@
                 "config_file": null,
                 "honor_inline_ignores": false,
                 "max_target_megabytes": null,
+                "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null
               }
@@ -2063,6 +2098,7 @@
                 "config_file": null,
                 "honor_inline_ignores": false,
                 "install_timeout": 300,
+                "offline": false,
                 "online_audits": false,
                 "persona": "regular",
                 "scan_timeout": 1800,
@@ -2362,6 +2398,7 @@
       "type": "object"
     },
     "AshSuppression": {
+      "additionalProperties": true,
       "description": "Represents a finding suppression rule.",
       "properties": {
         "client_supplied": {
@@ -2380,7 +2417,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expiration"
         },
         "line_end": {
@@ -2612,6 +2649,7 @@
     },
     "BanditScannerConfig": {
       "additionalProperties": true,
+      "description": "Bandit scanner configuration.",
       "properties": {
         "enabled": {
           "default": true,
@@ -2633,8 +2671,9 @@
             "excluded_paths": [],
             "ignore_nosec": false,
             "install_timeout": 300,
+            "offline": false,
             "scan_timeout": 1800,
-            "severity_threshold": null,
+            "severity_threshold": "ALL",
             "tool_version": ">=1.7.0,<2.0.0"
           },
           "description": "Configure Bandit scanner"
@@ -2648,18 +2687,8 @@
       "properties": {
         "additional_formats": {
           "default": [],
-          "description": "List of additional formats to output",
+          "description": "Additional output formats to generate (e.g., html, csv, xml)",
           "items": {
-            "enum": [
-              "csv",
-              "custom",
-              "html",
-              "json",
-              "sarif",
-              "txt",
-              "xml",
-              "yaml"
-            ],
             "type": "string"
           },
           "title": "Additional Formats",
@@ -2667,22 +2696,13 @@
         },
         "confidence_level": {
           "default": "all",
-          "description": "Confidence level for Bandit findings",
-          "enum": [
-            "all",
-            "low",
-            "medium",
-            "high"
-          ],
+          "description": "Confidence level for bandit scan (all, low, medium, high)",
+          "pattern": "^(all|low|medium|high)$",
           "title": "Confidence Level",
           "type": "string"
         },
         "config_file": {
           "anyOf": [
-            {
-              "format": "path",
-              "type": "string"
-            },
             {
               "type": "string"
             },
@@ -2696,7 +2716,7 @@
         },
         "excluded_paths": {
           "default": [],
-          "description": "List of excluded paths and their corresponding reason to exclude from scanning",
+          "description": "List of paths to exclude from the bandit scan",
           "items": {
             "$ref": "#/$defs/IgnorePathWithReason"
           },
@@ -2705,15 +2725,21 @@
         },
         "ignore_nosec": {
           "default": false,
-          "description": "If True, do not skip lines with # nosec comments. Defaults to False.",
+          "description": "Whether to ignore #nosec comments in the code",
           "title": "Ignore Nosec",
           "type": "boolean"
         },
         "install_timeout": {
           "default": 300,
-          "description": "Timeout in seconds for tool installation",
+          "description": "Timeout in seconds for tool installation (default: 300)",
           "title": "Install Timeout",
           "type": "integer"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "scan_timeout": {
           "anyOf": [
@@ -2730,24 +2756,11 @@
           "title": "Scan Timeout"
         },
         "severity_threshold": {
-          "anyOf": [
-            {
-              "enum": [
-                "ALL",
-                "LOW",
-                "MEDIUM",
-                "HIGH",
-                "CRITICAL"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
-          "title": "Severity Threshold"
+          "default": "ALL",
+          "description": "Severity threshold for bandit scan (ALL, LOW, MEDIUM, HIGH)",
+          "pattern": "^(ALL|LOW|MEDIUM|HIGH)$",
+          "title": "Severity Threshold",
+          "type": "string"
         },
         "tool_version": {
           "anyOf": [
@@ -2759,7 +2772,7 @@
             }
           ],
           "default": ">=1.7.0,<2.0.0",
-          "description": "Version constraint for bandit installation, in pip requirement syntax. The default below is the constraint the scanner enforces.",
+          "description": "Version constraint for bandit tool installation (e.g., '>=1.7.0'). If not specified, uses '>=1.7.0,<2.0.0' for stability.",
           "title": "Tool Version"
         }
       },
@@ -2815,10 +2828,11 @@
         },
         "custom_scanners": {
           "default": [],
-          "description": "Scanner configurations by type",
+          "description": "Not supported: nothing reads these entries, so the list must stay empty. Configure scanners under their own sections.",
           "items": {
             "$ref": "#/$defs/ScannerPluginBase"
           },
+          "maxItems": 0,
           "title": "Custom Scanners",
           "type": "array"
         },
@@ -2956,6 +2970,7 @@
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
             },
+            "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null
           },
@@ -2985,6 +3000,12 @@
             "PCIDSS321Checks": false
           },
           "description": "CDK Nag packs to enable"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "scan_timeout": {
           "anyOf": [
@@ -3202,6 +3223,7 @@
         "options": {
           "$ref": "#/$defs/CfnGuardScannerConfigOptions",
           "default": {
+            "offline": false,
             "rule_sets": [
               "wa-Security-Pillar"
             ],
@@ -3218,6 +3240,12 @@
     "CfnGuardScannerConfigOptions": {
       "additionalProperties": true,
       "properties": {
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
+        },
         "rule_sets": {
           "default": [
             "wa-Security-Pillar"
@@ -3298,6 +3326,7 @@
             "ignore_checks": [],
             "include_checks": [],
             "install_timeout": 300,
+            "offline": false,
             "regions": [],
             "scan_timeout": 1800,
             "severity_threshold": null,
@@ -3358,6 +3387,12 @@
           "description": "Timeout in seconds for tool installation",
           "title": "Install Timeout",
           "type": "integer"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "regions": {
           "default": [],
@@ -3436,6 +3471,7 @@
         "options": {
           "$ref": "#/$defs/CfnNagScannerConfigOptions",
           "default": {
+            "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null
           },
@@ -3448,6 +3484,12 @@
     "CfnNagScannerConfigOptions": {
       "additionalProperties": true,
       "properties": {
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
+        },
         "scan_timeout": {
           "anyOf": [
             {
@@ -3665,7 +3707,7 @@
         },
         "skip_ash_output_dir": {
           "default": true,
-          "description": "Skip ASH's own output directory when it sits inside the scanned directory, so Checkov does not parse ASH's previous reports. Defaults to true; set to false to scan it anyway. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.",
+          "description": "Tell Checkov to skip ASH's own output directories inside the scanned directory (this run's output directory and .ash/ash_output), so it does not parse ASH's previous reports. Defaults to true; set to false to let Checkov read them. Either way ASH drops the findings located there after the scan. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.",
           "title": "Skip Ash Output Dir",
           "type": "boolean"
         },
@@ -5564,13 +5606,26 @@
           "title": "Dependencies Satisfied",
           "type": "boolean"
         },
+        "dependency_unavailable_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the converter's dependencies were unavailable: the reason its dependency check recorded, with the home directory written as ~, or a message naming the converter when the check recorded none or raised. Set on every row whose dependencies_satisfied is False and None on every other.",
+          "title": "Dependency Unavailable Reason"
+        },
         "excluded": {
           "default": false,
           "title": "Excluded",
           "type": "boolean"
         },
         "failed_inputs": {
-          "description": "Inputs this converter tried to convert and could not, so the scanners never saw what conversion would have produced from them. The completeness gate counts a converter with any as incomplete.",
+          "description": "Inputs this converter tried to convert and could not, so the scanners never saw what conversion would have produced from them. The completeness gate counts a converter with any such record as incomplete, except records a suppression accepted (kind 'input' with accepted true), which stay here for the reader.",
           "items": {
             "$ref": "#/$defs/FailedInputInfo"
           },
@@ -6668,6 +6723,8 @@
           "$ref": "#/$defs/DetectSecretsScannerConfigOptions",
           "default": {
             "baseline_file": null,
+            "max_worker_output_mib": 256,
+            "offline": false,
             "scan_settings": {
               "filters_used": [],
               "generated_at": null,
@@ -6704,6 +6761,20 @@
           "default": null,
           "description": "Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
           "title": "Baseline File"
+        },
+        "max_worker_output_mib": {
+          "default": 256,
+          "description": "The most of the detect-secrets worker's output read back, in MiB, at most 4096. A finding is about 300 bytes of output, so the default of 256 holds about 900,000 findings. Reading the output costs about three times its size in memory (1024 MiB of output needs about 3 GiB). A scan whose output is larger fails and records no findings, with an error that names this option. Honored only from --config-overrides or a config file outside the scanned tree.",
+          "exclusiveMinimum": 0,
+          "maximum": 4096,
+          "title": "Max Worker Output Mib",
+          "type": "integer"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "scan_settings": {
           "$ref": "#/$defs/DetectSecretsScanSettings",
@@ -7450,6 +7521,36 @@
         "unknown"
       ],
       "title": "ExecutionEnvironment",
+      "type": "string"
+    },
+    "ExportFormat": {
+      "description": "A report format name, as --output-formats and output_formats take it.\n\nEach names the reporter that writes it, except aggregated, dict, asff and\ncustom: no reporter writes those, so asking for one writes nothing for it and\nlogs why.",
+      "enum": [
+        "aggregated",
+        "text",
+        "flat-json",
+        "yaml",
+        "csv",
+        "html",
+        "dict",
+        "junitxml",
+        "markdown",
+        "sarif",
+        "asff",
+        "ocsf",
+        "cyclonedx",
+        "spdx",
+        "custom",
+        "github-ghas",
+        "gitlab-sast",
+        "gitlab-cyclonedx",
+        "unused-suppressions",
+        "aws-security-hub",
+        "bedrock-summary-reporter",
+        "cloudwatch-logs",
+        "s3"
+      ],
+      "title": "ExportFormat",
       "type": "string"
     },
     "ExternalProperties": {
@@ -8237,9 +8338,50 @@
       "type": "object"
     },
     "FailedInputInfo": {
-      "additionalProperties": true,
       "description": "One input a converter set out to convert and could not.",
       "properties": {
+        "accepted": {
+          "default": false,
+          "description": "True when a suppression with rule_id 'ash-unconverted-input' accepts this input error, so it does not count against the completeness gate. The record stays, with the suppression's reason. A tool failure is never accepted.",
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "accepted_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The written-form id of the suppression that accepted this input error, recorded when the acceptance was granted. The convert phase registers exactly this id in used_suppressions, so no other entry that happens to match the path reads used. None when the id write failed, for a record a third-party converter built, and in a results file written before the field existed; the phase re-derives those records' entries from their paths instead.",
+          "title": "Accepted By"
+        },
+        "accepted_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The accepting suppression's reason.",
+          "title": "Accepted Reason"
+        },
+        "kind": {
+          "default": "tool",
+          "description": "What failed: 'input' when the file is not one the converter could hand to its tool (for the jupyter converter, not a notebook), 'tool' when the tool could not convert it. The completeness gate's trust in 'accepted' rides on the kind, so any other value is read as 'tool', which is never accepted, rather than as 'input' or as a refusal to load the record.",
+          "enum": [
+            "input",
+            "tool"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
         "path": {
           "description": "The input's path relative to the scanned tree, with '/' separators.",
           "title": "Path",
@@ -8800,6 +8942,7 @@
             "config_file": null,
             "honor_inline_ignores": false,
             "max_target_megabytes": null,
+            "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null
           },
@@ -8865,6 +9008,12 @@
           "default": null,
           "description": "Skip files larger than this many megabytes (gitleaks --max-target-megabytes). Unset scans every file. Used only when the operator sets it, with --config-overrides or in a config file outside every git checkout and the scanned directory: a config file inside one, or one an MCP client delivered, does not choose it. Set by such a config, it is ignored with a warning.",
           "title": "Max Target Megabytes"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "scan_timeout": {
           "anyOf": [
@@ -9538,6 +9687,7 @@
       "type": "object"
     },
     "IgnorePathWithReason": {
+      "additionalProperties": true,
       "description": "Represents a path exclusion entry.",
       "properties": {
         "client_supplied": {
@@ -9556,7 +9706,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD)",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expiration"
         },
         "path": {
@@ -11158,23 +11308,23 @@
     },
     "MCPResourceManagementConfig": {
       "additionalProperties": false,
-      "description": "Configuration model for MCP resource management settings.",
+      "description": "Configuration model for MCP resource management settings.\n\nThe MCP server enforces two of these: ``max_concurrent_scans`` and\n``scan_timeout_seconds``. It reads them from the operator's config (the file\n``ASH_CONFIG`` names, else these defaults), never from the config of a scan,\nwhich can be the scanned repository's own or a client's. The other fields are\naccepted so that existing configs keep validating, and nothing reads them.\nNothing ever read this section: the resource manager that had limits of the\nsame names took them from its constructor's defaults, and was later removed\nas dead code.",
       "properties": {
         "enable_health_checks": {
           "default": true,
-          "description": "Enable periodic health checks and resource monitoring",
+          "description": "Not enforced: nothing reads this setting. Enable periodic health checks and resource monitoring",
           "title": "Enable Health Checks",
           "type": "boolean"
         },
         "enable_resource_logging": {
           "default": true,
-          "description": "Enable detailed resource management logging",
+          "description": "Not enforced: nothing reads this setting. Enable detailed resource management logging",
           "title": "Enable Resource Logging",
           "type": "boolean"
         },
         "health_check_interval_seconds": {
           "default": 60,
-          "description": "Interval between health checks in seconds",
+          "description": "Not enforced: nothing reads this setting. Interval between health checks in seconds",
           "maximum": 300,
           "minimum": 10,
           "title": "Health Check Interval Seconds",
@@ -11182,17 +11332,24 @@
         },
         "log_resource_operations": {
           "default": false,
-          "description": "Log individual resource operations for debugging",
+          "description": "Not enforced: nothing reads this setting. Log individual resource operations for debugging",
           "title": "Log Resource Operations",
           "type": "boolean"
         },
         "max_concurrent_scans": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 3,
-          "description": "Maximum number of concurrent scans allowed",
-          "maximum": 10,
-          "minimum": 1,
-          "title": "Max Concurrent Scans",
-          "type": "integer"
+          "description": "Maximum number of scans the MCP server runs at once, across every session; a scan started beyond it is refused. A workspace scan counts as one scan, however many projects it has. 0 or null for no limit. Read from the operator's ASH_CONFIG only.",
+          "title": "Max Concurrent Scans"
         },
         "max_concurrent_scans_per_session": {
           "default": 2,
@@ -11204,7 +11361,7 @@
         },
         "max_concurrent_tasks": {
           "default": 20,
-          "description": "Maximum number of concurrent async tasks allowed",
+          "description": "Not enforced: nothing reads this setting. Maximum number of concurrent async tasks allowed",
           "maximum": 50,
           "minimum": 1,
           "title": "Max Concurrent Tasks",
@@ -11212,7 +11369,7 @@
         },
         "max_directory_size_mb": {
           "default": 1000,
-          "description": "Maximum directory size in MB that can be scanned",
+          "description": "Not enforced: nothing reads this setting. Maximum directory size in MB that can be scanned",
           "maximum": 10240,
           "minimum": 10,
           "title": "Max Directory Size Mb",
@@ -11220,7 +11377,7 @@
         },
         "max_message_size_bytes": {
           "default": 10485760,
-          "description": "Maximum size of MCP messages in bytes",
+          "description": "Not enforced: nothing reads this setting. Maximum size of MCP messages in bytes",
           "maximum": 104857600,
           "minimum": 1024,
           "title": "Max Message Size Bytes",
@@ -11228,7 +11385,7 @@
         },
         "max_path_length": {
           "default": 4096,
-          "description": "Maximum allowed path length for security validation",
+          "description": "Not enforced: nothing reads this setting. Maximum allowed path length for security validation",
           "maximum": 8192,
           "minimum": 256,
           "title": "Max Path Length",
@@ -11236,7 +11393,7 @@
         },
         "memory_critical_threshold_mb": {
           "default": 2048,
-          "description": "Memory usage threshold in MB that triggers protective actions",
+          "description": "Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers protective actions",
           "maximum": 16384,
           "minimum": 200,
           "title": "Memory Critical Threshold Mb",
@@ -11244,7 +11401,7 @@
         },
         "memory_warning_threshold_mb": {
           "default": 1024,
-          "description": "Memory usage threshold in MB that triggers warnings",
+          "description": "Not enforced: nothing reads this setting. Memory usage threshold in MB that triggers warnings",
           "maximum": 8192,
           "minimum": 100,
           "title": "Memory Warning Threshold Mb",
@@ -11252,23 +11409,30 @@
         },
         "operation_timeout_seconds": {
           "default": 180,
-          "description": "Default timeout for general operations in seconds",
+          "description": "Not enforced: nothing reads this setting. Default timeout for general operations in seconds",
           "maximum": 600,
           "minimum": 30,
           "title": "Operation Timeout Seconds",
           "type": "integer"
         },
         "scan_timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 1800,
-          "description": "Maximum time allowed for a single scan operation in seconds",
-          "maximum": 7200,
-          "minimum": 60,
-          "title": "Scan Timeout Seconds",
-          "type": "integer"
+          "description": "Longest a single MCP scan may run, in seconds, counted from when it starts running (after any wait for another scan of its session); a scan still running then is stopped and reported as failed. For a workspace scan it covers the whole workspace, and every project is stopped and reported as failed. 60 to 86400, or 0 or null for no limit. Read from the operator's ASH_CONFIG only.",
+          "title": "Scan Timeout Seconds"
         },
         "shutdown_timeout_seconds": {
           "default": 30,
-          "description": "Maximum time to wait for graceful shutdown in seconds",
+          "description": "Not enforced: nothing reads this setting. Maximum time to wait for graceful shutdown in seconds",
           "maximum": 300,
           "minimum": 5,
           "title": "Shutdown Timeout Seconds",
@@ -11276,7 +11440,7 @@
         },
         "task_count_warning_threshold": {
           "default": 15,
-          "description": "Active task count that triggers warnings",
+          "description": "Not enforced: nothing reads this setting. Active task count that triggers warnings",
           "maximum": 100,
           "minimum": 5,
           "title": "Task Count Warning Threshold",
@@ -11284,7 +11448,7 @@
         },
         "thread_pool_max_workers": {
           "default": 4,
-          "description": "Maximum number of worker threads in the shared thread pool",
+          "description": "Not enforced: nothing reads this setting. Maximum number of worker threads in the shared thread pool",
           "maximum": 20,
           "minimum": 1,
           "title": "Thread Pool Max Workers",
@@ -11374,7 +11538,6 @@
     },
     "MarkdownReporterConfig": {
       "additionalProperties": true,
-      "description": "Configuration for the Markdown reporter.",
       "properties": {
         "enabled": {
           "default": true,
@@ -13580,6 +13743,19 @@
           "title": "Output Dir",
           "type": "string"
         },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The ID of the scan this context belongs to, under which its scan set is written to the output directory and read back",
+          "title": "Run Id"
+        },
         "source_dir": {
           "description": "Source directory to scan",
           "format": "path",
@@ -13592,6 +13768,20 @@
           "format": "path",
           "title": "Work Dir",
           "type": "string"
+        },
+        "workspace_output_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "In a workspace scan, the workspace's output directory, which holds this project's output directory and every other project's: ASH's own output, left out of the scan like the output directory",
+          "title": "Workspace Output Dir"
         }
       },
       "required": [
@@ -14222,7 +14412,6 @@
       "type": "object"
     },
     "RefusedInputInfo": {
-      "additionalProperties": true,
       "description": "One input a converter declined to read, and why.",
       "properties": {
         "limit": {
@@ -16194,7 +16383,7 @@
               "type": "null"
             }
           ],
-          "default": "error",
+          "default": "warning",
           "description": "A value specifying the severity level of the result."
         },
         "locations": {
@@ -17354,7 +17543,7 @@
         },
         "mode": {
           "default": "off",
-          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Ignored in container mode, where the container is the boundary.",
+          "description": "How scanner subprocesses are confined. 'off' runs them as plain subprocesses. 'auto' uses the best sandbox available (Linux: bwrap, then firejail, then landlock; macOS: sandbox-exec). Any other value requires that backend. A scanner that cannot be sandboxed as requested is recorded MISSING with the reason; it is never run unsandboxed. A mode that --sandbox, ASH_CONFIG or the operator's config file sets is a floor: a config file inside a git checkout or the scanned directory cannot turn it off or switch backends. Not applied in container mode, where the container is the boundary; ASH logs a warning when it is set there.",
           "enum": [
             "off",
             "auto",
@@ -17468,6 +17657,7 @@
             "name": "actionlint",
             "options": {
               "config_file": null,
+              "offline": false,
               "pyflakes": null,
               "scan_timeout": 1800,
               "severity_threshold": null,
@@ -17488,8 +17678,9 @@
               "excluded_paths": [],
               "ignore_nosec": false,
               "install_timeout": 300,
+              "offline": false,
               "scan_timeout": 1800,
-              "severity_threshold": null,
+              "severity_threshold": "ALL",
               "tool_version": ">=1.7.0,<2.0.0"
             }
           },
@@ -17509,6 +17700,7 @@
                 "NIST80053R5Checks": false,
                 "PCIDSS321Checks": false
               },
+              "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null
             }
@@ -17521,6 +17713,7 @@
             "enabled": true,
             "name": "cfn-guard",
             "options": {
+              "offline": false,
               "rule_sets": [
                 "wa-Security-Pillar"
               ],
@@ -17542,6 +17735,7 @@
               "ignore_checks": [],
               "include_checks": [],
               "install_timeout": 300,
+              "offline": false,
               "regions": [],
               "scan_timeout": 1800,
               "severity_threshold": null,
@@ -17556,6 +17750,7 @@
             "enabled": true,
             "name": "cfn-nag",
             "options": {
+              "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null
             }
@@ -17594,6 +17789,8 @@
             "name": "detect-secrets",
             "options": {
               "baseline_file": null,
+              "max_worker_output_mib": 256,
+              "offline": false,
               "scan_settings": {
                 "filters_used": [],
                 "generated_at": null,
@@ -17618,6 +17815,7 @@
               "config_file": null,
               "honor_inline_ignores": false,
               "max_target_megabytes": null,
+              "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null
             }
@@ -17747,6 +17945,7 @@
               "config_file": null,
               "honor_inline_ignores": false,
               "install_timeout": 300,
+              "offline": false,
               "online_audits": false,
               "persona": "regular",
               "scan_timeout": 1800,
@@ -17764,6 +17963,12 @@
       "additionalProperties": true,
       "description": "Base class for scanner options.",
       "properties": {
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
+        },
         "scan_timeout": {
           "anyOf": [
             {
@@ -17923,9 +18128,16 @@
           "type": "array"
         },
         "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": 0,
-          "title": "Exit Code",
-          "type": "integer"
+          "title": "Exit Code"
         },
         "output": {
           "default": [],
@@ -18063,6 +18275,7 @@
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
           "default": {
+            "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null
           },
@@ -18140,6 +18353,7 @@
         },
         "dependencies_satisfied": {
           "default": true,
+          "description": "False on a MISSING row: the scanner's tool or another dependency was not available. True on every other row, including a SKIPPED one, which did not need its tool, and a MISSING row for a scanner whose filtering raised before any dependency was checked (its missing_reason says so).",
           "title": "Dependencies Satisfied",
           "type": "boolean"
         },
@@ -18157,6 +18371,7 @@
         },
         "excluded": {
           "default": false,
+          "description": "True when the run left the scanner out: --exclude-scanners or the shard split, --scanners, the configuration's enabled flag, --python-only, or a platform the scanner does not support.",
           "title": "Excluded",
           "type": "boolean"
         },
@@ -18170,6 +18385,7 @@
             }
           ],
           "default": 0,
+          "description": "The exit code of the scanner's tool, the highest over the targets it ran on. None when no tool ran (a MISSING or excluded row, a scanner that had nothing to scan or started no tool for its targets, or one that could not be built) or when no target recorded one.",
           "title": "Exit Code"
         },
         "finding_count": {
@@ -18194,7 +18410,7 @@
             }
           ],
           "default": null,
-          "description": "Why the scanner is MISSING, when ASH knows more than that its tool was not found: for example, that the tool was found only inside the scanned tree, which ASH does not run tools from by default.",
+          "description": "Why the scanner is MISSING: its tool was not found (or was found only inside the scanned tree, which ASH does not run tools from by default), a dependency check failed with the reason the scanner gave, or the scanner could not be sandboxed. Set on every MISSING row and None on every other.",
           "title": "Missing Reason"
         },
         "severity_counts": {
@@ -18207,6 +18423,19 @@
             "medium": 0,
             "suppressed": 0
           }
+        },
+        "skipped_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why the scanner is SKIPPED: excluded with --exclude-scanners (the excluded_scanners parameter over MCP) or by the shard split, not named by --scanners (the scanners parameter over MCP), disabled in the configuration, left out by --python-only, not supported on this platform, or nothing to scan in the project (no CloudFormation template for cdk-nag and cfn-nag, no lockfile for npm-audit), whether or not its tool is installed. Set on every SKIPPED row and None on every other.",
+          "title": "Skipped Reason"
         },
         "status": {
           "$ref": "#/$defs/ScannerStatus",
@@ -18898,6 +19127,35 @@
           "description": "Every scanner this executor resolved before partitioning -- the set assigned_scanners was taken from. None on results written before this field existed, in which case the union check is skipped.",
           "title": "Candidate Scanners"
         },
+        "intended_scanners": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Every candidate scanner this executor's selection asks for, whichever shard owns it: candidate_scanners after the --scanners allowlist, --exclude-scanners, --python-only and each scanner's own enabled flag. Unlike selected_scanners, which covers assigned_scanners only, it covers every candidate. It lets ash merge tell a scanner no job asked for, which is the operator's choice, from one some job asked for and its owner did not, which is a coverage hole. None on results written before this field existed.",
+          "title": "Intended Scanners"
+        },
+        "python_only": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether this shard ran with --python-only. ash merge reads it to tell a sharded --python-only scan, where every shard leaves the non-Python scanners out, from a matrix whose jobs disagree on the flag, where a scanner one shard left out ran nowhere. None on results written before this field existed.",
+          "title": "Python Only"
+        },
         "selected_scanners": {
           "anyOf": [
             {
@@ -18911,7 +19169,7 @@
             }
           ],
           "default": null,
-          "description": "The subset of assigned_scanners this shard actually intended to run, after the --scanners allowlist, --exclude-scanners and each scanner's own enabled flag. A third field rather than a narrowing of assigned_scanners, because that field's breadth is load-bearing for two existing readers -- see the class docstring. Intent and not outcome: a scanner whose tool is absent stays here, because 'nobody asked for it' and 'nobody could run it' route to different people. None on results written before this field existed.",
+          "description": "The subset of assigned_scanners this shard actually intended to run, after the --scanners allowlist, --exclude-scanners, --python-only and each scanner's own enabled flag. A third field rather than a narrowing of assigned_scanners, because that field's breadth is load-bearing for two existing readers -- see the class docstring. Intent and not outcome: a scanner whose tool is absent stays here, because 'nobody asked for it' and 'nobody could run it' route to different people. None on results written before this field existed.",
           "title": "Selected Scanners"
         },
         "shard_count": {
@@ -23352,8 +23610,16 @@
           "title": "Incomplete Converters",
           "type": "object"
         },
+        "incomplete_scanner_details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Each incomplete scanner's display status as the completeness gate reports it -- the bare status, or the status followed by the unevaluated-target counts for a partial audit. Keyed by the names in incomplete_scanners; empty in results files written before the field existed, where a reader falls back to the status.",
+          "title": "Incomplete Scanner Details",
+          "type": "object"
+        },
         "incomplete_scanners": {
-          "description": "Scanners this project was asked to run that did not complete -- ERROR or MISSING. Populated whether or not the completeness gate is on, because an operator who turned the gate off has accepted the risk and has not asked to be told the scan was complete. Read through the unified metrics rather than off `scanners`, so a scanner the operator excluded on a host that also lacks its tool reads SKIPPED here rather than MISSING.",
+          "description": "Scanners this project was asked to run that did not complete -- ERROR or MISSING. Populated whether or not the completeness gate is on, because an operator who turned the gate off has accepted the risk and has not asked to be told the scan was complete. Read through the unified metrics rather than off `scanners`, so a scanner the operator excluded on a host that also lacks its tool reads SKIPPED here rather than MISSING. A scanner listed only for a stale content database is not here; see stale_content_databases.",
           "items": {
             "type": "string"
           },
@@ -23385,6 +23651,14 @@
           "minLength": 1,
           "title": "Output Path",
           "type": "string"
+        },
+        "partial_coverage_scanners": {
+          "description": "The incomplete scanners whose recorded counts show a partial audit (some targets evaluated, some not), whatever status the writer graded. A coverage row for one carries the reason partial_coverage rather than its status token. Empty in results files written before the field existed.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Partial Coverage Scanners",
+          "type": "array"
         },
         "policy_origin_finding_count": {
           "default": 0,
@@ -23424,6 +23698,14 @@
           "description": "Whether the completeness facts above fail this project -- the incomplete scanners or converters it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
           "title": "Scan Incomplete",
           "type": "boolean"
+        },
+        "scanner_reasons": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Why each SKIPPED, MISSING or ERROR scanner gave no result, for this project alone: a SKIPPED or MISSING row's skipped_reason or missing_reason, and the first error an ERROR scanner's reports recorded, such as a constructor that raised. A scanner that ran, or that recorded no reason, is not listed. Empty in a workspace file written before the field existed.",
+          "title": "Scanner Reasons",
+          "type": "object"
         },
         "scanners": {
           "additionalProperties": {
@@ -23470,6 +23752,15 @@
           ],
           "default": null,
           "description": "Why the project was skipped, when it was."
+        },
+        "stale_content_databases": {
+          "description": "Content databases past their declared age bound under content_db_staleness: fail, each as the single-scan MCP payload reports it. A stale database fails the project (scan_incomplete) whatever fail_on_incomplete_scanners says.",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Stale Content Databases",
+          "type": "array"
         },
         "status": {
           "$ref": "#/$defs/ProjectRunStatus",
@@ -23642,6 +23933,7 @@
             "config_file": null,
             "honor_inline_ignores": false,
             "install_timeout": 300,
+            "offline": false,
             "online_audits": false,
             "persona": "regular",
             "scan_timeout": 1800,
@@ -23685,6 +23977,12 @@
           "description": "Timeout in seconds for tool installation",
           "title": "Install Timeout",
           "type": "integer"
+        },
+        "offline": {
+          "default": false,
+          "description": "Run this scanner offline even when ASH runs online. False follows ASH's own mode; it never puts a scanner online under --offline.",
+          "title": "Offline",
+          "type": "boolean"
         },
         "online_audits": {
           "default": false,
@@ -24303,7 +24601,7 @@
       "type": "array"
     },
     "used_suppressions": {
-      "description": "Set of suppression IDs that were actually applied to findings during the scan.",
+      "description": "Set of suppression IDs that were applied to findings or accepted an unconverted input during the scan.",
       "items": {
         "type": "string"
       },

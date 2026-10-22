@@ -9,10 +9,90 @@
     ]),
     'result': dict({
       'ash_command_available': True,
-      'ash_command_output': 'ASH version <ASH_VERSION>',
+      'ash_command_output': '/opt/ash/bin/ash',
       'installed': True,
+      'installs_on_first_scan': list([
+      ]),
+      'missing_dependencies': list([
+        'grype',
+      ]),
+      'ready': False,
+      'scanners': list([
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'bandit',
+          'version': '<BANDIT_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'cdk_nag',
+          'version': '<CDK_NAG_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'cfn_nag',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'checkov',
+          'version': '<CHECKOV_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'detect_secrets',
+          'version': '<DETECT_SECRETS_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': False,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'grype',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'npm_audit',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'opengrep',
+          'version': None,
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'semgrep',
+          'version': '<SEMGREP_VERSION>',
+        }),
+        dict({
+          'dependencies_satisfied': True,
+          'enabled': True,
+          'installs_on_first_scan': False,
+          'name': 'syft',
+          'version': None,
+        }),
+      ]),
       'success': True,
       'timestamp': '2026-01-15T12:00:00',
+      'undetermined_dependencies': list([
+      ]),
       'version': '<ASH_VERSION>',
     }),
     'tool': 'check_installation',
@@ -69,7 +149,7 @@
           'detected_at': '2026-01-15T12:00:00+00:00',
           'file_path': 'src/settings.py',
           'fix_available': None,
-          'id': 'bandit-B105-35f80ca8',
+          'id': 'bandit-B105-d8e89f4bf133',
           'is_suppressed': False,
           'line_end': 7,
           'line_start': 7,
@@ -99,7 +179,7 @@
           'detected_at': '2026-01-15T12:00:00+00:00',
           'file_path': 'tests/test_app.py',
           'fix_available': None,
-          'id': 'bandit-B101-c969d24b',
+          'id': 'bandit-B101-30eccaf87e25',
           'is_suppressed': True,
           'line_end': 4,
           'line_start': 4,
@@ -127,7 +207,7 @@
           'detected_at': '2026-01-15T12:00:00+00:00',
           'file_path': 'config/settings.ini',
           'fix_available': None,
-          'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-8af19541',
+          'id': 'detect-secrets-SECRET-AWS-ACCESS-KEY-49559df70b2e',
           'is_suppressed': False,
           'line_end': 3,
           'line_start': 3,
@@ -152,7 +232,7 @@
         dict({
           'after_severity': 'CRITICAL',
           'before_severity': 'HIGH',
-          'id': 'bandit-B602-e9f369ff',
+          'id': 'bandit-B602-b92d8ccf95a2',
         }),
       ]),
     }),
@@ -164,11 +244,7 @@
     'client_messages': list([
     ]),
     'result': dict({
-      'error': '''
-        Failed to parse result file: 1 validation error for AshAggregatedResults
-          Input should be an object [type=model_type]
-            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
-      ''',
+      'error': "Failed to parse result file: 1 validation error for AshAggregatedResults: Invalid value at '(top level)': Input should be an object",
       'success': False,
     }),
     'tool': 'diff_scan_results',
@@ -490,9 +566,11 @@
         'config_path': '<TMP>/cwd/absent.yaml',
         'error_category': 'file_not_found',
       }),
-      'error': 'Configuration file not found: <TMP>/cwd/absent.yaml',
+      'error': 'Configuration file <TMP>/cwd/absent.yaml cannot be loaded: the file does not exist',
       'error_category': 'file_not_found',
       'error_type': 'MCPResourceError',
+      'exit_code': 3,
+      'exit_code_meaning': 'invalid config or refused input',
       'operation': 'get_config',
       'success': False,
       'suggestions': list([
@@ -682,6 +760,8 @@
         'task_count_warning_threshold': 15,
         'thread_pool_max_workers': 4,
       }),
+      'output_formats': list([
+      ]),
       'project_name': 'snapshot-project',
       'reporters': dict({
         'csv': dict({
@@ -847,6 +927,7 @@
             ]),
             'ignore_nosec': False,
             'install_timeout': 300,
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
             'tool_version': '>=1.7.0,<2.0.0',
@@ -864,6 +945,7 @@
               'NIST80053R5Checks': False,
               'PCIDSS321Checks': False,
             }),
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -903,6 +985,7 @@
           'enabled': True,
           'name': 'cfn-nag',
           'options': dict({
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -935,6 +1018,8 @@
           'name': 'detect-secrets',
           'options': dict({
             'baseline_file': None,
+            'max_worker_output_mib': 256,
+            'offline': False,
             'scan_settings': dict({
               'filters_used': list([
               ]),
@@ -1259,6 +1344,8 @@
         'task_count_warning_threshold': 15,
         'thread_pool_max_workers': 4,
       }),
+      'output_formats': list([
+      ]),
       'project_name': 'ash-scan',
       'reporters': dict({
         'csv': dict({
@@ -1424,6 +1511,7 @@
             ]),
             'ignore_nosec': False,
             'install_timeout': 300,
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
             'tool_version': '>=1.7.0,<2.0.0',
@@ -1441,6 +1529,7 @@
               'NIST80053R5Checks': False,
               'PCIDSS321Checks': False,
             }),
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -1480,6 +1569,7 @@
           'enabled': True,
           'name': 'cfn-nag',
           'options': dict({
+            'offline': False,
             'scan_timeout': 1800,
             'severity_threshold': None,
           }),
@@ -1512,6 +1602,8 @@
           'name': 'detect-secrets',
           'options': dict({
             'baseline_file': None,
+            'max_worker_output_mib': 256,
+            'offline': False,
             'scan_settings': dict({
               'filters_used': list([
               ]),
@@ -1672,6 +1764,7 @@
       'bandit': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'bandit',
         'offline_strategy': 'bundled',
         'version': '<BANDIT_VERSION>',
@@ -1679,6 +1772,7 @@
       'cdk_nag': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'cdk_nag',
         'offline_strategy': 'bundled',
         'version': '<CDK_NAG_VERSION>',
@@ -1700,6 +1794,7 @@
       'cfn_nag': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'cfn_nag',
         'offline_strategy': 'bundled',
         'version': None,
@@ -1707,6 +1802,7 @@
       'checkov': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'checkov',
         'offline_strategy': 'cache_flags',
         'version': '<CHECKOV_VERSION>',
@@ -1714,6 +1810,7 @@
       'detect_secrets': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'detect_secrets',
         'offline_strategy': 'bundled',
         'version': '<DETECT_SECRETS_VERSION>',
@@ -1721,6 +1818,7 @@
       'ferret_scan': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'ferret_scan',
         'offline_strategy': 'bundled',
         'version': None,
@@ -1735,6 +1833,7 @@
       'grype': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'grype',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1742,13 +1841,15 @@
       'npm_audit': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'npm_audit',
-        'offline_strategy': 'cache_flags',
+        'offline_strategy': 'skip_offline',
         'version': None,
       }),
       'opengrep': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'opengrep',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1756,6 +1857,7 @@
       'semgrep': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'semgrep',
         'offline_strategy': 'cache_flags',
         'version': '<SEMGREP_VERSION>',
@@ -1763,6 +1865,7 @@
       'snyk_code': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'snyk_code',
         'offline_strategy': 'skip_offline',
         'version': None,
@@ -1770,6 +1873,7 @@
       'syft': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'syft',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1784,6 +1888,7 @@
       'trivy_repo': dict({
         'dependencies_satisfied': True,
         'enabled': True,
+        'installs_on_first_scan': False,
         'name': 'trivy_repo',
         'offline_strategy': 'cache_flags',
         'version': None,
@@ -1815,11 +1920,7 @@
     'client_messages': list([
     ]),
     'result': dict({
-      'error': '''
-        Failed to parse results file: 1 validation error for AshAggregatedResults
-          Invalid JSON: key must be a string at line 1 column 2 [type=json_invalid]
-            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
-      ''',
+      'error': "Failed to parse results file: 1 validation error for AshAggregatedResults: Invalid value at '(top level)': Invalid JSON: key must be a string at line 1 column 2",
       'success': False,
     }),
     'tool': 'suggest_suppression',
@@ -1898,6 +1999,8 @@
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1910,6 +2013,8 @@
       'errors': list([
       ]),
       'valid': True,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1927,6 +2032,8 @@
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1937,13 +2044,15 @@
     ]),
     'result': dict({
       'errors': list([
+      ]),
+      'valid': True,
+      'warnings': list([
         dict({
           'field': 'not_a_setting',
-          'message': "Unknown top-level field 'not_a_setting' - may cause parsing issues",
+          'message': "Unknown top-level field 'not_a_setting' - a scan ignores it",
           'type': 'unknown_field',
         }),
       ]),
-      'valid': False,
     }),
     'tool': 'validate_config',
   })
@@ -1956,6 +2065,8 @@
       'errors': list([
       ]),
       'valid': True,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1966,8 +2077,15 @@
     ]),
     'result': dict({
       'errors': list([
+        dict({
+          'field': 'fail_on_findings',
+          'message': "Invalid value at 'fail_on_findings': Input should be a valid boolean",
+          'type': 'invalid_field',
+        }),
       ]),
-      'valid': True,
+      'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })
@@ -1980,16 +2098,13 @@
       'errors': list([
         dict({
           'field': '',
-          'message': '''
-            YAML parsing error: while parsing a flow sequence
-              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 1, column 15
-            expected ',' or ']', but got '<stream end>'
-              in "<TMP>/server-tmp/tmpvalidate_config/config.yaml", line 2, column 1
-          ''',
+          'message': 'YAML parsing error: <TMP>/server-tmp/tmpvalidate_config/config.yaml could not be parsed (ParserError at line 2, column 1; started at line 1, column 15)',
           'type': 'yaml_parse_error',
         }),
       ]),
       'valid': False,
+      'warnings': list([
+      ]),
     }),
     'tool': 'validate_config',
   })

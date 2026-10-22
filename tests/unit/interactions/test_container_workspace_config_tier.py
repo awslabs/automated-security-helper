@@ -29,17 +29,24 @@ read through ``/src``, and one outside every checkout is the operator's.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.interactions import run_ash_container as rac
+from automated_security_helper.interactions.run_ash_container import (
+    _assemble_run_command,
+)
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import create_completed_process
 from tests.utils.config_link_layouts import config_through_links
+from tests.utils.helpers import mark_git_checkout
 
 GRANT = "project_name: tier\nsandbox:\n  extra_read_paths:\n    - /opt/tier-grant\n"
 FIX = "Keep --config, and every file it extends, outside every git checkout"
@@ -71,7 +78,7 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
 def checkout(tmp_path) -> Path:
     """A git checkout whose ``ws`` directory is a workspace with one project."""
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    mark_git_checkout(repo)
     project = repo / "ws" / "proj"
     project.mkdir(parents=True)
     (project / "a.py").write_text("x = 1\n", encoding="utf-8")
@@ -153,7 +160,7 @@ def test_a_config_in_another_checkout_is_marked_for_the_scan_inside(
     """Not the workspace's own checkout: mounted at /ash-config and marked, so the
     scan inside limits it as a local workspace scan does."""
     elsewhere = tmp_path / "elsewhere"
-    (elsewhere / ".git").mkdir(parents=True)
+    mark_git_checkout(elsewhere)
     if where == "the-config-in-another-checkout":
         config = _config(elsewhere / "ash-config.yaml")
     elif where == "a-config-extending-a-base-in-another-checkout":
@@ -296,37 +303,165 @@ def test_a_one_directory_scan_still_marks_it(checkout, commands, tmp_path):
     assert rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG in _run_command(commands)
 
 
-def _assemble_workspace_run(checkout: Path, config: Path, tmp_path: Path) -> None:
+def _assemble_workspace_run(
+    checkout: Path, config: Path | None, tmp_path: Path, **extra: Any
+) -> List[str]:
     (tmp_path / "out").mkdir(exist_ok=True)
-    rac._assemble_run_command(
-        oci_command_prefix=[],
-        resolved_oci_runner="docker",
-        image_name="ash:test",
-        source_dir=(checkout / "ws").resolve(),
-        output_dir=(tmp_path / "out").resolve(),
-        offline=False,
-        debug=False,
-        color=False,
-        quiet=True,
-        progress=False,
-        verbose=False,
-        simple=True,
-        python_based_plugins_only=False,
-        cleanup=False,
-        inspect=False,
-        fail_on_findings=None,
-        phases=[],
-        scanners=[],
-        exclude_scanners=[],
-        output_formats=[],
-        config=str(config),
-        config_overrides=[],
-        existing_results=None,
-        ash_plugin_modules=[],
-        strategy=None,
-        ctx=None,
-        workspace_relative_file="ash.code-workspace",
+    kwargs: Dict[str, Any] = {
+        "oci_command_prefix": [],
+        "resolved_oci_runner": "docker",
+        "image_name": "ash:test",
+        "source_dir": (checkout / "ws").resolve(),
+        "output_dir": (tmp_path / "out").resolve(),
+        "offline": False,
+        "debug": False,
+        "color": False,
+        "quiet": True,
+        "progress": False,
+        "verbose": False,
+        "simple": True,
+        "python_based_plugins_only": False,
+        "cleanup": False,
+        "inspect": False,
+        "fail_on_findings": None,
+        "phases": [ExecutionPhase.SCAN],
+        "scanners": [],
+        "exclude_scanners": [],
+        "output_formats": [],
+        "config": None if config is None else str(config),
+        "config_overrides": [],
+        "existing_results": None,
+        "ash_plugin_modules": [],
+        "strategy": ExecutionStrategy.PARALLEL,
+        "ctx": None,
+        "workspace_relative_file": "ash.code-workspace",
+    }
+    kwargs.update(extra)
+    return _assemble_run_command(**kwargs)
+
+
+def test_a_repository_written_workspace_policy_is_refused(checkout, tmp_path):
+    """A mounted config chain carries the repository-written judgment into
+    the container as a mark; the workspace policy has no mark the scan inside
+    reads, so a policy the scanned repository wrote refuses the run instead
+    of mounting at /ash-workspace-config with no signal."""
+    policy = checkout / "ci" / "policy.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text("projects: []\n", encoding="utf-8")
+    config = _config(tmp_path / "ops" / "ash-config.yaml")
+
+    with pytest.raises(rac.ContainerInputError, match="workspace policy"):
+        _assemble_workspace_run(
+            checkout, config, tmp_path, workspace_config=str(policy)
+        )
+
+
+def test_the_pre_run_check_refuses_a_repository_written_workspace_policy(
+    checkout, tmp_path
+):
+    """The refusal is part of the check that runs before anything is cleared
+    or built, not only of command assembly."""
+    policy = checkout / "ci" / "policy.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text("projects: []\n", encoding="utf-8")
+
+    refusal = rac.container_input_refusal(
+        str(checkout / "ws"),
+        str(tmp_path / "out"),
+        None,
+        str(policy),
+        "ash.code-workspace",
     )
+
+    assert isinstance(refusal, str), refusal
+    assert "workspace policy" in refusal, refusal
+    assert "written by the repository being scanned" in refusal, refusal
+
+
+def test_the_pre_run_check_lets_an_operators_workspace_policy_through(
+    checkout, tmp_path
+):
+    """The must-not twin of the refusal above."""
+    policy = tmp_path / "ops" / "policy.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text("projects: []\n", encoding="utf-8")
+
+    refusal = rac.container_input_refusal(
+        str(checkout / "ws"),
+        str(tmp_path / "out"),
+        None,
+        str(policy),
+        "ash.code-workspace",
+    )
+
+    assert refusal is None, refusal
+
+
+def test_the_scan_cli_refuses_a_repository_written_policy_before_clearing_the_output(
+    checkout, commands, tmp_path
+):
+    """The scan CLI: the refusal arrives before the previous run's reports are
+    cleared and before any command runs."""
+    policy = checkout / "ci" / "policy.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text("workspace: {}\n", encoding="utf-8")
+    output = tmp_path / "out"
+    (output / "reports").mkdir(parents=True)
+    (output / "reports" / "previous.txt").write_text("kept\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--mode",
+            "container",
+            "--no-build",
+            "--no-progress",
+            "--workspace",
+            str(checkout / "ws" / "ash.code-workspace"),
+            "--workspace-config",
+            str(policy),
+            "--output-dir",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 3, result.output
+    assert commands == []
+    assert (output / "reports" / "previous.txt").read_text(encoding="utf-8") == "kept\n"
+    assert "workspace policy" in " ".join(result.output.split()), result.output
+
+
+def test_an_operators_workspace_policy_still_mounts(checkout, tmp_path):
+    """The must-not twin: a policy the operator keeps outside the checkout
+    mounts at its own root as before."""
+    policy = tmp_path / "ops" / "policy.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text("projects: []\n", encoding="utf-8")
+    config = _config(tmp_path / "ops" / "ash-config.yaml")
+
+    cmd = _assemble_workspace_run(
+        checkout, config, tmp_path, workspace_config=str(policy)
+    )
+
+    assert any(rac.CONTAINER_WORKSPACE_CONFIG_ROOT in str(arg) for arg in cmd), cmd
+
+
+def test_an_ash_config_inside_the_checkout_is_mounted_marked(
+    checkout, tmp_path, monkeypatch
+):
+    """The chain-shape pin for the ASH_CONFIG label: a file of the checkout
+    the environment names is mounted WITH the repository-written mark, the
+    outcome the policy label's refusal stands in for."""
+    env_cfg = checkout / "ci" / "env.yaml"
+    env_cfg.parent.mkdir(parents=True, exist_ok=True)
+    env_cfg.write_text("project_name: env\n", encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(env_cfg))
+    config = _config(tmp_path / "ops" / "ash-config.yaml")
+
+    cmd = _assemble_workspace_run(checkout, config, tmp_path)
+
+    assert rac.CONFIG_FILE_FROM_SCANNED_REPOSITORY_FLAG in cmd, cmd
 
 
 def test_the_assembled_command_refuses_it_on_its_own(checkout, tmp_path):
@@ -360,6 +495,79 @@ def test_the_refusal_names_each_file_once_and_says_how_to_keep_a_setting(
     )[0]
     assert named.split(", ") == [config.as_posix(), base.as_posix()], message
     assert message.endswith(f"{FIX}. {KEEP_A_SETTING}"), message
+
+
+def _unjudgeable(monkeypatch, component: Path) -> None:
+    """``os.lstat`` of exactly *component* fails, for the link walk's own read,
+    as an unsearchable parent does: the walk stops before it finishes and the
+    name's membership is undecided. Every other path and caller keeps the real
+    ``os.lstat``."""
+    real = os.lstat
+    blocked = os.fspath(component)
+
+    def asking_from_the_walk() -> bool:
+        frame = sys._getframe(2)
+        for _ in range(4):
+            if frame is None:
+                return False
+            if frame.f_code.co_name == "_link_state":
+                return True
+            frame = frame.f_back
+        return False
+
+    def guarded(path, *args, **kwargs):
+        if os.fspath(path) == blocked and asking_from_the_walk():
+            raise PermissionError(13, "Permission denied", blocked)
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", guarded)
+
+
+def test_a_config_whose_name_walk_never_finished_is_refused_without_a_location(
+    checkout, tmp_path, monkeypatch
+):
+    """The walk of the name stops before the end, so the config is refused like
+    the others, fail closed, but the message says the walk stopped instead of
+    claiming the file sits in the checkout around the workspace root."""
+    config = _config(tmp_path / "ops" / "gate" / "ash-config.yaml")
+    _unjudgeable(monkeypatch, config.parent)
+
+    with pytest.raises(rac.ContainerInputError) as raised:
+        rac._refuse_repository_config_in_a_workspace(
+            str(config), [config], checkout / "ws"
+        )
+
+    message = str(raised.value)
+    assert (
+        "could not be decided (resolving its name stopped before the walk finished)"
+        in message
+    ), message
+    assert config.as_posix() in message, message
+    assert "is in the git checkout" not in message, message
+    from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
+
+    assert message.endswith(f"{FIX}. {KEEP_A_SETTING}"), message
+
+
+def test_a_chain_of_a_found_file_and_an_undecided_one_says_each_reason(
+    checkout, tmp_path, monkeypatch
+):
+    """A file in the workspace's checkout and a base whose name walk never
+    finished: the located one keeps the location sentence, the other gets the
+    walk-stopped one."""
+    located = _config(checkout / "other" / "ash-config.yaml")
+    undecided = _config(tmp_path / "ops" / "gate" / "base.yaml")
+    _unjudgeable(monkeypatch, undecided.parent)
+
+    with pytest.raises(rac.ContainerInputError) as raised:
+        rac._refuse_repository_config_in_a_workspace(
+            str(located), [located, undecided], checkout / "ws"
+        )
+
+    message = str(raised.value)
+    assert f"{located.as_posix()} is in the git checkout" in message, message
+    assert f"whether {undecided.as_posix()} is in that checkout" in message, message
+    assert f"{undecided.as_posix()} is in the git checkout" not in message, message
 
 
 def test_the_scan_cli_refuses_it_before_clearing_the_output(
@@ -404,3 +612,65 @@ def test_the_scan_cli_refuses_it_before_clearing_the_output(
         message
     ), message
     assert KEEP_A_SETTING in message, message
+
+
+def _ash_config_in(directory: Path) -> Path:
+    return _config(directory / "env.yaml", "project_name: env\n")
+
+
+def test_an_ash_config_in_the_checkout_with_no_config_is_refused_on_assembly(
+    checkout, tmp_path, monkeypatch
+):
+    """With no --config the variable's file becomes the inner scan's --config,
+    so a direct caller that passes no config gets the same refusal a named
+    --config in the workspace's checkout gets."""
+    monkeypatch.setenv("ASH_CONFIG", str(_ash_config_in(checkout / "ci")))
+
+    with pytest.raises(rac.ContainerInputError, match=FIX):
+        _assemble_workspace_run(checkout, None, tmp_path)
+
+
+def test_an_ash_config_in_the_checkout_with_no_config_is_refused_before_the_build(
+    checkout, tmp_path, monkeypatch
+):
+    """The pre-run check applies the same rule as command assembly."""
+    monkeypatch.setenv("ASH_CONFIG", str(_ash_config_in(checkout / "ci")))
+
+    refusal = rac.container_input_refusal(
+        str(checkout / "ws"),
+        str(tmp_path / "out"),
+        None,
+        None,
+        "ash.code-workspace",
+    )
+
+    assert isinstance(refusal, str), refusal
+    assert FIX in " ".join(refusal.split()), refusal
+
+
+def test_the_file_gets_one_verdict_named_as_config_or_by_the_environment(
+    checkout, tmp_path, monkeypatch
+):
+    """The same file in the workspace's checkout, given once as --config and
+    once through ASH_CONFIG with no --config, is refused with one message."""
+    target = _ash_config_in(checkout / "ci")
+
+    with pytest.raises(rac.ContainerInputError, match=FIX) as named:
+        _assemble_workspace_run(checkout, target, tmp_path)
+    monkeypatch.setenv("ASH_CONFIG", str(target))
+    with pytest.raises(rac.ContainerInputError, match=FIX) as by_environment:
+        _assemble_workspace_run(checkout, None, tmp_path)
+
+    assert str(by_environment.value) == str(named.value)
+
+
+def test_an_ash_config_outside_every_checkout_with_no_config_is_still_named(
+    checkout, tmp_path, monkeypatch
+):
+    """The must-not twin: the operator's own file, outside every checkout, is
+    handed to the inner scan as its --config."""
+    monkeypatch.setenv("ASH_CONFIG", str(_ash_config_in(tmp_path / "ops")))
+
+    cmd = _assemble_workspace_run(checkout, None, tmp_path)
+
+    assert cmd[cmd.index("--config") + 1].startswith(rac.CONTAINER_ENV_CONFIG_ROOT), cmd

@@ -44,6 +44,7 @@
     "2": "failed",
     "3": "errored",
     "4": "errored",
+    "5": "errored",
     "unknown": "errored"
   }
 }

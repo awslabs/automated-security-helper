@@ -436,6 +436,8 @@ class TestRunLocalModeTupleUnpacking:
         )
 
         mock_metric = _ran_metric(0)
+        # The spec'd mock lacks the per-target reports a real model always has.
+        result.additional_reports = {}
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
             return_value=[mock_metric],

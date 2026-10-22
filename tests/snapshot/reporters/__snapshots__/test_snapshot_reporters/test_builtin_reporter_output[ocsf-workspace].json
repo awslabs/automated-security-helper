@@ -45,7 +45,7 @@
           "uid": "B602"
         },
         "desc": "subprocess call with shell=True identified, security issue.",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "B602"
       }
     ]
@@ -96,7 +96,7 @@
           "uid": "CKV_AWS_20"
         },
         "desc": "S3 Bucket has an ACL defined which allows public READ access.",
-        "severity": "ERROR",
+        "severity": "HIGH",
         "title": "CKV_AWS_20"
       }
     ]
@@ -147,7 +147,7 @@
           "uid": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
         },
         "desc": "Bucket name is hardcoded; derive it from a variable.",
-        "severity": "WARNING",
+        "severity": "MEDIUM",
         "title": "terraform.aws.best-practice.s3-bucket-name-hardcoded"
       }
     ]

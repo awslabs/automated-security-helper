@@ -21,10 +21,13 @@ the kinds below, so a new one cannot be added without deciding which:
   1.30.2), and their ``--exclude`` cannot name one path: semgrep matches a pattern
   against paths below the git work tree's root when the target is inside one, and
   opengrep matches a top-level name at every depth. So no link is passed: a name
-  passed when nothing below the target had it could still be one of the target's
-  own directories, and then it left out the whole target.
-- snyk-code uploads what it reads, has no option that leaves out one path, and how
-  it treats links is not measured, so a target with such a link is not scanned.
+  that nothing else below the target has can still be one of the target's own
+  directories, and passing it would leave out the whole target.
+- snyk-code uploads what it reads and has no option that leaves out one path, so it
+  tests a copy of the scan set instead (``_stage_source``), made through
+  ``open_in_scanned_tree``, which copies no link. A file link leaving the target is
+  not in the scan set, a directory link is not descended, and a link the scan set
+  keeps is refused by the copy: nothing a link leads to reaches what snyk reads.
 """
 
 from __future__ import annotations
@@ -61,8 +64,8 @@ READS_THE_SCAN_SET = "reads the scan set"
 EXCLUDES_THE_LINK = "names the link in its exclusion option"
 #: It follows no link, and its command names none.
 FOLLOWS_NO_LINK = "follows no link and is given no exclusion"
-#: It is not run on a target holding such a link.
-REFUSES_THE_TARGET = "refuses the target"
+#: It is run on a copy of the scan set that holds no link.
+COPIES_WITHOUT_THE_LINK = "tests a copy of the scan set that holds no link"
 
 #: How each registered scanner is kept off a link that leaves its target, which
 #: test_each_scanners_link_handling_holds checks for each of them.
@@ -87,7 +90,7 @@ LINK_HANDLING = {
     "opengrep": FOLLOWS_NO_LINK,
     # `gitleaks dir` runs without --follow-symlinks.
     "gitleaks": FOLLOWS_NO_LINK,
-    "snyk-code": REFUSES_THE_TARGET,
+    "snyk-code": COPIES_WITHOUT_THE_LINK,
 }
 
 _SCANNERS = "automated_security_helper.plugin_modules"
@@ -243,6 +246,42 @@ def _recorded_argv(scanner, target: Path) -> list[str]:
     return recorded[0]
 
 
+def _what_snyk_reads(scanner, target: Path) -> dict:
+    """The copy the stand-in snyk is given, read while it exists: each regular file
+    with its bytes, and each link."""
+    seen: dict = {}
+
+    def _record(*args, **kwargs):
+        command = [str(arg) for arg in (kwargs.get("command") or args[0])]
+        tested = Path(next(arg for arg in command[3:] if not arg.startswith("-")))
+        entries = sorted(tested.rglob("*"))
+        seen["files"] = {
+            path.relative_to(tested).as_posix(): path.read_bytes()
+            for path in entries
+            if path.is_file() and not path.is_symlink()
+        }
+        seen["links"] = [
+            path.relative_to(tested).as_posix() for path in entries if path.is_symlink()
+        ]
+        raise _Stop
+
+    scanner.dependencies_satisfied = True
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess", side_effect=_record),
+    ):
+        with pytest.raises((_Stop, ScannerError)):
+            scanner.scan(target=target, target_type="source")
+    assert seen, "snyk was not started"
+    return seen
+
+
+def _no_outside_bytes(files: dict) -> None:
+    """No file in the copy holds what a file outside the tree holds."""
+    assert not [name for name, data in files.items() if b"# outside" in data], files
+
+
 # ---------------------------------------------------------------------------
 # Every registered scanner is accounted for
 # ---------------------------------------------------------------------------
@@ -302,6 +341,14 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
         monkeypatch.setattr(
             _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
         )
+    if name == "trivy-repo":
+        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+            trivy_repo_scanner,
+        )
+
+        monkeypatch.setattr(
+            trivy_repo_scanner, "sandboxed_online", lambda offline: False
+        )
     source = _tree(tmp_path, HANDLING_FILES, HANDLING_LINKS)
     module, scanner = _scanner_for(name, source, tmp_path)
     handling = LINK_HANDLING[name]
@@ -309,13 +356,21 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
     if handling == READS_THE_SCAN_SET:
         import importlib
 
-        scan_set_module = (
-            importlib.import_module(_SCAN_SET_MODULE[name])
-            if name in _SCAN_SET_MODULE
-            else module
-        )
         seen: list[list[str]] = []
-        real = scan_set_module.scan_set
+        # A scanner that does not import scan_set itself reads it through a helper
+        # that imports it when called (cfn-nag and cdk-nag, through
+        # cfn_template_model.cloudformation_candidate_files): spy on it there.
+        # cfn-lint and cfn-guard read it through utils/cfn_template_discovery
+        # (_SCAN_SET_MODULE).
+        from automated_security_helper.utils import get_scan_set as get_scan_set_module
+
+        if name in _SCAN_SET_MODULE:
+            reads_from = importlib.import_module(_SCAN_SET_MODULE[name])
+        elif hasattr(module, "scan_set"):
+            reads_from = module
+        else:
+            reads_from = get_scan_set_module
+        real = reads_from.scan_set
 
         def _spy(*args, **kwargs):
             seen.append([str(path) for path in real(*args, **kwargs)])
@@ -323,7 +378,7 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
 
         scanner.dependencies_satisfied = True
         with (
-            patch.object(scan_set_module, "scan_set", side_effect=_spy),
+            patch.object(reads_from, "scan_set", side_effect=_spy),
             patch.object(scanner, "_pre_scan", return_value=True),
             patch.object(scanner, "_post_scan"),
             patch.object(scanner, "_run_subprocess", side_effect=_Stop),
@@ -344,16 +399,12 @@ def test_each_scanners_link_handling_holds(tmp_path, monkeypatch, name):
         assert not [path for path in seen[0] if "link_out" in path]
         return
 
-    if handling == REFUSES_THE_TARGET:
-        scanner.dependencies_satisfied = True
-        with (
-            patch.object(scanner, "_pre_scan", return_value=True),
-            patch.object(scanner, "_post_scan"),
-            patch.object(scanner, "_run_subprocess") as run,
-        ):
-            with pytest.raises(ScannerError, match="link leaves the scanned tree"):
-                scanner.scan(target=source, target_type="source")
-        run.assert_not_called()
+    if handling == COPIES_WITHOUT_THE_LINK:
+        read = _what_snyk_reads(scanner, source)
+        assert "app.py" in read["files"], read["files"]
+        assert not [name for name in read["files"] if "link_out" in name], read["files"]
+        assert read["links"] == []
+        _no_outside_bytes(read["files"])
         return
 
     if name in _OWN_SCAN:
@@ -458,6 +509,38 @@ def test_the_list_extra_args_held_is_left_as_it_was(tmp_path, name):
     assert any("link_out" in str(arg) for arg in argv)
 
 
+def test_grypes_own_resolution_leaves_the_list_it_holds_as_it_was(tmp_path):
+    """grype's _resolve_arguments adds an --exclude per ASH output directory inside
+    the target, for that resolution only, in a new list: the one extra_args held is
+    left as it was and is extra_args again afterwards."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+        GrypeScannerConfig,
+    )
+
+    source = _tree(tmp_path, {**FILES}, {})
+    output = source / ".ash" / "ash_output"
+    output.mkdir(parents=True)
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    scanner = GrypeScanner(context=context, config=GrypeScannerConfig())
+    held = scanner.args.extra_args
+    before = [(a.key, a.value) for a in held]
+
+    argv = scanner._resolve_arguments(
+        target=f"dir:{source.as_posix()}", results_file=tmp_path / "r.sarif"
+    )
+
+    assert [(a.key, a.value) for a in held] == before
+    assert scanner.args.extra_args is held
+    # And the output directory's exclude did reach this resolution.
+    assert any(".ash" in str(arg) for arg in _values(argv, "--exclude")), argv
+
+
 @pytest.mark.parametrize("name", ["grype", "checkov", "bandit"])
 def test_a_target_with_no_link_leaving_it_leaves_the_list_as_it_was(tmp_path, name):
     """The entries every resolution adds (bandit's --ini, grype's --config) too.
@@ -545,6 +628,7 @@ def test_trivy_is_given_each_link_leaving_its_target_without_a_comma(
     monkeypatch.setattr(
         _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
     )
+    monkeypatch.setattr(trivy_repo_scanner, "sandboxed_online", lambda offline: False)
     source = _tree(
         tmp_path,
         FILES,
@@ -715,26 +799,20 @@ def _snyk(source: Path, base: Path, monkeypatch):
     )
 
 
-def test_snyk_code_does_not_scan_a_target_with_a_link_leaving_it(tmp_path, monkeypatch):
+def test_snyk_codes_copy_leaves_out_a_link_leaving_the_target(tmp_path, monkeypatch):
+    """Nor a link inside it: snyk reads only the target's regular files."""
     source = _tree(
         tmp_path,
         {"app.py": "x = 1\n"},
         {"config.yml": "outside/config.yml", "in_tree.py": "app.py"},
     )
     scanner = _snyk(source, tmp_path, monkeypatch)
-    scanner.dependencies_satisfied = True
 
-    with (
-        patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_post_scan"),
-        patch.object(scanner, "_run_subprocess") as run,
-    ):
-        with pytest.raises(ScannerError) as refused:
-            scanner.scan(target=source, target_type="source")
+    read = _what_snyk_reads(scanner, source)
 
-    run.assert_not_called()
-    assert "'config.yml'" in str(refused.value)
-    assert "link leaves the scanned tree" in str(refused.value)
+    assert sorted(read["files"]) == ["app.py"]
+    assert read["links"] == []
+    _no_outside_bytes(read["files"])
 
 
 @pytest.mark.parametrize(
@@ -742,29 +820,63 @@ def test_snyk_code_does_not_scan_a_target_with_a_link_leaving_it(tmp_path, monke
     ["creds", "deep/aws"],
     ids=["top-level", "nested"],
 )
-def test_snyk_code_does_not_scan_a_target_with_a_directory_link_leaving_it(
+def test_snyk_codes_copy_holds_nothing_below_a_directory_link_leaving_it(
     tmp_path, monkeypatch, link
 ):
     """A link to a directory outside, such as one pointing at ~/.aws.
 
-    snyk might upload every file below it, and the walk that finds file links does
-    not enter directory links, so these were not refused.
+    snyk might read every file below it. The scan set does not enter a directory
+    link, so nothing below it is in the copy snyk is given.
     """
     source = _tree(tmp_path, {"app.py": "x = 1\n"}, {link: "outside"})
     scanner = _snyk(source, tmp_path, monkeypatch)
-    scanner.dependencies_satisfied = True
 
-    with (
-        patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_post_scan"),
-        patch.object(scanner, "_run_subprocess") as run,
-    ):
-        with pytest.raises(ScannerError) as refused:
-            scanner.scan(target=source, target_type="source")
+    read = _what_snyk_reads(scanner, source)
 
-    run.assert_not_called()
-    assert repr(link) in str(refused.value)
-    assert "link leaves the scanned tree" in str(refused.value)
+    assert sorted(read["files"]) == ["app.py"]
+    assert read["links"] == []
+    _no_outside_bytes(read["files"])
+
+
+# The two guards the copy rests on, each pinned alone on the scan set's own output:
+# the cells above go red only when both are off for a kind of link, since the copy
+# (open_in_scanned_tree) refuses a link the scan set kept.
+
+
+def test_the_scan_set_snyk_code_copies_leaves_out_a_file_link_leaving_it(tmp_path):
+    from automated_security_helper.utils.get_scan_set import scan_set
+
+    source = _tree(
+        tmp_path,
+        {"app.py": "x = 1\n"},
+        {"config.yml": "outside/config.yml", "in_tree.py": "app.py"},
+    )
+
+    files = scan_set(source=str(source), output=str(tmp_path / "ash-output"))
+
+    assert sorted(Path(f).relative_to(source).as_posix() for f in files) == [
+        "app.py",
+        "in_tree.py",
+    ]
+
+
+def test_the_scan_set_snyk_code_copies_does_not_enter_a_directory_link(tmp_path):
+    """Not even one to a directory inside the tree, whose files all resolve inside
+    it: so nothing below a directory link reaches the copy by the scan set."""
+    from automated_security_helper.utils.get_scan_set import scan_set
+
+    source = _tree(
+        tmp_path,
+        {"app.py": "x = 1\n", "real/x.py": "y = 2\n"},
+        {"alias": "real", "creds": "outside"},
+    )
+
+    files = scan_set(source=str(source), output=str(tmp_path / "ash-output"))
+
+    assert sorted(Path(f).relative_to(source).as_posix() for f in files) == [
+        "app.py",
+        "real/x.py",
+    ]
 
 
 def test_snyk_code_still_scans_a_target_whose_links_stay_inside(tmp_path, monkeypatch):

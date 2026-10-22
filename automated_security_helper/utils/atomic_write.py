@@ -19,9 +19,12 @@ the new complete one.
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator, TextIO
 
 # Windows refuses to replace a file another process or thread has open, and a progress
 # poll holds the aggregated file open for the length of one JSON parse. Retrying for a
@@ -29,6 +32,16 @@ from pathlib import Path
 # raises here, so the loop runs once.
 _REPLACE_ATTEMPTS = 40
 _REPLACE_BACKOFF_SECONDS = 0.05
+
+
+def _staging_path(path: Path) -> Path:
+    """A file beside *path*, named for this process and a random token.
+
+    The token comes from :mod:`secrets`, not ``uuid.uuid4``: the snapshot tests pin
+    ``uuid.uuid4`` to a counter that report ids are built from, and a staging name
+    that drew from it shifted the id of every report made after the write.
+    """
+    return path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(16)}.tmp")
 
 
 def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> None:
@@ -52,6 +65,46 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
 
     with open_for_atomic_write(path, encoding=encoding) as handle:
         handle.write(content)
+
+
+@contextmanager
+def open_atomically(path: Path, encoding: str = "utf-8") -> Iterator[TextIO]:
+    """A text handle whose contents replace ``path`` when the block ends.
+
+    :func:`write_text_atomically` for a writer that streams its content rather than
+    holding it whole, such as the workspace's unified results file, assembled one
+    project's SARIF at a time. Written to a staging file beside ``path`` and renamed
+    over it when the block completes; if the block raises, the staging file is
+    removed and ``path`` is left as it was.
+    """
+    path = Path(path)
+    staging = _staging_path(path)
+    try:
+        with open(staging, mode="x", encoding=encoding) as handle:
+            yield handle
+        _replace(staging, path)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+
+
+def write_bytes_atomically(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` as :func:`write_text_atomically` writes text.
+
+    The bytes reach the file as given: nothing is encoded and no newline is
+    translated, so a caller that records a digest of the file can take it of
+    ``data`` rather than read the file back, which another writer may have replaced
+    by then.
+    """
+    path = Path(path)
+    staging = _staging_path(path)
+    try:
+        with open(staging, mode="xb") as handle:
+            handle.write(data)
+        _replace(staging, path)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
 
 
 def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:

@@ -61,6 +61,7 @@ from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.download_utils import (
     install_pinned_tool,
     read_receipt,
+    receipt_root,
 )
 from automated_security_helper.utils.tool_downloads import (
     _ASSET_TABLES,
@@ -69,6 +70,17 @@ from automated_security_helper.utils.tool_downloads import (
     get_tool_asset,
     supported_platforms,
 )
+
+pytestmark = pytest.mark.usefixtures("receipt_home")
+
+
+def test_receipts_from_this_module_stay_out_of_the_real_home(tmp_path):
+    """An install writes its receipt under Path.home(), here the test's own home.
+
+    This module wrote two receipts into the developer's real ~/.ash/install-receipts.
+    """
+    assert receipt_root().is_relative_to(tmp_path), receipt_root()
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NIX_OPENGREP = REPO_ROOT / "nix" / "opengrep.nix"

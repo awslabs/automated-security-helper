@@ -31,7 +31,7 @@ metadata:
   inputs_not_scanned: null
   plugin_load_errors: {}
   project_name: workspace
-  report_id: ASH-WORKSPACE-snapshot-with-skipped
+  report_id: ASH-WORKSPACE-snapshot-with-skipped-20260115120042-000000000003
   shard: null
   summary_stats:
     actionable: 0
@@ -636,6 +636,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: FAILED
     suppressed_finding_count: 0
   checkov:
@@ -653,6 +654,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: FAILED
     suppressed_finding_count: 0
   npm-audit:
@@ -662,7 +664,8 @@ scanner_results:
     excluded: false
     exit_code: 125
     finding_count: 0
-    missing_reason: null
+    missing_reason: 'api: its dependencies were not available; no reason was recorded,
+      and ash.log has the scanner''s own message'
     severity_counts:
       critical: 0
       high: 0
@@ -670,6 +673,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: MISSING
     suppressed_finding_count: 0
   semgrep:
@@ -687,6 +691,7 @@ scanner_results:
       low: 0
       medium: 0
       suppressed: 0
+    skipped_reason: null
     status: PASSED
     suppressed_finding_count: 0
 used_suppressions: []
@@ -705,23 +710,30 @@ workspace:
     finding_count: 1
     ignore_file_exclusions: null
     incomplete_converters: {}
+    incomplete_scanner_details:
+      npm-audit: MISSING
     incomplete_scanners:
     - npm-audit
     inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/api
+    partial_coverage_scanners: []
     policy_origin_finding_count: 0
     project: api
     relative_path: api
     sarif_run_index: 0
     scan_incomplete: true
+    scanner_reasons:
+      npm-audit: its dependencies were not available; no reason was recorded, and
+        ash.log has the scanner's own message
     scanners:
       bandit: FAILED
       npm-audit: MISSING
     severity_threshold: MEDIUM
     skip_detail: null
     skip_reason: null
+    stale_content_databases: []
     status: completed
   - actionable_finding_count: 1
     ceiling_unreachable_findings: {}
@@ -732,22 +744,26 @@ workspace:
     finding_count: 2
     ignore_file_exclusions: null
     incomplete_converters: {}
+    incomplete_scanner_details: {}
     incomplete_scanners: []
     inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/web
+    partial_coverage_scanners: []
     policy_origin_finding_count: 0
     project: web
     relative_path: web
     sarif_run_index: 1
     scan_incomplete: false
+    scanner_reasons: {}
     scanners:
       checkov: FAILED
       semgrep: PASSED
     severity_threshold: HIGH
     skip_detail: null
     skip_reason: null
+    stale_content_databases: []
     status: completed
   - actionable_finding_count: 0
     ceiling_unreachable_findings: {}
@@ -758,20 +774,24 @@ workspace:
     finding_count: 0
     ignore_file_exclusions: null
     incomplete_converters: {}
+    incomplete_scanner_details: {}
     incomplete_scanners: []
     inputs_not_scanned: []
     invalid_config: false
     no_scanner_ran: false
     output_path: projects/docs
+    partial_coverage_scanners: []
     policy_origin_finding_count: 0
     project: docs
     relative_path: docs
     sarif_run_index: null
     scan_incomplete: false
+    scanner_reasons: {}
     scanners: {}
     severity_threshold: null
     skip_detail: '''docs'' does not exist as a directory at ''<REPO>/tests/test_data/snapshot_fixture/workspace/docs'''
     skip_reason: error
+    stale_content_databases: []
     status: skipped
   refusal_detail: null
   skipped_projects:

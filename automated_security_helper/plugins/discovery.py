@@ -3,11 +3,42 @@
 
 import importlib
 import importlib.util
-from typing import List
+from typing import List, Mapping, Optional
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
-def _is_top_level_package(name: str) -> bool:
+def shown_import_failure(error: BaseException, name: str, label: str) -> str:
+    """Why importing or looking up ``name`` failed, as a log line about it says it.
+
+    ``label`` is how the line names the module: the masked form for a name a
+    config read from the environment, and the name itself otherwise. For a
+    masked name the error's own text is left out with it, because that text
+    quotes the name (``No module named '...'``); only its kind is said. For a
+    literal name the text is shown through ``error_text``, which redacts the
+    env-read values the loader carried onto the error: an import error can
+    quote any of them, not only the module's own name.
+    """
+    if label == name:
+        from automated_security_helper.utils.error_text import error_text
+
+        return error_text(error)
+    return masked_failure_kind(type(error).__name__)
+
+
+def masked_failure_kind(kind: str) -> str:
+    """All a masked name's failure may say about itself: the error's kind.
+
+    One wording for every surface that prints a failure beside a masked name --
+    the import log's warning and the loader's refusal -- so the two never
+    drift apart on what is withheld and why.
+    """
+    return (
+        f"{kind}, whose text is not shown because it can quote "
+        "the name, which was read from the environment"
+    )
+
+
+def _is_top_level_package(name: str, label: Optional[str] = None) -> bool:
     """Whether ``name`` is an importable top-level regular package.
 
     This used to be answered by walking ``pkgutil.iter_modules()`` -- every entry on
@@ -33,10 +64,14 @@ def _is_top_level_package(name: str) -> bool:
     """
     if not name or "." in name:
         return False
+    shown = name if label is None else label
     try:
         spec = importlib.util.find_spec(name)
     except Exception as e:  # a broken finder must not stop discovery
-        ASH_LOGGER.warning(f"Could not look up plugin package {name}: {e}")
+        ASH_LOGGER.warning(
+            f"Could not look up plugin package {shown}: "
+            f"{shown_import_failure(e, name, shown)}"
+        )
         return False
     return (
         spec is not None
@@ -45,7 +80,10 @@ def _is_top_level_package(name: str) -> bool:
     )
 
 
-def discover_plugins(plugin_modules: List[str] | None = None):
+def discover_plugins(
+    plugin_modules: List[str] | None = None,
+    shown: Optional[Mapping[str, str]] = None,
+):
     """Import the top-level plugin packages *plugin_modules* names.
 
     A name outside the plugin namespace that ``load_additional_plugin_modules``
@@ -53,6 +91,10 @@ def discover_plugins(plugin_modules: List[str] | None = None):
     never imported. A scan refuses such a name before calling this
     (``refuse_plugin_modules_outside_namespace``); the check here keeps every other
     caller to the same rule.
+
+    ``shown`` maps a name to how a log line names it, for a name a config read
+    from the environment (``plugin_module_trust.shown_module_names``); any other
+    name is named as it is.
     """
     from automated_security_helper.plugins.loader import (
         _is_allowed_module_path,
@@ -61,24 +103,26 @@ def discover_plugins(plugin_modules: List[str] | None = None):
 
     if plugin_modules is None:
         plugin_modules = ["ash_plugins"]
+    labels = shown or {}
     discovered = {"converters": [], "scanners": [], "reporters": []}
 
     # Look for top-level packages named by plugin_modules
     for name in dict.fromkeys(plugin_modules):
+        label = labels.get(name, name)
         if not _is_allowed_module_path(name):
             ASH_LOGGER.warning(
-                f"Skipping module with unexpected namespace: {name}. "
+                f"Skipping module with unexpected namespace: {label}. "
                 f"{_namespace_rule()}"
             )
             continue
-        if not _is_top_level_package(name):
+        if not _is_top_level_package(name, label):
             continue
         try:
             # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
             module = importlib.import_module(name)
             # The import itself should trigger plugin registration
             # via the AshPlugin metaclass
-            ASH_LOGGER.info(f"Discovered plugin package: {name}")
+            ASH_LOGGER.info(f"Discovered plugin package: {label}")
 
             # Track what was discovered
             if hasattr(module, "ASH_CONVERTERS"):
@@ -89,6 +133,8 @@ def discover_plugins(plugin_modules: List[str] | None = None):
                 discovered["reporters"].extend(module.ASH_REPORTERS)
 
         except ImportError as e:
-            ASH_LOGGER.warning(f"Failed to import plugin {name}: {e}")
+            ASH_LOGGER.warning(
+                f"Failed to import plugin {label}: {shown_import_failure(e, name, label)}"
+            )
 
     return discovered

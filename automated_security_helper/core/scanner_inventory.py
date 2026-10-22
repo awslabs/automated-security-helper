@@ -46,11 +46,16 @@ tree and no scan is run.
 import logging
 import re as _re
 import tempfile
+import threading
 from pathlib import Path
 from time import monotonic as _monotonic
 from typing import Any, Callable, Dict, List, Optional
 
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.redacted_model import (
+    EnvResolvedScalar,
+    without_env_scalars,
+)
 
 
 #: Scanner plugin packages that ship inside ASH but are not loaded by
@@ -101,12 +106,15 @@ def _loaded_scanner_classes() -> list:
 
     Why this does not call ``ash_plugin_manager.plugin_modules("scanner")``
     ---------------------------------------------------------------------
-    That method answers "what is registered in this process", which depends on
-    what the process imported before the call, not "what this build contains".
-    Reading ``plugin_library`` directly instead
-    fails the sweep in ``tests/unit/workspace/test_project_isolation.py``, which
-    forbids reaching into the manager's registry from outside the class that owns
-    it, because that is the shape the original defect arrived in.
+    That method's memo follows the registrations, but the registry is
+    process-wide: it holds every module any caller in the process loaded, a
+    session's own plugin modules included, so it answers "what is registered
+    here", not "what ASH ships".
+
+    Reading ``plugin_library`` directly instead fails the sweep in
+    ``tests/unit/workspace/test_project_isolation.py``, which forbids reaching into
+    the manager's registry from outside the class that owns it, because that is
+    the shape the original defect arrived in.
 
     Loading the vendored packages registers their scanners in the process-wide
     registry. That does not make them part of a scan: a scan selects the built-in
@@ -393,6 +401,7 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
     from automated_security_helper.utils.subprocess_utils import (
         find_executable,
         run_command,
+        run_succeeded,
     )
 
     resolved = find_executable(command)
@@ -430,7 +439,9 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
             )
             continue
 
-        if getattr(result, "returncode", 1) != 0:
+        # Flags first: a run whose output ASH could not record can exit 0, and
+        # what it printed is no version.
+        if not run_succeeded(result):
             continue
 
         combined = (getattr(result, "stdout", "") or "") + (
@@ -477,6 +488,7 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
             offline_strategy.value if offline_strategy is not None else "unknown"
         ),
         "enabled": True,
+        "installs_on_first_scan": False,
     }
 
     try:
@@ -522,12 +534,29 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
         if found_cfg is None:
             entry["enabled"] = enabled_default
         elif isinstance(found_cfg, dict):
-            entry["enabled"] = found_cfg.get("enabled", enabled_default)
+            # An external plugin's section, which the segment models keep as
+            # an extra and never validate: a value the file read from the
+            # environment is still the resolver's marker, and the entry is
+            # data a tool answer carries. The marker's TEXT came from the
+            # environment, so it is reported as its reference spelling, never
+            # by value; the downcast view (without_env_scalars) strips only
+            # the type and would keep the text.
+            raw_enabled = found_cfg.get("enabled", enabled_default)
+            if isinstance(raw_enabled, EnvResolvedScalar):
+                entry["enabled"] = "${" + raw_enabled.variable + "}"
+            else:
+                entry["enabled"] = without_env_scalars(raw_enabled)
         else:
             entry["enabled"] = getattr(found_cfg, "enabled", enabled_default)
 
     try:
         entry["dependencies_satisfied"] = bool(plugin.validate_plugin_dependencies())
+        # The check ran in check-only mode (list_scanner_inventory), and reached
+        # the point where a scan installs the tool: not offline, uv present, the
+        # tool not installed. So it is absent now and a scan installs it.
+        entry["installs_on_first_scan"] = entry[
+            "dependencies_satisfied"
+        ] is False and bool(getattr(plugin, "_installs_on_first_scan", False))
     except Exception as exc:
         # Left as None. Several scanners raise ScannerError from their dependency
         # check rather than returning False, and mapping that to False would put a
@@ -542,7 +571,16 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
     # validate_plugin_dependencies and assigns the result. Reading first reported
     # None for those scanners while the version was sitting there a moment later,
     # which is how this was found -- the reported set was missing npm-audit's
-    # version even though a probe that validated first could see it.
+    # version even though a probe that validated first could see it. A plugin that
+    # deferred its uv version probe from construction (bandit, checkov, semgrep) runs
+    # it from its dependency check too, and also here, so the version does not hang
+    # on how a subclass, or a test, implements that check.
+    resolve_version = getattr(plugin, "resolve_deferred_tool_version", None)
+    if callable(resolve_version):
+        try:
+            resolve_version()
+        except Exception as exc:  # A failed probe leaves the version unknown.
+            ASH_LOGGER.debug(f"Version probe for {entry['name']} raised: {exc}")
     entry["version"] = _normalized_version(getattr(plugin, "tool_version", None))
 
     # Fallback for a reachable external tool that did not report its own version.
@@ -559,8 +597,17 @@ def describe_scanner(cls, context, default_config) -> Dict[str, Any]:
     return entry
 
 
+#: Held while an inventory runs. Each one starts a probe per scanner (an import,
+#: a ``--version`` run), on a thread each when ``concurrent``, and nothing bounded
+#: how many ran at once: N MCP clients calling check_installation or
+#: list_scanners together started N times that many processes. One inventory at a
+#: time; a caller arriving meanwhile waits for it.
+_INVENTORY_LOCK = threading.Lock()
+
+
 def list_scanner_inventory(
     scanner_classes_provider: Optional[Callable[[], list]] = None,
+    concurrent: bool = False,
 ) -> List[Dict[str, Any]]:
     """Return per-scanner metadata for all registered ASH scanners.
 
@@ -570,6 +617,14 @@ def list_scanner_inventory(
       dependencies_satisfied: True, False, or None when it could not be determined
       offline_strategy: OfflineStrategy enum value string
       enabled: whether the scanner is enabled in the default config
+      installs_on_first_scan: the tool is not installed, and a scan would
+        install it with uv when it starts the scanner
+
+    Nothing is installed or downloaded: the checks run in check-only mode
+    (``utils.uv_tool_runner.checking_only``). A scanner's dependency check
+    installs its tool when it is missing, and a uv version probe downloads it,
+    so outside check-only mode describing the scanners would start minutes of
+    package downloads.
 
     Scanners are probed in a throwaway directory, not the working tree. Dependency
     checks ask the environment -- is this module importable, is that binary on PATH
@@ -582,14 +637,37 @@ def list_scanner_inventory(
             the scanner set; defaults to :func:`_loaded_scanner_classes`. The MCP
             wrapper passes its own module-level ``_loaded_scanner_classes`` so its
             existing monkeypatch target keeps intercepting.
+        concurrent: Describe the scanners on a thread each, in the order given.
+            The checks are slow ones (an import, a ``--version`` run: seconds
+            for checkov and semgrep), and a scan already runs them on scanner
+            threads, so they are safe side by side. Off by default.
+
+    One inventory runs at a time (``_INVENTORY_LOCK``); a concurrent caller
+    waits for the one running and then runs its own.
     """
+    from automated_security_helper.utils.uv_tool_runner import checking_only
+
+    with _INVENTORY_LOCK, checking_only():
+        return _describe_scanners(scanner_classes_provider, concurrent)
+
+
+def _describe_scanners(
+    scanner_classes_provider: Optional[Callable[[], list]], concurrent: bool
+) -> List[Dict[str, Any]]:
+    """list_scanner_inventory's body; it runs inside checking_only()."""
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.config.ash_config import AshConfig
-    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.config.default_config import (
+        default_config_for_tree,
+    )
 
     provider = scanner_classes_provider or _loaded_scanner_classes
     scanner_classes = provider()
-    default_config = get_default_config()
+    # As a scan rooted here loads it: the inventory describes the scanners the
+    # operator's default configuration enables, and an ASH_CONFIG file inside
+    # this checkout stays loadable whatever it writes for an operator-only
+    # option, as it is for the scan.
+    default_config = default_config_for_tree()
 
     with tempfile.TemporaryDirectory(prefix="ash-list-scanners-") as probe_root:
         source_dir = Path(probe_root) / "source"
@@ -601,6 +679,26 @@ def list_scanner_inventory(
             output_dir=output_dir,
             config=AshConfig(),
         )
-        return [
-            describe_scanner(cls, context, default_config) for cls in scanner_classes
-        ]
+        if not concurrent or len(scanner_classes) < 2:
+            return [
+                describe_scanner(cls, context, default_config)
+                for cls in scanner_classes
+            ]
+        import contextvars
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Each check in a copy of this context, taken here: a pool thread inherits
+        # none, and list_scanner_inventory's checking_only() must reach every
+        # check.
+        tasks = [(contextvars.copy_context(), cls) for cls in scanner_classes]
+        with ThreadPoolExecutor(
+            max_workers=len(scanner_classes), thread_name_prefix="ash-inventory"
+        ) as pool:
+            return list(
+                pool.map(
+                    lambda task: task[0].run(
+                        describe_scanner, task[1], context, default_config
+                    ),
+                    tasks,
+                )
+            )

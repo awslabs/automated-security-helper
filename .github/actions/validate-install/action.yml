@@ -5,6 +5,14 @@ inputs:
   method:
     description: "Install method: pip, pipx, uvx, homebrew, pre-commit"
     required: true
+  pre-commit-run-hooks:
+    description: >-
+      pre-commit only. "true" also runs the hooks against fixture repositories
+      (pre-commit.sh: minutes, and network for every scanner install), which the
+      callers ask for on one cell per OS; any other value runs the manifest check
+      alone.
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -105,10 +113,26 @@ runs:
       run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === homebrew ===
-    - name: "homebrew: validate formula"
+    # A real install of the formula, built from this commit rather than the release
+    # tag on its `url` line, then `brew test`, `ash --version` and local-mode scans,
+    # one of them with the default scanner selection. See homebrew.sh. The syntax
+    # check stays first because it fails in a second, before Homebrew installs
+    # anything.
+    - name: "homebrew: validate formula syntax"
       if: inputs.method == 'homebrew'
       shell: bash
       run: ruby -c Formula/ash.rb
+    - name: "homebrew: install from this commit, test and scan"
+      if: inputs.method == 'homebrew'
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
+        work="${RUNNER_TEMP}/ash-homebrew"
+        mkdir -p "$work"
+        tarball="$work/automated-security-helper-${version}.tar.gz"
+        git archive --format=tar.gz --prefix="automated-security-helper-${version}/" -o "$tarball" HEAD
+        bash "${GITHUB_ACTION_PATH}/homebrew.sh" "$GITHUB_WORKSPACE" "$tarball" "$work"
 
     # === pre-commit ===
     - name: "pre-commit: install"
@@ -119,4 +143,11 @@ runs:
       if: inputs.method == 'pre-commit'
       shell: bash
       run: pre-commit validate-manifest .pre-commit-hooks.yaml
+    # Runs the hooks against fixture repositories, not just the manifest schema;
+    # see pre-commit.sh. One cell per OS: the workflows pass the input, and
+    # tests/unit/test_pre_commit_hooks_manifest.py holds both to the same cells.
+    - name: "pre-commit: run the hooks"
+      if: inputs.method == 'pre-commit' && inputs.pre-commit-run-hooks == 'true'
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/pre-commit.sh" "$GITHUB_WORKSPACE" "${RUNNER_TEMP}/ash-pre-commit"
 

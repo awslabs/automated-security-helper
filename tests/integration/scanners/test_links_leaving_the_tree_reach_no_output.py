@@ -175,6 +175,20 @@ def _build(base: Path) -> Path:
         "import subprocess\nsubprocess.call('in-tree', shell=True)\n",
         encoding="utf-8",
     )
+    # A workflow whose run interpolates untrusted input, which actionlint and
+    # zizmor each report (zizmor also reports the unpinned checkout).
+    (tree / ".github" / "workflows").mkdir(parents=True)
+    (tree / ".github" / "workflows" / "ci.yml").write_text(
+        "name: ci\n"
+        "on: push\n"
+        "jobs:\n"
+        "  build:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        '      - run: echo "${{ github.event.head_commit.message }}"\n',
+        encoding="utf-8",
+    )
     (tree / "real.tf").write_text(
         INSECURE_BUCKET.format(name="in-tree-bucket"), encoding="utf-8"
     )
@@ -377,19 +391,27 @@ class Control:
 #: One for every registered scanner. The in-tree findings were measured with
 #: bandit 1.9.4, checkov 3.3.26, detect-secrets, semgrep 1.180.0, opengrep 1.30.2,
 #: cfn-nag, cdk-nag, grype 0.120.1, trivy 0.75.0 and syft 1.54.1; ferret-scan's
-#: has not been measured.
+#: has not been measured, nor have the actionlint, cfn-lint, gitleaks, trivy and
+#: zizmor controls added when those scanners were registered.
 CONTROLS = {
     "bandit": Control(commands=("bandit",), in_tree="real.py"),
     "checkov": Control(commands=("checkov",), in_tree="real.tf"),
     "detect-secrets": Control(commands=("detect-secrets",), in_tree="settings.yml"),
+    "gitleaks": Control(commands=("gitleaks",), in_tree="settings.yml"),
     "semgrep": Control(commands=("semgrep",), in_tree="real.py"),
     "opengrep": Control(commands=("opengrep",), in_tree="real.py"),
+    "actionlint": Control(commands=("actionlint",), in_tree=".github/workflows/ci.yml"),
+    "zizmor": Control(commands=("zizmor",), in_tree=".github/workflows/ci.yml"),
     "cfn-nag": Control(
         commands=("cfn_nag_scan",), in_tree="templates/real.template.json"
     ),
+    "cfn-lint": Control(commands=("cfn-lint",), in_tree="templates/real.template.json"),
     "cdk-nag": Control(module="cdk_nag", in_tree="templates/real.template.json"),
     "grype": Control(
         commands=("grype",), database="GRYPE_DB_CACHE_DIR", in_tree="requirements.txt"
+    ),
+    "trivy": Control(
+        commands=("trivy",), database="TRIVY_CACHE_DIR", in_tree="requirements.txt"
     ),
     "trivy-repo": Control(
         commands=("trivy",), database="TRIVY_CACHE_DIR", in_tree="requirements.txt"

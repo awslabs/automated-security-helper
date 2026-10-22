@@ -176,6 +176,50 @@ class TestInitialize:
         engine_cls.assert_called_once()
         assert [s.rule_id for s in orch.config.global_settings.suppressions] == ["B101"]
 
+    def test_a_resolution_warning_is_logged_on_one_line(self, tmp_path):
+        """A warning can quote a parser's message, which names the config file:
+        a newline in the file's path started a log line of the path's choosing.
+        The whole warning is one log line, every newline written as ``\\x0a``
+        (the parser's own layout flattened with the path's, deliberately: this
+        record cannot tell them apart) and shown once: not ``\\\\x0a``. The
+        record is NO_MARKUP, since the path's ``[/x]`` would read as a Rich tag.
+        """
+        from automated_security_helper.utils.log import NO_MARKUP
+
+        src = tmp_path / "src"
+        src.mkdir()
+        out = tmp_path / "out"
+        cfg = AshConfig(project_name="test")
+        # The real shape: the YAML parser's message spans lines of its own and
+        # quotes the file's name, which holds a newline and a bracket, twice.
+        warning = (
+            "Failed to load configuration file: while parsing a flow sequence\n"
+            '  in "a\nTAIL-[/x].yaml", line 1, column 15\n'
+            "expected ',' or ']', but got '<stream end>'\n"
+            '  in "a\nTAIL-[/x].yaml", line 2, column 1. '
+            "Using default configuration — suppressions and custom settings "
+            "are NOT active."
+        )
+        cfg._resolution_warnings = [warning]
+
+        with patch(
+            "automated_security_helper.core.orchestrator.ASH_LOGGER"
+        ) as mock_logger:
+            _initialized(src, out, _EngineStub(), config=cfg)
+
+        warned = [
+            c
+            for c in mock_logger.warning.call_args_list
+            if "Failed to load configuration file" in str(c.args[0])
+        ]
+        assert warned, mock_logger.warning.call_args_list
+        for call in warned:
+            message = str(call.args[0])
+            assert "\n" not in message, f"the path began a line: {message!r}"
+            assert "\\x0aTAIL-[/x].yaml" in message, message
+            assert "\\\\x0a" not in message, f"shown twice: {message!r}"
+            assert call.kwargs.get("extra") == NO_MARKUP, call.kwargs
+
     def test_stale_result_files_are_removed(self, tmp_path):
         """Known stale artifacts in output_dir are unlinked; others survive."""
         src = tmp_path / "src"
@@ -186,6 +230,8 @@ class TestInitialize:
         stale.write_text("{}")
         ignore_report = out / "ash-ignore-report.txt"
         ignore_report.write_text("x")
+        run_record = out / "ash-scan-set-run.json"
+        run_record.write_text("{}")
         keeper = out / "some-other-file.txt"
         keeper.write_text("keep me")
 
@@ -193,10 +239,15 @@ class TestInitialize:
 
         assert not stale.exists()
         assert not ignore_report.exists()
+        assert not run_record.exists()
         assert keeper.exists()
 
     def test_permission_error_on_unlink_is_swallowed(self, tmp_path):
-        """A stale file we cannot delete does not abort initialization."""
+        """A stale file we can neither set aside nor delete does not abort initialization.
+
+        The previous results are set aside (moved) rather than deleted, so both
+        moves and deletes fail here.
+        """
         src = tmp_path / "src"
         src.mkdir()
         out = tmp_path / "out"
@@ -204,7 +255,10 @@ class TestInitialize:
         stale = out / "ash_aggregated_results.json"
         stale.write_text("{}")
 
-        with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
+        with (
+            patch.object(Path, "rename", side_effect=PermissionError("locked")),
+            patch.object(Path, "unlink", side_effect=PermissionError("locked")),
+        ):
             orch = _initialized(src, out, _EngineStub())
 
         assert orch._initialized is True

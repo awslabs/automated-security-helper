@@ -26,7 +26,8 @@ The tests below pin five properties:
    produced this". ``projects/`` is excluded, because workspace mode's per-project trees
    are inputs to the run that follows.
 2. A terminal status that is not a verdict is propagated rather than discarded. Verdicts
-   are 0, 1 and 2, the statuses reached from a results file; 3 (invalid config) and 4
+   are 0, 1 and 2, the statuses reached from a results file; 3 (invalid config or
+   refused input) and 4
    (workspace definition or policy error) assert the opposite and must not be flattened
    into the read-back's 1. Exit 2 IS a verdict and must still reach the host's own
    exit-code computation, because the host applies filters the container was never told
@@ -518,7 +519,7 @@ class TestContainerStatusesThatAreNotVerdicts:
 
         assert exit_info.value.code == 3
         reported = " ".join(str(call) for call in logger.error.call_args_list)
-        assert "invalid config" in reported, (
+        assert "invalid config or refused input" in reported, (
             "the status is the whole diagnostic here -- there is no report to point the "
             f"operator at -- so the message has to name what it means; got: {reported}"
         )

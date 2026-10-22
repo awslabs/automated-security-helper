@@ -117,6 +117,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
     off_host_reporter_refused,
+    reporter_classes_for_run,
     reporter_companion_file_names,
     reporter_file_name,
     reporter_file_names,
@@ -346,17 +347,20 @@ def _present_per_project_artifacts(
     return [entry for entry in entries if entry["project"] not in missing]
 
 
-def _default_reporter_classes() -> List[type]:
-    """Every reporter class the plugin registry resolved.
+def _default_reporter_classes(plugin_modules: Sequence[str] = ()) -> List[type]:
+    """The reporter classes of this workspace run's own plugin modules.
 
     ``execution.prewarm_plugin_registry`` has already resolved the ``reporter``
     type before any project ran, so this reads a warm, complete registry rather
     than triggering discovery here -- which under the old lazy behaviour would
     have made the resolved set depend on when it was first asked for.
-    """
-    from automated_security_helper.plugins import ash_plugin_manager
 
-    return list(ash_plugin_manager.plugin_modules("reporter"))
+    Only ASH's built-ins and ``plugin_modules`` (the modules the workspace's
+    projects and command line name, ``execution.workspace_plugin_modules``): the
+    registry is process-wide, and a reporter another run's module registered in
+    it was built, checked and run here (``reporter_classes_for_run``).
+    """
+    return reporter_classes_for_run(plugin_modules)
 
 
 def _build_instance(
@@ -384,6 +388,7 @@ def _selected_reporters(
     python_based_plugins_only: bool,
     reporter_classes: Optional[Sequence[type]],
     check_dependencies: bool = True,
+    plugin_modules: Sequence[str] = (),
 ):
     """Every constructible reporter, with its declared behaviour and skip reason.
 
@@ -405,7 +410,7 @@ def _selected_reporters(
     classes = (
         list(reporter_classes)
         if reporter_classes is not None
-        else _default_reporter_classes()
+        else _default_reporter_classes(plugin_modules)
     )
     for reporter_class in classes:
         instance = _build_instance(reporter_class, context, config_lookup)
@@ -613,6 +618,7 @@ def unsupported_reporter_names(
     output_formats: Sequence[str] = (),
     python_based_plugins_only: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
+    plugin_modules: Sequence[str] = (),
 ) -> Tuple[str, ...]:
     """Enabled reporters that declare they cannot work in workspace mode.
 
@@ -655,6 +661,7 @@ def unsupported_reporter_names(
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
             check_dependencies=False,
+            plugin_modules=plugin_modules,
         )
         # ``skipped is None`` is what makes disabling the documented way out
         # actually work: a reporter the operator turned off must not refuse a run
@@ -672,6 +679,7 @@ def emit_workspace_reports(
     python_based_plugins_only: bool = False,
     ignore_suppressions: bool = False,
     reporter_classes: Optional[Sequence[type]] = None,
+    plugin_modules: Sequence[str] = (),
 ) -> WorkspaceReportOutcome:
     """Run the workspace-level report step and write the manifest.
 
@@ -692,6 +700,10 @@ def emit_workspace_reports(
             reads it sees the same value the projects' scans did.
         reporter_classes: Injected only by tests. Production callers take the
             registry, which ``prewarm_plugin_registry`` has already resolved.
+        plugin_modules: The plugin modules this workspace run names
+            (``execution.workspace_plugin_modules``). With ``reporter_classes``
+            unset, only ASH's built-in reporters and those of these modules are
+            considered.
 
     Returns:
         What was written, what was withheld, and what refused. The caller passes
@@ -733,6 +745,7 @@ def emit_workspace_reports(
             output_formats=output_formats,
             python_based_plugins_only=python_based_plugins_only,
             reporter_classes=reporter_classes,
+            plugin_modules=plugin_modules,
         )
     )
     # Before any reporter runs and before the manifest: a link that appeared
@@ -817,7 +830,8 @@ def emit_workspace_reports(
                 ASH_LOGGER.warning(
                     f"Reporter {name} has no artefact for project(s) "
                     f"{', '.join(missing)}. Those projects were skipped, failed, "
-                    f"or had the reporter disabled."
+                    f"had the reporter disabled, or left it out of their own "
+                    f"output_formats."
                 )
             continue
 

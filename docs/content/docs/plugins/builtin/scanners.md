@@ -46,6 +46,33 @@ scanners:
 Individual bandit test IDs are selected in a bandit configuration file, not through
 ASH options. `severity_threshold` belongs under `options`, alongside the rest.
 
+ASH passes bandit an `--exclude` list for each scan. Besides `excluded_paths` and
+the virtual-environment and `node_modules` directories, it holds ASH's output
+directory when that is inside the scanned directory, so bandit does not read the
+converters' output twice, and a bandit glob for each of the scan's `ignore_paths`
+that is a file path (`src/app.py`), of the form `dir/`, `dir/**` or `**/dir/**`, or
+like `src/*.py`. Such a glob makes
+bandit skip only files the ignore path covers, though it can skip fewer: bandit
+matches case-sensitively and ASH does not. A pattern with a character class
+(`[...]`) is never passed to bandit: ASH lower-cases the pattern and the path
+before matching, so `src/[!A-Z].py` does not cover `src/b.py`, and bandit would
+skip it. bandit also skips any file whose path contains an entry as plain text, so
+an entry is not passed when a file path under the scanned directory contains it,
+which takes a `*`, `?` or `[` in a file or directory name (`docs/*.md/app.py` for
+the entry of `docs/*.md`). bandit also turns an entry that names an existing
+directory into `<entry>/*`, so an entry is not passed when it names one (an empty
+directory, or a symlink, literally named `docs/*.md`). Every ignore path is still
+applied when the results are processed, as for every scanner, so the findings it
+covers are dropped either way.
+
+An `excluded_paths` entry is applied by bandit alone, and names a path anywhere
+below the scanned directory: `app.py` skips every file named `app.py`, `vendor`
+the files of every `vendor` directory (and a file named `vendor`), `tests/*` what
+the glob matches, and `vendor/` or `**/vendor/**` only the files of `vendor`
+directories. bandit matches these case-sensitively. An entry with a `,`, or with a
+`.` or empty path component, has no bandit form; the scanner logs a warning and
+skips nothing for it.
+
 **Key Checks**:
 - SQL injection vulnerabilities
 - Hardcoded passwords and secrets
@@ -67,9 +94,14 @@ scanners:
   cdk_nag:
     enabled: true
     options:
-      rules_to_suppress: ["AwsSolutions-S1", "AwsSolutions-S2"]
-      verbose: true
+      nag_packs:                       # Which cdk-nag packs to apply
+        AwsSolutionsChecks: true
+        HIPAASecurityChecks: false
+      include_compliant_checks: false  # Also report compliant resources (INFO)
 ```
+
+To skip a cdk-nag rule, suppress it like any other finding (`rule_id:
+AwsSolutions-S1` under `global_settings.suppressions`).
 
 **Key Checks**:
 - S3 bucket security configurations
@@ -78,7 +110,11 @@ scanners:
 - Encryption requirements
 - Logging and monitoring setup
 
-**Dependencies**: AWS CDK CLI, Node.js
+**Dependencies**: the `aws-cdk-lib`, `cdk-nag` and `constructs` Python packages in
+ASH's environment (`ash dependencies install --tool cdk-nag` adds them), and Node.js
+with `node` on `PATH`, which ASH does not install. The AWS CDK CLI is not needed.
+When either is missing the scanner is MISSING, and the reason it records says which:
+the unavailable packages, or "Node.js not found on PATH".
 
 ---
 
@@ -92,9 +128,11 @@ scanners:
   cfn_nag:
     enabled: true
     options:
-      rules_to_suppress: ["W1", "W2"]
-      fail_on_warnings: false
+      severity_threshold: "MEDIUM"
 ```
+
+cfn-nag has no options of its own beyond those every scanner takes; suppress a rule
+with `global_settings.suppressions`.
 
 **Key Checks**:
 - IAM policies with excessive permissions
@@ -135,6 +173,11 @@ scanners:
 Individual check IDs and custom check directories are configured in a checkov
 configuration file, which `config_file` points at.
 
+ASH adds a `--skip-path` for each of its own output directories inside the scanned
+directory, unless that directory's path holds a parenthesis, which checkov's terraform
+module finder cannot take, or ASH runs on Windows; then checkov reads the directory,
+ASH logs a warning naming it, and the findings checkov reports there are dropped.
+
 **Key Checks**:
 - Cloud resource misconfigurations
 - Kubernetes security policies
@@ -156,10 +199,29 @@ scanners:
   detect_secrets:
     enabled: true
     options:
-      plugins: ["ArtifactoryDetector", "AWSKeyDetector", "Base64HighEntropyString"]
-      exclude_files: ".*\\.lock$"
-      exclude_lines: "password.*=.*\\{\\{.*\\}\\}"
+      baseline_file: ".secrets.baseline"  # detect-secrets baseline, relative to the source
+      skip_generated_lockfiles: true      # Skip package-lock.json, yarn.lock and similar
+      max_worker_output_mib: 256          # Most of the scan's findings output read back, in MiB
 ```
+
+A finding is about 300 bytes of output, so the default of 256 MiB holds about
+900,000 findings. Reading the output back costs about three times its size in
+memory. A scan whose output is larger fails, records no findings, and names
+`max_worker_output_mib` in its error.
+
+`max_worker_output_mib` is at most 4096, and only the operator sets it: from
+`--config-overrides` or a config file outside the scanned tree. Whatever a config
+file inside the tree writes for it, a value past 4096 included, is ignored, with a
+warning, because the repository being scanned wrote that file. When such a file is
+part of the configuration, the limit is the operator's whether or not that file
+names it: an override's, the value a config file outside the tree gives it, or
+else the operator's base configuration's (the file `ASH_CONFIG` names, a
+workspace's default config, or 256), so a lower limit the operator set holds for a
+repository that says nothing about it.
+
+Which detectors run, and which files and lines they skip, are set in the
+detect-secrets baseline (`baseline_file`) or in `scan_settings`, in detect-secrets'
+own format.
 
 **Key Checks**:
 - High entropy strings (potential secrets)
@@ -218,9 +280,10 @@ scanners:
   npm_audit:
     enabled: true
     options:
-      audit_level: "moderate"  # info, low, moderate, high, critical
-      production_only: false
+      severity_threshold: "HIGH"  # ALL, LOW, MEDIUM, HIGH, CRITICAL
 ```
+
+npm-audit has no options of its own beyond those every scanner takes.
 
 **Key Checks**:
 - Known vulnerabilities in npm packages
@@ -422,10 +485,12 @@ scanners:
 # Different thresholds for different environments
 scanners:
   bandit:
-    severity_threshold: "LOW"    # Strict for production
+    options:
+      severity_threshold: "LOW"    # Strict for production
 
   checkov:
-    severity_threshold: "MEDIUM" # Balanced for staging
+    options:
+      severity_threshold: "MEDIUM" # Balanced for staging
 ```
 
 ## Troubleshooting

@@ -90,6 +90,10 @@ jobs:
           - { os: macos-14, python-version: "3.14", method: nix }
           # Homebrew not available on Windows
           - { os: windows-latest, method: homebrew }
+          # Nor on the Arm Linux image: actions/partner-runner-images lists Homebrew
+          # under omitted tools ("no packages for Arm Linux"). The leg installs the
+          # formula for real, so it needs a brew; ubuntu-latest has one.
+          - { os: ubuntu-24.04-arm, method: homebrew }
           # Podman/Finch/nerdctl not available on Windows
           - { os: windows-latest, method: podman }
           - { os: windows-latest, method: finch }
@@ -130,15 +134,12 @@ jobs:
           - { os: ubuntu-latest, python-version: "3.14", method: finch }
           - { os: macos-latest, method: finch }
           - { os: macos-14, method: finch }
-          # Homebrew only needs one Python (formula validation)
+          # Homebrew only needs one host Python: the formula builds ASH on its own
+          # python@3.12, and the host one only runs the formula renderer.
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: homebrew }
           - { os: macos-latest, python-version: "3.10", method: homebrew }
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
@@ -214,6 +215,10 @@ jobs:
         uses: ./.github/actions/validate-install
         with:
           method: ${{ matrix.method }}
+          # Read for pre-commit only: the hooks run for real on one cell per OS,
+          # the manifest check on every cell. Same expression as
+          # ash-unified-ci.yml (tests/unit/test_pre_commit_hooks_manifest.py).
+          pre-commit-run-hooks: ${{ matrix.python-version == '3.12' && contains(fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]'), matrix.os) }}
 
       # === mcp: server health check + scan ===
       - name: "Validate MCP"

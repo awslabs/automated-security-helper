@@ -16,15 +16,20 @@ tool's own exclusion option:
   character, or one that another file's path contains, cannot be excluded alone.
 - checkov: one ``--skip-path`` per link, anchored and escaped, so it matches that
   path and no other (checkov applies it with ``re.search`` and as a substring).
-- ferret-scan: ``--exclude`` patterns relative to the target, comma-joined, so a path
-  with a comma or a glob character cannot be carried.
+  checkov's terraform module finder joins every value into one regex a character
+  at a time, so values that fail to compile there cannot be given: an unmatched
+  parenthesis after a ``[.]`` does that, a balanced pair does not.
+- ferret-scan: ``--exclude`` patterns, comma-joined, so a path with a comma cannot
+  be carried (tests/unit/plugin_modules/ash_ferret_plugins/).
 
 When a link cannot be expressed that way the target is not scanned at all: the
 scanner raises, naming the path, and the tool is not started.
 
 The matching rules are checked as each tool applies them, read from bandit 1.9.4
 (``bandit/core/manager.py``) and checkov 3.3.26
-(``checkov/common/runners/base_runner.py``); the integration tests run the tools.
+(``checkov/common/runners/base_runner.py``,
+``checkov/terraform/module_loading/module_finder.py``); the integration tests run
+the tools.
 """
 
 from __future__ import annotations
@@ -87,6 +92,20 @@ def _context(source: Path, base: Path) -> PluginContext:
     )
 
 
+def _refused(scanner, source: Path) -> ScannerError:
+    """scan() raises before the tool is started."""
+    scanner.dependencies_satisfied = True
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess") as run,
+    ):
+        with pytest.raises(ScannerError) as refused:
+            scanner.scan(target=source, target_type="source")
+    run.assert_not_called()
+    return refused.value
+
+
 # ---------------------------------------------------------------------------
 # The walk
 # ---------------------------------------------------------------------------
@@ -139,7 +158,7 @@ def _bandit_excluded_entries(argv: list[str]) -> list[str]:
 def _bandit_excludes(path: str, entries: list[str]) -> bool:
     """The exclusion half of bandit 1.9.4's ``_is_file_included``."""
     return any(fnmatch.fnmatch(path, glob) for glob in entries) or any(
-        entry in path for entry in entries
+        entry in path for entry in entries if entry
     )
 
 
@@ -185,10 +204,18 @@ class TestBandit:
             ("a[1].py", {}),
             ("a*b.py", {}),
             ("a?b.py", {}),
+            ("a\nb.py", {}),
             # bandit also excludes every path the entry is a substring of.
             ("x.py", {"x.pyw": "z = 3\n"}),
         ],
-        ids=["comma", "bracket", "star", "question-mark", "a-longer-name"],
+        ids=[
+            "comma",
+            "bracket",
+            "star",
+            "question-mark",
+            "line-break",
+            "a-longer-name",
+        ],
     )
     def test_a_link_bandit_cannot_exclude_alone_refuses_the_target(
         self, tmp_path, link, also
@@ -198,20 +225,11 @@ class TestBandit:
             files={"app.py": "x = 1\n", **also},
             links={link: "outside/secret.py"},
         )
-        scanner = _bandit(source, tmp_path)
-        scanner.dependencies_satisfied = True
 
-        with (
-            patch.object(scanner, "_pre_scan", return_value=True),
-            patch.object(scanner, "_post_scan"),
-            patch.object(scanner, "_run_subprocess") as run,
-        ):
-            with pytest.raises(ScannerError) as refused:
-                scanner.scan(target=source, target_type="source")
+        refused = _refused(_bandit(source, tmp_path), source)
 
-        run.assert_not_called()
-        assert repr(link) in str(refused.value)
-        assert "link leaves the scanned tree" in str(refused.value)
+        assert repr(link) in str(refused)
+        assert "link leaves the scanned tree" in str(refused)
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +281,15 @@ def _checkov_secrets_all_files_skips(path: str, values: list[str]) -> bool:
     return False
 
 
+def _module_finder_compiles(values: list[str]) -> bool:
+    """checkov 3.3.26's ``find_modules`` regex over every --skip-path value."""
+    try:
+        re.compile("|".join(f"({values})"))
+    except re.error:
+        return False
+    return True
+
+
 posix_only = pytest.mark.skipif(os.sep != "/", reason="checkov skip paths are POSIX")
 
 
@@ -281,7 +308,7 @@ class TestCheckov:
             links={
                 "a/main.tf": "outside/main.tf",
                 "docker/Dockerfile": "outside/Dockerfile",
-                "l (1)+[x].tf": "outside/main.tf",
+                "l [1]+{x}.tf": "outside/main.tf",
                 "link_in.tf": "real/in.tf",
             },
         )
@@ -291,7 +318,7 @@ class TestCheckov:
 
         values = _skip_values(argv)
         root = Path(os.path.abspath(source)).as_posix()
-        for rel in ("a/main.tf", "docker/Dockerfile", "l (1)+[x].tf"):
+        for rel in ("a/main.tf", "docker/Dockerfile", "l [1]+{x}.tf"):
             assert _checkov_skips(os.path.join(root, rel), values), rel
         for rel in (
             "main.tf",
@@ -302,6 +329,7 @@ class TestCheckov:
             "we(ird) [name].tf",
         ):
             assert not _checkov_skips(os.path.join(root, rel), values), rel
+        assert _module_finder_compiles(values)
 
     @posix_only
     def test_the_secrets_runner_skips_them_in_scan_all_files_mode_too(self, tmp_path):
@@ -338,6 +366,89 @@ class TestCheckov:
 
         assert [(a.key, a.value) for a in scanner.args.extra_args] == before
 
+    @posix_only
+    @pytest.mark.parametrize("name", ["b(c.tf", "b)c.tf"])
+    def test_a_link_whose_value_breaks_the_module_finder_refuses_the_target(
+        self, tmp_path, name
+    ):
+        """An unmatched parenthesis, with a dotted link before it: the values fail
+        the module finder's regex to compile, and with it checkov's whole terraform
+        scan. (The links are given in the walk's order, so a(b.tf, which sorts
+        before a.tf, compiles.)"""
+        source = _tree(
+            tmp_path,
+            files={"m.tf": ""},
+            links={"a.tf": "outside/main.tf", name: "outside/main.tf"},
+        )
+        values = [
+            "^" + re.escape(f"{source.as_posix()}/{rel}").replace("\\.", "[.]") + "$"
+            for rel in file_links_leaving_tree(source)
+        ]
+        assert not _module_finder_compiles(values), "the case no longer fails"
+
+        refused = _refused(_checkov(source, tmp_path), source)
+
+        assert repr(name) in str(refused)
+        assert "link leaves the scanned tree" in str(refused)
+
+    @posix_only
+    @pytest.mark.parametrize("name", ["l (1).tf", "x (1).tf"])
+    def test_a_link_with_balanced_parentheses_is_skipped(self, tmp_path, name):
+        """Its value compiles in the module finder's regex, so checkov runs."""
+        source = _tree(
+            tmp_path,
+            files={"m.tf": "", "keep (1).tf": ""},
+            links={"a.tf": "outside/main.tf", name: "outside/main.tf"},
+        )
+        scanner = _checkov(source, tmp_path)
+
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+        values = _skip_values(argv)
+        root = Path(os.path.abspath(source)).as_posix()
+        for rel in ("a.tf", name):
+            assert _checkov_skips(os.path.join(root, rel), values), rel
+        for rel in ("m.tf", "keep (1).tf"):
+            assert not _checkov_skips(os.path.join(root, rel), values), rel
+        assert _module_finder_compiles(values)
+
+    @posix_only
+    def test_a_target_whose_own_path_has_a_parenthesis_is_refused(self, tmp_path):
+        """Every value holds the target's path, so a parenthesis there reaches the
+        module finder's regex too: with two links it fails to compile."""
+        base = tmp_path / "base(1"
+        base.mkdir()
+        source = _tree(
+            base,
+            files={"m.tf": ""},
+            links={"a.tf": "outside/main.tf", "b.tf": "outside/main.tf"},
+        )
+
+        refused = _refused(_checkov(source, base), source)
+
+        assert "link leaves the scanned tree" in str(refused)
+
+    @posix_only
+    def test_a_target_whose_path_has_balanced_parentheses_is_scanned(self, tmp_path):
+        """Its values compile in the module finder's regex: both links are skipped."""
+        base = tmp_path / "proj (1)"
+        base.mkdir()
+        source = _tree(
+            base,
+            files={"m.tf": ""},
+            links={"a.tf": "outside/main.tf", "b.tf": "outside/main.tf"},
+        )
+        scanner = _checkov(source, base)
+
+        argv, _, _ = scanner._execute_scan(source, "source", [])
+
+        values = _skip_values(argv)
+        root = Path(os.path.abspath(source)).as_posix()
+        for rel in ("a.tf", "b.tf"):
+            assert _checkov_skips(os.path.join(root, rel), values), rel
+        assert not _checkov_skips(os.path.join(root, "m.tf"), values)
+        assert _module_finder_compiles(values)
+
     def test_where_paths_cannot_be_skipped_the_target_is_refused(
         self, tmp_path, monkeypatch
     ):
@@ -351,16 +462,8 @@ class TestCheckov:
 
         source = _tree(tmp_path, files={"m.tf": ""}, links={"l.tf": "outside/main.tf"})
         scanner = _checkov(source, tmp_path)
-        scanner.dependencies_satisfied = True
         monkeypatch.setattr(checkov_scanner.os, "sep", "\\")
 
-        with (
-            patch.object(scanner, "_pre_scan", return_value=True),
-            patch.object(scanner, "_post_scan"),
-            patch.object(scanner, "_run_subprocess") as run,
-        ):
-            with pytest.raises(ScannerError) as refused:
-                scanner.scan(target=source, target_type="source")
+        refused = _refused(scanner, source)
 
-        run.assert_not_called()
-        assert "'l.tf'" in str(refused.value)
+        assert "'l.tf'" in str(refused)

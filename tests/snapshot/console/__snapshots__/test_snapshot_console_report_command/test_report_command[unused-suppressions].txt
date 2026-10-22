@@ -1,0 +1,10 @@
+$ ash report --format unused-suppressions --log-level ERROR
+[exit 0]
+{
+  "summary": {
+    "total_suppressions": 0,
+    "used_suppressions": 0,
+    "unused_suppressions": 0
+  },
+  "unused_suppressions": []
+}

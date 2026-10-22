@@ -37,12 +37,18 @@ import pytest
 
 from automated_security_helper.utils.sandbox import clear_backend_cache, resolve_backend
 from automated_security_helper.utils.sandbox.scope import SandboxUnavailable
+from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.integration
 
 FIXTURE = Path(__file__).resolve().parents[2] / "test_data" / "sandbox_escape"
 CANARY = "ash-sandbox-canary-7b9e2f"
-BACKENDS = ["bwrap", "firejail", "landlock", "sandbox-exec"]
+BACKENDS = [
+    pytest.param("bwrap", marks=pytest.mark.requires_userns),
+    "firejail",
+    "landlock",
+    "sandbox-exec",
+]
 
 
 def _required() -> set:
@@ -329,8 +335,9 @@ def _scan(
         "--sandbox",
         mode,
         "--no-progress",
-        "--fail-on-findings",
-        "false",
+        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
+        # takes no extra arguments.
+        "--no-fail-on-findings",
         # The listeners' directory is visible in every sandbox; see _Listeners.
         "--config-overrides",
         f"sandbox.extra_read_paths=[{listeners.directory}]",
@@ -348,7 +355,7 @@ def _scan(
         command.append("--offline")
     result = subprocess.run(  # nosec B603 - fixed argv
         command,
-        env=env,
+        env=checkout_env(env),
         capture_output=True,
         text=True,
         timeout=600,

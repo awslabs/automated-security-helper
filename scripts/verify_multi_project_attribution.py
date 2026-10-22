@@ -143,8 +143,9 @@ STATUS_ERROR = "ERROR"
 STATUS_MISSING = "MISSING"
 STATUS_SKIPPED = "SKIPPED"
 
-# Workspace exit codes: 0 success, 1 internal error, 2 actionable findings above
-# threshold, 3 invalid project config, 4 workspace definition or policy error.
+# Workspace exit codes: 0 success, 1 internal error, 2 actionable findings at or
+# above threshold, 3 invalid project config, 4 workspace definition or policy error,
+# 5 a usage error (for example a --scanners selection no project could run).
 # The fixture is built to produce actionable findings in project-a and project-b,
 # so 2 is expected, and 0 is tolerated in case a future default turns
 # fail_on_findings off.
@@ -1442,7 +1443,8 @@ def check_exit_code(exit_code: int) -> List[str]:
         (
             f"the workspace scan exited {exit_code}; expected one of "
             f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
-            "1 is an internal error and 3 is an invalid project config"
+            "1 is an internal error, 3 is an invalid project config and 5 is a "
+            "usage error: ASH refused this script's command line"
         )
     ]
 

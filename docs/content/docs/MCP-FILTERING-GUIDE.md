@@ -19,17 +19,24 @@ Controls how much data is returned in the response.
 - `summary`: Quick status checks, dashboards, CI/CD gates
 - `minimal`: Health checks, polling for completion, fast status queries
 
-### 2. `actionable_only` - Exclude Suppressed Findings
+### 2. `actionable_only` - Actionable Findings Only
 
-Filter out suppressed findings (false positives or accepted risks) to focus only on findings that require action.
+Keep only the actionable findings, the ones that make the scan exit 2: not suppressed (as a false positive or accepted risk), and at or above the severity threshold the scan was judged by. That is a scanner's own `severity_threshold` where the scan's config sets one, and `global_settings.severity_threshold` otherwise; a threshold passed to `run_ash_scan` tightens both.
 
 **Type:** Boolean (default: `False`)
 
 **When True:**
 - Excludes all findings marked as suppressed
-- Returns only findings that require attention
+- Excludes findings below the severity threshold, which the scan reports but does not fail on
+- Adds `findings`, a flat list of the remaining findings, and `findings_count`. Each entry has
+  `rule_id`, `severity`, `message`, `scanner`, `file_path`, `line_start` and `line_end` (keys with
+  no value are left out). The list honors `scanners` and `severities`, and is part of the `full`
+  response only: `summary` and `minimal` leave it out.
 - Updates summary stats to reflect only actionable findings
 - Sets `suppressed` count to 0 in all statistics
+
+The list is built from the scan's SARIF, which the response does not include; read
+`reports/ash.sarif` (see `get_scan_result_paths`) for the full SARIF.
 
 **Use when:**
 - CI/CD pipeline gates (fail only on actionable findings)
@@ -100,7 +107,7 @@ Filter results to include only specific severity levels.
 - `info` - Informational findings
 - `suppressed` - Suppressed/ignored findings
 
-**Note:** To exclude suppressed findings, use `actionable_only=True` instead of manually listing all non-suppressed severities.
+**Note:** `actionable_only=True` excludes suppressed findings and those below the scan's severity threshold. Listing every non-suppressed severity in `severities` excludes the suppressed ones only.
 
 **Examples:**
 ```python
@@ -123,7 +130,7 @@ severities = "critical,high,suppressed"
 
 #### Actionable Findings Only
 ```python
-# Get only actionable findings (exclude suppressed)
+# Get only actionable findings (unsuppressed, at or above the severity threshold)
 actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
 
 # Actionable summary for dashboard
@@ -178,7 +185,7 @@ high_priority = await get_scan_results(
     output_dir=".ash/ash_output", severities="critical,high"
 )
 
-# Actionable high-priority (exclude suppressed)
+# Actionable high-priority (unsuppressed, at or above the severity threshold)
 actionable_high_priority = await get_scan_results(
     output_dir=".ash/ash_output", actionable_only=True, severities="critical,high"
 )

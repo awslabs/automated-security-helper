@@ -1,0 +1,336 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A record of the tools a child ``ash scan`` started, for a test to hold at none.
+
+A child process is outside the unit-test guard (tests/utils/tool_guard.py): the
+guard's monkeypatches and audit hook live in the test's own process. A cell that
+runs ``ash scan`` in a child gives it ``ChildToolStarts.program`` as its code: the
+stubs in ``CHILD_TOOL_PROBE_STUBS`` answer the scan's tool probes without a
+process, and this module is how the cell shows it worked.
+
+Three parts, each doing what the others cannot:
+
+* An audit hook installed in the child before anything else runs
+  (``ChildToolStarts.prelude``). It appends a line to the log for every process
+  start (``subprocess.Popen``, ``os.posix_spawn``, ``os.exec``, ``os.spawn``,
+  ``os.system``) whose command names a probed tool, whatever found it: a bare name
+  looked up on PATH, a stand-in, or the uv installed with ASH, which the child asks
+  for by path before it searches PATH (``uv_tool_runner.bundled_uv_executable``).
+  A tool named by path inside a shell ``-c`` command line and a tool run as an
+  interpreter's ``-m`` module count too, and the second report subprocess makes
+  of one start (``os.posix_spawn`` right after ``subprocess.Popen``) is not a
+  second line. This is the record a cell reads.
+* Recording stand-ins for ``uv``, ``uvx`` and ``detect-secrets`` first on the
+  child's PATH, so a start that does look a probed tool up on PATH reaches a program
+  that logs and fails, never the tool. The prelude checks that each name resolves to
+  its stand-in before the child's code runs, and ends the child with a line in the
+  log when one does not: a directory ahead of the stand-ins on PATH would otherwise
+  let the real tool start where the cell looks for it.
+* The uv cache and tool directories given to the child. A uv that started, bundled
+  or not, and resolved anything leaves its cache directory non-empty, so an entry
+  is a start the other two did not see (for example one made through C code that the
+  audit hook cannot observe). A uv that resolves nothing leaves none, which is why
+  this is a second record, not the first.
+
+``child_env`` only adds to the environment it is given (PATH's front and the uv
+directories): every other variable, ``PYTHONPATH`` included, passes through
+unchanged, which is what lets a launch scan follow the caller's import path.
+
+The stand-ins are ``#!/bin/sh`` scripts, which Windows does not find on PATH, so the
+cells that use this class are skipped off POSIX (``POSIX_ONLY``).
+"""
+
+from __future__ import annotations
+
+import os
+import shlex
+from pathlib import Path
+from typing import Mapping
+
+import pytest
+
+from tests.utils.tool_guard import CHILD_TOOL_PROBE_STUBS
+
+#: The tools a child scan's availability probes start by name.
+PROBED_TOOLS = ("uv", "uvx", "detect-secrets")
+
+#: Skips a cell on a platform where the stand-ins cannot be found on PATH.
+POSIX_ONLY = pytest.mark.skipif(
+    os.name != "posix",
+    reason="the recording stand-ins are #!/bin/sh scripts, which PATH lookup "
+    "finds on POSIX only",
+)
+
+#: What the exit status of a child is when a stand-in is not what PATH finds.
+SHADOWED_EXIT = 97
+
+#: Python source run first in the child. ``@LOG@``, ``@NAMES@`` and ``@STAND_INS@``
+#: are replaced with the quoted log path, the probed names and the stand-ins'
+#: directory. Every name starts with an underscore so it cannot collide with the
+#: code that follows in the same namespace.
+_PRELUDE = '''\
+import os as _os
+import shutil as _shutil
+import sys as _sys
+
+_LOG = @LOG@
+_NAMES = @NAMES@
+_STAND_INS = @STAND_INS@
+_EVENTS = ("subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn", "os.system")
+_SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh")
+#: Shell options whose value is the next argument, not where the options end
+#: (the test conftest's set).
+_SHELL_OPTIONS_WITH_A_VALUE = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
+#: The one start a subprocess.Popen echo may stand for, as the decoded
+#: (program, argv). Armed only by a Popen that reports its start twice (the
+#: posix_spawn path: no cwd), rewritten on EVERY audited start, and spent by
+#: whatever start comes next: a Popen that cannot echo (cwd set) arms nothing,
+#: so a direct posix_spawn of the same tool right after it is its own record.
+_LAST = [None]
+
+
+def _note(line):
+    fd = _os.open(_LOG, _os.O_WRONLY | _os.O_APPEND | _os.O_CREAT, 0o644)
+    try:
+        _os.write(fd, (line + "\\n").encode("utf-8", "replace"))
+    finally:
+        _os.close(fd)
+
+
+def _named(command):
+    """The probed name *command* is, or None; a path counts by its last part."""
+    try:
+        text = _os.fsdecode(command)
+    except Exception:
+        return None
+    last = _os.path.basename(text.strip()).lower()
+    if last.endswith(".exe"):
+        last = last[:-4]
+    return last if last in _NAMES else None
+
+
+def _as_text(value):
+    return _os.fsdecode(value) if isinstance(value, bytes) else str(value)
+
+
+def _module_run_by(argv):
+    """The module a Python command line runs with ``-m``, or None.
+
+    Read as the interpreter reads its options: ``-I -m uv``, ``-Im uv`` and ``-muv``
+    all run uv, and ``-c``, a script or ``-`` ends the options with no module. Of
+    the options before those, ``-W``, ``-X`` and ``--check-hash-based-pycs`` take a
+    value. (The in-process guard's walk, tests/utils/tool_guard.py:329-364.)
+    """
+    if not isinstance(argv, (list, tuple)):
+        return None
+    args = [_as_text(a) for a in argv[1:]]
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg == "--check-hash-based-pycs":
+            index += 1
+            continue
+        if arg.startswith("--"):
+            continue
+        if not arg.startswith("-") or arg == "-":
+            return None
+        cluster = arg[1:]
+        for position, flag in enumerate(cluster):
+            rest = cluster[position + 1 :]
+            if flag == "m":
+                if rest:
+                    return rest
+                return args[index] if index < len(args) else None
+            if flag == "c":
+                return None
+            if flag in "WX":
+                if not rest:
+                    index += 1
+                break
+    return None
+
+
+def _shell_command_line(arguments):
+    """The command-line operand after a shell's -c, read left to right past
+    the options, or None: value-taking options skip their value, a long flag
+    is passed over, a short cluster holding c takes the next operand, and an
+    operand before any -c is a script, which ends the walk."""
+    index = 1
+    while index < len(arguments):
+        argument = arguments[index]
+        index += 1
+        if argument in _SHELL_OPTIONS_WITH_A_VALUE:
+            index += 1
+            continue
+        if argument.startswith("--"):
+            continue
+        if argument in ("-", "-s"):
+            return None
+        if (argument.startswith("-") or argument.startswith("+")) and len(argument) > 1:
+            if "c" in argument[1:]:
+                return arguments[index] if index < len(arguments) else None
+            continue
+        return None
+    return None
+
+
+def _words_of(argv):
+    """The words of *argv* a probed name can hide in: the program word, every
+    word of a shell command line (os.system's string, or the operand after a
+    shell's -c wherever its options put it), and the module an interpreter
+    runs with -m, read with the interpreter's own option rules
+    (_module_run_by) and compared by its top-level package, with the hyphen a
+    probed name uses."""
+    if isinstance(argv, (str, bytes, _os.PathLike)):
+        # A shell command line: any word of it can be the tool.
+        return _os.fsdecode(argv).split()
+    if not argv:
+        return []
+    arguments = []
+    for argument in argv:
+        try:
+            arguments.append(_os.fsdecode(argument))
+        except Exception:
+            arguments.append("")
+    words = arguments[:1]
+    first = _os.path.basename(arguments[0])
+    if first in _SHELLS:
+        command = _shell_command_line(arguments)
+        if command is not None:
+            words += command.split()
+    if first.startswith("python"):
+        module = _module_run_by(arguments)
+        if module is not None:
+            words.append(module.split(".")[0].replace("_", "-"))
+    return words
+
+
+def _decoded(program, argv):
+    """(program, argv) with every part fsdecoded, for comparing the two
+    reports subprocess makes of one start, or None where that fails."""
+    try:
+        if isinstance(argv, (str, bytes, _os.PathLike)):
+            seen = _os.fsdecode(argv)
+        else:
+            seen = tuple(_os.fsdecode(argument) for argument in argv)
+        return (_os.fsdecode(program) if program is not None else None, seen)
+    except Exception:
+        return None
+
+
+def _audit(event, args):
+    if event not in _EVENTS:
+        return
+    try:
+        if event == "os.spawn":
+            program, argv = args[1], args[2]
+        elif event == "os.system":
+            program, argv = None, args[0]
+        else:
+            program, argv = args[0], args[1]
+        # The echo arm is rewritten on EVERY audited start, before any found
+        # check: a subprocess.Popen that can echo (the posix_spawn path - no
+        # cwd) arms the start it will report twice, and every other start,
+        # the echo itself included, spends the arm.
+        start = _decoded(program, argv)
+        previous = _LAST[0]
+        if event == "subprocess.Popen" and len(args) > 2 and args[2] is None:
+            _LAST[0] = start
+        else:
+            _LAST[0] = None
+        words = _words_of(argv)
+        found = [
+            name
+            for name in map(_named, ([program] if program is not None else []) + words)
+            if name
+        ]
+        if found:
+            # subprocess reports one start twice when it uses posix_spawn
+            # (both subprocess.Popen and os.posix_spawn): keep the first
+            # report, and still log a posix_spawn that stands alone.
+            if event == "os.posix_spawn" and start is not None and previous == start:
+                return
+            _note(event + " " + found[0] + " " + repr(argv))
+    except Exception:
+        # An audit hook that raises would break the start it watches.
+        return
+
+
+_sys.addaudithook(_audit)
+
+for _name in _NAMES:
+    _found = _shutil.which(_name)
+    if _found is None or _os.path.realpath(_os.path.dirname(_found)) != _os.path.realpath(
+        _STAND_INS
+    ):
+        _note("stand-in for " + _name + " is shadowed: PATH finds " + repr(_found))
+        raise SystemExit(@SHADOWED_EXIT@)
+'''
+
+
+class ChildToolStarts:
+    """Stand-ins to put first on a child's PATH, and what the child started."""
+
+    def __init__(self, root: Path) -> None:
+        self.directory = root / "child-tool-stand-ins"
+        self.log = root / "child-tool-starts.log"
+        #: The uv cache and tool directories the child is given, named once here:
+        #: ``child_env`` sets them and ``starts`` reads them.
+        self.uv_cache = root / "uv-cache"
+        self.uv_tools = root / "uv-tools"
+        self.uv_directories = (self.uv_cache, self.uv_tools)
+        self.directory.mkdir(parents=True)
+        for name in PROBED_TOOLS:
+            stand_in = self.directory / name
+            stand_in.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' \"{name} $*\" >> {shlex.quote(str(self.log))}\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            stand_in.chmod(0o755)
+
+    def child_env(self, env: Mapping[str, str]) -> dict[str, str]:
+        """*env* with the stand-ins first on PATH and uv offline in the audited
+        directories. Give the child this environment as it will have it: a later
+        change to PATH can put a directory ahead of the stand-ins, which the
+        prelude's check ends the child for."""
+        given = env.copy() if isinstance(env, dict) else dict(env)
+        given["PATH"] = f"{self.directory}{os.pathsep}{given.get('PATH', '')}"
+        given["UV_CACHE_DIR"] = str(self.uv_cache)
+        given["UV_TOOL_DIR"] = str(self.uv_tools)
+        given["UV_OFFLINE"] = "1"
+        return given
+
+    def prelude(self) -> str:
+        """Python source to run first in the child: the audit hook and the check
+        that PATH finds each stand-in."""
+        return (
+            _PRELUDE.replace("@LOG@", repr(str(self.log)))
+            .replace("@NAMES@", repr(PROBED_TOOLS))
+            .replace("@STAND_INS@", repr(str(self.directory)))
+            .replace("@SHADOWED_EXIT@", str(SHADOWED_EXIT))
+        )
+
+    def program(self, source: str) -> str:
+        """The code for ``python -c``: the prelude, the stubs that answer the
+        scan's tool probes, then *source*."""
+        return self.prelude() + CHILD_TOOL_PROBE_STUBS + source
+
+    def starts(self) -> list[str]:
+        """Each start the audit hook and the stand-ins logged, then each entry a
+        uv left in its directories."""
+        called = (
+            self.log.read_text(encoding="utf-8").splitlines()
+            if self.log.exists()
+            else []
+        )
+        left = [
+            str(path.relative_to(directory.parent))
+            for directory in self.uv_directories
+            if directory.exists()
+            for path in sorted(directory.rglob("*"))
+        ]
+        return [*called, *left]

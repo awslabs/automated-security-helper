@@ -159,7 +159,12 @@ class TestHtmlReporterNoneDescription:
         reporter = HtmlReporter(context=_plugin_context(tmp_path))
         # Should not raise TypeError
         output = reporter.report(model)
-        assert "<html>" in output
+        # The whole page is written, from its doctype to its closing tag, with
+        # a card for each finding, the one with no rule ID among them.
+        assert output.startswith("<!DOCTYPE html>"), output[:80]
+        assert "<html" in output
+        assert output.rstrip().endswith("</html>"), output[-80:]
+        assert output.count('class="finding-card"') == 2
 
     def test_none_type_name_in_type_summary(self, tmp_path):
         """_format_type_summary must escape type_name even when it's None-ish."""
@@ -180,13 +185,31 @@ class TestHtmlReporterNoneDescription:
             HtmlReporter,
         )
 
-        result = _make_result(message_text='<script>alert("xss")</script>')
-        model = _make_model(runs=[_make_run([result])])
+        hostile = '<script>alert("xss")</script>'
 
-        reporter = HtmlReporter(context=_plugin_context(tmp_path))
-        output = reporter.report(model)
-        # Raw <script> must not appear
-        assert "<script>" not in output
+        def page(message_text):
+            model = _make_model(
+                runs=[_make_run([_make_result(message_text=message_text)])]
+            )
+            return HtmlReporter(context=_plugin_context(tmp_path)).report(model)
+
+        output = page(hostile)
+        control = page("benign text")
+        # The description is shown escaped, never raw. Only its angle brackets
+        # are pinned: a quote needs no escape in element text, so either form
+        # of it passes.
+        assert hostile not in output
+        assert "&lt;script&gt;alert(" in output
+        assert "&lt;/script&gt;" in output
+        # The page's own script is its only one: the finding adds none. The
+        # control page, with a benign description, has the same count.
+        assert output.lower().count("<script") == control.lower().count("<script")
+        # Not only the script tags: any tag in a description is escaped. One
+        # with no quote in it, so the check holds whichever form a quote takes.
+        tag = "<img src=x onerror=alert(1)>"
+        tagged = page(tag)
+        assert tag not in tagged
+        assert "&lt;img src=x onerror=alert(1)&gt;" in tagged
 
 
 # ===================================================================

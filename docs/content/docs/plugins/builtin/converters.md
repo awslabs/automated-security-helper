@@ -201,6 +201,10 @@ notebook, and one nbconvert fails on inside the sandbox, is listed in the row's
 - Educational content scanning
 - Research code auditing
 
+**When nbconvert is needed**: only when the scan set holds a notebook. With none, the
+converter neither looks nbconvert up nor installs it, and asks uv nothing; with one,
+it uses an installed nbconvert or installs it with uv, within `install_timeout`.
+
 ## Configuration Examples
 
 ### Basic Configuration

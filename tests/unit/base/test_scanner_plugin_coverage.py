@@ -394,7 +394,7 @@ def test_a_timed_out_tool_is_reported_as_a_timeout_not_a_missing_file(
         scanner.scan(target=target, target_type="source")
 
     message = str(excinfo.value)
-    assert "timed out after 5.0s" in message
+    assert "timed out after '5' s" in message
     assert "scanners.stub.options.scan_timeout" in message
 
 
@@ -424,8 +424,10 @@ def test_the_empty_results_warning_quotes_captured_stderr_when_present(
     logger = create_autospec(ASH_LOGGER)
 
     def _run(self, **kwargs):
+        # A returned stderr, as the real _run_subprocess hands it back: in the
+        # response and in self.errors.
         self.errors.append("tool said no")
-        return {"returncode": 1}
+        return {"returncode": 1, "stderr": "tool said no"}
 
     with (
         patch.object(type(scanner), "_run_subprocess", _run),
@@ -525,7 +527,11 @@ def test_the_failure_message_reads_the_stderr_log_when_errors_are_empty(
 
 def test_a_long_stderr_is_shortened_in_the_failure_message(plugin_context):
     scanner = _scanner(plugin_context)
-    scanner.errors = ["x" * (_STDERR_EXCERPT_LIMIT + 500)]
+    stderr = "x" * (_STDERR_EXCERPT_LIMIT + 500)
+    # The run's returned stderr, recorded with its exit code, and in self.errors,
+    # as the real run leaves both.
+    scanner._record_target_exit_code({"returncode": 2, "stderr": stderr})
+    scanner.errors = [stderr]
 
     detail = scanner._describe_scan_failure(RuntimeError("broke"), None)
 
@@ -563,6 +569,7 @@ def test_a_long_stderr_keeps_its_last_line_in_the_failure_message(
 
 def test_a_short_stderr_is_not_truncated(plugin_context):
     scanner = _scanner(plugin_context)
+    scanner._record_target_exit_code({"returncode": 2, "stderr": "short and sweet"})
     scanner.errors = ["short and sweet"]
 
     detail = scanner._describe_scan_failure(RuntimeError("broke"), None)

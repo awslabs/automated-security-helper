@@ -18,6 +18,7 @@ scanner modules off raw ``subprocess`` so their spawns go through the helpers.
 from __future__ import annotations
 
 import contextvars
+import logging
 import platform
 import threading
 from contextlib import contextmanager
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from automated_security_helper.core.enums import SandboxMode
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, delivers
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.backends import (
     AUTO_ORDER,
@@ -71,6 +72,29 @@ class SandboxScope:
     #: one was. A converter's row reads them: a refused spawn converted nothing.
     refused_spawns: int = 0
     last_refusal: Optional[str] = None
+    #: The owning plugin's env-read values, for the one line this module logs
+    #: itself: a planned argv can carry a value the plugin's config read from
+    #: the environment.
+    environment_values: Tuple[str, ...] = ()
+    #: True when the plugin's values hook raised or gave no value set when
+    #: the scope was built. ``environment_values`` is then empty, which must
+    #: not read as "no values": the post-spawn sweep, whose only redaction is
+    #: this scope's values, names no entry or path in its notes.
+    environment_values_unread: bool = False
+    #: The owning plugin's uv-run inputs (its --from spec and --with
+    #: dependencies), empty for a plugin that does not run through uv: a uv
+    #: run's command-line records hide them with the full uv layer, like the
+    #: report lines, so a glued or pinned spec hidden there cannot print in a
+    #: record.
+    plugin_inputs: Tuple[str, ...] = ()
+    #: The owning plugin's public command (``self.command``), the name every
+    #: report line passes as the layers' tool name. The public anchor is
+    #: never replaced by the input layer, and one name keeps the records'
+    #: placeholder numbering consistent with the report lines; a scanner
+    #: whose config name differs from its command otherwise had the command
+    #: replaced here and kept there. Empty for a pre-construction scope; the
+    #: records fall back to ``scanner_name``.
+    command: str = ""
 
 
 @dataclass
@@ -103,6 +127,20 @@ def clear_backend_cache() -> None:
     """Forget probe results. For tests."""
     with _probe_lock:
         _resolved.clear()
+
+
+class SandboxBackendUnavailable(SandboxUnavailable):
+    """No working backend for the requested sandbox mode.
+
+    Carries the requested mode, so a reader can tell a backend the operator
+    named that is unavailable (the tool could not start as requested) from
+    ASH's own default finding no backend (a missing dependency). Any other
+    SandboxUnavailable is a refusal, not an availability failure.
+    """
+
+    def __init__(self, reason: str, mode: str):
+        super().__init__(reason)
+        self.mode = mode
 
 
 def _probe_backend(name: str) -> SandboxBackend:
@@ -140,7 +178,9 @@ def resolve_backend(mode: "SandboxMode | str") -> SandboxBackend:
                 cached = e
             _resolved[cache_key] = cached
     if isinstance(cached, SandboxUnavailable):
-        raise cached
+        # Classified at the raise, not in the cache, so a cached refusal is
+        # always graded with the mode of the current request.
+        raise SandboxBackendUnavailable(str(cached), mode_value) from cached
     return cached
 
 
@@ -184,7 +224,11 @@ def scanner_sandbox_scope(
     """The scope for one scanner run, None when no sandbox applies.
 
     Raises SandboxUnavailable when a sandbox was requested and this scanner cannot
-    have one; the executor records the scanner MISSING with that message.
+    have one. The executor grades the raise by what was asked: a backend missing
+    under ``--sandbox auto`` is MISSING, like any missing dependency; a backend
+    the operator named that is unavailable is ERROR with the start-failure code;
+    a refusal that is not availability is ERROR with the reason and no exit
+    code. In every case the scanner never runs unsandboxed.
     """
     from automated_security_helper.core.constants import is_offline_mode
 
@@ -214,13 +258,58 @@ def scanner_sandbox_scope(
     requirements = getattr(scanner_plugin, "sandbox_requirements", None)
     if not isinstance(requirements, SandboxRequirements):
         requirements = SandboxRequirements()
+    environment_values: Tuple[str, ...] = ()
+    environment_values_unread = False
+    plugin_inputs: Tuple[str, ...] = ()
+    command = ""
+    if not isinstance(scanner_plugin, type):
+        # plugin_probe_scope can pass the CLASS, before construction: an
+        # unbound hook cannot be called, so the pre-construction scope
+        # carries no values, said outright rather than through a swallowed
+        # TypeError from the unbound call. For an instance, read the hook
+        # through the one guarded read the plugin's record paths use (a bare
+        # string answer is ONE value, not its characters). A double without
+        # the method contributes nothing. A hook that raised or gave no value
+        # set also contributes nothing to the records that union the scope's
+        # values with their own, and is marked unread so the sweep, which has
+        # no other source of values, writes a value-free note instead of
+        # quoting a path with an empty value set. Imported here: the base
+        # package imports this one.
+        from automated_security_helper.base.uv_tool_mixin import (
+            guarded_values_read,
+        )
+
+        if callable(getattr(scanner_plugin, "_values_to_redact", None)):
+            values_read = guarded_values_read(scanner_plugin)
+            if values_read.values is None:
+                environment_values_unread = True
+            else:
+                environment_values = values_read.values
+        inputs_getter = getattr(scanner_plugin, "_uv_run_inputs", None)
+        try:
+            plugin_inputs = (
+                tuple(inputs_getter())
+                if callable(inputs_getter)
+                and getattr(scanner_plugin, "use_uv_tool", False)
+                else ()
+            )
+        except Exception:  # noqa: BLE001 -- a raising getter adds nothing
+            plugin_inputs = ()
+        try:
+            # The plugin's public command, so the scope's records pass the
+            # SAME tool name the report lines pass -- read defensively like
+            # the getters above.
+            command = str(getattr(scanner_plugin, "command", "") or "")
+        except Exception:  # noqa: BLE001 -- a raising attribute adds nothing
+            command = ""
 
     backend = resolve_backend(mode)
     results_dir = getattr(scanner_plugin, "results_dir", None)
     if not isinstance(results_dir, (str, Path)):
         results_dir = Path(context.output_dir).joinpath("scanners", name)
     # Checked here as well as when each spawn's policy is built, so a planted
-    # symlink makes the scanner MISSING with the reason rather than ERROR.
+    # symlink refuses the scanner before anything runs -- ERROR with this
+    # reason and no exit code -- rather than failing its tool partway through.
     refuse_symlinked_output_dir(Path(context.source_dir), Path(context.output_dir))
     _refuse_symlinked_results_dir(Path(context.output_dir), Path(results_dir))
     # Registered before the scanner runs anything, so even ASH's first write
@@ -283,24 +372,95 @@ def scanner_sandbox_scope(
         else None,
         read_path_scanners=read_path_scanners,
         env_scanners=env_scanners,
+        environment_values=environment_values,
+        environment_values_unread=environment_values_unread,
+        plugin_inputs=plugin_inputs,
+        command=command,
     )
     # Released when the scope is collected, or when the scan ends (run_roots).
     release_with_holder(scope, results_root)
     return scope
 
 
+def sandbox_refusal_grades_missing(refusal: SandboxUnavailable) -> bool:
+    """Whether a scanner whose sandbox was refused this way is MISSING, not ERROR.
+
+    Only an unavailable backend under auto: any working backend was asked for
+    and none works, which is a missing dependency like any other. Every other
+    refusal is an ERROR -- a backend the operator named that is unavailable (the
+    tool could not start as requested), and a refusal that is not about
+    availability at all, such as a results directory the scanned repository
+    committed as a symlink. The one test, read by the executor that grades the
+    scan and by ScanPhase deciding whether a dependency check can say anything,
+    so the two cannot drift.
+    """
+    return (
+        isinstance(refusal, SandboxBackendUnavailable)
+        and refusal.mode == SandboxMode.auto.value
+    )
+
+
+def _record_probe_refusal(plugin: Any, refusal: SandboxUnavailable) -> None:
+    """Make the sandbox the scanner's recorded dependency reason.
+
+    Only for an unavailable backend (``SandboxBackendUnavailable``, named or
+    auto), and only on a constructed plugin whose
+    ``dependency_unavailable_reason`` exists and is empty: a reason the scanner
+    recorded itself stands, and a class has no instance to record on. The
+    record is what reaches a check that starts no process (detect-secrets runs
+    in-process): the refusing scope cannot stop such a check the way it stops a
+    probe-starting one, so without it ``ash dependencies``' probe-free check
+    answers True for a scanner every scan under this sandbox refuses -- under
+    auto the scan grades it MISSING, under a named backend the executor
+    refuses it before scan() with an ERROR naming the backend. The sweep and
+    the scan must agree either way, and the recorded reason names the SANDBOX
+    ("scanner sandbox unavailable: ..."), so the verdict never blames a tool
+    that is there.
+
+    Not for a refusal that is not about availability, such as a results
+    directory the scanned repository committed as a symlink: nothing is
+    missing there, something was refused, and a dependency reason would send
+    the operator to reinstall a tool when the repository planted the cause.
+    The scan itself does not read the record: ScanPhase reads the refusal
+    plugin_probe_scope yields and does not run the check under one the
+    executor grades ERROR. A check that probes through the refusing scope
+    still answers for its own failed probes either way.
+    """
+    if isinstance(plugin, type) or not isinstance(refusal, SandboxBackendUnavailable):
+        return
+    if not hasattr(plugin, "dependency_unavailable_reason"):
+        return
+    if getattr(plugin, "dependency_unavailable_reason", None):
+        return
+    try:
+        plugin.dependency_unavailable_reason = f"scanner sandbox unavailable: {refusal}"
+    except (AttributeError, TypeError, ValueError):
+        return
+
+
 @contextmanager
-def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
+def plugin_probe_scope(
+    plugin: Any, context: Any
+) -> Iterator[Optional[SandboxUnavailable]]:
     """Sandbox what a scanner runs while it is constructed and validated.
 
-    Scanners probe their tools before any scan starts: ``model_post_init`` runs
-    ``uv tool run <tool> --version`` for a scanner that may not even be selected,
-    and ``validate_plugin_dependencies`` runs the binary. Those are third-party code
-    too, so under a sandbox they run sandboxed, writing only to a throwaway
-    directory. ``plugin`` may be the class, before it is constructed.
+    Scanners probe their tools before their scan starts:
+    ``validate_plugin_dependencies`` runs the binary, and for a scanner that uses
+    uv it also runs the deferred ``uv tool run <tool> --version`` probe (which
+    construction only names). Those are third-party code too, so under a sandbox
+    they run sandboxed, writing only to a throwaway directory. ``plugin`` may be
+    the class, before it is constructed.
 
     A scanner that cannot be sandboxed gets a refusing scope, so its probes fail
-    rather than run unsandboxed, and it is recorded MISSING later with the reason.
+    rather than run unsandboxed, and the block is given the refusal: None when
+    there was none. ScanPhase reads it, and for every refusal the executor grades
+    ERROR (``sandbox_refusal_grades_missing`` is False) it does not run the
+    dependency check, whose probes could only fail for the sandbox: the scanner
+    is queued and the executor refuses it before scan(), naming the refusal --
+    the unavailable backend the operator named, or the planted symlink. An
+    unavailable backend is also recorded as the scanner's dependency reason
+    (_record_probe_refusal), so the MISSING a failed check records under auto
+    names the sandbox.
 
     A scanner that runs offline while ASH does not (its own ``options.offline:
     true``) gets the offline tool variables on these probes as well, sandbox or not,
@@ -310,8 +470,8 @@ def plugin_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
     from automated_security_helper.utils.offline_tool_env import offline_tool_scope
 
     with offline_tool_scope(_probe_offline(plugin, context)):
-        with _sandboxed_probe_scope(plugin, context):
-            yield
+        with _sandboxed_probe_scope(plugin, context) as refusal:
+            yield refusal
 
 
 def _probe_offline(plugin: Any, context: Any) -> bool:
@@ -348,17 +508,20 @@ def _probe_offline(plugin: Any, context: Any) -> bool:
 
 
 @contextmanager
-def _sandboxed_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
+def _sandboxed_probe_scope(
+    plugin: Any, context: Any
+) -> Iterator[Optional[SandboxUnavailable]]:
     """The sandbox half of :func:`plugin_probe_scope`."""
     import shutil
     import tempfile
 
     settings = _sandbox_settings(context)
     if settings is None or SandboxMode(settings.mode) == SandboxMode.off:
-        yield
+        yield None
         return
     probe_dir = Path(tempfile.mkdtemp(prefix="ash-sandbox-probe-"))
     probe: "SandboxScope | RefusingScope"
+    hit: Optional[SandboxUnavailable] = None
     try:
         probe = scanner_sandbox_scope(plugin, context, None) or RefusingScope(
             str(getattr(plugin, "__name__", plugin.__class__.__name__)),
@@ -368,9 +531,11 @@ def _sandboxed_probe_scope(plugin: Any, context: Any) -> Iterator[None]:
             probe.results_dir = probe_dir
     except SandboxUnavailable as refusal:
         probe = RefusingScope(_plugin_name(plugin), str(refusal))
+        hit = refusal
+        _record_probe_refusal(plugin, refusal)
     scope_reset = _ACTIVE.set(probe)
     try:
-        yield
+        yield hit
     finally:
         _ACTIVE.reset(scope_reset)
         shutil.rmtree(probe_dir, ignore_errors=True)
@@ -467,6 +632,110 @@ def sandbox_scope(scope: Optional[SandboxScope]) -> Iterator[None]:
 
 def active_scope() -> "SandboxScope | RefusingScope | None":
     return _ACTIVE.get()
+
+
+#: Record-ONLY context for a uv run outside any sandbox scope: (values,
+#: plugin inputs, the plugin's public command). Under the default sandbox
+#: mode "off" there is no scope, but the process runner's own records (the
+#: "Running command:" line, "Command stderr:") still quote the run's argv,
+#: and a glued or pinned spec hidden on the report lines must not print
+#: there. This context carries the SAME input set to those records; it
+#: grants nothing and sandboxes nothing.
+_RECORD_INPUTS: contextvars.ContextVar[
+    Optional[Tuple[Tuple[str, ...], Tuple[str, ...], str]]
+] = contextvars.ContextVar("ash_uv_record_inputs", default=None)
+
+
+@contextmanager
+def uv_record_inputs(
+    values: Sequence[str], plugin_inputs: Sequence[str], command: str
+) -> Iterator[None]:
+    """Give a uv run's records their inputs while the block runs.
+
+    Set by the uv dispatch around ``run_tool`` whatever the sandbox mode, so
+    ``scope_shown_text`` can hide the run's plugin-built inputs even when no
+    sandbox scope exists to carry them. An active sandbox scope's values and
+    inputs are UNIONED with this context's: hiding another run's set hides
+    more, never less, and choosing one source dropped whichever half the
+    record was made from (a scope with inputs lost the dispatch-time values;
+    a non-uv scope lost the inputs entirely).
+    """
+    token = _RECORD_INPUTS.set(
+        (tuple(values), tuple(plugin_inputs), str(command or ""))
+    )
+    try:
+        yield
+    finally:
+        _RECORD_INPUTS.reset(token)
+
+
+def scope_shown_text(text: str, values: Sequence[str] = ()) -> str:
+    """*text* for a record made while a scanner's sandbox scope may be active.
+
+    The caller's ``values``, the scope's env-read values and a uv run's
+    record-only context (``uv_record_inputs``, set by the dispatch whatever
+    the sandbox mode) are all hidden together -- the UNION of both sources'
+    values and inputs, because these records can quote a path or a tool's
+    words, either can hold a value the plugin's config read from the
+    environment, and preferring one source dropped whichever half the record
+    was made from. With neither source, only the caller's values apply, and
+    with none the text is unchanged.
+
+    Never raises: its callers sit inside ``except`` blocks on the sweep and
+    cleanup paths (fs_guard's symlink sweep, a sandbox plan's cleanup steps),
+    where a raise from the redaction would stop the sweep partway or skip the
+    remaining cleanup. A failure here returns a value-free note instead.
+    """
+    try:
+        return _scope_shown_text(text, values)
+    except Exception:
+        return "(this text could not be shown)"
+
+
+def _scope_shown_text(text: str, values: Sequence[str] = ()) -> str:
+    scope = active_scope()
+    merged = [value for value in values if value]
+    for value in tuple(getattr(scope, "environment_values", ()) or ()):
+        if value and value not in merged:
+            merged.append(value)
+    plugin_inputs = [
+        entry for entry in tuple(getattr(scope, "plugin_inputs", ()) or ()) if entry
+    ]
+    # The plugin's public command, the SAME tool name every report line
+    # passes: a scanner whose config name differs from its command otherwise
+    # had the command replaced in these records and kept on the report
+    # lines, numbering the placeholders differently. A non-empty command from
+    # either source wins; the config name is the last resort, for a scope
+    # built before construction with no record context.
+    scope_command = str(getattr(scope, "command", "") or "")
+    record = _RECORD_INPUTS.get()
+    record_command = ""
+    if record is not None:
+        record_values, record_inputs, record_command = record
+        for value in record_values:
+            if value and value not in merged:
+                merged.append(value)
+        for entry in record_inputs:
+            if entry and entry not in plugin_inputs:
+                plugin_inputs.append(entry)
+    tool_name = (
+        scope_command or record_command or str(getattr(scope, "scanner_name", "") or "")
+    )
+    if plugin_inputs:
+        from automated_security_helper.utils.uv_tool_runner import shown_uv_output
+
+        return shown_uv_output(
+            text,
+            merged,
+            plugin_inputs=tuple(plugin_inputs),
+            tool_name=tool_name,
+            limit=None,
+        )
+    if not merged:
+        return text
+    from automated_security_helper.utils.error_text import text_without_values
+
+    return text_without_values(text, merged)
 
 
 @contextmanager
@@ -569,7 +838,11 @@ def _plan_spawn(
     writable = [register_writable_root(path) for path in policy.writable]
 
     def sweep() -> None:
-        sweep_writable(writable)
+        sweep_writable(
+            writable,
+            scope.environment_values,
+            values_unread=scope.environment_values_unread,
+        )
 
     def release() -> None:
         # This spawn's registrations; its scope's and the output directory's stay.
@@ -578,8 +851,23 @@ def _plan_spawn(
 
     plan.cleanup.insert(0, sweep)
     plan.cleanup.insert(1, release)
-    ASH_LOGGER.debug(
-        f"Scanner sandbox ({scope.backend.name}, network={'yes' if policy.network else 'no'}) "
-        f"for {scope.scanner_name}: {' '.join(plan.argv)}"
-    )
+    # The planned argv is plugin-built text, so it can carry an env-read
+    # value, and for a uv run it carries the run's own inputs: the record
+    # goes through the one scope-record helper (scope_shown_text), which
+    # applies the full uv layer when the scope carries inputs and the plain
+    # value layer otherwise -- the active scope here is this spawn's own.
+    # Guarded by BOTH halves of emission: .debug() is gated by the logger's
+    # level (isEnabledFor), and the record then has to reach a handler whose
+    # level admits it (utils/log.py delivers). The CLI's logger sits at TRACE
+    # with its file handlers at INFO, so the logger-level check alone was
+    # always true there and the regex work ran for records no handler took;
+    # delivers alone would build the record a raised logger level never emits.
+    if ASH_LOGGER.isEnabledFor(logging.DEBUG) and delivers(ASH_LOGGER, logging.DEBUG):
+        ASH_LOGGER.debug(
+            scope_shown_text(
+                f"Scanner sandbox ({scope.backend.name}, "
+                f"network={'yes' if policy.network else 'no'}) "
+                f"for {scope.scanner_name}: {' '.join(plan.argv)}"
+            )
+        )
     return plan

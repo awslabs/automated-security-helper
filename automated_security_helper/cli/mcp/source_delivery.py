@@ -313,8 +313,27 @@ def _session_workspace(workspace_root: Path, session_id: str) -> Path:
     return session_directory(workspace_root, session_id)
 
 
+#: ``error_type`` every delivery tool returns for :class:`SessionWorkspaceError`.
+SESSION_WORKSPACE_UNAVAILABLE = "session_workspace_unavailable"
+
+
+class SessionWorkspaceError(OSError):
+    """A directory of the session's workspace could not be created.
+
+    An OSError, so a caller that catches OSError catches it. The MCP tools report
+    it as SESSION_WORKSPACE_UNAVAILABLE, an ``error_type`` a client can branch on,
+    not the exception's class name.
+    """
+
+
 def _ensure_dir(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
+    """Create ``path`` and its parents; SessionWorkspaceError if that fails."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise SessionWorkspaceError(
+            e.errno, f"could not create the session workspace directory {path}: {e}"
+        ) from e
     return path
 
 
@@ -715,6 +734,40 @@ def _git_environment(home: Path) -> Dict[str, str]:
 # below reject the option-like shape outright rather than trying to escape it.
 _DANGEROUS_URL_PREFIXES = ("ext::",)
 
+#: ``error_type`` values set_source_git returns, besides the scan-target refusal
+#: of a local clone source (scan_target_not_permitted) and invalid_session_id.
+#: A client branches on these, so they are stable; the message is for a person.
+CLONE_URL_NOT_PERMITTED = "clone_url_not_permitted"
+CLONE_REF_NOT_PERMITTED = "clone_ref_not_permitted"
+INVALID_CLONE_DEPTH = "invalid_clone_depth"
+GIT_CLONE_FAILED = "git_clone_failed"
+GIT_CHECKOUT_FAILED = "git_checkout_failed"
+
+
+class GitCommandError(RuntimeError):
+    """``git clone`` or ``git checkout`` failed; ``error_type`` says which."""
+
+    def __init__(self, message: str, error_type: str) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+
+
+def _depth_args(depth: int) -> List[str]:
+    """``--depth N`` for a shallow clone, nothing for depth 0 (a full clone).
+
+    git itself refuses ``--depth 0``, so 0 has to mean "omit the option" here.
+
+    Raises:
+        ValueError: if ``depth`` is negative.
+    """
+    depth = int(depth)
+    if depth < 0:
+        raise ValueError(
+            f"depth must be 0 for a full clone or a positive number of commits, "
+            f"not {depth}"
+        )
+    return ["--depth", str(depth)] if depth else []
+
 
 def _reject_option_like(value: str, what: str) -> str:
     """Reject a caller-supplied git argument that git would parse as an option.
@@ -1018,9 +1071,11 @@ def set_source_git(
         ValueError: if ``session_id`` is invalid, if ``url``/``ref`` is
             option-like or uses a command-executing git transport, if ``url`` is
             local or not https/ssh, if ``ssh_key_id`` is set, or if ``depth`` is
-            not a positive whole number. Raised before anything is created.
-        RuntimeError: if git is not on PATH, or ``git clone`` (or the optional
-            ``git checkout`` for an explicit ref) fails.
+            negative (``0`` clones the full history). Raised before anything is
+            created.
+        RuntimeError: if git is not on PATH.
+        GitCommandError: if ``git clone`` (or the optional ``git checkout``
+            for an explicit ref) fails.
     """
 
     # Validated here, before the session is taken: taking it creates the session
@@ -1030,7 +1085,7 @@ def set_source_git(
     _refuse_ssh_key_id(ssh_key_id)
     if ref:
         ref = _reject_option_like(ref, "ref")
-    depth = _validated_clone_depth(depth)
+    _depth_args(depth)
     return _clone_into_session(
         url, ref, depth=depth, workspace_root=workspace_root, session_id=session_id
     )
@@ -1087,7 +1142,8 @@ def _clone(
     rest of ``_GIT_ARGV`` follows it. Every command is built by ``git_argv``.
 
     Raises:
-        RuntimeError: when the clone or the checkout fails; ``target`` is removed.
+        GitCommandError: when the clone or the checkout fails; ``target`` is
+            removed.
         GitTimeoutError: when a command runs past ``GIT_TIMEOUT_SECONDS``.
     """
 
@@ -1098,11 +1154,12 @@ def _clone(
     env = child_environ(env)
 
     program = (git if git is not None else _git_executable(), *_GIT_ARGV[1:])
+    # git_argv: no hook or fsmonitor that git config names runs for the
+    # clone, the fetch or the checkout.
     cmd = git_argv(
         *_GIT_CONFIG,
         "clone",
-        "--depth",
-        str(depth),
+        *_depth_args(depth),
         # End-of-options marker, so even a future change that loosens
         # _validate_clone_url cannot turn the url into a git flag.
         "--",
@@ -1113,8 +1170,9 @@ def _clone(
     result = _run_git(cmd, env=env, grows_in=target)
     if result.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
-        raise RuntimeError(
-            f"git clone failed (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}"
+        raise GitCommandError(
+            f"git clone failed (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}",
+            GIT_CLONE_FAILED,
         )
     if not ref:
         return
@@ -1130,8 +1188,7 @@ def _clone(
             "-C",
             str(target),
             "fetch",
-            "--depth",
-            str(depth),
+            *_depth_args(depth),
             "origin",
             ref,
             program=program,
@@ -1155,9 +1212,10 @@ def _clone(
     )
     if checkout.returncode != 0:
         shutil.rmtree(target, ignore_errors=True)
-        raise RuntimeError(
+        raise GitCommandError(
             f"git checkout {ref!r} failed (exit {checkout.returncode}): "
-            f"{checkout.stderr.strip() or checkout.stdout.strip()}"
+            f"{checkout.stderr.strip() or checkout.stdout.strip()}",
+            GIT_CHECKOUT_FAILED,
         )
 
 

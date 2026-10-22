@@ -56,7 +56,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
@@ -248,6 +248,7 @@ def test_reporter_docs_are_current() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "generate_reporter_docs.py"), "--check"],
         cwd=REPO_ROOT,
+        env=checkout_env(),
         capture_output=True,
         text=True,
         timeout=CHILD_TIMEOUT_SECONDS,
@@ -272,6 +273,7 @@ def test_mcp_tool_reference_is_current() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "generate_mcp_tool_reference.py"), "--check"],
         cwd=REPO_ROOT,
+        env=checkout_env(),
         capture_output=True,
         text=True,
         timeout=CHILD_TIMEOUT_SECONDS,

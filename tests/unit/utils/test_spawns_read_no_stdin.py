@@ -302,23 +302,22 @@ def test_the_trust_root_export_gives_security_an_empty_stdin(tmp_path, monkeypat
 
 
 def test_the_jupyter_converter_gives_jupyter_an_empty_stdin(
-    tmp_path, tools, test_plugin_context
+    tmp_path, tools, test_plugin_context, monkeypatch
 ):
+    """The direct nbconvert run. The version check goes through ``spawn_run``,
+    which the helper cells above cover."""
     from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
         JupyterConverter,
         JupyterConverterConfig,
     )
+    from tests.unit.converters.nbconvert_routes import use_stand_in_nbconvert
 
     record = tmp_path / "read.log"
-    # Without uv the converter runs an installed jupyter-nbconvert directly, by
-    # its absolute path, for the version check and the conversion both.
-    _fake_tool(tools, "jupyter-nbconvert", record, stdout="7.16.4")
+    nbconvert = _fake_tool(tools, "jupyter-nbconvert", record)
     converter = JupyterConverter(
         context=test_plugin_context, config=JupyterConverterConfig()
     )
-    converter.use_uv_tool = False
-    with ash_stdin_holding_data():
-        assert converter.validate_plugin_dependencies() is True
+    use_stand_in_nbconvert(monkeypatch, converter, path=str(nbconvert))
 
     staged = tmp_path / "staged"
     staged.mkdir()
@@ -326,7 +325,7 @@ def test_the_jupyter_converter_gives_jupyter_an_empty_stdin(
     notebook.write_text("{}", encoding="utf-8")
     with ash_stdin_holding_data():
         converter._run_nbconvert(notebook, tmp_path / "out" / "nb.py", "nb.ipynb")
-    assert _reads(record) == ["b''", "b''"]
+    assert _reads(record) == ["b''"]
 
 
 def _load_install_pinned_tool():

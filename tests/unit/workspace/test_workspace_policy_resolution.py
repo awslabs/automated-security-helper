@@ -271,32 +271,31 @@ def test_workspace_ignore_paths_are_pushed_into_each_project(tmp_path):
         assert [p.path for p in projects[key].policy_ignore_paths] == ["**/vendor"]
 
 
-def test_a_trailing_double_star_after_a_double_star_is_refused(tmp_path):
-    """``**/vendor/**`` has no sound rewrite, and an operator will write it.
+@pytest.mark.parametrize("pattern", ["**/vendor/**", "**/node_modules/"])
+def test_any_vendor_directory_in_any_project_is_pushed_down(tmp_path, pattern):
+    """``**/vendor/**`` and ``**/node_modules/`` reach every project unchanged.
 
-    It is the most natural way to say "any vendor directory, at any depth, in any
-    project", so its refusal is the limitation of the push-down most likely to be
-    hit. Pinned as a test rather than left to be discovered, with the working
-    alternatives named in the message the operator sees.
-
-    The cause is workspace_paths' family 1: the remainder ``vendor/**`` is
-    multi-component and contains a glob, so prefixing it with ``**`` moves the
-    whole pattern from fnmatch to component-anchored matching and silently
-    re-interprets the trailing ``**``.
+    They are the most natural way to say "any such directory, at any depth, in
+    any project". Both were refused with exit 4, which was the push-down's most
+    likely limitation to be hit. The pattern already has ``**``, so the matcher
+    reads it component by component on both sides, and the directory is either
+    in the project path or below it.
     """
     _project(tmp_path, "api")
-    workspace = _workspace(tmp_path, ["api"])
+    _project(tmp_path, "web")
+    workspace = _workspace(tmp_path, ["api", "web"])
     _policy_file(
         tmp_path,
         "workspace:\n"
         "  ignore_paths:\n"
-        "    - path: '**/vendor/**'\n"
+        f"    - path: '{pattern}'\n"
         "      reason: third party\n",
     )
 
-    with pytest.raises(WorkspaceDefinitionError) as excinfo:
-        resolve_workspace(workspace)
-    assert "**/vendor/**" in str(excinfo.value)
+    plan = resolve_workspace(workspace)
+    projects = _by_key(plan)
+    for key in ("api", "web"):
+        assert [p.path for p in projects[key].policy_ignore_paths] == [pattern]
 
 
 # ---------------------------------------------------------------------------

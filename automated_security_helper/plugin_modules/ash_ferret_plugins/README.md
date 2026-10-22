@@ -24,7 +24,9 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 Install Ferret Scan:
 
 ```bash
-# Recommended: let ASH install the version this plugin is tested against
+# Recommended: let ASH install the version this plugin is tested against, into
+# the Python environment that runs ASH (with pip, or with uv where that
+# environment has no pip). ASH finds ferret-scan there even when it is not on PATH.
 ash dependencies install --config .ash/.ash_community_plugins.yaml
 
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
@@ -48,7 +50,7 @@ The ferret-scan plugin is a community plugin that must be explicitly enabled. Th
 
 #### Option 1: Add to ASH Configuration File (Recommended)
 
-Add the plugin module to your `.ash/.ash.yaml` configuration file:
+Add the plugin module to your ASH config file (`.ashrc.yaml` in a new project):
 
 ```yaml
 ash_plugin_modules:
@@ -98,11 +100,11 @@ This plugin follows ASH conventions for consistent behavior across all scanners:
 | **Output Format** | Always SARIF | Required by ASH for result aggregation |
 | **Output Directory** | `.ash/ash_output/scanners/ferret-scan/` | Follows ASH conventions |
 | **Offline Mode** | `ASH_OFFLINE=true` | Respects ASH offline mode environment variable |
-| **Suppressions** | `.ash/suppressions.yaml` | Managed centrally by ASH |
+| **Suppressions** | `global_settings.suppressions` in the ASH config file | Managed centrally by ASH |
 
 ### Unsupported Options
 
-The following ferret-scan CLI options are **NOT supported** in the ASH plugin and will raise an error if used:
+The following ferret-scan CLI options are **NOT supported** in the ASH plugin. Setting one under `scanners.ferret-scan.options` stops the scan with exit code 3 when ASH loads the plugins, before anything is scanned, and the error gives the reason below (for `debug`: "Use 'ferret_debug: true' instead..."). An option the plugin does not declare at all is refused the same way, as `Unknown key`. `ash config validate` and `ash config lint` do not import the plugin and do not catch these.
 
 | Option | Reason |
 |--------|--------|

@@ -307,9 +307,11 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
 
             def __init__(self):
                 self.saved_to = None
+                self.as_written = None
 
-            def save(self, target, exclude_unset=False):
+            def save(self, target, exclude_unset=False, as_written=False):
                 self.saved_to = target
+                self.as_written = as_written
 
         # Patched on the sandbox module, not on profile_registry:
         # ``materialize_session_config`` imports the name inside its own body, so
@@ -343,6 +345,8 @@ class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
         # re-spelled string: only the *recorded* spelling changed. It is written
         # beside the target first, and renamed over it (checked above).
         assert config.saved_to.parent == PureWindowsPath(r"C:\ash-mcp\session-a\config")
+        # Written as the profile wrote it (test_select_profile_materializes_as_written).
+        assert config.as_written is True
 
 
 class TestTheScanUsesTheBoundConfig:

@@ -87,6 +87,15 @@ export const ASH_PARAMETER_NAMES = {
  * ASH publishes no container image to any public registry. A tag, a branch or a
  * full commit SHA all work; an abbreviated SHA does not, because a fetch by commit
  * needs the whole id. Keep the `v` prefix — ASH tags releases as `v3.7.0`.
+ *
+ * It names the release this tree is, and `cz bump` rewrites it, together with the
+ * committed templates' `AshVersion` default, at every release ([tool.commitizen]
+ * version_files in pyproject.toml). The stacks pass options that older releases
+ * lack, so the default has to be the release they ship in; between releases the
+ * copy on main still names the previous one. Do not edit it by hand to a newer
+ * tag: commitizen rewrites only the current version, so a value ahead of it is
+ * never maintained again. tests/unit/deploy/test_deploy_ash_cli_contract.py holds
+ * both properties.
  */
 export const DEFAULT_ASH_VERSION = 'v3.7.0';
 

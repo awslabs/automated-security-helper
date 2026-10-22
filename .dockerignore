@@ -11,3 +11,9 @@ tests
 test-results
 *.bak
 *.pyc
+# The GenAI guide, which hatch_build.py packages into the wheel that `RUN uv build`
+# makes from this context. Without it an image built from a checkout carries no copy
+# and `ash get-genai-guide` in it exits 1. After `docs` above, because the last
+# matching line decides; tests/unit/cli/test_genai_guide_ships_with_install.py reads
+# this file with Docker's matching rules.
+!docs/content/docs/genai-steering-guide.md

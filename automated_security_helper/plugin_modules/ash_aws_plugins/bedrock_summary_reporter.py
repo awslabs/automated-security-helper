@@ -1,13 +1,30 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
+import html
 import os
-from collections import defaultdict
+import re
+import string
+from collections import Counter, defaultdict
+from copy import deepcopy
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Any, TYPE_CHECKING, Tuple
+from types import SimpleNamespace
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import boto3
 import botocore.exceptions
+from markdown_it import MarkdownIt
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import (
@@ -21,6 +38,7 @@ from automated_security_helper.base.reporter_plugin import (
     write_report_file,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.scanner_tool_types import (
     SECRETS_TOOL_TYPE,
@@ -30,6 +48,30 @@ from automated_security_helper.utils.scanner_tool_types import (
 from automated_security_helper.utils.secret_masking import (
     is_secret_detection,
     secret_detection_rule_ids,
+)
+from automated_security_helper.utils.numeric_text import purely_numeric
+from automated_security_helper.utils.redacted_model import value_tuple
+from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+from automated_security_helper.utils.severity_ladder import (
+    effective_sarif_level,
+    result_severity,
+    severity_fails_threshold,
+)
+from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
+from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    ReportContentEmitter,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter import (
+    _cell,
+    _code_block,
+    _text,
+    coverage_markdown,
+    outcome_markdown,
+)
+from automated_security_helper.utils.command_safe_stream import json_commands_broken
+from automated_security_helper.utils.terminal_text import (
+    shown_not_obeyed,
+    shown_on_one_line,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
@@ -42,10 +84,345 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
     BedrockModelClient,
     BedrockPromptBuilder,
+    CallOutcome,
 )
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+
+#: The ASH_BEDROCK_* variables this reporter's options read as defaults at
+#: import time (model_id, temperature, max_tokens). Their import-time values
+#: join the redaction values whether or not the loaded config's environment
+#: values also record them, except a numeric knob's purely numeric value
+#: (``_ASH_BEDROCK_NUMERIC_KNOBS``).
+#:
+#: The boundary: a value an option read from the environment is a
+#: recorded environment value and is redacted wherever a line would repeat it,
+#: which is the same rule the config's ``${VAR}`` values follow
+#: (``AshConfig._environment_values``). The one exception is by name: the
+#: purely numeric value of ASH_BEDROCK_TEMPERATURE or ASH_BEDROCK_MAX_TOKENS,
+#: read at import or by the config itself (``_config_read_knob_values``), is no
+#: needle; the two sources combine in ``_redaction_values``. The standard AWS_*
+#: identifiers (AWS_REGION, AWS_DEFAULT_REGION, AWS_PROFILE) are deliberately
+#: left as written. The options below do read them as defaults (``aws_region``,
+#: ``aws_profile``), but what they hold are the names the AWS SDK routes by - a
+#: region, a profile - identifiers in every line that names them, not values
+#: to hide.
+#: An operator who needs the hidden model id has it in the environment and the
+#: config; the written reports and ash.log are the surfaces that travel.
+_ASH_BEDROCK_DEFAULT_VARS = (
+    "ASH_BEDROCK_MODEL_ID",
+    "ASH_BEDROCK_TEMPERATURE",
+    "ASH_BEDROCK_MAX_TOKENS",
+)
+
+
+#: The numeric knobs among ``_ASH_BEDROCK_DEFAULT_VARS``: a purely numeric
+#: value of one of these is no redaction needle. Chosen by name, not by the
+#: value's shape, so a numeric value read from any other variable -- a model
+#: id that happens to be all digits -- stays redacted.
+_ASH_BEDROCK_NUMERIC_KNOBS = frozenset(
+    {"ASH_BEDROCK_TEMPERATURE", "ASH_BEDROCK_MAX_TOKENS"}
+)
+
+#: The CommonMark parser the generated sections are written for: it tells an
+#: answer's code from its text, and checks what the written answer renders as.
+_COMMONMARK = MarkdownIt("commonmark")
+
+#: The characters a backslash outside code makes literal, a backtick among them.
+_ASCII_PUNCTUATION = frozenset(string.punctuation)
+
+#: A "<" that starts a line inside a code span, after any indentation or
+#: block-quote markers: the line could open an HTML block before the span is read.
+_SPAN_LINE_START_TAG = re.compile(r"(\n[ \t>]*)<")
+
+#: A line put after an answer while closing its fences: report text follows every
+#: answer, so text here shows whether the answer left a fence open.
+_AFTER_ANSWER = "ash-report-continues"
+
+
+def _html_as_text(text: str) -> str:
+    """*text* with each "&" and "<" written as an entity, so it renders as text."""
+    return text.replace("&", "&amp;").replace("<", "&lt;")
+
+
+def _closing_backticks(source: str, start: int, run: int) -> Optional[int]:
+    """Where the next string of exactly *run* backticks at or after *start* begins."""
+    position, length = start, len(source)
+    while position < length:
+        if source[position] != "`":
+            position += 1
+            continue
+        end = position
+        while end < length and source[end] == "`":
+            end += 1
+        if end - position == run:
+            return position
+        position = end
+    return None
+
+
+def _code_span_ranges(source: str) -> List[Tuple[int, int]]:
+    """The (start, end) of each code span's content in *source*, one block's
+    inline text, paired as CommonMark pairs them: a backtick string opens a span
+    only when a later string of the same length closes it, and outside a span a
+    backslash makes the punctuation after it literal, a backtick included."""
+    spans: List[Tuple[int, int]] = []
+    index, length = 0, len(source)
+    while index < length:
+        char = source[index]
+        if char == "\\":
+            following = source[index + 1 : index + 2]
+            index += 2 if following and following in _ASCII_PUNCTUATION else 1
+            continue
+        if char != "`":
+            index += 1
+            continue
+        end = index
+        while end < length and source[end] == "`":
+            end += 1
+        close = _closing_backticks(source, end, end - index)
+        if close is None:
+            index = end
+            continue
+        spans.append((end, close))
+        index = close + (end - index)
+    return spans
+
+
+def _inline_as_written(source: str) -> str:
+    """One block's inline text with HTML outside its code spans written as text
+    and each span as the model wrote it, but for a "<" starting a line inside a
+    span, which stays text (_SPAN_LINE_START_TAG)."""
+    pieces = []
+    position = 0
+    for start, end in _code_span_ranges(source):
+        pieces.append(_html_as_text(source[position:start]))
+        pieces.append(_SPAN_LINE_START_TAG.sub(r"\1&lt;", source[start:end]))
+        position = end
+    pieces.append(_html_as_text(source[position:]))
+    return "".join(pieces)
+
+
+def _renders_html(text: str) -> bool:
+    """Whether a CommonMark viewer would render any HTML from *text*."""
+    for token in _COMMONMARK.parse(text):
+        if token.type in ("html_block", "html_inline"):
+            return True
+        if any(child.type == "html_inline" for child in token.children or []):
+            return True
+    return False
+
+
+def _fences_closed(text: str) -> str:
+    """*text* with a closing line after any fence it leaves open, so the report
+    text after an answer renders as the report and not as the answer's code.
+
+    Only a fence outside any list or block quote can run on: the blank line the
+    report puts after each answer ends a block quote, and the report's next line,
+    at the left margin, ends a list item and any fence inside it.
+    """
+    for _ in range(3):
+        tokens = _COMMONMARK.parse(f"{text}\n\n{_AFTER_ANSWER}\n")
+        open_fence = next(
+            (
+                token
+                for token in tokens
+                if token.type == "fence"
+                and token.level == 0
+                and _AFTER_ANSWER in token.content
+            ),
+            None,
+        )
+        if open_fence is None:
+            return text
+        text = f"{text}\n{open_fence.markup}"
+    return text
+
+
+def _markdown_as_written(shown: str) -> str:
+    """A model answer, its controls shown already, as the report writes it: HTML
+    outside code written as text, the answer's code as the model wrote it, and a
+    fence the answer leaves open closed.
+
+    Code is what CommonMark keeps as written: fenced blocks of any length,
+    indented blocks, and code spans. HTML in code renders as text already, and
+    an entity written there would show as the entity, so code is left alone.
+    Which lines are code comes from parsing the answer with every "&" and "<"
+    written as text, which has the same block structure as the written answer.
+    If the written answer would still render any HTML, the whole answer is
+    written as text instead.
+
+    Costs, both in raw Markdown only: a "<" or "&" outside code reads as "&lt;"
+    or "&amp;" (a viewer shows it as written), and a "<" that starts a line
+    inside a code span reads as "&lt;", because there it could open an HTML
+    block. The answer's Markdown structure (headings, emphasis, links, tables)
+    stays live by design. The split between code and text is code to maintain.
+    """
+    lines = shown.split("\n")
+    written = [_html_as_text(line) for line in lines]
+    for token in _COMMONMARK.parse("\n".join(written)):
+        if token.map is None:
+            continue
+        start, end = token.map
+        if token.type in ("fence", "code_block"):
+            written[start:end] = lines[start:end]
+        elif token.type == "inline":
+            written[start:end] = _inline_as_written("\n".join(lines[start:end])).split(
+                "\n"
+            )
+    result = "\n".join(written)
+    if _renders_html(result):
+        result = _html_as_text(shown)
+    return _fences_closed(result)
+
+
+def _purely_numeric(value: str) -> bool:
+    """The shared bare-number boundary with one leading sign allowed on top.
+
+    The core is one definition (utils.numeric_text, a leaf module): a change
+    to it moves the knob exclusion here and the validator's derived-spelling
+    rule together. A knob's number identifies nothing signed or not ("-1",
+    "+0.5"), so this site strips one leading sign before the shared test.
+    Imported at the top, not from the config package: this module runs the
+    predicate while it is being imported (_ASH_BEDROCK_DEFAULT_VALUES), and
+    the config package imports the plugin modules at start-up, so a config
+    import here would close that cycle at load time."""
+    unsigned = value[1:] if value[:1] in "+-" else value
+    return purely_numeric(unsigned)
+
+
+def _read_ash_bedrock_defaults() -> Tuple[str, ...]:
+    """The values of ``_ASH_BEDROCK_DEFAULT_VARS`` the environment holds now.
+
+    AWS_REGION, AWS_DEFAULT_REGION and AWS_PROFILE are deliberately not read:
+    an identifier is left as written. The numeric knobs' numbers
+    (``_ASH_BEDROCK_NUMERIC_KNOBS``: ASH_BEDROCK_TEMPERATURE and
+    ASH_BEDROCK_MAX_TOKENS, when purely numeric) are excluded too: the knob's
+    number identifies nothing, and replacing it corrupts what legitimately
+    prints that number -- redact_values matches a four-character needle like
+    "4000" as a whole word, which mangled a line printing that count, and a
+    date inside a model id. ASH_BEDROCK_MODEL_ID joins whatever its shape.
+    """
+    return tuple(
+        value
+        for name in _ASH_BEDROCK_DEFAULT_VARS
+        if (value := os.environ.get(name))
+        and not (name in _ASH_BEDROCK_NUMERIC_KNOBS and _purely_numeric(value))
+    )
+
+
+def _config_read_knob_values(config: Any, values: Iterable[str]) -> frozenset:
+    """The values among ``values`` (the config's environment values) that the
+    config read only through a numeric knob: the import snapshot's exclusion,
+    applied to what the config itself recorded.
+
+    A value is left out only when each of its occurrences in ``values`` is
+    accounted for by a reference (``AshConfig._environment_references``) to
+    one of ``_ASH_BEDROCK_NUMERIC_KNOBS`` that read it, it is purely numeric,
+    and no other reference read it. A value also read through any other
+    variable, or recorded with no reference saying where from (one a trusted
+    config contributed), stays a needle, so the rule can only err toward
+    redacting.
+    """
+    # Imported here: the config package imports the plugin modules at start-up.
+    from automated_security_helper.config.environment_record import referenced_name
+
+    references = getattr(config, "_environment_references", None) or ()
+    from_knobs: Counter = Counter()
+    from_others = set()
+    for reference in references:
+        value = getattr(reference, "value", None)
+        written = getattr(reference, "written", None)
+        if not isinstance(value, str) or not isinstance(written, str):
+            continue
+        if referenced_name(written) in _ASH_BEDROCK_NUMERIC_KNOBS and _purely_numeric(
+            value
+        ):
+            from_knobs[value] += 1
+        else:
+            from_others.add(value)
+    recorded = Counter(values)
+    excluded = {
+        value
+        for value, read in from_knobs.items()
+        if value not in from_others and recorded[value] <= read
+    }
+    if excluded:
+        # The derived needles move with the exclusion: environment_record_read
+        # adds the spellings a typing model prints for the knob's value, and
+        # leaving those in would redact "1e+06" while deliberately showing
+        # 1000000. A spelling another reference also read stays. Imported at
+        # call time, from the report path, never at module load.
+        from automated_security_helper.config.config_validator import _typed_spellings
+
+        for value in tuple(excluded):
+            excluded.update(
+                spelling
+                for spelling in _typed_spellings(value)
+                if spelling in recorded and spelling not in from_others
+            )
+    return frozenset(excluded)
+
+
+def _error_reason(error: Optional[str]) -> str:
+    """The reason an "*Error ...*" text gives: its wrapping asterisks and a
+    leading "Error: " taken off."""
+    if not error:
+        return ""
+    reason = error.strip()
+    if len(reason) > 1 and reason.startswith("*") and reason.endswith("*"):
+        reason = reason[1:-1]
+    reason = reason.removeprefix("Error: ")
+    return reason.strip()
+
+
+def _shim_outcome(text: str) -> CallOutcome:
+    """A text-returning call as an outcome, for the backward-compatible shims,
+    whose ``_try_model_call`` answers text: an "*Error ...*" text failed.
+    The report path reads ``BedrockModelClient.call``'s own outcome instead."""
+    failed = text.startswith("*Error")
+    return CallOutcome(text, ok=not failed, model_specific=failed)
+
+
+def _exhaustion_text(
+    primary: str,
+    called: List[str],
+    unavailable: List[str],
+    primary_error: Optional[str],
+    run_model: Optional[str] = None,
+    run_model_error: Optional[str] = None,
+) -> str:
+    """The fallback walk's "nothing answered" text: the configured model, the
+    models called (and failed) apart from the ones not available to call, why
+    the configured model failed when that is known, and, for a walk resumed
+    after the run's model failed in turn, why that one failed."""
+    groups = []
+    if called:
+        groups.append("called: " + ", ".join(called))
+    if unavailable:
+        groups.append("unavailable: " + ", ".join(unavailable))
+    text = (
+        f"*Error: No suitable fallback model found for {primary} ({'; '.join(groups)})"
+    )
+    reason = _error_reason(primary_error)
+    if reason:
+        text += f". The configured model's error: {reason}"
+    run_reason = _error_reason(run_model_error)
+    if run_model and run_reason:
+        # rstrip: the configured model's reason can end its own sentence.
+        text = (
+            text.rstrip(".")
+            + f". The run's fallback model {run_model} then failed: {run_reason}"
+        )
+    return text + "*"
+
+
+#: Snapshotted at import, when the options bake the defaults in: an option
+#: sourced this way holds the import-time reading, so the redaction values hold
+#: that same reading, not whatever the environment says later.
+_ASH_BEDROCK_DEFAULT_VALUES: Tuple[str, ...] = _read_ash_bedrock_defaults()
 
 
 class BedrockSummaryReporterConfigOptions(ReporterOptionsBase):
@@ -385,6 +762,31 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         super().__init__(*args, **kwargs)
         self._cache = {}
         self._secret_findings_exist = False
+        # One report run's state (reset by report()): the control-plane client
+        # the fallback walk validates candidates with, built once, the
+        # fallback model that answered, which the run's later calls go to first,
+        # and the configured model's error, kept for an exhaustion after it.
+        self._control_client: Any = None
+        self._run_model: Optional[str] = None
+        self._configured_error: Optional[str] = None
+
+    def _session(self) -> Any:
+        """The boto3 session every client of this reporter is built from: the
+        configured profile and region, the ones validate_plugin_dependencies
+        checked."""
+        session_params: Dict[str, Any] = {}
+        if self.config.options.aws_profile:
+            session_params["profile_name"] = self.config.options.aws_profile
+        if self.config.options.aws_region:
+            session_params["region_name"] = self.config.options.aws_region
+        return boto3.Session(**session_params)
+
+    def _control_plane(self) -> Any:
+        """The run's control-plane ("bedrock") client, from ``_session``,
+        built the first time the walk needs one."""
+        if self._control_client is None:
+            self._control_client = self._session().client("bedrock")
+        return self._control_client
 
     def model_post_init(self, context):
         if self.config is None:
@@ -407,9 +809,34 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             names.append(opts.output_technical_file)
         return tuple(names)
 
+    def _redaction_values(self) -> Tuple[str, ...]:
+        """The values this reporter's lines are redacted with.
+
+        The scan config's environment values (``PluginBase._environment_values``)
+        plus the import-time snapshot of the ASH_BEDROCK_* defaults
+        (``_ASH_BEDROCK_DEFAULT_VALUES``). A numeric knob's number is no needle
+        in either: the snapshot leaves it out by name, and so does this for a
+        value the config read through one (``_config_read_knob_values``).
+        """
+        values = value_tuple(self._environment_values())
+        knob_values = _config_read_knob_values(
+            getattr(getattr(self, "context", None), "config", None), values
+        )
+        return (
+            tuple(value for value in values if value not in knob_values)
+            + _ASH_BEDROCK_DEFAULT_VALUES
+        )
+
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
+
+        # A configured option can come from the environment (``${VAR}``, or the
+        # ASH_BEDROCK_* defaults), these lines are appended to the reporter's
+        # errors, which the report output persists, and ash.log is a sink; each
+        # line that interpolates an option or an error's text is redacted with
+        # the reporter's redaction values.
+        values = self._redaction_values()
 
         # The region defaults to us-east-1, so it is unset only when a config sets
         # it to null.
@@ -421,12 +848,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         try:
             # Create AWS session
-            session_params = {}
-            if self.config.options.aws_profile:
-                session_params["profile_name"] = self.config.options.aws_profile
-            if self.config.options.aws_region:
-                session_params["region_name"] = self.config.options.aws_region
-            session = boto3.Session(**session_params)
+            session = self._session()
 
             # Verify AWS credentials
             sts_client = session.client("sts")
@@ -467,7 +889,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 else:
                     detail = f"{type(e).__name__}: {e}"
                 self._plugin_log(
-                    f"Error accessing Bedrock service: {detail}",
+                    text_without_values(
+                        f"Error accessing Bedrock service: {detail}", values
+                    ),
                     level=logging.WARNING,
                     target_type="source",
                     append_to_stream="stderr",
@@ -478,12 +902,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             model_id = self.config.options.model_id
             label = self._model_label(model_id)
             is_valid, error_message = validate_bedrock_model(
-                bedrock_client, model_id, label=label
+                bedrock_client, model_id, values=values, label=label
             )
 
             if not is_valid:
                 self._plugin_log(
-                    f"Configured model '{label}' is not valid: {error_message}",
+                    text_without_values(
+                        f"Configured model '{label}' is not valid: {error_message}",
+                        values,
+                    ),
                     level=logging.WARNING,
                     target_type="source",
                     append_to_stream="stderr",
@@ -494,11 +921,16 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     fallback_model = get_fallback_model(model_id)
                     if fallback_model and fallback_model != model_id:
                         is_valid, error_message = validate_bedrock_model(
-                            bedrock_client, fallback_model
+                            bedrock_client, fallback_model, values
                         )
                         if is_valid:
                             self._plugin_log(
-                                f"Fallback model '{fallback_model}' is available and will be used",
+                                text_without_values(
+                                    f"Fallback model '{fallback_model}' is available; "
+                                    "the run falls back to it if the configured model "
+                                    "still fails",
+                                    values,
+                                ),
                                 level=logging.INFO,
                                 target_type="source",
                                 append_to_stream="stderr",
@@ -513,14 +945,18 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             error_code = e.response.get("Error", {}).get("Code")
             error_message = e.response.get("Error", {}).get("Message")
             self._plugin_log(
-                f"AWS API error when validating Bedrock access: {error_code}: {error_message}",
+                text_without_values(
+                    f"AWS API error when validating Bedrock access: {error_code}: {error_message}",
+                    values,
+                ),
                 level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
             )
         except Exception as e:
             self._plugin_log(
-                f"Error when validating Bedrock access: {type(e).__name__}: {str(e)}",
+                "Error when validating Bedrock access: "
+                f"{type(e).__name__}: {error_text(e, values)}",
                 level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
@@ -533,17 +969,21 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if isinstance(self.config, dict):
             self.config = BedrockSummaryReporterConfig.model_validate(self.config)
 
-        session_params: Dict[str, Any] = {}
-        if self.config.options.aws_profile:
-            session_params["profile_name"] = self.config.options.aws_profile
-        if self.config.options.aws_region:
-            session_params["region_name"] = self.config.options.aws_region
-        bedrock_runtime = boto3.Session(**session_params).client("bedrock-runtime")
+        # A new run: no control-plane client yet, and the configured model first.
+        self._control_client = None
+        self._run_model = None
+        self._configured_error = None
 
         all_findings, secret_findings, indexed_findings = self._extract_findings(model)
-
+        outcome = self._scan_outcome(model)
         if not all_findings and not secret_findings:
-            return "No actionable findings available in the SARIF report."
+            return (
+                outcome
+                + "\n\nNo findings matched the analysis filters. Review scanner coverage and the complete scan reports.\n\n"
+                + FOOTER_CREDIT
+            )
+
+        bedrock_runtime = self._session().client("bedrock-runtime")
 
         if self.config.options.add_section_headers:
             ASH_LOGGER.info("Generating structured report with section headers")
@@ -559,12 +999,34 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 secret_findings,
             )
 
+        summary = (
+            outcome
+            + "\n\n## Generated analysis\n\n"
+            + "Generated with Amazon Bedrock. Verify suggestions against the source findings.\n\n"
+            + summary.removeprefix("# Security scan summary report\n\n")
+            + f"\n\n{FOOTER_CREDIT}\n"
+        )
         if self.config.options.output_markdown:
             self._write_markdown_files(
                 bedrock_runtime, model, all_findings, secret_findings, summary
             )
 
         return summary
+
+    @staticmethod
+    def _scan_outcome(model: "AshAggregatedResults") -> str:
+        emitter = ReportContentEmitter(model, human_presentation=True)
+        summary = emitter.get_scan_summary()
+        return "\n\n".join(
+            part
+            for part in (
+                "# ASH security scan analysis",
+                outcome_markdown(summary).strip(),
+                f"Project: {_text(shown_on_one_line(str(model.metadata.project_name or 'Unknown')))}",
+                coverage_markdown(summary).strip(),
+            )
+            if part
+        )
 
     # ------------------------------------------------------------------
     # Finding extraction
@@ -585,6 +1047,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             return all_findings, secret_findings, indexed_findings
         detection_rule_ids = secret_detection_rule_ids(model.sarif)
 
+        thresholds: Dict[str, str] = {}
         for i, result in enumerate(sarif_results):
             finding_dict = result.model_dump(
                 by_alias=True, exclude_defaults=True, exclude_unset=True, mode="json"
@@ -593,14 +1056,23 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # exclusion cannot recognize, so its code is not sent or written.
             if not result_tool_types(finding_dict):
                 finding_dict = _without_snippets(finding_dict)
+            # Explicit: exclude_defaults drops a level equal to the model's
+            # default, and the readers below took a missing level as "none".
+            finding_dict["level"] = effective_sarif_level(result)
             finding_dict["index"] = i + 1
-            indexed_findings.append(self._make_indexed_finding(i + 1, finding_dict))
+            finding_dict["severity"] = _resolve_result_severity(result).upper()
+            indexed = self._make_indexed_finding(i + 1, finding_dict)
+            indexed_findings.append(indexed)
 
             is_secret = self._is_secret_scanner(finding_dict) or (
                 self._excludes_secrets()
                 and is_secret_detection(result, detection_rule_ids)
             )
-            is_actionable = self._is_actionable(finding_dict)
+            is_actionable = self._is_actionable(
+                finding_dict,
+                threshold=self._scanner_threshold(model, finding_dict, thresholds),
+                result=result,
+            )
 
             if is_secret:
                 if is_actionable:
@@ -633,8 +1105,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         msg = finding_dict.get("message", {})
         return {
             "index": index,
-            "rule_id": (finding_dict.get("rule") or {}).get("id", "Unknown"),
+            "rule_id": finding_dict.get("ruleId")
+            or (finding_dict.get("rule") or {}).get("id")
+            or "Unknown",
             "level": finding_dict.get("level", "none"),
+            "severity": self._finding_severity(finding_dict),
             "message": (
                 msg.get("text", "No description available")
                 if isinstance(msg, dict)
@@ -642,6 +1117,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             ),
             "locations": locations,
         }
+
+    @staticmethod
+    def _finding_severity(finding: Dict[str, Any]) -> str:
+        properties = dict(finding.get("properties") or {})
+        if finding.get("severity"):
+            properties["issue_severity"] = str(finding["severity"])
+        return _resolve_result_severity(
+            SimpleNamespace(properties=properties, level=finding.get("level"))
+        ).upper()
 
     def _is_secret_scanner(self, finding_dict: Dict[str, Any]) -> bool:
         """Whether the finding's scanner type is one ``exclude_scanner_types`` names.
@@ -672,14 +1156,64 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             for name in self.config.options.exclude_scanner_types
         }
 
-    def _is_actionable(self, finding_dict: Dict[str, Any]) -> bool:
+    def _is_actionable(
+        self,
+        finding_dict: Dict[str, Any],
+        threshold: Optional[str] = None,
+        result: Any = None,
+    ) -> bool:
+        """Whether ``actionable_only`` keeps this finding: the single-directory gate's.
+
+        In workspace mode the verdict uses one ``gate_threshold`` per project
+        (which a workspace ceiling can tighten) and can leave out policy-added
+        scanners; this uses each scanner's threshold, so the two can differ there.
+
+        Not suppressed, and its severity (``result_severity``, which reads
+        ``issue_severity`` first) fails *threshold*, the threshold of the scanner
+        that reported it. A ``properties.below_threshold`` flag alone would not
+        do: nothing in ASH sets it, so every unsuppressed finding would be sent,
+        LOW and INFO ones included. The severity is
+        read from *result* when given, because *finding_dict* is dumped with
+        ``exclude_defaults`` and so drops a level equal to the field default.
+        With no *threshold* only suppression is checked; ``_scanner_threshold``
+        always resolves one.
+        """
         if not self.config.options.actionable_only:
             return True
         if finding_dict.get("suppressions"):
             return False
         if (finding_dict.get("properties") or {}).get("below_threshold"):
             return False
-        return True
+        if threshold is None:
+            return True
+        return severity_fails_threshold(
+            result_severity(result if result is not None else finding_dict),
+            threshold,
+        )
+
+    @staticmethod
+    def _scanner_threshold(
+        model: "AshAggregatedResults",
+        finding_dict: Dict[str, Any],
+        memo: Dict[str, str],
+    ) -> str:
+        """The severity threshold of the scanner that reported *finding_dict*.
+
+        Resolved as the exit-code gate resolves it: the scanner's own
+        ``options.severity_threshold``, else the global one, which is never
+        unset. A finding with no scanner name gets the global threshold.
+        """
+        from automated_security_helper.core.scanner_statistics_calculator import (
+            ScannerStatisticsCalculator,
+        )
+
+        name = (finding_dict.get("properties") or {}).get("scanner_name")
+        key = name if isinstance(name, str) else ""
+        if key not in memo:
+            memo[key] = ScannerStatisticsCalculator.get_scanner_threshold_info(
+                model, key
+            )[0]
+        return memo[key]
 
     # ------------------------------------------------------------------
     # Report runners
@@ -707,14 +1241,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             compliance_frameworks=opts.compliance_frameworks,
             custom_context=opts.custom_context,
         )
-        return self._get_cached_or_generate(
-            "simple_summary",
-            lambda: client.try_call(
-                prepared,
-                "You are a security expert specializing in code security analysis. "
-                "Your task is to analyze security findings from the Automated Security Helper (ASH) tool "
-                "and provide a concise, actionable summary report.",
-            ),
+        return self._model_answer(
+            client,
+            prepared,
+            "You are a security expert specializing in code security analysis. "
+            "Your task is to analyze security findings from the Automated Security Helper (ASH) tool "
+            "and provide a concise, actionable summary report.",
+            cache_key="simple_summary",
         )
 
     def _run_structured_report(
@@ -733,7 +1266,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             ASH_LOGGER.info("Summarizing findings to reduce token usage")
             findings = self._summarize_findings(findings)
 
-        report = "# Security Scan Summary Report\n\n"
+        report = "# Security scan summary report\n\n"
         report += self._build_toc(findings)
 
         included = set(opts.include_sections) - set(opts.exclude_sections)
@@ -746,13 +1279,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 compliance_frameworks=opts.compliance_frameworks,
                 custom_context=opts.custom_context,
             )
-            return self._get_cached_or_generate(
-                cache_key, lambda: client.try_call(prepared, system)
-            )
+            return self._model_answer(client, prepared, system, cache_key=cache_key)
 
         if "executive_summary" in included:
             ASH_LOGGER.info("Generating executive summary")
-            report += "## Executive Summary\n\n"
+            report += "## Executive summary\n\n"
             report += (
                 _section_call(
                     builder.executive_summary(
@@ -765,7 +1296,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             )
 
         if "technical_analysis" in included:
-            report += "## Findings by Severity\n\n"
+            report += "## Findings by severity\n\n"
             if opts.group_by_severity:
                 report += self._render_by_severity(findings, builder, client, opts)
             else:
@@ -777,7 +1308,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 )
 
         if self._secret_findings_exist and "secret_findings" in included:
-            report += "## Secret Findings\n\n"
+            report += "## Secret findings\n\n"
             report += (
                 _section_call(
                     builder.secret_advice(secret_findings),
@@ -801,7 +1332,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         if "risk_assessment" in included:
             ASH_LOGGER.info("Generating risk assessment")
-            report += "## Risk Assessment\n\n"
+            report += "## Risk assessment\n\n"
             report += (
                 _section_call(
                     builder.risk_assessment(findings, opts.compliance_frameworks),
@@ -813,7 +1344,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         if "compliance_impact" in included and opts.compliance_frameworks:
             ASH_LOGGER.info("Generating compliance impact analysis")
-            report += "## Compliance Impact\n\n"
+            report += "## Compliance impact\n\n"
             report += (
                 _section_call(
                     builder.compliance_impact(
@@ -841,15 +1372,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     ) -> str:
         severity_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for f in findings:
-            severity_groups[f.get("level", "none")].append(f)
+            severity_groups[self._finding_severity(f).lower()].append(f)
 
         out = ""
-        for severity in ("error", "warning", "note", "none"):
+        for severity in ("critical", "high", "medium", "low", "info"):
             if severity not in severity_groups:
                 continue
             limited = severity_groups[severity][: opts.max_findings_per_severity]
             ASH_LOGGER.info(f"Analyzing {len(limited)} {severity} level findings")
-            out += f"### {severity.capitalize()} Level Findings\n\n"
+            out += f"### {severity.capitalize()} findings\n\n"
             prompt = builder.prepare_prompt(
                 builder.severity_analysis(limited, severity),
                 custom_prompt=opts.custom_prompt,
@@ -857,16 +1388,12 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 compliance_frameworks=opts.compliance_frameworks,
                 custom_context=opts.custom_context,
             )
-            # capture loop variable
-            _sev = severity
-            _prompt = prompt
             out += (
-                self._get_cached_or_generate(
-                    f"severity_{severity}",
-                    lambda: client.try_call(
-                        _prompt,
-                        f"You are a security expert analyzing {_sev} level findings from a security scan.",
-                    ),
+                self._model_answer(
+                    client,
+                    prompt,
+                    f"You are a security expert analyzing {severity} level findings from a security scan.",
+                    cache_key=f"severity_{severity}",
                 )
                 + "\n\n"
             )
@@ -890,12 +1417,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             compliance_frameworks=opts.compliance_frameworks,
             custom_context=opts.custom_context,
         )
-        return self._get_cached_or_generate(
-            "findings_flat",
-            lambda: client.try_call(
-                prompt,
-                "You are a security expert summarizing findings from a security scan.",
-            ),
+        return self._model_answer(
+            client,
+            prompt,
+            "You are a security expert summarizing findings from a security scan.",
+            cache_key="findings_flat",
         )
 
     def _render_finding_details(
@@ -906,16 +1432,15 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     ) -> str:
         import json
 
-        report = "## Finding Details\n\n"
-        report += "This section contains detailed information about each finding referenced in the report.\n\n"
-        report += "### Finding Index Reference\n\n"
-        report += "| Index | Rule ID | Severity | File | Line Range | Description |\n"
+        report = "## Finding details\n\n"
+        report += "### Finding index\n\n"
+        report += "| Index | Rule ID | Severity | File | Line range | Description |\n"
         report += "|-------|---------|----------|------|------------|-------------|\n"
 
         for finding in indexed_findings:
             index = finding.get("index", "")
             rule_id = finding.get("rule_id", "Unknown")
-            level = finding.get("level", "none").capitalize()
+            severity = self._finding_severity(finding)
             file_path = "Unknown"
             line_range = "Unknown"
             if finding.get("locations"):
@@ -927,29 +1452,49 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             message = finding.get("message", "No description available")
             if len(message) > 50:
                 message = message[:47] + "..."
-            report += f"| {index} | {rule_id} | {level} | {file_path} | {line_range} | {message} |\n"
+            report += (
+                "| "
+                + " | ".join(
+                    _cell(shown_on_one_line(str(value)))
+                    for value in (
+                        index,
+                        rule_id,
+                        severity,
+                        file_path,
+                        line_range,
+                        message,
+                    )
+                )
+                + " |\n"
+            )
 
-        report += "\n\n### Full Finding Details\n\n"
-        report += (
-            "<details>\n<summary>Click to expand full finding details</summary>\n\n"
-        )
-
+        report += "\n\n### Evidence\n\n"
         raw_by_index = {f.get("index"): f for f in findings + secret_findings}
 
         for finding in indexed_findings:
             index = finding.get("index", "")
             rule_id = finding.get("rule_id", "Unknown")
-            level = finding.get("level", "none").capitalize()
-            report += f"#### Finding {index}: {rule_id} ({level})\n\n"
+            severity = self._finding_severity(finding)
+            report += (
+                "<details>\n"
+                f"<summary>{html.escape(str(shown_on_one_line(str(index))))}. "
+                f"{html.escape(str(shown_on_one_line(str(severity))))} · "
+                f"{html.escape(str(shown_on_one_line(str(rule_id))))}</summary>\n\n"
+                f"#### Finding {index}: {_text(shown_on_one_line(str(rule_id)))} "
+                f"({_text(shown_on_one_line(str(severity)))})\n\n"
+            )
 
             if finding.get("locations"):
                 loc = finding["locations"][0]
                 file_path = loc.get("file", "Unknown")
                 start = loc.get("startLine", "?")
                 end = loc.get("endLine", start)
-                report += f"**Location**: {file_path} (lines {start}-{end})\n\n"
+                report += (
+                    f"Location: {_text(shown_on_one_line(str(file_path)))} "
+                    f"(lines {_text(shown_on_one_line(str(start)))}-{_text(shown_on_one_line(str(end)))})\n\n"
+                )
 
-            report += f"**Description**: {finding.get('message', 'No description available')}\n\n"
+            report += f"{_text(shown_not_obeyed(str(finding.get('message', 'No description available'))))}\n\n"
 
             original = raw_by_index.get(index)
             if self.config.options.include_code_snippets and original:
@@ -957,16 +1502,24 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     phys = loc.get("physicalLocation", {})
                     snippet_text = phys.get("region", {}).get("snippet", {}).get("text")
                     if snippet_text:
-                        report += f"**Code Snippet**:\n```\n{snippet_text}\n```\n\n"
+                        report += (
+                            "Code snippet:\n"
+                            + _code_block(str(shown_not_obeyed(str(snippet_text))))
+                            + "\n\n"
+                        )
 
             if original:
                 if not self.config.options.include_code_snippets:
                     original = _without_snippets(original)
-                report += "<details>\n<summary>Raw JSON</summary>\n\n```json\n"
-                report += json.dumps(original, indent=2)
-            report += "\n```\n</details>\n\n"
+                report += "<details>\n<summary>Raw JSON</summary>\n\n"
+                # Still JSON: each "##name[" form's first "#" is written as
+                # JSON's own escape, which parses to the same text.
+                report += _code_block(
+                    json_commands_broken(json.dumps(original, indent=2)), "json"
+                )
+                report += "\n</details>\n\n"
 
-        report += "</details>\n\n"
+            report += "</details>\n\n"
         return report
 
     # ------------------------------------------------------------------
@@ -983,33 +1536,33 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         n = 1
 
         if "executive_summary" in included:
-            items.append(f"{n}. [Executive Summary](#executive-summary)")
+            items.append(f"{n}. [Executive summary](#executive-summary)")
             n += 1
         if "technical_analysis" in included:
-            items.append(f"{n}. [Findings by Severity](#findings-by-severity)")
+            items.append(f"{n}. [Findings by severity](#findings-by-severity)")
             if opts.group_by_severity:
-                for sev in ("error", "warning", "note", "none"):
-                    if any(f.get("level") == sev for f in findings):
+                for sev in ("critical", "high", "medium", "low", "info"):
+                    if any(self._finding_severity(f).lower() == sev for f in findings):
                         items.append(
-                            f"   - [{sev.capitalize()} Level Findings](#{sev.lower()}-level-findings)"
+                            f"   - [{sev.capitalize()} findings](#{sev.lower()}-findings)"
                         )
             n += 1
         if self._secret_findings_exist and "secret_findings" in included:
-            items.append(f"{n}. [Secret Findings](#secret-findings)")
+            items.append(f"{n}. [Secret findings](#secret-findings)")
             n += 1
         if "remediation_guide" in included:
             items.append(f"{n}. [Recommendations](#recommendations)")
             n += 1
         if "risk_assessment" in included:
-            items.append(f"{n}. [Risk Assessment](#risk-assessment)")
+            items.append(f"{n}. [Risk assessment](#risk-assessment)")
             n += 1
         if "compliance_impact" in included and opts.compliance_frameworks:
-            items.append(f"{n}. [Compliance Impact](#compliance-impact)")
+            items.append(f"{n}. [Compliance impact](#compliance-impact)")
             n += 1
         if "detailed_findings" not in opts.exclude_sections:
-            items.append(f"{n}. [Finding Details](#finding-details)")
+            items.append(f"{n}. [Finding details](#finding-details)")
 
-        return "## Table of Contents\n\n" + "\n".join(items) + "\n\n"
+        return "## Contents\n\n" + "\n".join(items) + "\n\n"
 
     # ------------------------------------------------------------------
     # Client factory
@@ -1046,6 +1599,170 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             base_delay=opts.base_delay,
             max_delay=opts.max_delay,
             model_label=self._model_label(opts.model_id),
+            values=self._redaction_values(),
+        )
+
+    def _model_answer(
+        self,
+        client: BedrockModelClient,
+        prompt: str,
+        system_prompt: str,
+        cache_key: Optional[str] = None,
+    ) -> str:
+        """A model answer as the report shows it: the one way report text
+        comes from the model.
+
+        The answer comes from ``_call_with_fallback``, cached under
+        *cache_key* when one is given, and is shown here, once, after the
+        cache: a cached answer is stored as the model gave it and shown each
+        time it is placed. A model response can repeat the scanned
+        repository's text verbatim, so the generated-analysis sections carry
+        repository text one hop removed. The answer is shown with its layout
+        kept: control characters become visible escapes, a line that would
+        start a workflow command is broken, HTML outside its code is text, its
+        code reads as written, and a fence it leaves open is closed, while the
+        response's own Markdown formatting stays as written
+        (``_markdown_as_written``).
+        """
+
+        def _answer() -> str:
+            return self._call_with_fallback(client, prompt, system_prompt)
+
+        text = (
+            self._get_cached_or_generate(cache_key, _answer)
+            if cache_key is not None
+            else _answer()
+        )
+        shown = str(shown_not_obeyed(str(text)))
+        # HTML outside the answer's code is written as text, its code as the
+        # model wrote it, and a fence it leaves open is closed; the costs are
+        # named on _markdown_as_written.
+        return _markdown_as_written(shown)
+
+    def _call_with_fallback(
+        self, client: BedrockModelClient, prompt: str, system_prompt: str
+    ) -> str:
+        """The report path's model call: the configured model first, then the
+        fallback chain when the call errors and ``enable_fallback_models`` is
+        on. The answer comes back as the model gave it; report text takes it
+        through ``_model_answer``, which shows it once.
+
+        This is the walk ``validate_plugin_dependencies`` promises: it answers
+        True for a run whose configured model is invalid but whose fallback is
+        available, so the run itself has to reach that fallback, rather than
+        write the configured model's "*Error ...*" string into every section
+        of the report.
+
+        Whether a call answered is the outcome's ``ok``, never its text. Only a
+        failure another model can answer (``CallOutcome.model_specific``) is
+        walked: one of the credentials, the connection or the service comes
+        back as it is. A fallback that answered is the run's model from then
+        on, so each later call goes to it first instead of failing on the
+        configured model and walking again. A model-specific failure stands
+        for the rest of the run, so if the run's model fails in turn the walk
+        resumes after it, without calling the configured model again
+        (``_configured_error`` keeps why that one failed).
+        """
+        opts = self.config.options
+
+        def call(model: str) -> CallOutcome:
+            return client.with_model(model).call(prompt, system_prompt)
+
+        run_model = self._run_model
+        if run_model is not None and opts.enable_fallback_models:
+            kept = call(run_model)
+            if kept.ok or not kept.model_specific:
+                return kept.text
+            self._run_model = None
+            return self._walk_fallbacks(
+                self._control_plane(),
+                opts.model_id,
+                call,
+                primary_error=self._configured_error,
+                resume_after=run_model,
+                resume_error=kept.text,
+            )
+        outcome = client.call(prompt, system_prompt)
+        if outcome.ok or not opts.enable_fallback_models or not outcome.model_specific:
+            return outcome.text
+        self._configured_error = outcome.text
+        return self._walk_fallbacks(
+            self._control_plane(),
+            opts.model_id,
+            call,
+            primary_error=outcome.text,
+        )
+
+    def _walk_fallbacks(
+        self,
+        bedrock_client: Any,
+        primary: str,
+        call_model: Callable[[str], CallOutcome],
+        primary_error: Optional[str] = None,
+        primary_called: bool = True,
+        keep_as_run_model: bool = True,
+        resume_after: Optional[str] = None,
+        resume_error: Optional[str] = None,
+    ) -> str:
+        """Walk the fallback chain from *primary*: the one walk the report
+        path (``_call_with_fallback``) and the shims (``_try_fallback_models``)
+        share, so the two cannot drift.
+
+        ``get_fallback_model`` falls through to its default model for a
+        chain's last member, and the default's own chain walks back around, so
+        the walk keeps every model it has visited and ends on a repeat rather
+        than recursing without bound. Each candidate is validated before it is
+        called; one that fails validation, or whose call fails, is walked past.
+        The first that answers is the report run's model (``_run_model``)
+        when ``keep_as_run_model`` says so; the shims' walks answer their own
+        call only.
+
+        Exhaustion names the model the operator configured, keeps why it
+        failed (``primary_error``), and separates the models that were called
+        and failed from the ones that were not available to call (*primary*
+        itself is called unless ``primary_called`` says otherwise). Every line
+        here is redacted with the reporter's values.
+
+        ``resume_after`` is the run's model when it failed in turn: the walk
+        goes on from the model after it, with it and *primary* counted as
+        called, and exhaustion keeps its error (``resume_error``) too.
+        """
+        values = self._redaction_values()
+        called: List[str] = [primary] if primary_called else []
+        unavailable: List[str] = [] if primary_called else [primary]
+        if resume_after is not None and resume_after not in called:
+            called.append(resume_after)
+        model: Optional[str] = get_fallback_model(
+            primary if resume_after is None else resume_after
+        )
+        while model and model not in called and model not in unavailable:
+            ASH_LOGGER.info(
+                text_without_values(f"Trying fallback model: {model}", values)
+            )
+            is_valid, _err = validate_bedrock_model(bedrock_client, model, values)
+            if not is_valid:
+                unavailable.append(model)
+            else:
+                called.append(model)
+                outcome = call_model(model)
+                if outcome.ok:
+                    ASH_LOGGER.info(
+                        text_without_values(f"Fallback model {model} succeeded", values)
+                    )
+                    if keep_as_run_model:
+                        self._run_model = model
+                    return outcome.text
+            model = get_fallback_model(model)
+        return text_without_values(
+            _exhaustion_text(
+                primary,
+                called,
+                unavailable,
+                primary_error,
+                run_model=resume_after,
+                run_model_error=resume_error,
+            ),
+            values,
         )
 
     # ------------------------------------------------------------------
@@ -1065,12 +1782,19 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
 
+        # The configured file names can come from the environment (``${VAR}``),
+        # and ash.log is a sink, so each "written to" line is redacted with the
+        # reporter's redaction values. The files themselves keep their names.
+        values = self._redaction_values()
+
         reports_dir = Path(self.context.output_dir) / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         output_path = write_report_file(reports_dir, opts.output_file, summary)
         if output_path is not None:
-            ASH_LOGGER.info(f"Bedrock summary written to {output_path}")
+            ASH_LOGGER.info(
+                text_without_values(f"Bedrock summary written to {output_path}", values)
+            )
 
         if "executive_summary" in included:
             prompt = builder.prepare_prompt(
@@ -1082,20 +1806,27 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 compliance_frameworks=opts.compliance_frameworks,
                 custom_context=opts.custom_context,
             )
-            exec_content = self._get_cached_or_generate(
-                "executive_summary_only",
-                lambda: client.try_call(
-                    prompt,
-                    "You are a security expert providing a concise executive summary of security scan results.",
-                ),
+            exec_content = self._model_answer(
+                client,
+                prompt,
+                "You are a security expert providing a concise executive summary of security scan results.",
+                cache_key="executive_summary_only",
             )
             exec_path = write_report_file(
                 reports_dir,
                 opts.output_executive_file,
-                f"# Executive Security Summary\n\n{exec_content}",
+                self._scan_outcome(model)
+                + "\n\n## Executive summary\n\n"
+                + "Generated with Amazon Bedrock. Verify suggestions against the source findings.\n\n"
+                + exec_content
+                + f"\n\n{FOOTER_CREDIT}\n",
             )
             if exec_path is not None:
-                ASH_LOGGER.info(f"Executive summary written to {exec_path}")
+                ASH_LOGGER.info(
+                    text_without_values(
+                        f"Executive summary written to {exec_path}", values
+                    )
+                )
 
         if "technical_analysis" in included:
             tech_prompt = builder.prepare_prompt(
@@ -1109,20 +1840,27 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 compliance_frameworks=opts.compliance_frameworks,
                 custom_context=opts.custom_context,
             )
-            tech_content = self._get_cached_or_generate(
-                "technical_summary_only",
-                lambda: client.try_call(
-                    tech_prompt,
-                    "You are a security expert providing detailed technical analysis of security findings.",
-                ),
+            tech_content = self._model_answer(
+                client,
+                tech_prompt,
+                "You are a security expert providing detailed technical analysis of security findings.",
+                cache_key="technical_summary_only",
             )
             tech_path = write_report_file(
                 reports_dir,
                 opts.output_technical_file,
-                f"# Technical Security Analysis\n\n{tech_content}",
+                self._scan_outcome(model)
+                + "\n\n## Technical analysis\n\n"
+                + "Generated with Amazon Bedrock. Verify suggestions against the source findings.\n\n"
+                + tech_content
+                + f"\n\n{FOOTER_CREDIT}\n",
             )
             if tech_path is not None:
-                ASH_LOGGER.info(f"Technical analysis written to {tech_path}")
+                ASH_LOGGER.info(
+                    text_without_values(
+                        f"Technical analysis written to {tech_path}", values
+                    )
+                )
 
     # ------------------------------------------------------------------
     # Caching
@@ -1153,9 +1891,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for finding in findings:
-            rule_id = "unknown"
-            if "rule" in finding and finding["rule"] and "id" in finding["rule"]:
-                rule_id = finding["rule"]["id"]
+            rule_id = (
+                finding.get("ruleId")
+                or (finding.get("rule") or {}).get("id")
+                or "unknown"
+            )
             grouped[rule_id].append(finding)
 
         summarized = []
@@ -1163,7 +1903,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             if len(rule_findings) == 1:
                 summarized.append(rule_findings[0])
                 continue
-            base = rule_findings[0].copy()
+            base = deepcopy(rule_findings[0])
             seen_uris: List[str] = []
             locations: List[Dict[str, Any]] = []
             for f in rule_findings:
@@ -1206,7 +1946,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 compliance_frameworks=opts.compliance_frameworks,
                 custom_context=opts.custom_context,
             )
-            return client.try_call(
+            return self._model_answer(
+                client,
                 prompt,
                 "You are a security expert summarizing findings from a security scan.",
             )
@@ -1225,8 +1966,11 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 compliance_frameworks=opts.compliance_frameworks,
                 custom_context=opts.custom_context,
             )
+            # Each batch's answer is prompt input for the synthesis below, not
+            # report text, so it is kept as the model gave it.
             batch_results.append(
-                client.try_call(
+                self._call_with_fallback(
+                    client,
                     prompt,
                     "You are a security expert summarizing findings from a security scan.",
                 )
@@ -1238,7 +1982,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             + "\n".join(formatted)
             + "\n\nProvide a unified summary that captures the key insights from all batches.\n"
         )
-        return client.try_call(
+        return self._model_answer(
+            client,
             combined,
             "You are a security expert synthesizing multiple security scan batch summaries.",
         )
@@ -1250,15 +1995,20 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
     def _call_bedrock(
         self, bedrock_runtime: Any, user_message: str, system_prompt: str
     ) -> str:
-        """Thin shim retained for backward compatibility with existing tests."""
+        """Thin shim retained for backward compatibility with existing tests.
+
+        It keeps none of a report run's state: its control-plane client is
+        built for this call, from the profile and region the options hold
+        now, and a fallback its walk reaches answers this call only.
+        """
         opts = self.config.options
         builder = BedrockPromptBuilder()
         client = self._make_model_client(bedrock_runtime)
 
-        bedrock_client = boto3.client("bedrock", region_name=opts.aws_region)
+        bedrock_client = self._session().client("bedrock")
         label = self._model_label(opts.model_id)
         is_valid, error_message = validate_bedrock_model(
-            bedrock_client, opts.model_id, label=label
+            bedrock_client, opts.model_id, values=self._redaction_values(), label=label
         )
         if not is_valid:
             if opts.enable_fallback_models:
@@ -1274,8 +2024,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                         "maxTokens": opts.max_tokens,
                         "topP": opts.top_p,
                     },
+                    primary_error=error_message,
+                    primary_called=False,
                 )
-            return f"*Error: Primary model {label} validation failed: {error_message}*"
+            return text_without_values(
+                f"*Error: Primary model {label} validation failed: {error_message}*",
+                self._redaction_values(),
+            )
 
         prepared = builder.prepare_prompt(
             user_message,
@@ -1284,8 +2039,8 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             compliance_frameworks=opts.compliance_frameworks,
             custom_context=opts.custom_context,
         )
-        result = client.try_call(prepared, system_prompt)
-        if result.startswith("*Error") and opts.enable_fallback_models:
+        outcome = client.call(prepared, system_prompt)
+        if not outcome.ok and outcome.model_specific and opts.enable_fallback_models:
             return self._try_fallback_models(
                 bedrock_runtime,
                 bedrock_client,
@@ -1297,8 +2052,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                     "maxTokens": opts.max_tokens,
                     "topP": opts.top_p,
                 },
+                primary_error=outcome.text,
             )
-        return result
+        return outcome.text
 
     def _try_fallback_models(
         self,
@@ -1308,38 +2064,30 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         messages: List[Dict],
         system: List[Dict],
         inference_config: Dict,
+        primary_error: Optional[str] = None,
+        primary_called: bool = True,
     ) -> str:
-        """Try fallback models when the primary model fails."""
-        fallback_model = get_fallback_model(failed_model_id)
-        if not fallback_model or fallback_model == failed_model_id:
-            return (
-                "*Error: No suitable fallback model found for "
-                f"{self._model_label(failed_model_id)}*"
-            )
-        ASH_LOGGER.info(f"Trying fallback model: {fallback_model}")
-        is_valid, _err = validate_bedrock_model(bedrock_client, fallback_model)
-        if not is_valid:
-            return self._try_fallback_models(
-                bedrock_runtime,
-                bedrock_client,
-                fallback_model,
-                messages,
-                system,
-                inference_config,
-            )
-        result = self._try_model_call(
-            bedrock_runtime, fallback_model, messages, system, inference_config
-        )
-        if not result.startswith("*Error"):
-            ASH_LOGGER.info(f"Fallback model {fallback_model} succeeded")
-            return result
-        return self._try_fallback_models(
-            bedrock_runtime,
+        """Try fallback models when the primary model fails.
+
+        The walk itself is ``_walk_fallbacks``, shared with the report path
+        (``_call_with_fallback``); here each candidate is called through
+        ``_try_model_call`` with the shim's raw converse arguments.
+        ``_try_model_call`` answers text, as this shim always has, so a
+        candidate's call failed when that text is an "*Error ...*" string.
+        ``primary_error`` and ``primary_called`` say how the configured model
+        failed, for the exhaustion text.
+        """
+        return self._walk_fallbacks(
             bedrock_client,
-            fallback_model,
-            messages,
-            system,
-            inference_config,
+            failed_model_id,
+            lambda model: _shim_outcome(
+                self._try_model_call(
+                    bedrock_runtime, model, messages, system, inference_config
+                )
+            ),
+            primary_error=primary_error,
+            primary_called=primary_called,
+            keep_as_run_model=False,
         )
 
     def _prepare_prompt(self, user_message: str) -> str:
@@ -1377,6 +2125,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             base_delay=opts.base_delay,
             max_delay=opts.max_delay,
             model_label=self._model_label(model_id),
+            values=self._redaction_values(),
         )
         prompt_text = ""
         if messages and messages[0].get("content"):

@@ -64,7 +64,7 @@ def container_stubs(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 4242)
     monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 4343)
     monkeypatch.setattr(rac, "_resolve_oci_runner", lambda oci_runner: "docker")
-    monkeypatch.setattr(rac, "get_ash_revision", lambda: "LOCAL")
+    monkeypatch.setattr(rac, "get_ash_revision", lambda quiet=False: "LOCAL")
     monkeypatch.setattr(rac, "_find_dockerfile", lambda revision: dockerfile)
 
     def fake_build_image(**kwargs):
@@ -150,6 +150,23 @@ class TestCwdDefaults:
 
         assert result.returncode == 0
         assert container_stubs["build"], "the build helper should still have run"
+        assert container_stubs["run_command"] == []
+
+    def test_building_without_running_does_not_check_the_run_mounts(
+        self, container_stubs, tmp_path, monkeypatch
+    ):
+        """A build mounts nothing, so a path only a run would mount refuses
+        nothing when run=False: the directory check belongs to the run phase,
+        which checks it again for a caller that reaches it directly."""
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        output = tmp_path / "out,dir"
+
+        result = run_ash_container(
+            source_dir=tmp_path, output_dir=str(output), build=True, run=False
+        )
+
+        assert result.returncode == 0
+        assert container_stubs["build"], "the build was refused over a run mount"
         assert container_stubs["run_command"] == []
 
 

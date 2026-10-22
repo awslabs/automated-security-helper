@@ -71,6 +71,7 @@ from automated_security_helper.models.workspace import (
 from automated_security_helper.workspace import execution as workspace_execution
 from automated_security_helper.workspace.execution import WorkspaceRunResult
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.env_assertions import environ_names
 
 AshConfig.model_rebuild()
 
@@ -109,7 +110,7 @@ class _RecordingLogger:
     def verbose(self, message):
         self.records["verbose"].append(str(message))
 
-    def debug(self, message):
+    def debug(self, message, extra=None):
         self.records["debug"].append(str(message))
 
     def info(self, message):
@@ -118,8 +119,10 @@ class _RecordingLogger:
     def warning(self, message):
         self.records["warning"].append(str(message))
 
-    def error(self, message):
-        self.records["error"].append(str(message))
+    def error(self, message, exc_info=None, extra=None):
+        # An error logged with its traceback is recorded as logger.exception's.
+        # ``extra`` is NO_MARKUP's: the console handler is not under test here.
+        self.records["exception" if exc_info else "error"].append(str(message))
 
     def exception(self, message):
         self.records["exception"].append(str(message))
@@ -251,14 +254,17 @@ class TestResolveWorkspaceExecutionConfig:
         """The same file refuses a single-directory scan, so it refuses this one,
         rather than scanning the workspace without the settings it is there to
         apply."""
-        (tmp_path / ".ash.yaml").write_text(
-            "workspace: [this: is: not: valid\n", encoding="utf-8"
-        )
+        config_file = tmp_path / ".ash.yaml"
+        config_file.write_text("workspace: [this: is: not: valid\n", encoding="utf-8")
 
-        with pytest.raises(ASHConfigValidationError, match=r"\.ash\.yaml"):
+        with pytest.raises(ASHConfigValidationError) as refused:
             _resolve_workspace_execution_config(
                 ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out")
             )
+
+        assert f"{config_file.as_posix()} could not be parsed (ParserError" in str(
+            refused.value
+        )
 
     def test_a_named_config_that_does_not_exist_refuses_the_scan(self, tmp_path):
         with pytest.raises(ASHConfigValidationError, match="profile.yaml"):
@@ -581,7 +587,7 @@ class TestRunWorkspaceModeOffline:
         _run_workspace_mode(opts, logger)
 
         assert seen["offline_env"] == "YES"
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
 
 
 class TestRunWorkspaceModeFailures:
@@ -624,6 +630,32 @@ class TestRunWorkspaceModeFailures:
         assert excinfo.value.code == 3
         assert "ERROR (3) Invalid configuration" in _plain(capsys.readouterr().out)
 
+    @pytest.mark.parametrize(
+        "error, code",
+        [
+            (ASHConfigValidationError("The path '/x[/bold]' of an ignore path"), 3),
+            (RuntimeError("The path '/x[/bold]' of an ignore path"), 1),
+        ],
+        ids=["invalid-config", "other"],
+    )
+    def test_markup_in_the_error_is_printed_as_text(
+        self, recorded_workspace_execution, logger, tmp_path, capsys, error, code
+    ):
+        """A project's ignore path "/x[/bold]", quoted in the refusal, is shown as
+        text; as Rich markup it would raise MarkupError, a traceback and exit 1."""
+        recorded_workspace_execution(raises=error)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path / "out",
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            _run_workspace_mode(opts, logger)
+
+        assert excinfo.value.code == code
+        assert "'/x[/bold]'" in _plain(capsys.readouterr().out)
+
     def test_any_other_failure_exits_one(
         self, recorded_workspace_execution, logger, tmp_path, capsys
     ):
@@ -659,7 +691,7 @@ class TestRunWorkspaceModeFailures:
         with pytest.raises(SystemExit):
             _run_workspace_mode(opts, logger)
 
-        assert "ASH_OFFLINE" not in os.environ
+        assert "ASH_OFFLINE" not in environ_names()
 
 
 # ---------------------------------------------------------------------------
@@ -902,13 +934,19 @@ class TestRunAshScanContainerWorkspaceVerdict:
                 exit_code=0,
             )
         )
-        monkeypatch.setattr(
-            ras,
-            "_run_container_mode",
-            lambda opts, logger, resolved_fail_on_findings=None, resolved_fail_on_incomplete_scanners=None: (
-                results
-            ),
-        )
+
+        def container_mode(
+            opts,
+            logger,
+            resolved_fail_on_findings=None,
+            resolved_fail_on_incomplete_scanners=None,
+            reads=None,
+            image_may_differ=None,
+        ):
+            assert reads is not None, "the per-scan reads bundle reaches container mode"
+            return results
+
+        monkeypatch.setattr(ras, "_run_container_mode", container_mode)
 
         returned = run_ash_scan(
             source_dir=tmp_path,
@@ -930,13 +968,19 @@ class TestRunAshScanContainerWorkspaceVerdict:
                 exit_code=int(WorkspaceExitCode.ACTIONABLE_FINDINGS),
             )
         )
-        monkeypatch.setattr(
-            ras,
-            "_run_container_mode",
-            lambda opts, logger, resolved_fail_on_findings=None, resolved_fail_on_incomplete_scanners=None: (
-                results
-            ),
-        )
+
+        def container_mode(
+            opts,
+            logger,
+            resolved_fail_on_findings=None,
+            resolved_fail_on_incomplete_scanners=None,
+            reads=None,
+            image_may_differ=None,
+        ):
+            assert reads is not None, "the per-scan reads bundle reaches container mode"
+            return results
+
+        monkeypatch.setattr(ras, "_run_container_mode", container_mode)
 
         with pytest.raises(SystemExit) as excinfo:
             run_ash_scan(
@@ -954,13 +998,19 @@ class TestRunAshScanContainerWorkspaceVerdict:
     ):
         """No payload means no per-project verdict; treating that as 0 would pass
         a workspace nobody judged."""
-        monkeypatch.setattr(
-            ras,
-            "_run_container_mode",
-            lambda opts, logger, resolved_fail_on_findings=None, resolved_fail_on_incomplete_scanners=None: (
-                AshAggregatedResults()
-            ),
-        )
+
+        def container_mode(
+            opts,
+            logger,
+            resolved_fail_on_findings=None,
+            resolved_fail_on_incomplete_scanners=None,
+            reads=None,
+            image_may_differ=None,
+        ):
+            assert reads is not None, "the per-scan reads bundle reaches container mode"
+            return AshAggregatedResults()
+
+        monkeypatch.setattr(ras, "_run_container_mode", container_mode)
 
         with pytest.raises(SystemExit) as excinfo:
             run_ash_scan(

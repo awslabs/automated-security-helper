@@ -1,21 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Each scanner that walks its target is told to leave out the global ignore paths.
+"""Each scanner is told to leave out the files the global ignore paths ignore.
 
 ASH drops the findings in ``global_settings.ignore_paths`` after the scan, but a
-scanner that walks the directory it is given read the ignored files anyway, and its
-own results held them. Each is now given those paths in its own option, as exact
-paths picked with ASH's own matcher, a fully ignored directory as one entry:
+scanner that walks the directory it is given, or reads every file the scan set
+holds, would read the ignored files anyway, with its own results holding them.
+Each is given those paths, picked with ASH's own matcher, a fully ignored
+directory as one entry, in the form it takes:
 
-- grype and syft: ``--exclude ./<path>``, a directory ``./<dir>/**``;
+- npm-audit reads the scan set, without the ignored files (``drop_ignored``), and so
+  does its ``nothing_to_scan_reason``;
+- checkov: an anchored ``--skip-path``, a directory open at its end, and none for a
+  value checkov's terraform module finder could not compile with the others;
 - trivy: ``--skip-files`` and ``--skip-dirs``;
-- checkov: an anchored ``--skip-path``, a directory open at its end;
-- semgrep and opengrep: ``--exclude=<name>``, only for a name nothing else has;
-- cfn-nag, cdk-nag and npm-audit read the scan set, which is filtered.
+- grype and syft: ``--exclude ./<path>``, a directory ``./<dir>/**``;
+- semgrep and opengrep: ``--exclude=<name>``, only for a name nothing else has.
 
-bandit is covered in test_bandit_exclude_built_per_scan.py, and the whole scan in
-tests/integration/scanners/test_global_ignore_paths_reach_every_scanner.py.
+bandit is covered in test_bandit_exclude_built_per_scan.py; cfn-nag and cdk-nag in
+tests/unit/utils/test_cfn_candidates_leave_out_ignore_paths.py; and the whole scan
+in tests/integration/scanners/test_global_ignore_paths_reach_every_scanner.py.
 """
 
 from __future__ import annotations
@@ -67,15 +71,136 @@ def _tree(base: Path, files: list[str] = FILES) -> Path:
     return source
 
 
-def _context(source: Path, base: Path) -> PluginContext:
+def _context(source: Path, base: Path, ignores=()) -> PluginContext:
+    """The scan's context; ``ignores`` are its global ignore paths."""
     output = base / "ash-output"
     output.mkdir(exist_ok=True)
+    config = AshConfig()
+    config.global_settings.ignore_paths = list(ignores)
     return PluginContext(
         source_dir=source,
         output_dir=output,
         work_dir=output / "converted",
-        config=AshConfig(),
+        config=config,
     )
+
+
+class _Stop(Exception):
+    """Raised in place of running the tool, once its argv is recorded."""
+
+
+# ---------------------------------------------------------------------------
+# The scan-set readers
+# ---------------------------------------------------------------------------
+
+
+def test_the_readers_drop_the_ignored_paths(tmp_path):
+    source = _tree(tmp_path)
+    scan_set = [str(source / rel) for rel in FILES]
+
+    kept = link_exclusions.drop_ignored(scan_set, source, IGNORES)
+
+    assert sorted(Path(p).relative_to(source).as_posix() for p in kept) == [
+        "app.py",
+        "main.tf",
+        "pkg/real.py",
+        "requirements.txt",
+        "thirdparty2/keep.py",
+    ]
+
+
+def _npm_audit(source: Path, base: Path, ignores):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+        NpmAuditScanner,
+        NpmAuditScannerConfig,
+    )
+
+    return NpmAuditScanner(
+        context=_context(source, base, ignores), config=NpmAuditScannerConfig()
+    )
+
+
+def test_npm_audit_filters_its_scan_set(tmp_path, monkeypatch):
+    """The scan set npm-audit goes on to use is the filtered one."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        npm_audit_scanner as module,
+    )
+
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    source = _tree(tmp_path)
+    scanner = _npm_audit(source, tmp_path, IGNORES)
+    handed: list[list[str]] = []
+    real = module.drop_ignored
+
+    def _spy(*args, **kwargs):
+        kept = real(*args, **kwargs)
+        handed.append(kept)
+        raise _Stop
+
+    scanner.dependencies_satisfied = True
+    with (
+        patch.object(module, "drop_ignored", side_effect=_spy),
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_run_subprocess", side_effect=_Stop),
+    ):
+        try:
+            scanner.scan(
+                target=source, target_type="source", global_ignore_paths=IGNORES
+            )
+        except (_Stop, ScannerError):
+            pass
+
+    assert handed, "npm-audit did not filter its scan set"
+    assert not [p for p in handed[0] if "/thirdparty/" in p or p.endswith("gen_a.py")]
+    assert any(p.endswith("/app.py") for p in handed[0])
+
+
+def _package(source: Path, rel: str) -> None:
+    (source / rel).mkdir(parents=True, exist_ok=True)
+    (source / rel / "package.json").write_text('{"name": "p"}', encoding="utf-8")
+    (source / rel / "package-lock.json").write_text("{}\n", encoding="utf-8")
+
+
+def test_npm_audit_has_nothing_to_scan_when_its_only_package_is_ignored(tmp_path):
+    source = _tree(tmp_path, ["app.py"])
+    _package(source, "thirdparty/web")
+
+    scanner = _npm_audit(source, tmp_path, IGNORES)
+
+    assert scanner.nothing_to_scan_reason() is not None
+
+
+def test_control_npm_audit_has_a_package_to_scan_outside_the_ignore_paths(tmp_path):
+    source = _tree(tmp_path, ["app.py"])
+    _package(source, "thirdparty/web")
+    _package(source, "web")
+
+    scanner = _npm_audit(source, tmp_path, IGNORES)
+
+    assert scanner.nothing_to_scan_reason() is None
+    assert [Path(p).parent.name for p in scanner._package_manifests("source")] == [
+        "web"
+    ]
+
+
+def test_an_expired_ignore_path_no_longer_leaves_out_a_package(tmp_path):
+    source = _tree(tmp_path, ["app.py"])
+    _package(source, "thirdparty/web")
+    expired = [
+        IgnorePathWithReason(
+            path="thirdparty/**", reason="ignored", expiration="2000-01-01"
+        )
+    ]
+
+    scanner = _npm_audit(source, tmp_path, expired)
+
+    assert scanner.nothing_to_scan_reason() is None
+
+
+# ---------------------------------------------------------------------------
+# checkov
+# ---------------------------------------------------------------------------
 
 
 def _values(argv: list[str], flag: str) -> list[str]:
@@ -88,8 +213,122 @@ def _values(argv: list[str], flag: str) -> list[str]:
     return values
 
 
-class _Stop(Exception):
-    """Raised in place of running the tool, once its argv is recorded."""
+def _checkov(source: Path, base: Path):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+        CheckovScanner,
+        CheckovScannerConfig,
+    )
+
+    return CheckovScanner(context=_context(source, base), config=CheckovScannerConfig())
+
+
+def test_checkov_is_given_anchored_skip_paths(tmp_path):
+    import re
+
+    source = _tree(tmp_path)
+    scanner = _checkov(source, tmp_path)
+
+    patterns = scanner._ignore_skip_patterns(source, IGNORES)
+
+    root = source.as_posix()
+    by_path = {
+        rel: [p for p in patterns if re.search(p, f"{root}/{rel}")] for rel in FILES
+    }
+    assert by_path["thirdparty/bad.py"] and by_path["thirdparty/sub/deep.tf"]
+    assert by_path["pkg/gen_a.py"]
+    for kept in ("app.py", "main.tf", "thirdparty2/keep.py", "pkg/real.py"):
+        assert by_path[kept] == [], kept
+    # checkov joins every value into one regex: no group may be opened.
+    assert not any("(" in p.replace("\\(", "") for p in patterns)
+
+
+def test_checkov_reaches_the_command_with_them(tmp_path):
+    source = _tree(tmp_path)
+    scanner = _checkov(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(source, "source", IGNORES)
+
+    skips = _values(argv, "--skip-path")
+    assert any("thirdparty/" in skip for skip in skips), skips
+    assert any("gen_a" in skip for skip in skips), skips
+
+
+def _module_finder_compiles(values: list[str]) -> bool:
+    """checkov 3.3.26's terraform module finder regex over every --skip-path value:
+    ``re.compile('|'.join(f"({excluded_paths})"))``."""
+    import re
+
+    try:
+        re.compile("|".join(f"({values})"))
+    except re.error:
+        return False
+    return True
+
+
+def _skipped(path: str, values: list[str]) -> bool:
+    """checkov 3.3.26's ``filter_ignored_paths`` test for one walked path."""
+    import re
+
+    return any(
+        re.search(re.escape(v) if re.match(r"^\.[^\.]", v) else v, path) or v in path
+        for v in values
+    )
+
+
+def test_checkov_leaves_out_only_the_ignored_path_that_breaks_the_module_finder(
+    tmp_path,
+):
+    """A value that would fail checkov's terraform module finder's regex is left
+    out: checkov reads that file, and ASH drops its findings. A balanced pair of
+    parentheses does not fail it, so that path is skipped."""
+    source = _tree(tmp_path, ["app.py", "gen(1)/x.py", "a.tf", "b(c.tf"])
+    scanner = _checkov(source, tmp_path)
+
+    argv, _, _ = scanner._execute_scan(
+        source, "source", _ignore("gen(1)/**", "b(c.tf", "a.tf")
+    )
+
+    values = _values(argv, "--skip-path")
+    root = source.as_posix()
+    assert _module_finder_compiles(values), values
+    assert _skipped(f"{root}/a.tf", values), values
+    assert _skipped(f"{root}/gen(1)/x.py", values), values
+    assert not _skipped(f"{root}/app.py", values), values
+
+
+@pytest.mark.parametrize("parent", ["proj (1)", "base(1", "d.ir/base(1"])
+def test_checkov_is_given_an_ignored_directory_under_a_target_with_a_parenthesis(
+    tmp_path, parent
+):
+    """Every value holds the target's own path, the temporary directory's
+    included. The ignored file is skipped where its value compiles in the module
+    finder's regex together with the values before it, and left out where it does
+    not: a dot is written ``[.]``, and its ``]`` can leave a later parenthesis an
+    open group. So the outcome turns on the characters of the temporary path, a
+    dotted user name for one, and is computed here rather than assumed. The
+    ``d.ir`` parent puts a dot above the parenthesis, so the value is always left
+    out there."""
+    import re
+
+    base = tmp_path / parent
+    base.mkdir(parents=True)
+    source = _tree(base, ["app.py", "vendor/a.tf", "vendor/b.tf", "keep.tf"])
+    scanner = _checkov(source, base)
+    ignores = _ignore("vendor/a.tf", "vendor/b.tf")
+
+    argv, _, _ = scanner._execute_scan(source, "source", ignores)
+
+    values = _values(argv, "--skip-path")
+    root = source.as_posix()
+    patterns = scanner._ignore_skip_patterns(source, ignores)
+    (value_for_a,) = [p for p in patterns if re.search(p, f"{root}/vendor/a.tf")]
+    before_it = [v for v in values if v not in patterns]
+    compiles = _module_finder_compiles([*before_it, value_for_a])
+    assert _module_finder_compiles(values), values
+    assert _skipped(f"{root}/vendor/a.tf", values) is compiles, (values, compiles)
+    assert not _skipped(f"{root}/keep.tf", values), values
+    if parent == "d.ir/base(1":
+        assert not compiles, value_for_a
 
 
 def _recorded_argv(scanner, target: Path, ignore_paths) -> list[str]:
@@ -176,6 +415,7 @@ def test_trivy_is_given_the_ignored_files_and_directories(tmp_path, monkeypatch)
     monkeypatch.setattr(
         _trivy_scanner_base, "prepare_content_db", lambda *args, **kwargs: None
     )
+    monkeypatch.setattr(trivy_repo_scanner, "sandboxed_online", lambda offline: False)
     source = _tree(tmp_path)
     scanner = trivy_repo_scanner.TrivyRepoScanner(
         context=_context(source, tmp_path),
@@ -198,58 +438,33 @@ def test_trivy_is_not_given_an_ignored_path_with_a_comma(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# checkov
-# ---------------------------------------------------------------------------
-
-
-def test_checkov_is_given_anchored_skip_paths(tmp_path):
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-        CheckovScanner,
-        CheckovScannerConfig,
-    )
-
-    source = _tree(tmp_path)
-    scanner = CheckovScanner(
-        context=_context(source, tmp_path), config=CheckovScannerConfig()
-    )
-
-    patterns = scanner._ignore_skip_patterns(source, IGNORES)
-
-    import re
-
-    root = source.as_posix()
-    by_path = {
-        rel: [p for p in patterns if re.search(p, f"{root}/{rel}")] for rel in FILES
-    }
-    assert by_path["thirdparty/bad.py"] and by_path["thirdparty/sub/deep.tf"]
-    assert by_path["pkg/gen_a.py"]
-    for kept in ("app.py", "main.tf", "thirdparty2/keep.py", "pkg/real.py"):
-        assert by_path[kept] == [], kept
-    # checkov joins every value into one regex: no group may be opened.
-    assert not any("(" in p.replace("\\(", "") for p in patterns)
-
-
-def test_checkov_reaches_the_command_with_them(tmp_path):
-    from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-        CheckovScanner,
-        CheckovScannerConfig,
-    )
-
-    source = _tree(tmp_path)
-    scanner = CheckovScanner(
-        context=_context(source, tmp_path), config=CheckovScannerConfig()
-    )
-
-    argv, _, _ = scanner._execute_scan(source, "source", IGNORES)
-
-    skips = _values(argv, "--skip-path")
-    assert any("thirdparty/" in skip for skip in skips), skips
-    assert any("gen_a" in skip for skip in skips), skips
-
-
-# ---------------------------------------------------------------------------
 # semgrep and opengrep
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(params=["semgrep", "opengrep", "opengrep-patterns"])
+def grep_scanner(request, tmp_path, monkeypatch):
+    """A semgrep or opengrep scanner over the fixture tree; opengrep also in its
+    patterns mode, which resolves its arguments a second time."""
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    source = _tree(tmp_path)
+    context = _context(source, tmp_path)
+    if request.param == "semgrep":
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+            SemgrepScanner,
+            SemgrepScannerConfig,
+        )
+
+        return source, SemgrepScanner(context=context, config=SemgrepScannerConfig())
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+        OpengrepScanner,
+        OpengrepScannerConfig,
+    )
+
+    config = OpengrepScannerConfig()
+    if request.param == "opengrep-patterns":
+        config.options.patterns = ["eval(...)"]
+    return source, OpengrepScanner(context=context, config=config)
 
 
 @pytest.fixture(params=["semgrep", "opengrep"])
@@ -269,18 +484,24 @@ def grep_scanner_class(request):
     return OpengrepScanner, OpengrepScannerConfig
 
 
-def test_a_grep_scanner_is_given_names_nothing_else_has(
-    tmp_path, monkeypatch, grep_scanner_class
-):
-    monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    scanner_class, config_class = grep_scanner_class
-    source = _tree(tmp_path)
-    scanner = scanner_class(context=_context(source, tmp_path), config=config_class())
+def test_a_grep_scanner_is_given_names_nothing_else_has(grep_scanner):
+    source, scanner = grep_scanner
 
     argv, _, _ = scanner._execute_scan(source, "source", IGNORES)
 
     assert "--exclude=thirdparty" in argv
     assert "--exclude=gen_a.py" in argv
+
+
+def test_a_grep_scanner_is_given_them_for_this_resolution_only(grep_scanner):
+    source, scanner = grep_scanner
+    before = [(a.key, a.value) for a in scanner.args.extra_args]
+
+    scanner._execute_scan(source, "source", IGNORES)
+    argv, _, _ = scanner._execute_scan(source, "source", [])
+
+    assert not [arg for arg in argv if str(arg).startswith("--exclude=")], argv
+    assert [(a.key, a.value) for a in scanner.args.extra_args] == before
 
 
 def test_a_name_another_path_has_is_not_given(tmp_path):
@@ -387,69 +608,3 @@ def test_a_file_left_out_for_another_reason_is_still_an_error(
         _run_grep(
             scanner, source, _ignore("thirdparty/**"), ["thirdparty/a.py", "src/b.py"]
         )
-
-
-# ---------------------------------------------------------------------------
-# The scan-set readers
-# ---------------------------------------------------------------------------
-
-
-def test_the_readers_drop_the_ignored_paths(tmp_path):
-    source = _tree(tmp_path)
-    scan_set = [str(source / rel) for rel in FILES]
-
-    kept = link_exclusions.drop_ignored(scan_set, source, IGNORES)
-
-    assert sorted(Path(p).relative_to(source).as_posix() for p in kept) == [
-        "app.py",
-        "main.tf",
-        "pkg/real.py",
-        "requirements.txt",
-        "thirdparty2/keep.py",
-    ]
-
-
-@pytest.mark.parametrize("name", ["cfn-nag", "cdk-nag", "npm-audit"])
-def test_each_reader_filters_its_scan_set(tmp_path, monkeypatch, name):
-    """The scan set a reader goes on to use is the filtered one."""
-    import importlib
-
-    modules = {
-        "cfn-nag": ("cfn_nag_scanner", "CfnNagScanner", "CfnNagScannerConfig"),
-        "cdk-nag": ("cdk_nag_scanner", "CdkNagScanner", "CdkNagScannerConfig"),
-        "npm-audit": ("npm_audit_scanner", "NpmAuditScanner", "NpmAuditScannerConfig"),
-    }
-    module_name, class_name, config_name = modules[name]
-    module = importlib.import_module(
-        f"automated_security_helper.plugin_modules.ash_builtin.scanners.{module_name}"
-    )
-    monkeypatch.delenv("ASH_OFFLINE", raising=False)
-    source = _tree(tmp_path)
-    scanner = getattr(module, class_name)(
-        context=_context(source, tmp_path), config=getattr(module, config_name)()
-    )
-    handed: list[list[str]] = []
-    real = module.drop_ignored
-
-    def _spy(*args, **kwargs):
-        kept = real(*args, **kwargs)
-        handed.append(kept)
-        raise _Stop
-
-    scanner.dependencies_satisfied = True
-    with (
-        patch.object(module, "drop_ignored", side_effect=_spy),
-        patch.object(scanner, "_pre_scan", return_value=True),
-        patch.object(scanner, "_post_scan"),
-        patch.object(scanner, "_run_subprocess", side_effect=_Stop),
-    ):
-        try:
-            scanner.scan(
-                target=source, target_type="source", global_ignore_paths=IGNORES
-            )
-        except (_Stop, ScannerError):
-            pass
-
-    assert handed, f"{name} did not filter its scan set"
-    assert not [p for p in handed[0] if "/thirdparty/" in p or p.endswith("gen_a.py")]
-    assert any(p.endswith("/app.py") for p in handed[0])

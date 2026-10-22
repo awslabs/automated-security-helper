@@ -10,8 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from automated_security_helper.utils.subprocess_utils import SPAWN_FAILURE_RETURNCODE
-
 
 @pytest.fixture(autouse=True)
 def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
@@ -34,9 +32,9 @@ class TestBug4TimeoutExpiredReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_timeout_returns_completed_process(self, mock_run, _mock_find):
-        """When subprocess.run raises TimeoutExpired, run_command should
+        """When the plain runner raises TimeoutExpired, run_command should
         return a CompletedProcess, not the raw exception."""
         from automated_security_helper.utils.subprocess_utils import run_command
 
@@ -46,6 +44,7 @@ class TestBug4TimeoutExpiredReturnType:
 
         result = run_command(["sleep", "100"], timeout=5)
 
+        mock_run.assert_called_once()
         assert isinstance(result, subprocess.CompletedProcess), (
             f"Expected CompletedProcess, got {type(result).__name__}"
         )
@@ -54,7 +53,7 @@ class TestBug4TimeoutExpiredReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_timeout_has_returncode_attribute(self, mock_run, _mock_find):
         """The CompletedProcess from a timeout must expose .returncode
         so callers don't hit AttributeError."""
@@ -66,6 +65,7 @@ class TestBug4TimeoutExpiredReturnType:
 
         result = run_command(["sleep", "100"], timeout=5)
 
+        mock_run.assert_called_once()
         assert hasattr(result, "returncode")
         assert result.returncode == -1
 
@@ -73,7 +73,7 @@ class TestBug4TimeoutExpiredReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_timeout_preserves_stderr_message(self, mock_run, _mock_find):
         """stderr should contain the timeout duration."""
         from automated_security_helper.utils.subprocess_utils import run_command
@@ -84,13 +84,14 @@ class TestBug4TimeoutExpiredReturnType:
 
         result = run_command(["sleep", "100"], timeout=5)
 
+        mock_run.assert_called_once()
         assert "5" in result.stderr
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_timeout_preserves_stdout_from_exception(self, mock_run, _mock_find):
         """If the TimeoutExpired has partial stdout, it should be carried over."""
         from automated_security_helper.utils.subprocess_utils import run_command
@@ -102,6 +103,7 @@ class TestBug4TimeoutExpiredReturnType:
 
         result = run_command(["cmd"], timeout=5)
 
+        mock_run.assert_called_once()
         assert result.stdout == "partial output"
         assert result.stderr == "partial err"
 
@@ -109,7 +111,7 @@ class TestBug4TimeoutExpiredReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_timeout_still_raises_when_check_true(self, mock_run, _mock_find):
         """When check=True, TimeoutExpired should still propagate."""
         from automated_security_helper.utils.subprocess_utils import run_command
@@ -120,6 +122,7 @@ class TestBug4TimeoutExpiredReturnType:
 
         with pytest.raises(subprocess.TimeoutExpired):
             run_command(["sleep", "100"], timeout=5, check=True)
+        mock_run.assert_called_once()
 
 
 class TestBug5CalledProcessErrorReturnType:
@@ -129,9 +132,9 @@ class TestBug5CalledProcessErrorReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_called_process_error_returns_completed_process(self, mock_run, _mock_find):
-        """When subprocess.run raises CalledProcessError and check=False,
+        """When the plain runner raises CalledProcessError and check=False,
         run_command should return a CompletedProcess."""
         from automated_security_helper.utils.subprocess_utils import run_command
 
@@ -141,6 +144,7 @@ class TestBug5CalledProcessErrorReturnType:
 
         result = run_command(["false"])
 
+        mock_run.assert_called_once()
         assert isinstance(result, subprocess.CompletedProcess), (
             f"Expected CompletedProcess, got {type(result).__name__}"
         )
@@ -149,7 +153,7 @@ class TestBug5CalledProcessErrorReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_called_process_error_preserves_returncode(self, mock_run, _mock_find):
         """The returncode from the CalledProcessError should be preserved."""
         from automated_security_helper.utils.subprocess_utils import run_command
@@ -160,13 +164,14 @@ class TestBug5CalledProcessErrorReturnType:
 
         result = run_command(["bad"])
 
+        mock_run.assert_called_once()
         assert result.returncode == 42
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_called_process_error_preserves_output(self, mock_run, _mock_find):
         """stdout and stderr from the CalledProcessError should carry over."""
         from automated_security_helper.utils.subprocess_utils import run_command
@@ -177,6 +182,7 @@ class TestBug5CalledProcessErrorReturnType:
 
         result = run_command(["bad"])
 
+        mock_run.assert_called_once()
         assert result.stdout == "captured out"
         assert result.stderr == "captured err"
 
@@ -184,7 +190,7 @@ class TestBug5CalledProcessErrorReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_called_process_error_handles_none_output(self, mock_run, _mock_find):
         """When output/stderr are None on the exception, use empty strings."""
         from automated_security_helper.utils.subprocess_utils import run_command
@@ -195,6 +201,7 @@ class TestBug5CalledProcessErrorReturnType:
 
         result = run_command(["bad"])
 
+        mock_run.assert_called_once()
         assert isinstance(result, subprocess.CompletedProcess)
         assert result.stdout == ""
         assert result.stderr == ""
@@ -203,7 +210,7 @@ class TestBug5CalledProcessErrorReturnType:
         "automated_security_helper.utils.subprocess_utils.find_executable",
         return_value=None,
     )
-    @patch("subprocess.run")
+    @patch("automated_security_helper.utils.subprocess_utils._run_plain")
     def test_called_process_error_still_raises_when_check_true(
         self, mock_run, _mock_find
     ):
@@ -216,6 +223,7 @@ class TestBug5CalledProcessErrorReturnType:
 
         with pytest.raises(subprocess.CalledProcessError):
             run_command(["false"], check=True)
+        mock_run.assert_called_once()
 
 
 class TestBug48PopenOrphanedOnException:
@@ -243,8 +251,9 @@ class TestBug48PopenOrphanedOnException:
 
         mock_process.kill.assert_called_once()
         mock_process.wait.assert_called()
-        # ASH's own failure: not 1, which most scanners accept.
-        assert result == SPAWN_FAILURE_RETURNCODE
+        # The tool started and ASH failed relaying it: the fixed code for a run
+        # ASH could not record, not 1, which most scanners accept.
+        assert result == 255
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",
@@ -265,7 +274,7 @@ class TestBug48PopenOrphanedOnException:
         result = run_command_stream_output(["some", "cmd"])
 
         mock_process.kill.assert_not_called()
-        assert result == SPAWN_FAILURE_RETURNCODE
+        assert result == 255
 
     @patch(
         "automated_security_helper.utils.subprocess_utils.find_executable",
@@ -310,7 +319,7 @@ class TestBug49ArgsNotMutated:
             return_value="/usr/bin/echo",
         ):
             with patch(
-                "automated_security_helper.utils.subprocess_utils.subprocess.run"
+                "automated_security_helper.utils.subprocess_utils._run_plain"
             ) as mock_run:
                 mock_run.return_value = MagicMock(
                     returncode=0, stdout="hello\n", stderr=""
@@ -320,6 +329,8 @@ class TestBug49ArgsNotMutated:
                 )
 
                 run_command(original)
+
+            mock_run.assert_called_once()
 
         # The caller's list must not have been modified
         assert original == caller_copy, (

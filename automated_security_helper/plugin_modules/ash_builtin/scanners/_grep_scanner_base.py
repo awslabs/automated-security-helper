@@ -33,6 +33,7 @@ from typing import (
 
 from pydantic import PrivateAttr
 
+
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
@@ -158,7 +159,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         protected -- so the one place a reviewer would not look was the one place
         the protection was missing. mypy runs in this repository, so the decorator
         makes the claim checkable instead of aspirational.
+
+        Before either: the tool-version probe a member deferred at construction
+        (under ``deferred_tool_version_probes``), which is a no-op for a member
+        that did not.
         """
+        self.resolve_deferred_tool_version()
         if self.dependency_unavailable_reason:
             # Not re-logged. `_configure_offline_mode` already emitted this at
             # WARNING during construction, and ScanPhase logs its own line when it
@@ -459,7 +465,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # git work tree's root when the target is a directory inside one, so even a
         # name nothing below the target has can be one of the target's own
         # directories, and then it leaves out the whole target.
-        final_args = self._resolve_arguments(target=target, results_file=results_file)
+        # Resolved before this target's ignore names are computed, so the
+        # resolution adds only the output-directory excludes
+        # (_resolve_scan_arguments); the ignore names are inserted once, below.
+        self._ignore_exclude_names = []
+        final_args = self._resolve_scan_arguments(target, results_file)
 
         # The global ignore paths, as names that leave out nothing else (see
         # utils/link_exclusions.grep_ignore_names); an ignored path no such name
@@ -493,6 +503,76 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         env_vars = self.extra_subprocess_env()
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None
         return final_args, results_file, subprocess_env
+
+    def _resolve_scan_arguments(self, target: Path, results_file: Path) -> List[str]:
+        """``_resolve_arguments`` plus an ``--exclude`` per ASH output directory,
+        and one per name the global ignore paths give (``_execute_scan``).
+
+        Added for this resolution only, as checkov does: the patterns depend on the
+        target, and extra_args persists across scan() calls. The names go in the
+        joined form right after the command, since a name can start with "-".
+        """
+        original_extra_args = list(self.args.extra_args)
+        self.args.extra_args.extend(
+            ToolExtraArg(key="--exclude", value=pattern)
+            for pattern in self._output_dir_exclude_patterns(target)
+        )
+        try:
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
+        finally:
+            self.args.extra_args = original_extra_args
+        names = self._ignore_exclude_names
+        if names:
+            head = [self.command, *self.subcommands]
+            insert_at = len(head) if final_args[: len(head)] == head else 1
+            final_args[insert_at:insert_at] = [f"--exclude={name}" for name in names]
+        return final_args
+
+    def _output_dir_exclude_patterns(self, target: Path) -> List[str]:
+        """``--exclude`` values naming each ASH output directory under ``target``.
+
+        semgrep reads ``--exclude`` with gitignore syntax, so a bare ``out`` would
+        also skip ``src/out``. A leading ``/`` anchors the pattern, but at the
+        project root rather than at the target: the nearest ancestor holding
+        ``.git``, or the target when there is none. Measured with semgrep 1.180 on a
+        target ``t/src`` inside the git repository ``t``: ``/shard-1`` left
+        ``t/src/shard-1`` scanned and ``/src/shard-1`` excluded it, and without the
+        repository it was the other way round. opengrep shares semgrep's file
+        targeting.
+
+        Every component is escaped (``utils/scan_output_dirs.escape_for_pattern``),
+        the scanned directory's own name included when the anchor is above it:
+        ``/out[1]`` skipped a directory ``out1`` and scanned ``out[1]``, on semgrep
+        1.180.0 and opengrep 1.30.2.
+        """
+        from automated_security_helper.utils.scan_output_dirs import (
+            PatternSyntax,
+            escape_for_pattern,
+        )
+
+        relatives = self._ash_output_dirs_inside(target)
+        if not relatives:
+            return []
+        target_abs = Path(os.path.abspath(target))
+        anchor = next(
+            (
+                candidate
+                for candidate in (target_abs, *target_abs.parents)
+                if candidate.joinpath(".git").exists()
+            ),
+            target_abs,
+        )
+        return [
+            "/"
+            + escape_for_pattern(
+                target_abs.joinpath(relative).relative_to(anchor).as_posix(),
+                PatternSyntax.GLOB,
+                separator="/",
+            )
+            for relative in relatives
+        ]
 
     def _post_process_sarif(self, sarif_report, final_args: List[str], target: Path):
         """Record how many files the tool scanned, and refuse a scan of none.

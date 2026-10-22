@@ -17,6 +17,33 @@ The MCP server uses a file-based approach to track scan progress and completion,
 
 Pick stdio for local IDE integration. Pick streamable-HTTP when ASH must be reachable over the network.
 
+### Lifetime over stdio
+
+A stdio server lives as long as its client. The client starts `ash mcp` and is the only thing that can talk to it, so when the client closes the connection the server stops: it cancels every scan still running, waits up to 1.5 seconds for them to stop, and exits. That is inside the window the MCP SDK's stdio client gives a server it shuts down, which is SIGTERM two seconds after it closes the server's stdin and SIGKILL two seconds after that. A scan stopped this way ends like one stopped with `cancel_scan`, except that its scanner's tool and every process it started get SIGKILL half a second after SIGTERM rather than ten, and the previous scan's results in its output directory are put back (see [Output formats](output-formats.md#generating-reports)), so none of the results it wrote half-way stays behind, only its logs, `ash.log` and `ash.log.jsonl`; a scan with no previous results keeps what it wrote before it stopped (see [cancel_scan](#cancel_scan)). On Linux and macOS, SIGTERM, from the client or anything else, SIGHUP, from a closed terminal or a supervisor, and Ctrl-C (SIGINT) are handled the same way, whether or not the client has closed stdin: the server stops its scans and exits, with status 0 for SIGTERM and SIGHUP and 130 for Ctrl-C, also when the signal arrives while the server waits for such a scan after the client has gone. On Windows, Ctrl-C reaches the server but not its scanners' tools, which run in process groups of their own, and the server stops its scans as it does when the client leaves, but it exits, with status 130, only once the client has closed stdin, because the MCP SDK reads stdin on a thread that Ctrl-C cannot interrupt. A scan still running after the 1.5 seconds, one busy outside a scanner's tool, is left to the process exit; its previous results stay in `.ash_previous_results/` and the next MCP scan in that directory takes them back.
+
+A streamable-HTTP or SSE server stops its scans the same way when it shuts down: on Ctrl-C, SIGTERM or SIGHUP it stops them promptly, waits up to 1.5 seconds, and kills what is left of their scanners' tools. It then exits with status 130 on Ctrl-C and 0 on SIGHUP, also when a scan busy outside a scanner's tool is still running; that scan's previous results stay in `.ash_previous_results/`, as on stdio. On SIGTERM, uvicorn raises the signal again once it has stopped, so the process ends by SIGTERM (status 143 in a shell). Before any of that, uvicorn waits up to 5 seconds for the connections still open to close, and the scans go on running while it waits; then it cancels the requests still open and the stop above runs. The wait is short because a service manager follows SIGTERM with SIGKILL once a grace period of its own runs out ([`docker stop`](https://docs.docker.com/reference/cli/docker/container/stop/) waits 10 seconds for a Linux container), and a SIGKILL leaves the scanners' tools running. A second Ctrl-C during that wait kills the scanners' tools and exits with status 130 at once, without waiting for the scans; previous results a scan had not put back by then are taken back by the next MCP scan in its directory. If the server itself fails, it kills the tools on its way out.
+
+On every transport, a server started with SIGINT ignored leaves it ignored. A shell starts a background job that way (`ash mcp --transport streamable-http &`), so a Ctrl-C meant for the job in the foreground does not stop the server. SIGTERM still does. Likewise a server started with SIGHUP ignored, as `nohup` starts one, leaves that ignored on every transport, so it outlives the terminal it was started from.
+
+On any transport, a scanner's tool runs in a process group of its own, so a SIGKILL of the server alone, or a crash of the Python process, leaves the tool running. It writes into the scan's `.ash/ash_output` until it finishes, and that scan's previous results stay in `.ash_previous_results/`. Stop such a server with SIGTERM, or send the SIGKILL to the tool's process group as well.
+
+This is deliberate. The alternative, finishing the scan after the client has gone, keeps a process running whose results nobody can poll or collect, and the next client starts a new server anyway. Use the streamable-HTTP transport when scans have to outlive a client's connection.
+
+Exit status of `ash mcp` over stdio:
+
+| Status | When |
+|--------|------|
+| `0` | The client closed the connection, including while the server was writing to it, or the server was stopped with SIGTERM or SIGHUP |
+| `1` | The server failed while serving, or the MCP dependencies are not installed. The error is printed to stderr, also with `--quiet` |
+| `3` | The options are invalid (for example `--quiet` with `--debug`, or an unreadable `--profile`) |
+| `130` | The server was stopped with Ctrl-C (SIGINT). The same on every transport |
+
+A scan that fails does not stop the server or set its exit status: the scan's status says it failed, and the server goes on serving.
+
+Nothing but JSON-RPC frames is written to stdout, during the session or after it. ASH's own output, a scan's output, and the output of the tools a scan runs all go to stderr; MCP scans run without the live progress display, which is for a terminal.
+
+A request line that the MCP SDK can't parse as JSON, for example one holding a lone surrogate escape such as `\udce9`, gets no reply; the client's request times out.
+
 ## Architecture
 
 The ASH MCP server architecture consists of the following components:
@@ -70,7 +97,7 @@ Starts a security scan asynchronously and returns a scan ID for tracking.
 
 **Parameters:**
 - `directory_path` (required): Path to the directory to scan
-- `severity_threshold` (optional): Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL)
+- `severity_threshold` (optional): The least severe finding that still counts as actionable (ALL, LOW, MEDIUM, HIGH, CRITICAL, in any case). It can make the config's `global_settings.severity_threshold` stricter for this scan, never looser: the scan runs at the stricter of the two, so `LOW` over a configured `HIGH` applies and `CRITICAL` over a configured `MEDIUM` does not. Omit it to use the config's own (MEDIUM unless the config sets one)
 - `config_path` (optional): Path to ASH configuration file
 
 **Returns:**
@@ -268,9 +295,22 @@ scans = await mcp_list_active_scans()
 
 ### cancel_scan
 
-Cancels a running scan and cleans up its resources. Only a scan the calling
-session started can be cancelled; another session's scan id gets the same
-response as an id that was never issued.
+Cancels a running scan and stops it. Only a scan the calling session started can be cancelled;
+another session's scan id gets the same response as an id that was never issued. The scanner tool
+running at the time is stopped with every
+process it started (SIGTERM, then SIGKILL after 10 seconds). The scan stops at its next check: no
+further scanner, phase or reporter starts, and no further results are written. Work already under
+way that is not waiting on a child process, such as a scanner reading its tool's output, finishes
+first and may still write under `scanners/` or `converted/`. The previous scan's results are then
+put back in place of every result the cancelled scan wrote; its logs, `ash.log` and
+`ash.log.jsonl`, stay. Without previous results, what it wrote before it stopped stays, except that its reports are removed when it stops during the report phase;
+the unused-suppressions reporter's markdown file, which that reporter writes itself, stays even
+then. The scan's status becomes `cancelled` at once, and the scan normally ends within a second, or
+after the 10 seconds a scanner that ignores SIGTERM gets. Until it has, a new `run_ash_scan` of the
+same directory is refused because the cancelled scan is still stopping. A scan that has already
+finished cannot be cancelled: the response then has `success` set to `false` and the scan's status.
+Cancelling one project of a workspace scan stops that project; the workspace's other projects carry
+on, and its response reports the cancelled project as `failed`.
 
 **Parameters:**
 - `scan_id` (required): The scan ID to cancel
@@ -296,29 +336,39 @@ result = await mcp_cancel_scan(scan_id="550e8400-e29b-41d4-a716-446655440000")
 
 ### check_installation
 
-Checks if ASH is properly installed and ready to use.
+Reports whether ASH can scan. Each built-in scanner is asked whether its dependencies are satisfied, by the same check `list_scanners` reports and a scan runs before starting a scanner. Each check may run the scanner's tool, so the call takes a few seconds. It installs and downloads nothing. A scanner whose tool is not installed yet, and that a scan installs with `uv` when it starts the scanner (bandit, checkov and semgrep on a fresh install, when the scan is not offline and `uv` is present), is listed in `installs_on_first_scan` rather than `missing_dependencies`. Only the scanners ASH ships are checked; community plugins are not loaded.
 
 **Parameters:**
 None
 
 **Returns:**
-A dictionary with installation status information.
 
-**Example:**
-```python
-result = await mcp_check_installation()
-```
+- `installed`: ASH is installed and at least one enabled scanner can run, or will once the first scan installs its tool. `false` means a scan would run nothing.
+- `ready`: every enabled scanner can run or is installed by the first scan, so a default scan is complete.
+- `missing_dependencies`: enabled scanners whose tool is missing and that a scan cannot install. A scan reports them as not run.
+- `installs_on_first_scan`: enabled scanners whose tool the first scan installs with `uv`. That scan needs network access, and takes longer while it installs them.
+- `undetermined_dependencies`: enabled scanners whose check could not run.
+- `scanners`: each built-in scanner's `name`, `enabled`, `dependencies_satisfied` (`true`, `false`, or `null` when undetermined), `installs_on_first_scan` and `version`.
+- `ash_command_available` and `ash_command_output`: whether an `ash` executable is on `PATH`, and its path. The server scans in-process and does not need one.
 
 **Example Response:**
 ```json
 {
   "success": true,
   "installed": true,
-  "version": "3.0.0",
+  "ready": false,
+  "version": "3.7.0",
+  "scanners": [
+    {"name": "bandit", "enabled": true, "dependencies_satisfied": true, "installs_on_first_scan": false, "version": "1.9.4"},
+    {"name": "cdk_nag", "enabled": true, "dependencies_satisfied": false, "installs_on_first_scan": false, "version": null},
+    {"name": "semgrep", "enabled": true, "dependencies_satisfied": false, "installs_on_first_scan": true, "version": null}
+  ],
+  "missing_dependencies": ["cdk_nag"],
+  "installs_on_first_scan": ["semgrep"],
+  "undetermined_dependencies": [],
   "ash_command_available": true,
-  "ash_command_output": "ASH v3.4.1",
-  "ash_dir_exists": true,
-  "timestamp": "2025-07-16T12:37:12.345678"
+  "ash_command_output": "/usr/local/bin/ash",
+  "timestamp": "2026-10-11T12:37:12.345678"
 }
 ```
 
@@ -365,6 +415,7 @@ The following error categories are used:
 - `operation_timeout`: Operation took too long and timed out
 - `scan_not_found`: Requested scan ID was not found in the registry
 - `scan_incomplete`: Scan has not completed yet
+- `plugin_module_refused`: The config's `ash_plugin_modules` entries are ones a scan refuses to import
 - `unexpected_error`: An unexpected error occurred
 
 ### Config refusals
@@ -410,49 +461,44 @@ as well: `set_source_git`, `set_source_zip_finalize` and `clear_source` return
 
 ## Configuration
 
-The ASH MCP server can be configured using the `mcp-resource-management` section in the ASH configuration file:
+### Server limits
+
+The MCP server enforces two limits from the `mcp-resource-management` section. It reads them from
+the operator's config, the file the `ASH_CONFIG` environment variable of the `ash mcp` process
+names, and never from the config of a scan: a scanned repository's `.ash/.ash.yaml` or a config a
+client delivers cannot change them. With no `ASH_CONFIG`, the defaults below apply.
 
 ```yaml
-# .ash/.ash.yaml
+# The file ASH_CONFIG names for the ash mcp process
 mcp-resource-management:
-  # Concurrent operations
-  max_concurrent_scans: 5
-  max_concurrent_tasks: 30
-  thread_pool_max_workers: 8
-
-  # Timeouts
-  scan_timeout_seconds: 2400
-  operation_timeout_seconds: 300
-
-  # Resource monitoring
-  enable_health_checks: true
-  health_check_interval_seconds: 30
-  memory_warning_threshold_mb: 1024
-  memory_critical_threshold_mb: 2048
-  task_count_warning_threshold: 20
-
-  # Message limits
-  max_message_size_bytes: 10485760  # 10MB
-  max_directory_size_mb: 1024       # 1GB
+  max_concurrent_scans: 3      # default 3, up to 100; 0 or null for no limit
+  scan_timeout_seconds: 1800   # default 1800 (30 min), 60-86400; 0 or null for no limit
 ```
 
 The server reads its operator configuration from the file `ASH_CONFIG` names, for every scan that names no config of its own. It loads that file at startup, the way it loads each `--profile`. If `ASH_CONFIG` names a path that is not a file, or a file the server can't read, parse or validate, `ash mcp` refuses to start (exit 3) with an error naming the variable and the path. `python -m automated_security_helper.cli.mcp_server` starts the same way as `ash mcp` and makes the same checks.
 
 ### Configuration Options
 
-- `max_concurrent_scans`: Maximum number of concurrent scans
+- `max_concurrent_scans`: the most scans the server runs at once, counted across every session. A
+  `run_ash_scan` or `run_ash_workspace_scan` beyond it is refused with `success: false` and an error
+  naming the limit; start it again once a running scan finishes or is cancelled. A cancelled scan
+  counts until it has stopped. A workspace scan counts as one scan however many projects it has, so
+  a workspace with more projects than the limit can still run.
 - `max_concurrent_scans_per_session`: Maximum number of scans one session of a network transport (streamable-http, sse) may run at once, default 2; `0` turns the per-session limit off. A `run_ash_workspace_scan` counts once, however many projects it has, and stdio's single session is not limited. A scan past the limit is refused with `error_type: session_scan_limit`, and other sessions are unaffected. Callers with no session the server issued (every caller of a stateless streamable-http server run without `--trust-upstream-session-id`, and a request that names no issued session) share one count under the same limit. Read only from the file `ASH_CONFIG` names, never from a config inside a scanned or delivered tree.
-- `max_concurrent_tasks`: Maximum number of concurrent tasks
-- `thread_pool_max_workers`: Maximum number of worker threads
-- `scan_timeout_seconds`: Timeout for scans in seconds
-- `operation_timeout_seconds`: Timeout for operations in seconds
-- `enable_health_checks`: Whether to enable health checks
-- `health_check_interval_seconds`: Interval between health checks in seconds
-- `memory_warning_threshold_mb`: Memory usage warning threshold in MB
-- `memory_critical_threshold_mb`: Memory usage critical threshold in MB
-- `task_count_warning_threshold`: Task count warning threshold
-- `max_message_size_bytes`: Maximum message size in bytes
-- `max_directory_size_mb`: Maximum directory size in MB
+- `scan_timeout_seconds`: the longest one scan may run, counted from when it starts running, so
+  the time a scan waits for another scan of its session is not counted. A scan still running then
+  is stopped the way `cancel_scan` stops one, and reported as `failed` with an `error_message`
+  naming the limit. For a workspace scan the limit covers the whole workspace: every project still
+  running is stopped, every project is reported as `failed`, including one that had already
+  finished (its files on disk are complete), and `run_ash_workspace_scan` returns
+  `success: false` with `error_category` `operation_timeout` and the `scan_ids`.
+
+The section declares more keys (`max_concurrent_tasks`, `thread_pool_max_workers`,
+`operation_timeout_seconds`, `shutdown_timeout_seconds`, `memory_warning_threshold_mb`,
+`memory_critical_threshold_mb`, `task_count_warning_threshold`, `max_message_size_bytes`,
+`max_path_length`, `max_directory_size_mb`, `enable_health_checks`,
+`health_check_interval_seconds`, `enable_resource_logging`, `log_resource_operations`). They are
+accepted so existing configs keep validating, and nothing reads them.
 
 ### Tools and output inside the scanned directory
 

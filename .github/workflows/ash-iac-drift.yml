@@ -397,7 +397,7 @@ jobs:
           # Delete the generated files before copying the new ones in. This is
           # what turns an orphan committed template -- one whose stack was
           # removed from the app -- into a deletion git will report. Only the
-          # generated pattern is deleted, so a README or a LICENSE the CDK lane
+          # generated pattern is deleted, so a README or a LICENSE the CDK build
           # keeps alongside the templates survives.
           mkdir -p "$GEN_DIR"
           find "$GEN_DIR" -type f -name '*.template.json' -delete
@@ -472,7 +472,7 @@ jobs:
   # committed buildspec.yml is its output.
   #
   # The generator is found by name in the package's own scripts rather than
-  # hardcoded here, so the jsii lane owns how it runs. If the package exists but
+  # hardcoded here, so the package itself owns how it runs. If the package exists but
   # exposes none of the accepted names, this fails and says so -- the one
   # outcome worse than a red gate is a gate that finds no generator, regenerates
   # nothing, compares a file to itself and reports success.
@@ -592,7 +592,7 @@ jobs:
           set -euo pipefail
 
           # The accepted generator script names, in priority order. Reading them
-          # out of package.json keeps this workflow from pinning the lane's
+          # out of package.json keeps this workflow from pinning the package's
           # internal naming, while still refusing to run if none is present.
           #
           # Both "generate:buildspec" and "buildspec" are accepted because the two
@@ -1388,7 +1388,7 @@ jobs:
       # reason: '...' }) -- the id form the synth log prints -- after which the
       # report carries zero violations and this step reports "0 advisory, 0
       # error-severity" and still passes. Whether to acknowledge them is the CDK
-      # lane's call, not this gate's: an acknowledgement quietens the build but also
+      # side's call, not this gate's: an acknowledgement quietens the build but also
       # stops reporting if the parameter shape ever changes for real.
       #
       # Pinning this step to "expect exactly two warnings" would couple it to that

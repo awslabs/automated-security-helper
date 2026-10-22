@@ -3,19 +3,16 @@
 
 """npm-audit audits no file that is a link leaving the scanned tree.
 
-ASH found a package's lockfile with ``exists()``, which follows links, and npm, pnpm
-and yarn read whatever the link points at: measured with npm 10.9.4, pnpm 12.6.0 and
-yarn 1.22.22, offline under bwrap, a ``package-lock.json`` linking to a file outside
-the scanned tree, next to a real ``package.json``, was read by each one (npm counted
-its packages, pnpm parsed it, and yarn quoted its content in an error). None of the
-three has an option not to follow links.
+npm, pnpm and yarn read whatever a link points at (npm 10.9.4, pnpm 12.6.0 and
+yarn 1.22.22), and none of the three has an option not to follow links, so every
+file a package manager would read has to resolve inside the scanned tree.
 
 Every file the package manager reads from the package (the manifest, each lockfile it
-would read, and for yarn every workspace manifest below it) must now resolve inside
+would read, and for yarn every workspace manifest below it) must resolve inside
 the scanned tree and be a regular file. When one does not, that package is not
-audited, and the file is recorded as an input not scanned with the reason "link
-leaves the scanned tree". The scan then fails, as it does for any lockfile that went
-unaudited online. A link that stays inside the tree is followed as before.
+audited, and the scan fails naming the file with the reason "link leaves the scanned
+tree", as it does for any lockfile that went unaudited online. A link that stays
+inside the tree is followed as before.
 """
 
 from __future__ import annotations
@@ -42,18 +39,20 @@ from automated_security_helper.utils import package_manager_child as child_modul
 from automated_security_helper.utils.package_manager_child import (
     package_manager_child,
 )
-from tests.utils.refusing_proxy import scrub_cloud_credentials
+from tests.utils.aws_isolation import isolate_from_aws
+from tests.utils.npm_audit_reports import (
+    NPM_CLEAN,
+    PNPM_CLEAN,
+    YARN_1_NO_ADVISORIES,
+)
 
 #: In every file outside the scanned tree; it must reach no output.
 MARKER = "outside-content-7f3a"
 REASON = "link leaves the scanned tree"
-NO_ADVISORIES = json.dumps(
-    {"auditReportVersion": 2, "vulnerabilities": {}, "metadata": {}}
-)
-YARN_1_NO_ADVISORIES = (
-    '{"type":"auditSummary","data":{"vulnerabilities":{"info":0,'
-    '"low":0,"moderate":0,"high":0,"critical":0}}}\n'
-)
+#: Each tool's own clean report (tests/utils/npm_audit_reports.py): pnpm's is
+#: keyed advisories, so an npm-shaped document is not a pnpm report. yarn 1's
+#: clean report is the module's capture too (classic-clean.json).
+NO_ADVISORIES = NPM_CLEAN
 LOCKFILES = {
     "npm": "package-lock.json",
     "pnpm": "pnpm-lock.yaml",
@@ -62,8 +61,8 @@ LOCKFILES = {
 
 
 @pytest.fixture
-def online(monkeypatch):
-    scrub_cloud_credentials(monkeypatch)
+def online(monkeypatch, tmp_path):
+    isolate_from_aws(monkeypatch, tmp_path)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     return monkeypatch
 
@@ -85,6 +84,8 @@ def spawns(monkeypatch) -> List[Dict[str, Any]]:
             return {"stdout": "1.22.22\n", "returncode": 0}
         if command[0] == "yarn":
             return {"stdout": YARN_1_NO_ADVISORIES, "returncode": 0}
+        if command[0] == "pnpm":
+            return {"stdout": PNPM_CLEAN, "returncode": 0}
         return {"stdout": NO_ADVISORIES, "returncode": 0}
 
     monkeypatch.setattr(NpmAuditScanner, "_run_subprocess", fake_run)
@@ -145,10 +146,15 @@ def _no_marker_under(directory: Path) -> None:
             assert MARKER not in path.read_bytes().decode("utf-8", "replace"), path
 
 
-def _refused(scanner: NpmAuditScanner) -> ScannerError:
+def _refused(scanner: NpmAuditScanner, *shown: str) -> ScannerError:
+    """The scan fails, naming each refused file once with the reason."""
     with pytest.raises(ScannerError) as raised:
         scanner.scan(target=scanner.context.source_dir, target_type="source")
-    assert MARKER not in str(raised.value)
+    message = str(raised.value)
+    assert MARKER not in message
+    assert f"could not audit {len(shown)} lockfile(s)" in message, message
+    for path in shown:
+        assert message.count(f"{path}: {REASON}") == 1, message
     return raised.value
 
 
@@ -161,11 +167,9 @@ def test_a_linked_lockfile_that_leaves_the_tree_is_not_audited(
     package = _package(scanner.context.source_dir, lockfile)
     _link(package / lockfile, _outside(tmp_path, lockfile))
 
-    error = _refused(scanner)
+    _refused(scanner, f"web/{lockfile}")
 
     assert spawns == [], "a package manager was started for the linked lockfile"
-    assert scanner.inputs_not_scanned == [{"path": f"web/{lockfile}", "reason": REASON}]
-    assert f"web/{lockfile}" in str(error) and REASON in str(error)
     _no_marker_under(scanner.context.output_dir)
 
 
@@ -176,18 +180,24 @@ def test_a_linked_manifest_that_leaves_the_tree_is_not_audited(
     package = _package(scanner.context.source_dir, "package-lock.json")
     _link(package / "package.json", _outside(tmp_path, "package.json"))
 
-    _refused(scanner)
+    _refused(scanner, "web/package.json")
 
     assert spawns == []
-    assert scanner.inputs_not_scanned == [
-        {"path": "web/package.json", "reason": REASON}
-    ]
     _no_marker_under(scanner.context.output_dir)
 
 
 # The scan set leaves out a file link whose target is outside the tree, so a linked
 # package.json never reaches npm-audit through it. The package is found from its
 # lockfile instead, when a package.json sits beside it that the scan set left out.
+
+
+def test_a_linked_manifest_still_counts_as_something_to_scan(online, tmp_path):
+    """The selection the scan makes is the one that says whether to run at all."""
+    scanner = _scanner(tmp_path)
+    package = _package(scanner.context.source_dir, "package-lock.json")
+    _link(package / "package.json", _outside(tmp_path, "package.json"))
+
+    assert scanner.nothing_to_scan_reason() is None
 
 
 def test_a_dangling_manifest_link_beside_a_lockfile_is_not_audited(
@@ -197,12 +207,9 @@ def test_a_dangling_manifest_link_beside_a_lockfile_is_not_audited(
     package = _package(scanner.context.source_dir, "package-lock.json")
     _link(package / "package.json", tmp_path / "outside" / "missing.json")
 
-    _refused(scanner)
+    _refused(scanner, "web/package.json")
 
     assert spawns == []
-    assert scanner.inputs_not_scanned == [
-        {"path": "web/package.json", "reason": REASON}
-    ]
 
 
 def test_a_package_with_several_lockfiles_is_refused_once(online, spawns, tmp_path):
@@ -212,17 +219,34 @@ def test_a_package_with_several_lockfiles_is_refused_once(online, spawns, tmp_pa
         (package / lockfile).write_text("\n", encoding="utf-8")
     _link(package / "package.json", _outside(tmp_path, "package.json"))
 
-    _refused(scanner)
+    _refused(scanner, "web/package.json")
 
     assert spawns == []
-    assert scanner.inputs_not_scanned == [
-        {"path": "web/package.json", "reason": REASON}
+
+
+def test_an_ignored_package_whose_manifest_links_out_is_not_a_failure(
+    online, spawns, tmp_path
+):
+    """Under a global ignore path the package is not one npm-audit audits, so its
+    linked manifest neither starts a tool nor fails the scan."""
+    from automated_security_helper.models.core import IgnorePathWithReason
+
+    scanner = _scanner(tmp_path)
+    scanner.context.config.global_settings.ignore_paths = [
+        IgnorePathWithReason(path="vendor/", reason="vendored")
     ]
+    package = _package(scanner.context.source_dir / "vendor", "package-lock.json")
+    _link(package / "package.json", _outside(tmp_path, "package.json"))
+
+    result = scanner.scan(target=scanner.context.source_dir, target_type="source")
+
+    assert result is not False
+    assert spawns == []
 
 
 def test_an_orphan_lockfile_is_left_as_before(online, spawns, tmp_path):
     """A lockfile with no package.json beside it is not a package: nothing is
-    started and nothing is recorded, as before."""
+    started and nothing fails, as before."""
     scanner = _scanner(tmp_path)
     orphan = scanner.context.source_dir / "web"
     orphan.mkdir()
@@ -232,7 +256,6 @@ def test_an_orphan_lockfile_is_left_as_before(online, spawns, tmp_path):
 
     assert result is not False
     assert spawns == []
-    assert scanner.inputs_not_scanned == []
 
 
 def _whole_scan(tmp_path: Path, monkeypatch) -> tuple[int, Dict[str, Any]]:
@@ -262,14 +285,6 @@ def _whole_scan(tmp_path: Path, monkeypatch) -> tuple[int, Dict[str, Any]]:
     return code, results
 
 
-def _scanner_not_scanned(results: Dict[str, Any]) -> List[tuple]:
-    return [
-        (entry["path"], entry["reason"])
-        for report in results["additional_reports"]["npm-audit"].values()
-        for entry in report.get("inputs_not_scanned", [])
-    ]
-
-
 def test_the_whole_scan_fails_for_a_linked_manifest(
     online, spawns, tmp_path, monkeypatch
 ):
@@ -280,7 +295,6 @@ def test_the_whole_scan_fails_for_a_linked_manifest(
 
     assert code == 1, "a package left unaudited must fail the scan"
     assert results["scanner_results"]["npm-audit"]["status"] == "ERROR"
-    assert _scanner_not_scanned(results) == [("web/package.json", REASON)]
     assert spawns == []
     _no_marker_under(tmp_path / "out")
 
@@ -288,23 +302,14 @@ def test_the_whole_scan_fails_for_a_linked_manifest(
 def test_when_the_manifest_and_the_lockfile_both_link_out_nothing_is_audited(
     online, spawns, tmp_path, monkeypatch
 ):
-    """Nothing of the package is in the tree; the scan set's own record says so."""
+    """Nothing of the package is in the tree, so there is nothing to start."""
     package = _package(tmp_path / "repo", "package-lock.json")
     _link(package / "package.json", _outside(tmp_path, "package.json"))
     _link(package / "package-lock.json", _outside(tmp_path, "lock.json"))
 
-    code, results = _whole_scan(tmp_path, monkeypatch)
+    _whole_scan(tmp_path, monkeypatch)
 
     assert spawns == []
-    assert _scanner_not_scanned(results) == []
-    left_out = sorted(
-        (entry["path"], entry["reason"])
-        for entry in results["metadata"].get("inputs_not_scanned") or []
-    )
-    assert left_out == [
-        ("web/package-lock.json", REASON),
-        ("web/package.json", REASON),
-    ], left_out
     _no_marker_under(tmp_path / "out")
 
 
@@ -316,12 +321,9 @@ def test_a_linked_shrinkwrap_beside_a_regular_lockfile_is_not_audited(
     package = _package(scanner.context.source_dir, "package-lock.json")
     _link(package / "npm-shrinkwrap.json", _outside(tmp_path, "shrinkwrap.json"))
 
-    _refused(scanner)
+    _refused(scanner, "web/npm-shrinkwrap.json")
 
     assert spawns == []
-    assert scanner.inputs_not_scanned == [
-        {"path": "web/npm-shrinkwrap.json", "reason": REASON}
-    ]
 
 
 @pytest.mark.parametrize("sandboxed", [False, True])
@@ -343,12 +345,9 @@ def test_a_yarn_workspace_member_linked_outside_is_not_audited(
     else:
         _link(members / "api", outside_manifest.parent)
 
-    _refused(scanner)
+    _refused(scanner, "web/packages/api/package.json")
 
     assert spawns == []
-    assert scanner.inputs_not_scanned == [
-        {"path": "web/packages/api/package.json", "reason": REASON}
-    ]
 
 
 def test_another_package_is_still_audited(online, spawns, tmp_path):
@@ -358,13 +357,10 @@ def test_another_package_is_still_audited(online, spawns, tmp_path):
     _link(linked / "package-lock.json", _outside(tmp_path, "lock.json"))
     _package(scanner.context.source_dir, "package-lock.json", name="api")
 
-    _refused(scanner)
+    _refused(scanner, "web/package-lock.json")
 
     (audit,) = _audits(spawns)
     assert json.loads(audit["files"]["package.json"]) == {"name": "api"}
-    assert scanner.inputs_not_scanned == [
-        {"path": "web/package-lock.json", "reason": REASON}
-    ]
 
 
 def test_control_an_in_tree_regular_lockfile_is_audited(online, spawns, tmp_path):
@@ -375,7 +371,6 @@ def test_control_an_in_tree_regular_lockfile_is_audited(online, spawns, tmp_path
 
     (audit,) = _audits(spawns)
     assert sorted(audit["files"]) == ["package-lock.json", "package.json"]
-    assert scanner.inputs_not_scanned == []
 
 
 @pytest.mark.parametrize("binary", sorted(LOCKFILES))
@@ -394,7 +389,6 @@ def test_an_in_tree_link_to_an_in_tree_lockfile_is_still_audited(
 
     (audit,) = _audits(spawns)
     assert audit["files"][lockfile] == "# the shared lockfile\n"
-    assert scanner.inputs_not_scanned == []
 
 
 def test_a_link_into_another_project_of_the_workspace_is_audited(
@@ -422,7 +416,6 @@ def test_a_link_into_another_project_of_the_workspace_is_audited(
 
     (audit,) = _audits(spawns)
     assert audit["files"]["package-lock.json"] == "# the api lockfile\n"
-    assert scanner.inputs_not_scanned == []
 
 
 @pytest.mark.parametrize("binary", ["npm", "pnpm", "yarn"])
@@ -478,16 +471,6 @@ def test_the_whole_scan_reports_it_and_no_outside_content_reaches_any_output(
     results = json.loads((output / "ash_aggregated_results.json").read_text())
     # ERROR, as when an audit fails: those dependencies were not checked.
     assert results["scanner_results"]["npm-audit"]["status"] == "ERROR"
-    reports = results["additional_reports"]["npm-audit"]
-    recorded = [
-        (entry["path"], entry["reason"])
-        for report in reports.values()
-        for entry in report.get("inputs_not_scanned", [])
-    ]
-    assert recorded == [("web/package-lock.json", REASON)], recorded
-    for summary in ("ash.summary.md", "ash.summary.txt"):
-        text = (output / "reports" / summary).read_text(encoding="utf-8")
-        assert "web/package-lock.json" in text and REASON in text, summary
     assert spawns == []
     _no_marker_under(output)
     captured = capsys.readouterr()

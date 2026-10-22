@@ -796,8 +796,13 @@ def _ash_paths() -> Tuple[List[Path], List[Path]]:
     Returns every path to mount, and the sys.path entries among them that are only
     import entries (not an interpreter directory or a link directory of it), which
     the caller keeps from being executable where they are the scan's data.
+
+    And the ASH bin directory, when it is anchored. A relative ASH_BIN_PATH is not
+    searched for tools (subprocess_utils.find_executable), and here _existing would
+    make it absolute against the cwd: ASH_BIN_PATH=bin, run from the repository,
+    made the bin/ it committed a read-only and executable path.
     """
-    from automated_security_helper.utils.subprocess_utils import _bin_path
+    from automated_security_helper.utils.subprocess_utils import _bin_path, _is_anchored
 
     package_dir = Path(__file__).resolve().parents[2]
     # The directory holding the package too: importlib lists each sys.path entry, and
@@ -858,6 +863,11 @@ def _ash_paths() -> Tuple[List[Path], List[Path]]:
         interpreter_dirs.append(real_prefix)
     link_dirs = [hop.parent for hop in _symlink_hops(Path(sys.executable))]
     bin_path = _bin_path()
+    # Only when anchored: a relative ASH_BIN_PATH is not searched for tools
+    # (subprocess_utils.find_executable), and _existing would make it absolute
+    # against the cwd (see the docstring). None is mounted then.
+    if bin_path is not None and not _is_anchored(str(bin_path)):
+        bin_path = None
     _refuse_a_home_among(
         interpreter_dirs, link_dirs, bin_path, homes, interpreter_roots
     )
@@ -969,7 +979,7 @@ def _refused_link(
 def _refuse_a_home_among(
     interpreter_dirs: Sequence[Path],
     link_dirs: Sequence[Path],
-    bin_path: Path,
+    bin_path: Optional[Path],
     homes: Sequence[Path],
     interpreter_roots: Iterable[Path],
 ) -> None:
@@ -1032,7 +1042,7 @@ def _refuse_a_home_among(
             and not part_of_an_interpreter
         ):
             raise SandboxUnavailable(_refused_link(path, real, homes, links))
-    if os.path.isdir(bin_path):
+    if bin_path is not None and os.path.isdir(bin_path):
         real = Path(os.path.realpath(bin_path))
         if holds_a_home(real) or (
             directly_in_a_home(real) and not _a_bin_directory(bin_path, homes, links)

@@ -54,7 +54,10 @@ from automated_security_helper.base.converter_plugin import (
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
-from automated_security_helper.interactions.run_ash_scan import incomplete_converters
+from automated_security_helper.interactions.run_ash_scan import (
+    IncompleteConverter,
+    incomplete_converters,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 
@@ -341,6 +344,131 @@ class TestADroppedConverterIsRecorded:
         assert results.converter_results["empty-converter"].excluded is False
 
 
+#: What a converter's dependency check records when its tool is unavailable, in
+#: the words the notebook converter's check uses for its own reasons.
+_UNAVAILABLE_REASON = "nbconvert could not be installed through uv"
+
+#: The reason a row records for a check that gave none, or raised.
+_UNNAMED_REASON = (
+    "missing-tool-converter's dependency check failed; ash.log has the "
+    "converter's own message"
+)
+
+
+def _converter_whose_check_says(reason: str):
+    """A converter whose dependency check records *reason* and answers False."""
+
+    class _Reasoned(_MissingToolConverter):
+        def validate_plugin_dependencies(self) -> bool:
+            self.dependency_unavailable_reason = reason
+            return False
+
+    return _Reasoned
+
+
+class _RaisingCheckConverter(_MissingToolConverter):
+    """Its dependency check raises, which the phase records as unsatisfied."""
+
+    def validate_plugin_dependencies(self) -> bool:
+        raise RuntimeError("the dependency check itself failed")
+
+
+class TestAnUnavailableConvertersRowSaysWhy:
+    """A converter whose dependencies are unavailable records why in its row, as
+    a MISSING scanner's row does, so a results file, a merge of shards and an MCP
+    client have the reason the console's warning gives."""
+
+    def test_the_row_carries_the_reason_its_check_recorded(self, plugin_context):
+        results = _run(
+            plugin_context, [_converter_whose_check_says(_UNAVAILABLE_REASON)]
+        )
+
+        row = results.converter_results["missing-tool-converter"]
+        # The control: this is the unavailable converter's row.
+        assert row.dependencies_satisfied is False, row
+        assert row.dependency_unavailable_reason == _UNAVAILABLE_REASON, row
+
+    @pytest.mark.parametrize(
+        "converter",
+        [_MissingToolConverter, _RaisingCheckConverter],
+        ids=["no-reason", "check-raises"],
+    )
+    def test_a_check_that_gave_no_reason_is_named_in_its_row(
+        self, plugin_context, converter
+    ):
+        results = _run(plugin_context, [converter])
+
+        row = results.converter_results["missing-tool-converter"]
+        assert row.dependencies_satisfied is False, row
+        assert row.dependency_unavailable_reason == _UNNAMED_REASON, row
+
+    def test_the_reason_writes_the_home_directory_as_a_tilde(self, plugin_context):
+        reason = f"{Path.home().as_posix()}/bin/jupyter-nbconvert did not verify"
+        results = _run(plugin_context, [_converter_whose_check_says(reason)])
+
+        row = results.converter_results["missing-tool-converter"]
+        assert row.dependency_unavailable_reason == (
+            "~/bin/jupyter-nbconvert did not verify"
+        ), row
+
+    def test_the_reason_carries_no_value_the_run_read_from_the_environment(
+        self, plugin_context
+    ):
+        value = "/nonexistent/ENVCANARY-3c7e/nbconvert"
+        plugin_context.config._environment_values = [value]
+        results = _run(
+            plugin_context, [_converter_whose_check_says(f"{value} is not executable")]
+        )
+
+        row = results.converter_results["missing-tool-converter"]
+        # The control: the row carries the reason, without the value.
+        assert "is not executable" in str(row.dependency_unavailable_reason), row
+        assert "ENVCANARY-3c7e" not in str(row.dependency_unavailable_reason), row
+
+    def test_the_reason_carries_no_value_only_the_converter_read(self, plugin_context):
+        """A value the converter read from the environment that the run's
+        configuration does not hold (its own options' reads) is left out of the
+        row too."""
+        value = "/nonexistent/OWNCANARY-81d2/nbconvert"
+
+        class _OwnValue(_converter_whose_check_says(f"{value} is not executable")):
+            def _environment_values(self):
+                return (value,)
+
+        results = _run(plugin_context, [_OwnValue])
+
+        row = results.converter_results["missing-tool-converter"]
+        # The control: the run's configuration holds no such value, so only the
+        # converter's own can hide it.
+        assert value not in (plugin_context.config._environment_values or [])
+        assert "is not executable" in str(row.dependency_unavailable_reason), row
+        assert "OWNCANARY-81d2" not in str(row.dependency_unavailable_reason), row
+
+    def test_every_row_whose_dependencies_were_satisfied_carries_none(
+        self, plugin_context
+    ):
+        results = _run(
+            plugin_context,
+            [
+                _ProductiveConverter,
+                _EmptyConverter,
+                _DisabledConverter,
+                _RaisingConverter,
+            ],
+        )
+
+        # The control: every one of them has a row.
+        assert len(results.converter_results) == 4, results.converter_results
+        for name, row in results.converter_results.items():
+            assert row.dependency_unavailable_reason is None, (name, row)
+
+    def test_the_field_is_declared_in_the_results_schema(self):
+        from automated_security_helper.models.asharp_model import ConverterStatusInfo
+
+        properties = ConverterStatusInfo.model_json_schema()["properties"]
+        assert "dependency_unavailable_reason" in properties, sorted(properties)
+
+
 class TestAConverterThatFailedToConstructIsRecorded:
     """The third hole in the same function, keyed on the class rather than a name.
 
@@ -383,14 +511,18 @@ class TestTheRecordedRowsReachTheGate:
         results = _run(plugin_context, [_MissingToolConverter])
 
         assert incomplete_converters(results) == [
-            ("missing-tool-converter", "dependencies unavailable, so it never ran")
+            IncompleteConverter(
+                "missing-tool-converter", "dependencies unavailable, so it never ran"
+            )
         ]
 
     def test_a_crash_recorded_by_the_phase_is_listed_by_the_gate(self, plugin_context):
         results = _run(plugin_context, [_RaisingConverter])
 
         assert incomplete_converters(results) == [
-            ("raising-converter", "RuntimeError: nbconvert is not on PATH")
+            IncompleteConverter(
+                "raising-converter", "RuntimeError: nbconvert is not on PATH"
+            )
         ]
 
     def test_a_disabled_converter_recorded_by_the_phase_is_not_listed(

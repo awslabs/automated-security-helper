@@ -1,21 +1,21 @@
 $ ash config validate --config invalid.yaml
 Validating configuration file: invalid.yaml
 
-❌ Configuration validation failed with 9 error(s):
-  1. Missing required top-level field: 'project_name'
-  2. Invalid top-level field 'build' - this is an internal field and should not be in user configs
-  3. Unknown top-level field 'legacy_option' - may cause parsing issues
+❌ 3 error(s); a scan refuses the configuration because of these:
+  1. Invalid value at 'build.build_mode': Input should be 'ONLINE' or 'OFFLINE'
+  2. Invalid value at 'converters.archive': Value error, Converter 'archive' contains internal-only field 'install_timeout' - this should not be in user configs.
+  3. Invalid value at 'scanners.bandit': Value error, Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs; if you meant a version constraint, put it under options.
+
+⚠️  7 warning(s); a scan accepts these, but check them:
+  1. Top-level field 'project_name' is not set, so reports name the project 'ash-scan' (or the ASH_PROJECT_NAME environment variable)
+  2. Top-level field 'build' is an internal field and should not be in user configs
+  3. Unknown top-level field 'legacy_option' - a scan ignores it
   4. Duplicate top-level field 'fail_on_findings' found at multiple locations
   5. Scanner 'bandit' contains internal-only field 'name' - this should not be in user configs
-  6. Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs
-  7. Reporter 'html' contains internal-only field 'extension' - this should not be in user configs
-  8. Converter 'archive' contains internal-only field 'install_timeout' - this should not be in user configs
-  9. Path 'vendor' points to a directory but matches no file in it. Use 'vendor/' to ignore every file inside the directory.
+  6. Reporter 'html' contains internal-only field 'extension' - this should not be in user configs
+  7. Path 'vendor' points to a directory but matches no file in it. Use 'vendor/' to ignore every file inside the directory.
 
-💡 Common fixes:
-  - Remove internal-only fields like 'name', 'extension', 'tool_version' from scanner/reporter configs
-  - Remove invalid top-level sections like 'build' or 'mcp-resource-management'
-  - Check for duplicate field definitions in your YAML file
+💡 'ash config lint --fix' removes internal-only fields and sections.
 
-📖 See the ASH configuration documentation for the correct format.
-[exit code: 1]
+❌ Configuration is invalid: a scan refuses it with exit 3. The configuration guide, and the JSON schema at automated_security_helper/schemas/AshConfig.json, give each field's type and allowed values.
+[exit code: 3]

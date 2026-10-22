@@ -196,9 +196,9 @@ class TestReportPathIsNotDotBlind:
         """`**` does not descend into hidden directories such as `.ash/`.
 
         Scoped to this workflow on purpose. run-unit-tests publishes
-        `**/pytest.junit.xml`, which is correct there: `test-results/` is not
-        hidden, so that glob does match. The dot-blindness only bites a report
-        written under a dot-directory, which is this workflow's default.
+        `test-results/*.junit.xml`, and `test-results/` is not hidden, so a glob
+        would match there too. The dot-blindness only bites a report written
+        under a dot-directory, which is this workflow's default.
         """
         report_paths = str(_junit_publish_step(workflow)["with"]["report_paths"])
         assert "**" not in report_paths, (

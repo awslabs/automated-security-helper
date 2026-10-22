@@ -174,6 +174,27 @@ UNREADABLE = [
     pytest.param("empty.zip", b"", id="empty-file"),
     pytest.param("noise.tar.gz", b"\x1f\x8b" + b"\x00" * 64, id="damaged-gzip"),
     pytest.param(
+        "clash.zip", zip_of(FILE_OVER_DIRECTORY), id="zip-file-over-a-directory"
+    ),
+    pytest.param(
+        "clash.tar", tar_of(FILE_OVER_DIRECTORY), id="tar-file-over-a-directory"
+    ),
+    pytest.param(
+        "clash.zip", zip_of(DIRECTORY_OVER_FILE), id="zip-directory-over-a-file"
+    ),
+    pytest.param(
+        "clash.tar", tar_of(DIRECTORY_OVER_FILE), id="tar-directory-over-a-file"
+    ),
+]
+
+
+#: Tars whose damage sits PAST a readable member: the skip-tolerant listing
+#: extracts the members it can read and records the remainder as one FAILED
+#: input ("extracted only in part"), which the completeness gate reads, and
+#: archives_extracted_whole holds the archive back from whole-archive
+#: consumers. The all-or-nothing posture for these shapes is superseded.
+EXTRACTED_IN_PART = [
+    pytest.param(
         "header.tar", tar_with_damaged_second_header(), id="tar-damaged-second-header"
     ),
     pytest.param(
@@ -192,18 +213,6 @@ UNREADABLE = [
     pytest.param("inside.tar", tar_cut_inside_a_header(), id="tar-cut-inside-header"),
     pytest.param(
         "noise.tar", tar_with_noise_for_a_header(), id="tar-noise-for-a-header"
-    ),
-    pytest.param(
-        "clash.zip", zip_of(FILE_OVER_DIRECTORY), id="zip-file-over-a-directory"
-    ),
-    pytest.param(
-        "clash.tar", tar_of(FILE_OVER_DIRECTORY), id="tar-file-over-a-directory"
-    ),
-    pytest.param(
-        "clash.zip", zip_of(DIRECTORY_OVER_FILE), id="zip-directory-over-a-file"
-    ),
-    pytest.param(
-        "clash.tar", tar_of(DIRECTORY_OVER_FILE), id="tar-directory-over-a-file"
     ),
 ]
 
@@ -253,7 +262,44 @@ def test_an_unreadable_archive_fails_the_completeness_gate(
 
     listed = incomplete_converters(model)
 
-    assert [n for n, _ in listed] == ["archive"]
+    assert [row.name for row in listed] == ["archive"]
+    assert name in listed[0][1]
+
+
+@pytest.mark.parametrize("name, data", EXTRACTED_IN_PART)
+def test_a_damaged_tar_is_extracted_in_part_with_the_loss_recorded(
+    name, data, test_plugin_context, monkeypatch, ash_warnings
+):
+    """The readable members are extracted; the remainder is ONE failed input."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+        archives_extracted_whole,
+    )
+
+    converter, results = convert(test_plugin_context, monkeypatch, name, data)
+
+    (extracted,) = results
+    assert files_under(converter) != [], "the readable members are extracted"
+    assert [r.path for r in converter.failed_inputs] == [name]
+    assert "extracted only in part" in converter.failed_inputs[0].reason
+    assert converter.refused_inputs == [], "one record per archive, failed category"
+    assert archives_extracted_whole(test_plugin_context) == set(), (
+        "a partially-extracted archive is held back from whole-archive consumers"
+    )
+
+
+@pytest.mark.parametrize("name, data", EXTRACTED_IN_PART)
+def test_a_tar_extracted_in_part_fails_the_completeness_gate(
+    name, data, test_plugin_context, monkeypatch
+):
+    converter, _ = convert(test_plugin_context, monkeypatch, name, data)
+    model = AshAggregatedResults()
+    model.converter_results["archive"] = ConverterStatusInfo(
+        converted_paths=[], failed_inputs=list(converter.failed_inputs)
+    )
+
+    listed = incomplete_converters(model)
+
+    assert [row.name for row in listed] == ["archive"]
     assert name in listed[0][1]
 
 

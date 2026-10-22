@@ -78,11 +78,11 @@ describe('sharded scan contract', () => {
   });
 
   test('a shard that produced no results file fails instead of passing empty', () => {
-    // Click reports a usage error as exit 2 and ASH reports actionable findings as
-    // exit 2. Trusting the code would let an unrecognized flag look like "found
-    // findings" and upload an empty shard, which the merge would then treat as a
-    // clean subset. Gating on the artifact the merge consumes removes the
-    // ambiguity entirely.
+    // ASH 3.7.0 and 3.7.1 report a usage error as exit 2, the code they use for
+    // actionable findings (releases after 3.7.1 exit 5). Trusting the code would let a refused
+    // command line look like "found findings" and upload an empty shard, which the
+    // merge would then treat as a clean subset. Gating on the artifact the merge
+    // consumes removes the ambiguity entirely.
     const specs = Object.values(buildSpecsByName(template)).filter((s) =>
       s.includes('ASH_SHARD_INDEX'),
     );

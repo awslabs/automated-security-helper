@@ -125,6 +125,20 @@ def _resolve_while_registering(manager: AshPluginManager) -> Optional[BaseExcept
     return escaped
 
 
+def _counting_imports(calls: List[str]):
+    """Patch importlib.import_module to record the scanner module's imports."""
+    import importlib
+
+    real_import = importlib.import_module
+
+    def counting_import(name, *args, **kwargs):
+        if name == REAL_SCANNER_MODULE:
+            calls.append(name)
+        return real_import(name, *args, **kwargs)
+
+    return patch.object(importlib, "import_module", counting_import)
+
+
 class TestARegistrationDuringAResolve:
     """A registration forced into a resolve on a cold cache."""
 
@@ -151,6 +165,20 @@ class TestARegistrationDuringAResolve:
         assert [cls.__name__ for cls in manager.plugin_modules("scanner")] == [
             "BanditScanner"
         ]
+
+    def test_the_next_resolution_picks_it_up(self):
+        manager = _manager()
+        _resolve_while_registering(manager)
+        calls: List[str] = []
+
+        with _counting_imports(calls):
+            manager.plugin_modules("scanner")
+
+        assert calls, "the registry changed and the memo was reused anyway"
+        names = [
+            name for name, _, _ in manager._resolved_plugins["scanner"].registrations
+        ]
+        assert "registered-mid-iteration" in names
 
 
 class TestTheCopyIsTakenUnderTheLock:
@@ -259,9 +287,14 @@ class TestTheCacheFollowsTheRegistrations:
             manager.plugin_modules("scanner")
             assert calls == [], "the cache did not warm again after the re-read"
 
+        names = [
+            name for name, _, _ in manager._resolved_plugins["scanner"].registrations
+        ]
+        assert names[-1] == "added-later"
 
-class TestAWarmCacheClosesIt:
-    def test_the_same_forced_mutation_no_longer_escapes(self):
+
+class TestAWarmCache:
+    def test_the_same_forced_mutation_does_not_escape(self):
         """Identical construction, cache resolved first. Nothing may escape."""
         manager = _manager()
         manager.plugin_modules("scanner")  # what prewarm_plugin_registry does
@@ -270,32 +303,24 @@ class TestAWarmCacheClosesIt:
         assert _resolve_while_registering(manager) is None
 
     def test_a_warm_resolve_never_enters_the_import_loop(self):
-        """The mechanism, observed rather than inferred.
-
-        If the warm path still imported, the previous test would be passing for
-        the wrong reason -- a fast loop rather than no loop.
-        """
-        import importlib
-
+        """With no registration since, the memo answers and nothing is imported."""
         manager = _manager()
         manager.plugin_modules("scanner")
 
         calls: List[str] = []
-        real_import = importlib.import_module
-
-        def counting_import(name, *args, **kwargs):
-            if name == REAL_SCANNER_MODULE:
-                calls.append(name)
-            return real_import(name, *args, **kwargs)
-
-        with patch.object(importlib, "import_module", counting_import):
+        with _counting_imports(calls):
             manager.plugin_modules("scanner")
 
         assert calls == []
 
     @pytest.mark.parametrize("readers", [2, 4, 8])
-    def test_many_concurrent_readers_are_safe_once_warm(self, readers):
-        """A workspace at max_parallel_projects=8 is eight concurrent readers."""
+    def test_concurrent_readers_and_a_writer_are_safe(self, readers):
+        """A workspace at max_parallel_projects=8 is eight concurrent readers.
+
+        Every registration the writer makes sends the readers' next resolution
+        back through the loop, so this runs the copy-and-iterate path under
+        contention, not only the memo.
+        """
         manager = _manager(seed=30)
         manager.plugin_modules("scanner")
 

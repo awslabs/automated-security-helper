@@ -1,30 +1,30 @@
- ⭘                                    ASH Security Findings                                03:04:05
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ ID  Rule ID                                     Severity  Scanner  File          Line  Message   │
-│ 1   B105                                        high      bandit   src/app.py    12    Possible h│
-│ 2   javascript.lang.security.audit.unsafe-eval  low       semgrep  web/index.js  N/A   Avoid eval│
-│ 3   GHSA-0000-fixture                           info      unknown  N/A           N/A   Package le│
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                        ▉                         │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
-Total: 4 | Showing: 3 | Hiding suppressed | s=search | f=filters | h=toggle suppressed
+                             ASH findings — Findings explorer
 
+  3 active  ·  1 critical  ·  1 low  ·  1 info  ·  1 suppressed
 
+ ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Severity    Finding                                              Location                    │
+ │ CRITICAL    B105                                                 src/app.py                  │
+ │             Possible hardcoded password: 'hunter2'               line 12                     │
+ │ LOW         javascript.lang.security.audit.unsafe-eval           web/index.js                │
+ │             Avoid eval() on user input                                                       │
+ │ INFO        GHSA-0000-fixture                                    N/A                         │
+ │             Package left-pad 1.0.0 has a known advisory                                      │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ │                                                                                              │
+ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 
+  B105  ·  bandit  ·  Active
+  src/app.py  ·  line 12
 
+  Showing 3 of 4 · Suppressed hidden · Enter: details
 
- q Quit  f Toggle Filters  j Next Finding  k Previous Finding  v View Selected  s Search▏^p palette
+q Quit f Filters / Search h Suppressed r Reset x Suppress
+                                Build with <3 at Amazon Web Services

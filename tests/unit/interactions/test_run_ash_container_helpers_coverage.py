@@ -36,18 +36,19 @@ the assertion would then be about the patch rather than about the command.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
+import signal
 import sys
 from pathlib import Path
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError, TimeoutExpired
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import patch
 
 import pytest
 
-from automated_security_helper.core.constants import ASH_REPO_LATEST_REVISION
 from automated_security_helper.core.enums import (
     AshLogLevel,
     ExecutionPhase,
@@ -68,7 +69,12 @@ from automated_security_helper.interactions.run_ash_container import (
     validate_path,
 )
 from automated_security_helper.utils import subprocess_utils
-from automated_security_helper.utils.subprocess_utils import create_completed_process
+from automated_security_helper.utils.subprocess_utils import (
+    INTERRUPT_GRACE_SECONDS,
+    INTERRUPT_WAIT_SLICE_SECONDS,
+    create_completed_process,
+)
+from tests.utils.windows_console import as_windows
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +89,23 @@ class TestValidateAshRevision:
 
     def test_none_is_rejected(self):
         assert _validate_ash_revision(None) is False
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0123456789abcdef0123456789abcdef01234567\n",
+            "v3.7.0\n",
+            (
+                "0123456789abcdef0123456789abcdef01234567\n"
+                "89abcdef0123456789abcdef0123456789abcdef"
+            ),
+        ],
+        ids=["commit-id-and-newline", "tag-and-newline", "two-commit-ids"],
+    )
+    def test_a_line_break_is_rejected_wherever_it_is(self, value):
+        """`$` in re.match also matches before a final newline, so a revision with
+        one passed and reached the image build as a build argument."""
+        assert _validate_ash_revision(value) is False
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +127,12 @@ _REPO_ROOT_MARKERS = frozenset(
 )
 
 
+# What the fixture below says the build recorded in assets/ASH_INSTALLED_REVISION.
+# The real file holds the branch of the checkout the suite runs in, which is "HEAD"
+# on a detached CI checkout, and get_ash_revision treats that value as no record.
+RECORDED_BRANCH = "main"
+
+
 @pytest.fixture
 def pip_installed_ash(monkeypatch, tmp_path):
     """Make ``get_ash_revision`` take the pip-installed branch.
@@ -111,12 +140,14 @@ def pip_installed_ash(monkeypatch, tmp_path):
     The function decides between LOCAL and a git revision by probing eight
     marker paths beside the package. In this worktree they all exist, so the
     function returns LOCAL before reaching any of the dist-info handling. This
-    reports those eight -- and only those eight -- as absent, and points
-    ``import_module`` at a package directory the test owns.
+    reports those eight -- and only those eight -- as absent, points
+    ``import_module`` at a package directory the test owns, and records
+    RECORDED_BRANCH as the revision the build wrote.
 
     Returns the ``direct_url.json`` path the function will look for. The test
     decides whether it exists and what it contains.
     """
+    monkeypatch.setattr(rac, "ASH_REPO_LATEST_REVISION", RECORDED_BRANCH)
     real_exists = Path.exists
 
     def fake_exists(self, *args, **kwargs):
@@ -139,13 +170,33 @@ def pip_installed_ash(monkeypatch, tmp_path):
 
 
 class TestGetAshRevisionFromDirectUrl:
-    def test_a_local_file_url_still_builds_from_local_source(self, pip_installed_ash):
-        """pip install of a local path is a local build, not a git checkout."""
+    def test_a_local_ash_source_directory_builds_from_local_source(
+        self, pip_installed_ash, tmp_path
+    ):
+        """pip install of an ASH source directory is a local build, not a git checkout."""
+        tree = tmp_path / "ash-src"
+        tree.mkdir()
+        (tree / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (tree / "pyproject.toml").write_text(
+            '[project]\nname = "automated-security-helper"\n', encoding="utf-8"
+        )
         pip_installed_ash.write_text(
-            json.dumps({"url": "file://" + pip_installed_ash.parent.as_posix()}),
-            encoding="utf-8",
+            json.dumps({"url": tree.as_uri(), "dir_info": {}}), encoding="utf-8"
         )
         assert get_ash_revision() == "LOCAL"
+
+    def test_a_local_path_that_is_not_an_ash_tree_is_not_local(self, pip_installed_ash):
+        """Here the dist-info's own directory: no Dockerfile, no pyproject.toml.
+
+        It is not LOCAL. test_container_image_revision.py has the cases in full.
+        """
+        pip_installed_ash.write_text(
+            json.dumps(
+                {"url": "file://" + pip_installed_ash.parent.as_posix(), "dir_info": {}}
+            ),
+            encoding="utf-8",
+        )
+        assert get_ash_revision() == RECORDED_BRANCH
 
     def test_requested_revision_wins_over_commit_id(self, pip_installed_ash):
         """The tag the operator asked for is more useful than its resolved sha."""
@@ -183,7 +234,7 @@ class TestGetAshRevisionFromDirectUrl:
             json.dumps({"url": "git+https://example.invalid/ash.git", "vcs_info": {}}),
             encoding="utf-8",
         )
-        assert get_ash_revision() == ASH_REPO_LATEST_REVISION
+        assert get_ash_revision() == RECORDED_BRANCH
 
     def test_a_url_without_vcs_info_falls_back_to_the_latest_revision(
         self, pip_installed_ash
@@ -193,28 +244,32 @@ class TestGetAshRevisionFromDirectUrl:
             json.dumps({"url": "https://example.invalid/ash-1.0.0.tar.gz"}),
             encoding="utf-8",
         )
-        assert get_ash_revision() == ASH_REPO_LATEST_REVISION
+        assert get_ash_revision() == RECORDED_BRANCH
 
     def test_unparseable_direct_url_json_falls_back_rather_than_raising(
         self, pip_installed_ash
     ):
         """A corrupt dist-info must not stop a container build."""
         pip_installed_ash.write_text("{ this is not json", encoding="utf-8")
-        assert get_ash_revision() == ASH_REPO_LATEST_REVISION
+        assert get_ash_revision() == RECORDED_BRANCH
 
-    def test_a_json_document_that_is_not_an_object_yields_no_revision(
+    def test_a_json_document_that_is_not_an_object_builds_the_release_tag(
         self, pip_installed_ash
     ):
-        """Well-formed JSON of the wrong shape leaves the revision unresolved."""
+        """Well-formed JSON of the wrong shape records nothing, so the version's tag.
+
+        The revision is never None, so no build passes INSTALL_ASH_REVISION=None.
+        test_container_image_revision.py has the rest.
+        """
         pip_installed_ash.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
-        assert get_ash_revision() is None
+        assert get_ash_revision() == "v9.9.9"
 
     def test_no_direct_url_json_falls_back_to_the_latest_revision(
         self, pip_installed_ash
     ):
         """A plain `pip install ash` from an index has no direct_url.json."""
         assert not pip_installed_ash.exists()
-        assert get_ash_revision() == ASH_REPO_LATEST_REVISION
+        assert get_ash_revision() == RECORDED_BRANCH
 
     @pytest.mark.parametrize(
         "direct_url",
@@ -282,6 +337,11 @@ class _StubPipe:
         return self._lines.pop(0) if self._lines else ""
 
 
+#: Stand-in pids above 2**30 sit past the kernel's pid space, so a signal or
+#: waitid aimed at one can only fail: no stray kill can reach a real process.
+_STUB_PIDS = itertools.count(2**30 + 101)
+
+
 class _StubProcess:
     """Stands in for the Popen that ``create_process_with_pipes`` returns.
 
@@ -302,16 +362,21 @@ class _StubProcess:
         self.stdout = _StubPipe(stdout_lines, raises=stdout_raises)
         self.stderr = _StubPipe(stderr_lines)
         self.returncode = returncode
+        self.pid = next(_STUB_PIDS)
         self._poll_raises = poll_raises
         self._wait_raises = wait_raises
         self.terminated = False
         self.killed = False
+        self.signals: List[int] = []
         self.wait_timeouts: List[Any] = []
 
     def poll(self):
         if self._poll_raises is not None:
             raise self._poll_raises
         return self.returncode
+
+    def send_signal(self, signum):
+        self.signals.append(signum)
 
     def terminate(self):
         self.terminated = True
@@ -392,9 +457,24 @@ class TestRunCmdDirectAgainstARealChild:
         assert result.stdout.strip() == "given"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the runtime is sent SIGINT on POSIX")
 class TestRunCmdDirectInterruption:
-    def test_ctrl_c_terminates_then_escalates_to_kill(self, stub_process, capfd):
-        """A process that ignores SIGTERM must still be killed, not waited on."""
+    """Ctrl-C is passed on to the runtime, which gets the grace to stop, and re-raised.
+
+    The runtime is not sent SIGTERM, which would kill it before it could pass the
+    interrupt to the container and leave a -15 status (exit 241). Container mode
+    exits 130, as an interrupted local scan does.
+    """
+
+    @pytest.fixture(autouse=True)
+    def not_the_terminals_foreground(self, monkeypatch):
+        """Off a terminal, as under pytest: the runtime did not get the Ctrl-C itself."""
+        monkeypatch.setattr(
+            os, "tcgetpgrp", lambda fd: (_ for _ in ()).throw(OSError("not a tty"))
+        )
+
+    def test_ctrl_c_forwards_the_interrupt_then_escalates_to_kill(self, stub_process):
+        """A runtime that does not stop within the grace is killed, not waited on."""
         process = stub_process(
             _StubProcess(
                 returncode=None,
@@ -402,20 +482,153 @@ class TestRunCmdDirectInterruption:
                 wait_raises=TimeoutError("did not exit"),
             )
         )
-        result = run_cmd_direct(["ignored"], check=False)
-        assert process.terminated is True
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.signals == [signal.SIGINT]
+        assert process.terminated is False
         assert process.killed is True
         assert process.wait_timeouts == [5, None]
-        assert result.returncode == -1
-        assert "Command interrupted by user" in capfd.readouterr().err
 
-    def test_ctrl_c_does_not_kill_a_process_that_exits_on_terminate(self, stub_process):
+    def test_ctrl_c_does_not_kill_a_runtime_that_stops_on_the_interrupt(
+        self, stub_process
+    ):
         process = stub_process(
-            _StubProcess(returncode=0, poll_raises=KeyboardInterrupt())
+            _StubProcess(returncode=130, poll_raises=KeyboardInterrupt())
         )
-        run_cmd_direct(["ignored"], check=False)
-        assert process.terminated is True
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.signals == [signal.SIGINT]
         assert process.killed is False
+        assert process.wait_timeouts == [5]
+
+    def test_a_second_ctrl_c_during_the_grace_kills_at_once(self, stub_process):
+        """The operator pressed Ctrl-C again: stop waiting for the runtime."""
+        process = stub_process(
+            _StubProcess(
+                returncode=None,
+                poll_raises=KeyboardInterrupt(),
+                wait_raises=KeyboardInterrupt(),
+            )
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.killed is True
+        assert process.wait_timeouts == [5, None]
+
+    def test_a_terminals_ctrl_c_is_not_sent_to_the_runtime_twice(
+        self, stub_process, monkeypatch
+    ):
+        """In the terminal's foreground group, the runtime got the same SIGINT."""
+        monkeypatch.setattr(sys, "stdin", SimpleNamespace(fileno=lambda: 0))
+        monkeypatch.setattr(os, "tcgetpgrp", lambda fd: os.getpgrp())
+        process = stub_process(
+            _StubProcess(returncode=130, poll_raises=KeyboardInterrupt())
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.signals == []
+        assert process.wait_timeouts == [5]
+
+
+class _StillRunning(_StubProcess):
+    """A runtime that outlives every timed wait, as Popen.wait reports it."""
+
+    def wait(self, timeout=None):
+        self.wait_timeouts.append(timeout)
+        if timeout is not None:
+            raise TimeoutExpired("runtime", timeout)
+        return self.returncode
+
+
+#: The waits on Windows: the grace in slices, so a second Ctrl-C lands between them.
+_SLICES = [INTERRUPT_WAIT_SLICE_SECONDS] * round(
+    INTERRUPT_GRACE_SECONDS / INTERRUPT_WAIT_SLICE_SECONDS
+)
+
+
+class TestRunCmdDirectInterruptionOnWindows:
+    """On Windows the runtime shares ASH's console, so a Ctrl-C there reached it too.
+
+    Pinned here, at the caller, as well as in subprocess_utils: a run_cmd_direct that
+    stopped the runtime itself rather than through the helper fails these. The
+    platform and the console are stood in for (tests/utils/windows_console.py); the
+    windows-latest CI leg is the real check.
+    """
+
+    def test_with_a_console_the_runtime_is_not_terminated_before_the_grace(
+        self, stub_process, monkeypatch
+    ):
+        """terminate() at once cut short the runtime's own handling of the Ctrl-C."""
+        as_windows(monkeypatch, console=True)
+        process = stub_process(
+            _StillRunning(returncode=None, poll_raises=KeyboardInterrupt())
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.terminated is False
+        assert process.signals == []
+        assert process.wait_timeouts == _SLICES + [None]
+        assert process.killed is True, "a runtime still running after the grace"
+
+    def test_with_a_console_a_runtime_that_stops_in_the_grace_is_not_killed(
+        self, stub_process, monkeypatch
+    ):
+        as_windows(monkeypatch, console=True)
+        process = stub_process(
+            _StubProcess(returncode=130, poll_raises=KeyboardInterrupt())
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.terminated is False
+        assert process.killed is False
+        assert process.wait_timeouts == _SLICES[:1]
+
+    def test_with_a_console_a_second_ctrl_c_kills_at_once(
+        self, stub_process, monkeypatch
+    ):
+        as_windows(monkeypatch, console=True)
+        process = stub_process(
+            _StubProcess(
+                returncode=None,
+                poll_raises=KeyboardInterrupt(),
+                wait_raises=KeyboardInterrupt(),
+            )
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.terminated is False
+        assert process.killed is True
+        assert process.wait_timeouts == _SLICES[:1] + [None]
+
+    def test_without_a_console_the_runtime_is_terminated(
+        self, stub_process, monkeypatch
+    ):
+        """Nothing passed the Ctrl-C to the runtime, so ASH stops it."""
+        as_windows(monkeypatch, console=False)
+        process = stub_process(
+            _StubProcess(returncode=1, poll_raises=KeyboardInterrupt())
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            run_cmd_direct(["ignored"], check=False)
+
+        assert process.terminated is True
+        assert process.signals == []
+        assert process.wait_timeouts == _SLICES[:1]
 
 
 class TestRunCmdDirectPipeFailure:
@@ -1132,6 +1345,15 @@ class TestAssembleRunCommandFlagPassthrough:
             "destination=/ash-config/ash.yaml,readonly"
         ) in cmd
 
+    def test_config_is_forwarded_at_its_container_path(self, tmp_path):
+        """An in-source config is read through the /src mount, so the inner
+        scan is given its path there, not the host path, which names nothing
+        inside the container."""
+        config = tmp_path / "ash.yaml"
+        config.write_text("project_name: t\n", encoding="utf-8")
+        cmd = _run_command(tmp_path, tmp_path / "out", config=str(config))
+        assert cmd[cmd.index("--config") + 1] == "/src/ash.yaml"
+
     def test_existing_results_becomes_the_declared_flag(self, tmp_path):
         """Inverted assertion.
 
@@ -1220,9 +1442,9 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
 
     This closes a class rather than an instance. ``--existing-results`` was emitted here
     for as long as the file has existed and is declared nowhere; the in-container CLI
-    rejects an unknown option with a usage error, and a usage error exits 2, which is
-    also ASH's code for actionable findings -- so the host's read-back could not tell the
-    rejected invocation from a dirty scan, and the flag went unnoticed.
+    rejects an unknown option with a usage error, and the real ``ash`` group exits
+    ASH_EXIT_USAGE_ERROR for it, a code apart from 2, ASH's code for actionable
+    findings, so the host's read-back tells the rejected invocation from a dirty scan.
 
     Asserting a flag is ``in cmd`` cannot catch that: presence in the list it was written
     into is guaranteed by the writing. The question is whether the receiving parser
@@ -1287,8 +1509,9 @@ class TestTheInnerArgvIsAcceptedByTheInnerCli:
 
         If --existing-results were ever declared, emitting --use-existing instead would
         be a silent behavior change rather than a fix. The exit code is asserted because
-        it is the reason nobody noticed: a usage error exits 2, and 2 is also ASH's code
-        for actionable findings.
+        it is the reason nobody noticed: click's usage error exits 2, and 2 is also ASH's
+        code for actionable findings. This parses with a bare command, not the ``ash``
+        group, so it sees click's own code; ``ash`` maps it to ASH_EXIT_USAGE_ERROR.
         """
         from typer.exceptions import TyperException
 

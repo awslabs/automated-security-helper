@@ -31,11 +31,13 @@ import errno
 import json
 import os
 import platform
+import re
 import signal
 import stat
 import struct
 import time
 import sys
+import unicodedata
 from typing import Any, Callable, Dict, List, NoReturn, Tuple
 
 SYS_LANDLOCK_CREATE_RULESET = 444
@@ -116,8 +118,64 @@ libc = ctypes.CDLL(None, use_errno=True)
 libc.syscall.restype = ctypes.c_long
 
 
+#: The Unicode categories of the characters written as escapes, not printed:
+#: utils/terminal_text.py's SHOWN_AS_ESCAPES.
+_SHOWN_AS_ESCAPES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+_ESCAPE_TEXT = re.compile(r"x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}")
+_CANDIDATES = re.compile(
+    r"(?<!\\)(\\+)(?=x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[^\x20-\x7e])"
+    r"|[^\x20-\x7e]"
+)
+
+
+def _escape_for(character: str) -> str:
+    code = ord(character)
+    if code <= 0xFF:
+        return "\\x%02x" % code
+    if code <= 0xFFFF:
+        return "\\u%04x" % code
+    return "\\U%08x" % code
+
+
+def _shown(text: str) -> str:
+    """*text* on one line, shown and not obeyed: what utils/terminal_text.py's
+    shown_on_one_line writes, inlined since this program imports nothing from ASH.
+
+    Each control, format, separator, surrogate, private-use and unassigned
+    character (tab, newline and carriage return included) as ``\\xNN``,
+    ``\\uNNNN`` or ``\\UNNNNNNNN``, a run of backslashes before text that reads as
+    one of those or before such a character doubled, and each CI command form
+    broken: "::" at the start, and "##" with an optional name and "[" anywhere (a
+    bare "##" is left). The error text and the scanner's path it quotes are the
+    repository's or the tool's. tests/unit/utils/test_landlock_exec_shows_text.py
+    checks that this writes what shown_on_one_line writes.
+    """
+
+    def one(match: "re.Match[str]") -> str:
+        run = match.group(1)
+        if run:
+            after = match.end()
+            if _ESCAPE_TEXT.match(text, after) or (
+                after < len(text)
+                and unicodedata.category(text[after]) in _SHOWN_AS_ESCAPES
+            ):
+                return run * 2
+            return run
+        character = match.group()
+        if unicodedata.category(character) in _SHOWN_AS_ESCAPES:
+            return _escape_for(character)
+        return character
+
+    shown = _CANDIDATES.sub(one, text)
+    shown = re.sub(r"^([^\S\n]*):(?=:)", r"\1\\x3a", shown, flags=re.MULTILINE)
+    return re.sub(
+        r"(\\*)#(?=#[A-Za-z]*\[)", lambda match: match.group(1) * 2 + "\\x23", shown
+    )
+
+
 def fail(message: str) -> NoReturn:
-    sys.stderr.write(f"ash-landlock: {message}\n")
+    # The message quotes policy paths, which name the scanned tree's directories.
+    sys.stderr.write(_shown(f"ash-landlock: {message}") + "\n")
     sys.exit(126)
 
 
@@ -294,7 +352,7 @@ def main(argv: List[str]) -> int:
                 "kernel parameter)\n"
             )
             return 1
-        print(abi)
+        print(abi)  # print-ok: an int, the ABI version the parent reads
         return 0
     if argv[:1] == ["--socket-filter"]:
         if len(argv) < 4 or argv[1] not in ("unix", "all") or argv[2] != "--":
@@ -408,7 +466,8 @@ def run_and_reap(command: List[str], restrict: Callable[[], None]) -> int:
             restrict()
             os.execve(command[0], command, os.environ)
         except OSError as e:
-            sys.stderr.write(f"ash-landlock: exec {command[0]}: {e}\n")
+            # The scanner's path, and the error that quotes it.
+            sys.stderr.write(_shown(f"ash-landlock: exec {command[0]}: {e}") + "\n")
         except BaseException:  # noqa: BLE001 - fail() raises SystemExit
             pass
         # Whatever happened, the child never returns into the wrapper's code; a

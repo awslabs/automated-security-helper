@@ -159,7 +159,15 @@ class TestTrackedWithAttempts:
         c = _container(targets_attempted=4, targets_failed=0)
         assert c.determine_status("MEDIUM") == ScannerStatus.PASSED
 
-    def test_partial_failure_with_findings_still_reaches_the_severity_gate(self):
+    def test_a_partial_failure_with_gate_failing_findings_grades_failed(self):
+        # On a PARTIAL loss the severity gate runs first: the evaluated
+        # targets carried a gate-failing finding, so the run grades FAILED,
+        # the status consumers gate and waive on. This cell has pinned each
+        # side of the rule in turn -- first the fall-through to the gate,
+        # then the unconditional fail-closed ERROR -- and the decided rule is
+        # now gate-first on partial loss, with ERROR only when the surviving
+        # findings pass the gate (the dedicated file beside the container
+        # model pins that side and the all-failed ERROR).
         c = _container(
             targets_attempted=3,
             targets_failed=1,

@@ -92,7 +92,7 @@ import subprocess  # nosec B404 — a fresh interpreter is the property under te
 import sys
 import textwrap
 
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, importing_this_checkout
 
 # Exit code for "the premise is gone", kept distinct from the 1 that an
 # unresolved forward reference produces so the two are never confused.
@@ -142,7 +142,7 @@ _POISONED_ORDER = (
 def test_deserialization_works_when_run_ash_scan_is_imported_first():
     """A fresh interpreter in the failing import order can still deserialize."""
     proc = subprocess.run(  # nosec B603 - fixed argv, no shell, interpreter is sys.executable
-        [sys.executable, "-c", _POISONED_ORDER],
+        [sys.executable, "-c", importing_this_checkout(_POISONED_ORDER)],
         capture_output=True,
         text=True,
         # The non-zero exit IS the finding here, so it must not raise: the

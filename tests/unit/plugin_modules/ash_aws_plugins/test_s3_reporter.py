@@ -263,8 +263,10 @@ def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
-@patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.yaml")
-def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
+@patch(
+    "automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.report_yaml"
+)
+def test_s3_reporter_report_yaml_format(mock_report_yaml, mock_boto3, ash_temp_path):
     """Test report method with YAML format."""
     # Create mock session and client
     mock_session = MagicMock()
@@ -273,7 +275,7 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
     # Configure mocks
     mock_boto3.Session.return_value = mock_session
     mock_session.client.return_value = mock_s3_client
-    mock_yaml.dump.return_value = "yaml content"
+    mock_report_yaml.return_value = "yaml content"
 
     # Create reporter with context and config
     context = PluginContext(
@@ -299,7 +301,7 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
     result = reporter.report(model)
 
     # Verify YAML was used
-    mock_yaml.dump.assert_called_once()
+    mock_report_yaml.assert_called_once()
 
     # Verify S3 upload
     mock_s3_client.put_object.assert_called_once()

@@ -34,8 +34,10 @@ def test_config_init_writes_default_config(
         run = run_cli(["config", "init"])
 
     assert run.exit_code == 0, run.output
-    written = project_dir / ".ash" / ".ash.yaml"
+    # The name discovery treats as current (ASH_DEFAULT_CONFIG_FILE_NAME).
+    written = project_dir / ".ashrc.yaml"
     assert written.is_file()
+    assert not (project_dir / ".ash" / ".ash.yaml").exists()
     assert text_snapshot("txt")(name="stdout") == run.document
     assert text_snapshot("yaml")(name="ash-yaml") == written.read_text(encoding="utf-8")
     assert text_snapshot("txt")(name="gitignore") == (
@@ -55,7 +57,7 @@ def test_config_init_refuses_to_overwrite(project_dir, text_snapshot):
 @pytest.mark.parametrize("host", CONFIG_HOSTS, ids=lambda h: h.id)
 def test_default_config(host, monkeypatch, text_snapshot):
     """The effective defaults, as ``get_default_config`` hands them to a scan."""
-    from automated_security_helper.cli.config import IndentableYamlDumper
+    from automated_security_helper.config.config_writer import IndentableYamlDumper
     from automated_security_helper.config.default_config import get_default_config
 
     with simulated_host(monkeypatch, host):

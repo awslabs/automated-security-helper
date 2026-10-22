@@ -1,134 +1,138 @@
 $ ash report --format markdown --log-level ERROR
 [exit 0]
-                                      ASH Security Scan Report
+# ASH security scan report
 
- • Report generated: 2026-01-15T12:30:00+00:00
- • Time since scan: 30 minutes
+> [!WARNING]
+> **Scan incomplete**
+>
+> 4 actionable findings. Some inputs or scanners were not evaluated.
+>
+> **4 actionable** · 7 below threshold · 3 suppressed · 5/9 scanners completed
+>
+> Next action: Review findings, resolve coverage gaps, and scan again.
 
-Scan Metadata
+Project: ASH · Scan executed: 2026-01-15T12:00:00+00:00
 
- • Project: ASH
- • Scan executed: 2026-01-15T12:00:00+00:00
- • ASH version: <ASH_VERSION>
+## Summary
 
-Summary
+### Scanner results
 
-Scanner Results
+| Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| bandit | 1 | 0 | 1 | 2 | 1 | 0 | 3 | FAILED | MEDIUM (global) |
+| cdk-nag | 0 | 0 | 0 | 0 | 0 | 0 | 0 | PASSED | MEDIUM (global) |
+| checkov | 0 | 0 | 0 | 0 | 2 | 1 | 0 | PASSED | MEDIUM (global) |
+| detect-secrets | 0 | 0 | 0 | 0 | 0 | 0 | 0 | SKIPPED | MEDIUM (global) |
+| grype | 0 | 0 | 0 | 0 | 0 | 0 | 0 | MISSING | MEDIUM (global) |
+| npm-audit | 0 | 0 | 0 | 0 | 0 | 0 | 0 | ERROR | MEDIUM (global) |
+| opengrep | 0 | 0 | 1 | 0 | 0 | 0 | 0 | PASSED | CRITICAL (config) |
+| semgrep | 2 | 1 | 0 | 0 | 0 | 2 | 1 | FAILED | MEDIUM (global) |
+| syft | 0 | 0 | 0 | 0 | 0 | 0 | 0 | SKIPPED | MEDIUM (global) |
 
-The table below shows findings by scanner, with status based on severity thresholds and
-dependencies:
+<details>
+<summary>How to read scanner results</summary>
 
- • Severity levels:
-    • Suppressed (S): Findings that have been explicitly suppressed and don't affect scanner status
-    • Critical (C): Highest severity findings that require immediate attention
-    • High (H): Serious findings that should be addressed soon
-    • Medium (M): Moderate risk findings
-    • Low (L): Lower risk findings
-    • Info (I): Informational findings with minimal risk
- • Actionable: Number of findings at or above the threshold severity level that require attention
- • Result:
-    • PASSED = No findings at or above threshold
-    • FAILED = Findings at or above threshold
-    • MISSING = Required dependencies not available
-    • SKIPPED = Scanner explicitly disabled
-    • ERROR = Scanner execution error
- • Threshold: The minimum severity level that will cause a scanner to fail
-    • Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
-    • Source: Values in parentheses indicate where the threshold is set:
-       • global (global_settings section in the ASH_CONFIG used)
-       • config (scanner config section in the ASH_CONFIG used)
-       • scanner (default configuration in the plugin, if explicitly set)
- • Statistics calculation:
-    • All statistics are calculated from the final aggregated SARIF report
-    • Suppressed findings are counted separately and do not contribute to actionable findings
-    • Scanner status is determined by comparing actionable findings to the threshold
+**Severity levels:** Critical, High, Medium, Low, Info. Suppressed findings are counted separately.
 
+**Actionable** counts findings at or above each scanner's threshold.
 
- Scanner         Suppressed  Critical  High  Medium  Low  Info  Actionable  Result   Threshold
- ──────────────────────────────────────────────────────────────────────────────────────────────────
- bandit                   1         0     1       2    1     0           3  FAILED   MEDIUM
-                                                                                     (global)
- cdk-nag                  0         0     0       0    0     0           0  PASSED   MEDIUM
-                                                                                     (global)
- checkov                  0         0     0       0    2     1           0  PASSED   MEDIUM
-                                                                                     (global)
- detect-secrets           0         0     0       0    0     0           0  SKIPPED  MEDIUM
-                                                                                     (global)
- grype                    0         0     0       0    0     0           0  MISSING  MEDIUM
-                                                                                     (global)
- npm-audit                0         0     0       0    0     0           0  ERROR    MEDIUM
-                                                                                     (global)
- opengrep                 0         0     1       0    0     0           0  PASSED   CRITICAL
-                                                                                     (config)
- semgrep                  2         1     0       0    0     2           1  FAILED   MEDIUM
-                                                                                     (global)
- syft                     0         0     0       0    0     0           0  SKIPPED  MEDIUM
-                                                                                     (global)
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
 
+**Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
 
-Incomplete coverage
+**Statistics calculation:** final aggregated SARIF, with suppressed findings excluded from actionable counts.
 
-These scanners could not evaluate part of their input. The findings they did report are real, but
-the set is known to be partial:
+</details>
 
- • cdk-nag: evaluated 6 of 10 target(s); 4 could not be evaluated
+### Incomplete coverage
 
-Top 2 Hotspots
+Targets left unevaluated:
 
-Files with the highest number of security findings:
+- **cdk-nag**: evaluated 6 of 10 target(s); 4 could not be evaluated
 
+**Scanners needing attention:** grype, npm-audit. Check their dependencies and execution logs.
 
- Finding Count  File Location
- ────────────────────────────
-             3  src/app.py
-             1  src/config.py
+### Top 2 hotspots
 
+Files with the most actionable findings.
 
+| Finding count | File location |
+| ---: | --- |
+| 3 | src/app.py |
+| 1 | src/config.py |
 
+## Detailed findings
 
-Finding 1: B602
+Showing 4 of 4 actionable findings, highest severity first.
 
- • Severity: HIGH
- • Scanner: bandit
- • Rule ID: B602
- • Location: src/app.py:12
+<details>
+<summary>1. CRITICAL · python.lang.security.eval · src/app.py:77</summary>
 
-Description: subprocess call with shell=True
+### Finding 1: python.lang.security.eval
 
-----------------------------------------------------------------------------------------------------
+- Severity: CRITICAL
+- Scanner: semgrep
+- Rule ID: python.lang.security.eval
+- Location: src/app.py:77
 
-Finding 2: B105
+Detected use of eval()
 
- • Severity: MEDIUM
- • Scanner: bandit
- • Rule ID: B105
- • Location: src/config.py:3
+</details>
 
-Description: Possible hardcoded password
+<details>
+<summary>2. HIGH · B602 · src/app.py:12</summary>
 
-----------------------------------------------------------------------------------------------------
+### Finding 2: B602
 
-Finding 3: B108
+- Severity: HIGH
+- Scanner: bandit
+- Rule ID: B602
+- Location: src/app.py:12
 
- • Severity: MEDIUM
- • Scanner: bandit
- • Rule ID: B108
- • Location: src/app.py:40
+subprocess call with shell=True
 
-Description: Probable insecure usage of temp file
+</details>
 
-----------------------------------------------------------------------------------------------------
+<details>
+<summary>3. MEDIUM · B108 · src/app.py:40</summary>
 
-Finding 4: python.lang.security.eval
+### Finding 3: B108
 
- • Severity: CRITICAL
- • Scanner: semgrep
- • Rule ID: python.lang.security.eval
- • Location: src/app.py:77
+- Severity: MEDIUM
+- Scanner: bandit
+- Rule ID: B108
+- Location: src/app.py:40
 
-Description: Detected use of eval()
+Probable insecure usage of temp file
 
+</details>
 
-----------------------------------------------------------------------------------------------------
+<details>
+<summary>4. MEDIUM · B105 · src/config.py:3</summary>
 
-Report generated by Automated Security Helper (ASH) at 2026-01-15T12:30:00+00:00
+### Finding 4: B105
+
+- Severity: MEDIUM
+- Scanner: bandit
+- Rule ID: B105
+- Location: src/config.py:3
+
+Possible hardcoded password
+
+</details>
+
+<details>
+<summary>Scan metadata</summary>
+
+## Scan metadata
+
+- Project: ASH
+- Scan executed: 2026-01-15T12:00:00+00:00
+- Report generated: 2026-01-15T12:30:00+00:00
+- ASH version: <ASH_VERSION>
+
+</details>
+
+*Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at 2026-01-15T12:30:00+00:00*
+
+Build with <3 at Amazon Web Services

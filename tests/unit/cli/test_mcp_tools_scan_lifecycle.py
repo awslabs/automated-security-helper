@@ -47,6 +47,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistryEntry,
 )
 from automated_security_helper.utils.log import ASHLogger
+from tests.utils.scan_task_stubs import closing_scan_task_start
 
 _TOOLS = "automated_security_helper.cli.mcp_tools"
 _RUN_ASH_SCAN = "automated_security_helper.interactions.run_ash_scan.run_ash_scan"
@@ -104,9 +105,11 @@ class TestScanDirectoryValidation:
 
         assert result["success"] is False
         assert result["error_category"] == "file_not_found"
+        assert result["error"] == (
+            f"Source directory does not exist: {allowed_root / 'not-there'}"
+        )
         assert (
-            "Check that the directory exists and is accessible"
-            in (result["suggestions"])
+            "Check that the path names the directory to scan" in (result["suggestions"])
         )
 
     def test_unknown_severity_threshold_is_rejected(self, allowed_root):
@@ -118,9 +121,41 @@ class TestScanDirectoryValidation:
         assert result["error_category"] == "invalid_parameter"
         assert "Invalid severity threshold: 'EXTREME'" in result["error"]
         assert (
-            "Valid severity thresholds are: LOW, MEDIUM, HIGH, CRITICAL"
+            "Valid severity thresholds are: ALL, LOW, MEDIUM, HIGH, CRITICAL"
             in result["suggestions"]
         )
+
+    def test_the_suggested_thresholds_are_the_ones_a_config_accepts(self, allowed_root):
+        """The suggestion names what the error does, and what a config may set.
+
+        It left out ALL, which the error's own list and the config's
+        global_settings.severity_threshold both accept, so a client following it
+        could not ask for the loosest threshold.
+        """
+        from typing import get_args
+
+        from automated_security_helper.config.ash_config import (
+            AshConfigGlobalSettingsSection,
+        )
+
+        annotation = AshConfigGlobalSettingsSection.model_fields[
+            "severity_threshold"
+        ].annotation
+        accepted = list(get_args(annotation))
+
+        result = asyncio.run(
+            mcp_scan_directory(str(allowed_root), severity_threshold="EXTREME")
+        )
+
+        assert result["context"]["valid_values"] == accepted
+        assert (
+            f"Valid severity thresholds are: {', '.join(accepted)}"
+            in result["suggestions"]
+        ), result["suggestions"]
+        # The value is matched in any case, so case is not what to check.
+        assert not any("case of" in s for s in result["suggestions"]), result[
+            "suggestions"
+        ]
 
     def test_missing_config_file_is_rejected(self, allowed_root):
         result = asyncio.run(
@@ -270,9 +305,14 @@ class TestScanDirectoryRegistryFailures:
         assert "registry offline" in result["error"]
         assert "Unexpected error starting scan" in logger.error.call_args[0][0]
 
-    def test_output_directory_is_created_under_the_target(self, allowed_root, registry):
-        """The .ash/ash_output tree is made before registration, so it exists
-        even on the path where registration then fails."""
+    def test_no_output_directory_is_created_when_registration_fails(
+        self, allowed_root, registry
+    ):
+        """The .ash/ash_output tree is made only once the registry gave the scan.
+
+        A scan the registry refuses leaves no tree behind in the scanned
+        repository.
+        """
         registry.register_scan.side_effect = RuntimeError("stop here")
 
         with (
@@ -281,6 +321,25 @@ class TestScanDirectoryRegistryFailures:
         ):
             asyncio.run(mcp_scan_directory(str(allowed_root)))
 
+        assert not (allowed_root / ".ash").exists()
+
+    def test_output_directory_is_created_under_the_target_once_registered(
+        self, allowed_root, registry
+    ):
+        registry.register_scan.return_value = "scan-1"
+
+        with (
+            patch(f"{_TOOLS}.get_scan_registry", return_value=registry),
+            patch(f"{_TOOLS}._logger", MagicMock(spec=ASHLogger)),
+            patch(
+                f"{_TOOLS}._start_scan_task",
+                side_effect=closing_scan_task_start(started := []),
+            ) as start,
+        ):
+            result = asyncio.run(mcp_scan_directory(str(allowed_root)))
+            assert started, (start.call_args, "the scan was never started")
+
+        assert result["success"] is True, result
         assert (allowed_root / ".ash" / "ash_output").is_dir()
 
 
@@ -752,10 +811,23 @@ class TestCheckInstallation:
         assert "Unexpected error checking installation" in logger.error.call_args[0][0]
 
     def test_successful_lookup_reports_the_version(self):
-        with patch(f"{_TOOLS}.get_ash_version", return_value="9.9.9"):
+        scanner = {
+            "name": "bandit",
+            "enabled": True,
+            "dependencies_satisfied": True,
+            "version": "1.8.0",
+            "offline_strategy": "bundled",
+            "installs_on_first_scan": False,
+        }
+        with (
+            patch(f"{_TOOLS}.get_ash_version", return_value="9.9.9"),
+            patch(f"{_TOOLS}.list_scanner_inventory", return_value=[scanner]),
+            patch("shutil.which", return_value="/opt/ash/bin/ash"),
+        ):
             result = asyncio.run(mcp_check_installation())
 
         assert result["success"] is True
         assert result["installed"] is True
         assert result["version"] == "9.9.9"
-        assert result["ash_command_output"] == "ASH version 9.9.9"
+        # The executable found on PATH, not a sentence built from the version.
+        assert result["ash_command_output"] == "/opt/ash/bin/ash"

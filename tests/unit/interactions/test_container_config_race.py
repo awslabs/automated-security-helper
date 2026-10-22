@@ -45,7 +45,11 @@ def _make_opts(tmp_path, *, fail_on_findings=None, mode_str="container"):
 
 
 def _write_config(tmp_path, *, fail_on_findings: bool) -> Path:
-    config_path = tmp_path / ".ash.yaml"
+    # Inside the source directory: container mode refuses a --config outside
+    # it (the mounts are /src and /out only), and these cells measure the
+    # host-read race, not that refusal.
+    (tmp_path / "src").mkdir(parents=True, exist_ok=True)
+    config_path = tmp_path / "src" / ".ash.yaml"
     config_path.write_text(
         f"fail_on_findings: {'true' if fail_on_findings else 'false'}\n",
         encoding="utf-8",

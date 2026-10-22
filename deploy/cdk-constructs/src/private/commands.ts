@@ -89,9 +89,12 @@ export interface InstallOptions {
  * Default git ref installed when the caller does not pin one.
  *
  * A tag rather than a branch, so two runs of the same pipeline definition scan
- * with the same ASH. Bumping this is a deliberate step at release time; the
- * buildspec drift gate will fail until the generated files are regenerated,
- * which is the reminder.
+ * with the same ASH. It names the release this tree is: `cz bump` rewrites it at
+ * every release, together with the generated `buildspec*.yml` files, so the
+ * buildspec drift gate stays green on the release commit ([tool.commitizen]
+ * version_files in pyproject.toml). The sharded commands need `ash merge` and the
+ * shard options, which v3.7.0 and v3.7.1 predate, so this has to move with the
+ * release.
  */
 export const DEFAULT_ASH_REF = 'v3.7.0';
 

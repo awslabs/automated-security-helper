@@ -33,6 +33,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanne
     BanditScanner,
     BanditScannerConfig,
     BanditScannerConfigOptions,
+    bandit_excluded_path_globs,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     Level,
@@ -45,6 +46,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+# With only the mixin hooks patched, a scanner that passed its check would ask uv for
+# bandit's version (``uv tool run --from 'bandit[sarif,toml]...' bandit --version``),
+# which starts bandit wherever uv can reach it, so the probes answer without a process
+# (tests/unit/conftest.py).
+pytestmark = pytest.mark.usefixtures("no_tool_probes")
 
 
 @pytest.fixture
@@ -340,10 +347,12 @@ def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_nonexistent_configured_config_file_warns_and_adds_no_flag(
+def test_nonexistent_configured_config_file_warns_and_passes_an_empty_ini(
     plugin_context, tmp_path, caplog
 ):
-    """A configured path that is not on disk is reported, not passed to bandit."""
+    """A configured path that is not on disk is reported, not passed to bandit.
+    Bandit searches for a ``.bandit`` file itself when it is given no ini, so it
+    gets the empty one ASH writes instead."""
     missing = tmp_path / "nowhere" / "bandit.yaml"
 
     with caplog.at_level(logging.WARNING):
@@ -359,8 +368,11 @@ def test_nonexistent_configured_config_file_warns_and_adds_no_flag(
         for r in caplog.records
     ), f"expected a missing-config warning; got {[r.message for r in caplog.records]}"
     keys = [a.key for a in scanner.args.extra_args]
-    assert "--ini" not in keys
     assert "--configfile" not in keys
+    ini = [a.value for a in scanner.args.extra_args if a.key == "--ini"]
+    assert len(ini) == 1, ini
+    assert ini[0].endswith("bandit-empty.ini"), ini
+    assert str(missing) not in ini[0], ini
 
 
 def _scan_argv(scanner, plugin_context):
@@ -525,10 +537,15 @@ def test_excluded_paths_are_folded_into_the_exclude_token(plugin_context):
     assert len(tokens) == 1
     value = tokens[0][len("--exclude=") :]
     entries = value.split(",")
-    assert str(Path("**").joinpath("vendor", "**")) in entries
+    # Anchored at the source directory, as each scan anchors them at its
+    # target (they were "**/vendor/**" and "<known>/**").
+    anchor = Path(plugin_context.source_dir).as_posix()
+    for entry in bandit_excluded_path_globs(anchor, "vendor"):
+        assert entry in entries
     # The built-in ignore list is still present alongside the user's entry.
     for known in KNOWN_IGNORE_PATHS:
-        assert str(Path(known).joinpath("**")) in entries
+        for entry in bandit_excluded_path_globs(anchor, known):
+            assert entry in entries
 
 
 # ---------------------------------------------------------------------------

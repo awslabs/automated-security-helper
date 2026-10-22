@@ -1,21 +1,24 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression test for #180: yarn/pnpm graceful-skip when binary is absent.
+"""Regression test for #180: an absent yarn or pnpm does not crash the scan.
 
-The guard at npm_audit_scanner.py:506-512 checks find_executable() before
-invoking yarn or pnpm.  When the binary is missing it logs a warning and
-skips the lock file instead of crashing with FileNotFoundError.
+The guard in npm_audit_scanner checks find_executable() before invoking yarn or
+pnpm, so a missing binary is never started and no FileNotFoundError escapes.
 
-This test monkeypatches find_executable to simulate missing binaries and
-asserts that:
-- the scanner does not raise
-- it returns a non-False result (empty SARIF rather than hard failure)
-- the log contains "<binary> is not installed"
+The guard makes the lockfile a failed target, so dependencies nobody checked do
+not read as a clean audit.
+It is counted, and named in the scanner's errors, so the executor records ERROR
+when it was the only lockfile and the completeness gate reports the shortfall
+otherwise.
+
+This test monkeypatches find_executable to simulate missing binaries and asserts
+that the scan neither raises nor reads clean: one target attempted, one failed,
+and the error names the missing tool and the lockfile.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -23,7 +26,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_sca
     NpmAuditScanner,
     NpmAuditScannerConfig,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
 
 
 @pytest.fixture
@@ -45,17 +47,11 @@ def _make_project(base: Path, lock_name: str) -> Path:
     return project
 
 
-def test_yarn_graceful_skip_when_yarn_missing(npm_scanner, tmp_path, caplog):
-    """Issue #180: scanner must warn-and-skip yarn.lock when yarn is not installed.
-
-    Monkeypatches find_executable to return None for 'yarn', mimicking a
-    system without yarn.  Asserts no exception is raised, the scan returns
-    a result (not False), and the warning log mentions 'yarn' and 'not installed'.
-    """
+def test_yarn_lock_without_yarn_is_a_failed_target(npm_scanner, tmp_path):
+    """Issue #180: no crash on a missing yarn, and no clean read either."""
     project = _make_project(tmp_path, "yarn.lock")
     npm_scanner.context.source_dir = project
 
-    mock_warning = MagicMock()
     with (
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.find_executable",
@@ -67,25 +63,21 @@ def test_yarn_graceful_skip_when_yarn_missing(npm_scanner, tmp_path, caplog):
         ),
         patch.object(npm_scanner, "_pre_scan", return_value=True),
         patch.object(npm_scanner, "_post_scan"),
-        patch.object(ASH_LOGGER, "warning", mock_warning),
     ):
-        result = npm_scanner.scan(target=project, target_type="source")
+        report = npm_scanner.scan(target=project, target_type="source")
 
-    assert result is not False, "Scanner must not return False on missing yarn"
-
-    warning_messages = [str(c) for c in mock_warning.call_args_list]
-    assert any(
-        "yarn" in msg.lower() and "not installed" in msg.lower()
-        for msg in warning_messages
-    ), f"Expected 'yarn is not installed' warning; got: {warning_messages}"
+    assert report is not False
+    assert (npm_scanner.targets_attempted, npm_scanner.targets_failed) == (1, 1)
+    message = " ".join(npm_scanner.errors)
+    assert "yarn is not installed" in message, message
+    assert "yarn.lock" in message, message
 
 
-def test_pnpm_graceful_skip_when_pnpm_missing(npm_scanner, tmp_path):
-    """Issue #180: scanner must warn-and-skip pnpm-lock.yaml when pnpm is not installed."""
+def test_pnpm_lock_without_pnpm_is_a_failed_target(npm_scanner, tmp_path):
+    """Issue #180: no crash on a missing pnpm, and no clean read either."""
     project = _make_project(tmp_path, "pnpm-lock.yaml")
     npm_scanner.context.source_dir = project
 
-    mock_warning = MagicMock()
     with (
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.find_executable",
@@ -97,14 +89,11 @@ def test_pnpm_graceful_skip_when_pnpm_missing(npm_scanner, tmp_path):
         ),
         patch.object(npm_scanner, "_pre_scan", return_value=True),
         patch.object(npm_scanner, "_post_scan"),
-        patch.object(ASH_LOGGER, "warning", mock_warning),
     ):
-        result = npm_scanner.scan(target=project, target_type="source")
+        report = npm_scanner.scan(target=project, target_type="source")
 
-    assert result is not False, "Scanner must not return False on missing pnpm"
-
-    warning_messages = [str(c) for c in mock_warning.call_args_list]
-    assert any(
-        "pnpm" in msg.lower() and "not installed" in msg.lower()
-        for msg in warning_messages
-    ), f"Expected 'pnpm is not installed' warning; got: {warning_messages}"
+    assert report is not False
+    assert (npm_scanner.targets_attempted, npm_scanner.targets_failed) == (1, 1)
+    message = " ".join(npm_scanner.errors)
+    assert "pnpm is not installed" in message, message
+    assert "pnpm-lock.yaml" in message, message

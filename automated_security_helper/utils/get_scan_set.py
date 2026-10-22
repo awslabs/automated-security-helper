@@ -2,20 +2,52 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import codecs
+import hashlib
 import io
+import json
 import re
+import shutil
 import stat
 import subprocess  # nosec B404
 import sys
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence
+import threading
+import uuid
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 from igittigitt import IgnoreParser
 from pathlib import Path, PurePosixPath
 import argparse
 import os
 
-from automated_security_helper.utils.git_command import git_argv
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.atomic_write import (
+    write_bytes_atomically,
+    write_text_atomically,
+)
 from automated_security_helper.utils.output_dir_links import OUTPUT_GITIGNORE
+from automated_security_helper.utils.scan_output_dirs import (
+    SCAN_SET_RUN_FILE_NAME,
+    SCAN_START_FILE_NAMES,
+    classified_output_dirs,
+    holds_ash_output,
+    tracked_files_in,
+    warn_about_committed_files,
+    warn_about_look_alike,
+    warn_about_scanned_output_dir,
+)
+from automated_security_helper.utils.error_text import redact_then_split
+from automated_security_helper.utils.git_command import git_argv
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.scanned_tree import (
     REASON_LINK_LEAVES_TREE,
     TreeInputRefused,
@@ -23,6 +55,7 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
     resolves_inside,
 )
+from automated_security_helper.utils.terminal_text import shown_not_obeyed
 
 ASH_INCLUSIONS = [
     ".git",
@@ -108,7 +141,9 @@ def black(msg) -> str:
 def debug_echo(*msg, debug: bool = False) -> str | None:
     message = " ".join(str(m) for m in msg)
     if debug:
-        ASH_LOGGER.debug(message)
+        # NO_MARKUP, as for every line here that carries a path: a "[/" in
+        # one is a closing Rich tag that raises instead of printing.
+        ASH_LOGGER.debug(message, extra=NO_MARKUP)
     return message
 
 
@@ -522,6 +557,51 @@ def _count_files_ash_would_scan(
     return count
 
 
+#: Prefix of the directories ``cdk synth`` stages assets in, inside an assembly.
+_CDK_ASSET_DIR_PREFIX = "asset."
+
+#: Files every CDK cloud assembly directory holds: the assembly version marker
+#: and the manifest (aws-cdk-lib core/test/synthesis.test.ts lists both).
+_CDK_ASSEMBLY_MARKER_FILES = ("cdk.out", "manifest.json")
+
+
+def _is_cdk_cloud_assembly(directory: Path) -> bool:
+    """Whether *directory* is a CDK cloud assembly that ``cdk synth`` wrote.
+
+    Named ``cdk.out``, CDK's default output directory, or holding the files every
+    assembly holds, which covers ``cdk synth -o <dir>``. Asked only of a
+    directory the root ``.gitignore`` excludes, which is the one place a
+    directory is pruned before the ``!**/*.template.json`` inclusion is applied:
+    the same rule in a nested ignore file never pruned anything, so the
+    templates came back there and not here.
+    """
+    if directory.name == "cdk.out":
+        return True
+    return all(
+        directory.joinpath(name).is_file() for name in _CDK_ASSEMBLY_MARKER_FILES
+    )
+
+
+def _warn_about_scanned_earlier_output_dirs(
+    reached: List[Tuple[str, Path]], scan_set_files: List[str]
+) -> None:
+    """Warn about each earlier run's output directory the scan set still reads.
+
+    Counted over *scan_set_files*, after the ignore files have been applied: an
+    ignore file that lists the directory leaves none of its files in the scan
+    set, and then the warning that it "is scanned like the rest of the tree"
+    was not true. A directory with no file left gets no warning.
+    """
+    for relative, directory in reached:
+        kept = sum(
+            1
+            for name in scan_set_files
+            if Path(os.path.abspath(name)).is_relative_to(directory)
+        )
+        if kept:
+            warn_about_scanned_output_dir(relative, kept)
+
+
 def _collect_ignorefiles_and_all_files(
     path: str,
     extra_ignorefiles: List[str] | None = None,
@@ -530,6 +610,9 @@ def _collect_ignorefiles_and_all_files(
     pruned_counts: Optional[Dict[str, int]] = None,
     own_output: Optional[str] = None,
     own_output_counts: Optional[Dict[str, int]] = None,
+    output_dir: str | Path | None = None,
+    workspace_output_dir: str | Path | None = None,
+    earlier_output_dirs_reached: Optional[List[Tuple[str, Path]]] = None,
     links_not_scanned: Optional[List[str]] = None,
 ) -> tuple[List[str], List[str]]:
     """Walk the directory tree once to collect ignore files and all file paths.
@@ -537,7 +620,35 @@ def _collect_ignorefiles_and_all_files(
     Respects .gitignore hierarchy: if a directory is ignored by a parent
     .gitignore, its contents (including nested .gitignore files) are skipped.
     This prevents rules like ``*`` inside ``.venv/.gitignore`` from being
-    applied globally and accidentally ignoring all project files.
+    applied globally and accidentally ignoring all project files. The one
+    ignored directory still walked is a CDK cloud assembly, for its templates;
+    see :func:`_is_cdk_cloud_assembly`.
+
+    ASH's own output is skipped whether or not an ignore file names it: the
+    directory *output_dir* names and the default ``.ash/ash_output``
+    (``utils/scan_output_dirs.named_output_dirs``). Without that, a scan read the
+    reports of the previous scan back in as source. A directory that only holds
+    files like ASH's output is walked like any other, with a warning naming it.
+    In a git checkout, the files git tracks in a skipped output directory are
+    listed anyway, with a warning: a repository can commit files there, and they
+    were scanned before ASH named its output directories. Their ignore files are
+    not collected; they are ASH's directory's. Where git cannot say what is
+    committed, only this run's output directory is skipped: an earlier run's
+    ``.ash/ash_output`` is walked like the rest of the tree
+    (``utils/scan_output_dirs.classified_output_dirs``). Each one the walk
+    reaches is appended to *earlier_output_dirs_reached*, as its ``/``-separated
+    path under the source and its absolute path, so that :func:`scan_set` warns
+    about it once the ignore files have been applied, and only when a file below
+    it is still in the scan set.
+
+    *links_not_scanned* is filled, when given, with each file link the walk left
+    out because its target leaves *path*
+    (:func:`_left_out_as_a_link_leaving_the_tree`). A file git tracks in a skipped
+    output directory is never one: ``tracked_files_in`` returns only regular files
+    reached without a link. Such a link is not in the file paths returned, so
+    nothing counts it as removed by an ignore file. An ignore file that is such a
+    link is still returned among the ignore files, where reading it is refused and
+    reported.
 
     Args:
         honor_ignore_files: False when the operator turned the scanned
@@ -578,6 +689,18 @@ def _collect_ignorefiles_and_all_files(
     ignore_files: List[str] = []
     all_files: List[str] = []
 
+    root_absolute = Path(os.path.abspath(path))
+    named, scanned_earlier = classified_output_dirs(
+        path, output_dir, workspace_output_dir
+    )
+    own_output_dirs = set(named)
+    # Earlier runs' output directories git cannot say anything about: walked like
+    # the rest of the tree, and recorded when the walk reaches them, for
+    # scan_set's warning once the ignore files have been applied.
+    earlier_output_dirs = set(scanned_earlier)
+    skipped_output_dirs: List[str] = []
+    kept_assemblies: List[Path] = []
+
     # Build an initial ignore spec from the root .gitignore (if it exists)
     # so we can skip walking into ignored directories.
     root_ignore_parser = IgnoreParser()
@@ -593,11 +716,14 @@ def _collect_ignorefiles_and_all_files(
         try:
             candidate_parser = IgnoreParser()
             with io.TextIOWrapper(
-                open_in_scanned_tree(root_gitignore, root_path)
+                open_in_scanned_tree(root_gitignore, root_path),
+                errors=IGNORE_FILE_ERRORS,
+                newline=IGNORE_FILE_NEWLINE,
             ) as rule_lines:
-                for rule_line in rule_lines:
+                for rule_line in ignore_file_lines(rule_lines):
                     candidate_parser.add_rule(
-                        rule_line.rstrip("\n"), base_path=root_path
+                        gitignore_rule_for_igittigitt(ignore_file_line(rule_line)),
+                        base_path=root_path,
                     )
             root_ignore_parser = candidate_parser
         except TreeInputRefused:
@@ -617,49 +743,110 @@ def _collect_ignorefiles_and_all_files(
     own = _own_output_of(own_output)
 
     for root, dirs, files in os.walk(path):
-        if own is not None:
-            kept_dirs = []
-            for d in dirs:
-                candidate = os.path.join(root, d)
-                if not _is_own_output(candidate, own):
-                    kept_dirs.append(d)
-                elif own_output_counts is not None:
-                    own_output_counts[candidate] = _count_files_in_own_output(candidate)
-            dirs[:] = kept_dirs
-        # Prune directories that are ignored by the root .gitignore.
-        # This prevents descending into .venv/, node_modules/, etc.
-        # and picking up their internal .gitignore files.
-        dirs_to_remove = []
+        root_path = Path(os.path.abspath(root))
+        kept_dirs = []
         for d in dirs:
-            dir_path = Path(root) / d
-            # igittigitt.match expects a Path; directories need trailing separator
-            # to match directory-specific patterns. We check both the dir path
-            # and a fake file inside it.
-            try:
-                if root_ignore_parser.match(dir_path / "placeholder"):
-                    dirs_to_remove.append(d)
-                    debug_echo(f"Skipping ignored directory: {dir_path}", debug=debug)
-            except (ValueError, TypeError, IndexError, re.error):
-                # If matching fails for a specific directory (e.g. due to a
-                # malformed pattern), skip pruning for that directory only.
-                pass
-        for d in dirs_to_remove:
-            dirs.remove(d)
-            # The pruned files are still counted: they are missing from the scan set
-            # because of the root .gitignore, and a count that left them out would
-            # report less than the file removed. Counted, not listed, so a pruned
-            # node_modules costs a walk and no memory. A link counts nothing: the
-            # count walks through _walk_unless_link, as every count does.
-            if pruned_counts is None:
+            candidate = root_path.joinpath(d)
+            walked = os.path.join(root, d)
+            if candidate not in own_output_dirs and not _is_own_output(walked, own):
+                kept_dirs.append(d)
                 continue
-            removed = _count_files_ash_would_scan(
-                Path(root) / d, path, own, own_output_counts
+            skipped_output_dirs.append(walked)
+            if own_output_counts is not None:
+                own_output_counts[walked] = _count_files_in_own_output(walked)
+            # tracked_files_in returns regular files reached without a link only,
+            # so no link, leaving the tree or not, is among them.
+            committed = [
+                os.path.join(walked, *tracked.relative_to(candidate).parts)
+                for tracked in tracked_files_in(candidate) or []
+            ]
+            if committed:
+                all_files.extend(committed)
+                warn_about_committed_files(
+                    _source_dir_marker(path, walked), len(committed)
+                )
+        dirs[:] = kept_dirs
+        if root_path in earlier_output_dirs and earlier_output_dirs_reached is not None:
+            earlier_output_dirs_reached.append(
+                (root_path.relative_to(root_absolute).as_posix(), root_path)
             )
-            pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
+        inside_an_earlier_output_dir = any(
+            root_path == earlier or root_path.is_relative_to(earlier)
+            for earlier in earlier_output_dirs
+        )
+        if (
+            root_path != root_absolute
+            and holds_ash_output(files)
+            and not inside_an_earlier_output_dir
+        ):
+            warn_about_look_alike(_source_dir_marker(path, root))
+
+        # Inside a cloud assembly the root .gitignore excludes, kept only for the
+        # templates the forced-inclusion pass brings back (see
+        # _is_cdk_cloud_assembly). Its asset directories hold bundled code, not
+        # templates, and are not walked; nothing else here is re-tested, because
+        # every path below the assembly matches the rule that matched it.
+        inside_kept_assembly = any(
+            root_path == kept or root_path.is_relative_to(kept)
+            for kept in kept_assemblies
+        )
+        if inside_kept_assembly:
+            dirs[:] = [d for d in dirs if not d.startswith(_CDK_ASSET_DIR_PREFIX)]
+        else:
+            # Prune directories that are ignored by the root .gitignore.
+            # This prevents descending into .venv/, node_modules/, etc.
+            # and picking up their internal .gitignore files.
+            dirs_to_remove = []
+            for d in dirs:
+                dir_path = Path(root) / d
+                # The directory itself, as git decides whether to descend: a
+                # directory-only rule ("lib/") matches it, since igittigitt reads a
+                # path that is not a file as a directory. Asking about a file inside
+                # it instead pruned a directory whose children alone are excluded
+                # ("vendor/*"), so a later "!vendor/keep.js" could not bring keep.js
+                # back, as git does.
+                try:
+                    if root_ignore_parser.match(dir_path):
+                        if _is_cdk_cloud_assembly(dir_path):
+                            kept_assemblies.append(Path(os.path.abspath(dir_path)))
+                            debug_echo(
+                                f"Walking ignored CDK cloud assembly for its "
+                                f"templates: {dir_path}",
+                                debug=debug,
+                            )
+                            continue
+                        dirs_to_remove.append(d)
+                        debug_echo(
+                            f"Skipping ignored directory: {dir_path}", debug=debug
+                        )
+                except (ValueError, TypeError, IndexError, re.error):
+                    # If matching fails for a specific directory (e.g. due to a
+                    # malformed pattern), skip pruning for that directory only.
+                    pass
+            for d in dirs_to_remove:
+                dirs.remove(d)
+                # The pruned files are still counted: they are missing from the
+                # scan set because of the root .gitignore, and a count that left
+                # them out would report less than the file removed. Counted, not
+                # listed, so a pruned node_modules costs a walk and no memory. A
+                # link counts nothing: the count walks through _walk_unless_link,
+                # as every count does.
+                if pruned_counts is None:
+                    continue
+                removed = _count_files_ash_would_scan(
+                    Path(root) / d, path, own, own_output_counts
+                )
+                pruned_counts[pruned_key] = pruned_counts.get(pruned_key, 0) + removed
 
         for f in files:
             full_path = os.path.join(root, f)
-            if honor_ignore_files and f in IGNORE_FILE_NAMES:
+            # An ignore file under an ignored directory is not read: git does
+            # not read one there either.
+            if (
+                honor_ignore_files
+                and f in IGNORE_FILE_NAMES
+                and not inside_kept_assembly
+            ):
                 ignore_files.append(full_path)
             if _left_out_as_a_link_leaving_the_tree(full_path, path, links_not_scanned):
                 continue
@@ -670,6 +857,17 @@ def _collect_ignorefiles_and_all_files(
         extra_path = os.path.join(path, extra)
         if extra_path not in ignore_files:
             ignore_files.append(extra_path)
+
+    if skipped_output_dirs:
+        ASH_LOGGER.info(
+            "Left %d ASH output %s out of the scan set: %s",
+            len(skipped_output_dirs),
+            "directory" if len(skipped_output_dirs) == 1 else "directories",
+            ", ".join(
+                _source_dir_marker(path, directory) for directory in skipped_output_dirs
+            ),
+            extra=NO_MARKUP,
+        )
 
     return ignore_files, all_files
 
@@ -711,15 +909,18 @@ def get_ash_ignorespec_lines(
         if ignorefile in named_by_caller:
             if not os.path.isfile(ignorefile):
                 continue
-            with open(ignorefile) as f:
-                content = f.readlines()
+            with open(
+                ignorefile, errors=IGNORE_FILE_ERRORS, newline=IGNORE_FILE_NEWLINE
+            ) as f:
+                content = ignore_file_lines(f)
         else:
             try:
                 handle = open_in_scanned_tree(ignorefile, path)
             except TreeInputRefused as refused:
                 ASH_LOGGER.warning(
                     f"Skipped ignore file '{refused.path}': {refused.reason}, so its "
-                    "rules were not applied"
+                    "rules were not applied",
+                    extra=NO_MARKUP,
                 )
                 # Recorded in the report as a comment, which every reader of the
                 # report already skips, so the skip is visible next to the rules
@@ -732,8 +933,10 @@ def get_ash_ignorespec_lines(
                 # other OSError propagates, as it did from the open() this replaced.
                 continue
             # TextIOWrapper with no encoding decodes exactly as open() does.
-            with io.TextIOWrapper(handle) as f:
-                content = f.readlines()
+            with io.TextIOWrapper(
+                handle, errors=IGNORE_FILE_ERRORS, newline=IGNORE_FILE_NEWLINE
+            ) as f:
+                content = ignore_file_lines(f)
         debug_echo(f"Found .ignore file: {clean}", debug=debug)
         lines.append(f"{START_MARKER_PREFIX}{clean}{MARKER_SUFFIX}")
         # Comment lines are left out. They hold no rule (git reads a line starting
@@ -745,11 +948,152 @@ def get_ash_ignorespec_lines(
         lines.extend(line for line in content if not line.strip().startswith("#"))
         lines.append(f"{END_MARKER_PREFIX}{clean}{MARKER_SUFFIX}")
         lines.append("")
-    lines = [line.strip() for line in lines]
+    # Only the line ending comes off: a pattern's leading whitespace and an
+    # escaped trailing space are part of it (gitignore_rule_for_igittigitt).
+    lines = [ignore_file_line(line) for line in lines]
     lines.append(f"{START_MARKER_PREFIX}{ASH_INCLUSIONS_MARKER}{MARKER_SUFFIX}")
     lines.extend(ASH_INCLUSIONS)
     lines.append(f"{END_MARKER_PREFIX}{ASH_INCLUSIONS_MARKER}{MARKER_SUFFIX}")
     return lines
+
+
+#: How an ignore file is split into lines: on LF alone, as git splits it. Text
+#: mode's universal newlines also split on a lone CR, so ``a<CR>b.py`` became
+#: the two patterns ``a`` and ``b.py``, which git reads as one.
+IGNORE_FILE_NEWLINE = "\n"
+
+#: How an ignore file's bytes are decoded: with the locale's encoding, and
+#: surrogateescape for a byte it does not decode. git reads the file as bytes, so
+#: a line that is not UTF-8 is a pattern there, matching the file whose name holds
+#: the same bytes; os.walk gives that name back as the same surrogates. Decoded
+#: strictly, the line raised UnicodeDecodeError out of scan_set.
+IGNORE_FILE_ERRORS = "surrogateescape"
+
+#: A UTF-8 byte order mark as it decodes, U+FEFF. Spelled with chr() so the
+#: source holds no invisible character.
+_UTF8_BOM = chr(0xFEFF)
+
+
+def _byte_order_marks(handle: Iterable[str]) -> Tuple[str, ...]:
+    """A UTF-8 byte order mark as *handle* decodes it, and as U+FEFF.
+
+    Ignore files are read with the locale's encoding, and on Windows without
+    UTF-8 mode that is the ANSI code page, where the mark's three bytes decode as
+    "\\xef\\xbb\\xbf" (cp1252). An encoding that cannot decode them adds nothing: a
+    file read with it cannot hold the mark.
+    """
+    marks = [_UTF8_BOM]
+    encoding = getattr(handle, "encoding", None)
+    errors = getattr(handle, "errors", None)
+    if isinstance(encoding, str):
+        try:
+            # With the handle's own error handler: under cp932 the mark's bytes
+            # do not decode strictly, and surrogateescape gives "\udcef" plus two
+            # half-width katakana, which is what the handle read.
+            decoded = codecs.BOM_UTF8.decode(
+                encoding, errors if isinstance(errors, str) else "strict"
+            )
+        except (LookupError, UnicodeDecodeError):
+            decoded = ""
+        if decoded and decoded not in marks:
+            marks.append(decoded)
+    return tuple(marks)
+
+
+def ignore_file_lines(handle: Iterable[str]) -> List[str]:
+    """The lines of an ignore file opened with :data:`IGNORE_FILE_NEWLINE`.
+
+    A UTF-8 byte order mark before the first line is skipped, as git skips its
+    bytes (``skip_utf8_bom`` in dir.c), however the handle decoded them; kept,
+    it made the first pattern start with the mark, which matches no file. Only
+    that one is skipped: a mark on a later line, or a second one, is part of its
+    pattern for git too. Line endings are left for :func:`ignore_file_line`.
+    """
+    marks = _byte_order_marks(handle)
+    lines = list(handle)
+    if lines:
+        for mark in marks:
+            if lines[0].startswith(mark):
+                lines[0] = lines[0][len(mark) :]
+                break
+    return lines
+
+
+def ignore_file_line(line: str) -> str:
+    """*line*, read with :data:`IGNORE_FILE_NEWLINE`, without its line ending.
+
+    The LF, and one CR before it, as git drops it (``add_patterns_from_buffer``
+    in dir.c); a last line with no LF loses a trailing CR the same way, because
+    git ends the buffer with an LF first. Any other CR is part of the pattern.
+    """
+    return line.removesuffix("\n").removesuffix("\r")
+
+
+def _git_trim_trailing_spaces(text: str) -> str:
+    """*text* without its trailing spaces, as git trims an ignore-file line.
+
+    git's ``trim_trailing_spaces`` (dir.c): only spaces, not tabs, and not a space
+    a backslash escapes. A backslash escapes whatever follows it.
+    """
+    last_space: Optional[int] = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == " ":
+            if last_space is None:
+                last_space = index
+        elif char == "\\":
+            index += 1
+            if index >= len(text):
+                return text
+            last_space = None
+        else:
+            last_space = None
+        index += 1
+    return text if last_space is None else text[:last_space]
+
+
+def gitignore_rule_for_igittigitt(line: str) -> str:
+    """One ignore-file line, newline removed, as igittigitt must get it to read it as git does.
+
+    git keeps a pattern's leading whitespace, drops only the trailing spaces no
+    backslash escapes, keeps a trailing tab, and reads a line as a comment only
+    when ``#`` is its first character. igittigitt 2.2.3 strips the pattern's
+    leading whitespace, and the whitespace around every escaped space, so
+    `` lead.py`` ignored ``lead.py`` and ``tab.py<TAB>`` ignored ``tab.py``.
+    So git's trailing-space rule is applied here, and every escaped space and
+    every whitespace character left at either end of the pattern is written as a
+    one-character class (``[ ]``): it matches the same character, and igittigitt
+    neither strips nor splits on it. Measured against ``git check-ignore`` 2.50.1
+    (tests/unit/utils/test_ignore_file_whitespace_follows_git.py).
+
+    Returns an empty string for a blank line or a comment.
+    """
+    text = _git_trim_trailing_spaces(line)
+    if not text or text.startswith("#"):
+        return ""
+    prefix = ""
+    if text.startswith("!"):
+        prefix, text = "!", text[1:]
+    tokens: List[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] == "\\" and index + 1 < len(text):
+            tokens.append(text[index : index + 2])
+            index += 2
+        else:
+            tokens.append(text[index])
+            index += 1
+    tokens = ["[ ]" if token == "\\ " else token for token in tokens]
+    start = 0
+    while start < len(tokens) and tokens[start].isspace():
+        tokens[start] = f"[{tokens[start]}]"
+        start += 1
+    end = len(tokens)
+    while end > start and tokens[end - 1].isspace():
+        tokens[end - 1] = f"[{tokens[end - 1]}]"
+        end -= 1
+    return prefix + "".join(tokens)
 
 
 def _confine_base_path(candidate: Path, root_base_path: Path, marker: str) -> Path:
@@ -784,6 +1128,7 @@ def _confine_base_path(candidate: Path, root_base_path: Path, marker: str) -> Pa
         "ignore file is not silently discarded.",
         marker,
         candidate_absolute,
+        extra=NO_MARKUP,
     )
     return root_base_path
 
@@ -907,9 +1252,9 @@ def get_ash_ignorespec_with_attribution(
     current_base_path = root_base_path
 
     for line in lines:
-        stripped = line.strip()
-        if not stripped:
+        if not line:
             continue
+        stripped = line.strip()
 
         # Detect section markers to determine the base path for rules
         content_path = _start_marker_path(stripped)
@@ -966,11 +1311,15 @@ def get_ash_ignorespec_with_attribution(
             rule_ids_by_marker.setdefault(current_marker, [])
             continue
 
-        if stripped.startswith("#"):
+        # Read as git reads the line, not as stripped: a comment only with "#" in
+        # its first column, and leading whitespace and an escaped trailing space
+        # kept as part of the pattern.
+        rule = gitignore_rule_for_igittigitt(line)
+        if not rule:
             continue
 
         added_from = len(parser.rules)
-        parser.add_rule(stripped, base_path=current_base_path)
+        parser.add_rule(rule, base_path=current_base_path)
         rule_ids_by_marker.setdefault(current_marker, []).extend(
             id(rule) for rule in parser.rules[added_from:]
         )
@@ -1072,6 +1421,7 @@ def report_ignore_file_exclusions(
             "No ignore files were found under %s, so no ignore rules removed "
             "anything from the scan set.",
             path,
+            extra=NO_MARKUP,
         )
 
     for marker, count in counts.items():
@@ -1084,6 +1434,7 @@ def report_ignore_file_exclusions(
             marker,
             count,
             "file" if count == 1 else "files",
+            extra=NO_MARKUP,
         )
         if debug and paths_by_marker.get(marker):
             for excluded_file in paths_by_marker[marker]:
@@ -1095,6 +1446,7 @@ def report_ignore_file_exclusions(
             "them, so the per-ignore-file counts above are incomplete. First: %s",
             len(unattributed),
             unattributed[0],
+            extra=NO_MARKUP,
         )
 
     return counts
@@ -1208,7 +1560,7 @@ def _git_executable() -> Optional[str]:
     return find_executable("git")
 
 
-def git_repository_root(path: Path) -> Optional[Path]:
+def git_repository_root(path: Path, *, values: Iterable[str] = ()) -> Optional[Path]:
     """Return the root of the git repository containing *path*, or None.
 
     Needed because ``git diff --name-only`` prints paths relative to the
@@ -1227,33 +1579,466 @@ def git_repository_root(path: Path) -> Optional[Path]:
         path: Any directory. Its containing repository is returned, which may be
             an ancestor.
 
+        values: The run's environment-read values when the caller knows them,
+            for the stderr line a problem clause can quote.
+
     Returns:
         The absolute repository root, or ``None`` when *path* is not inside a git
         repository, git is not on ``PATH``, or the command times out.
+        :func:`git_repository_root_problem` says which.
     """
+    root, problem = _rev_parse_toplevel(path, values=values)
+    key = _problem_key(path)
+    with _root_problems_lock:
+        if problem is None:
+            _root_problems.pop(key, None)
+        else:
+            _root_problems[key] = problem
+    return root
+
+
+#: The clause a warning uses when git itself is absent.
+GIT_NOT_INSTALLED = "git is not installed or not on PATH"
+
+# What the last failed git_repository_root of each directory found, kept until
+# git_repository_root_problem reads it or the next lookup of that directory
+# replaces it. Asking git again for the reason cost a second 30-second timeout
+# when git hangs. Locked because a workspace scans its projects in threads.
+_root_problems: Dict[str, str] = {}
+_root_problems_lock = threading.Lock()
+
+
+def _problem_key(path: Path) -> str:
+    return os.path.abspath(os.fspath(path))
+
+
+def git_repository_root_problem(path: Path, *, values: Iterable[str] = ()) -> str:
+    """Why :func:`git_repository_root` has no answer for *path*, as a clause.
+
+    Asked after a ``None``. The cause is the one that lookup found; git is run
+    again only when there was no such lookup (a caller that substituted
+    ``git_repository_root``, or asked first). The warnings this feeds said "is
+    not inside a git repository" for every ``None``, including when git itself
+    was missing, which sent the reader to check a repository that was there.
+    ``values`` as for :func:`git_repository_root`; a remembered clause was
+    already redacted with the values that lookup carried.
+    """
+    with _root_problems_lock:
+        remembered = _root_problems.pop(_problem_key(path), None)
+    if remembered is not None:
+        return remembered
+    root, problem = _rev_parse_toplevel(path, values=values)
+    if problem is not None:
+        return problem
+    # The second run found a root the first did not, or a caller substituted
+    # the lookup. Nothing more specific is known.
+    return f"the git repository root of {path.as_posix()} could not be read"
+
+
+def _why_git_did_not_start(error: OSError, cwd: Optional[Path]) -> str:
+    """The cause of a FileNotFoundError from starting git in *cwd*, as a clause.
+
+    subprocess raises the same FileNotFoundError for a missing working directory
+    as for a missing program, so the two are told apart here rather than every
+    one being reported as git missing.
+    """
+    if cwd is not None and not Path(cwd).is_dir():
+        return f"{Path(cwd).as_posix()} does not exist"
+    if shutil.which("git") is None:
+        return GIT_NOT_INSTALLED
+    where = f" in {Path(cwd).as_posix()}" if cwd is not None else ""
+    return f"git could not be started{where}: {error}"
+
+
+# Every git command here runs with no stdin. git reads the files a repository
+# names (a worktree's commondir, a .git file's gitdir), and one linked to
+# /dev/stdin made it read ASH's: a silent terminal held it for the 30-second
+# timeout, and what someone typed went to git.
+#
+# They run through plain subprocess.run, not run_ended_with_the_server: each is a
+# query bounded by that timeout, so one running when an MCP server stops ends on
+# its own soon after.
+
+
+def _rev_parse_toplevel(
+    path: Path, *, values: Iterable[str]
+) -> "tuple[Optional[Path], Optional[str]]":
+    """``git rev-parse --show-toplevel`` in *path*: (root, None) or (None, problem).
+
+    ``values`` are the run's environment-read values when the caller knows
+    them, for the stderr line a problem clause can quote; the public entries
+    forward what their callers pass, defaulted empty."""
     git = _git_executable()
     if git is None:
-        return None
+        return None, GIT_NOT_INSTALLED
     try:
         result = subprocess.run(
             # git_argv: the repository's config names no program git runs here.
             git_argv("rev-parse", "--show-toplevel", program=git),  # nosec B603 B607
-            stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
+            stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=path,
             env=child_environ(),
         )
-    except (FileNotFoundError, NotADirectoryError, subprocess.TimeoutExpired, OSError):
-        return None
+    except FileNotFoundError as error:
+        return None, _why_git_did_not_start(error, path)
+    except subprocess.TimeoutExpired:
+        return None, "git rev-parse --show-toplevel timed out after 30 seconds"
+    except (NotADirectoryError, OSError) as error:
+        return None, f"git could not be started in {Path(path).as_posix()}: {error}"
 
     if result.returncode != 0:
+        stderr = os.fsdecode(result.stderr or b"")
+        # Redacted whole BEFORE the first-line cut (redact_then_split) and
+        # before any strip: a value holding a line break would otherwise leave
+        # its first line in the problem clause, and a value whose own edge is
+        # whitespace at stderr's edge would lose that edge to a whole-text
+        # strip and stop matching. Each line is stripped only after the
+        # redaction, so no needle is shaved first.
+        lines = [line.strip() for line in redact_then_split(stderr, values)]
+        first_line = next((line for line in lines if line), "")
+        if "not a git repository" in stderr.lower():
+            return None, f"{Path(path).as_posix()} is not inside a git repository"
+        detail = f" ({first_line})" if first_line else ""
+        return None, (
+            f"git could not read the repository root of {Path(path).as_posix()}{detail}"
+        )
+    top = _git_path_line(result.stdout)
+    if not os.path.isabs(top):
+        return None, f"git printed no repository root for {Path(path).as_posix()}"
+    return Path(top).resolve(), None
+
+
+#: Variables that point git at a repository whatever its working directory is.
+_GIT_LOCATION_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")
+
+
+def git_common_dir(path: Path) -> Optional[Path]:
+    """The ``git rev-parse --git-common-dir`` of the repository at *path*, resolved.
+
+    Two worktrees of one repository share it, and a submodule or an unrelated
+    clone has its own. utils/scan_source.py exempts a linked worktree inside its
+    checkout from the nesting check only when this matches the outer
+    repository's, ``git_worktree_paths`` lists it, and its admin dir records it
+    (``git_absolute_git_dir``): a listed path that now holds another repository
+    fails this check, and a planted ``.git`` file that names the outer git dir
+    passes it. GIT_DIR and its siblings are left out of git's environment, so
+    the answer is about *path*.
+
+    Returns:
+        The absolute common git directory, or ``None`` when *path* is not inside
+        a git repository, git is missing or refuses it (safe.directory), the
+        command times out, or the path it prints is not a file name here
+        (:func:`_git_path_line`).
+    """
+    environ = {
+        key: value
+        for key, value in snapshot_environ().items()
+        if key not in _GIT_LOCATION_ENV
+    }
+    try:
+        result = subprocess.run(
+            git_argv("rev-parse", "--git-common-dir"),  # nosec B603 B607
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            cwd=path,
+            env=environ,
+        )
+        common = _git_path_line(result.stdout)
+    except (
+        FileNotFoundError,
+        NotADirectoryError,
+        subprocess.TimeoutExpired,
+        OSError,
+        UnicodeDecodeError,
+    ):
         return None
-    top = result.stdout.strip()
-    if not top:
+    if result.returncode != 0 or not common:
         return None
-    return Path(top).resolve()
+    # Relative to *path* for a main checkout (".git"), absolute otherwise.
+    return (Path(path) / common).resolve()
+
+
+def git_absolute_git_dir(path: Path) -> Optional[Path]:
+    """The ``git rev-parse --absolute-git-dir`` of the repository at *path*, resolved.
+
+    For a linked worktree, its admin dir under the common git dir's
+    ``worktrees/``. utils/scan_source.py checks that a directory exempted as a
+    linked worktree has one, and that the admin dir's ``gitdir`` names that
+    directory. GIT_DIR and its siblings are left out of git's environment, so
+    the answer is about *path*.
+
+    Returns:
+        The absolute git directory, or ``None`` when *path* is not inside a git
+        repository, git is missing or refuses it (safe.directory), the command
+        times out, or the path it prints is not a file name here
+        (:func:`_git_path_line`).
+    """
+    environ = {
+        key: value
+        for key, value in snapshot_environ().items()
+        if key not in _GIT_LOCATION_ENV
+    }
+    try:
+        result = subprocess.run(
+            git_argv("rev-parse", "--absolute-git-dir"),  # nosec B603 B607
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            cwd=path,
+            env=environ,
+        )
+        git_dir = _git_path_line(result.stdout)
+    except (
+        FileNotFoundError,
+        NotADirectoryError,
+        subprocess.TimeoutExpired,
+        OSError,
+        UnicodeDecodeError,
+    ):
+        return None
+    if result.returncode != 0 or not git_dir:
+        return None
+    return Path(git_dir).resolve()
+
+
+def git_worktree_paths(path: Path) -> Optional[Set[Path]]:
+    """The worktrees ``git worktree list`` names for the repository at *path*.
+
+    The main worktree and every linked one, as git prints them, not resolved
+    here. By default git records a linked worktree's real absolute path when it
+    adds one, and prints the main worktree's real path, so resolving would only
+    follow a symlink that later replaced a listed path (or one of its parents)
+    to whatever it points at now, a nested clone or a planted ``.git`` file. A
+    worktree added with ``--relative-paths`` or ``worktree.useRelativePaths``
+    (git 2.48 and later) is recorded relative to its admin dir instead, and git
+    resolves that path when it lists it, so it follows such a symlink itself:
+    for those, this list says nothing about the directory now at the path, and
+    scan_source.py checks the admin dir's record too.
+
+    utils/scan_source.py uses this with ``git_common_dir`` and
+    ``git_absolute_git_dir`` to tell a linked worktree inside its checkout from
+    a nested repository. GIT_DIR and its siblings are left out of git's
+    environment, so the answer is about *path*.
+
+    Returns:
+        The absolute worktree paths, or ``None`` when *path* is not inside a git
+        repository, git is missing or refuses it (safe.directory), the command
+        times out, or its output is not file names here (:func:`_git_paths`).
+    """
+    environ = {
+        key: value
+        for key, value in snapshot_environ().items()
+        if key not in _GIT_LOCATION_ENV
+    }
+    try:
+        result = subprocess.run(
+            git_argv("worktree", "list", "--porcelain", "-z"),  # nosec B603 B607
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            cwd=path,
+            env=environ,
+        )
+        fields = _git_paths(result.stdout)
+    except (
+        FileNotFoundError,
+        NotADirectoryError,
+        subprocess.TimeoutExpired,
+        OSError,
+        UnicodeDecodeError,
+    ):
+        return None
+    if result.returncode != 0:
+        return None
+    # -z ends every attribute line with NUL; a "worktree <path>" line opens each
+    # entry, so a path with a newline in it is read whole.
+    paths = {
+        Path(field[len("worktree ") :])
+        for field in fields
+        if field.startswith("worktree ")
+    }
+    return paths or None
+
+
+#: Variables that change what a pathspec matches. They are left out of the
+#: environment of the listings below, which set GIT_LITERAL_PATHSPECS themselves
+#: or spell their own magic: a path is matched as written, never as a glob or
+#: ignoring case.
+_GIT_PATHSPEC_ENV = (
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+    "GIT_LITERAL_PATHSPECS",
+)
+
+
+def _git_listing(
+    repository: Path, args: List[str], literal: bool = True
+) -> Optional[List[str]]:
+    """``git ls-files -z`` *args* in *repository*: its paths, or None.
+
+    Paths are relative to *repository*, as ``ls-files`` prints them from there,
+    and matched literally; with *literal* False, the pathspecs in *args* carry
+    their own magic instead. GIT_DIR and its siblings, GIT_INDEX_FILE (a hook's
+    temporary index, say) and the pathspec variables are left out, so the
+    answer is about the repository at *repository* and the paths as given.
+
+    Returns:
+        The paths, or None when git is missing, refuses the repository
+        (safe.directory), fails, times out, or prints something that is not a
+        file name here (:func:`_git_paths`).
+    """
+    environ = {
+        key: value
+        for key, value in snapshot_environ().items()
+        if key not in _GIT_LOCATION_ENV
+        and key not in _GIT_PATHSPEC_ENV
+        and key != "GIT_INDEX_FILE"
+    }
+    if literal:
+        environ["GIT_LITERAL_PATHSPECS"] = "1"
+    try:
+        result = subprocess.run(
+            git_argv("ls-files", "-z", *args),  # nosec B603 B607
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
+            cwd=repository,
+            env=environ,
+        )
+        fields = _git_paths(result.stdout)
+    except (
+        FileNotFoundError,
+        NotADirectoryError,
+        subprocess.TimeoutExpired,
+        OSError,
+        UnicodeDecodeError,
+    ):
+        return None
+    if result.returncode != 0:
+        return None
+    return [field for field in fields if field]
+
+
+def _pathspec_for_exactly(path: str) -> str:
+    """A pathspec that matches *path* and nothing below it.
+
+    A plain pathspec, literal or not, also matches every path below the one it
+    names. A ``:(glob)`` pathspec with a wildcard in it is matched against the
+    whole path instead, and a backslash-escaped character counts as one, so the
+    last character is escaped (every glob character before it is too).
+    """
+    escaped = "".join("\\" + char if char in "*?[\\" else char for char in path[:-1])
+    return f":(glob){escaped}\\{path[-1]}"
+
+
+def _pathspecs_below_and_exactly(
+    relative: str, exactly: Sequence[str], suffix: str = ""
+) -> List[str]:
+    """Pathspecs for *relative* and everything below it, plus one per path in
+    *exactly* (with *suffix* after it) for that path alone; the listing that
+    takes them runs with ``literal=not exactly``."""
+    if not exactly:
+        return [relative]
+    return [
+        f":(literal){relative}",
+        *(_pathspec_for_exactly(path) + suffix for path in exactly),
+    ]
+
+
+def git_index_paths_below(
+    repository: Path, relative: str, exactly: Sequence[str] = ()
+) -> Optional[List[str]]:
+    """The index entries of the repository at *repository* at or below *relative*,
+    and at each path in *exactly*.
+
+    One ``git ls-files`` with *relative* (``/``-separated, from *repository*)
+    as a literal pathspec: a gitlink is listed as its own path, and nothing
+    below it is. Each path in *exactly* gets a pathspec that matches it alone
+    (:func:`_pathspec_for_exactly`), since one that named it plainly would list
+    everything below it too, which for the top directory of a monorepo is most
+    of the index. ls-files answers from the index alone, so a gitlink there is
+    listed whether or not its commit is in the repository (``git cat-file
+    --batch-check`` calls such a gitlink missing), and so is an entry a merge
+    left unmerged. utils/scan_source.py uses it to ask whether a repository
+    that a GIT_CEILING_DIRECTORIES entry hides tracks a directory below it, or
+    a path between them.
+
+    Returns:
+        The paths, relative to *repository*, or None when git could not answer.
+    """
+    return _git_listing(
+        repository,
+        ["--", *_pathspecs_below_and_exactly(relative, exactly)],
+        literal=not exactly,
+    )
+
+
+def git_untracked_paths_below(
+    repository: Path, relative: str, exactly: Sequence[str] = ()
+) -> Optional[List[str]]:
+    """What the repository at *repository* lists as untracked at or below *relative*,
+    and which of the directories in *exactly* it lists as untracked.
+
+    ``git ls-files --others --exclude-standard --directory`` with *relative* as a
+    literal pathspec: untracked and not ignored, by the repository's ignore files,
+    ``info/exclude`` and ``core.excludesFile``. A directory git does not descend
+    into (another repository, a linked worktree, a directory with nothing
+    tracked) is listed once, with a trailing ``/``. Nothing below a gitlink is
+    listed. Each directory in *exactly* gets a pathspec that matches it alone
+    and is listed, as ``<path>/``, only when git lists the directory itself.
+    utils/scan_source.py uses it with ``git_index_paths_below``.
+
+    Returns:
+        The paths, relative to *repository*, or None when git could not answer.
+    """
+    return _git_listing(
+        repository,
+        [
+            "--others",
+            "--exclude-standard",
+            "--directory",
+            "--",
+            *_pathspecs_below_and_exactly(relative, exactly, suffix="/"),
+        ],
+        literal=not exactly,
+    )
+
+
+def _git_path_line(output: bytes | str) -> str:
+    """The path git printed on a line of its own, spelled as Python spells a file name.
+
+    Only the newline git ends the line with is removed: a strip took a trailing
+    space off the name of a repository root, and every changed path was then
+    joined onto a directory that is not the repository. Decoded as a file name
+    (:func:`os.fsdecode`), not in text mode, which raised ``UnicodeDecodeError``
+    for a root that is not UTF-8. On Windows, where no file name holds a carriage
+    return, one before the newline is removed too.
+    """
+    text = os.fsdecode(output)
+    if text.endswith("\n"):
+        text = text[:-1]
+        if sys.platform == "win32" and text.endswith("\r"):
+            text = text[:-1]
+    return text
+
+
+def _git_paths(output: bytes) -> List[str]:
+    """The NUL-separated fields git printed with ``-z``, each spelled as Python
+    spells a file name.
+
+    git prints a path as the bytes of its name, and in UTF-8 on Windows. Each
+    path read here is compared with a name on disk, so the output is decoded as
+    :func:`os.fsdecode` decodes that name: on Linux a byte that is not UTF-8 is
+    kept as a surrogate. Text mode would decode with the locale's encoding, which
+    on Windows is a code page (cp1252, say), not UTF-8. On Windows, output that
+    is not UTF-8 raises ``UnicodeDecodeError``, which the callers take as no
+    answer.
+    """
+    return os.fsdecode(output).split("\0")
 
 
 #: The characters a base ref may hold. Narrower than git's own ref name rules,
@@ -1332,7 +2117,7 @@ def get_changed_files(
 ) -> Optional[List[Path]]:
     """Return files changed between *base_ref* and HEAD using ``git diff``.
 
-    Falls back to ``None`` (meaning "scan everything") when:
+    Falls back to ``None`` (meaning "report every finding") when:
     * ``git`` is not available on ``PATH``, or
     * *base_ref* does not exist in the local repository.
 
@@ -1344,6 +2129,14 @@ def get_changed_files(
     Returns:
         A list of :class:`~pathlib.Path` objects relative to the repo root,
         or ``None`` if the diff could not be computed.
+
+    The names are read as git stores them: ``-z`` separates them with NUL and
+    prints each verbatim, and ``core.quotePath=false`` keeps git from quoting
+    one. Read line by line and stripped, with the default ``core.quotePath``, a
+    name holding a byte above 0x7f, a control character, a double quote or a
+    backslash came back C-quoted, and a leading or trailing space was lost; such
+    a name matched no file, and the findings in it were dropped. Each name is
+    decoded as Python decodes a file name (:func:`os.fsdecode`).
 
     Raises:
         InvalidBaseRefError: when :func:`validate_base_ref` refuses *base_ref*.
@@ -1360,10 +2153,9 @@ def get_changed_files(
         # non-ASCII byte, a quote, a backslash or a control character
         # ("\303\274.py"), and that string names no file: those changes never
         # matched a finding. -z separates names with NUL and prints them raw, so a
-        # name is never split or stripped either. Decoded as UTF-8, which is how git
-        # stores paths; surrogateescape keeps any other byte, so the Path still
-        # names the file on disk. git_argv: the repository's config names no
-        # program git runs here.
+        # name is never split or stripped either. Each name is decoded as Python
+        # decodes a file name (os.fsdecode), so the Path still names the file on
+        # disk. git_argv: the repository's config names no program git runs here.
         #
         # The trailing "--" makes git read the range only as revisions. Without
         # it, when the base ref is missing here (origin/main in a shallow clone)
@@ -1382,30 +2174,38 @@ def get_changed_files(
                 "--",
                 program=git,
             ),
-            stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
+            stdin=subprocess.DEVNULL,
             timeout=30,
             cwd=cwd,
             env=child_environ(),
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        ASH_LOGGER.warning("git not available or timed out; falling back to full scan")
+    except FileNotFoundError as error:
+        ASH_LOGGER.warning(
+            f"{_why_git_did_not_start(error, cwd)}; reporting every finding",
+            extra=NO_MARKUP,
+        )
+        return None
+    except subprocess.TimeoutExpired:
+        ASH_LOGGER.warning(
+            f"git diff against {base_ref} timed out after 30 seconds; reporting "
+            "every finding",
+            extra=NO_MARKUP,
+        )
         return None
 
     if result.returncode != 0:
         ASH_LOGGER.warning(
-            "git diff against %s failed (rc=%d); falling back to full scan",
+            "git diff against %s failed (rc=%d); reporting every finding",
             base_ref,
             result.returncode,
+            extra=NO_MARKUP,
         )
         return None
 
     # Every name ends in NUL, so the last entry is empty; nothing is stripped, since
     # a leading or trailing space is part of a name.
-    return [Path(name) for name in result.stdout.split("\0") if name]
+    return [Path(os.fsdecode(name)) for name in result.stdout.split(b"\0") if name]
 
 
 def parse_args() -> argparse.Namespace:
@@ -1466,6 +2266,129 @@ def honors_ignore_files(config: Any) -> bool:
     return getattr(config, "honor_ignore_files", True) is not False
 
 
+def new_run_id() -> str:
+    """An ID for one scan: the run :func:`scan_set` records its lists under."""
+    return uuid.uuid4().hex
+
+
+#: How a list's names become bytes, and back. UTF-8, with the filesystem's error
+#: handler: a name that is not UTF-8 is a str with surrogate escapes from
+#: ``os.walk`` on POSIX, written as the bytes the filesystem holds, and a
+#: strict encode made the write raise for any tree holding one.
+_LIST_ENCODING = "utf-8"
+_LIST_ERRORS = sys.getfilesystemencodeerrors()
+
+
+def _list_bytes(lines: List[str]) -> bytes:
+    return "\n".join(lines).encode(_LIST_ENCODING, _LIST_ERRORS)
+
+
+def _list_lines(data: bytes) -> List[str]:
+    """The names :func:`_list_bytes` wrote, split on ``\\n`` alone.
+
+    ``str.splitlines`` also splits on ``\\r``, ``\\x0b``, ``\\x0c``,
+    ``\\x1c``-``\\x1e``, ``\\x85``, U+2028 and U+2029, every one of which a file
+    name can hold: ``a\\x0cb.py`` came back as two names. An empty file is an
+    empty list.
+
+    Only the separator is removed, never other whitespace: a name may end in a
+    space, a tab or, on POSIX, a carriage return. On Windows, where no file name
+    holds a carriage return, one at the end of a record is part of a ``\\r\\n``
+    separator and is removed too.
+    """
+    text = data.decode(_LIST_ENCODING, _LIST_ERRORS)
+    records = text.split("\n") if text else []
+    if sys.platform == "win32":
+        records = [record.removesuffix("\r") for record in records]
+    return records
+
+
+def _lists_this_run_wrote(
+    output_path: Path, run_id: str
+) -> Optional[tuple[list[str], list[str]]]:
+    """The ignore report and the scan-set list in *output_path*, if run *run_id* wrote them.
+
+    Read only when ``SCAN_SET_RUN_FILE_NAME`` there names *run_id* and the SHA-256
+    of each file as it is now. None for a pair with no record, another run's, a
+    damaged record, or a file changed since it was written: a pair an earlier run
+    left, or one a repository committed to its ``.ash/ash_output``, is not read.
+    """
+    try:
+        record = json.loads(
+            (output_path / SCAN_SET_RUN_FILE_NAME).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return None
+    digests = record.get("sha256") if isinstance(record, dict) else None
+    if not isinstance(digests, dict) or record.get("run_id") != run_id:
+        return None
+    contents: list[list[str]] = []
+    for name in SCAN_START_FILE_NAMES:
+        try:
+            data = (output_path / name).read_bytes()
+            if hashlib.sha256(data).hexdigest() != digests.get(name):
+                return None
+            contents.append(_list_lines(data))
+        except (OSError, UnicodeDecodeError):
+            return None
+    return contents[0], contents[1]
+
+
+def scan_set_this_run_wrote(output: str | Path, run_id: object) -> Optional[List[str]]:
+    """The scan set run *run_id* wrote to *output*, as :func:`scan_set` returns it.
+
+    None when *run_id* is not a string or that run's list is not there intact
+    (:func:`_lists_this_run_wrote`). Walks nothing and writes nothing, for a caller
+    that has another way to answer when the run wrote no list: ``ash merge`` has
+    no run ID, so it never reads one.
+    """
+    if not isinstance(run_id, str):
+        return None
+    reread = _lists_this_run_wrote(Path(output), run_id)
+    if reread is None:
+        return None
+    # As written, not stripped: a name that ends in whitespace keeps it.
+    return reread[1]
+
+
+def _write_lists(
+    output_path: Path,
+    ignore_lines: list[str],
+    scan_set_lines: list[str],
+    run_id: Optional[str],
+) -> None:
+    """Write the ignore report and the scan-set list, and, for a run, its record.
+
+    Each file is replaced atomically, the record last, so no reader trusts a pair
+    that is half written. Without *run_id* no record is written, and no caller
+    reads the pair back.
+
+    Each list is encoded once, and the record holds the digest of those bytes, not
+    of the file as it is after the replace: another run writing to the same output
+    directory can replace the file in between, and its list was then recorded, and
+    read back, as this run's.
+
+    No record is written for a scan set holding a name with a ``\\n`` in it, which
+    no newline-separated list can give back whole; every later call walks.
+    """
+    output_path.mkdir(parents=True, exist_ok=True)
+    digests = {}
+    for name, lines in zip(SCAN_START_FILE_NAMES, (ignore_lines, scan_set_lines)):
+        data = _list_bytes(lines)
+        write_bytes_atomically(output_path / name, data)
+        digests[name] = hashlib.sha256(data).hexdigest()
+    if run_id is not None and any("\n" in line for line in scan_set_lines):
+        ASH_LOGGER.debug(
+            "Not recording the scan set for reuse: a file name in it holds a "
+            "newline, so each scanner that reads the scan set builds it again."
+        )
+    elif run_id is not None:
+        write_text_atomically(
+            output_path / SCAN_SET_RUN_FILE_NAME,
+            json.dumps({"run_id": run_id, "sha256": digests}, indent=2),
+        )
+
+
 def scan_set(
     source: Optional[str] = None,
     output: Optional[str] = None,
@@ -1475,18 +2398,32 @@ def scan_set(
     filter_pattern: Optional[re.Pattern] = None,
     honor_ignore_files: bool = True,
     exclusions: Optional[Dict[str, Any]] = None,
+    run_id: Optional[str] = None,
+    write_lists: bool = False,
+    workspace_output_dir: Optional[str] = None,
     links_not_scanned: Optional[List[Dict[str, str]]] = None,
 ) -> list[str]:
     """Get list of files not matching .gitignore underneath source path.
 
-    A scan set reused from *output* is returned as it was written, whatever
-    *honor_ignore_files* says. The orchestrator removes both files before it
-    computes the scan set, so within one scan the scanners and converters that call
-    this later reuse the list it wrote.
+    *output* is the scan's output directory, which the walk leaves out. With
+    *run_id* too, the ignore report and the scan set are written there as
+    ``ash-ignore-report.txt`` and ``ash-scan-set-files-list.txt``, a record of the
+    run that wrote them goes beside them, and a later call with the same *run_id*
+    reads the pair back instead of walking the tree. A scan set reused that way
+    is returned as it was written, whatever *honor_ignore_files* says. Nothing
+    else is read back, so a pair an earlier run left, or one a repository
+    committed to its output directory, never decides what a scanner reading the
+    scan set is given.
+
+    Without *run_id* nothing is written unless *write_lists* asks for the pair,
+    which then has no record. So a call with neither, such as a scanner run on
+    its own, leaves the pair in the output directory as it is, a pair the
+    repository committed there included.
 
     Args:
         source: Path to scan. Defaults to current working directory.
-        output: Output path to save the ash-ignore-report.txt and ash-scan-set-files-list.txt files.
+        output: The output directory: left out of the walk, and where the
+            ash-ignore-report.txt and ash-scan-set-files-list.txt files are saved.
         ignorefile: List of ignore files to use in addition to the standard gitignore.
         debug: Enable debug logging.
         print_results: Print results to stdout. Defaults to False for library usage.
@@ -1501,12 +2438,20 @@ def scan_set(
             removed (:func:`ignore_file_exclusion_record`), which the orchestrator
             stores as ``metadata.ignore_file_exclusions``. Left empty when the
             scan set was reused from *output*, since nothing was matched then.
+        run_id: The scan's ID (``PluginContext.run_id``, :func:`new_run_id`). None
+            walks the tree on every call.
+        write_lists: Write the pair to *output* without a *run_id*, as the
+            command line does.
+        workspace_output_dir: In a workspace scan, the workspace's output
+            directory, which holds every project's output and is left out of the
+            walk like *output*: a project at the workspace root holds it
+            (``PluginContext.workspace_output_dir``).
         links_not_scanned: When given, extended with ``{"path", "reason"}`` for
             each file link left out of the scan set because its target leaves
             *source* (:func:`_left_out_as_a_link_leaving_the_tree`): the path below
             *source* with ``/`` separators, and the reason
             ``REASON_LINK_LEAVES_TREE``, sorted by path. Left empty when the scan set
-            was reused from *output*, whose list already leaves them out. Every
+            was read back from *output*, whose list already leaves them out. Every
             such link is also warned about, whether or not this is given.
 
     Returns:
@@ -1517,34 +2462,31 @@ def scan_set(
     if ignorefile is None:
         ignorefile = []
 
-    ashignore_content = None
-    ashscanset_list = None
-    ashignore_imported = False
-    ashscanset_imported = False
+    # Read back below, or computed by the walk.
+    ashignore_content: List[str] = []
+    ashscanset_list: List[str] = []
+    imported = False
+    if not isinstance(run_id, str):
+        # A context a test or another plugin builds may carry anything in run_id;
+        # only a string is a run's ID, and anything else reads nothing back.
+        run_id = None
 
-    if output:
-        # Ensure output is a Path object
-        output_path = Path(output)
-        ashignore_path = output_path.joinpath("ash-ignore-report.txt")
-        ashscanset_path = output_path.joinpath("ash-scan-set-files-list.txt")
-        if ashignore_path.exists():
-            with open(ashignore_path) as f:
-                ashignore_content = f.readlines()
-            ashignore_imported = True
-            debug_echo(f"Imported ash-ignore-report.txt from {output}", debug=debug)
-        if ashscanset_path.exists():
-            with open(ashscanset_path) as f:
-                ashscanset_list = f.readlines()
-            ashscanset_imported = True
+    if output and run_id is not None:
+        reread = _lists_this_run_wrote(Path(output), run_id)
+        if reread is not None:
+            ashignore_content, ashscanset_list = reread
+            imported = True
             debug_echo(
-                f"Imported ash-scan-set-files-list.txt from {output}", debug=debug
+                f"Imported this run's {', '.join(SCAN_START_FILE_NAMES)} from {output}",
+                debug=debug,
             )
 
     pruned_counts: Dict[str, int] = {}
     own_output_counts: Dict[str, int] = {}
-    walked_links: List[str] = []
-    if not ashignore_content or not ashscanset_list:
+    if not imported:
         # Single os.walk pass collects both ignore files and the full file list
+        earlier_output_dirs: List[Tuple[str, Path]] = []
+        walked_links: List[str] = []
         discovered_ignores, all_files = _collect_ignorefiles_and_all_files(
             source,
             ignorefile,
@@ -1553,6 +2495,9 @@ def scan_set(
             pruned_counts=pruned_counts,
             own_output=output,
             own_output_counts=own_output_counts,
+            output_dir=output,
+            workspace_output_dir=workspace_output_dir,
+            earlier_output_dirs_reached=earlier_output_dirs,
             links_not_scanned=walked_links,
         )
         for directory, found in own_output_counts.items():
@@ -1568,8 +2513,6 @@ def scan_set(
                     _source_dir_marker(source, directory),
                     "it was" if found == 1 else "they were",
                 )
-
-    if not ashignore_content:
         ashignore_content = get_ash_ignorespec_lines(
             source,
             ignorefile,
@@ -1578,9 +2521,6 @@ def scan_set(
         )
         if not honor_ignore_files:
             ashignore_content.insert(0, NOT_HONORED_REPORT_LINE)
-
-    if not ashscanset_list:
-        if not honor_ignore_files:
             ASH_LOGGER.info(
                 "The scanned repository's .gitignore and .ignore files are not "
                 "honored for this scan (honor_ignore_files: false), so they remove "
@@ -1606,6 +2546,7 @@ def scan_set(
                     walked_links, key=lambda link: relative_display(link, source)
                 )
             )
+        _warn_about_scanned_earlier_output_dirs(earlier_output_dirs, ashscanset_list)
         counts = report_ignore_file_exclusions(
             source,
             spec,
@@ -1636,40 +2577,20 @@ def scan_set(
             "Scan set was reused from %s, so per-ignore-file exclusion counts "
             "were not recomputed this run.",
             output,
+            extra=NO_MARKUP,
         )
 
-    if output:
-        # Imported here: get_scan_set is imported before the sandbox package is.
-        # The output directory is guarded for these two writes whether or not a
-        # PluginContext registered it: a link at either name, or at a directory
-        # below the output directory, is refused rather than written through.
-        from automated_security_helper.utils.sandbox.fs_guard import open_for_write
-
-        # Ensure output is a Path object
-        output_path = Path(output)
-        ashignore_path = output_path.joinpath("ash-ignore-report.txt")
-        ashscanset_path = output_path.joinpath("ash-scan-set-files-list.txt")
-
-        if not ashignore_imported:
-            debug_echo(f"Writing ash-ignore-report.txt to {output}", debug=debug)
-            if not ashignore_path.parent.exists():
-                ashignore_path.parent.mkdir(parents=True)
-            with open_for_write(ashignore_path, root=output_path) as f:
-                f.write("\n".join(ashignore_content))
-
-        if not ashscanset_imported:
-            debug_echo(
-                f"Writing ash-scan-set-files-list.txt to {output}",
-                debug=debug,
-            )
-            if not ashscanset_path.parent.exists():
-                ashscanset_path.parent.mkdir(parents=True)
-            with open_for_write(ashscanset_path, root=output_path) as f:
-                f.write("\n".join(ashscanset_list))
+    if output and not imported and (run_id is not None or write_lists):
+        debug_echo(
+            f"Writing {', '.join(SCAN_START_FILE_NAMES)} to {output}", debug=debug
+        )
+        _write_lists(Path(output), ashignore_content, ashscanset_list, run_id)
 
     if print_results:
+        # The names are the repository's: a control or a CI command form in one
+        # is shown, not obeyed.
         for file in ashscanset_list:
-            print(file, file=sys.stdout)
+            print(shown_not_obeyed(file), file=sys.stdout)
 
     if filter_pattern:
         ashscanset_list = [
@@ -1678,7 +2599,11 @@ def scan_set(
             if re.match(pattern=filter_pattern, string=file)
         ]
 
-    return [item.strip() for item in ashscanset_list]
+    # Each name exactly as the walk found it, or as _list_lines read it back. A
+    # strip took the whitespace off a name that ends in a space, a tab or a
+    # carriage return, and off a relative source directory that starts with a
+    # space, so the scan set named files that do not exist.
+    return ashscanset_list
 
 
 def main() -> int:
@@ -1696,8 +2621,9 @@ def main() -> int:
         debug=args.debug,
         print_results=True,
         honor_ignore_files=args.honor_ignore_files,
+        write_lists=True,
     )
-    print(file_list, file=sys.stderr)
+    print(shown_not_obeyed(str(file_list)), file=sys.stderr)
 
     return 0
 

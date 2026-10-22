@@ -114,7 +114,13 @@ class SpawnPlan:
             try:
                 fn()
             except Exception as e:  # pragma: no cover - best effort
-                ASH_LOGGER.debug(f"Sandbox cleanup failed: {e}")
+                # The exception can name a path an option chose: redacted
+                # with the active scope's env-read values before it is logged.
+                from automated_security_helper.utils.sandbox.scope import (
+                    scope_shown_text,
+                )
+
+                ASH_LOGGER.debug(scope_shown_text(f"Sandbox cleanup failed: {e}"))
 
 
 class SandboxBackend:
@@ -214,17 +220,39 @@ def _hidden_around(
     return hidden
 
 
+def _probe_env() -> Dict[str, str]:
+    """The environment a probe runs with: PATH, and the home directory.
+
+    The home is this process's usable one (``core.constants.usable_home``), as
+    HOME, or USERPROFILE on Windows, so that ``~`` in the probe is the operator's.
+    With no usable home (an empty or relative HOME) the probe gets none: a
+    relative one would be read against the probe's working directory.
+    """
+    from automated_security_helper.core.constants import usable_home
+
+    env = {"PATH": os.environ.get("PATH", "")}
+    home = usable_home()
+    if home is not None:
+        env["USERPROFILE" if os.name == "nt" else "HOME"] = str(home)
+    return env
+
+
 def _probe_process(
     argv: Sequence[str], env: Optional[Mapping[str, str]] = None
 ) -> "subprocess.CompletedProcess[str]":
-    """Run ``argv`` with its output captured, as a probe."""
+    """Run ``argv`` with its output captured, as a probe.
+
+    Plain subprocess.run, as for every probe in this module: bounded by
+    PROBE_TIMEOUT_SECONDS, one running when an MCP server stops ends on its own
+    soon after (subprocess_utils.run_ended_with_the_server is for longer runs).
+    """
     return subprocess.run(  # nosec B603 - fixed argv built in this module
         list(argv),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=PROBE_TIMEOUT_SECONDS,
-        env=dict(env) if env is not None else {"PATH": os.environ.get("PATH", "")},
+        env=dict(env) if env is not None else _probe_env(),
         check=False,
     )
 

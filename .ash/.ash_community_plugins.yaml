@@ -1229,7 +1229,8 @@ scanners:
     enabled: false
   snyk-code:
     enabled: false
-    severity_threshold: "MEDIUM"
+    options:
+      severity_threshold: "MEDIUM"
   syft:
     enabled: false
   ferret-scan:
@@ -1253,7 +1254,10 @@ scanners:
       ignore_unfixed: false
       license_full: false
       disable_telemetry: true
-      skip_dirs: ["tests/test_data"]
+      # trivy-repo has no skip_dirs option: global_settings.ignore_paths keeps
+      # tests/test_data out of its scan (utils/link_exclusions.py trivy_skip_dirs
+      # turns the entry into trivy's --skip-dirs), and an option the plugin does
+      # not declare stops the scan.
 converters:
   archive:
     enabled: true # Disable once #197 is fixed, not required for the test

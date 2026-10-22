@@ -311,9 +311,9 @@ def test_the_git_calls_keep_the_inherited_environment(gate, monkeypatch, tmp_pat
     gate.clone_source("repo", "feature", "a" * 40, "us-east-1")
 
     assert calls, "clone_source ran no subprocess"
-    assert all(call["env"] is None for call in calls), (
-        f"a git call was given a rewritten environment: {calls}"
-    )
+    # Named by argv: the environment a call was given would print its values.
+    rewritten = [call["argv"] for call in calls if call["env"] is not None]
+    assert rewritten == [], "these git calls were given a rewritten environment"
 
 
 # ---------------------------------------------------------------------------

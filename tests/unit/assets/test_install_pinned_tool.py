@@ -1642,6 +1642,9 @@ class TestPythonToolLicenses:
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv on PATH")
+@pytest.mark.runs_real_tools(
+    reason="what the real uv prints for `tool dir` under FORCE_COLOR is the question"
+)
 def test_uv_tool_dir_is_a_plain_path_even_when_color_is_forced(monkeypatch):
     """Measured: with FORCE_COLOR set, `uv tool dir` wraps the path in ANSI codes
     even when its stdout is a pipe, and the dist-info lookup then found nothing."""

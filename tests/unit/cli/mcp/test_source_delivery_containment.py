@@ -41,6 +41,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -215,6 +216,10 @@ class TestFinalizeCannotReachOutsideTheSession:
 
         Separate from the checksum case because it is reachable with no knowledge
         of the target at all, and because it deletes on a different branch.
+
+        The refusal quotes the upload_id, a path under the test's temporary
+        directory, whose name can hold any digits ("64" among them), so the
+        size is looked for in the rest of the text, as a number of its own.
         """
         monkeypatch.setattr(sd, "_MAX_ZIP_BYTES", 8)
         outside = tmp_path / "outside-the-workspace"
@@ -233,11 +238,14 @@ class TestFinalizeCannotReachOutsideTheSession:
 
         message = str(excinfo.value)
         assert "upload_id" in message
-        # The refusal names the upload_id it refused, a path under pytest's
-        # temporary directory, which can hold any digits (pytest-64, for one).
-        # The size can only leak in the rest of the text.
-        assert "64" not in message.replace(upload_id, ""), (
-            "the refusal leaked the size of a file outside the sandbox"
+        # The upload_id out, both as repr() quotes it, which doubles a backslash
+        # (on Windows, or in a POSIX name holding one), and as str() spells it.
+        # Only those: stripping every quoted span would pair an apostrophe in
+        # the prose ("upload's") with a later quote and take the size with it.
+        rest = message.replace(repr(upload_id), "''").replace(upload_id, "''")
+        assert not re.search(r"(?<![0-9])64(?![0-9])", rest), (
+            "the refusal reported the size of a file outside the sandbox",
+            message,
         )
         assert victim.exists()
 

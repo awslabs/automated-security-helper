@@ -94,6 +94,12 @@ uv tool install "bandit[sarif,toml]>=1.7.0,<2.0.0"
 uv tool install --offline "bandit>=1.7.0,<2.0.0"
 ```
 
+These read your user and system `uv.toml` (an index mirror set there applies)
+and not the scanned repository's: uv ignores project files for `uv tool`
+commands. The `uv pip` commands ASH runs carry `--no-config`. See
+[uv settings](https://awslabs.github.io/automated-security-helper/latest/docs/cli-reference/#uv-settings)
+in the CLI reference.
+
 ## Version Constraints
 
 ### Supported Version Constraint Formats
@@ -172,6 +178,14 @@ export SEMGREP_RULES_CACHE_DIR=/path/to/cached/rules
 #### 1. UV Not Available
 
 **Error**: `UV tool validation failed - UV is not available but required`
+
+ASH looks for uv in this order: the uv installed with ASH, in ASH's own environment
+(ASH depends on the `uv` package, so a pip, pipx, uv tool or uvx install has one
+beside the Python interpreter that runs ASH, or in that interpreter's `Scripts`
+directory on Windows, even when that directory is not on `PATH`), then `PATH`, the
+ASH bin directory (`~/.ash/bin` or `ASH_BIN_PATH`) and `/usr/local/bin`. The error
+means none of them has a uv, which happens when ASH was installed without its
+dependencies.
 
 **Solution**:
 ```bash
@@ -257,15 +271,37 @@ UV's built-in caching provides significant performance improvements:
 
 ### Cache Management
 
+Run these from `/` (on Windows, from the system drive's root), as ASH does, with
+`UV_PROJECT` and `UV_WORKING_DIR` unset. A `cache-dir` in a `uv.toml` or
+`pyproject.toml` `[tool.uv]` in the current directory or its parents, or in the
+directory either variable names, changes the cache they act on, so whoever can
+write that directory, `/tmp` on a shared host included, could choose what
+`uv cache clean` removes. Only an administrator can put such a file in `/`. A
+`cache-dir` in your own or the system `uv.toml`, or `UV_CACHE_DIR`, moves the
+cache for ASH's tools and for these commands alike when it is an absolute path.
+uv resolves a relative one against each command's working directory, so
+`(cd / && uv cache clean)` would act on a directory under `/`, not on the cache
+the tools used:
+
 ```bash
-# View cache information
-uv cache info
+# View cache size
+(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache size)
+
+# Check cache location
+(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache dir)
 
 # Clean cache if needed
-uv cache clean
+(cd / && env -u UV_PROJECT -u UV_WORKING_DIR uv cache clean)
+```
 
-# Check cache size and location
-uv cache dir
+In PowerShell, remove the two variables first (this changes the current session),
+then run each command from the system drive's root:
+
+```powershell
+Remove-Item Env:UV_PROJECT, Env:UV_WORKING_DIR -ErrorAction Ignore
+Push-Location "$env:SystemDrive\"; uv cache size; Pop-Location
+Push-Location "$env:SystemDrive\"; uv cache dir; Pop-Location
+Push-Location "$env:SystemDrive\"; uv cache clean; Pop-Location
 ```
 
 ### Performance Tips
@@ -339,7 +375,7 @@ The enhanced installation system maintains full backward compatibility:
 ### Basic Configuration
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   bandit:
     enabled: true
@@ -352,7 +388,7 @@ scanners:
 ### Advanced Configuration with Version Control
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   bandit:
     enabled: true
@@ -379,7 +415,7 @@ scanners:
 ### Offline Mode Configuration
 
 ```yaml
-# .ash/.ash.yaml
+# ASH config file (.ashrc.yaml in a new project)
 scanners:
   checkov:
     enabled: true
@@ -400,8 +436,9 @@ scanners:
 # GitHub Actions example
 - name: Setup UV
   run: |
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    # The installer puts uv in ~/.local/bin, not under ~/.cargo; UV_INSTALL_DIR pins it.
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh
+    echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Pre-install Security Tools
   run: |
@@ -437,6 +474,10 @@ scanners:
 ### 4. Security Considerations
 
 - **Version Pinning**: Pin tool versions for reproducible security scans
+- **Repository configuration is not read**: uv tool commands ignore project files,
+  and ASH runs `uv pip` with `--no-config` and `uv cache` from the filesystem root,
+  so a scanned repository's `uv.toml` or `[tool.uv]` cannot point uv at its own
+  packages
 - **Offline Mode**: Use offline mode in secure environments with limited network access
 - **Tool Verification**: Regularly validate that installed tools are functional
 

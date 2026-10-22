@@ -3,10 +3,11 @@
 import math
 import os
 import random
+import re
 from contextlib import suppress
 from typing import Any, Callable, Dict, Iterable, List
 import uuid
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -16,15 +17,25 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     PropertyBag,
 )
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    MARKUP,
+    NO_MARKUP,
+    escape_markup,
+)
+from automated_security_helper.utils.severity_ladder import result_severity
 from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Suppression,
     Kind1,
 )
 from automated_security_helper.utils.suppression_matcher import (
+    active_ignore_paths,
     find_inline_suppressions,
+    recorded_suppressions,
     should_suppress_finding,
+    written_suppression_id,
+    written_suppression_reasons,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.package_identity import (
@@ -35,6 +46,15 @@ from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_matcher import ignore_path_matches
+from automated_security_helper.utils.undecodable_text import (
+    path_in_record_form,
+    text_of_undecodable,
+    undecodable_of_text,
+)
+from automated_security_helper.utils.uri_separators import (
+    WINDOWS_ABSOLUTE,
+    sanitized_uri_text,
+)
 
 
 def get_finding_id(
@@ -72,6 +92,14 @@ def _file_uri_to_path_text(uri: str) -> str:
       decoded, so a source directory containing a space arrived as ``my%20dir``
       and then matched no file on disk and no suppression ``path``. That one
       misses on every platform, not only Windows.
+
+    Decoded as the filesystem decodes a name (surrogateescape), not with
+    ``unquote``'s default, which replaces a byte that is not UTF-8 with U+FFFD:
+    bandit writes a file whose name is not UTF-8 as ``as_uri()`` output with the
+    byte percent-encoded, and the replacement character named no file on disk
+    and no suppression ``path``. Read with surrogateescape the byte comes back
+    as the lone surrogate the directory listing has, so the name is the file's
+    own and the record form spells it as a report shows it.
     """
     from urllib.parse import unquote, urlparse
 
@@ -81,7 +109,7 @@ def _file_uri_to_path_text(uri: str) -> str:
     # scanning a bind mount, or a SARIF file moved between machines).
     if len(path) > 2 and path[0] == "/" and path[2] == ":":
         path = path[1:]
-    return unquote(path)
+    return unquote(path, errors="surrogateescape")
 
 
 def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
@@ -90,18 +118,26 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
 
     Args:
         uri: The URI to sanitize
-        source_dir_path: The source directory path object
-        source_dir_str: The source directory string with trailing separator
+        source_dir_path: The source directory path object, in the record form
+            (utils/undecodable_text.path_in_record_form)
+        source_dir_str: The source directory string with trailing separator, in
+            the record form
 
     Returns:
         The sanitized URI
     """
     if not uri:
         return uri
-
     # Remove file:// prefix if present, using urlparse to handle host segments
     if uri.startswith("file://"):
         uri = _file_uri_to_path_text(uri)
+
+    # Compared with the source directory in the record form a result holds names
+    # in. After the file:// decoding, whose surrogateescape unquoting hands back
+    # raw lone surrogates: converted before it, the lexical branch below compared
+    # a raw-surrogate path against a record-form source directory and could never
+    # match, while the resolve fallback answered in the record form.
+    uri = text_of_undecodable(uri)
 
     # Make path relative to source directory
     try:
@@ -128,23 +164,64 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
                 #
                 # Only reached when the lexical form already failed, so the
                 # common case pays nothing for it.
+                #
+                # Resolved by the name the file has on disk, the URI's record form
+                # read back first, and compared in the record form again.
                 with suppress(ValueError, OSError):
-                    uri = str(path_obj.resolve().relative_to(source_dir_path))
+                    resolved = Path(undecodable_of_text(uri)).resolve()
+                    uri = str(
+                        path_in_record_form(resolved).relative_to(source_dir_path)
+                    )
         else:
             # Both sides reduced to one spelling before a textual prefix test.
-            # source_dir_str is built from a Path, so it carries backslashes on
-            # Windows, while a SARIF URI carries forward slashes by convention:
-            # comparing the raw text made this branch platform-dependent, and on
-            # Windows it could not fire at all.
-            posix_uri = uri.replace("\\", "/")
-            posix_prefix = source_dir_str.replace("\\", "/")
+            # source_dir_str may carry backslashes on Windows, while a SARIF URI
+            # carries forward slashes by convention: comparing the raw text made
+            # this branch platform-dependent, and on Windows it could not fire
+            # at all. Each side is converted only where its backslashes are
+            # separators, so a POSIX name that contains one is compared as is.
+            posix_uri = _with_slash_separators(uri, source_dir_path)
+            posix_prefix = _with_slash_separators(source_dir_str, source_dir_path)
             if posix_uri.startswith(posix_prefix):
                 uri = posix_uri.removeprefix(posix_prefix)
     except Exception as e:
         ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
 
-    # Replace backslashes with forward slashes for consistency
-    uri = str(uri).replace("\\", "/")
+    return _with_slash_separators(str(uri), source_dir_path)
+
+
+def _with_slash_separators(uri: str, source_dir_path: PurePath) -> str:
+    """*uri* with ``/`` for each backslash that separates segments, and no other.
+
+    A backslash separates segments where the scan root's paths are Windows
+    paths, and is an ordinary file-name character where they are POSIX paths.
+    POSIX producers keep it as written: ``os.path.relpath``,
+    ``Path.relative_to``, ``as_posix()``, ``as_uri()`` (as ``%5C``, which
+    :func:`_file_uri_to_path_text` decodes), and detect-secrets' result keys.
+    Rewriting every backslash turned the POSIX file ``a\\b.py`` into ``a/b.py``,
+    which names nothing.
+
+    The scan root is the producer's root here because the two callers of
+    :func:`sanitize_sarif_paths` run on the host that ran the scanner. On a
+    POSIX root a URI is still read as Windows-made when it can only be one: a
+    drive letter or UNC prefix, or a backslash spelling that names no file
+    under the root while its slash spelling does (SARIF written on Windows for
+    the same tree). When both spellings name a file, the name as written wins.
+    A URI that names nothing either way is kept as written.
+    """
+    if "\\" not in uri:
+        return uri
+    slashed = uri.replace("\\", "/")
+    if isinstance(source_dir_path, PureWindowsPath):
+        return slashed
+    try:
+        if os.path.lexists(source_dir_path / uri):
+            return uri
+        if WINDOWS_ABSOLUTE.match(uri) or os.path.lexists(source_dir_path / slashed):
+            return slashed
+    except (OSError, ValueError):
+        # ValueError: an embedded NUL. The URI names no file this host can stat,
+        # so it is kept as written.
+        pass
     return uri
 
 
@@ -164,7 +241,10 @@ def sanitize_sarif_paths(
     if not sarif_report or not sarif_report.runs:
         return sarif_report
 
-    source_dir_path = Path(source_dir).resolve()
+    # In the record form, as a URI holds a file name that is not UTF-8 (each lone
+    # surrogate as \udcNN, utils/undecodable_text.py): a URI under a source directory
+    # named so is made relative to it like any other.
+    source_dir_path = path_in_record_form(Path(source_dir).resolve())
     # as_posix() rather than str(): the prefix is compared against a SARIF URI,
     # which is forward-slashed by convention, and str() on Windows is not.
     source_dir_str = source_dir_path.as_posix() + "/"
@@ -384,33 +464,13 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
 
 
 def _resolve_result_severity(result) -> str:
-    """Resolve a SARIF result to a normalized severity name."""
-    if result.properties:
-        props = result.properties
-        if isinstance(props, PropertyBag):
-            props = props.model_dump(mode="json", exclude_unset=True, exclude_none=True)
-        issue_sev = (
-            props.get("issue_severity", "").upper() if isinstance(props, dict) else ""
-        )
-        if issue_sev in _CANONICAL_SEVERITIES:
-            return issue_sev.lower()
+    """Resolve a SARIF result to a normalized (lower-case) severity name.
 
-    if result.level:
-        # Read `.value` before str(): Level is a (str, Enum) mixin, so
-        # str(Level.error) is "Level.error" and matches no arm below. The field
-        # holds a member whenever it was not validated -- an omitted key taking
-        # the default, or a post-construction assignment. Falling through here
-        # returns "info", which puts a real finding under every threshold above
-        # INFO, so the gate passes a report the SARIF on disk says is error.
-        level = getattr(result.level, "value", result.level)
-        match str(level).lower():
-            case "error":
-                return "critical"
-            case "warning":
-                return "medium"
-            case "note":
-                return "low"
-    return "info"
+    ``utils.severity_ladder.result_severity`` is the rule; it lives there so that
+    the models and the reporters, which this module's imports would make circular,
+    can call the same function.
+    """
+    return result_severity(result).lower()
 
 
 def get_severity_metrics_from_sarif(
@@ -471,6 +531,35 @@ def mask_secrets_in_sarif(sarif_report: SarifReport) -> SarifReport:
     return sarif_report
 
 
+#: A URI with a scheme and an authority (``https://``). ``file://`` is turned into
+#: its path before this is checked; any other such URI names no file in the tree.
+_URI_WITH_AUTHORITY = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
+
+
+def _matched_path_text(uri: str, source_dir_prefix: str) -> str:
+    """*uri* in the one spelling every match reads.
+
+    The matchers compare a path as it is given and normalize only the pattern
+    (``path_matching._path_pattern_matches``), so the path is put in one spelling
+    here, where it is built: the ``file://`` scheme turned into its path
+    (:func:`_file_uri_to_path_text`, so ``file:///C:/`` is ``C:/``), ``\\`` made
+    ``/`` where it is a separator (:func:`sanitized_uri_text`, which reads the
+    scan root's prefix), and then ``PurePosixPath(...).as_posix()``, which folds
+    ``.`` components and repeated separators and keeps ``..``. A scanner's
+    ``./vendor/v.py`` or ``vendor//v.py`` is the file ``vendor/v.py``. A ``..`` is
+    kept because folding it needs the filesystem: with a symlink before it,
+    dropping it would name another file.
+
+    Any other scheme with an authority (``https://host/x``) is left as written, so
+    a pattern for a file in the tree does not reach it. The URI the report records
+    is not this text: ``_sanitize_uri`` writes it without the folding.
+    """
+    text = _file_uri_to_path_text(uri) if uri.startswith("file://") else uri
+    if not text or _URI_WITH_AUTHORITY.match(text):
+        return text
+    return PurePosixPath(sanitized_uri_text(text, source_dir_prefix)).as_posix()
+
+
 def _normalize_sarif_uri(
     uri: str,
     source_dir_prefix: str,
@@ -485,9 +574,20 @@ def _normalize_sarif_uri(
     2. Windows with leading slash before drive: /D:/path/...
     3. Windows with drive letter stripped by scanner: /a/repo/... vs D:/a/repo/
     4. Offline opengrep basename-relative: basename/subpath/file.py
-    5. No match: returned unchanged (forward-slash normalised)
+    5. No match: returned as the path it names
+
+    *uri* has been sanitized, so a backslash left in it is part of a POSIX file
+    name and is kept, unless the URI is a drive-letter or UNC path or the source
+    directory is a Windows path (``utils/uri_separators.py``). The result opens
+    the file for its inline suppressions, so rewriting it read ``a/b.py`` for the
+    file ``a\\b.py``.
+
+    The URI is first put in the spelling every match reads
+    (:func:`_matched_path_text`), before any prefix is stripped, so
+    ``./vendor/v.py`` is ``vendor/v.py`` for the ignore paths, the suppressions,
+    the inline-suppression read and the finding id alike.
     """
-    uri_normalized = uri.replace("\\", "/")
+    uri_normalized = _matched_path_text(uri, source_dir_prefix)
     if uri_normalized.startswith(source_dir_prefix):
         return uri_normalized[len(source_dir_prefix) :]
     if uri_normalized.startswith(source_dir_prefix_with_slash):
@@ -535,10 +635,21 @@ def _apply_config_suppression(
     flat_finding: "FlatVulnerability",
     used_suppressions: set | None,
     symbol_resolver: SymbolResolver | None = None,
+    written_reasons: Dict[int, str] | None = None,
+    recorded_fields: Dict[int, Dict[str, Any]] | None = None,
+    written_ids: Dict[int, str] | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
+    ``written_reasons`` (``suppression_matcher.written_suppression_reasons``) gives
+    the reason quoted for a suppression whose reason was read from the environment.
+    ``recorded_fields`` (``suppression_matcher.recorded_suppressions``) gives the
+    written form a matched suppression is recorded as used by
+    (``written_suppression_id``), so ``used_suppressions`` carries the reference a
+    field was read through, never its value. ``written_ids``, keyed by the
+    suppression's ``id()``, keeps each written id once it is computed, so a
+    caller applying many findings computes it once per matched suppression.
     """
     should_suppress, matching_suppression = should_suppress_finding(
         flat_finding, suppressions, symbol_resolver
@@ -547,7 +658,18 @@ def _apply_config_suppression(
         return False
 
     if used_suppressions is not None and matching_suppression:
-        used_suppressions.add(matching_suppression.id)
+        written_id = (
+            written_ids.get(id(matching_suppression))
+            if written_ids is not None
+            else None
+        )
+        if written_id is None:
+            written_id = written_suppression_id(
+                matching_suppression, recorded_fields or {}
+            )
+            if written_ids is not None:
+                written_ids[id(matching_suppression)] = written_id
+        used_suppressions.add(written_id)
 
     if not result.suppressions:
         result.suppressions = []
@@ -561,14 +683,19 @@ def _apply_config_suppression(
     reason = (
         matching_suppression and matching_suppression.reason
     ) or "No reason provided"
-    # This message styles its own reason, so markup has to stay on for the record
-    # and each interpolated value is escaped instead. A rule id or a repository
-    # path can contain brackets, and an unescaped one either aborts the record or
-    # is silently swallowed as a style tag.
+    # A reason read from the environment is quoted by its reference, here and in
+    # the justification, which every report carries.
+    if matching_suppression is not None and written_reasons:
+        reason = written_reasons.get(id(matching_suppression), reason)
+    # This message styles its own reason, so the record asks for markup and each
+    # interpolated value is escaped. A rule id or a repository path can contain
+    # brackets, and an unescaped one either aborts the record or is silently
+    # swallowed as a style tag.
     ASH_LOGGER.verbose(
         f"Suppressing rule '{escape_markup(result.ruleId)}' on location "
         f"'{escape_markup(flat_finding.file_path)}' based on suppression rule: "
-        f"[yellow]{escape_markup(reason)}[/yellow]"
+        f"[yellow]{escape_markup(reason)}[/yellow]",
+        extra=MARKUP,
     )
     client_supplied = getattr(matching_suppression, "client_supplied", False) is True
     result.suppressions.append(
@@ -603,8 +730,12 @@ def _apply_inline_suppression(
     source tree, or ``work_dir`` for a finding in a converted file, whose URI is
     absolute and so replaces ``source_dir`` in the join below. A converted notebook
     keeps its ``ash-ignore`` comments, so those findings stay suppressible.
+
+    The file is opened by the name it has on disk: a URI holds a file name that is
+    not UTF-8 in its record form, ``\\udcNN`` (utils/undecodable_text.py), which is
+    read back as the name first.
     """
-    file_path = source_dir / normalized_uri
+    file_path = source_dir / undecodable_of_text(normalized_uri)
     file_key = str(file_path)
     if file_key not in inline_cache:
         scan_root = source_dir
@@ -625,7 +756,8 @@ def _apply_inline_suppression(
             ASH_LOGGER.verbose(
                 f"Suppressing rule '{escape_markup(result.ruleId)}' at line "
                 f"{result_line} in '{escape_markup(normalized_uri)}' via inline "
-                f"comment: [yellow]{escape_markup(isup.reason)}[/yellow]"
+                f"comment: [yellow]{escape_markup(isup.reason)}[/yellow]",
+                extra=MARKUP,
             )
             result.suppressions.append(
                 Suppression(
@@ -705,9 +837,10 @@ def _suppress_transitive_of_suppressed_roots(
             described.append(f"{ref['rule_id']} at {where}")
         else:
             roots = ", ".join(described)
+            # Text, so nothing is escaped: an escaped value printed its backslash.
             ASH_LOGGER.verbose(
-                f"Suppressing rule '{escape_markup(result.ruleId)}': every root "
-                f"advisory is suppressed ({escape_markup(roots)})",
+                f"Suppressing rule '{result.ruleId}': every root "
+                f"advisory is suppressed ({roots})",
                 extra=NO_MARKUP,
             )
             result.suppressions = [
@@ -987,18 +1120,33 @@ def apply_suppressions_to_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
     used_suppressions: set | None = None,
+    exclude_output_dir: bool = True,
 ) -> SarifReport:
-    """Apply suppressions to a SARIF report based on global ignore paths and suppression rules."""
-    # The config's ignore paths only. KNOWN_IGNORE_PATHS (node_modules/, .venv/,
-    # venv/) were added here too, with their **/ forms, but as globs ending in "/"
-    # they matched no finding. Since an ignore path ending in "/" names its
-    # directory, they would drop every finding below one, and the dependency
-    # scanners report there: npm-audit locates each finding at
-    # node_modules/<package>/package.json, so all of them would go. They are
-    # scanner-level exclusions, for bandit and checkov, and stay out of this step.
-    ignore_paths = list(plugin_context.config.global_settings.ignore_paths or [])
+    """Apply suppressions to a SARIF report based on global ignore paths and suppression rules.
+
+    With *exclude_output_dir*, a result located in the output directory, outside
+    its work directory, is dropped unless the repository committed that file.
+    ``ash merge`` passes False: each shard already made that decision with its
+    own git answer and run ID, and the merge has neither.
+    """
+    # KNOWN_IGNORE_PATHS (.venv/, venv/, node_modules/) are not applied here.
+    # Applied, they would drop findings that matter: grype and npm-audit locate a
+    # vulnerable dependency at node_modules/<pkg>/package.json, and that finding
+    # is the point of running them. The code scanners skip these directories
+    # themselves (bandit --exclude, checkov --skip-path).
+    ignore_paths = active_ignore_paths(
+        plugin_context.config.global_settings.ignore_paths
+    )
 
     suppressions = plugin_context.config.global_settings.suppressions or []
+    # The written form each used entry is recorded by (written_suppression_id),
+    # built once per call and shared with the written reasons. The written ids
+    # are kept as they are computed, once per matched suppression.
+    recorded_fields = recorded_suppressions(plugin_context.config)
+    written_reasons = written_suppression_reasons(
+        plugin_context.config, recorded_fields
+    )
+    written_ids: Dict[int, str] = {}
 
     # Exclusions a delivered config gave one scanner in its options, moved out of
     # them before the scan so the files were scanned. Each finding of that scanner
@@ -1042,6 +1190,17 @@ def apply_suppressions_to_sarif(
         else None
     )
 
+    # The files a repository committed to ASH's output directories, which the
+    # exclusion keeps: a repository must not be able to hide a file from ASH by
+    # committing it under the output directory. With the default output directory,
+    # .ash/ash_output, a key committed there was reported by no scanner. Read the
+    # first time a result falls in the output directory, so a report with none
+    # there reads nothing: from the scan-set list this run wrote, or from git when
+    # there is none. Neither walks the source tree or writes to the output
+    # directory (committed_output_files). ``ash merge`` does not get here: it
+    # keeps what its shards kept (exclude_output_dir=False).
+    _committed_files: set[Path] | None = None
+
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -1068,7 +1227,16 @@ def apply_suppressions_to_sarif(
                     if not raw_uri:
                         continue
                     uri = output_exclusion.normalize(raw_uri)
-                    if output_exclusion.holds(uri):
+                    in_output_path = exclude_output_dir and output_exclusion.holds(uri)
+                    if in_output_path and _committed_files is None:
+                        from automated_security_helper.utils.scan_output_dirs import (
+                            committed_output_files,
+                        )
+
+                        _committed_files = committed_output_files(plugin_context)
+                    if in_output_path and output_exclusion._resolve_cache[uri] not in (
+                        _committed_files or ()
+                    ):
                         output_exclusion.record(uri)
                         is_in_ignorable_path = True
                         continue
@@ -1080,7 +1248,8 @@ def apply_suppressions_to_sarif(
                             f"Ignoring finding on rule '{escape_markup(result.ruleId)}' "
                             f"file location '{escape_markup(uri)}' based on ignore_path "
                             f"match with global reason: "
-                            f"[yellow]{escape_markup(matched_ignore.reason)}[/yellow]"
+                            f"[yellow]{escape_markup(matched_ignore.reason)}[/yellow]",
+                            extra=MARKUP,
                         )
                         # ``is True``: an ignore path is a model here, and a stand-in
                         # without the field must not count as the client's.
@@ -1210,6 +1379,9 @@ def apply_suppressions_to_sarif(
                         flat_finding,
                         used_suppressions,
                         _symbol_resolver,
+                        written_reasons,
+                        recorded_fields,
+                        written_ids,
                     )
                     if config_suppressed and len(result.suppressions or []) >= 1:
                         updated_results.append(result)

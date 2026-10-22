@@ -4,6 +4,10 @@ ASH produces scan results in multiple formats. Every scan writes an internal agg
 
 The reports land in `reports/` under the output directory (`.ash/ash_output` by default), beside `ash_aggregated_results.json`. The output directory also holds `scanners/`, each tool's raw output as the tool wrote it, and `converted/`, the converted copies of scanned files such as notebooks and archive contents. Those two are not masked: a secret a scanner found is in them in full. When you keep scan output as a CI artifact, keep `reports/` and `ash_aggregated_results.json` only, as the examples in [Running ASH in CI](../tutorials/running-ash-in-ci.md) do. A workspace scan repeats the layout per project under `projects/<key>/`, so keep `projects/*/reports` and `projects/*/ash_aggregated_results.json` too, and not the projects' `scanners/` or `converted/`.
 
+Every report, `ash inspect findings`, the summary counts, and the exit code grade a finding the same way: by the severity the scanner gives it (`properties.issue_severity` in SARIF) when it gives one, otherwise by its SARIF level, where `error` is CRITICAL, `warning` is MEDIUM, `note` is LOW, and `none` is INFO. A finding that states no level takes the level its rule declares as default (`defaultConfiguration.level`), or `none` when its `kind` is not `fail`, and otherwise SARIF's own default, `warning` (MEDIUM); a level ASH does not recognise is read as `warning` too. `ash.sarif` writes every finding's level, so a tool reading the file sees the level ASH graded. Formats with their own severity scale carry the same grade in that scale: GitLab SAST as `Critical` through `Info`, OCSF as `severity_id` 5 (Critical) through 1 (Informational), and the GitHub GHAS report, for a rule whose scanner gives no `security-severity`, as 9.5, 8.0, 6.0, 3.0, or 1.0.
+
+Each scan's results carry a `metadata.report_id` that no other scan shares: `ASH-`, the scan's start as a UTC date and time, and 12 random hexadecimal digits, for example `ASH-20261011153012-3f9c0e2b7d1a`. Reports rendered again from saved results, with `ash report` or `--use-existing`, keep the id. `ash merge` gives the merged report one id of the same shape, computed from its shards' ids, so merging the same shards again gives the same id and it differs from every shard's. The aggregated report of a workspace scan has an id of the form `ASH-WORKSPACE-<workspace file name>-<date and time>-<hex digits>`.
+
 ## Quick reference
 
 <!-- BEGIN GENERATED: reporter-quick-reference -->
@@ -34,10 +38,29 @@ The reports land in `reports/` under the output directory (`.ash/ash_output` by 
 Of the 15 built-in reporters, 13 are enabled by default: `csv`, `cyclonedx`, `flat-json`, `github-ghas`, `gitlab-cyclonedx`, `gitlab-sast`, `html`, `junitxml`, `markdown`, `ocsf`, `sarif`, `text`, and `unused-suppressions`. `spdx` and `yaml` are available but disabled by default.
 <!-- END GENERATED: reporter-defaults -->
 
-To request a specific set of formats, use the `reporters` section in your configuration file:
+To write only some of these reports, name them with `--output-formats` (short form `-f`), comma-separated, using the names in parentheses in the table above:
+
+```bash
+ash scan --output-formats sarif,github-ghas,gitlab-sast
+```
+
+To make the same choice for every scan, list the names under `output_formats` in your configuration file:
 
 ```yaml
 # .ash/.ash.yaml
+output_formats:
+  - sarif
+  - github-ghas
+```
+
+`output_formats` also takes one name (`output_formats: sarif`) or names separated by commas, as `--output-formats` does; `null` means not set. A `--output-formats` list replaces the configured one for that run. With neither, every enabled reporter writes its report. `ash merge --output-formats` takes the same names, and without it `ash merge` uses the `output_formats` of the scan it merges.
+
+Either list narrows the enabled reporters; it does not turn on a reporter that is disabled. A name that produces no report, such as `yaml` while that reporter is disabled, is logged as an error that says why, and the scan continues. `aggregated`, `dict`, `asff`, and `custom` are accepted for compatibility but no reporter writes them. The AWS reporters (`aws-security-hub`, `bedrock-summary-reporter`, `cloudwatch-logs`, and `s3`) can be named the same way; they exist in a run only when `ash_plugin_modules` lists `automated_security_helper.plugin_modules.ash_aws_plugins`. A reporter from your own plugin module cannot be named in either list; it runs only when no list is given.
+
+To choose which reporters are enabled, use the `reporters` section in your configuration file:
+
+```yaml
+# ASH config file (.ashrc.yaml in a new project)
 reporters:
   flat-json:
     enabled: true
@@ -83,6 +106,25 @@ trailing dots and spaces, as case-insensitive file systems and Windows compare t
 In workspace mode that covers `reports/workspace-reports.json` too, and the run is
 refused before any project is scanned.
 
+`ash scan` deletes the previous scan's results when it starts, as it always has, so a scan that
+fails leaves only what it wrote before it failed: gate CI on ASH's exit code, not on whether
+`reports/` exists. Container and Nix mode delete them before they start the scan.
+
+A scan started over MCP keeps them until it has its own. When it starts, the MCP server moves the
+previous `reports/`, `scanners/`, `analysis/`, `converted/`, `ash_aggregated_results.json`,
+`ash-ignore-report.txt` and `ash-scan-set-files-list.txt` into
+`.ash/ash_output/.ash_previous_results/`. When the scan finishes they are deleted; when it fails
+or is cancelled, the server removes the results the scan had written, puts them back, and writes
+`.ash_previous_results_restored` beside them to say so. The scan's own logs, `ash.log` and
+`ash.log.jsonl`, stay. The next scan removes that file when it
+starts. A server that is killed outright cannot do any of this; the next MCP scan in the same
+output directory then treats `.ash_previous_results/` as the last complete results, and the next
+`ash scan` deletes it. `get_scan_progress` for a scan whose previous results were put back returns
+`output_holds_previous_results: true` and no scanner data, because the files are not that scan's.
+The tools that read results from the directory (`get_scan_results`, `get_scan_summary`,
+`get_scan_result_paths`, `explain_finding`, `diff_scan_results`, `suggest_suppression`) answer that
+the scan is not complete, with `output_holds_previous_results: true` in the error's `context`.
+
 ---
 
 ## Flat JSON
@@ -102,9 +144,19 @@ The top-level structure contains four sections:
 }
 ```
 
-**`metadata`** -- report-level information (project name, scan time, report time, tool version, time delta).
+**`metadata`** -- report-level information: the project name (the configuration's `project_name`), scan time, report time, tool version and time delta.
 
-**`scanner_metrics`** -- a list of per-scanner objects with finding counts by severity and pass/fail status.
+**`scanner_metrics`** -- a list of per-scanner objects with finding counts by severity and pass/fail status. Besides the counts, each object says what happened to the scanner:
+
+| Field | Description |
+|-------|-------------|
+| `status` | `PASSED`, `FAILED`, `ERROR`, `SKIPPED` or `MISSING` |
+| `excluded` | `true` when the run left the scanner out: `--exclude-scanners` or the shard split, `--scanners`, `enabled: false` in the configuration, `--python-only`, or a platform it does not support |
+| `dependencies_missing` | `true` on a `MISSING` row, and only there, except a `MISSING` row for a scanner whose filtering raised before any dependency was checked (`false`; its `missing_reason` says so) |
+| `missing_reason` | On a `MISSING` row, why: the tool that was not found, the reason the scanner's dependency check gave, or that the scanner could not be sandboxed. `null` otherwise |
+| `skipped_reason` | On a `SKIPPED` row, why: which of the options above left it out, or that it had nothing to scan (for example no CloudFormation template for cdk-nag and cfn-nag, no lockfile for npm-audit), whether or not its tool is installed. `null` otherwise |
+
+The scanner rows in `ash_aggregated_results.json` (`scanner_results`) carry the same status, `excluded`, `missing_reason` and `skipped_reason`, with `dependencies_satisfied` (`false` on a `MISSING` row, except one for a scanner whose filtering raised before any dependency was checked) and `exit_code`: the exit code of the scanner's tool, the highest over the targets it ran on, or `null` when no tool ran (a `MISSING` or excluded scanner, one that had nothing to scan, or one that started no tool for its targets, such as npm-audit with a `yarn.lock` and no yarn).
 
 **`top_hotspots`** -- the files with the most findings, ranked by count.
 
@@ -116,7 +168,7 @@ Each object in the `findings` array has these fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique identifier for the finding (e.g., `bandit-B105-4821`) |
+| `id` | string | `<scanner>-<rule>-<12 hex digits>`, for example `bandit-B105-0f3a9c21d4e7`. The digits are a hash of the finding's identity: its SARIF fingerprints when the scanner reports ones that tell findings apart, otherwise its file (relative to the scan root) and its start and end lines; plus its package name and path for a dependency finding and its project in a workspace scan. A fingerprint the scanner writes on every result, such as semgrep's `requires login`, or one that findings of one scanner and rule share at different places in one file, does not count; the same value in another file or from another scanner still counts. A file a converter wrote, such as a converted notebook, is identified by its path under the converted files, so the id does not depend on where the output directory is. Findings that share all of that, such as two secrets on one line, are told apart by a digest of their column and message, so a newcomer does not take an existing finding's id and fixing one does not hand its id to another; only exact duplicates, with the same column and message, are numbered, the first keeping the plain id. A finding alone with its identity has no digest, so it keeps its id when the scanner rewords its message, and gets a new one when a second finding with the same identity appears. A finding identified by its lines gets a new id when an edit above it moves it; one with fingerprints keeps it. Upgrading a package to another vulnerable version keeps it |
 | `title` | string | Rule ID or short name of the finding |
 | `description` | string | Human-readable explanation of the issue |
 | `severity` | string | One of `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO` |
@@ -169,7 +221,7 @@ Each object in the `findings` array has these fields:
   ],
   "findings": [
     {
-      "id": "bandit-B105-4821",
+      "id": "bandit-B105-0f3a9c21d4e7",
       "title": "B105",
       "description": "Possible hardcoded password: 'secret_key'",
       "severity": "HIGH",
@@ -241,6 +293,8 @@ for finding in high_findings:
 
 The SARIF report is ASH's internal canonical representation -- all other formats are derived from it.
 
+The run's `tool.driver` is ASH, with ASH's version, and each scanner is a `tool.extensions[]` entry with its own name, version and rules (one run per project in workspace mode). Each result points at its rule in its scanner's extension, as SARIF 2.1.0 asks when rules are defined in an extension (3.27.7): `rule.toolComponent` names the extension and gives its `index` in `tool.extensions`, and `rule.index` is the rule's position in that extension's `rules`. A result whose rule no extension defines has no `rule` reference. Each scanner's version is the scanner's own: the `version` of its extension, and `properties.scanner_version` and `properties.scanner_details.tool_version` on each of its results. When ASH does not know a scanner's version, those fields are left out.
+
 **Configuration:**
 ```yaml
 reporters:
@@ -277,6 +331,8 @@ justification in `suppression_justification`. See
 ## CycloneDX
 
 [CycloneDX](https://cyclonedx.org/) is an OWASP standard for Software Bill of Materials. ASH produces CycloneDX 1.6 JSON documents that inventory dependencies and their known vulnerabilities. Use this format for SBOM compliance workflows and supply-chain security tools.
+
+The components come from the SBOM scanner, syft. When no SBOM scanner ran, for example because syft is not installed or `--scanners` left it out, the report is still a valid CycloneDX document, with an empty `components` list and a `compositions` entry whose `aggregate` is `unknown`, which tells a consumer that the inventory's completeness is not known rather than that the project has no dependencies: `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[],"compositions":[{"aggregate":"unknown"}]}`. The `gitlab-cyclonedx` report writes an empty component list in GitLab's format.
 
 **Configuration:**
 ```yaml

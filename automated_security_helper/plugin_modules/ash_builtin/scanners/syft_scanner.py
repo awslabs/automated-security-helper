@@ -32,9 +32,11 @@ from automated_security_helper.config.path_trust import (
     honored_path,
 )
 from automated_security_helper.utils.link_exclusions import syft_excludes
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 
 
 class SyftScannerConfigOptions(ScannerOptionsBase):
@@ -91,6 +93,9 @@ class SyftScannerConfig(ScannerPluginConfigBase):
 class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
     """SyftScanner implements IaC scanning using Syft."""
 
+    #: syft is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     sandbox_requirements: ClassVar[SandboxRequirements] = SandboxRequirements(
         cache_paths=("~/.cache/syft",),
         env_prefixes=("SYFT_",),
@@ -137,6 +142,21 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.custom_install_commands.update(pinned_tool_install_commands("syft"))
         return self
 
+    def _use_empty_config(self) -> None:
+        """Hand syft an empty config file ASH writes.
+
+        Given no ``--config``, syft runs from the source directory and reads
+        ``.syft.yaml`` from it, which would put the repository's file where the
+        operator's refused or missing one was. An explicit ``--config`` ends
+        the discovery.
+        """
+        self.args.extra_args.append(
+            ToolExtraArg(
+                key="--config",
+                value=self._neutral_tool_file("syft-config-empty.yaml", "{}\n"),
+            )
+        )
+
     def _process_config_options(self):
         # Syft config path
         # Only the operator's config file. A config file inside the scanned tree
@@ -169,31 +189,70 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         # license and package lookups, which contacted proxy.golang.org and
         # github.com in an offline scan, and change what is reported.
         source_dir = Path(self.context.source_dir)
+        # A refused configured value drops the ``--config`` rather than falling
+        # through to discovery: the option named one file, and discovery would
+        # silently replace it. Whether a candidate may be used is honored_path's
+        # call (config/path_trust.py), which weighs who named the path.
         for index, conf_path in enumerate(possible_config_paths):
+            configured = index == 0 and self.config.options.config_file is not None
             candidate = Path(conf_path)
             if not candidate.is_absolute():
                 candidate = source_dir / candidate
-            if not candidate.exists():
-                continue
-            configured = index == 0 and self.config.options.config_file is not None
-            honored = honored_path(
-                conf_path,
-                source_dir=source_dir,
-                config=getattr(self.context, "config", None),
-                key="scanners.syft.options.config_file"
-                if configured
-                else f"syft config file {conf_path}",
-            )
-            if honored is None:
-                continue
-            self.args.extra_args.append(
-                ToolExtraArg(key="--config", value=honored.as_posix())
-            )
-            break
+            if candidate.exists():
+                honored = honored_path(
+                    conf_path,
+                    source_dir=source_dir,
+                    config=getattr(self.context, "config", None),
+                    key="scanners.syft.options.config_file"
+                    if configured
+                    else f"syft config file {conf_path}",
+                )
+                if honored is None:
+                    if configured:
+                        self._use_empty_config()
+                        ASH_LOGGER.warning(
+                            "Configured syft config file was not used because "
+                            "it is a work product derived from the scanned "
+                            "repository. Syft will run with an empty config "
+                            "file that ASH writes; no config file is "
+                            "discovered from the scanned tree in its place."
+                        )
+                        break
+                    continue
+                self.args.extra_args.append(
+                    ToolExtraArg(key="--config", value=honored.as_posix())
+                )
+                break
+            elif configured:
+                # A configured file that does not exist takes no discovered
+                # replacement (config/path_trust.py, "Configured tool inputs
+                # that are refused or missing").
+                self._use_empty_config()
+                ASH_LOGGER.warning(
+                    text_without_values(
+                        f"Configured syft config file does not exist: "
+                        f"{self.config.options.config_file}. Syft will run "
+                        "with an empty config file that ASH writes; no config "
+                        "file is discovered from the scanned tree in its place.",
+                        self._environment_values(),
+                    )
+                )
+                break
 
-        for item in self.config.options.exclude:
+        for item in active_ignore_paths(
+            self.config.options.exclude, where="scanners.syft.options.exclude"
+        ):
+            # NO_MARKUP: the path and the reason are the config's text, and a
+            # "[/" in either is a closing Rich tag that raises instead of printing.
+            # Redacted: a configured value can come from the environment, and
+            # ash.log keeps DEBUG lines under --debug.
             ASH_LOGGER.debug(
-                f"Path '{item.path}' excluded from {self.config.name} scan for reason: {item.reason}"
+                text_without_values(
+                    f"Path '{item.path}' excluded from {self.config.name} scan "
+                    f"for reason: {item.reason}",
+                    self._environment_values(),
+                ),
+                extra=NO_MARKUP,
             )
             self.args.extra_args.append(
                 ToolExtraArg(
@@ -335,6 +394,18 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     )
                 )
 
+            # ASH's own output directories inside the target. Rebuilt with the
+            # ToolArgs above on every call, so nothing accumulates.
+            from automated_security_helper.utils.scan_output_dirs import (
+                output_dir_exclude_globs,
+            )
+
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--exclude", value=pattern)
+                for pattern in output_dir_exclude_globs(
+                    self._ash_output_dirs_inside(target)
+                )
+            )
             final_args = self._resolve_arguments(
                 target=target,
             )

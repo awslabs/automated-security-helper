@@ -106,7 +106,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import yaml
 
@@ -353,6 +353,7 @@ def prepare_content_db(
     scan_id: Optional[str] = None,
     executable: Optional[str] = None,
     config_file: Optional[Union[str, Path]] = None,
+    values: Sequence[str] = (),
 ) -> None:
     """Bring ``tool``'s database in ``cache_dir`` up to date, outside any sandbox.
 
@@ -376,6 +377,10 @@ def prepare_content_db(
             Only a file the caller has established is the operator's and outside
             the scanned tree (``TrivyScannerBase._operator_path``); never one the
             scanned repository could have written.
+        values: The caller's env-read values: a failed update's stderr excerpt
+            is redacted with them BEFORE it is cut, so the cut cannot split a
+            value and leave a fragment the downstream whole-spelling
+            redaction misses.
 
     A trivy update the operator's settings turn off is not run, with a warning; see
     "The operator's opt-out" above.
@@ -454,7 +459,7 @@ def prepare_content_db(
                     env,
                 ):
                     if what not in skipped:
-                        _run(argv, command_env, cwd, f"{tool} {what}")
+                        _run(argv, command_env, cwd, f"{tool} {what}", values)
             finally:
                 shutil.rmtree(workdir, ignore_errors=True)
     if scan_id is not None:
@@ -507,7 +512,13 @@ def _commands(
     return commands
 
 
-def _run(argv: List[str], env: Dict[str, str], cwd: Path, what: str) -> None:
+def _run(
+    argv: List[str],
+    env: Dict[str, str],
+    cwd: Path,
+    what: str,
+    values: Sequence[str] = (),
+) -> None:
     try:
         proc = spawn_run(  # nosec B603 - resolved tool binary, list arguments
             argv,
@@ -525,7 +536,12 @@ def _run(argv: List[str], env: Dict[str, str], cwd: Path, what: str) -> None:
     except OSError as exc:
         raise ScannerError(f"could not update the {what}: {exc}") from exc
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()
+        from automated_security_helper.utils.error_text import shown_tool_stderr
+
+        # REDACTED BEFORE the excerpt is cut: a cut can split a quoted
+        # env-read value, and the downstream whole-spelling redaction cannot
+        # match the fragment.
+        detail = shown_tool_stderr((proc.stderr or proc.stdout or "").strip(), values)
         if len(detail) > 2000:
             detail = f"{detail[:1000]} ... {detail[-1000:]}"
         raise ScannerError(

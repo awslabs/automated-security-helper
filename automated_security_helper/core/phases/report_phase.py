@@ -1,10 +1,10 @@
 """Implementation of the Report phase."""
 
 from pathlib import Path
-import traceback
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.base.plugin_config import plugin_config_key
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.reporter_plugin import (
     confined_report_path,
     off_host_reporter_refused,
@@ -13,13 +13,23 @@ from automated_security_helper.base.reporter_plugin import (
     reporter_file_names,
     reporter_format_name,
     reporter_matches_requested_formats,
-    warn_off_host_section_without_enabled,
+)
+from automated_security_helper.config.operator_only_options import reporter_section
+from automated_security_helper.core.cancellation import (
+    ScanCancelled,
+    raise_if_cancelled,
 )
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.error_text import (
+    config_environment_values,
+    error_text,
+    traceback_text,
+)
 from automated_security_helper.utils.inner_run_outcome import record_reports_written
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.redacted_model import without_env_scalars
 from automated_security_helper.utils.report_path_links import (
     ensure_reports_dir,
     refuse_colliding_report_names,
@@ -27,6 +37,7 @@ from automated_security_helper.utils.report_path_links import (
     refuse_report_names_outside,
 )
 from automated_security_helper.utils.secret_masking import mask_secrets_in_results
+from automated_security_helper.utils.undecodable_text import recorded
 
 #: The reporter for this format is switched off in configuration. This is the
 #: common case and the one an operator can fix in a line: ``yaml`` and ``spdx``
@@ -47,12 +58,14 @@ FORMAT_REPORTER_DEPENDENCIES = "reporter-dependencies-unsatisfied"
 #: anything -- the reporter is enabled and its dependencies are fine.
 FORMAT_REPORTER_NOT_PYTHON = "reporter-non-python-excluded"
 
-#: No reporter produces this format at all. ``ExportFormat`` carries members that
-#: name no reporter -- ``aggregated`` and ``dict`` are internal result shapes
+#: No reporter in this run produces this format. ``ExportFormat`` carries members
+#: that name no reporter -- ``aggregated`` and ``dict`` are internal result shapes
 #: rather than report formats, ``asff`` is the Security Hub reporter's payload but
 #: that reporter is named ``aws-security-hub``, and ``custom`` is a placeholder --
-#: so the CLI accepts all of them and only this check tells the operator that
-#: asking for one produces nothing.
+#: and members naming the AWS reporters, which exist only when
+#: ``ash_plugin_modules`` loads their module. ``--output-formats`` and the config's
+#: ``output_formats`` accept all of them, and only this check tells the operator
+#: that asking for one produces nothing.
 FORMAT_NO_REPORTER = "no-reporter"
 
 #: What to tell the operator for each cause, and where to send them. Keyed by
@@ -74,9 +87,13 @@ _FORMAT_REASON_MESSAGES = {
         "--python-based-plugins-only excluded its reporter, which has non-Python "
         "dependencies. Drop that flag to get this report."
     ),
+    # Worded for either source of the list: --output-formats or the config's
+    # output_formats.
     FORMAT_NO_REPORTER: (
-        "no reporter produces it. The format is accepted by --output-formats but "
-        "has no reporter behind it."
+        "no reporter produces it in this run. The name is a valid output format, "
+        "but no loaded reporter has it. A reporter from a plugin module, such as "
+        "the AWS reporters, is loaded only when ash_plugin_modules lists that "
+        "module."
     ),
 }
 
@@ -214,6 +231,53 @@ def _log_unsatisfied_output_formats(unsatisfied: Dict[str, str]) -> None:
         )
 
 
+def _warn_if_configured_but_not_enabled(
+    plugin_instance, plugin_config, output_formats
+) -> None:
+    """Warn when an off-host reporter has a config section that does not enable it.
+
+    An off-host reporter runs only when its section sets ``enabled: true``
+    (``off_host_reporter_refused``). A section that sets its options and leaves
+    ``enabled`` out, or gives it a value that is not the boolean ``true`` (a
+    quoted ``"true"``, say), reads as wanting it to run, and the reporter
+    shipping enabled once made that true; so the skip is said once at WARNING,
+    with the type ``enabled`` is set to (not its value, which a config file can
+    read from the environment). No section, an empty one, ``enabled:
+    false``, or requested formats that leave the reporter out (it would not run
+    whatever its section said) are skipped quietly.
+    """
+    if not isinstance(plugin_config, dict) or not plugin_config:
+        return
+    # The section is an external plugin's, which the segment models keep as an
+    # extra and never validate, so a value a config file read from the
+    # environment is still the resolver's marker here. Read through the
+    # downcast view: the type this warning names is the one the file gave (a
+    # str), never the marker class (utils/redacted_model.EnvResolvedScalar).
+    plugin_config = without_env_scalars(plugin_config)
+    if plugin_config.get("enabled") is False:
+        return
+    if not reporter_matches_requested_formats(plugin_instance, output_formats):
+        return
+    # The key its section is read under, which the remedy names.
+    name = plugin_config_key(type(plugin_instance))
+    if "enabled" in plugin_config:
+        # The value's type, never the value: a config file can read it from the
+        # environment.
+        value = plugin_config["enabled"]
+        kind = "null" if value is None else f"a {type(value).__name__}"
+        why = (
+            f"its config section sets enabled to {kind}, and only the boolean "
+            "true turns it on"
+        )
+    else:
+        why = "its config section does not set enabled: true"
+    ASH_LOGGER.warning(
+        f"Reporter '{name}' sends findings off the host and is not run: {why} "
+        f"(reporters.{name}.enabled).",
+        extra=NO_MARKUP,
+    )
+
+
 def _disable(plugin_instance) -> bool:
     """Set a reporter's config to disabled; False when its config cannot be set."""
     config = getattr(plugin_instance, "config", None)
@@ -228,6 +292,29 @@ def _disable(plugin_instance) -> bool:
 
 class ReportPhase(EnginePhase):
     """Implementation of the Report phase."""
+
+    def __init__(
+        self,
+        plugin_context: PluginContext,
+        plugins: Optional[Sequence[type]] = None,
+        progress_display: Optional[Any] = None,
+        asharp_model: Optional[AshAggregatedResults] = None,
+        plugin_filter: Optional[Callable[[Any], bool]] = None,
+    ) -> None:
+        # ``plugins`` is the list of reporter CLASSES to run, and given none the
+        # phase runs none. A scan's engine hands it the reporters of the run's
+        # own plugin modules (plugin_modules, filtered by plugins_of), and
+        # `ash merge` the ones reporter_classes_for_run gives it; the phase
+        # never reads the process-wide registry for them. EnginePhase types
+        # ``plugins`` as plugin instances, which no caller passes, so the list
+        # is cast where it is handed over.
+        super().__init__(
+            plugin_context=plugin_context,
+            plugins=cast(Any, plugins),
+            progress_display=progress_display,
+            asharp_model=asharp_model,
+            plugin_filter=plugin_filter,
+        )
 
     @property
     def phase_name(self) -> str:
@@ -244,11 +331,64 @@ class ReportPhase(EnginePhase):
     ) -> AshAggregatedResults:
         """Execute the Report phase.
 
+        All or nothing for a cancelled scan. The phase checks for a cancel before
+        each reporter and before writing what one returned, and a cancel that
+        stops it removes every report it had written: the engine checks only
+        between phases, so a cancel_scan landing here let every reporter write,
+        and a scan with no previous results set aside kept those reports. Only
+        the files this phase wrote, by path, are removed, and the reports
+        directory with them if this phase created it and nothing else is in it.
+        The previous results, where they were set aside, are put back by
+        whoever settles them (core/previous_results.py).
+
         Args:
             report_dir(Path): The directory to save reports to.
             cli_output_formats: Output formats specified via CLI, which override config
             **kwargs: Additional arguments
         """
+        self._written_reports: List[Path] = []
+        created_report_dir = not report_dir.exists()
+        try:
+            return self._write_reports(
+                report_dir=report_dir,
+                aggregated_results=aggregated_results,
+                cli_output_formats=cli_output_formats,
+                python_based_plugins_only=python_based_plugins_only,
+                **kwargs,
+            )
+        except ScanCancelled:
+            self._remove_written_reports(report_dir, created_report_dir)
+            raise
+
+    def _remove_written_reports(self, report_dir: Path, created: bool) -> None:
+        """Remove the reports this phase wrote. Never raises: a cancel is propagating."""
+        for path in self._written_reports:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as e:
+                ASH_LOGGER.error(
+                    f"Could not remove {path}, written before the scan was cancelled: {e}"
+                )
+        if created:
+            try:
+                report_dir.rmdir()
+            except OSError:
+                pass  # not empty, or already gone: left as it is
+        if self._written_reports:
+            ASH_LOGGER.info(
+                f"The scan was cancelled during the report phase; removed the "
+                f"{len(self._written_reports)} report(s) it had written"
+            )
+
+    def _write_reports(
+        self,
+        report_dir: Path,
+        aggregated_results: AshAggregatedResults,
+        cli_output_formats=None,
+        python_based_plugins_only: bool = False,
+        **kwargs,
+    ) -> AshAggregatedResults:
+        """The phase itself; _execute_phase removes what it wrote if it is cancelled."""
         ASH_LOGGER.debug("Entering: ReportPhase._execute_phase()")
         ensure_reports_dir(report_dir)
 
@@ -257,13 +397,13 @@ class ReportPhase(EnginePhase):
         # utils/secret_masking.py.
         mask_secrets_in_results(aggregated_results)
 
-        # Initialize progress
-        self.initialize_progress("Starting report generation...")
-
-        # Update progress
-        self.update_progress(10, "Preparing report data...")
-
-        # Print progress update
+        # Every reporter reads these results field by field, so a file name set on
+        # one after it was validated is read in the record form
+        # (utils/undecodable_text.py). Re-bound, not forked: the reporters, this
+        # phase's summary and the run after it (which takes what this returns) all
+        # use the same object, which is the one given when there is no such name.
+        aggregated_results = recorded(aggregated_results)
+        self.asharp_model = aggregated_results
         ASH_LOGGER.info("Preparing report data...")
 
         # Get output formats from config
@@ -273,9 +413,11 @@ class ReportPhase(EnginePhase):
         if cli_output_formats:
             output_formats = cli_output_formats
             ASH_LOGGER.info(f"Using CLI-specified output formats: {output_formats}")
-
-        # Update progress
-        self.update_progress(20, "Identifying reporters...")
+        elif output_formats:
+            ASH_LOGGER.info(
+                "Using the output formats from the configuration: "
+                f"{[str(getattr(fmt, 'value', fmt)) for fmt in output_formats]}"
+            )
 
         # Create a list of reporter classes
         reporter_classes = self.plugins
@@ -290,36 +432,41 @@ class ReportPhase(EnginePhase):
         # disabled is held back here instead.
         off_host_refused = set()
         for plugin_class in reporter_classes:
+            # An off-host reporter's section comes from the operator's
+            # configuration when the scanned repository wrote this one
+            # (config/operator_only_options.reporter_section).
+            plugin_config = reporter_section(self.plugin_context.config, plugin_class)
+            # Decided before the reporter is built: a refused reporter is built
+            # turned off, so an enabled value its own model would refuse (null,
+            # a list, a string) is said once, at WARNING, not logged as its
+            # model's error.
+            refused = off_host_reporter_refused(plugin_class, plugin_config)
+            build_config = plugin_config
+            if refused and isinstance(plugin_config, dict):
+                build_config = {**plugin_config, "enabled": False}
             try:
-                plugin_config = (
-                    self.plugin_context.config.get_plugin_config(
-                        plugin_type="reporter",
-                        plugin_name=plugin_config_key(plugin_class),
-                    )
-                    if self.plugin_context.config is not None
-                    else None
-                )
                 plugin_instance = plugin_class(
                     context=self.plugin_context,
-                    config=plugin_config,
+                    config=build_config,
                 )
-                all_reporter_instances.append(plugin_instance)
-                if off_host_reporter_refused(plugin_class, plugin_config):
-                    # A section with options and no enabled is a config written
-                    # for when these reporters shipped on: name it, if the run
-                    # would otherwise use the reporter.
-                    if reporter_matches_requested_formats(
-                        plugin_instance, output_formats
-                    ):
-                        warn_off_host_section_without_enabled(
-                            plugin_class, plugin_config
-                        )
-                    if not _disable(plugin_instance):
-                        off_host_refused.add(id(plugin_instance))
             except Exception as e:
+                # Logged as written (NO_MARKUP): the text names the reporter's
+                # fields. Redacted with the config's environment values: the
+                # exception can name a configured option, and error_text alone
+                # only replaces a ValidationError's refused inputs.
                 ASH_LOGGER.error(
-                    f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: {e}"
+                    f"Error creating reporter {getattr(plugin_class, '__name__', 'Unknown')}: "
+                    f"{error_text(e, config_environment_values(getattr(self.plugin_context, 'config', None)))}",
+                    extra=NO_MARKUP,
                 )
+                continue
+            all_reporter_instances.append(plugin_instance)
+            if refused:
+                _warn_if_configured_but_not_enabled(
+                    plugin_instance, plugin_config, output_formats
+                )
+                if not _disable(plugin_instance):
+                    off_host_refused.add(id(plugin_instance))
 
         # The format filter runs first, then the enabled/python/dependency check
         # on what is left. A reporter's dependency check can contact a remote
@@ -441,10 +588,6 @@ class ReportPhase(EnginePhase):
             description=f"Generating reports with {len(enabled_reporter_names)} reporters...",
         )
 
-        # Track progress for each reporter
-        total_reporters = len(enabled_reporters)
-        completed = 0
-
         # Directly invoke each reporter plugin
         results = []
         # The report files written below, each with its reporter's format, recorded
@@ -455,6 +598,10 @@ class ReportPhase(EnginePhase):
                 f"Processing {len(enabled_reporters)} enabled reporter classes"
             )
             for plugin_instance in enabled_reporters:
+                # A cancelled scan runs no further reporter. Outside the try:
+                # ScanCancelled is a BaseException and must not be logged as
+                # this reporter's failure.
+                raise_if_cancelled()
                 try:
                     plugin_name = plugin_instance.__class__.__name__
                     ASH_LOGGER.debug(f"Initializing reporter: {plugin_name}")
@@ -462,7 +609,9 @@ class ReportPhase(EnginePhase):
                     # Create a task for this reporter
                     reporter_task = self.progress_display.add_task(
                         phase=ExecutionPhase.REPORT,
-                        description=f"Starting reporter: {plugin_name}",
+                        # Each name a description quotes is escaped once: the
+                        # live display renders it as markup.
+                        description=f"Starting reporter: {escape_markup(plugin_name)}",
                         total=100,
                     )
 
@@ -478,14 +627,7 @@ class ReportPhase(EnginePhase):
                         phase=ExecutionPhase.REPORT,
                         task_id=reporter_task,
                         completed=50,
-                        description=f"Running reporter: {display_name}",
-                    )
-
-                    # Update main progress
-                    progress_percent = 20 + (completed / total_reporters * 70)
-                    self.update_progress(
-                        int(progress_percent),
-                        f"Running reporter {completed + 1}/{total_reporters}: {display_name}",
+                        description=f"Running reporter: {escape_markup(display_name)}",
                     )
 
                     # Call report method directly
@@ -509,6 +651,8 @@ class ReportPhase(EnginePhase):
                         )
 
                     report_result = plugin_instance.report(aggregated_results)
+                    # Cancelled while the reporter built its report: not written.
+                    raise_if_cancelled()
 
                     if report_result:
                         ASH_LOGGER.debug(f"Reporter {display_name} returned a report")
@@ -532,6 +676,7 @@ class ReportPhase(EnginePhase):
                         # (an MCP client, or the integration fixture) could read it
                         # empty or half-written. See utils/atomic_write.py.
                         write_text_atomically(output_file, report_result)
+                        self._written_reports.append(output_file)
 
                         results.append(report_result)
                         written_files.append(
@@ -543,7 +688,7 @@ class ReportPhase(EnginePhase):
                             phase=ExecutionPhase.REPORT,
                             task_id=reporter_task,
                             completed=100,
-                            description=f"[green]({display_name}) Generated report: {output_filename}",
+                            description=f"[green]({escape_markup(display_name)}) Generated report: {escape_markup(output_filename)}",
                         )
 
                         # Notify reporter complete
@@ -601,7 +746,7 @@ class ReportPhase(EnginePhase):
                             phase=ExecutionPhase.REPORT,
                             task_id=reporter_task,
                             completed=100,
-                            description=f"[red]({display_name}) Failed: no report returned",
+                            description=f"[red]({escape_markup(display_name)}) Failed: no report returned",
                         )
 
                         # ERROR rather than REPORT_COMPLETE. REPORT_COMPLETE is how
@@ -644,7 +789,7 @@ class ReportPhase(EnginePhase):
                             phase=ExecutionPhase.REPORT,
                             task_id=reporter_task,
                             completed=100,
-                            description=f"[yellow]({display_name}) No report generated",
+                            description=f"[yellow]({escape_markup(display_name)}) No report generated",
                         )
 
                         # Notify reporter complete (no report)
@@ -666,13 +811,18 @@ class ReportPhase(EnginePhase):
                                 f"Failed to notify reporter complete event: {str(event_error)}"
                             )
 
-                    # Increment completed count
-                    completed += 1
-
                 except Exception as e:
-                    ASH_LOGGER.error(f"Error in reporter {plugin_name}: {e}")
+                    # Redacted with the config's environment values: a
+                    # reporter's exception can name a configured option (an
+                    # account id, a bucket), and this goes to ash.log.
+                    environment_values = config_environment_values(
+                        getattr(self.plugin_context, "config", None)
+                    )
+                    described = error_text(e, environment_values)
+                    ASH_LOGGER.error(f"Error in reporter {plugin_name}: {described}")
                     ASH_LOGGER.debug(
-                        f"Reporter exception traceback: {traceback.format_exc()}"
+                        "Reporter exception traceback: "
+                        f"{traceback_text(values=environment_values)}"
                     )
 
                     # Update reporter task to show error
@@ -680,19 +830,13 @@ class ReportPhase(EnginePhase):
                         phase=ExecutionPhase.REPORT,
                         task_id=reporter_task,
                         completed=100,
-                        description=f"[red]({display_name}) Failed: {str(e)}",
+                        description=(
+                            f"[red]({escape_markup(display_name)}) Failed: "
+                            f"{escape_markup(described)}"
+                        ),
                     )
-
-                    # Increment completed count
-                    completed += 1
         else:
             ASH_LOGGER.warning("No enabled reporters found matching requested formats")
-
-        # Update main progress
-        self.update_progress(
-            100,
-            f"Reporters complete: {len(results)} reports generated from {len(enabled_reporters)} reporters",
-        )
 
         # Update progress
         self.progress_display.update_task(

@@ -130,6 +130,8 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.client_config_policy import ClientConfigRules
+from automated_security_helper.config.plugin_module_trust import config_module_names
+from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.config.resolve_config import (
     check_operator_config,
     find_config_file,
@@ -139,6 +141,7 @@ from automated_security_helper.config.resolve_config import (
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     WorkspaceDefinitionError,
+    WorkspacePathNotUtf8Error,
 )
 from automated_security_helper.models.workspace import SkippedProjectReason
 from automated_security_helper.utils.path_containment import validate_contained_path
@@ -149,7 +152,9 @@ from automated_security_helper.workspace.policy import (
 )
 from automated_security_helper.workspace.scanner_pins import PinVerdict, compare_pins
 from automated_security_helper.workspace.workspace_file import (
+    NOT_UTF8_ON_THE_HOST,
     WorkspaceDefinition,
+    is_utf8_path,
     load_workspace_file,
 )
 
@@ -183,8 +188,7 @@ class _Candidate:
 
 def _refuse(headline: str, problems: List[str]) -> WorkspaceDefinitionError:
     """Build a refusal naming every problem, not just the first."""
-    joined = "\n  - ".join(problems)
-    return WorkspaceDefinitionError(f"{headline}\n  - {joined}")
+    return WorkspaceDefinitionError.listing(headline, problems)
 
 
 def _field(container: Any, name: str, default: Any = None) -> Any:
@@ -317,6 +321,68 @@ def _validate_containment(
             problems,
         )
     return candidates
+
+
+def _refuse_folders_that_are_not_utf8(
+    definition: WorkspaceDefinition, candidates: List[_Candidate]
+) -> None:
+    """Refuse the entries whose resolved path is not UTF-8, naming every one.
+
+    Each project's path, relative path and key go into the plan and the results
+    file, which are UTF-8 only, and pydantic refused the first such project with
+    a traceback. Run right after containment, before any project's config is
+    read. The root is UTF-8 here: load_workspace_file refused it otherwise. The
+    message holds the paths as they are, on one line; each sink shows it once
+    (see WorkspacePathNotUtf8Error).
+    """
+    problems = [
+        f"'{candidate.entry}' at '{candidate.resolved.as_posix()}'"
+        for candidate in candidates
+        if not (
+            is_utf8_path(candidate.resolved) and is_utf8_path(Path(candidate.entry))
+        )
+    ]
+    if problems:
+        raise WorkspacePathNotUtf8Error(
+            f"Workspace '{definition.path.as_posix()}' lists folders whose path is "
+            "not UTF-8. The workspace plan and its results hold every project's "
+            "path, and they are UTF-8 only, so the workspace cannot be planned: "
+            f"{'; '.join(problems)}. Rename each of them. {NOT_UTF8_ON_THE_HOST}"
+        )
+
+
+def _refuse_config_files_that_are_not_utf8(
+    workspace_config: Optional[PathLike], default_config: Optional[PathLike]
+) -> None:
+    """Refuse a policy file or a default config whose path is not UTF-8, naming each.
+
+    The plan holds the policy file's resolved path, and the default config's for
+    every project that declares none, and the plan is UTF-8 only: both MCP
+    workspace tools built a response their client could not be sent. Checked as
+    given, made absolute, and resolved, so a link whose own name is UTF-8 does
+    not get around it. Refused whenever given, whether or not a project ends up
+    using the default config. Run with the folder check, before any project's
+    config is read.
+    """
+    problems = []
+    for described, given in (
+        ("the workspace policy file", workspace_config),
+        ("the default config, for a project that declares none", default_config),
+    ):
+        if given is None or given == "":
+            continue
+        absolute = Path(os.path.abspath(os.fspath(given)))
+        resolved = absolute.resolve()
+        for path in dict.fromkeys((absolute, resolved)):
+            if not is_utf8_path(path):
+                problems.append(f"{described}, '{path.as_posix()}'")
+    if problems:
+        raise WorkspacePathNotUtf8Error(
+            "A config file the workspace plan names has a path that is not UTF-8. "
+            "The plan holds its path, and it is UTF-8 only, so the workspace "
+            f"cannot be planned: {'; '.join(problems)}. Rename the file, or the "
+            f"directory whose name is not UTF-8, or move it. {NOT_UTF8_ON_THE_HOST}"
+        )
 
 
 def _validate_no_overlap(
@@ -472,6 +538,10 @@ def _resolve_project_config(
     The config file is located once and passed back in, rather than letting
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
+
+    ``permit_base`` is the MCP session's gate (``cli/mcp/sandbox.config_base_gate``),
+    or None for the CLI. It covers the config discovery finds in the project
+    (``find_config_file``) and every base its ``extends`` chain names.
 
     The operator's config, and where it sits in the precedence
     ----------------------------------------------------------
@@ -658,16 +728,17 @@ def _validate_plugin_modules(
     ``ScanExecutionEngine.__init__`` reads *the project's own*
     ``ash_plugin_modules`` and registers them into the module-level
     ``plugin_library``, then reads the scanner set back through
-    ``ash_plugin_manager.plugin_modules()``, which memoises into
-    ``_resolved_plugins``. So the first project to build its engine decides the
-    scanner set for every project in the run, and measured on two real projects
-    neither ordering is correct:
+    ``ash_plugin_manager.plugin_modules()``. That method's memo follows the
+    registrations, but the registry is process-wide, so the order in which
+    projects register still decides what one of them gets:
 
-    * project-without-the-plugin first -- the project that DECLARED it loses it.
-      A silent false negative: fewer findings than ``ash --source-dir`` would
-      report, with no warning anywhere.
+    * project-without-the-plugin first -- the project that declared the plugin
+      keeps it. A memo keyed on the plugin kind alone would make that project
+      lose it: a silent false negative, fewer findings than ``ash --source-dir``
+      would report, with no warning anywhere.
     * project-with-the-plugin first -- the other project gains a scanner it never
-      declared.
+      declared, because the registry holds every module any project loaded.
+      This one can still happen.
 
     Merging the sets would make the second case the defined behaviour for
     everyone, which is the wrong direction for a security tool: a project would
@@ -943,6 +1014,52 @@ def _refuse_missing_default_config(default_config: Optional[PathLike]) -> None:
         )
 
 
+def _refuse_a_default_config_that_does_not_load(default_config: Path) -> None:
+    """Refuse the operator's ``--config`` by its own name when it cannot be read or
+    parsed, before a project's resolution quotes it as that project's.
+
+    It is the config of every project that declares none, so it is refused once,
+    as the operator's file, rather than once per project. A file that parses and
+    does not validate is refused by each project's resolution, which names the
+    project. A name with no file there is left to that resolution too.
+    """
+    import yaml
+
+    from automated_security_helper.config.config_sources import (
+        describe_config_path,
+        read_config_file,
+        unparsed_config_reason,
+    )
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+    from automated_security_helper.utils.error_text import error_text
+
+    if not default_config.is_file():
+        return
+    unparsed: Optional[str] = None
+    try:
+        read_config_file(default_config)
+    except ASHConfigValidationError:
+        raise
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
+        # json.JSONDecodeError, UnicodeDecodeError and a constructor's
+        # ValueError are all ValueErrors.
+        if isinstance(exc, OSError):
+            # Read: the file could not be opened, so there is no syntax to
+            # send a reader to.
+            raise ASHConfigSourceError(
+                f"Config file '{describe_config_path(default_config)}' could not "
+                f"be read: {error_text(exc)}"
+            ) from exc
+        # Anything else here is a parse refusal, and a parser's or
+        # a constructor's own words can quote the file (unparsed_config_reason).
+        # pydantic's ValidationError, the one excluded ValueError, is never
+        # raised here: read_config_file only parses.
+        unparsed = unparsed_config_reason(default_config, exc)
+    if unparsed is not None:
+        # Outside the handler, so the parser's error is not its context.
+        raise ASHConfigSourceError(unparsed)
+
+
 def resolve_workspace(
     workspace_file: PathLike,
     *,
@@ -1010,7 +1127,10 @@ def resolve_workspace(
             base a project's chain extends, and the workspace policy file must
             resolve to a file it permits; one that is a link out is refused
             before anything opens it (``config_sources.check_discovery_candidates``).
-            Must reach ``ProjectScanSettings.config_base_gate`` too.
+            Must reach ``ProjectScanSettings.config_base_gate`` too. A refusal is
+            raised as the project's ``ASHConfigValidationError``, from the
+            ``ASHConfigInputNotPermittedError``, and names neither the file's
+            target nor anything in it.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -1021,7 +1141,10 @@ def resolve_workspace(
             entry escapes the workspace root, is a symlink, names the root, does
             not exist, is unreadable, overlaps another entry, collides on its
             key, or pins a scanner version irreconcilable with another project's.
-            The message names every offending entry.
+            The message names every offending entry. A workspace file, root,
+            entry, policy file or default config whose path is not UTF-8 raises
+            its WorkspacePathNotUtf8Error subclass, before any project's config
+            is read.
         ASHConfigValidationError: Exit code 3. The workspace is fine but one
             project's own config is invalid, or cannot be loaded, or
             ``default_config`` names a file that does not exist. The message
@@ -1030,6 +1153,8 @@ def resolve_workspace(
     definition = load_workspace_file(workspace_file)
 
     candidates = _validate_containment(definition)
+    _refuse_folders_that_are_not_utf8(definition, candidates)
+    _refuse_config_files_that_are_not_utf8(workspace_config, default_config)
     _validate_no_overlap(definition, candidates)
     _validate_unique_keys(definition, candidates)
     _apply_existence_checks(definition, candidates, allow_missing_projects)
@@ -1044,6 +1169,9 @@ def resolve_workspace(
 
     if project_gate is not None:
         project_gate([(c.key, c.resolved) for c in candidates if not c.skipped])
+
+    if default_config is not None:
+        _refuse_a_default_config_that_does_not_load(Path(default_config))
 
     operator = _operator_config(
         Path(default_config) if default_config else None,
@@ -1085,29 +1213,31 @@ def resolve_workspace(
         )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)
-        projects.append(
-            ProjectPlan(
-                key=candidate.key,
-                relative_path=candidate.relative.as_posix(),
-                path=candidate.resolved.as_posix(),
-                label=label,
-                # Settled below by _assign_display_labels, which needs the whole
-                # sibling set to know whether this label is ambiguous.
-                display_label=label,
-                # By the path the project holds it at, not the file a link there
-                # reaches: execution re-resolves from it, and a file is judged by
-                # every path it was reached by (config_sources, "Base paths"). The
-                # sandbox check needs the config's own name too, and a symlinked
-                # .ash.yaml resolves out of the project.
-                config_source=_as_named(config_path),
-                operator_config=_as_named(operator_config),
-                operator_config_digest=operator_digest if operator_config else None,
-                scanners=scanners,
-                severity_threshold=config.global_settings.severity_threshold,
-                scanner_pins=pins,
-                ash_plugin_modules=_project_plugin_modules(config),
-            )
+        project = ProjectPlan(
+            key=candidate.key,
+            relative_path=candidate.relative.as_posix(),
+            path=candidate.resolved.as_posix(),
+            label=label,
+            # Settled below by _assign_display_labels, which needs the whole
+            # sibling set to know whether this label is ambiguous.
+            display_label=label,
+            # By the path the project holds it at, not the file a link there
+            # reaches: execution re-resolves from it, and a file is judged by
+            # every path it was reached by (config_sources, "Base paths"). The
+            # sandbox check needs the config's own name too, and a symlinked
+            # .ash.yaml resolves out of the project.
+            config_source=_as_named(config_path),
+            operator_config=_as_named(operator_config),
+            operator_config_digest=operator_digest if operator_config else None,
+            scanners=scanners,
+            severity_threshold=config.global_settings.severity_threshold,
+            scanner_pins=pins,
+            ash_plugin_modules=_project_plugin_modules(config),
+            plugin_module_names=config_module_names(config),
         )
+        # Private: no dump of the plan shows it (ProjectPlan._environment_values).
+        project._environment_values = config_environment_values(config)
+        projects.append(project)
 
     active = [project for project in projects if not project.skipped]
     _validate_scanner_pins(definition, active)

@@ -96,9 +96,12 @@ class TestMasked:
         today = date.today().isoformat()
         out = timed.text(
             f"at 2026-10-05T12:34:56+00:00 and 2026-10-05 12:34:56Z id ASH-20261005123456 "
-            f"day {today}"
+            f"id ASH-20261005123456-0123456789ab old ASH-20261005 day {today}"
         )
-        assert out == "at <TIMESTAMP> and <TIMESTAMP> id ASH-<REPORT_ID> day <TODAY>"
+        assert out == (
+            "at <TIMESTAMP> and <TIMESTAMP> id ASH-<REPORT_ID> id ASH-<REPORT_ID> "
+            "old ASH-<REPORT_ID> day <TODAY>"
+        )
 
     def test_rich_log_time_column(self, normalizer):
         out = normalizer.text(

@@ -40,7 +40,10 @@ def _backend(name):
         pytest.skip(f"{name} unavailable: {e}")
 
 
-@pytest.mark.parametrize("backend_name", ["bwrap", "landlock"])
+@pytest.mark.parametrize(
+    "backend_name",
+    [pytest.param("bwrap", marks=pytest.mark.requires_userns), "landlock"],
+)
 def test_a_results_subdirectory_replaced_after_the_spawn_is_not_followed(
     tmp_path, monkeypatch, backend_name
 ):

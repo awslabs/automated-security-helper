@@ -1,6 +1,15 @@
-# ASH Security Scan Report
+# ASH security scan report
 
-- **Report generated**: 2026-01-15T12:00:42+00:00
+> [!WARNING]
+> **Scan incomplete**
+>
+> 3 actionable findings. Some inputs or scanners were not evaluated.
+>
+> **3 actionable** · 0 below threshold · 0 suppressed · 3/4 scanners completed
+>
+> Next action: Review findings, resolve coverage gaps, and scan again.
+
+Project: workspace · Scan executed: 2026-01-15T12:00:42+00:00
 
 ## Projects
 
@@ -12,42 +21,9 @@ Each project is scanned independently and judged against its own threshold, so a
 | snapshot-web (web) | COMPLETED | 2 | 1 | HIGH | FAILED |
 | docs | SKIPPED | 0 | 0 | n/a | SKIPPED (error) |
 
-## Scan Metadata
-
-- **Project**: workspace
-- **Scan executed**: 2026-01-15T12:00:42+00:00
-- **ASH version**: <ASH_VERSION>
-
 ## Summary
 
-### Scanner Results
-
-The table below shows findings by scanner, with status based on severity thresholds and dependencies:
-
-- **Severity levels**:
-  - **Suppressed (S)**: Findings that have been explicitly suppressed and don't affect scanner status
-  - **Critical (C)**: Highest severity findings that require immediate attention
-  - **High (H)**: Serious findings that should be addressed soon
-  - **Medium (M)**: Moderate risk findings
-  - **Low (L)**: Lower risk findings
-  - **Info (I)**: Informational findings with minimal risk
-- **Actionable**: Number of findings at or above the threshold severity level that require attention
-- **Result**:
-  - **PASSED** = No findings at or above threshold
-  - **FAILED** = Findings at or above threshold
-  - **MISSING** = Required dependencies not available
-  - **SKIPPED** = Scanner explicitly disabled
-  - **ERROR** = Scanner execution error
-- **Threshold**: The minimum severity level that will cause a scanner to fail
-  - Thresholds: ALL, LOW, MEDIUM, HIGH, CRITICAL
-  - Source: Values in parentheses indicate where the threshold is set:
-    - `global` (global_settings section in the ASH_CONFIG used)
-    - `config` (scanner config section in the ASH_CONFIG used)
-    - `scanner` (default configuration in the plugin, if explicitly set)
-- **Statistics calculation**:
-  - All statistics are calculated from the final aggregated SARIF report
-  - Suppressed findings are counted separately and do not contribute to actionable findings
-  - Scanner status is determined by comparing actionable findings to the threshold
+### Scanner results
 
 | Scanner | Suppressed | Critical | High | Medium | Low | Info | Actionable | Result | Threshold |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
@@ -56,56 +32,90 @@ The table below shows findings by scanner, with status based on severity thresho
 | npm-audit | 0 | 0 | 0 | 0 | 0 | 0 | 0 | MISSING | MEDIUM (unavailable) |
 | semgrep | 0 | 0 | 0 | 1 | 0 | 0 | 1 | FAILED | MEDIUM (unavailable) |
 
-### Top 2 Hotspots
+<details>
+<summary>How to read scanner results</summary>
 
-Files with the highest number of security findings:
+**Severity levels:** Critical, High, Medium, Low, Info. Suppressed findings are counted separately.
 
-| Finding Count | File Location |
+**Actionable** counts findings at or above each scanner's threshold.
+
+**Result:** PASSED = no actionable findings; FAILED = threshold exceeded; MISSING = dependencies unavailable; SKIPPED = disabled; ERROR = execution error.
+
+**Threshold** shows the minimum severity and its source: `global`, `config`, or `scanner`.
+
+**Statistics calculation:** final aggregated SARIF, with suppressed findings excluded from actionable counts.
+
+</details>
+
+**Scanners needing attention:** npm-audit. Check their dependencies and execution logs.
+
+### Top 2 hotspots
+
+Files with the most actionable findings.
+
+| Finding count | File location |
 | ---: | --- |
 | 2 | main.tf |
 | 1 | app.py |
 
-<h2>Detailed Findings</h2>
+## Detailed findings
+
+Showing 3 of 3 actionable findings, highest severity first.
 
 <details>
-<summary>Show 3 actionable findings</summary>
+<summary>1. HIGH · B602 · app.py:7</summary>
 
 ### Finding 1: B602
 
-- **Severity**: HIGH
-- **Scanner**: bandit
-- **Rule ID**: B602
-- **Location**: app.py:7
+- Severity: HIGH
+- Scanner: bandit
+- Rule ID: B602
+- Location: app.py:7
 
-**Description**:
 subprocess call with shell=True identified, security issue.
 
----
+</details>
 
-### Finding 2: CKV_AWS_20
+<details>
+<summary>2. HIGH · CKV_AWS_20 · main.tf:1-4</summary>
 
-- **Severity**: HIGH
-- **Scanner**: checkov
-- **Rule ID**: CKV_AWS_20
-- **Location**: main.tf:1-4
+### Finding 2: CKV\_AWS\_20
 
-**Description**:
+- Severity: HIGH
+- Scanner: checkov
+- Rule ID: CKV\_AWS\_20
+- Location: main.tf:1-4
+
 S3 Bucket has an ACL defined which allows public READ access.
 
----
+</details>
+
+<details>
+<summary>3. MEDIUM · terraform.aws.best-practice.s3-bucket-name-hardcoded · main.tf:2</summary>
 
 ### Finding 3: terraform.aws.best-practice.s3-bucket-name-hardcoded
 
-- **Severity**: MEDIUM
-- **Scanner**: semgrep
-- **Rule ID**: terraform.aws.best-practice.s3-bucket-name-hardcoded
-- **Location**: main.tf:2
+- Severity: MEDIUM
+- Scanner: semgrep
+- Rule ID: terraform.aws.best-practice.s3-bucket-name-hardcoded
+- Location: main.tf:2
 
-**Description**:
 Bucket name is hardcoded; derive it from a variable.
 
 </details>
 
----
+<details>
+<summary>Scan metadata</summary>
+
+## Scan metadata
+
+- Project: workspace
+- Scan executed: 2026-01-15T12:00:42+00:00
+- Report generated: 2026-01-15T12:00:42+00:00
+- ASH version: <ASH_VERSION>
+
+</details>
 
 *Report generated by [Automated Security Helper (ASH)](https://github.com/awslabs/automated-security-helper) at 2026-01-15T12:00:42+00:00*
+
+Build with <3 at Amazon Web Services

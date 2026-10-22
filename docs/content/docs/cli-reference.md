@@ -20,12 +20,12 @@ These parameters are available across multiple ASH commands:
 |------------------------|------------------------------------------------------------|-------------------|----------------------|--------------------------------------|
 | `--source-dir`         | Path to the directory containing code to scan              | Current directory | `ASH_SOURCE_DIR`     | `scan`                               |
 | `--version`            | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
-| `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan` |
+| `--ash-revision-to-install` | ASH branch, tag or full commit id to install in the container image for usage during containerized scans | |  | `scan` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set: a branch, a tag or a commit, optionally followed by `~<n>` or `^<n>` (`origin/main`, `v1.2.0`, `HEAD~1`). With --changed-files-only, a value that starts with `-`, holds a character other than letters, digits and `. _ / ~ ^ @ { } -`, or is not a ref name `git check-ref-format --allow-onelevel` accepts (`main..HEAD`, `main@{1}`) is refused with exit 1 before git runs, and nothing is scanned. Without --changed-files-only the value is not used. | `origin/main` | `ASH_BASE_REF` | `scan` |
 | `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1, except for trivy's database in an image built with `OFFLINE=YES`, which warns by default. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
 | `--allow-in-tree-tools` | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo `.venv/bin` or `node_modules/.bin`, and the scanner sandbox's own programs (`bwrap`, `firejail`, `readlink`, `true`). Without it such a tool is treated as missing and the scanner is reported MISSING with the in-tree path. Only this flag (also the `allow_in_tree_tools` key of `--cli-json-input`) and the environment variable, set to `1`, `true`, `yes` or `on`, turn it on, never a config file, and `ash mcp` never does; see [Tools inside the scanned directory](advanced-usage.md#tools-inside-the-scanned-directory). | Off | `ASH_ALLOW_IN_TREE_TOOLS` | `scan` |
-| `--sandbox` | Run every scanner subprocess in an OS-level sandbox: `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` or `off`. A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the `sandbox.mode` config value; ignored in container mode. See [Scanner sandboxing](scanner-sandbox.md). | `off` (or `sandbox.mode`) |  | `scan` |
-| `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. File names are read from `git diff` unquoted and NUL-separated, so names with spaces or non-ASCII characters match their findings. When git is not installed, or the base ref names no commit in the local repository (for example `origin/main` in a shallow clone), every file is scanned; the base ref is only ever read as a revision, never as a path in the checkout. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
+| `--sandbox` | Run every scanner subprocess in an OS-level sandbox: `auto`, `bwrap`, `firejail`, `landlock`, `sandbox-exec` or `off`. A scanner that cannot be sandboxed as requested is reported MISSING. Overrides the `sandbox.mode` config value. Refused with `--mode container` (exit 5), which runs the scanners unsandboxed inside the container. See [Scanner sandboxing](scanner-sandbox.md). | `off` (or `sandbox.mode`) |  | `scan` |
+| `--changed-files-only` | Report only findings in files changed between `--base-ref` and HEAD. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. When git is not installed, the source directory is not in a git repository, or the diff fails, ASH logs which of these it was and reports every finding. Not supported with `--mode container`, which refuses it with exit 5 (set through `ASH_CHANGED_FILES_ONLY` too). See [Reporting only changed files](#reporting-only-changed-files). | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
 | `--compact-report` | Produce a shorter markdown report suitable for PR comments. | |  | `scan` |
 | `--container-gid` | GID to use for the container user | |  | `scan` |
@@ -35,17 +35,17 @@ These parameters are available across multiple ASH commands:
 | `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`), or a converter could not convert some of its inputs. On by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--honor-ignore-files` / `--no-honor-ignore-files` | Whether the `.gitignore` and `.ignore` files in the scanned tree leave files out of ASH's scan set. `--no-honor-ignore-files` scans those files too; ASH's own exclusions such as `.git` still apply. Takes precedence over the `honor_ignore_files` config value, which a config file inside the scanned tree cannot set. The results and summaries record how many files the ignore files excluded; see [Ignore files and the scan set](configuration-guide.md#ignore-files-and-the-scan-set). | Unset: the operator's `honor_ignore_files`, then honored |  | `scan` |
-| `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
+| `--min-severity` | Minimum severity to trigger non-zero exit code: `critical`, `high`, `medium`, `low` or `none`, in any case. `critical` and `high` rank the same. Any other value is a [usage error](#usage-errors). | `low` |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
 | `--python-based-plugins-only` / `--all-enabled-plugins` | Exclude execution of any plugins or tools that have depencies external to Python. Also spelled `--python-only` / `--full`, and `--python-based-scanners-only` / `--all-enabled-scanners`; all three name the same option, and the `plugins` spelling is preferred because the option covers converters and reporters too. | |  | `scan` |
 | `--runner` | Use the specified OCI runner instead of docker to run the containerized tools | | `OCI_RUNNER` | `scan` |
 | `--show-summary` | Show metrics table and results summary | |  | `scan` |
 | `--simple` | Simplified output mode with minimal logging | |  | `scan` |
 | `--output-dir`         | Path to store scan results. Refused, whatever the sandbox mode, when it, a directory or file ASH writes in it, or a directory inside the scanned tree on the way to it is a symlink; see [Output directory](concepts.md#output-directory). | `.ash/ash_output` | `ASH_OUTPUT_DIR`     | `scan`, `report`                     |
-| `--config`, `-c`       | Path to ASH configuration file                             | `.ash/.ash.yaml`  | `ASH_CONFIG`         | `scan`, `config`, `plugin`           |
+| `--config`, `-c`       | Path to ASH configuration file                             | Discovered        | `ASH_CONFIG`         | `scan`, `config`, `plugin`           |
 | `--config-overrides`   | Override configuration values (can be used multiple times) |                   |                      | `scan`, `config`, `plugin`, `report` |
 | `--ash-plugin-modules` | List of Python modules to import containing ASH plugins    |                   | `ASH_PLUGIN_MODULES` | `scan`, `plugin`                     |
-| `--mode`               | Execution mode: `local`, `container`, or `precommit`       | `local`           | `ASH_MODE`           | `scan`                               |
+| `--mode`               | Execution mode: `local`, `precommit`, `container` or `nix`. `precommit` runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit, plus any `--scanners`, with simplified output; in workspace mode it changes only the output. `nix` runs the scan inside `nix develop`, always offline | `local`           | `ASH_MODE`           | `scan`                               |
 | `--debug`, `-d`        | Enable debug logging                                       | `False`           | `ASH_DEBUG`          | All commands                         |
 | `--verbose`, `-v`      | Enable verbose logging                                     | `False`           | `ASH_VERBOSE`        | All commands                         |
 | `--quiet`              | Suppress non-essential output                              | `False`           |                       | All commands                         |
@@ -71,6 +71,8 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 # Complex values using JSON syntax
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
+
+The key is applied exactly as written, so a key that would name a setting nothing reads is refused, with exit code `3`. That is a key with a dot-separated part that is empty (`a..b`, or a leading or trailing `.`), a part that holds whitespace (a space, a tab, a no-break space), or a part that holds a character that does not print, as Python's `str.isprintable()` decides it. The last covers the zero-width space, the byte order mark and the bidirectional controls, such as U+202E RIGHT-TO-LEFT OVERRIDE and U+2066 LEFT-TO-RIGHT ISOLATE, which can make one key display as another. It also covers the zero-width non-joiner (U+200C), the zero-width joiner (U+200D) and the soft hyphen (U+00AD). Some languages need those in text, but no configuration key holds one. Only the key is checked this way: a value may hold spaces.
 
 ### Passing parameters as JSON
 
@@ -114,7 +116,7 @@ The document ranks above environment variables because it is named on this invoc
 
 **Interaction with `--config` and `--config-overrides`.** The document is resolved while the command line is parsed, before ASH reads any configuration. It only supplies parameter values: `"config"` in the document is the value of `--config`, and `"config_overrides"` is the list `--config-overrides` would have built. After that, configuration is resolved exactly as it is for flags: the configuration file is loaded, then each override is applied in order. A `--config-overrides` flag on the command line replaces the document's `config_overrides` list as a whole.
 
-**Errors.** The command exits 2 without running when the document cannot be read, is not valid JSON, is not a JSON object, repeats a key, names a key the command does not have (the message lists the valid ones), sets one parameter under two spellings, or holds a value the parameter's type rejects. Exit 2 is the same code an invalid flag produces.
+**Errors.** The command exits 5 without running when the document cannot be read, is not valid JSON, is not a JSON object, repeats a key, names a key the command does not have (the message lists the valid ones), sets one parameter under two spellings, or holds a value the parameter's type rejects. Exit 5 is the [usage-error code](#usage-errors), the same code an invalid flag produces.
 
 **Security.** The document is parsed as JSON and nothing else. No value is evaluated, and no environment-variable or `~` expansion is applied, which matches how a flag's value is treated once the shell has handed it over. Relative paths in values are relative to the working directory, as they are for flags.
 
@@ -138,7 +140,7 @@ ash [command] [options]
 | `dependencies`    | Install dependencies for ASH plugins                       |
 | `inspect`         | Inspect and analyze ASH outputs and reports                |
 | `build-image`     | Build the ASH container image                              |
-| `get-genai-guide` | Download the GenAI Integration Guide for AI assistants     |
+| `get-genai-guide` | Write the GenAI Integration Guide for AI assistants        |
 | `mcp`             | Start the Model Context Protocol (MCP) server for AI tools |
 
 ## Scan Command
@@ -155,13 +157,13 @@ ash [options]
 |-------------------------------|---------------------------------------------------------|-----------------------|-------------------------|
 | `--source-dir`                | Path to the directory containing code to scan           | Current directory     | `ASH_SOURCE_DIR`        |
 | `--output-dir`                | Path to store scan results                              | `.ash/ash_output`     | `ASH_OUTPUT_DIR`        |
-| `--mode`                      | Execution mode: `local`, `container`, or `precommit`    | `local`               | `ASH_MODE`              |
-| `--config`, `-c`              | Path to ASH configuration file                          | `.ash/.ash.yaml`      | `ASH_CONFIG`            |
+| `--mode`                      | Execution mode: `local`, `precommit`, `container` or `nix`. `precommit` runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit, plus any `--scanners`, with simplified output; in workspace mode it changes only the output. `nix` runs the scan inside `nix develop`, always offline | `local`               | `ASH_MODE`              |
+| `--config`, `-c`              | Path to ASH configuration file                          | Discovered from the source directory | `ASH_CONFIG`            |
 | `--config-overrides`          | Override configuration values                           |                       |                         |
 | `--ash-plugin-modules`        | List of Python modules to import containing ASH plugins |                       | `ASH_PLUGIN_MODULES`    |
 | `--scanners`                  | Specific scanner names to run                           | All enabled scanners  | `ASH_SCANNERS`          |
 | `--exclude-scanners`          | Specific scanner names to exclude                       | None                  | `ASH_EXCLUDED_SCANNERS` |
-| `--output-formats`, `-f`      | Output formats (comma-separated). Run `ash scan --help` for the list this build accepts; the help text is derived from the code, so it cannot go stale. The reporter names are also tabulated in [Output formats](output-formats.md) | Default formats       |                         |
+| `--output-formats`, `-f`      | Output formats (comma-separated). Run `ash scan --help` for the list this build accepts; the help text is derived from the code, so it cannot go stale. The reporter names are also tabulated in [Output formats](output-formats.md) | The config's `output_formats`, else every enabled reporter |                         |
 | `--strategy`                  | Whether to run scanners in parallel or sequential       | `parallel`            |                         |
 | `--log-level`                 | Set the log level                                       | `INFO`                |                         |
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
@@ -177,7 +179,7 @@ ash [options]
 | `--cleanup`                   | Clean up temporary files after scan                     | `False`               |                         |
 | `--use-existing`              | Use existing results file                               | `False`               |                         |
 | `--phases`                    | Phases to run: `convert`, `scan`, `report`, `inspect`   | `convert,scan,report` |                         |
-| `--inspect`                   | Enable inspection of SARIF fields                       | `False`               |                         |
+| `--inspect`                   | After the scan, analyze the SARIF fields in this scan's output directory and write the result to its `analysis/` directory | `False`               |                         |
 | `--shard-index`               | Zero-based index of this shard when one scan is split across several executors. Requires `--shard-count` | None | `ASH_SHARD_INDEX` |
 | `--shard-count`               | Total number of shards the scan is split across. Requires `--shard-index` | None | `ASH_SHARD_COUNT` |
 | `--workspace`                 | Path to a `.code-workspace` file, or `auto` to find the one in the current directory. Mutually exclusive with `--source-dir` | None | `ASH_WORKSPACE` |
@@ -378,6 +380,8 @@ ash --mode container --build-target ci
 
 See [Building your own container image](building-your-own-image.md).
 
+Container mode passes three hidden options, `--config-from-scanned-repository`, `--config-file-from-scanned-repository` and `--ash-config-from-host`, to the scan inside the container so that it applies to a mounted config file the same limits the host judged for it; they are internal, local-mode only (any other scan refuses them with exit 3), and not meant to be set by hand.
+
 ### Workspace Mode
 
 A [VS Code workspace file](https://code.visualstudio.com/docs/editor/workspaces) lists several project folders. Passing it to `--workspace` tells ASH to treat each folder as its own project, with its own configuration, rather than as one directory tree:
@@ -395,7 +399,11 @@ Folder paths are relative to the directory holding the workspace file, which bec
 
 `--workspace` and `--source-dir` cannot be combined. Note that `ASH_SOURCE_DIR` counts as setting `--source-dir`.
 
-`--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. Without it, the same plan is what gets scanned — resolved once, so what you inspect is what runs.
+Each project uses its own ASH config file. A project that has none uses the file named by `--config` instead, both for the scan and for its verdict, and `--dry-run` shows that file and its threshold; with no `--config` it uses ASH's built-in defaults. The workspace root's own config file is not applied to the other projects: it is the root's config when the root is listed as a project, and otherwise it supplies only the `workspace` settings under Concurrency below.
+
+`--dry-run` resolves and validates the workspace, prints the resulting plan, and exits 0 without scanning anything. It makes the same scanner-selection pre-check the real run makes, so a `--scanners` or `--exclude-scanners` combination the scan would refuse exits 5 here too, with the same message, instead of blessing a command line the real run then refuses. To make that check it loads the workspace's plugin modules, from `--ash-plugin-modules` and from every project's config, as the scan does, so each module's top-level code runs; a module outside ASH's plugin namespace is refused with exit 3, as the scan refuses it, before anything is imported. Without it, the same plan is what gets scanned — resolved once, so what you inspect is what runs.
+
+`ash dependencies install` reads one configuration, that of the directory it runs in, and not each project's. To install the tools the projects' scanners need, name them with `--tool` (for example `ash dependencies install --tool bandit --tool checkov`), or run it in each project's directory.
 
 #### The operator's config
 
@@ -460,7 +468,7 @@ Rather than leave that as a caveat to remember, ASH measures it. When the ceilin
 
 Read it as a statement about those findings, not about the scanner: seven findings in this project carry no severity, so the ceiling did not change their verdict. It is recomputed on every scan from the findings actually present, so it disappears if a scanner starts reporting severity, and it is absent entirely when the ceiling either did not tighten the project or reached everything it needed to.
 
-Suppressions and ignore paths are written workspace-relative and pushed down into each project's own coordinates. A pattern that cannot match inside a project is not applied there, so `services/api/src/legacy.py` silences nothing in `shared-infra`. A pattern with no exact per-project equivalent is refused with exit 4 rather than approximated, because a suppression that matches more than intended hides findings and leaves nothing in the output to show what went missing. `**/vendor` works; `**/vendor/**` is refused, and the error names the pattern and the project.
+Suppressions and ignore paths are written workspace-relative and pushed down into each project's own coordinates, where each matches what it matched at the top level. An ignore path ending in `/` still names a directory (`api/vendor/` becomes `vendor/` in project `api`), and a suppression's trailing `/` stays literal, so it matches no file. A pattern that cannot match inside a project is not applied there, so `services/api/src/legacy.py` silences nothing in `shared-infra`. A pattern with no exact per-project equivalent is refused with exit 4 rather than approximated, because a suppression that matches more than intended hides findings, and an ignore path that does drops files from the scan, with nothing in the output to show what went missing. A pattern with a `.` or empty component (`./api/x.py`, `api//x.py`) is refused the same way: ASH's matcher reads it literally, so it matches no file. `**/vendor/` and `**/vendor/**` reach every project; `*/sub/*.py` is refused, and the error names the pattern and the project.
 
 Scanners in `additional_scanners` that a project already enables run under that project's own configuration and their findings are the project's. Scanners only the policy adds run with default configuration, are reported separately as `origin: workspace-policy`, and do not affect the project's exit code unless `policy_scanners_gate: true`.
 
@@ -482,7 +490,7 @@ Output is laid out per project, with a workspace-level roll-up beside it:
     scanners/<scanner>/<target>/   # raw scanner output
 ```
 
-The unified `ash_aggregated_results.json` carries a `workspace` block: one entry per project with its threshold, finding counts, verdict and `sarif_run_index`, plus the `skipped_projects` payload.
+The unified `ash_aggregated_results.json` carries a `workspace` block: one entry per project with its threshold, finding counts, verdict and `sarif_run_index`, plus the `skipped_projects` payload. A project's entry lists, in `scanner_reasons`, why each of its `SKIPPED` or `MISSING` scanners did not run, and the error each `ERROR` scanner recorded (a scanner whose constructor raised, for one). The file's `scanner_results` rolls each scanner up to its worst status across projects, and a rolled-up `SKIPPED` or `MISSING` row's `skipped_reason` or `missing_reason` names each project at that status with its reason, as `api: <reason>; web: <reason>`.
 
 Its SARIF holds one `run` per project. Each run declares its own project root under `originalUriBaseIds`, and result paths inside a run stay relative to that root — so a consumer that ingests SARIF against a single repository root, such as GitHub code scanning, still resolves every path correctly. Selecting one run gives you a valid single-root SARIF document for one project. Each result also carries `properties.workspace_project` and `properties.workspace_uri`, the workspace-relative path, for consumers that want one flat coordinate space.
 
@@ -520,7 +528,7 @@ If a reporter declares that it cannot produce a correct workspace-level artefact
 
 #### Changed files and precommit
 
-`--mode precommit` and `--changed-files-only` are evaluated per project, against that project's own git repository, because projects in a workspace are versioned independently. A project with no changed files is skipped and recorded with `skipped_reason: no-changes`, which does not affect the exit code. Under `--mode precommit`, a project that is not a git repository is an error, because precommit selects files from a diff; pass `--allow-missing-projects` to scan it in full instead. A refused `--base-ref` (see its row in [Common Parameters](#common-parameters)) stops the whole workspace before any project runs.
+`--changed-files-only` is evaluated per project, against that project's own git repository, because projects in a workspace are versioned independently. A project with no changed files is skipped and recorded with `skipped_reason: no-changes`, which does not affect the exit code. A project that is not a git repository is scanned in full, with a warning. `--mode precommit` does not select changed files in a workspace, and it does not narrow the scanner set there either: in workspace mode it changes only the output. A refused `--base-ref` (see its row in [Common Parameters](#common-parameters)) stops the whole workspace before any project runs.
 
 #### Concurrency
 
@@ -538,7 +546,7 @@ workspace:
 
 #### Container mode
 
-Container mode has one source mount, so the workspace **root** is mounted at `/src` and each project is `/src/<relative-path>`. This is why every project must sit below the workspace root. `--changed-files-only` is not supported in container mode, as in single-directory mode.
+Container mode has one bind mount, so the workspace **root** is mounted at `/src` and each project is `/src/<relative-path>`. This is why every project must sit below the workspace root. `--changed-files-only` is not supported in container mode, as in single-directory mode, and is refused with exit 5.
 
 #### Fail-closed validation
 
@@ -551,10 +559,13 @@ Workspace resolution refuses the whole workspace rather than scanning part of it
 - two entries reduce to the same project key
 - the scanners' `tool_version` constraints the plan records are incompatible for the same scanner. A project's own config does not set `tool_version` (it is ignored with a warning), so every project records the operator's value or the scanner's default.
 - the `folders` list is empty, or the file is not valid JSON
+- the workspace file, the directory holding it, or a folder has a path that is not UTF-8. The plan and the results hold those paths, and both are UTF-8 only, so the workspace is refused before any project's config is read, with the path's bytes that are not UTF-8 written as escapes. Rename the directory, file or folder: container mode does not help, because the workspace is planned on the host
 
 `--allow-missing-projects` opts out of the first item only. Projects skipped that way are recorded in the plan's `skipped_projects` payload with a reason, not just logged. Nothing opts out of the others: they are problems with the definition rather than with the machine, so they are wrong everywhere.
 
 Workspace mode does not introduce a separate exit-code vocabulary; it uses the codes in [Exit Codes](#exit-codes). Every refusal listed above is code `4` — the workspace definition could not be used, so nothing was scanned. That is deliberately distinct from code `2`, which means a scan ran and found issues above the threshold.
+
+What is found before execution starts refuses the whole workspace, and no project runs: the definition problems above, permitted roots, tool versions, plugin sets, scanner selection, and a file git tracks where a project's scan would write (exit `3`, naming the project). A failure during one project's run fails only that project, and the others still run.
 
 When several projects end differently, the code is chosen by how specific the diagnosis is rather than by severity: `3` (a named misconfigured project) outranks `1` (a project that reached no verdict at all, whether from an internal error or a per-project timeout, or one whose scanners did not all complete), which outranks `2` (a project with a verdict that failed). That is the order a single-directory scan uses, so a workspace with one incomplete project exits `1` even when another project has findings; each project's findings are still in the results file and the summaries. The results payload also records `workspace.status` — `completed` or `refused` — and `workspace.refusal_detail`, for consumers reading the file rather than the exit status.
 
@@ -594,6 +605,18 @@ A `--shard-count` above the number of scanners leaves the surplus shards with no
 Sharding cannot be combined with `--workspace`, and the combination is refused rather than ignored. Both spread one scan over more compute, but only sharding is recombinable: workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from — and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via `--source-dir` and shard that.
 
 In container mode both flags are forwarded to the in-container `ash` invocation rather than dropped.
+
+### Reporting only changed files
+
+`--changed-files-only` asks git which files changed between `--base-ref` (default `origin/main`) and HEAD, and reports only the findings located in those files:
+
+```bash
+ash --changed-files-only --base-ref origin/main
+```
+
+It narrows what is reported, not what is scanned: every scanner still scans all of `--source-dir`, so the scan takes as long as a full one. Findings located in other files are dropped before the summary counts and the reports are written, so they are absent from every report, from the summary counts and from the exit code. Each scanner's own raw output under `scanners/` in the output directory still contains them. Findings with no file location are kept. The results record `metadata.changed_files_only`: `true` when the findings were filtered this way, `false` on a full scan (including the fallback below), so a reader of `ash_aggregated_results.json` can tell a filtered result set from a full one: a finding that is not listed was left out, not fixed.
+
+Only changed files under `--source-dir` count. When git cannot list the changes (not a repository, git missing, or a base ref it cannot resolve), ASH logs a warning and reports everything. When none of the changed files are under `--source-dir`, it reports nothing. In workspace mode each project is compared against its own repository, and a project with no changes is skipped. Container mode does not support the flag and refuses it, exit 5.
 
 ### Examples
 
@@ -646,10 +669,10 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 |------------------------|------------------------------------------------------------------------------|---------------------------------------------------|----------------------|
 | `--results`            | A shard's `ash_aggregated_results.json`, or a directory containing one. Repeat once per shard. Required | | |
 | `--output-dir`         | Directory to write the merged results and reports to. Required                |                                                   | `ASH_OUTPUT_DIR`     |
-| `--output-formats`     | Comma-separated report formats to generate                                    | The formats the scan's own configuration asks for |                      |
+| `--output-formats`     | Comma-separated report formats to generate                                    | The scan configuration's `output_formats`, else every enabled reporter |                      |
 | `--config`, `-c`       | The operator's config file, the source of the settings a shard's recorded configuration cannot choose (see below) | ASH's defaults                                    | `ASH_CONFIG`         |
 | `--config-overrides`   | Configuration overrides as `key.path=value`, applied over the shards' recorded configuration | |                      |
-| `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
+| `--min-severity`       | Minimum severity that counts as actionable for the exit code: `critical`, `high`, `medium`, `low` or `none`; any other value is a usage error | `low`                                             |                      |
 | `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
 | `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `True` | |
 | `--config`, `-c`       | The operator's configuration file; only it can turn on a reporter that sends findings off the host | None                                              |                      |
@@ -710,6 +733,8 @@ That is the distributed form of the false-clean exit code, and none of the check
 
 This one check is opt-in while the rest are unconditional. The others describe a set of shards that cannot reconstruct one scan whatever the environment; this one describes an environment — four of the ten default scanners are `MISSING` on a machine without their tools — so refusing by default would break merges that have nothing wrong with them. A shard that owned nothing is never an offender: a shard count above the scanner count leaves surplus shards with an empty assignment, and a shard asked to run nothing cannot have failed to run it.
 
+Merge also warns, without refusing, when a scanner ran on no shard although one job's selection asked for it: the jobs of the matrix were given different `--scanners`, `--exclude-scanners` or config, and the shard that owned the scanner did not select it. Every job records what its selection asks for, so a scanner that no job's selection includes, such as one left out of the same `--scanners` list on every job, is the operator's choice and merges without a warning. Shards from an ASH release that did not record this get the older warning, which names every scanner no shard ran.
+
 An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ash merge` accept a single scan as a complete merge of a five-way split.
 
 The output directory is checked the way `ash scan` checks it: when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink, the merge is refused with exit 3 before anything is written. See [Output directory](concepts.md#output-directory).
@@ -724,10 +749,9 @@ The merged output carries no shard provenance of its own; it records `merged_sha
 | 1    | The merge was refused, or a scanner or converter in the union did not complete — the scan's findings are unknown, not absent |
 | 2    | The union has findings at or above `--min-severity`                            |
 | 3    | The configuration is invalid: `--config` (or `ASH_CONFIG`) names a path that is missing, a directory or unreadable, it or a `--config-overrides` value does not validate, or the shards' recorded configurations disagree on a setting the verdict reads |
+| 5    | Usage error: the command line was refused, for example a missing `--output-dir` or `--results`, or a `--results` path that does not exist, and nothing was merged |
 
-Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan.
-
-An invocation missing a required option also exits 2, from the argument parser rather than from any finding, so confirm the command is well-formed before reading 2 as a statement about the code.
+Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan. Code 5 means the command itself was malformed; it never stands for a finding.
 
 ### Examples
 
@@ -765,33 +789,44 @@ ash config [subcommand] [options]
 | `init`     | Initialize a new configuration file                              |
 | `get`      | Display current configuration                                    |
 | `update`   | Update configuration values                                      |
-| `validate` | Validate configuration file against JSON schema and check syntax |
+| `validate` | Check that a scan accepts the configuration (same loader and model) |
 | `lint`     | Lint configuration for issues and optionally auto-fix them       |
 
 ### Config Options
 
 | Option               | Description                                     | Default          | Environment Variable |
 |----------------------|-------------------------------------------------|------------------|----------------------|
-| `--config`, `-c`     | Path to configuration file                      | `.ash/.ash.yaml` | `ASH_CONFIG`         |
-| `--config-overrides` | Override configuration values                   |                  |                      |
+| `--config`, `-c`     | Path to configuration file (every subcommand)   | The config a scan of the current directory would use | `ASH_CONFIG`         |
+| `--config-overrides` | Override configuration values (with `get`, `validate`, `validate-plugin-dependencies`) |                  |                      |
+| `--source-dir`       | The directory a scan would scan: where the config is discovered, and the tree a config inside it may extend from (with `get`, `lint`, `validate`, `validate-plugin-dependencies`) | Current directory | `ASH_SOURCE_DIR` |
 | `--set`              | Set configuration values (with `update`)        |                  |                      |
 | `--dry-run`          | Preview changes without writing (with `update`) | `False`          |                      |
-| `--force`            | Overwrite existing config file (with `init`)    | `False`          |                      |
+| `--force`            | Overwrite the file at the target path (with `init`) | `False`      |                      |
 | `--fix`              | Auto-fix common issues (with `lint`)            | `False`          |                      |
 | `--fix-unused`       | Comment out unused suppressions (with `lint`)   | `False`          |                      |
 | `--non-interactive`  | Skip confirmation prompts (with `lint`)         | `False`          |                      |
 | `--output-dir`, `-o` | Path to ASH output directory (with `lint`)      | `.ash/ash_output`|                      |
-| `--debug`, `-d`      | Enable debug logging                            | `False`          | `ASH_DEBUG`          |
-| `--verbose`, `-v`    | Enable verbose logging                          | `False`          | `ASH_VERBOSE`        |
-| `--no-color`         | Disable colored output                          | `False`          |                       |
+| `--debug`, `-d`      | Enable debug logging                            | `False`          |                      |
+| `--verbose`, `-v`    | Enable verbose logging                          | `False`          |                      |
+| `--no-color`         | Disable colored output                          | `False`          |                      |
+
+`get`, `update` and `validate-plugin-dependencies` also accept the file as a
+positional argument, as they did before they had `--config`; `--config` is
+preferred. A path on the command line takes precedence over `ASH_CONFIG`, as it does
+for `ash scan`. A subcommand given a file that is not a valid configuration exits 3,
+the exit code `ash scan` gives for an invalid configuration; a file that does not
+exist exits 1.
 
 ### Examples
 
 ```bash
-# Initialize a new configuration file
+# Initialize a new configuration file (.ashrc.yaml in the current directory)
 ash config init
 
-# Initialize with force (overwrite existing)
+# Replace an existing .ashrc.yaml (or the --config file) with the defaults.
+# A project whose config has another name is refused even with --force; name
+# the file to reset it: ash config init --config .ash/.ash.yaml --force
+# init and wizard write YAML or JSON, and refuse a .toml target.
 ash config init --force
 
 # Display current configuration
@@ -833,47 +868,98 @@ ash config lint --config path/to/config.yaml
 
 ### Config Validate Details
 
-The `ash config validate` command performs comprehensive validation of your ASH configuration file:
+`ash config validate` loads the configuration the way a scan loads it and gives the
+verdict the scan would give. Without `--config` it checks the file a scan of the
+current directory (or of `--source-dir`) would use. The check judges the
+environment it runs in: an `ash_plugin_modules` entry no package installed in
+this environment provides is refused as a scan run here would refuse it, so a
+module that is only installed inside a container image is reported missing by
+a check run on the host.
 
-**Validation Checks:**
-- **Schema Validation**: Verifies the configuration matches the JSON schema
-- **YAML Syntax**: Checks for valid YAML syntax and structure
-- **Required Fields**: Ensures all required fields are present
-- **Type Checking**: Validates data types for all fields
-- **Enum Values**: Verifies enum fields contain valid values
-- **Path Validation**: Checks that file paths in suppressions and ignore rules are valid
-- **Suppression Rules**: Validates suppression syntax and required fields
-- **Scanner Configuration**: Checks scanner-specific options
+**What it checks:**
+- **Loading**: the file must parse (YAML, JSON, or TOML for `.ashrc.toml` and
+  `pyproject.toml`; the suffix decides, in upper or lower case), with `${VAR}` and
+  `!ENV` references resolved as in a scan, and its `extends`
+  chain must resolve, with the same confinement a scan applies: a config inside the
+  source directory may extend files anywhere inside it. A file that does not parse is
+  invalid (exit 3), and a scan given it refuses it with exit 3 before scanning
+  anything.
+- **The model**: the result is checked against the `AshConfig` model the JSON schema
+  is generated from, with strict types, so a wrong type (`fail_on_findings: banana`),
+  a value outside an enum (`severity_threshold: BOGUS`), an unknown key inside a
+  section (`global_settings.severity_treshold`) or a suppression without a `reason`
+  is an error. Each error names the field, for example
+  `Invalid value at 'global_settings.severity_threshold': Input should be 'ALL', 'LOW', 'MEDIUM', 'HIGH' or 'CRITICAL'`.
+  So is a key a built-in plugin's section does not declare beside `enabled`. For
+  the internal-only fields there (`tool_version`, `install_timeout`, and a
+  scanner's `extension`) the error says so,
+  `Invalid value at 'scanners.bandit': Value error, Scanner 'bandit' contains internal-only field 'tool_version' - this should not be in user configs; if you meant a version constraint, put it under options.`,
+  the message a scan refuses the file with. The hint about `options` appears
+  where the plugin declares an option of that name. `ash config lint --fix`
+  removes them, except a `tool_version` or `install_timeout` that is neither
+  null nor equal to the plugin option's default, which may be a pin you meant.
+- **Overrides**: with `--config-overrides`, the overrides are applied as a scan
+  given the same `--config-overrides` applies them.
+- **Warnings**: things a scan accepts but that are probably mistakes. These are
+  printed and do not change the exit code: the internal-only fields a section
+  declares (`name`, and a reporter's `extension`), internal-only fields in the
+  section of a plugin loaded from `ash_plugin_modules` (checked when a scan loads
+  it), the internal `build` section, an unknown top-level key (a scan
+  ignores it, so that a config written for another ASH version still loads), a
+  duplicated top-level key (YAML keeps the last one), a key written both as its
+  documented name and as its field name (`mcp-resource-management` and
+  `mcp_resource_management`; a scan reads the first), a missing `project_name`
+  (reports then use `ash-scan`), and a path in `ignore_paths` or a suppression that
+  names a directory without a `**` glob. A JSON `$schema` key is not a warning, and
+  neither is `mcp_resource_management` alone, which a scan reads as
+  `mcp-resource-management`. The MCP `validate_config` tool gives the same verdict:
+  `valid` is true when a scan accepts the file, and its `errors` list still holds
+  these warnings, each with its type.
+- **Environment values are not repeated**: an error from the model names the field,
+  not the value it holds, and a value read from an environment variable (`!ENV`, or
+  `${VAR:default}`) is shown as `<value>` wherever the command would print it,
+  including the "Resolved source chain" list, a value quoted with escapes, and the
+  `--fix-unused` list. A key read from the environment (a mapping key written as
+  `${VAR}`) is hidden the same way. A value shorter than four characters is left as
+  it is. The same holds for `ash config lint`, `ash config
+  validate-plugin-dependencies`, the refusals of `ash scan` and the error it logs
+  (for the file it found or was given, the file `ASH_CONFIG` names, and each project
+  of a `--workspace` scan), the messages of `ash config get`, and the MCP
+  `validate_config` tool. `ash config get` itself prints a valid configuration with
+  each value and key a file read from the environment as the reference the file
+  wrote (`${VAR}`, `${VAR:default}` or `!ENV '${VAR}'`, the tag with the
+  reference quoted), as a scan's results file records it, and never the value.
+  When an `extends` chain fails only because of a base named through an environment
+  variable, the error says so without naming the base: a file reached through that
+  base (the base itself, or one it extends) is missing, unreadable, or outside the
+  directory bases must stay inside.
 
 **Exit Codes:**
-- `0`: Configuration is valid
-- `1`: Configuration has validation errors
-- `3`: The file cannot be loaded at all, as `ash scan` refuses it: missing, a
-  directory or FIFO, unreadable, not UTF-8, not valid YAML, JSON or TOML, or using a
-  YAML alias
+- `0`: A scan accepts the configuration (warnings may have been printed)
+- `1`: No `--config` was given and no config file was found
+- `3`: A scan refuses the configuration (the exit code `ash scan` gives for an
+  invalid configuration), or the file cannot be loaded at all: missing, a
+  directory or FIFO, unreadable, not UTF-8, not valid YAML, JSON or TOML, or
+  using a YAML alias
+- `5`: Usage error, such as an unknown option
 
 **Example Output:**
 
 ```bash
 $ ash config validate
-✓ Configuration file loaded successfully
-✓ YAML syntax is valid
-✓ Schema validation passed
-✓ All required fields present
-✓ Suppression rules validated (3 rules)
-✓ Scanner configurations validated (16 scanners)
+Validating configuration file: .ashrc.yaml
 
-Configuration is valid!
+✅ Configuration is valid! A scan accepts it.
 
-$ ash config validate --config .ash/.ash_bad_config.yaml
-✗ Configuration validation failed
+$ ash config validate --config bad.yaml
+Validating configuration file: bad.yaml
 
-Errors found:
-  - Line 15: 'scanners.bandit.options' must be an object, got list
-  - Line 23: Unknown field 'global_settings.invalid_field'
-  - Line 30: 'suppressions[0].reason' is required but missing
+❌ 3 error(s); a scan refuses the configuration because of these:
+  1. Invalid value at 'global_settings.severity_threshold': Input should be 'ALL', 'LOW', 'MEDIUM', 'HIGH' or 'CRITICAL'
+  2. Invalid value at 'fail_on_findings': Input should be a valid boolean
+  3. Invalid value at 'scanners.bandit.enabled': Input should be a valid boolean
 
-Please fix these errors and try again.
+❌ Configuration is invalid: a scan refuses it with exit 3. The configuration guide, and the JSON schema at automated_security_helper/schemas/AshConfig.json, give each field's type and allowed values.
 ```
 
 **Use Cases:**
@@ -888,9 +974,12 @@ Please fix these errors and try again.
 The `ash config lint` command performs all validation checks plus additional lint checks that can identify and auto-fix common configuration issues:
 
 **Lint Checks:**
-- **All validation checks**: Same checks as `ash config validate`
-- **Internal fields**: Detects internal-only fields leaked from older `ash config init` versions (e.g., `name`, `extension`, `tool_version` in scanner configs)
-- **Invalid sections**: Detects internal top-level sections like `build` that shouldn't be in user configs
+- **All validation checks**: Same checks as `ash config validate`. A problem that
+  makes a scan refuse the configuration is an error marked `[blocks the scan]`.
+  Everything else lint reports is a warning or info, because a scan accepts it.
+- **Internal fields**: Detects internal-only fields in plugin sections (e.g., `name`, `extension`, `tool_version` in scanner configs). An error marked `[blocks the scan]` when a built-in plugin's section does not declare the field (`tool_version`, `install_timeout`, a scanner's `extension`), otherwise a warning; `--fix` removes them, except a `tool_version` or `install_timeout` that is neither `null` nor equal to the plugin option's default (any value but `null` for a plugin lint does not load), which it leaves for a hand edit because it may be a pin. A field an `extends` base sets stays an error that is not auto-fixable, since `--fix` edits only the linted file
+- **Invalid sections**: Detects internal top-level sections like `build` that shouldn't be in user configs. A warning; `--fix` removes them
+- **Legacy plugin and key names**: A snake_case spelling such as `cdk_nag` (the documented key is `cdk-nag`), and both spellings at once, which a scan reads as the documented one. Warnings
 - **Missing line_end**: Detects suppressions with `line_start` but no `line_end`
 - **Expired suppressions**: Detects suppressions past their expiration date
 - **Unused suppressions**: Detects suppressions not matching any findings (requires `--fix-unused`)
@@ -900,11 +989,17 @@ The `ash config lint` command performs all validation checks plus additional lin
 - Removes invalid top-level sections (e.g., `build`)
 - Sets `line_end` equal to `line_start` when missing
 - Removes expired suppressions
+- Refuses (exit 1) to rewrite a file that reads values from the environment
+  (`!ENV`, or `${VAR:default}`), since the rewrite would store what they resolve to
+  now; with nothing to fix, such a file gets the exit code `lint` gives it
 
 **Unused Suppression Handling (`--fix-unused`):**
 - Comments out unused suppressions instead of removing them
 - Adds a dated note explaining why they were commented out
 - Preserves suppressions for easy re-activation if needed
+- When every entry is commented out, the key is left as `suppressions: []`, so
+  the file still loads (a key holding only comments is null, which a scan
+  refuses); remove the `[]` when you re-activate an entry
 - This is intentionally conservative: a suppression unused locally may still be needed in CI/CD where different scanners are available
 
 **Non-interactive Mode (`--non-interactive` / `--yes` / `-y`):**
@@ -913,35 +1008,55 @@ The `ash config lint` command performs all validation checks plus additional lin
 - Warns (but proceeds) when the unused suppressions report is older than 1 hour
 
 **Exit Codes:**
-- `0`: No errors found (warnings and info are acceptable)
-- `1`: Configuration has errors that need attention
-- `3`: The file cannot be loaded at all (see `ash config validate`)
+- `0`: A scan accepts the configuration. Warnings and info, such as internal
+  fields, the `build` section or a duplicated key, do not change it; nor does
+  declining `--fix` at its prompt
+- `1`: No `--config` was given and no config file was found, or `--fix` or
+  `--fix-unused` refused to rewrite it (a TOML file, a JSON file for
+  `--fix-unused`, or a file with environment references when there is something
+  to fix)
+- `3`: A scan refuses the configuration, as `ash config validate` reports it, the
+  `--config` file does not exist or cannot be read, or the file does not parse
+  (marked `[blocks the scan]`). With
+  `--fix`, the fixes are applied first and the exit code describes the fixed file,
+  since removing an internal section can make the configuration valid
+- `5`: Usage error, such as an unknown option
 
 **Example Output:**
 
+For a `.ashrc.yaml` whose `bandit` section has `name: bandit`, with a
+suppression that sets `line_start: 42` and no `line_end`, and one that expired
+on 2024-01-01:
+
 ```bash
 $ ash config lint
-Linting configuration file: .ash/.ash.yaml
+Linting configuration file: /home/user/my-project/.ashrc.yaml
 
 Found 3 issue(s):
-  ❌ Scanner 'bandit' contains internal-only field 'name' [auto-fixable]
-  ⚠️  Suppression has 'line_start' (42) but missing 'line_end' [auto-fixable]
-  ⚠️  Suppression has expired (expiration: 2024-01-01) [auto-fixable]
+  ⚠️  Scanner 'bandit' contains internal-only field 'name' at 'scanners.bandit.name' [auto-fixable]
+  ⚠️  Suppression has 'line_start' (42) but missing 'line_end' - it matches any finding that ends at or after line 42, including a multi-line finding that starts before it at 'global_settings.suppressions[0]' [auto-fixable]
+  ⚠️  Suppression has expired (expiration: 2024-01-01) at 'global_settings.suppressions[1]' [auto-fixable]
 
-  Errors: 1
-  Warnings: 2
+  Warnings: 3
 
 💡 3 issue(s) can be auto-fixed. Run with --fix to apply fixes.
 
 $ ash config lint --fix --non-interactive
-Linting configuration file: .ash/.ash.yaml
+Linting configuration file: /home/user/my-project/.ashrc.yaml
+
+Found 3 issue(s):
+  ⚠️  Scanner 'bandit' contains internal-only field 'name' at 'scanners.bandit.name' [auto-fixable]
+  ⚠️  Suppression has 'line_start' (42) but missing 'line_end' - it matches any finding that ends at or after line 42, including a multi-line finding that starts before it at 'global_settings.suppressions[0]' [auto-fixable]
+  ⚠️  Suppression has expired (expiration: 2024-01-01) at 'global_settings.suppressions[1]' [auto-fixable]
+
+  Warnings: 3
 
 🔧 Fixing 3 issue(s):
   • Remove internal field 'name' from scanner 'bandit'
-  • Set line_end = 42 (same as line_start)
+  • Narrow the suppression to line 42 alone by setting line_end = 42
   • Remove expired suppression
 
-✅ Fixed 3 issue(s) in .ash/.ash.yaml
+✅ Fixed 3 issue(s) in /home/user/my-project/.ashrc.yaml
 ```
 
 ## Plugin Command
@@ -964,7 +1079,7 @@ ash plugin [subcommand] [options]
 |---------------------------|----------------------------------------|------------------|----------------------|
 | `--include-plugin-config` | Include plugin configuration in output | `False`          |                      |
 | `--ash-plugin-modules`    | Additional plugin modules to load      |                  | `ASH_PLUGIN_MODULES` |
-| `--config`, `-c`          | Path to configuration file             | `.ash/.ash.yaml` | `ASH_CONFIG`         |
+| `--config`, `-c`          | Path to configuration file             | Discovered       | `ASH_CONFIG`         |
 | `--config-overrides`      | Override configuration values          |                  |                      |
 | `--debug`, `-d`           | Enable debug logging                   | `False`          | `ASH_DEBUG`          |
 | `--verbose`, `-v`         | Enable verbose logging                 | `False`          | `ASH_VERBOSE`        |
@@ -991,13 +1106,19 @@ The `report` command generates reports from scan results.
 ash report [options]
 ```
 
+With no `--output-dir` and no `ASH_OUTPUT_DIR`, `ash report` reads `.ash/ash_output/ash_aggregated_results.json` under the current directory, where a scan writes it. Given a directory, it reads `ash_aggregated_results.json` from the directory's `.ash/ash_output` subdirectory, its `ash_output` subdirectory or the directory itself, the first of the three it finds. It writes the report to stdout. Log messages and errors go to stderr. When stdout is not a terminal, or with `--no-color`, stdout carries the reporter's output, not re-indented, highlighted or wrapped, so `ash report --format sarif > ash.sarif` produces a SARIF file. It is a fresh rendering of the saved results, not a copy of the file the scan wrote to `reports/`: SARIF can carry fields the saved results default, and CSV, HTML and Markdown carry the time they were rendered. On a terminal with color, JSON is indented and Markdown is rendered, with each link shown as its text and target rather than as a terminal hyperlink (a Markdown report that holds a control character, or text that reads as one of the escapes below, is printed as escaped text, unrendered); `docker run -t` gives the command a terminal: `--no-color` there stops the indenting and rendering, but control characters are still shown escaped, so for the reporter's exact output run the container without `-t`, or redirect stdout to a file inside the container. On a terminal, control characters in the report (which can come from the scanned code, such as escape sequences in a finding's message) are shown as `\xNN`, and Unicode's bidirectional and format controls (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069, the set ASH's console log shows too) as `\uNNNN`, rather than sent to the terminal (as `\u00NN` in JSON formats, indented or not, so the JSON parses to the same document), and the backslashes of text that would read as such an escape are doubled, so `\x1b` on the terminal is always an escaped control character; redirected output is not changed. An invalid configuration exits 3, including an option a plugin loaded from `ash_plugin_modules` does not accept, checked once the plugins are loaded as a scan checks it; an unknown `--format` is refused before the results are read. If no results file is found, the command names the paths it checked and exits 1 without creating anything.
+
+In CI, write the report to a file (`ash report --format markdown > ash-report.md`) or publish the copy the scan wrote to `reports/`, rather than printing it to the job log. A CI log is not a terminal, so the report reaches it unchanged, and the report quotes the scanned code: a line of it that starts with `::` is read by GitHub Actions as a workflow command, and `##[` or `##vso[` by Azure Pipelines. ASH's log and summaries break such commands, writing the colon as `\x3a` or the `#` as `\x23`; `ash report`'s stdout is left as the report.
+
+In CI, don't give ASH a terminal: no `docker run -t`, `script` or `unbuffer` around it. Container mode passes `-t` to the container runner itself when its own output is a terminal and color is on. A terminal gets ASH's output as written. Under GitHub Actions, Azure Pipelines and TeamCity, known by the `GITHUB_ACTIONS`, `TF_BUILD` or `TEAMCITY_VERSION` variable each sets in every job, ASH breaks the commands on a terminal too; under any other runner it can't tell that a terminal is a job log. Container mode and `./ash` pass each of those variables that is set into the container, by name, or, with `OCI_RUNNER_WRAPPER` set, with its value, because a wrapper such as `sudo` need not pass the environment on. Those three are the only variables of your environment that go on the runner's command line with their values; the others there, such as the mount paths, `ASH_DEBUG`, `ASH_OFFLINE` and the terminal size, are ASH's own. Through a wrapper, one of the three holding a newline is refused with exit 3. Running the ASH image yourself with `docker run -t`, pass them the same way, by name (`-e GITHUB_ACTIONS`), or the scan inside writes to its terminal as is.
+
 ### Report Options
 
 | Option               | Description                       | Default           | Environment Variable |
 |----------------------|-----------------------------------|-------------------|----------------------|
 | `--format`           | Report format to generate         | `markdown`        |                      |
 | `--output-dir`       | Directory containing scan results. Refused, with exit 3, when it, a directory or file ASH writes in it, or a directory below the current directory on the way to it is a symlink; see [Output directory](concepts.md#output-directory). | `.ash/ash_output` | `ASH_OUTPUT_DIR`     |
-| `--config`, `-c`     | Path to configuration file        | `.ash/.ash.yaml`  | `ASH_CONFIG`         |
+| `--config`, `-c`     | Path to configuration file        | Discovered        | `ASH_CONFIG`         |
 | `--config-overrides` | Override configuration values     |                   |                      |
 | `--log-level`        | Set the log level                 | `INFO`            |                      |
 | `--debug`, `-d`      | Enable debug logging              | `False`           | `ASH_DEBUG`          |
@@ -1029,11 +1150,14 @@ example: `ash report --format s3 --config-overrides reporters.s3.enabled=true
 # Generate a markdown report
 ash report --format markdown
 
-# Generate a JSON report
-ash report --format json
+# Generate a flat JSON report
+ash report --format flat-json
 
 # Generate a report from specific results
 ash report --output-dir ./my-scan-results --format html
+
+# Write a SARIF file from saved results
+ash report --format sarif > ash.sarif
 ```
 
 ## Dependencies Command
@@ -1048,9 +1172,10 @@ ash dependencies install [options]
 
 | Option                | Description                              | Default                      | Environment Variable |
 |-----------------------|------------------------------------------|------------------------------|----------------------|
-| `--bin-path`, `-b`    | Path to install binaries                 | `~/.ash/bin`                 | `ASH_BIN_PATH`       |
-| `--plugin-type`, `-t` | Plugin types to install dependencies for | `converter,scanner,reporter` |                      |
-| `--config`, `-c`      | Path to configuration file               | `.ash/.ash.yaml`             | `ASH_CONFIG`         |
+| `--bin-path`, `-b`    | Path to install binaries. A scan finds them there only when `ASH_BIN_PATH` names the same directory; see below | `~/.ash/bin`                 | `ASH_BIN_PATH`       |
+| `--plugin-type`, `-t` | Plugin types to install dependencies for: `converter`, `scanner` or `reporter` (repeatable). Any other value exits 2 before anything is resolved or installed, naming the value and the three types | `converter,scanner,reporter` |                      |
+| `--tool`, `-T`        | Install dependencies for these plugins only, by name (repeatable). A name no plugin has, or one of a type `--plugin-type` leaves out, exits 2 before anything is installed or downloaded | all plugins |                      |
+| `--config`, `-c`      | Path to configuration file               | Discovered                   | `ASH_CONFIG`         |
 | `--config-overrides`  | Override configuration values            |                              |                      |
 | `--debug`, `-d`       | Enable debug logging                     | `False`                      | `ASH_DEBUG`          |
 | `--verbose`, `-v`     | Enable verbose logging                   | `False`                      | `ASH_VERBOSE`        |
@@ -1065,11 +1190,162 @@ ash dependencies install
 # Install dependencies for scanners only
 ash dependencies install --plugin-type scanner
 
-# Install dependencies to a custom directory
+# Install dependencies to a custom directory, and scan with them
 ash dependencies install --bin-path ~/tools/ash-bin
+export ASH_BIN_PATH=~/tools/ash-bin
+ash scan
 ```
 
 A `--tool` name that no loaded plugin has is refused with exit 2 and nothing is installed, so a typo cannot report success. With `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` (exactly that value), such names are listed as skipped and the known tools are installed; a run that names only unknown tools installs nothing and exits 0. The refusal stands while any plugin failed to load, because the unknown name may be that plugin's. A name that is a plugin of a type `--plugin-type` left out is not unknown: it is refused with exit 2 whether or not the variable is set, and the message names its type. ASH's reusable CI workflow sets the variable only when its caller passes `skip-unknown-tools: true` with `config-ref`, as ASH's own required check does: that check installs an older ASH than the workflow files it runs, so the workflow can ask for a tool that ASH does not have yet.
+
+A `--plugin-type` other than `converter`, `scanner` or `reporter` is refused with exit 2 before anything is resolved or installed, naming the value and the three types.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Every tool a scan here would run is present after the install |
+| 1 | For a plugin a scan here would run, or one named with `--tool`: an install command failed, the plugin raised, or its tool is still absent. The panel names each plugin, with a missing program it needs besides its own command in parentheses (`cdk-nag (node)`); npm-audit without npm is named `npm-audit`. A plugin a scan here skips (disabled in the configuration, or not available on this platform) and that was not named with `--tool` exits 0 even when its install command fails or it raises |
+| 2 | A `--tool` name matches no plugin, or names a plugin of a type that `--plugin-type` leaves out; or a `--plugin-type` that is none of `converter`, `scanner` and `reporter` was given. ASH names the tool or the type, and nothing was installed or downloaded |
+| 3 | The configuration is one a scan refuses, the file `ASH_CONFIG` names included; the scan's refusal is printed and nothing is installed |
+| 5 | Any other usage error, such as an unknown option (see [Usage errors](#usage-errors)) |
+
+A tool counts as present when a scan would find it (see below), or, for bandit,
+checkov, semgrep and nbconvert, when `uv tool list` lists it, since ASH runs those
+with `uv tool run`. cdk-nag runs inside ASH's own Python process, so its tool is
+the interpreter running ASH, whether or not a program named `python` is on
+`PATH`; it still needs Node.js.
+
+Only the plugins a scan with the same configuration on the same platform would run
+decide the exit code, together with every plugin named with `--tool`. A scan skips
+a scanner that its configuration disables (`enabled: false`) and one that does not
+run on this platform (semgrep on Windows), so the install still runs and reports
+theirs, but unless you asked for it with `--tool`, a failed command or a missing
+tool there does not fail it. The panel lists them under "Not available on this
+platform" (with the reason) and, when one is missing or failed, under "Disabled in
+the configuration, not counted". A scanner that only lacks its tool here is
+reported MISSING by a scan, and fails the install too: cfn-nag on Windows without
+a Ruby DevKit, for example, which has no install path there. To provision only the
+scanners you scan with, name them with `--tool`. In a workspace, where each project
+has its own configuration and this command reads only the one for the directory it
+runs in, name the tools the projects use with `--tool`.
+
+### Where scans look for tools
+
+A scan looks for each program on `PATH`, then in the ASH bin directory
+(`ASH_BIN_PATH`, or `~/.ash/bin` when it is unset or blank), then
+in the directories of ASH's own environment, where packages installed into it put
+their commands: the directory of the Python interpreter running ASH, and that
+interpreter's scripts directory, which is a different one on a Windows Python
+outside a virtual environment (`python.exe` in the install directory, commands in
+its `Scripts\` subdirectory). Last comes `/usr/local/bin` (not on Windows).
+
+Blank means empty, or whitespace in every part of the path, such as ` ` or ` /`
+(`/` itself is the root, not blank), and a blank `--bin-path` is the same as none,
+so `--bin-path "$TOOLS_DIR"` with `TOOLS_DIR` unset installs into the ASH bin
+directory.
+
+A relative `ASH_BIN_PATH`, such as `bin`, is read relative to the working
+directory, which is usually the repository being scanned, so a scan does not look
+for tools there, and the scanner sandbox does not make it executable. It logs one
+warning to `ash.log` that names the value and asks for an absolute path, and when
+a scanner is then MISSING the incomplete-scan message names it too. A relative
+`--bin-path`, such as `tools` or `.`, is taken against the directory
+`ash dependencies install` runs in; the installer creates that directory and
+exports it to its own commands as an absolute path.
+
+Keep `ASH_BIN_PATH` outside the repository being scanned. An absolute path inside
+it is searched like any other, and under the scanner sandbox it is a directory
+tools run from, so a file the repository commits there can run as a tool.
+
+uv is looked for in the other order. ASH runs the uv installed with it, from its
+own environment: beside the interpreter, in its scripts directory, or where a
+`pip install --prefix`, `--user` or `--target` put the `uv` package. Only when
+there is none there does it look for uv on `PATH` and in the directories above.
+
+A scan finds what `--bin-path` installed somewhere else only when `ASH_BIN_PATH`
+names that directory for the scan too. Nothing is remembered between runs, so
+`ash dependencies install` ends by printing the line that sets it, in absolute
+form, for POSIX shells and for PowerShell:
+
+```text
+  export ASH_BIN_PATH=/home/me/tools/ash-bin    (POSIX shells)
+  $env:ASH_BIN_PATH = '/home/me/tools/ash-bin'    (PowerShell)
+```
+
+It prints nothing when a scan in the same environment looks there anyway: the
+directory is the (absolute) `ASH_BIN_PATH`, or `~/.ash/bin` with `ASH_BIN_PATH`
+unset.
+
+### Python packages
+
+Some plugins need Python packages in ASH's own environment: cdk-nag needs
+`aws-cdk-lib`, `cdk-nag` and `constructs`, and the ferret-scan community plugin
+needs `ferret-scan`. `ash dependencies install` adds them with the installer that
+owns that environment:
+
+- In an environment `uv tool install` created, it runs
+  `uv pip install --no-config --python <ASH's interpreter>`. A later
+  `uv tool upgrade` or `uv tool install --force` rebuilds that environment without
+  them: run `ash dependencies install --tool cdk-nag` again after either one, or
+  add `--with` for each package to the `uv tool install` command you install ASH
+  with.
+- In an environment where pip is importable (pip, pipx, `python -m venv`), it runs
+  `<ASH's interpreter> -m pip install`.
+- Anywhere else, including `uvx` and a `uv venv` without pip, it runs
+  `uv pip install --no-config --python <ASH's interpreter>`. uvx builds a new
+  environment when its cache entry is gone or ASH changes; add `--with` for each
+  package to the uvx command to keep them.
+
+With neither pip nor uv available, the plugin's row is FAILED and the message says
+what to install.
+
+### uv settings
+
+Every uv subcommand except `uv tool` reads `uv.toml` and `pyproject.toml`'s
+`[tool.uv]` from the working directory and its parents (`uv pip`, `uv venv`,
+`uv python`, `uv run` and the rest). The ones ASH runs itself are `uv pip install`
+(above), the dry run that checks a tool found on `PATH`, and `uv cache dir`
+(below). It runs the first two with `--no-config`, because the working directory
+is usually the repository being scanned and its configuration must not choose what
+ASH installs.
+
+An install command a plugin declares gets `UV_NO_CONFIG=1` when it runs uv (as
+`uv`, `uv.exe`, `uv.bat`, `uv.cmd`, or `python -m uv` however Python's options
+are spelled: `-Im uv`, `-muv` and `-m uv.__main__` count), unless it is a
+`uv tool` command or `uvx`. That keeps uv from reading configuration files, and nothing
+more: such a command still runs in the working directory, where uv finds the
+project and its `.venv` (a `uv pip` command can use a Python interpreter the
+repository put there, and `uv run` or `uv sync` creates `.venv` and `uv.lock`
+in it). In a plugin, declare `python -I -m uv` rather than `python -m uv`: `-m`
+puts the working directory first on `sys.path`, so a declared `python -m uv` run
+from the repository runs a `uv.py` the repository carries, and `-I` leaves the
+working directory off. `-I` also skips user site-packages, so where uv is
+installed only there (`pip install --user uv`), declare `python -P -m uv` instead
+(Python 3.11+): `-P` leaves the working directory off and keeps the user site.
+
+For the commands with `--no-config` or `UV_NO_CONFIG=1`, your own and the system
+`uv.toml` are not read either; `UV_*` environment variables still apply
+(`UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `UV_OFFLINE` and the rest), and so does a
+file named by `UV_CONFIG_FILE`, which uv reads even with `--no-config`:
+
+```bash
+UV_CONFIG_FILE=~/.config/uv/uv.toml ash dependencies install --tool cdk-nag
+```
+
+The `uv tool install`, `uv tool run` and `uv tool list` commands ASH runs for
+bandit, checkov, semgrep and nbconvert get no flag. uv ignores project files for
+`uv tool` commands, so the scanned repository cannot configure them, and they
+read your user `uv.toml` (`~/.config/uv/uv.toml`, `%APPDATA%\uv\uv.toml` on
+Windows) and the system one (`/etc/uv/uv.toml`), where an index mirror is usually
+set. A `cache-dir` there moves their cache. ASH runs `uv cache dir` from the
+filesystem root (`/`, or the system drive's root on Windows), where only an
+administrator can put a `uv.toml`, and without `UV_PROJECT` or `UV_WORKING_DIR`,
+which would send uv to read a `uv.toml` elsewhere. So it names that same cache
+and never one that a scanned repository's `uv.toml`, or one in a shared temporary
+directory, chose. Give `cache-dir` and `UV_CACHE_DIR` as absolute paths: uv
+resolves a relative one against each command's own working directory, so the
+cache `uv cache dir` names from `/` is not the one the tools used.
 
 ## Inspect Command
 
@@ -1091,7 +1367,7 @@ ash inspect [subcommand] [options]
 | Option            | Description                       | Default           | Environment Variable |
 |-------------------|-----------------------------------|-------------------|----------------------|
 | `--output-dir`    | Directory containing scan results | `.ash/ash_output` | `ASH_OUTPUT_DIR`     |
-| `--config`, `-c`  | Path to configuration file        | `.ash/.ash.yaml`  | `ASH_CONFIG`         |
+| `--config`, `-c`  | Path to configuration file        | Discovered        | `ASH_CONFIG`         |
 | `--debug`, `-d`   | Enable debug logging              | `False`           | `ASH_DEBUG`          |
 | `--verbose`, `-v` | Enable verbose logging            | `False`           | `ASH_VERBOSE`        |
 | `--no-color`      | Disable colored output            | `False`           |                       |
@@ -1108,11 +1384,17 @@ ash inspect findings
 
 ## Build-Image Command
 
-The `build-image` command builds the ASH container image.
+The `build-image` command builds the ASH container image and then, unless
+`--no-run` is given, scans the current directory with it.
 
 ```bash
 ash build-image [options]
 ```
+
+It takes only the options below; any other argument is a
+[usage error](#usage-errors). To scan with scan options, such as `--scanners` or
+`--min-severity`, use `ash scan --mode container`, which builds the image the same
+way and accepts every scan option.
 
 ### Build-Image Options
 
@@ -1144,17 +1426,26 @@ ash build-image --oci-runner podman
 
 ## Get-GenAI-Guide Command
 
-The `get-genai-guide` command downloads the ASH GenAI Integration Guide, a comprehensive document designed to help AI assistants and LLMs properly interact with ASH scan results.
+The `get-genai-guide` command writes the ASH GenAI Integration Guide to a file. The guide tells AI assistants and LLMs how to work with ASH scan results.
 
 ```bash
 ash get-genai-guide [options]
 ```
 
+The guide ships with ASH, so the command writes the copy that belongs to the
+installed version and needs no network access. Every installation carries one: a
+wheel or sdist, an install from a git URL, a clone of the repository (where the
+command writes `docs/content/docs/genai-steering-guide.md`), and the container
+images that `ash build-image`, `ash scan --mode container`, `./ash` and `Invoke-ASH`
+build. A package built from a source tree without `docs/` has none, and there the
+command exits 1 and names `--from-github`. `--from-github` downloads the guide from
+GitHub instead: the `main` branch's, or that of the branch or release tag `--branch`
+names.
+
 ### Purpose
 
 This guide provides AI assistants with:
 - Instructions on using correct output formats (JSON vs HTML)
-- How to handle severity discrepancies between report formats
 - Proper suppression creation with correct YAML syntax
 - Working with CycloneDX SBOM for dependency analysis
 - Configuration file schema and structure
@@ -1167,17 +1458,19 @@ This guide provides AI assistants with:
 | Option            | Description                                | Default              |
 |-------------------|--------------------------------------------|----------------------|
 | `--output`, `-o`  | Output path for the GenAI integration guide | `ash-genai-guide.md` |
+| `--from-github`   | Download the guide from GitHub instead of writing the installed copy | off |
+| `--branch`, `-b`  | Branch or tag to download from with `--from-github` | `main` |
 
 ### Examples
 
 ```bash
-# Download to default location (ash-genai-guide.md)
+# Write to the default location (ash-genai-guide.md)
 ash get-genai-guide
 
-# Download to custom location
+# Write to another location
 ash get-genai-guide -o /path/to/guide.md
 
-# Download to current directory with custom name
+# Write to the current directory under another name
 ash get-genai-guide --output genai-integration.md
 ```
 
@@ -1317,12 +1610,14 @@ honored by `ash mcp`. See
 | `--trust-upstream-host-check`               | A proxy or platform in front of ASH checks Host and Origin, so ASH checks neither. HTTP transports only; not with `--allowed-host` | `False` |
 | `--profile`                                 | Register a config profile as `NAME=path/to/ash.yaml`. Repeatable. Each file is loaded and validated at startup, and one that fails stops the server with exit 3. See [Config profiles](mcp/streamable-http.md#config-profiles) | None |
 | `--log-level`                               | Set the log level                                                                   | `INFO`                 |
-| `--verbose`, `-v`                           | Enable verbose logging                                                              | `False`                |
-| `--debug`, `-d`                             | Enable debug logging                                                                | `False`                |
-| `--quiet`                                   | Hide all log output                                                                 | `True`                 |
-| `--color`                                   | Enable/disable colorized output                                                     | `True`                 |
+| `--verbose` / `--no-verbose`, `-v`          | Enable verbose logging                                                              | `--no-verbose`         |
+| `--debug` / `--no-debug`, `-d`              | Enable debug logging                                                                | `--no-debug`           |
+| `--quiet` / `--no-quiet`                    | Hide all log output                                                                 | `--no-quiet`           |
+| `--color` / `--no-color`                    | Enable/disable colorized output                                                     | `--color`              |
 
 Setting `--auth-header-name` without `--auth-header-value`, or the reverse, is rejected: partial auth configuration would look configured and enforce nothing.
+
+`--profile` is the only way a profile is registered. Clients see the names with the `list_profiles` tool and bind one to their session with `select_profile`; a bound profile supplies the config for every later call in that session that names none. A profile file that does not load, has an unknown top-level key, or repeats a name stops the server from starting, with exit code 3. See [Config profiles](mcp/streamable-http.md#config-profiles).
 
 Everything this command writes goes to stderr. On the `stdio` transport stdout is the JSON-RPC channel, so one human-readable line there makes the client fail to parse the stream.
 
@@ -1389,10 +1684,24 @@ ASH supports additional environment variables that don't directly map to command
 | `OCI_RUNNER_WRAPPER`  | Command prefix to wrap the OCI runner invocation                     |                                              |
 | `ASH_OFFLINE`         | Run in offline mode                                                  |                                              |
 | `ASH_DEBUG`           | Enable debug logging                                                 |                                              |
+| `ASH_DEBUG_SHOW_LOCALS` | Show each frame's local variables in a traceback. They can include secrets; see below | unset |
 | `ASH_VERBOSE`         | Enable verbose logging                                               |                                              |
 | `ASH_BASE_IMAGE_OVERRIDE` | Registry to fetch the Dockerfile's base image from                   | unset (the Dockerfile's own `ARG BASE_IMAGE`) |
 | `ASH_BASE_OCI_LAYOUT` | Verified OCI layout to build the base image from, with no registry call | unset |
 | `ASH_ALLOW_IN_TREE_TOOLS` | Let ASH start tools found inside the scanned directory, as `--allow-in-tree-tools` does: `1`, `true`, `yes` or `on`. Ignored by `ash mcp` | unset |
+
+### `ASH_DEBUG_SHOW_LOCALS`
+
+Set to `YES`, `1` or `TRUE`, a traceback in the console log, and the one printed for an
+uncaught error, lists each frame's local variables. It is for debugging on your own
+machine. Those variables can include secrets from the config and from the environment,
+so never set it in CI or anywhere the output is shared. On a CI runner ASH ignores it:
+when `GITHUB_ACTIONS`, `TF_BUILD`, `AZURE_PIPELINES`, `TEAMCITY_VERSION`, `JENKINS_URL`,
+`CODEBUILD_BUILD_ID`, `GITLAB_CI`, `BUILDKITE`, `CIRCLECI`, `TRAVIS`, `APPVEYOR`,
+`BITBUCKET_BUILD_NUMBER` or `bamboo_buildKey` is set, to any value, an empty one
+included, or `CI` is set to anything but `0` or
+`false` (`true`, `1`, ...), no locals are shown, and the scan logs one warning saying
+the variable was ignored. A developer whose shell exports `CI=1` gets no locals either.
 
 ### `ASH_BASE_IMAGE_OVERRIDE`
 
@@ -1441,15 +1750,18 @@ ignored. When it applies, it takes the place of `ASH_BASE_IMAGE_OVERRIDE`; an ex
 
 ## Exit Codes
 
-ASH returns the following exit codes:
+Every `ash` command exits with one of these codes. `--help` exits 0, as does
+`--version` on `ash` and `ash scan`.
 
-| Code | Description                                      |
-|------|--------------------------------------------------|
-| 0    | Success - No issues found                        |
-| 1    | Scan execution error                             |
-| 2    | Issues found with severity at or above threshold |
-| 3    | Invalid configuration                            |
-| 4    | Workspace definition or policy error - nothing was scanned |
+| Code | Meaning | Returned by |
+|------|---------|-------------|
+| 0    | Success. For a scan or a merge: no actionable findings at or above the threshold | every command |
+| 1    | The command failed, or the scan is incomplete: a selected scanner is `ERROR` or `MISSING`, a rule could not be evaluated, a content database is stale, or a merge was refused. Also a scan run on the host (local, precommit or nix mode) of a directory whose path is not UTF-8, refused before it writes anything | every command (any unexpected error exits 1) |
+| 2    | Actionable findings at or above the threshold | `ash`, `ash scan`, `ash merge`, `ash build-image` |
+| 3    | Invalid configuration or refused input, including, for the `ash config` commands, a named config file that does not exist or cannot be read, and a configured `ash_plugin_modules` entry that fails to import (or, for the checks, one no installed package provides). Also, in container mode, a directory to scan or an output directory whose path holds a comma, a double quote or a line break, or is not UTF-8, refused before any container runtime call (`--no-run`, which mounts nothing, is not refused); `./ash` refuses such a path with 3 too | `ash`, `ash scan`, `ash build-image`, `ash report`, `ash merge`, `ash dependencies install`, `ash plugin list`, `ash config validate`, `lint`, `get`, `update` and `validate-plugin-dependencies`, `ash mcp` |
+| 4    | Workspace definition or policy error; nothing was scanned | `ash` and `ash scan` in workspace mode, or given a workspace-only option without `--workspace` |
+| 5    | Usage error: the command line was refused and nothing ran, including a `--source-dir` that does not exist, is not a directory or cannot be entered, and an `--output-dir` that is a file, cannot be created, cannot be entered or cannot be written (see [Usage errors](#usage-errors)) | every command, `./ash` and `Invoke-ASH` |
+| 130  | Stopped with Ctrl-C | every command, at any point: while the CLI loads, while the command runs, and while it reports an unexpected error |
 
 Code 4 is distinct from code 2 on purpose. Code 2 means a scan ran and found
 issues; code 4 means the workspace definition could not be used and no project
@@ -1469,6 +1781,151 @@ rebuild the image from this ASH. When the inner run refused its reports, the exi
 code is `1` with the inner run's own message. A container status that is not a
 verdict (`3`, `4`, or the runner's own, such as `125` or `137`) is returned as is,
 without reading any results back.
+
+`ash mcp` also exits 2 when the server stops on a scanner error, and `ash dependencies install` for a `--tool` it cannot select or a `--plugin-type` that is none of the three. In container mode
+(and with `ash build-image`), a status the container runtime reports, such as 125
+for a container that could not start or 137 for one that was killed, is passed
+through unchanged.
+
+A scan stopped with Ctrl-C exits 130 in every mode: local, container and Nix. It
+prints that it was interrupted, and no completion line, results table or verdict. In
+container and Nix mode the interrupt is passed on to the container runtime or the
+Nix shell, which has 5 seconds to stop before it is killed. A second Ctrl-C during
+those 5 seconds kills it at once. On Windows the console passes a Ctrl-C to the
+runtime as well, since the two share it; when ASH is attached to no console, it ends
+the runtime at once instead. `ash build-image` stopped with Ctrl-C also exits 130 and
+says it was interrupted. Every other command stopped with Ctrl-C while it runs exits
+130 too. Stopped while the CLI loads, before the command runs, or while it reports
+an unexpected error, any command exits 130 as well and prints nothing more: neither
+the error nor a traceback of the interrupt. A shell
+script that runs `ash` in a loop sees 130 as an exit status, not as an interrupt,
+and goes on to the next iteration unless it checks for it, for example with
+`ash scan ... || [ $? -ne 130 ] || break`.
+
+The `./ash` wrapper script in the repository exits 3 when it refuses its own
+arguments or environment, before it builds or runs anything: no container runner
+found or an `OCI_RUNNER` of only whitespace, an option given without a value or with
+an empty or blank one, a `--source-dir` or `--output-dir` whose path holds a newline, a carriage
+return, a comma or a double quote (a runtime reads `--mount` as CSV, so it cannot
+take any of them; a relative `--output-dir` counts the working directory's path,
+and is refused before it is created) or bytes that are not UTF-8, an
+`ASH_IMAGE_NAME` that
+starts with `-` or holds a character other than A-Z, a-z, 0-9 and `. _ : / @ -`, a
+`--build-target` that starts with `-` or holds one other than A-Z, a-z, 0-9 and
+`. _ -`, a `--workspace` or `--workspace-config` (the wrapper scans one directory, so
+run `ash --mode container --workspace <file>` instead), when it builds the image,
+an `ASH_BASE_IMAGE_OVERRIDE` held to the same characters as an image name or a
+malformed `ASH_BASE_OCI_LAYOUT`, or, with `OCI_RUNNER_WRAPPER` set, a
+`GITHUB_ACTIONS`, `TF_BUILD` or `TEAMCITY_VERSION` that holds a newline. A registry named by a bracketed IPv6 literal, such as
+`[::1]:5000`, is refused as well, since `[` and `]` are not among the image-name
+characters; name the registry by a host name instead. Those characters are the same in every locale, and
+`Invoke-ASH` holds an image name and `ASH_BASE_IMAGE_OVERRIDE` to them as well, with the
+same message; it reads `ASH_BASE_IMAGE_OVERRIDE` when it starts, even with `-NoBuild`.
+`ash scan --mode container` holds `ASH_IMAGE_NAME` to them too, with the same message
+and exit 3, before it builds or runs anything; an empty one names the default image.
+When it builds, it holds `ASH_BASE_IMAGE_OVERRIDE` to them as well, with the wrappers'
+message and exit 3, before the build starts: a value of only whitespace is refused,
+and only an empty one is unset. Both refusals write a tab, a newline or a carriage
+return in the value as `\x09`, `\x0a` or `\x0d`, so each stays on one line.
+With `--no-run`, which only builds the image, the two directories are neither checked
+nor created and the runner variables are not read, so those refusals do not apply. The
+exceptions to exit 3 are the usage errors `ash` itself refuses with 5, refused with 5
+and the text `ash scan` gives: an explicit `--sandbox` other than `off`, as
+`ash scan --mode container --sandbox` refuses it, even next to a `--workspace`,
+whichever comes first; a `--source-dir` that does not exist, is not a directory, or
+cannot be entered; and an `--output-dir` that is a file, cannot be created, or
+cannot be entered or written. A command line
+that reaches `ash` inside the container is refused there with 5, as above. The other
+two wrappers follow the same rule: `utils/ash_helpers.sh` returns 3 when it cannot
+find the checkout, and `Invoke-ASH` in `utils/ash_helpers.ps1` sets `$LASTEXITCODE`
+to 3 and throws for each refusal its help lists, or to 5 for the same usage errors.
+PowerShell's own errors in reading Invoke-ASH's parameters, such as a parameter given
+no value, are not Invoke-ASH refusals; its help gives the catch form that turns them
+into exit 1.
+
+### Usage errors
+
+ASH exits 5 when something on the command line is wrong. It refuses before any scanner
+runs, and writes no report. Exactly these exit 5:
+
+- An unknown command or option, or an argument the command does not take, for any
+  command. `ash scan --fail-on-finding` (for `--fail-on-findings`) is refused rather
+  than run without the gate it names.
+- An option given to `ash` before a subcommand that does not take it, as in
+  `ash --source-dir src report`. An option the subcommand does take is passed to it,
+  as though written right after the subcommand name, so `ash --output-dir out report`
+  reads `out`. An option set through its environment variable, such as
+  `ASH_SOURCE_DIR`, is not affected.
+- A missing required option, such as `ash merge` without `--output-dir` or
+  `--results`.
+- A value an option does not accept: a value outside its choices (`--mode`,
+  `--strategy`, `--output-formats`, `--build-target`, `--min-severity`,
+  `ash mcp --transport`), or a
+  number that is not one (`--shard-index first`).
+- A name ASH does not know: a `--scanners` list that names no registered scanner,
+  in a single scan or a workspace scan; an `ash report --format` that no reporter
+  answers to, whether or not there are results to report. Two selections exit 2
+  instead: an `ash dependencies install` `--tool` name that it has no plugin for,
+  or whose plugin type `--plugin-type` leaves out, and a `--plugin-type` that is
+  none of `converter`, `scanner` and `reporter`.
+- Options that cannot be combined: `--shard-index` without `--shard-count` or the
+  reverse, a `--shard-index` outside `0` to `--shard-count` minus one, either with
+  `--workspace`, a `--scanners` list that `--exclude-scanners` cancels out, and
+  `ash mcp`'s `--stateless-http` without `--transport streamable-http`,
+  `--auth-header-name` without `--auth-header-value` or the reverse, and `--quiet`
+  with `--verbose` or `--debug`.
+- A path that names nothing usable: a `--source-dir` (or `ASH_SOURCE_DIR`) that does
+  not exist, is not a directory, or cannot be entered, for `ash scan` and the
+  `ash config` commands that take it; an `ash scan --output-dir` that is a file,
+  cannot be created, or is there but cannot be entered or written; an
+  `ash merge --results` that does not exist or is neither a file nor a directory; and
+  a `--cli-json-input` file that cannot be read, along with a document in it that ASH
+  cannot use. A missing `--output-dir` is not refused: it is created.
+
+  The directory refusals read the same from `ash`, `./ash`, `Invoke-ASH` and the MCP
+  server's scan tools, which name the case and the path as given, and no option:
+  `Source directory does not exist: <path>`, `Source directory is not a directory:
+  <path>`, `Source directory cannot be entered: <path>`, `Output directory is not
+  a directory: <path>`, `Output directory cannot be entered: <path>`,
+  `Output directory cannot be created: <path> (<reason>)` and `Output directory
+  cannot be written: <path> (<reason>)`, whose reason is the system's own text for
+  the error, such as `Not a directory` for a file on the way to it, `Permission
+  denied` or `Read-only file system`. Whether an output directory that is there can
+  be written is found by making a file in it, under a name of its own, and deleting
+  it, before anything else is written there; the permission bits alone miss ACLs and
+  read-only mounts. The wrappers put `ERROR: ` before them. A source directory
+  cannot be entered when its entries cannot be both listed and opened (it lacks
+  read or search permission), and also when it is under a directory that cannot be
+  searched, whether or not it is there: the system denies such a path, which is not
+  the same as not finding it.
+
+These are not usage errors, because the command line is right and what it asks for
+is not there yet, or the problem is the machine's. They exit 1: `--use-existing`
+when the output directory holds no results, `ash report` when it holds none, an
+`ash merge --results` directory holding no results file or more than one, and
+`--mode nix` on a machine without Nix. So do `ash config validate`, `lint`, `update`
+and `validate-plugin-dependencies` given no `--config` in a directory with no config
+file.
+
+A config path that names no readable file is not a usage error either: it names the
+configuration to use, and that configuration cannot be used. `ash config validate`,
+`lint`, `get`, `update` and `validate-plugin-dependencies` exit 3 for a `--config`,
+an `ASH_CONFIG` or a path argument that does not exist, is a directory, or cannot be
+read, as they do for a file a scan refuses. So do `ash scan` and `ash report` for an
+`ASH_CONFIG` or a `--config` that does not exist, and `ash config validate`, `lint`
+and `get` checking another file while `ASH_CONFIG` names a file that does not
+exist, since a scan with that environment refuses it. An empty `ASH_CONFIG` counts
+as unset; one of only whitespace is refused.
+
+Usage errors have a code of their own because click, the library ASH's command line
+is built on, exits 2 for them, and 2 is ASH's code for actionable findings: a CI gate
+would read a mistyped flag as a scan that found problems. Workspace-mode refusals
+keep code 4, including `--dry-run` or `--workspace-config` without `--workspace` and
+`--workspace` combined with `--source-dir`.
+
+Container mode and `--mode nix` run a second ASH, inside the image or the Nix shell.
+When that inner ASH exits 3, 4 or 5 before scanning, the outer `ash` exits with the
+same code and names its meaning.
 
 ### An incomplete scan is not a clean scan
 
@@ -1495,7 +1952,10 @@ Two statuses count as incomplete:
 `SKIPPED` does not. A skipped scanner is one you did not select, which is also
 how sharding divides work between executors: each shard excludes the scanners its
 siblings own, and those land as `SKIPPED`. Gating on `SKIPPED` would fail every
-shard of a healthy sharded scan.
+shard of a healthy sharded scan. A scanner with nothing to scan in the project is
+`SKIPPED` as well, whether or not its tool is installed: cdk-nag and cfn-nag with no
+CloudFormation template among the scanned files, npm-audit with no lockfile beside a
+`package.json`. With files to scan and no tool, it is `MISSING`.
 
 A run in which every scanner is `SKIPPED` still exits 1, because it scanned
 nothing. A scanner with nothing of its kind to scan is `SKIPPED` too, so this is
@@ -1535,9 +1995,9 @@ workspace mode reports them per project in `incomplete_converters`. When a scann
 incomplete as well, the message names the scanners only; the converter failures are
 then in `ash.log` and in the results file.
 
-Narrowing a run selects rather than fails. Both `--scanners bandit` and
-`--exclude-scanners grype` record the scanners you left out as `SKIPPED`, so they
-do not trip the gate. That was not always true of `--scanners`: the scan phase used
+Narrowing a run selects rather than fails. `--scanners bandit`,
+`--exclude-scanners grype` and `--python-only` record the scanners you left out as
+`SKIPPED`, so they do not trip the gate. That was not always true of `--scanners`: the scan phase used
 to validate a scanner's dependencies before checking whether it had been selected,
 so on a host without cfn-nag, grype and syft a `--scanners bandit` run reported
 those three `MISSING` while the six left-out scanners whose tools were present
@@ -1567,14 +2027,16 @@ records `SKIPPED` and the report says which scanners were not part of it, where
 
 `ash merge` uses the same vocabulary over the union of a sharded run: `0` clean,
 `1` the merge was refused so the union's findings are unknown, `2` findings at or
-above the threshold. See [Merge Exit Codes](#merge-exit-codes). A shard's own exit
+above the threshold, `5` a usage error. See [Merge Exit Codes](#merge-exit-codes). A shard's own exit
 code is not the verdict for a sharded run — see [Sharding](#sharding).
 
 Workspace mode applies the gate per project, so `ash --workspace` and
 `ash --source-dir <one project>` agree about whether that project's scan happened.
 A project that completed with a scanner at `ERROR` or `MISSING` is reported with
 `scan_incomplete: true` and the scanner named in `incomplete_scanners`, and the run
-exits `1`. A project whose conversion was incomplete (a converter that crashed, one
+exits `1`. A scanner at `ERROR` only because its content database is stale is named
+in `stale_content_databases` instead, as a single scan's results name it. A project
+whose conversion was incomplete (a converter that crashed, one
 that could not convert some of its inputs, a converter tool that was absent with
 inputs to convert, or an archive refused for an extraction limit) is reported the
 same way, with the converter and the reason in `incomplete_converters`, exactly as

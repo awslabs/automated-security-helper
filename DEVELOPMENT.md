@@ -95,21 +95,98 @@ copy that is not a git work tree they fail instead of checking nothing.
 Run the test suite:
 
 ```bash
-uv run pytest
+uv sync
+uv run pytest                                      # everything
+uv run pytest tests/unit/cli                       # one directory
+uv run pytest tests/unit/cli/test_config_init.py   # one file
 ```
 
-Run specific test categories:
+`pytest.ini` runs one worker per CPU (`-n auto`) and measures no coverage, so a run of
+part of the suite passes or fails on its own tests.
+
+On Linux and macOS, tests do not write into your home directory, except into uv's
+cache. `tests/conftest.py` points `HOME`, `USERPROFILE` and the `XDG_*` base directories
+at a temporary directory for each test and unsets uv's own directory variables
+(`UV_TOOL_DIR` and the like); `UV_CACHE_DIR` stays on your cache, so uv does not
+download again. On Windows, `%APPDATA%` and `%LOCALAPPDATA%` are not moved, so what
+tools keep there still lands in yours.
+On Linux and macOS your user-level `uv.toml`, `pip.conf`, `.npmrc` and `~/.netrc` are in
+your home, so tests don't read them (on Windows only `.npmrc` and the netrc file are
+missed; `%APPDATA%\uv` and `%APPDATA%\pip` are still read). Behind a package mirror,
+export it before running the tests instead: `UV_DEFAULT_INDEX` (or `UV_INDEX_URL`),
+`UV_EXTRA_INDEX_URL`, `PIP_INDEX_URL` and `npm_config_registry` reach every test
+unchanged. For a mirror that needs credentials, point `NETRC` at your netrc file, or give
+uv the index's as `UV_INDEX_<NAME>_USERNAME` and `UV_INDEX_<NAME>_PASSWORD` rather than
+in the URL.
+Tools in `~/.ash/bin` are not found either, since that is in each test's home. To run
+the integration tests that need them against yours, put the directory on `PATH`:
+`PATH="$HOME/.ash/bin:$PATH" uv run pytest ...`, or first, in PowerShell,
+`$env:PATH = "$HOME\.ash\bin;$env:PATH"`, and in cmd
+`set "PATH=%USERPROFILE%\.ash\bin;%PATH%"`. Don't set `ASH_BIN_PATH` to it: tests
+that install to the default directory install into `ASH_BIN_PATH`, and the run refuses
+an installer it can see heading into your home. A test that writes under your `~/.ash`
+some other way (a path from the passwd database, say) is refused the write and fails at
+teardown. Mark a test
+`@pytest.mark.real_home` if it really needs the real home.
+
+A plain `uv sync` installs neither optional extra. The tests that need the `cdk` extra
+(cdk-nag) or the `symbols` extra (tree-sitter, for symbol-scoped suppressions) skip
+without it, and the skip reason names the extra. To run them:
 
 ```bash
-# Unit tests
-uv run pytest tests/unit/ -v
-
-# Integration tests
-uv run pytest tests/integration/ -v
-
-# Scanner-specific integration tests
-uv run pytest tests/integration/scanners/ -v
+uv sync --extra cdk --extra symbols
 ```
+
+Integration tests and slow tests are skipped unless you ask for them:
+
+```bash
+uv run pytest tests/integration --run-integration
+uv run pytest tests/integration/scanners --run-integration
+uv run pytest --run-slow
+```
+
+CI's unit-test step (`.github/actions/run-unit-tests/action.yml`) installs both extras,
+fails instead of skipping when a test cannot find its extra, and fails the run when total
+coverage is below 80%. To run the suite the way it does:
+
+```bash
+uv sync --extra cdk --extra symbols
+ASH_REQUIRE_CDK_EXTRA=1 ASH_REQUIRE_SYMBOLS_EXTRA=1 uv run pytest \
+  --cov=automated_security_helper --cov-config=.coveragerc \
+  --cov-report=term-missing --cov-fail-under=80
+```
+
+The 80% threshold applies to the full suite only. Pass `--cov` options to a partial run to
+see its coverage, but leave out `--cov-fail-under`, or the run fails on code it did not
+exercise.
+
+## Pre-commit hooks
+
+`.pre-commit-config.yaml` runs these hooks:
+
+- `generate-schemas` regenerates the JSON schemas under `automated_security_helper/schemas/`.
+- `sync-cdk-extra-fallback` rewrites `_CDK_EXTRA_FALLBACK_REQUIREMENTS` in
+  `cdk_nag_scanner.py` from the `cdk` extra in `pyproject.toml`. It runs the script on
+  Python 3.13 with `uv run --no-project`, so it leaves your `.venv` and its extras alone.
+- `pretty-format-json` formats hand-written JSON.
+- `ruff-check` (with `--fix`) and `ruff-format`.
+- `commitizen` checks the commit message (commit-msg stage).
+- `ash` runs an ASH scan of the checkout, only when asked:
+  `uv run pre-commit run --hook-stage manual ash`.
+
+Install the hooks, the commit-message one included, and run them over the whole tree:
+
+```bash
+uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+uv run pre-commit run --all-files
+```
+
+On a clean checkout the second command changes nothing. The JSON formatter skips files a
+tool writes or a check compares byte for byte: the agent plugin outputs and vendored
+schemas under `ash-agent-plugins/`, the synthesized CDK templates, the npm manifests and
+the snapshot files. Change those with the tool that owns them, for example
+`uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build` for
+the plugin outputs.
 
 ## Snapshot tests
 
@@ -342,13 +419,13 @@ uv sync --upgrade
 
 ```bash
 # Install dependencies
-curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.cargo/env && uv sync
+curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && export PATH="$HOME/.local/bin:$PATH" && uv sync
 
 # Build the project
-uv build
+export PATH="$HOME/.local/bin:$PATH" && uv build
 
 # Run tests
-uv run pytest
+export PATH="$HOME/.local/bin:$PATH" && uv run pytest
 ```
 
 ### Migration Validation
@@ -481,15 +558,25 @@ When developing custom scanner plugins for ASH, follow these guidelines:
 
 ### Base Scanner Plugin
 
-All scanner plugins should inherit from `ScannerPluginBase` and implement the required methods:
+All scanner plugins should inherit from `ScannerPluginBase` and implement the required
+methods. The template below builds as written (a test executes it from this file):
 
 ```python
+from pathlib import Path
+from typing import List, Literal, Optional, Tuple
+
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from typing import Optional
+
+
+class MyCustomScannerConfig(ScannerPluginConfigBase):
+    """The `scanners.my-tool` section of the ASH config."""
+
+    name: str = "my-tool"
 
 
 @ash_scanner_plugin
@@ -497,10 +584,18 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
     def model_post_init(self, context):
         # Initialize scanner properties
         self.command = "my-tool"
-        self.use_uv_tool = True  # Enable UV tool management if needed
         self.tool_type = "SAST"  # Scanner type
 
-        # Set up UV tool installation if using UV tool management
+        # use_uv_tool opts into the uv-managed tool path. The helpers below
+        # live on UVToolMixin (automated_security_helper/base/uv_tool_mixin.py),
+        # which every plugin inherits through PluginBase: the dependency check
+        # can then install the tool with `uv tool`, read its version, and run
+        # it through uv. Left False (the default), the scanner runs
+        # self.command straight from PATH as it is: nothing installs the tool,
+        # `ash dependencies install --tool my-tool` has no install route to it
+        # and exits 1 without the version check ever being asked, and
+        # validate_plugin_dependencies below must find the tool itself.
+        self.use_uv_tool = True
         if self.use_uv_tool:
             self._setup_uv_tool_install_commands()
             self.tool_version = self._get_uv_tool_version("my-tool")
@@ -508,12 +603,29 @@ class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):
         super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
-        # Implement validation logic
+        # Decide whether the tool can run (PATH lookup, version pin, ...).
         return True
 
-    def scan(self, target, target_type, global_ignore_paths=None, config=None):
-        # Implement scanning logic
-        pass
+    def _execute_scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List[IgnorePathWithReason],
+    ) -> Tuple[List[str], Path, Optional[dict]]:
+        # Build the tool invocation; the base class's scan() template runs
+        # it, bounds it with the scan timeout, and reads results_file back.
+        # Scanners with their own flow (Python-API scanners) override scan()
+        # directly instead and keep a one-line _execute_scan stub.
+        results_file = self.results_dir.joinpath(target_type, "my_tool.sarif")
+        results_file.parent.mkdir(parents=True, exist_ok=True)
+        final_args = [
+            self.command,
+            "scan",
+            str(target),
+            "--output",
+            str(results_file),
+        ]
+        return final_args, results_file, None
 ```
 
 ### UV Tool Version Constraints (Optional)
@@ -559,6 +671,6 @@ When testing custom scanner plugins:
 # Run scanner-specific unit tests
 uv run pytest tests/unit/plugin_modules/ -v
 
-# Run scanner integration tests
-uv run pytest tests/integration/scanners/ -v
+# Run scanner integration tests (skipped without --run-integration)
+uv run pytest tests/integration/scanners/ --run-integration -v
 ```

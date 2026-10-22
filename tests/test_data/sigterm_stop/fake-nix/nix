@@ -1,0 +1,9 @@
+#!/bin/sh
+# A stand-in `nix` for the SIGTERM cells: it enters no shell and fetches
+# nothing. Nix mode makes exactly one invocation (`nix develop ... --command
+# ash ...`), so every call records this pid where ASH_FAKE_RUNNER_PID_FILE
+# points and blocks in a plain `sleep`, standing in for the shell child the
+# scan sits in while a SIGTERM arrives. `exec` keeps the recorded pid the
+# sleeping process's own.
+printf '%s' "$$" > "${ASH_FAKE_RUNNER_PID_FILE}"
+exec sleep 60

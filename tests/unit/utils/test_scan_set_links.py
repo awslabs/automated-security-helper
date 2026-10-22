@@ -163,33 +163,37 @@ class TestTheScanSet:
         assert not any(str(fixture_tree.outside) in w for w in warned)
 
     def test_the_written_list_matches_and_reuse_keeps_it(self, fixture_tree, tmp_path):
+        """The pair is written, and read back, for the run that wrote it."""
         out = tmp_path / "out"
-        first = scan_set(source=str(fixture_tree.tree), output=str(out))
+        first = scan_set(source=str(fixture_tree.tree), output=str(out), run_id="r1")
         written = (out / "ash-scan-set-files-list.txt").read_text(encoding="utf-8")
 
-        again = scan_set(source=str(fixture_tree.tree), output=str(out))
+        again = scan_set(source=str(fixture_tree.tree), output=str(out), run_id="r1")
 
         assert _relative(written.splitlines(), fixture_tree.tree) == fixture_tree.kept
         assert again == first
 
     def test_left_out_links_are_not_counted_as_removed_by_an_ignore_file(
-        self, fixture_tree, tmp_path
+        self, fixture_tree, tmp_path, caplog
     ):
-        """No ignore file is involved, so the ignore-file count stays 0.
+        """No ignore file is involved, so no ignore file is credited with them.
 
-        Holds before and after the change; it fails if the walk keeps the links and
-        only the filter drops them, which would count each one as removed by an
-        ignore file.
+        It fails if the walk keeps the links and only the filter drops them: the
+        exclusion report then finds files gone from the scan set with no ignore
+        rule to account for them.
         """
-        exclusions: dict = {}
+        with caplog.at_level(logging.INFO):
+            scan_set(source=str(fixture_tree.tree), output=str(tmp_path / "out"))
 
-        scan_set(
-            source=str(fixture_tree.tree),
-            output=str(tmp_path / "out"),
-            exclusions=exclusions,
-        )
-
-        assert exclusions["excluded_file_count"] == 0
+        messages = [r.getMessage() for r in caplog.records]
+        assert not [m for m in messages if "without any ignore rule" in m], messages
+        assert not [
+            m
+            for m in messages
+            if " excluded " in m
+            and "from the scan set" in m
+            and " excluded 0 " not in m
+        ], messages
 
 
 class TestTheFilter:

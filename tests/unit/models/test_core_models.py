@@ -64,7 +64,7 @@ class TestSuppression:
                 path="src/example.py",
                 expiration="invalid-date",
             )
-        assert "Invalid expiration date format" in str(excinfo.value)
+        assert "Invalid expiration date format. Use YYYY-MM-DD" in str(excinfo.value)
 
     def test_suppression_model_expired_date_accepted(self):
         """Past expiration date must be stored; is_expired signals it at runtime."""

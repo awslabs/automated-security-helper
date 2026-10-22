@@ -30,6 +30,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app as ash_app
 from automated_security_helper.cli.mcp import build_streamable_http_app, mcp_command
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.exceptions import ASHValidationError
 from tests.utils.mcp_transport_harness import LOOPBACK_PORT
 
@@ -84,7 +85,7 @@ class TestWiring:
 
         def _fake_app(**kwargs):
             captured.update(kwargs)
-            # A real (empty) app: the builder installs its own middleware on it.
+            # The SDK returns a Starlette app, whose lifespan the builder wraps.
             return Starlette()
 
         monkeypatch.setattr(mcp_server.mcp, "streamable_http_app", _fake_app)
@@ -101,7 +102,7 @@ class TestWiring:
 
         def _fake_app(**kwargs):
             captured.update(kwargs)
-            # A real (empty) app: the builder installs its own middleware on it.
+            # The SDK returns a Starlette app, whose lifespan the builder wraps.
             return Starlette()
 
         monkeypatch.setattr(mcp_server.mcp, "streamable_http_app", _fake_app)
@@ -299,11 +300,12 @@ class TestCommandWiring:
 
 
 class TestOptionValidation:
-    """Exit code 3, not a propagated exception.
+    """The usage-error exit code, not a propagated exception.
 
-    ``mcp_command`` catches ``ASHValidationError`` and converts it to
-    ``typer.Exit(3)``, which is the contract its existing tests assert
-    (``test_quiet_with_verbose_raises_exit_3``). Caught as ``typer.Exit`` rather
+    ``mcp_command`` catches ``ASHValidationError`` from its option checks and
+    converts it to ``typer.Exit(ASH_EXIT_USAGE_ERROR)``, which is the contract its
+    existing tests assert (``test_quiet_with_verbose_raises_the_usage_exit``).
+    Caught as ``typer.Exit`` rather
     than ``click.exceptions.Exit``: typer 0.27 vendors click as ``typer._click``,
     so the two are no longer the same class and catching click's lets the
     exception escape.
@@ -327,7 +329,7 @@ class TestOptionValidation:
                 stateless_http=True,
                 quiet=True,
             )
-        assert excinfo.value.exit_code == 3
+        assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
 
     def test_no_stateless_http_with_stdio_is_accepted(self, monkeypatch) -> None:
         """The default must not be mistaken for an explicit request.

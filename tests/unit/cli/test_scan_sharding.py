@@ -39,6 +39,7 @@ import typer
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.core.enums import ExecutionPhase, RunMode
 from automated_security_helper.core.sharding import ShardAssignment
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -265,9 +266,10 @@ class TestUnusableSelectionsAreRefused:
                 shard_index=index,
                 shard_count=count,
             )
-        # Not 2: ASH spends 2 on "actionable findings were found", so a usage
-        # error exiting 2 would be read by a CI gate as a failing scan.
-        assert excinfo.value.exit_code == 1
+        # The usage-error code. Not 2: ASH spends 2 on "actionable findings were
+        # found", so a usage error exiting 2 would be read by a CI gate as a failing
+        # scan; and not 1, which reports a scan that failed rather than one never run.
+        assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
         assert excinfo.value.exit_code != 2
         assert fragment in capsys.readouterr().err
 
@@ -357,7 +359,7 @@ class TestEnvironmentVariables:
                 ["scan", "--source-dir", str(source), "--output-dir", str(output)],
             )
 
-        assert result.exit_code == 1
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
         mock_run_ash_scan.assert_not_called()
 
 
@@ -390,7 +392,7 @@ class TestWorkspaceModeRefusesSharding:
                 shard_count=count,
             )
 
-        assert excinfo.value.exit_code == 1
+        assert excinfo.value.exit_code == ASH_EXIT_USAGE_ERROR
         message = capsys.readouterr().err
         assert "cannot be combined with --workspace" in message
         # The refusal has to say what to do instead, or an operator's only move is

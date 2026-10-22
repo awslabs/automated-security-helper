@@ -377,7 +377,11 @@ class TestTheBashEntrypoint:
 
 
 class TestThePowerShellEntrypoint:
-    """``utils/ash_helpers.ps1``: the powershell scan legs. Text assertions; no pwsh here."""
+    """``utils/ash_helpers.ps1``: the powershell scan legs, asserted as text.
+
+    The refusal of a malformed value is also run under pwsh, in
+    tests/unit/test_powershell_wrapper_matches_ash.py ("layout" in _FAILURES).
+    """
 
     @pytest.fixture
     def body(self) -> str:
@@ -393,10 +397,12 @@ class TestThePowerShellEntrypoint:
         branch_at = body.index("if ($ociRunnerName -in @('nerdctl', 'finch'))")
         else_at = body.index("else", branch_at)
         branch = body[branch_at:else_at]
+        # Without embedded quotes: the build command is an argument array handed to the
+        # runner directly, where `"...`" quotes would reach it as literal characters.
         assert (
-            '"--build-context", \'"ash-base-image=oci-layout://$baseLayoutDir"\''
-            in branch
+            '"--build-context", "ash-base-image=oci-layout://$baseLayoutDir"' in branch
         )
+        assert '`"ash-base-image' not in branch
         assert '"--build-arg", "BASE_IMAGE=ash-base-image"' in branch
         assert '"--pull=false"' in branch
 

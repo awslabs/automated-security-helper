@@ -13,6 +13,8 @@ ASH's real behavior.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tests.snapshot.container.conftest import FakeStep
@@ -80,11 +82,47 @@ def test_unparseable_results(run_cli, snapshot, fake_docker):
     assert run_cli(SCAN) == snapshot
 
 
+#: A key or value of a results file, with what a terminal or a CI runner obeys.
+SECRET = "wJalrXUtnFEMIK7MDENG"
+HOSTILE = SECRET + "\x1b[31m\n::error title=scan::" + SECRET
+
+
+@pytest.mark.parametrize(
+    "results_json, reason",
+    [
+        pytest.param('{"T": ' + SECRET, "Invalid JSON", id="not-json"),
+        pytest.param(
+            json.dumps({"scanner_results": {HOSTILE: 5}}),
+            "Invalid value at 'scanner_results.<key>'",
+            id="key",
+        ),
+        # Written with surrogateescape: the file holds the byte 0xff.
+        pytest.param('{"name": "ok\udcff"}', "not UTF-8 at byte offset", id="not-utf8"),
+    ],
+)
+def test_unparseable_results_are_not_quoted(run_cli, fake_docker, results_json, reason):
+    """The results file holds finding data. pydantic's text quotes it
+    (input_value='...'), its locations name the file's keys, and a decode error
+    prints the byte; Rich read the quoting part as a tag and dropped it, and once
+    log messages print as text it reached the console. A decode error escaped
+    the parse handler as a traceback."""
+    fake_docker.run = FakeStep(returncode=0, results_json=results_json)
+    result = run_cli(SCAN)
+
+    shown = result["stdout"] + result["stderr"]
+    assert result["exit_code"] == 1, shown
+    assert "Failed to parse results file" in shown, shown
+    assert reason in shown, shown
+    assert SECRET not in shown, shown
+    assert "\x1b[31m" not in shown and "\n::" not in shown, repr(shown)
+
+
 @pytest.mark.parametrize(
     "returncode",
     [
         pytest.param(3, id="3-invalid-config"),
         pytest.param(4, id="4-workspace-error"),
+        pytest.param(5, id="5-usage-error"),
         pytest.param(125, id="125-runner-failed-before-entrypoint"),
         pytest.param(137, id="137-killed"),
     ],

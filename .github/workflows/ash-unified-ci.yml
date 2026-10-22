@@ -30,14 +30,17 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 91 jobs and
-  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~194 runner
-  # jobs instead of ~97. The duplicate verdict on a queued merge is the price of
-  # covering the bypassed one, and it was accepted deliberately. It used to be ~350
-  # against ~175, before install-validation's five cheap install methods stopped being
-  # 105 separate legs, which nearly halves what this deliberate duplication costs.
-  # The 91 is derived from a census rather than being one -- see the note on the
-  # required-checks job for which link in that chain was actually measured.
+  # Sized off a count rather than a guess: this workflow expands to 98 jobs on a push
+  # to main and 96 on a pull request or a merge-queue run, where warm-image-layers does
+  # not run, and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
+  # ~206 runner jobs instead of ~102. The duplicate verdict on a queued merge is the
+  # price of covering the bypassed one, and it was accepted deliberately. With
+  # install-validation's five cheap install methods as 105 separate legs it would be
+  # ~350 against ~175, so running them as one leg per cell nearly halves what this
+  # deliberate duplication costs. The 98 is derived from a census rather than being one -- see the note on the
+  # required-checks job for which link in that chain was actually measured, and
+  # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
+  # matrices.
   #
   # Both counts are job counts, from
   # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
@@ -253,9 +256,10 @@ jobs:
       #
       # The hooks already exist, so reusing them would mean less duplication. It is
       # still wrong here. The ruff hook carries `args: [--fix]` and pretty-format-json
-      # carries `--autofix`, so the run MUTATES: measured on this tree, one
-      # `pre-commit run --all-files` rewrote 569 files (+23,283/-21,679) and exited 1,
-      # having reported its verdict over its own edits. It would also give zero type
+      # carries `--autofix`, so the run MUTATES whatever it finds: on a tree that needs
+      # formatting it rewrites what it flags and exits 1, reporting its verdict over its
+      # own edits, and on a clean tree a violation is repaired rather than reported.
+      # It would also give zero type
       # coverage, because mypy is not a hook, and it silently skips the commitizen
       # hook entirely because that one is commit-msg staged. pre-commit stays the
       # local convenience where --fix is a feature; CI runs the tools directly in
@@ -842,6 +846,9 @@ jobs:
       # log rather than surfacing as "none of the scanners this gate asserts on
       # ran". On the Windows runner only bandit and checkov are available at all, so
       # a single failed install is the difference between green and a confusing red.
+      # Only those two, the gate's GATE_SCANNERS (a unit test ties them together): a
+      # plain install also needs cfn-nag, which this job gives no Ruby DevKit to
+      # build on windows-latest, and fails there as a scan selecting it would.
       - id: tool-cache
         uses: ./.github/actions/tool-download-cache
         with:
@@ -850,7 +857,7 @@ jobs:
         shell: bash
         env:
           ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
-        run: ash dependencies install
+        run: ash dependencies install --tool bandit --tool checkov
       - uses: ./.github/actions/tool-download-cache
         with:
           mode: save
@@ -931,20 +938,25 @@ jobs:
           bwrap --version
           firejail --version | head -1
       # Ubuntu 23.10+ restricts unprivileged user namespaces through AppArmor. The
-      # packaged bwrap is meant to be allowed by its profile, but the hosted runner
-      # image has been seen to refuse it. Lifting the restriction is runner setup,
-      # the same thing docs/content/docs/scanner-sandbox.md tells a user to do; the
-      # tests themselves are unchanged and still require bwrap to work.
-      - name: Let bwrap create user namespaces
+      # packaged bwrap carries a profile the restriction can allow while a plain
+      # unshare is still refused, so a bwrap-only probe passes on a runner where
+      # the suite's namespace-dependent cells fail. Probe the capability itself
+      # and lift the restriction when it is refused: runner setup, the same thing
+      # docs/content/docs/scanner-sandbox.md tells a user to do; the tests are
+      # unchanged and still require the backends to work. The step runs under
+      # bash -e, so a failed sysctl or a still-refused re-probe turns this step
+      # red instead of failing the suite dozens of cells deep.
+      - name: Let unprivileged user namespaces be created
         if: runner.os == 'Linux'
         run: |
-          if bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
-            echo "bwrap can create a sandbox as-is"
+          if unshare --user --map-root-user --net true; then
+            echo "user namespaces can be created as-is"
           else
-            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+            echo "::notice::user-namespace creation refused by the AppArmor userns restriction; lifting it for this runner"
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
           fi
+          unshare --user --map-root-user --net true
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
       - name: Install dependencies
         run: uv sync
       - name: Run the sandbox escape and unit suites
@@ -1014,11 +1026,20 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q bubblewrap
-          if ! bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true; then
-            echo "::notice::bwrap refused by the AppArmor userns restriction; lifting it for this runner"
+      # Same capability lift as the sandbox job: the restriction can allow the
+      # packaged bwrap while refusing every other namespace use, so the probe is
+      # the capability itself, and a failed sysctl or re-probe fails this step.
+      - name: Let unprivileged user namespaces be created
+        if: runner.os == 'Linux'
+        run: |
+          if unshare --user --map-root-user --net true; then
+            echo "user namespaces can be created as-is"
+          else
+            echo "::notice::user-namespace creation refused by the AppArmor userns restriction; lifting it for this runner"
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
           fi
+          unshare --user --map-root-user --net true
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
       - name: Install ASH with the cdk extra, and every scanner
         run: |
           pip install ".[cdk]"
@@ -1170,7 +1191,10 @@ jobs:
           install-ash: "true"
       # bandit is the only producer this gate asserts on. Installing it here means
       # an install flake fails as a failed install step with its own log, rather
-      # than surfacing as "the fixture produced zero findings".
+      # than surfacing as "the fixture produced zero findings". bandit and checkov
+      # only, the gate's GATE_SCANNERS (a unit test ties them together): a plain
+      # install also needs cfn-nag, which this job gives no Ruby DevKit to build on
+      # windows-latest, and fails there as a scan selecting it would.
       - id: tool-cache
         uses: ./.github/actions/tool-download-cache
         with:
@@ -1179,7 +1203,7 @@ jobs:
         shell: bash
         env:
           ASH_TOOL_DOWNLOAD_CACHE: ${{ steps.tool-cache.outputs.dir }}
-        run: ash dependencies install
+        run: ash dependencies install --tool bandit --tool checkov
       - uses: ./.github/actions/tool-download-cache
         with:
           mode: save
@@ -1348,8 +1372,9 @@ jobs:
   # boots a real kernel and jsii extraction is billed per booting worker -- see the table in
   # tests/conftest.py.
   #
-  # --no-cov because pytest.ini's --cov plus .coveragerc's fail_under=80 would make this job
-  # a second coverage gate that fails on a subset at 100% green.
+  # --no-cov: the 80% coverage gate belongs to the unit-test legs, whose "Run PyTest" step
+  # passes --cov and --cov-fail-under itself. pytest.ini carries no coverage options, so this
+  # only keeps the job from measuring anything if they are ever added there again.
   #
   # Two items stay skipped with both flags on, at
   # tests/integration/scanners/test_detect_secrets_scanner.py:111 and :139. Those are
@@ -1380,7 +1405,7 @@ jobs:
       # both tests in test_repo_tool_configs_are_not_read.py skipped.
       # tests/unit/test_integration_job_installs_required_tools.py holds this list.
       - name: Install the scanners the integration suite runs for real
-        run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
+        run: uv run ash dependencies install --bin-path /tmp/ash-tools/bin --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
       # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan,
@@ -1391,11 +1416,17 @@ jobs:
       # binaries on PATH), and a test fails if it `uv tool install`s one, so a
       # pre-install that stops reaching the scanner shows up instead of being redone.
       #
-      # The installs above put the pinned binaries in ~/.ash/bin and the uv tools in
-      # ~/.local/bin. PATH gains both for this step only, not through GITHUB_PATH, so no
-      # later step of the job runs an executable by name from either directory.
+      # The install above puts the pinned binaries in /tmp/ash-tools/bin (--bin-path)
+      # and the uv tools in ~/.local/bin. The suite gives every test its own HOME, so a
+      # HOME-derived install location (~/.ash/bin, and the rules bundle beside it) would
+      # vanish under the moved HOME; /tmp/ash-tools is outside any HOME, ASH_BIN_PATH
+      # and ASH_CFN_GUARD_RULES_DIR name it for the tests' ash children, and PATH gains
+      # both bin directories for this step only, not through GITHUB_PATH, so no later
+      # step of the job runs an executable by name from either directory.
       - name: Run the integration suite
         env:
+          ASH_BIN_PATH: /tmp/ash-tools/bin
+          ASH_CFN_GUARD_RULES_DIR: /tmp/ash-tools/share/cfn-guard-rules
           ASH_REQUIRE_ACTIONLINT: "1"
           ASH_REQUIRE_CDK_EXTRA: "1"
           ASH_REQUIRE_CFN_TOOLS: "1"
@@ -1403,7 +1434,7 @@ jobs:
           ASH_REQUIRE_SYMBOLS_EXTRA: "1"
           ASH_REQUIRE_PREINSTALLED_TOOLS: bandit,actionlint,cfn-lint,cfn-guard,gitleaks
         run: |
-          export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
+          export PATH="/tmp/ash-tools/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
             tests/integration \
             tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
@@ -1500,7 +1531,8 @@ jobs:
   #
   # So those five collapse into one `bundle` leg per (os, python-version), running
   # each method as its own step. 113 legs -> 33, which is 80 fewer runners queued
-  # for and the same five methods still executed on all 25 cells. Nothing is
+  # for and the same five methods run on all 25 cells. (32 with the
+  # ubuntu-24.04-arm homebrew leg excluded: that image has no Homebrew.) Nothing is
   # cached and nothing is uploaded to get there, deliberately: on a public
   # repository GitHub's caching and artifact-upload actions are both readable by
   # anyone holding a read token, so nothing this repo builds may be put in either,
@@ -1535,7 +1567,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     # finch has been observed succeeding at 23 min and hanging past 280; podman is
     # similarly slow, so the container runtimes get enough room to pass
-    # legitimately. homebrew is `ruby -c` on one file and keeps the tight 20.
+    # legitimately. homebrew installs the formula from source (bottles for its
+    # python@3.12, uv and node, then the locked wheels), runs `brew test` and five
+    # scans. validate-install/homebrew.sh took 294 seconds in a homebrew/brew
+    # container on Homebrew 7.0.9 with python@3.12 already present, so it keeps
+    # the tight 20.
     #
     # `bundle` gets 30. The old 20 bounded a single install method, on the measured
     # grounds that each peaks under 3 min; one leg now runs five of them back to
@@ -1550,11 +1586,17 @@ jobs:
         # `bundle` is pip + pipx + uvx + pre-commit + mcp, as steps. homebrew and
         # the three container runtimes stay their own legs: they are already
         # trimmed to a single Python version and carry OS-specific excludes, so
-        # they are 8 legs in total and none of them is the redundancy.
+        # they are 7 legs in total (homebrew 3, podman 2, finch 1, nerdctl 1) and
+        # none of them is the redundancy. tests/unit/test_unified_ci_job_counts.py
+        # holds that number to the matrix.
         method: [bundle, homebrew, podman, finch, nerdctl]
         exclude:
           # Homebrew not on Windows
           - { os: windows-latest, method: homebrew }
+          # Nor on the Arm Linux image (actions/partner-runner-images lists it under
+          # omitted tools, "no packages for Arm Linux"). The leg installs the formula
+          # for real, so it needs a brew.
+          - { os: ubuntu-24.04-arm, method: homebrew }
           # Podman/Finch/nerdctl not on Windows
           - { os: windows-latest, method: podman }
           - { os: windows-latest, method: finch }
@@ -1595,15 +1637,11 @@ jobs:
           - { os: macos-latest, method: finch }
           - { os: macos-14, method: finch }
 
-          # Homebrew only needs Python 3.12
+          # Homebrew only needs Python 3.12 (the formula brings its own python@3.12)
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: homebrew }
           - { os: macos-latest, python-version: "3.10", method: homebrew }
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
@@ -1648,7 +1686,8 @@ jobs:
           # `mcp`, which was the axis before those five cheap methods became steps
           # inside a single `bundle` leg. After that change the list named five values
           # that can no longer occur while omitting the one that does, so every bundle
-          # leg -- 25 of the job's 33 -- fell through to the `*)` below and exited 1.
+          # leg -- 25 of the 33 the job had then -- fell through to the `*)` below and
+          # exited 1.
           # Measured by extracting this shell and running it with METHOD=bundle.
           #
           # The five folded methods are NOT listed here. They are steps, and the steps
@@ -1718,6 +1757,11 @@ jobs:
         uses: ./.github/actions/validate-install
         with:
           method: pre-commit
+          # Every cell checks the manifest; the hooks themselves run on one cell per
+          # OS, because each run installs ASH with the cdk extra into a fresh hook
+          # environment and then bandit and checkov from PyPI. Same expression as
+          # ash-install-methods.yml (tests/unit/test_pre_commit_hooks_manifest.py).
+          pre-commit-run-hooks: ${{ matrix.python-version == '3.12' && contains(fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]'), matrix.os) }}
 
       - name: uvx
         id: uvx
@@ -1781,10 +1825,53 @@ jobs:
           runtime: ${{ matrix.method }}
 
   # ---------------------------------------------------------------------------
+  # Homebrew on macOS, a supported install method, in a job of its own
+  # ---------------------------------------------------------------------------
+  #
+  # install-validation's matrix carries Homebrew legs too (ubuntu-latest, macos-latest,
+  # macos-14), and this job does not replace them. It exists so Homebrew on macOS stays
+  # tested whatever happens to that matrix: one exclude entry drops a matrix cell, and
+  # nobody has to decide to stop testing macOS for that to happen.
+  # tests/unit/test_homebrew_macos_ci_job.py holds what it runs.
+  #
+  # The install is the formula's tested path, the same validate-install step the matrix
+  # legs run: a `git archive` of this commit, Formula/ash.rb rendered onto it and
+  # installed from a local tap with `brew install --build-from-source`, `brew test`, and
+  # homebrew.sh's scans, among them the committed fixture tests/test_data/homebrew_scan.
+  # Not `brew install ./Formula/ash.rb`: Homebrew refuses a formula outside a tap, and
+  # the committed formula builds the release tag on its `url` line, so it would test the
+  # last release instead of this commit.
+  #
+  # macos-14 is a pinned image, so what `macos-latest` names can move without changing
+  # what this job tests. No secrets: the install and the scans read only public package
+  # indexes. nektos act cannot run a macOS job, so off GitHub this job is checked only by
+  # that test and by actionlint.
+  homebrew-macos:
+    name: "homebrew (macos-14, in-repo formula)"
+    runs-on: macos-14
+    # The same budget as install-validation's Homebrew legs, which run the same script.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this job uses git credentials after checkout.
+          persist-credentials: false
+      # homebrew.sh runs the formula renderer and the result checks on this Python; the
+      # formula itself installs on Homebrew's python@3.12.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/validate-install
+        with:
+          method: homebrew
+
+  # ---------------------------------------------------------------------------
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 116 check
+  # Most jobs above name themselves from their matrix, so this workflow contributes 121 check
   # runs to a pull request and few of their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` means enumerating all 25 of its names -- and then any matrix edit either orphans
@@ -1794,32 +1881,42 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. Both were measured on pull request 599 at b5111830, and both are
-  # re-derivable:
+  # stale unnoticed. The 186 was measured on pull request 599 at b5111830, the 121 is derived
+  # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 116 is this workflow's own contribution: 91 jobs, plus the 25 `PyTest - ...` check runs
-  # that mikepenz/action-junit-report publishes from inside the unit-test legs -- one per leg.
-  # Those 25 are not jobs and land in a separate check suite, so a job census alone undercounts
-  # what this file puts on a pull request -- that gap is most of why the old figure of 84 looked
-  # defensible.
+  # 121 is this workflow's own contribution to a pull request: the 96 jobs that run there,
+  # plus the 25 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
+  # inside the unit-test legs -- one per leg. warm-image-layers runs only on a push to main
+  # and is not in the 96; whether GitHub still lists it as skipped on a pull request was not
+  # checked. Those 25 are not jobs and land in a separate check suite, so a job census alone
+  # undercounts what this file puts on a pull request -- that gap is most of why the old figure
+  # of 84 looked defensible.
   #
-  # The 91 is arithmetic on a measured anchor, and the chain is worth keeping because each link
-  # is a different kind of claim. Run 35370310502 reported `total_count` 168 with 168 rows
-  # received, `unit-test` 25 and `install-validation` 113 by name, and `required-checks` absent
-  # because it is `needs`-gated and is not created until the run resolves: 168 + 1 = 169 jobs,
-  # measured. `integration-test` landed after that run, so the pre-collapse figure is 170, and
-  # the run has never been re-taken to confirm it. Folding pip, pipx, uvx, pre-commit and mcp
-  # into the single `bundle` method took install-validation from 113 legs to 33, so 170 - 80 = 90,
-  # and the unmatrixed snapshot-trailers job makes it 91. Only the 169 was counted; 170, 90 and
-  # 91 are derived, and a fresh census is what would settle them. The 25 `PyTest - ...` runs are derived from the unit-test leg count by the one-per-leg
-  # rule #602 measured at 20 legs, not counted again, and the collapse does not touch them.
+  # The 96 and the 98 are arithmetic on a measured anchor, and the chain is worth keeping
+  # because each link is a different kind of claim. Run 35370310502 reported `total_count` 168
+  # with 168 rows received, `unit-test` 25 and `install-validation` 113 by name, and
+  # `required-checks` absent because it is `needs`-gated and is not created until the run
+  # resolves: 168 + 1 = 169 jobs, measured. `integration-test` landed after that run, so the
+  # pre-collapse figure is 170, and the run has never been re-taken to confirm it. Folding pip,
+  # pipx, uvx, pre-commit and mcp into the single `bundle` method took install-validation from
+  # 113 legs to 33, so 170 - 80 = 90. Jobs added since: snapshot-trailers, homebrew-macos and
+  # actionlint (1 each), and sandbox and sandbox-scanner-parity (2 each), which makes 97.
+  # Excluding the ubuntu-24.04-arm homebrew leg took install-validation to 32: 96 on a pull
+  # request. warm-image-layers' 2 legs run only on a push to main: 98 there. Only the 169 was
+  # counted; every later figure is derived, and a fresh census is what would settle them.
+  # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
+  # these figures can drift from GitHub's census but not from this file. The 25 `PyTest - ...`
+  # runs are derived from the unit-test leg count by the one-per-leg rule #602 measured at 20
+  # legs, not counted again, and the collapse does not touch them.
   #
-  # Where 91 comes from, per job: lint 1, snapshot-trailers 1, unit-test 25,
-  # scan-validation 24, external-target-scan 2, multi-project-attribution 2,
-  # deploy-aws-helpers 1, integration-test 1, install-validation 33, required-checks 1.
+  # Where 98 comes from, per job, on a push to main: lint 1, actionlint 1,
+  # snapshot-trailers 1, unit-test 25, warm-image-layers 2, scan-validation 24,
+  # external-target-scan 2, sandbox 2, sandbox-scanner-parity 2, multi-project-attribution 2,
+  # deploy-aws-helpers 1, integration-test 1, install-validation 32, homebrew-macos 1,
+  # required-checks 1.
   #
   # unit-test reached 25 from three independent changes that all had to land: adding 3.14 to the
   # axis (18 -> 23), removing the macos-14 exclusion for 3.10 and 3.11 (#599), and nothing in
@@ -1859,8 +1956,9 @@ jobs:
   # NOT restated for this branch -- that commit predates Python 3.14, so re-labelling its numbers
   # would be inventing a measurement rather than citing one. What can be said is the delta this
   # file contributes: 25 more jobs and 5 more `PyTest - ...` runs than at b5111830, then one more
-  # job for integration-test, 80 fewer for the install-validation collapse and one more for
-  # snapshot-trailers, so a comparable CI-plumbing commit would see 138 rather than 186. That is arithmetic on a measured baseline,
+  # job for integration-test, 80 fewer for the install-validation collapse, one more for
+  # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
+  # see 139 rather than 186. That is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
   # This job's name does not depend on the matrix, so it can be required once and stay correct
@@ -1952,6 +2050,7 @@ jobs:
       - integration-test
       - converter-integration
       - install-validation
+      - homebrew-macos
       - sandbox
       - sandbox-scanner-parity
     runs-on: ubuntu-latest

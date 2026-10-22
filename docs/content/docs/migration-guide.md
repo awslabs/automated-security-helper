@@ -18,8 +18,9 @@ This guide helps users migrate from ASH v2 to ASH v3.
    - Replace any collection and/or parsing of `aggregated_results.txt` with collecting/parsing the reports found in the new `reports` directory of the `output-dir` OR with JSON parsing of the new `ash_aggregated_results.json` (public JSON schema in GitHub)
    - **Recommendation**: Add `ash report` to your script after `ash` has completed to pretty-print the summary report in the terminal or job stdout.
 4. **Update Pre-commit Configuration**:
-   - Change hook ID from `ash` to `ash-simple-scan`
-   - Update the revision to `v3.0.0` or later
+   - Keep the hook ID `ash`. In v3 it runs ASH locally instead of in a container; `ash-simple-scan` is the same hook, and `ash-full-scan` is the container scan
+   - Update the revision to a v3 release tag
+   - Make sure Node.js and npm are on `PATH` for cdk-nag and npm-audit, or exclude those two scanners in the hook's `args` (see [Using ASH with pre-commit](../tutorials/using-ash-with-pre-commit.md))
 5. **Test Your Migration**:
    ```bash
    ash --mode local
@@ -106,10 +107,10 @@ ash --mode container --source-dir /path/to/code --output-dir /path/to/output
 | `--output-dir`     | `--output-dir`          | Default changed to `.ash/ash_output` |
 | `--ext`            | Not directly supported  | Use configuration file instead       |
 | `--force`          | `--force`               | Same behavior                        |
-| `--no-cleanup`     | `--cleanup false`       | Inverted logic                       |
+| `--no-cleanup`     | `--no-cleanup`          | The default; `--cleanup` opts in     |
 | `--debug`          | `--debug`               | Same behavior                        |
 | `--quiet`          | `--quiet`               | Same behavior                        |
-| `--no-color`       | `--color false`         | Inverted logic                       |
+| `--no-color`       | `--no-color`            | Same behavior                        |
 | `--single-process` | `--strategy sequential` | Renamed                              |
 | `--oci-runner`     | `--oci-runner`          | Same behavior                        |
 
@@ -130,6 +131,7 @@ output_dir/
 ├── ash_aggregated_results.json
 ├── ash-ignore-report.txt
 ├── ash-scan-set-files-list.txt
+├── ash-scan-set-run.json
 ├── converted
 │   └── jupyter
 ├── reports
@@ -205,7 +207,7 @@ output_dir/
 No formal configuration file. Settings controlled via command line parameters.
 
 ### ASH v3
-YAML configuration file (`.ash/.ash.yaml`):
+YAML configuration file (`.ashrc.yaml` in a new project):
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json
@@ -243,15 +245,17 @@ repos:
 
 ### ASH v3
 
-> V3 pre-commit hook runs 100% locally, no container involved
+> V3 pre-commit hook runs locally, no container involved. It needs Node.js and npm on `PATH` for cdk-nag and npm-audit.
 
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
     rev: v3.7.0
     hooks:
-      - id: ash-simple-scan
+      - id: ash
 ```
+
+`ash-simple-scan` is the same hook under another id, and `ash-full-scan` scans in the ASH container image.
 
 ## Scanner Changes
 
@@ -282,17 +286,26 @@ ASH v3 can be used programmatically in Python:
 
 ```python
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
-from automated_security_helper.core.enums import RunMode, Strategy
+from automated_security_helper.core.enums import ExecutionStrategy, RunMode
 
 # Run a scan
 results = run_ash_scan(
     source_dir="/path/to/code",
     output_dir="/path/to/output",
     mode=RunMode.local,
-    strategy=Strategy.parallel,
+    strategy=ExecutionStrategy.PARALLEL,
     scanners=["bandit", "semgrep"],
+    # Return the results even when there are actionable findings
+    fail_on_findings=False,
 )
+
+# Access scan results
+stats = results.metadata.summary_stats
+print(f"Found {stats.total} findings, {stats.actionable} actionable")
 ```
+
+See [Programmatic Usage](advanced-usage.md#programmatic-usage) for what the call
+returns and raises.
 
 ## Troubleshooting Common Migration Issues
 

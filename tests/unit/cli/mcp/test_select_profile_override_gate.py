@@ -1708,6 +1708,59 @@ def test_a_client_cannot_send_the_findings_to_a_bucket_of_its_own(
     _assert_unbound("override")
 
 
+def test_a_client_turning_the_operators_s3_reporter_off_changes_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Accepted, so a client profile that carries it does not fail; not applied,
+    since whether an off-host reporter runs is the operator's to say."""
+    import logging
+
+    document = _profile(allowed_paths=["/reporters/**"], denied_paths=[])
+    s3 = {"enabled": True, "options": {"bucket_name": "operators-bucket"}}
+    document["reporters"] = {"s3": s3}
+    _install(tmp_path, document)
+    turned_off = {"enabled": False, "options": {"bucket_name": "operators-bucket"}}
+
+    with caplog.at_level(logging.WARNING):
+        patched, overridden = _both_routes(
+            {"op": "replace", "path": "/reporters/s3/enabled", "value": False},
+            _override_for(document, {"reporters": {"s3": turned_off}}),
+        )
+
+    for result in (patched, overridden):
+        assert result["success"] is True, result
+    for session_id in ("patch", "override"):
+        bound = get_session_state(session_id).bound_config
+        assert bound is not None
+        section = bound.get_plugin_config("reporter", "s3")
+        assert section["enabled"] is True, section
+        assert section["options"]["bucket_name"] == "operators-bucket", section
+    assert any(
+        "/reporters/s3/enabled" in record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ), [record.getMessage() for record in caplog.records]
+
+
+def test_a_client_turning_s3_off_with_a_bucket_of_its_own_is_refused(
+    tmp_path: Path,
+) -> None:
+    document = _profile(allowed_paths=["/reporters/**"], denied_paths=[])
+    _install(tmp_path, document)
+    section = {"enabled": False, "options": {"bucket_name": "clients-bucket"}}
+
+    patched, overridden = _both_routes(
+        {"op": "add", "path": "/reporters/s3", "value": section},
+        _override_for(document, {"reporters": {"s3": section}}),
+    )
+
+    for result in (patched, overridden):
+        assert result["success"] is False, result
+        assert "'s3'" in result["error"], result["error"]
+    _assert_unbound("patch")
+    _assert_unbound("override")
+
+
 def test_control_a_client_still_patches_a_built_in_reporter(tmp_path: Path) -> None:
     document = _profile(allowed_paths=["/reporters/**"], denied_paths=[])
     _install(tmp_path, document)

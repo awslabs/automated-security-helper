@@ -296,10 +296,12 @@ runs:
     # that is the gate's actual job and it is not weakened. Dropping it on retry
     # means buildkit reuses the layers it just finished building, so the retry costs
     # about a minute instead of seven and spends that minute re-running precisely
-    # the operation that raced: export, then load. This works because
-    # BUILD_DATE_EPOCH -- the one build-arg that changes per invocation -- is
-    # consumed on the last line of the `core` stage rather than near its top, so the
-    # apt, node, ruby and pinned-binary layers above it all stay cacheable.
+    # the operation that raced: export, then load. This works because the one
+    # build-arg that changes over time, BUILD_DATE_EPOCH, is UTC midnight of the
+    # build day (run_ash_container.py), so it is the same for both attempts and
+    # every layer the first attempt finished stays cacheable. A retry that falls on
+    # a new UTC day re-runs the Dockerfile's core stage from its apt-get upgrade
+    # step down.
     #
     # The partially-imported image is removed before each retry. containerd's
     # `Import` can leave an image record behind whose snapshot chain is incomplete,
@@ -502,11 +504,11 @@ runs:
       #
       # So every 2 accepted here was an anomaly recorded as a pass. Two anomalies in
       # particular. A findings-producing 2 would mean a scanner flagged a one-line
-      # print statement, which is worth a red build. And click raises UsageError with
-      # exit_code 2, so renaming `--simple`, `--mode`, `--phases` or
+      # print statement, which is worth a red build. And if a click UsageError exited
+      # 2 as well, renaming `--simple`, `--mode`, `--phases` or
       # `--fail-on-incomplete-scanners`, or removing an `--oci-runner` value, would
       # exit 2 with the scan never having started -- and the old tolerance called
-      # that success.
+      # that success. A usage error exits 5, ASH's code for a refused command line.
       #
       # 1 stays rejected, and now has something to reject: see the flag below.
       run: |
@@ -530,7 +532,8 @@ runs:
           echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
           case "$rc" in
             1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
-            2) echo "::error::2 means either actionable findings on a fixture that is one print statement, or a click UsageError -- a flag above was renamed or removed and the scan never ran." ;;
+            2) echo "::error::2 means actionable findings on a fixture that is one print statement." ;;
+            5) echo "::error::5 is a usage error: ASH refused the command line above, so a flag was renamed or removed and the scan never ran." ;;
           esac
           # The end of each scanner's stderr log, where a tool says why it failed. This
           # job uploads no artifacts, so without it the reason is only in the runner.

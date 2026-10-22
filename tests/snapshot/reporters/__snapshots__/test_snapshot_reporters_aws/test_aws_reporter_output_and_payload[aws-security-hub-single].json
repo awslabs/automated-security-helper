@@ -1,4 +1,532 @@
 {
-  "message": "Security Hub integration in development",
-  "findings_count": 11
+  "product_arn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+  "aws_account_id": "123456789012",
+  "region": "us-east-1",
+  "imported": 11,
+  "requests": 1,
+  "duplicates_skipped": 0,
+  "archived": 0,
+  "archived_ids": [],
+  "archive_scanners": [],
+  "archive_skipped": "archive_resolved_findings is false",
+  "findings": [
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/0d6c7e8baf31506a86bd8ccc749f4a8feabd11c2ad468cca45ab5a4f3d639b05",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/bandit/B602",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "HIGH",
+        "Original": "HIGH"
+      },
+      "Title": "B602: subprocess call with shell=True identified, security issue.",
+      "Description": "subprocess call with shell=True identified, security issue.",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/app/app.py"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "HIGH",
+          "Original": "HIGH"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "bandit",
+        "ash/ruleId": "B602",
+        "ash/severity": "HIGH",
+        "ash/suppressed": "false",
+        "ash/file": "app/app.py",
+        "ash/startLine": "9",
+        "ash/endLine": "9"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/17d639b73b4dd6ea4b4dda993186da6bef13f19c0b54ab28827ba7f1905644ad",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/bandit/B105",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "LOW",
+        "Original": "LOW"
+      },
+      "Title": "B105: Possible hardcoded password: 'hu**********************t'",
+      "Description": "Possible hardcoded password: 'hu**********************t'",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/app/app.py"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "LOW",
+          "Original": "LOW"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "bandit",
+        "ash/ruleId": "B105",
+        "ash/severity": "LOW",
+        "ash/suppressed": "false",
+        "ash/file": "app/app.py",
+        "ash/startLine": "5",
+        "ash/endLine": "5"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/eadbd324ce7c3a00e5f0b3317b1f29666b8c997341d718a11ef7ef2b0bb5418b",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/checkov/CKV_AWS_20",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "HIGH",
+        "Original": "HIGH"
+      },
+      "Title": "CKV_AWS_20: S3 Bucket has an ACL defined which allows public READ access.",
+      "Description": "S3 Bucket has an ACL defined which allows public READ access.",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/infra/main.tf"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "HIGH",
+          "Original": "HIGH"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "checkov",
+        "ash/ruleId": "CKV_AWS_20",
+        "ash/severity": "HIGH",
+        "ash/suppressed": "false",
+        "ash/file": "infra/main.tf",
+        "ash/startLine": "6",
+        "ash/endLine": "9"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/2f1bd9daa2b145b7bfee5b53637fe81cee59cd7408b2c6459d4f70419e9fb7de",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/checkov/CKV_AWS_18",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "MEDIUM",
+        "Original": "MEDIUM"
+      },
+      "Title": "CKV_AWS_18: Ensure the S3 bucket has access logging enabled",
+      "Description": "Ensure the S3 bucket has access logging enabled",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/infra/main.tf"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "MEDIUM",
+          "Original": "MEDIUM"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "checkov",
+        "ash/ruleId": "CKV_AWS_18",
+        "ash/severity": "MEDIUM",
+        "ash/suppressed": "false",
+        "ash/file": "infra/main.tf",
+        "ash/startLine": "2",
+        "ash/endLine": "4"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/0a226ae115fda829f8b9dba9d68c9b0fd109f5eb1a7e8dc54f3037f50a943459",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/checkov/CKV_DOCKER_8",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "MEDIUM",
+        "Original": "MEDIUM"
+      },
+      "Title": "CKV_DOCKER_8: Ensure the last USER is not root",
+      "Description": "Ensure the last USER is not root",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/Dockerfile"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "MEDIUM",
+          "Original": "MEDIUM"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "checkov",
+        "ash/ruleId": "CKV_DOCKER_8",
+        "ash/severity": "MEDIUM",
+        "ash/suppressed": "false",
+        "ash/file": "Dockerfile",
+        "ash/startLine": "5",
+        "ash/endLine": "5"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/4e8f2f07adb22f7af895207ca7511cdab93ae43576614b6671af20f8ae6b73e2",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/checkov/CKV_DOCKER_2",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "LOW",
+        "Original": "LOW"
+      },
+      "Title": "CKV_DOCKER_2: Ensure that HEALTHCHECK instructions have been added to container images",
+      "Description": "Ensure that HEALTHCHECK instructions have been added to container images",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/Dockerfile"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "LOW",
+          "Original": "LOW"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "checkov",
+        "ash/ruleId": "CKV_DOCKER_2",
+        "ash/severity": "LOW",
+        "ash/suppressed": "false",
+        "ash/file": "Dockerfile",
+        "ash/startLine": "1",
+        "ash/endLine": "6"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/ee29037acdac15419d4fd081c90975f656f1617c0f01644a3252fe5ef19c3e31",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/semgrep/dockerfile.security.last-user-is-root.last-user-is-root",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "LOW",
+        "Original": "LOW"
+      },
+      "Title": "dockerfile.security.last-user-is-root.last-user-is-root: The last user in the container is 'root'. Switch back to an unprivileged user.",
+      "Description": "The last user in the container is 'root'. Switch back to an unprivileged user.",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/Dockerfile"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "LOW",
+          "Original": "LOW"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "semgrep",
+        "ash/ruleId": "dockerfile.security.last-user-is-root.last-user-is-root",
+        "ash/severity": "LOW",
+        "ash/suppressed": "false",
+        "ash/file": "Dockerfile",
+        "ash/startLine": "5",
+        "ash/endLine": "5"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/b7b199a3e2d7fac22de7eb7b245569613b02cf64999d53130690e29e2e198f5e",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/semgrep/python.lang.best-practice.unpinned-shell-command",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "INFORMATIONAL",
+        "Original": "INFO"
+      },
+      "Title": "python.lang.best-practice.unpinned-shell-command: Command string built with an f-string; prefer an argument list.",
+      "Description": "Command string built with an f-string; prefer an argument list.",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/app/app.py"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "INFORMATIONAL",
+          "Original": "INFO"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "semgrep",
+        "ash/ruleId": "python.lang.best-practice.unpinned-shell-command",
+        "ash/severity": "INFO",
+        "ash/suppressed": "false",
+        "ash/file": "app/app.py",
+        "ash/startLine": "9",
+        "ash/endLine": "9"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/b9370f1d36415dc01ddc7ea6de72ab32eee6ce6afe6e705458242e2c04bd392b",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/detect-secrets/SECRET-SECRET-KEYWORD",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "HIGH",
+        "Original": "HIGH"
+      },
+      "Title": "SECRET-SECRET-KEYWORD: Secret of type Secret Keyword detected in file app/app.py at line 5",
+      "Description": "Secret of type Secret Keyword detected in file app/app.py at line 5",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/app/app.py"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "HIGH",
+          "Original": "HIGH"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "detect-secrets",
+        "ash/ruleId": "SECRET-SECRET-KEYWORD",
+        "ash/severity": "HIGH",
+        "ash/suppressed": "true",
+        "ash/file": "app/app.py",
+        "ash/startLine": "5",
+        "ash/endLine": "5",
+        "ash/suppressionJustification": "(ASH) Suppressing finding for rule 'SECRET-SECRET-KEYWORD' in 'app/app.py' with reason: Fixture placeholder credential, not a real secret"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ARCHIVED"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/640677c5a807872ec6138204ff9ed067c674a4c403783cf2edb7ccff608c5e0b",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/grype/CVE-2018-18074-requests",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities/CVE"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "CRITICAL",
+        "Original": "CRITICAL"
+      },
+      "Title": "CVE-2018-18074-requests: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
+      "Description": "A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found at requirements.txt",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/requirements.txt"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "CRITICAL",
+          "Original": "CRITICAL"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities/CVE"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "grype",
+        "ash/ruleId": "CVE-2018-18074-requests",
+        "ash/severity": "CRITICAL",
+        "ash/suppressed": "false",
+        "ash/file": "requirements.txt",
+        "ash/startLine": "1",
+        "ash/endLine": "1"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    },
+    {
+      "SchemaVersion": "2018-10-08",
+      "Id": "ash/dda60e1e61f0c29f8ecf06ae42d061c628c64c2b9973e77760f7275bdbea1c4f",
+      "ProductArn": "arn:aws:securityhub:us-east-1:123456789012:product/123456789012/default",
+      "GeneratorId": "ash/grype/CVE-2023-32681-requests",
+      "AwsAccountId": "123456789012",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities/CVE"
+      ],
+      "CreatedAt": "2026-01-15T12:00:00.000Z",
+      "UpdatedAt": "2026-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "MEDIUM",
+        "Original": "MEDIUM"
+      },
+      "Title": "CVE-2023-32681-requests: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
+      "Description": "A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found at requirements.txt",
+      "Resources": [
+        {
+          "Type": "Other",
+          "Id": "snapshot-fixture/requirements.txt"
+        }
+      ],
+      "FindingProviderFields": {
+        "Severity": {
+          "Label": "MEDIUM",
+          "Original": "MEDIUM"
+        },
+        "Types": [
+          "Software and Configuration Checks/Vulnerabilities/CVE"
+        ]
+      },
+      "ProductFields": {
+        "ash/target": "snapshot-fixture",
+        "ash/scope": "source=tests/test_data/snapshot_fixture/repo;converted=no",
+        "ash/scanner": "grype",
+        "ash/ruleId": "CVE-2023-32681-requests",
+        "ash/severity": "MEDIUM",
+        "ash/suppressed": "false",
+        "ash/file": "requirements.txt",
+        "ash/startLine": "1",
+        "ash/endLine": "1"
+      },
+      "ProductName": "Automated Security Helper",
+      "CompanyName": "AWS Labs",
+      "RecordState": "ACTIVE"
+    }
+  ]
 }

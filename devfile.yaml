@@ -5,16 +5,20 @@ components:
   - name: dev
     container:
       image: public.ecr.aws/aws-mde/universal-image:latest
+# uv's installer puts uv in ~/.local/bin unless told otherwise, and writes its env script
+# there, not under ~/.cargo. UV_INSTALL_DIR pins the directory, and each command puts it
+# on PATH itself rather than relying on the image's PATH or on a sourced env script, so
+# the lines also run under a POSIX sh, which has no `source`.
 commands:
   - id: install
     exec:
       component: dev
-      commandLine: "curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.cargo/env && uv sync"
+      commandLine: 'curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh && export PATH="$HOME/.local/bin:$PATH" && uv sync'
   - id: build
     exec:
       component: dev
-      commandLine: "uv build"
+      commandLine: 'export PATH="$HOME/.local/bin:$PATH" && uv build'
   - id: test
     exec:
       component: dev
-      commandLine: "uv run pytest"
+      commandLine: 'export PATH="$HOME/.local/bin:$PATH" && uv run pytest'

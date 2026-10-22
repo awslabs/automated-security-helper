@@ -17,7 +17,8 @@ wrote (issue #628).
 
 The existing test of the timeout message mocks ``_run_subprocess`` to return
 ``{"timed_out": True}``, which skips both rebuilds. These tests put the timeout
-at ``subprocess.run`` instead, underneath every layer that has to carry it.
+at the plain runner (``_run_plain``) instead, underneath every layer that has to
+carry it.
 """
 
 import subprocess
@@ -40,7 +41,7 @@ from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
 PluginContext.model_rebuild()
 
-_SUBPROCESS_RUN = "automated_security_helper.utils.subprocess_utils.subprocess.run"
+_PLAIN_RUNNER = "automated_security_helper.utils.subprocess_utils._run_plain"
 
 
 def _timeout(cmd, timeout, **_kwargs):
@@ -70,7 +71,7 @@ def checkov(tmp_path):
 @pytest.fixture
 def uv_available():
     with (
-        patch.object(UVToolRunner, "is_uv_available", return_value=True),
+        patch.object(UVToolRunner, "uv_availability", return_value=(True, None)),
         patch.object(CheckovScanner, "validate_plugin_dependencies", return_value=True),
     ):
         yield
@@ -82,7 +83,7 @@ def test_checkov_through_uv_reports_the_timeout(checkov, uv_available):
     assert scanner.use_uv_tool, "the test must exercise the uv path"
 
     with (
-        patch(_SUBPROCESS_RUN, side_effect=_timeout) as run,
+        patch(_PLAIN_RUNNER, side_effect=_timeout) as run,
         pytest.raises(ScannerError) as excinfo,
     ):
         scanner.scan(target=source, target_type="source")
@@ -91,7 +92,7 @@ def test_checkov_through_uv_reports_the_timeout(checkov, uv_available):
     assert run.call_count == 1
     assert run.call_args.args[0][1:3] == ["tool", "run"]
     message = str(excinfo.value)
-    assert "timed out after 5.0s" in message, message
+    assert "timed out after '5' s" in message, message
     assert "No such file or directory" not in message, message
 
 
@@ -102,12 +103,12 @@ def test_checkov_without_uv_reports_the_timeout(checkov):
 
     with (
         patch.object(CheckovScanner, "validate_plugin_dependencies", return_value=True),
-        patch(_SUBPROCESS_RUN, side_effect=_timeout),
+        patch(_PLAIN_RUNNER, side_effect=_timeout),
         pytest.raises(ScannerError) as excinfo,
     ):
         scanner.scan(target=source, target_type="source")
 
-    assert "timed out after 5.0s" in str(excinfo.value)
+    assert "timed out after '5' s" in str(excinfo.value)
 
 
 def test_the_timeout_is_recorded_on_the_scanner(checkov, uv_available):
@@ -118,18 +119,18 @@ def test_the_timeout_is_recorded_on_the_scanner(checkov, uv_available):
     """
     scanner, source = checkov
 
-    with patch(_SUBPROCESS_RUN, side_effect=_timeout), pytest.raises(ScannerError):
+    with patch(_PLAIN_RUNNER, side_effect=_timeout), pytest.raises(ScannerError):
         scanner.scan(target=source, target_type="source")
 
     assert scanner.scan_timed_out_after == 5.0
-    assert any("timed out after 5.0s" in line for line in scanner.errors)
+    assert any("timed out after '5' s" in line for line in scanner.errors)
 
 
 def test_partial_stderr_of_a_killed_tool_is_kept(checkov, uv_available):
     """What the tool printed before it was killed is the best clue to why."""
     scanner, source = checkov
 
-    with patch(_SUBPROCESS_RUN, side_effect=_timeout), pytest.raises(ScannerError):
+    with patch(_PLAIN_RUNNER, side_effect=_timeout), pytest.raises(ScannerError):
         scanner.scan(target=source, target_type="source")
 
     log = scanner.results_dir / "source" / "CheckovScanner.stderr.log"
@@ -141,8 +142,8 @@ class TestRunToolCarriesTheFlag:
     def test_with_a_results_dir(self, tmp_path):
         runner = UVToolRunner()
         with (
-            patch.object(UVToolRunner, "is_uv_available", return_value=True),
-            patch(_SUBPROCESS_RUN, side_effect=_timeout),
+            patch.object(UVToolRunner, "uv_availability", return_value=(True, None)),
+            patch(_PLAIN_RUNNER, side_effect=_timeout),
         ):
             result = runner.run_tool(
                 "checkov", args=["-d", "."], results_dir=tmp_path, timeout=3
@@ -156,9 +157,9 @@ class TestRunToolCarriesTheFlag:
         silent fallback to direct execution: the tool ran a second time."""
         runner = UVToolRunner()
         with (
-            patch.object(UVToolRunner, "is_uv_available", return_value=True),
+            patch.object(UVToolRunner, "uv_availability", return_value=(True, None)),
             patch(
-                "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+                "automated_security_helper.utils.subprocess_utils._run_plain",
                 side_effect=_timeout,
             ),
         ):

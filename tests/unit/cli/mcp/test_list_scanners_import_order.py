@@ -1,202 +1,143 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests that mcp_list_scanners() does not depend on what ran before it.
+"""Runs the list-scanners import-order probe in a pytest process of its own.
 
-The mechanism these guard
--------------------------
-``mcp_list_scanners()`` reports the vendored ferret/snyk/trivy scanners, which
-``load_internal_plugins()`` does not load, by reading the loaders' return values
-rather than the process-wide registry. Its answer is the same whatever resolved
-the registry before it and whatever the process has already imported.
-
-Why these tests provoke the memo through the public API only
------------------------------------------------------------
-The tests in ``test_list_scanners.py`` call ``mcp_list_scanners()`` on a process
-whose history they do not control, which is why they failed at some pytest-xdist
-worker counts and passed at others on identical code. Reproducing the poisoning
-by hand is what makes these deterministic instead.
-
-They go through ``plugin_modules()`` rather than touching ``plugin_library`` or
-``_resolved_plugins``, because the sweep in
-``tests/unit/workspace/test_project_isolation.py`` forbids reaching into the
-manager's registry from outside the class that owns it -- in a new test as much as
-in production. An earlier draft of this file did reach in, and that sweep is what
-caught it.
-
-What is deliberately not asserted here
--------------------------------------
-What ``plugin_modules()`` returns after ``mcp_list_scanners()``. Listing registers
-the vendored scanners in the process-wide registry; whether a scan then runs them
-is decided by the scan's own plugin modules, which
-tests/unit/cli/mcp/test_list_scanners_scan_selection.py holds.
+The probe's cells (list_scanners_import_order_probe.py) each load plugin
+packages, and a load registers classes in the process-global plugin registry
+for the rest of the worker: nothing a test may touch takes a registration
+back (the project-isolation sweep forbids registry surgery, sys.modules
+restore does not unregister, and a re-import mints second-generation
+classes). Run in the main process, the cells left the vendored scanner
+classes resolved for every later test on their xdist worker. So the probe
+runs in its own interpreter, through the real conftests, and this file
+asserts its outcomes; the registrations die with the child.
 """
 
-import pytest
+from __future__ import annotations
 
-from automated_security_helper.cli.mcp_tools import (
-    _VENDORED_SCANNER_PLUGIN_PACKAGES,
-    _loaded_scanner_classes,
-    mcp_list_scanners,
-)
-from automated_security_helper.plugins import ash_plugin_manager
-from automated_security_helper.plugins.loader import (
-    load_additional_plugin_modules,
-    load_internal_plugins,
-)
-from tests.utils.isolated_tool_env import isolated_tool_dirs
+import configparser
+import fnmatch
+import os
+import sys
+from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pyproject.toml declares tomli for Python below 3.11
+    import tomli as tomllib
+
+pytest_plugins = ["pytester"]
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+
+#: pytest's own default for ``python_files``, used when nothing configures it.
+_DEFAULT_PYTHON_FILES = ("test_*.py", "*_test.py")
+PROBE = Path(__file__).resolve().parent / "list_scanners_import_order_probe.py"
+
+#: The probe's cell count: a child that collected fewer ran a different file.
+PROBE_CELLS = 10
 
 
-@pytest.fixture(autouse=True)
-def _tool_writes_stay_in_tmp_path(tmp_path, monkeypatch):
-    """Point every directory a scanner probe writes to under the test's tmp_path.
+def test_the_probe_passes_in_its_own_interpreter(pytester, monkeypatch):
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join(p for p in (str(REPO_ROOT), os.environ.get("PYTHONPATH")) if p),
+    )
+    # A child that inherited these would act as an xdist worker of this run.
+    for name in [n for n in os.environ if n.startswith("PYTEST_XDIST_")]:
+        monkeypatch.delenv(name)
 
-    ``mcp_list_scanners()`` builds each scanner in this process, and building one
-    probes its tool: semgrep writes its settings and version cache, checkov its
-    update cache, and uv its tool directory lock, under the XDG and uv tool
-    directories, which are otherwise the developer's own.
+    result = pytester.runpytest_subprocess(
+        str(PROBE),
+        "-o",
+        "addopts=",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        "no:randomly",
+        "-n",
+        "0",
+        "-rA",
+    )
+
+    outcomes = result.parseoutcomes()
+    output = result.stdout.str()
+    assert outcomes.get("failed", 0) == 0, output[-6000:]
+    assert outcomes.get("errors", 0) == 0, output[-6000:]
+    passed = outcomes.get("passed", 0)
+    skipped = outcomes.get("skipped", 0)
+    # The memo-shortness cell may skip when an earlier cell in the same child
+    # already loaded the vendored packages; everything else must pass.
+    assert passed + skipped == PROBE_CELLS, (passed, skipped, output[-6000:])
+    assert passed >= PROBE_CELLS - 1, (passed, skipped, output[-6000:])
+
+    # The child-process guard lists this launch on the reason that this test
+    # puts the checkout first on the child's path. The child checks the
+    # substance of that reason itself (captured output masks environment
+    # values, the checkout path among them, so the path cannot be read back
+    # here) and this run reads back its verdict line.
+    marker = "probe-package-in-checkout="
+    named = [line for line in output.splitlines() if marker in line]
+    assert named, output[-6000:]
+    assert named[-1].split(marker, 1)[1].strip() == "True", named[-1]
+
+
+def _configured_python_files() -> list[str]:
+    """The collection patterns the repository configures for pytest.
+
+    pytest reads the first of pytest.ini, pyproject.toml's
+    [tool.pytest.ini_options], tox.ini and setup.cfg that has a pytest
+    section; the first two are read here. ``python_files`` is a
+    whitespace-separated string in an ini file and a list or string in
+    TOML. Pytest's own default applies when neither names it.
     """
-    for name, value in isolated_tool_dirs(tmp_path / "tool-dirs").items():
-        monkeypatch.setenv(name, value)
-
-
-VENDORED_SCANNER_NAMES = {"ferret_scan", "snyk_code", "trivy_repo"}
-VENDORED_SCANNER_CLASSES = {"FerretScanScanner", "SnykCodeScanner", "TrivyRepoScanner"}
-
-
-def _resolve_without_the_vendored_packages() -> set:
-    """Make the process look like something resolved before we were called.
-
-    Loads the internal plugins only, then resolves, which is what a CLI command or
-    an earlier test does. The returned names are the memo's contents, so a caller
-    can assert the memo really is short before trusting a test that depends on it
-    being short -- otherwise, on a worker where another test already loaded the
-    vendored packages, the test would pass while exercising nothing.
-    """
-    load_internal_plugins()
-    return {cls.__name__ for cls in ash_plugin_manager.plugin_modules("scanner")}
-
-
-class TestListScannersIsImportOrderIndependent:
-    def test_complete_after_a_prior_resolve(self):
-        """The core guarantee: a resolve before us must not shorten our answer."""
-        _resolve_without_the_vendored_packages()
-
-        names = {entry["name"] for entry in mcp_list_scanners()}
-
-        missing = VENDORED_SCANNER_NAMES - names
-        assert not missing, f"mcp_list_scanners() lost {missing} to a stale resolve"
-        assert len(names) >= 13
-
-    def test_complete_when_the_memo_is_demonstrably_short(self):
-        """Same guarantee, with the memo's shortness asserted rather than assumed.
-
-        Skips rather than passes when the worker's history already loaded the
-        vendored packages, because a green result in that state would prove
-        nothing. The test above covers the outcome unconditionally; this one
-        exists to pin the mechanism when it can be observed.
-        """
-        import pytest
-
-        memoised = _resolve_without_the_vendored_packages()
-        if VENDORED_SCANNER_CLASSES & memoised:
-            pytest.skip(
-                "this worker had already loaded the vendored packages, so the "
-                "memo is complete and there is no staleness to observe"
+    ini = REPO_ROOT / "pytest.ini"
+    if ini.is_file():
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read(ini, encoding="utf-8")
+        if parser.has_section("pytest"):
+            return parser.get("pytest", "python_files", fallback="").split() or list(
+                _DEFAULT_PYTHON_FILES
             )
-
-        names = {entry["name"] for entry in mcp_list_scanners()}
-        assert VENDORED_SCANNER_NAMES <= names
-
-    def test_complete_when_vendored_packages_already_loaded(self):
-        """Order-independence in the other direction.
-
-        Loading the vendored packages before the call must not change the result
-        either. This is the case metadata discovery used to shadow: the old code
-        chose discovery over the vendored list whenever discovery returned
-        anything, so whichever set the winner did not cover simply vanished.
-        """
-        load_additional_plugin_modules(list(_VENDORED_SCANNER_PLUGIN_PACKAGES))
-
-        names = {entry["name"] for entry in mcp_list_scanners()}
-        assert VENDORED_SCANNER_NAMES <= names
-
-    def test_repeated_calls_agree(self):
-        """Idempotent: calling it again must not add or drop scanners."""
-        first = sorted(e["name"] for e in mcp_list_scanners())
-        second = sorted(e["name"] for e in mcp_list_scanners())
-        assert first == second
-
-    def test_names_are_unique(self):
-        """One entry per scanner.
-
-        A scanner reported twice would double-count for any caller that sizes or
-        shards work from this list.
-        """
-        names = [e["name"] for e in mcp_list_scanners()]
-        assert len(names) == len(set(names)), f"duplicate entries in {sorted(names)}"
-
-
-class TestLoadedScannerClasses:
-    def test_finds_every_scanner_regardless_of_the_memo(self):
-        _resolve_without_the_vendored_packages()
-
-        resolved = _loaded_scanner_classes()
-
-        names = {cls.__name__ for cls in resolved}
-        assert VENDORED_SCANNER_CLASSES <= names, (
-            f"resolved from the memo rather than the loaders; got {sorted(names)}"
+    pyproject = REPO_ROOT / "pyproject.toml"
+    if pyproject.is_file():
+        options = (
+            tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            .get("tool", {})
+            .get("pytest", {})
+            .get("ini_options")
         )
-        assert len(resolved) >= 13
+        if options is not None:
+            configured = options.get("python_files", list(_DEFAULT_PYTHON_FILES))
+            return configured.split() if isinstance(configured, str) else configured
+    return list(_DEFAULT_PYTHON_FILES)
 
-    def test_returns_no_duplicates(self):
-        """The internal and vendored lists overlap in principle; dedupe anyway.
 
-        Without this, a scanner declared by two packages would be reported twice.
-        """
-        classes = _loaded_scanner_classes()
-        names = [cls.__name__ for cls in classes]
-        assert len(names) == len(set(names)), f"duplicates in {sorted(names)}"
+def test_the_probe_is_not_collected_by_the_main_run():
+    """The isolation holds only while the probe stays out of normal collection:
+    a rename back to a test module's name would re-poison the worker, and so
+    would a configured collection pattern (``*_probe.py``) that matches it."""
+    assert PROBE.is_file()
+    assert not PROBE.name.startswith("test_")
+    assert not PROBE.name.endswith("_test.py")
+    patterns = _configured_python_files()
+    assert patterns, "no collection pattern read"
+    matching = [p for p in patterns if fnmatch.fnmatch(PROBE.name, p)]
+    assert not matching, (PROBE.name, matching, patterns)
 
-    def test_repeated_calls_return_the_same_set(self):
-        assert {c.__name__ for c in _loaded_scanner_classes()} == {
-            c.__name__ for c in _loaded_scanner_classes()
-        }
 
-    def test_vendored_packages_are_package_paths_not_module_paths(self):
-        """Guards the subtlety that makes this work.
-
-        ``ASH_SCANNERS`` is declared in each package's ``__init__``, so the
-        loaders return the vendored scanners only when handed the package
-        path. Pointing at ``ash_ferret_plugins.ferret_scanner`` imports the
-        scanner but reports nothing, and the resulting list would be silently
-        short again. Measured both ways: leaf paths yield 0, package paths yield all.
-        """
-        leaves = {
-            "ash_ferret_plugins": "ferret_scanner",
-            "ash_snyk_plugins": "snyk_code_scanner",
-            "ash_trivy_plugins": "trivy_repo_scanner",
-        }
-        leaf_paths = [
-            f"{package}.{leaves[package.rsplit('.', 1)[1]]}"
-            for package in _VENDORED_SCANNER_PLUGIN_PACKAGES
-        ]
-
-        via_leaves = load_additional_plugin_modules(leaf_paths)
-        via_packages = load_additional_plugin_modules(
-            list(_VENDORED_SCANNER_PLUGIN_PACKAGES)
-        )
-
-        assert via_leaves["scanners"] == [], (
-            "leaf module paths now report scanners; if ASH_SCANNERS moved into "
-            "the leaf modules this guard is stale, but check the package paths "
-            "still work before deleting it"
-        )
-        assert len(via_packages["scanners"]) == len(VENDORED_SCANNER_CLASSES)
+def test_a_pattern_of_the_configured_shape_would_catch_the_probe():
+    """The control: the matcher flags a pattern that does match the probe."""
+    assert fnmatch.fnmatch(PROBE.name, "*_probe.py")
+    assert fnmatch.fnmatch(PROBE.name, "list_scanners_*.py")
 
 
 def test_the_vendored_list_is_every_in_tree_community_module():
     """A new community module that is not listed here is missing from list_scanners."""
+    from automated_security_helper.cli.mcp_tools import (
+        _VENDORED_SCANNER_PLUGIN_PACKAGES,
+    )
     from automated_security_helper.core.community_scanners import (
         community_scanner_modules,
     )

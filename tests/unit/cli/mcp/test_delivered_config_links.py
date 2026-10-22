@@ -539,8 +539,14 @@ def test_positive_control_an_operator_file_keeps_the_detailed_error(
         resolve_config(config_path=host_file, source_dir=elsewhere)
 
     message = str(raised.value)
-    assert "validation error for AshConfig" in message, message
-    assert "[type=model_type]" in message, message
+    # The refusal wording is the renderer's own, a ruled and documented
+    # contract (the restack merge d9644331: refusal messages name the
+    # container by its own kind and the location by the config's path), not
+    # pydantic's raw text, which quoted the superseded shape.
+    assert "Invalid value at '(top level)'" in message, message
+    assert "Input should be a valid dictionary or instance of AshConfig" in message, (
+        message
+    )
     assert CANARY not in message, message
 
 
@@ -553,17 +559,22 @@ LINK_OUT = f"# {CANARY}\nproject_name: linked\n"
 
 
 def _reads(during: Callable[[], Any]) -> List[Path]:
-    """The config files read while ``during`` runs, resolved."""
+    """The config files read while ``during`` runs, resolved.
+
+    Recorded at ``read_config_bytes``, the one read every config file goes
+    through; the stock chain read never calls the ``read_config_file``
+    callable, so a wrapper on that name records nothing.
+    """
     from automated_security_helper.config import config_sources
 
     read: List[Path] = []
-    real = config_sources.read_config_file
+    real = config_sources.read_config_bytes
 
     def recording(path: Path, *args: Any, **kwargs: Any) -> Any:
         read.append(Path(path).resolve())
         return real(path, *args, **kwargs)
 
-    with patch.object(config_sources, "read_config_file", recording):
+    with patch.object(config_sources, "read_config_bytes", recording):
         during()
     return read
 

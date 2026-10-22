@@ -34,9 +34,16 @@ the scanner would need ``tomli`` as a *runtime* dependency purely to serve the
 oldest supported interpreter. A security scanner's runtime dependency surface is
 part of its risk profile, and that is the wrong currency to pay in.
 
-This script has no such constraint: it runs in pre-commit and CI, never inside
-ASH, so it may require 3.11+ and use ``tomllib`` from the standard library. That
-asymmetry is the whole argument for generating rather than reading.
+This script escapes the dependency half of that constraint -- it runs in
+pre-commit and CI, never inside ASH, so a wrong parse here breaks a gate loudly
+instead of a scan quietly -- but not the interpreter half. An earlier version
+exited on anything below 3.11 and let the hook's and the drift workflow's pinned
+``--python 3.13`` satisfy that, which held exactly until the unit-test matrix ran
+on 3.10: "needs only the standard library" is a property relative to the
+interpreter actually running the script, the repository floor is 3.10, and a
+contributor may run the script directly with that floor. So ``tomllib`` is the
+parser of record where it exists, and on 3.10 ``_parse_cdk_extra`` below reads
+the one table and key this script owns, strictly.
 
 Failure modes and limitations
 -----------------------------
@@ -54,22 +61,29 @@ Failure modes and limitations
   whatever pyproject says. That is deliberate: a normalizing rewrite would make
   the committed constant differ from its source for no reason, and the test
   already compares order-insensitively.
+* On 3.10 the extra is read by ``_parse_cdk_extra``, which accepts only the
+  committed shape: the table header and ``cdk = [`` each on a line of their own,
+  one double-quoted requirement per line, blank and comment lines, and a closing
+  ``]``. Anything else exits non-zero naming the line, rather than guessing what
+  a TOML parser would have read. ``tomllib`` stays the parser of record on
+  3.11+, and ``test_cdk_extra_fallback_sync_gate.py`` holds the two equal on the
+  real pyproject.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
-if sys.version_info < (3, 11):  # pragma: no cover - guarded by the message itself
-    sys.exit(
-        "sync_cdk_extra_fallback.py needs Python 3.11+ for tomllib. It runs in "
-        "pre-commit and CI, never inside ASH, so this does not constrain "
-        "requires-python. Run it with `uv run --python 3.13`."
-    )
-
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10, the bottom of requires-python.
+    # tomllib entered the standard library in 3.11, and under `uv run
+    # --no-project` a tomli backport is unreachable even where the project
+    # environment carries one. _parse_cdk_extra below is the 3.10 path.
+    tomllib = None  # type: ignore[assignment]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -88,9 +102,88 @@ ANCHOR = "_CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = ["
 CLOSER = "]"
 EXTRA_NAME = "cdk"
 
+#: The table the extra lives in, as the line _parse_cdk_extra anchors on.
+_OPTIONAL_DEPENDENCIES = "[project.optional-dependencies]"
+
+#: One array element in the committed shape: a double-quoted string with no
+#: escapes and no quotes inside, an optional trailing comma, nothing else on the
+#: line. For a string this regex accepts, the raw characters ARE the TOML value,
+#: which is what makes the fallback's answer equal to tomllib's.
+_ELEMENT = re.compile(r'^"([^"\\]+)",?$')
+
+
+def _parse_cdk_extra(text: str) -> list[str]:
+    """``[project.optional-dependencies] cdk`` without a TOML parser, for 3.10.
+
+    Accepts exactly the committed shape of the extra and refuses anything else,
+    naming the first line it does not understand. The refusals are the point: a
+    narrow parser that guessed would hand ``--fix`` a wrong list to write into
+    the scanner. ``test_cdk_extra_fallback_sync_gate.py`` holds this function
+    equal to ``tomllib`` on the real pyproject, and the 3.10 unit leg runs the
+    whole gate suite through it.
+    """
+    lines = text.splitlines()
+    opener = f"{EXTRA_NAME} = ["
+
+    def _refusal(reason: str) -> SystemExit:
+        return SystemExit(
+            f"{PYPROJECT}: {reason}. This fallback parser runs only on Python "
+            f"3.10, where tomllib is not yet in the standard library, and it "
+            f"reads only the committed shape of the {EXTRA_NAME} extra: either "
+            f"run the script on 3.11+ or keep the extra in that shape."
+        )
+
+    try:
+        header = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == _OPTIONAL_DEPENDENCIES
+        )
+    except StopIteration:
+        raise _refusal(
+            f"no {_OPTIONAL_DEPENDENCIES} table found; the extra was renamed or "
+            f"removed, so this script's premise is gone and the fallback "
+            f"constant needs a human decision"
+        ) from None
+
+    opener_index = None
+    for index in range(header + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            break  # the next table; the key was not in this one
+        if stripped == opener:
+            opener_index = index
+            break
+    if opener_index is None:
+        raise _refusal(
+            f"no `{opener}` line inside {_OPTIONAL_DEPENDENCIES}; the extra was "
+            f"renamed or removed, so this script's premise is gone and the "
+            f"fallback constant needs a human decision"
+        )
+
+    found: list[str] = []
+    for index in range(opener_index + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped == CLOSER:
+            return found
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            break  # a table header before the closer: the array never closed
+        element = _ELEMENT.match(stripped)
+        if element is None:
+            raise _refusal(
+                f"line {index + 1} ({lines[index].strip()!r}) is not one "
+                f"double-quoted requirement, a comment, or a blank line"
+            )
+        found.append(element.group(1))
+    raise _refusal(f"the `{opener}` array never closes with {CLOSER!r}")
+
 
 def declared_requirements() -> list[str]:
     """The ``cdk`` extra, verbatim, from pyproject.toml."""
+    if tomllib is None:
+        return _parse_cdk_extra(PYPROJECT.read_text(encoding="utf-8"))
     with PYPROJECT.open("rb") as handle:
         data = tomllib.load(handle)
     try:
@@ -168,8 +261,8 @@ def main() -> int:
             f"[project.optional-dependencies] {EXTRA_NAME} in pyproject.toml\n"
             f"  pyproject: {declared}\n"
             f"  constant : {committed}\n"
-            "Run `uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py "
-            "--fix` and commit the result.",
+            "Run `uv run --no-project --python 3.13 python "
+            "scripts/sync_cdk_extra_fallback.py --fix` and commit the result.",
             file=sys.stderr,
         )
         return 1

@@ -176,6 +176,13 @@ scanners:
 UV tool execution is required but UV is not available
 ```
 
+ASH looks for uv in its own environment first (the `uv` package is one of its
+dependencies): beside its interpreter, in the interpreter's scripts directory, and
+where the `uv` package's `--prefix`, `--user` or `--target` layout puts it. Then on
+`PATH`, in the ASH bin directory and in `/usr/local/bin`. See
+`bundled_uv_executable` and `find_uv_or_none` in
+`automated_security_helper/utils/uv_tool_runner.py`.
+
 **Solutions:**
 - Install UV: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - Use offline mode: `ASH_OFFLINE=true ash --mode local`

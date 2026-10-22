@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
 import importlib
 import re
 import sys
@@ -17,13 +18,45 @@ from typing import (
     List,
     Literal,
     Mapping,
+    NamedTuple,
     Sequence,
     Set,
+    Tuple,
 )
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+
+
+def callback_display_name(callback: Any, *, strict: bool = False) -> str:
+    """A name for a log line that no callback shape can make raise: a
+    functools.partial has no ``__name__``, and a descriptor can raise on
+    reading it (``hasattr`` passes only AttributeError through). The loader's
+    registration arm and ``notify`` below name callbacks through this one
+    helper.
+
+    Even the fallback ``type(callback).__name__`` can raise (a metaclass
+    property), and a callback can reach the handler list without the loader's
+    validation (``subscribe`` directly), so the display ends in a fixed
+    "anonymous" rather than breaking ``notify`` for every subscriber of the
+    event. With ``strict`` the fallback's own error propagates instead: the
+    loader validates a declared ``ASH_EVENT_HANDLERS`` mapping with it, so a
+    handler it cannot truthfully name is refused with the mapping."""
+    try:
+        name = getattr(callback, "__name__", None)
+    except Exception:  # noqa: BLE001 -- a display name must never raise
+        name = None
+    if isinstance(name, str):
+        return name
+    if strict:
+        return type(callback).__name__
+    try:
+        name = type(callback).__name__
+    except Exception:  # noqa: BLE001 -- a display name must never raise
+        name = None
+    return name if isinstance(name, str) else "anonymous"
+
 
 if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
@@ -81,20 +114,26 @@ class AshPluginLibrary(BaseModel):
     ] = {}
 
 
+class _Resolution(NamedTuple):
+    """What ``plugin_modules`` resolved one plugin kind to, and from what."""
+
+    #: (name, module path, enabled) of each registration, in registry order.
+    registrations: Tuple[Tuple[str, str, bool], ...]
+    classes: List[type]
+
+
 class AshPluginManager(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
     context: Any = None
-    #: Resolved plugin classes per plugin type, each stored with the registrations
-    #: it was resolved from. A stored list is reused while the registrations are
-    #: unchanged and resolved again after a new registration, so a module imported
-    #: after the first resolve (a later scan's ``ash_plugin_modules``, or
-    #: ``list_scanners`` loading the community packages) is in the next resolve, and
-    #: each scanner a scan selects gets a row in its results.
+    #: plugin kind -> _Resolution. Reused only while the kind's registrations are
+    #: the ones it was resolved from; see plugin_modules.
     _resolved_plugins: dict = PrivateAttr(default_factory=dict)
-    #: Guards the registration dicts while they are changed or copied. Imports run
-    #: outside it: an import registers plugins, which takes this lock.
+    #: Guards the registry dicts: registration's check-and-insert, and the copy of
+    #: them plugin_modules resolves from. Workspace mode registers and resolves from
+    #: several threads at once. Imports run outside it: an import registers
+    #: plugins, which takes this lock.
     _registry_lock: Lock = PrivateAttr(default_factory=Lock)
     #: Guards the shared event-handler lists. This manager is a module-level
     #: singleton (``plugins/__init__.py``) and workspace mode runs several
@@ -120,12 +159,14 @@ class AshPluginManager(BaseModel):
             context: The PluginContext to use for plugin discovery and operations
         """
         self.context = context
-        # The directories only: the context holds the whole config, whose values
-        # can be read from the environment or be credentials.
+        # The directories only: the context's config is the resolved one, with
+        # every value its files read from the environment, and --debug prints
+        # this line to the console and to ash.log.
         ASH_LOGGER.debug(
-            "Plugin manager context set: source "
-            f"{getattr(context, 'source_dir', None)}, output "
-            f"{getattr(context, 'output_dir', None)}",
+            "Plugin manager context set: "
+            f"source_dir={getattr(context, 'source_dir', None)}, "
+            f"output_dir={getattr(context, 'output_dir', None)}, "
+            f"work_dir={getattr(context, 'work_dir', None)}",
             extra=NO_MARKUP,
         )
 
@@ -171,9 +212,10 @@ class AshPluginManager(BaseModel):
         event_type,
         *args,
         handler_filter: Callable[[Callable], bool] | None = None,
+        _scope: Callable[[Any], bool] | None = None,
         **kwargs,
     ):
-        """Notify the subscribers of an event.
+        """Notify the subscribers of an event: those the given filters accept.
 
         Args:
             event_type: The event to notify.
@@ -181,6 +223,13 @@ class AshPluginManager(BaseModel):
                 passes its own (``plugins.loader.scan_handler_filter``), so a
                 handler registered by a plugin module only another scan named is
                 not called for it. None notifies every subscriber.
+            _scope: The filter for a scan's own plugin modules
+                (``loader.plugins_of``). Subscriptions are process-wide, so
+                without it an event handler that another scan's modules
+                subscribed ran in this one, and was handed this run's context
+                and results. ``_scope`` is not passed on to the handlers.
+                With both filters given, a subscriber is notified only when
+                both accept it.
         """
         if not hasattr(self.plugin_library, "event_handlers"):
             ASH_LOGGER.debug(
@@ -200,12 +249,14 @@ class AshPluginManager(BaseModel):
             handlers = list(self.plugin_library.event_handlers[event_type])
         if handler_filter is not None:
             handlers = [callback for callback in handlers if handler_filter(callback)]
+        if _scope is not None:
+            handlers = [callback for callback in handlers if _scope(callback)]
 
         ASH_LOGGER.debug(f"Notifying {len(handlers)} subscribers of event {event_type}")
         results = []
         for callback in handlers:
             ASH_LOGGER.debug(
-                f"Calling subscriber callback {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
+                f"Calling subscriber callback {callback_display_name(callback)}"
             )
             results.append(callback(*args, **kwargs))
 
@@ -288,6 +339,112 @@ class AshPluginManager(BaseModel):
                 )
 
         ASH_LOGGER.verbose(f"Registered plugin module '{plugin_module_name}'")
+
+    def registration_snapshot(self) -> tuple:
+        """What is registered right now, for :meth:`undo_registrations_since`.
+
+        The loader takes one before importing a configured plugin module: the
+        import runs the module's decorators and the loader subscribes what the
+        module declares, and a module refused at the registration stage must
+        not leave any of that in this process-wide registry. Shallow copies of
+        the three registration dicts and of each event's handler list, each
+        under its own lock; the registrations and callbacks themselves are
+        shared, which is what makes the undo an identity comparison."""
+        with self._registry_lock:
+            kinds = (
+                dict(self.plugin_library.converters),
+                dict(self.plugin_library.scanners),
+                dict(self.plugin_library.reporters),
+            )
+        with self._event_lock:
+            events = {
+                event_type: list(handlers)
+                for event_type, handlers in self.plugin_library.event_handlers.items()
+            }
+        return (kinds, events)
+
+    def undo_registrations_since(self, snapshot: tuple, owner: str) -> None:
+        """Remove what the refused module *owner* registered or subscribed
+        after *snapshot* was taken.
+
+        A removal of the refused module's own additions, never a wholesale
+        restore: everything the snapshot holds is left exactly as it is now,
+        and an addition made in the window is removed only when it is the
+        refused module's -- a registration whose ``plugin_module_path`` is
+        *owner* or under it, or a handler defined there (its ``__module__``,
+        read never-raising, a functools.partial unwrapped to its function).
+        Another thread can load a GOOD plugin module inside the refused
+        module's import window (the MCP server runs scans as threads of one
+        process), and the refused module can first-import a plugin module
+        that stays loaded: undoing either's registration would lose it for
+        the process, because the cached import never runs its decorators
+        again.
+
+        The residual limit: a handler whose ``__module__`` is another
+        module's (a foreign function the refused import subscribes directly)
+        is not read as the refused module's, and survives the refusal."""
+
+        def _owned_registration(registration: Any) -> bool:
+            path = getattr(registration, "plugin_module_path", "") or ""
+            return path == owner or path.startswith(owner + ".")
+
+        def _owned_handler(callback: Any) -> bool:
+            plugin = callback
+            while isinstance(plugin, functools.partial):
+                plugin = plugin.func
+            try:
+                name = getattr(plugin, "__module__", None)
+            except Exception:  # noqa: BLE001 -- an undo filter must never raise
+                name = None
+            if not isinstance(name, str):
+                return False
+            return name == owner or name.startswith(owner + ".")
+
+        kinds_before, events_before = snapshot
+        registries = (
+            self.plugin_library.converters,
+            self.plugin_library.scanners,
+            self.plugin_library.reporters,
+        )
+        with self._registry_lock:
+            for registry, before in zip(registries, kinds_before):
+                for name in [key for key in registry if key not in before]:
+                    if _owned_registration(registry[name]):
+                        registry.pop(name, None)
+        with self._event_lock:
+            handlers_by_event = self.plugin_library.event_handlers
+            for event_type in list(handlers_by_event):
+                kept = events_before.get(event_type, [])
+                handlers_by_event[event_type] = [
+                    callback
+                    for callback in handlers_by_event[event_type]
+                    if any(callback is held for held in kept)
+                    or not _owned_handler(callback)
+                ]
+                if (
+                    not handlers_by_event[event_type]
+                    and event_type not in events_before
+                ):
+                    del handlers_by_event[event_type]
+
+    def remove_plugin_module_registration(
+        self,
+        plugin_type: Literal["converter", "scanner", "reporter"],
+        plugin_module_name: str,
+    ) -> bool:
+        """Remove one plugin-module registration; True when it was there.
+
+        The inverse of :meth:`register_plugin_module`, for a test that
+        registered a module of its own and puts the registry back, through the
+        manager's API rather than its state. Under the same lock as
+        registration, and the resolved memo follows the registrations, so no
+        cache needs touching.
+        """
+        registry = self._registrations(plugin_type)
+        if registry is None:
+            return False
+        with self._registry_lock:
+            return registry.pop(plugin_module_name, None) is not None
 
     def _registrations(self, plugin_type) -> Dict[str, AshPluginRegistration] | None:
         """The registration dict for *plugin_type*, or None for an unknown type."""
@@ -484,6 +641,17 @@ class AshPluginManager(BaseModel):
     ):
         """Get plugin modules of a specific type.
 
+        The resolved class list is memoised per kind together with the
+        registrations it came from, and reused only while those are unchanged,
+        so a config that loads more plugin modules later (``ash report`` with
+        ``ash_plugin_modules``, or a later request to a long-lived MCP server)
+        gets a list with them.
+
+        The registrations are copied under ``_registry_lock`` and the loop runs
+        over the copy. A module registered by another thread while this one
+        imports (workspace mode) cannot change the dict being iterated; it is
+        picked up by the next resolution.
+
         Args:
             plugin_type: The type of plugin to get (IConverter, IScanner, IReporter)
             filter_callback: Optional callback to filter plugins
@@ -502,41 +670,41 @@ class AshPluginManager(BaseModel):
         # into this dict, and iterating it while that happens raises
         # "dictionary changed size during iteration".
         with self._registry_lock:
-            snapshot = tuple(
-                (registration.plugin_module_path, registration.enabled)
-                for registration in registrations.values()
-            )
+            registered = list(registrations.items())
+        resolved_from = tuple(
+            (name, registration.plugin_module_path, registration.enabled)
+            for name, registration in registered
+        )
         cached = self._resolved_plugins.get(cache_key)
-        if cached is not None and cached[0] == snapshot:
+        if cached is not None and cached.registrations == resolved_from:
             return self.filter_plugin_modules(
-                cached[1], filter_callback, *args, **kwargs
+                cached.classes, filter_callback, *args, **kwargs
             )
 
-        plugins = []
-        for plugin_module_path, enabled in snapshot:
-            if not enabled:
+        plugins: List[type] = []
+        for _name, registration in registered:
+            if not registration.enabled:
                 continue
             try:
                 # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
-                module = importlib.import_module(plugin_module_path)
-                # Find the plugin class in the module
+                module = importlib.import_module(registration.plugin_module_path)
+                # Find the plugin classes in the module
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if (
                         isinstance(attr, type)
-                        and hasattr(attr, "ash_plugin_type")
-                        and attr.ash_plugin_type == plugin_type
+                        and getattr(attr, "ash_plugin_type", None) == plugin_type
+                        and attr not in plugins  # Avoid duplicates
                     ):
-                        if attr not in plugins:  # Avoid duplicates
-                            plugins.append(attr)
+                        plugins.append(attr)
             except ImportError as e:
                 ASH_LOGGER.warning(
-                    f"Failed to import plugin module {plugin_module_path}: {e}"
+                    f"Failed to import plugin module {registration.plugin_module_path}: {e}"
                 )
 
-        # Cache the unfiltered result, keyed by the registrations it came from, so
-        # repeat calls skip the import work until something new registers
-        self._resolved_plugins[cache_key] = (snapshot, plugins)
+        # Memoise the unfiltered result, keyed by the registrations it came from,
+        # so repeat calls skip the import work until something new registers
+        self._resolved_plugins[cache_key] = _Resolution(resolved_from, plugins)
 
         # Apply filter callback
         return self.filter_plugin_modules(plugins, filter_callback, *args, **kwargs)

@@ -35,12 +35,19 @@ is kept separately from the secret's ``filename`` because they differ: scan_file
 multi-file scan by the path relative to ``root`` while the secret keeps the absolute
 name.
 
+A secret found by this scan also carries ``ash_start_column``, the 1-based column its
+value starts at in its line, when the value is found there. detect-secrets reports no
+column, and without one two secrets of one type on one line are indistinguishable to
+ASH. The column is worked out here because only this process holds the secret's
+value; the value is not written to OUTPUT.
+
 Deliberately imports nothing from ASH beyond ``utils.process_env`` (itself standard
 library only, and required so the environment write below lands under
 ``ENVIRON_LOCK``), the standard library and detect-secrets, so starting it does not
 load the plugin registry.
 """
 
+import itertools
 import json
 import multiprocessing
 import os
@@ -51,6 +58,89 @@ from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
 )
+
+#: The key of the column in each secret written to OUTPUT.
+START_COLUMN_KEY = "ash_start_column"
+
+
+def _read_lines(filename: str, count: int) -> Optional[List[str]]:
+    """The first *count* lines of *filename*, numbered as detect-secrets numbers them.
+
+    Opened as detect-secrets opens a file it scans, ``open(filename)``: text mode,
+    the default encoding and error handling, universal newlines. Iterating the
+    handle ends a line only at ``\\n``, ``\\r`` and ``\\r\\n``. Not
+    ``str.splitlines``, which also ends one at ``\\v``, ``\\f``, ``\\x1c``-``\\x1e``,
+    NEL, U+2028 and U+2029, and so numbers a line below any of them differently
+    from detect-secrets. None for a file that cannot be read or decoded.
+    """
+    try:
+        with open(filename) as handle:
+            return list(itertools.islice(handle, count))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _start_column(
+    secret: Any, lines_by_file: Dict[str, Optional[List[str]]]
+) -> Optional[int]:
+    """The 1-based column *secret*'s value starts at in its line, or None.
+
+    None for a secret loaded from a baseline (it has no value), for a file that
+    cannot be read again, and for a value that is not in its line as written, as
+    when a transformer (YAML, INI) rebuilt the line before detect-secrets read it.
+
+    *lines_by_file* holds, for each file, its lines read so far, or None when it
+    cannot be read. A file is read only as far as the furthest line asked for,
+    and again only for a line beyond that.
+    """
+    value = getattr(secret, "secret_value", None)
+    line_number = getattr(secret, "line_number", 0) or 0
+    if not value or line_number < 1:
+        return None
+    filename = str(secret.filename)
+    lines = lines_by_file.get(filename, [])
+    if lines is not None and line_number > len(lines):
+        lines = _read_lines(filename, line_number)
+        lines_by_file[filename] = lines
+    if lines is None or line_number > len(lines):
+        return None
+    index = lines[line_number - 1].find(value)
+    return index + 1 if index >= 0 else None
+
+
+def _with_column(
+    secret: Any, lines_by_file: Dict[str, Optional[List[str]]]
+) -> Dict[str, Any]:
+    record = secret.json()
+    column = _start_column(secret, lines_by_file)
+    if column is not None:
+        record[START_COLUMN_KEY] = column
+    return record
+
+
+def _scan_files(collection: Any, paths: List[str]) -> None:
+    """``collection.scan_files(*paths)``, with a lone file scanned at the path given.
+
+    detect-secrets (1.5.0) scans a list of one file through
+    ``SecretsCollection.scan_file``, which passes the name through
+    ``convert_local_os_path``. On POSIX that rewrites every backslash to a slash,
+    and a backslash is an ordinary character in a POSIX file name: a file under
+    ``src-C:\\out\\`` was looked for at a path that does not exist, and the scan
+    found nothing and said nothing. Two or more files go through its process pool,
+    which scans each at the path given. So on POSIX a lone file is scanned here as
+    ``scan_file`` scans it, keyed by the name it was handed, without the rewrite. On
+    Windows a file name holds neither separator, the rewrite loses nothing, and
+    detect-secrets is called as before.
+    """
+    if len(paths) != 1 or os.sep != "/":
+        collection.scan_files(*paths)
+        return
+    from detect_secrets.core import scan
+
+    filename = paths[0]
+    for secret in scan.scan_file(os.path.join(collection.root, filename)):
+        collection[filename].add(secret)
+
 
 #: Set to "1" in the worker's environment when requests are refused; see above.
 REFUSE_HTTP_ENV = "ASH_DETECT_SECRETS_REFUSE_HTTP"
@@ -112,9 +202,10 @@ def run(request: Dict[str, Any]) -> List[List[Any]]:
         )
         collection.root = request["root"]
         with transient_settings(request["settings"]):
-            collection.scan_files(*request["paths"])
+            _scan_files(collection, request["paths"])
+        lines_by_file: Dict[str, Optional[List[str]]] = {}
         return [
-            [key, [secret.json() for secret in secrets]]
+            [key, [_with_column(secret, lines_by_file) for secret in secrets]]
             for key, secrets in collection.data.items()
         ]
     finally:
@@ -132,6 +223,16 @@ def main(argv: List[str]) -> int:
     request_path, output_path = argv
     with open(request_path, encoding="utf-8") as f:
         request = json.load(f)
+    # Parsed, so the file has done its job. It holds the scan settings,
+    # environment-derived values included, in the results directory, which is
+    # what CI uploads: removing it here shrinks the window a run killed
+    # mid-scan leaves it behind from the whole scan to this parse. The caller
+    # still removes it in a finally for a worker that never got here, and a
+    # sandbox that refuses the unlink only puts that back in charge.
+    try:
+        os.unlink(request_path)
+    except OSError:
+        pass
     result = run(request)
     # Created, never opened: ASH removes the path before it starts the worker, so
     # anything there now, a symlink included, was put there by something else.

@@ -528,10 +528,12 @@ resource "aws_codebuild_project" "merge" {
 
     # Passed straight through to `ash merge --min-severity`. The threshold is
     # evaluated by ASH, not compared here, so there is exactly one
-    # implementation of "does this breach".
+    # implementation of "does this breach". Lowered, because the validation
+    # accepts any case and ASH should get the spelling it ranks whatever the
+    # release.
     environment_variable {
       name  = "MIN_SEVERITY"
-      value = var.min_severity
+      value = lower(var.min_severity)
     }
 
     environment_variable {

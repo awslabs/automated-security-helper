@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import shlex
+import os
 import logging
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Set, Tuple
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -20,6 +20,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanne
     reset_trivy_default_misconfig_scanners as reset_trivy_default_misconfig_scanners,
     trivy_default_misconfig_scanners,
 )
+from automated_security_helper.base.scanner_plugin import (
+    redacted_command_record,
+)
 from automated_security_helper.core.enums import ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -28,6 +31,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.base.uv_tool_mixin import guarded_values_read
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
@@ -161,6 +166,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     keeps its own config and its own ``scan()``, so what it reports is unchanged.
     """
 
+    #: trivy is a native binary. See ScannerPluginBase.python_only.
+    python_only: ClassVar[bool | None] = False
+
     # trivy exits 0 for a completed run, findings or not, unless --exit-code names
     # another code for findings (default 0, pkg/flag/report_flags.go), and 1 from
     # log.Fatal on any error (cmd/trivy/main.go). TrivyScannerBase._run_subprocess
@@ -197,6 +205,16 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
     def _process_config_options(self):
         self._append_trivy_options()
         return super()._process_config_options()
+
+    def _environment_values(self) -> Tuple[str, ...]:
+        """The configuration's environment values, plus the two variables this
+        scanner reads straight from the environment (never through the
+        configuration), so text that quotes one is redacted."""
+        read = (
+            os.environ.get("TRIVY_IGNOREFILE"),
+            os.environ.get("TRIVY_SECRET_CONFIG"),
+        )
+        return (*super()._environment_values(), *(value for value in read if value))
 
     def _default_misconfig_scanners(self, binary: str) -> Optional[List[str]]:
         """``TrivyScannerBase._default_misconfig_scanners``, looked up in this module.
@@ -355,11 +373,32 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
             # added by TrivyScannerBase._run_subprocess, for trivy and trivy-repo
             # alike (utils/content_db_refresh.py).
 
-            self._plugin_log(
-                f"Running command: {' '.join(final_args)}",
-                target_type=target_type,
-                level=logging.VERBOSE,
-            )
+            # The values hook is overridable and is read once, guarded, for the
+            # log line and both SARIF records. When it raised or gave no usable
+            # answer nothing can be redacted, so every record carries only the
+            # command's name.
+            read = guarded_values_read(self)
+            redact_values = read.values
+            if redact_values is None:
+                shown_command = str(self.command)
+                recorded_command_line = shown_command
+                recorded_arguments: List[str] = []
+                self._plugin_log(
+                    f"Running command: {shown_command} (the arguments are not "
+                    f"shown: the plugin's values hook {read.failure()})",
+                    target_type=target_type,
+                    level=logging.VERBOSE,
+                )
+            else:
+                shown_command = text_without_values(" ".join(final_args), redact_values)
+                recorded_command_line, recorded_arguments = redacted_command_record(
+                    final_args, redact_values
+                )
+                self._plugin_log(
+                    f"Running command: {shown_command}",
+                    target_type=target_type,
+                    level=logging.VERBOSE,
+                )
 
             response = self._run_subprocess(
                 command=final_args,
@@ -386,8 +425,8 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         scanner_name=self.config.name,
                         scanner_version=getattr(self, "tool_version", None),
                         invocation_details={
-                            "command_line": " ".join(final_args),
-                            "arguments": final_args[1:],
+                            "command_line": shown_command,
+                            "arguments": recorded_arguments,
                             "working_directory": get_shortest_name(input=target),
                             "start_time": self.start_time.isoformat()
                             if self.start_time
@@ -402,8 +441,8 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                     if sarif_report.runs:
                         sarif_report.runs[0].invocations = [
                             Invocation(
-                                commandLine=shlex.join(final_args),
-                                arguments=final_args[1:],
+                                commandLine=recorded_command_line,
+                                arguments=recorded_arguments,
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,
                                 executionSuccessful=self._exit_code_accepted(),

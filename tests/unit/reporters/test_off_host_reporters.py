@@ -177,7 +177,7 @@ def _context(tmp_path, config):
 
 
 class TestTheReportPhase:
-    def _run(self, tmp_path, reporters, config):
+    def _run(self, tmp_path, reporters, config, output_formats=None):
         from automated_security_helper.core.phases.report_phase import ReportPhase
         from automated_security_helper.core.progress import LiveProgressDisplay
         from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -193,7 +193,7 @@ class TestTheReportPhase:
         phase._execute_phase(
             report_dir=context.output_dir / "reports",
             aggregated_results=model,
-            cli_output_formats=None,
+            cli_output_formats=output_formats,
             python_based_plugins_only=False,
         )
 
@@ -206,6 +206,165 @@ class TestTheReportPhase:
         self._run(tmp_path, reporters, _config(section))
 
         assert ran == ["fake-local"]
+
+    @pytest.mark.parametrize("section", [None, {}], ids=["no-section", "empty"])
+    def test_asking_for_it_says_it_is_disabled_whatever_its_own_default(
+        self, tmp_path, reporters, ran, caplog, section
+    ):
+        """Its own default is on, but the phase sets it off (``_disable``), so the
+        requested format is reported as disabled: the setting to change is in the
+        config. Left on, it would be reported as failing its dependency check."""
+        import logging
+
+        with caplog.at_level(logging.ERROR):
+            self._run(tmp_path, reporters, _config(section), ["fake-off-host"])
+
+        assert ran == []
+        assert (
+            "No report will be written for requested format 'fake-off-host': "
+            "its reporter is disabled in the configuration"
+        ) in caplog.text
+        assert "dependencies are not satisfied" not in caplog.text
+
+    @pytest.mark.parametrize(
+        "section",
+        [
+            {"extension": "off-host.json"},
+            {"enabled": "true"},
+            # Values the reporter's own model refuses: it is not run either way,
+            # and the operator is told why, not shown its model's error.
+            {"enabled": None},
+            {"enabled": ["true"]},
+            {"enabled": "[/x]"},
+        ],
+        ids=[
+            "no-enabled-key",
+            "enabled-not-a-boolean",
+            "enabled-null",
+            "enabled-a-list",
+            "enabled-markup",
+        ],
+    )
+    def test_a_section_that_configures_it_without_enabling_it_warns(
+        self, tmp_path, reporters, ran, caplog, section
+    ):
+        """An operator who wrote a section for it expects it to run; say why not,
+        once, at WARNING, and log no error for it."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            self._run(tmp_path, reporters, _config(section))
+
+        assert ran == ["fake-local"]
+        records = [
+            record
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+            and "fake-off-host" in record.getMessage()
+        ]
+        assert len(records) == 1, caplog.text
+        message = records[0].getMessage()
+        assert "reporters.fake-off-host.enabled" in message
+        # The text is logged as written, not read as markup.
+        assert getattr(records[0], "markup", None) is False, vars(records[0])
+        if "enabled" in section:
+            # Says what type it is set to, never the value, and that only the
+            # boolean counts.
+            value = section["enabled"]
+            kind = "null" if value is None else f"a {type(value).__name__}"
+            assert f"sets enabled to {kind}," in message, message
+            if value is not None:
+                assert repr(value) not in message, message
+            assert "boolean" in message, message
+        else:
+            assert "does not set" in message, message
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR], (
+            caplog.text
+        )
+
+    def test_the_warning_names_a_reporter_whose_name_reads_as_markup(
+        self, tmp_path, ran, caplog
+    ):
+        """A reporter named "[/x]" is named as written, with markup off."""
+        import logging
+
+        class _MarkupNamedConfig(ReporterPluginConfigBase):
+            name: Literal["[/x]"] = "[/x]"
+            extension: str = "markup.json"
+            enabled: bool = True
+
+        class MarkupNamedReporter(ReporterPluginBase[_MarkupNamedConfig]):
+            sends_off_host = True
+
+            def model_post_init(self, context):
+                if self.config is None:
+                    self.config = _MarkupNamedConfig()
+                return super().model_post_init(context)
+
+            def report(self, model):
+                ran.append("[/x]")
+                return "{}"
+
+        from automated_security_helper.config.ash_config import AshConfig
+
+        config = AshConfig.model_validate(
+            {"reporters": {"[/x]": {"extension": "markup.json"}}}
+        )
+        with caplog.at_level(logging.WARNING):
+            self._run(tmp_path, [MarkupNamedReporter], config)
+
+        assert ran == []
+        records = [
+            record
+            for record in caplog.records
+            if record.levelno == logging.WARNING and "[/x]" in record.getMessage()
+        ]
+        assert len(records) == 1, caplog.text
+        assert "reporters.[/x].enabled" in records[0].getMessage()
+        assert getattr(records[0], "markup", None) is False, vars(records[0])
+
+    def test_a_requested_format_that_leaves_it_out_does_not_warn(
+        self, tmp_path, reporters, ran, caplog
+    ):
+        """Asked for other formats, the reporter would not run whatever its section
+        says, so its section is not worth a warning."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            self._run(
+                tmp_path,
+                reporters,
+                _config({"extension": "off-host.json"}),
+                ["fake-local"],
+            )
+
+        assert ran == ["fake-local"]
+        assert not [
+            record
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+            and "fake-off-host" in record.getMessage()
+        ], caplog.text
+
+    @pytest.mark.parametrize(
+        "section", [None, {}, {"enabled": False}], ids=["no-section", "empty", "off"]
+    )
+    def test_no_section_or_one_that_turns_it_off_does_not_warn(
+        self, tmp_path, reporters, ran, caplog, section
+    ):
+        """Control: left alone, or turned off on purpose, it is skipped quietly."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            self._run(tmp_path, reporters, _config(section))
+
+        assert ran == ["fake-local"]
+        assert not [
+            record
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+            and "fake-off-host" in record.getMessage()
+        ], caplog.text
 
     def test_an_off_host_reporter_its_config_enables_is_run(
         self, tmp_path, reporters, ran
@@ -227,10 +386,13 @@ class TestTheReportCommand:
         (output_dir / "ash_aggregated_results.json").write_text(
             AshAggregatedResults().model_dump_json(by_alias=True), encoding="utf-8"
         )
+        # On the class, not the instance: undoing an instance patch leaves the
+        # bound method behind as an instance attribute, which then hides every
+        # later patch of the class (the off_scope_reporter fixture's, say).
         monkeypatch.setattr(
-            report_module.ash_plugin_manager,
+            type(report_module.ash_plugin_manager),
             "plugin_modules",
-            lambda plugin_type=None, **kwargs: list(reporters),
+            lambda self, plugin_type=None, **kwargs: list(reporters),
         )
         monkeypatch.setattr(report_module, "load_plugins", lambda **kwargs: None)
         return report_module.report_command(
@@ -330,10 +492,11 @@ class TestTheMergeCommand:
                 encoding="utf-8",
             )
 
+        # On the class, for the reason TestTheReportCommand._report gives.
         monkeypatch.setattr(
-            merge_module.ash_plugin_manager,
+            type(merge_module.ash_plugin_manager),
             "plugin_modules",
-            lambda plugin_type=None, **kwargs: list(reporters),
+            lambda self, plugin_type=None, **kwargs: list(reporters),
         )
         monkeypatch.setattr(merge_module, "load_plugins", lambda **kwargs: None)
         # get_logger replaces the ASH logger's handlers, so the command's warnings

@@ -31,15 +31,23 @@ from automated_security_helper.workspace.aggregation import (
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
-    incomplete_scanners_for_project,
-    no_scanner_ran_for_project,
     project_relative_uri,
     project_root_uri,
     rebase_run_for_project,
     to_workspace_uri,
 )
 from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+from automated_security_helper.workspace.execution import _coverage_fields
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+
+
+def incomplete_scanners_for_project(results):
+    """Names of the incomplete scanners, read as a single scan reads them."""
+    from automated_security_helper.interactions.run_ash_scan import (
+        scan_incompleteness,
+    )
+
+    return [name for name, _status in scan_incompleteness(results, gate=True).scanners]
 
 
 def _plan(tmp_path, *keys):
@@ -130,8 +138,12 @@ class TestWorkspaceUriConversion:
             == "api/src/app.py"
         )
 
-    def test_a_backslash_path_is_normalised(self):
-        assert to_workspace_uri("src\\app.py", "api") == "api/src/app.py"
+    def test_a_backslash_in_a_sanitized_uri_is_part_of_the_name(self):
+        """The project's scan wrote "/" for its separators when it sanitized the
+        URI, so a backslash left in it is part of a POSIX file name. Under a
+        Windows project path it is a separator (test_a_relative_windows_uri_still_converts)."""
+        assert to_workspace_uri("src\\app.py", "api") == "api/src\\app.py"
+        assert to_workspace_uri("src/app.py", "api") == "api/src/app.py"
 
     def test_a_path_the_converter_refuses_returns_none(self):
         """Not an exception and not a silent pass-through -- the caller counts it."""
@@ -464,10 +476,11 @@ class TestActionableCounting:
         results = [_result(level="error", suppressed=True)]
         assert count_actionable_results(results, "ALL") == 0
 
-    def test_a_missing_level_is_read_as_note(self):
+    def test_a_missing_level_is_read_as_the_missing_level(self):
+        """MISSING_SARIF_LEVEL, "warning" (MEDIUM); it was "note" here."""
         entry = {"ruleId": "B307"}
-        assert count_actionable_results([entry], "LOW") == 1
-        assert count_actionable_results([entry], "MEDIUM") == 0
+        assert count_actionable_results([entry], "MEDIUM") == 1
+        assert count_actionable_results([entry], "HIGH") == 0
 
     def test_the_threshold_is_matched_case_insensitively(self):
         """run_ash_scan upper-cases the configured value; the ladder does not."""
@@ -510,6 +523,26 @@ class TestMinSeverityGate:
 
     def test_a_high_gate_rejects_a_warning(self):
         assert has_finding_at_min_severity([_result(level="warning")], "high") is False
+
+    def test_a_declared_severity_decides_over_the_level(self):
+        """issue_severity first, as run_ash_scan._severity_filters_finding reads it.
+
+        The workspace gate read the level alone, so a scanner's declared HIGH at
+        level note never met --min-severity high, and a declared LOW at level
+        error always did.
+        """
+        assert (
+            has_finding_at_min_severity(
+                [_result(level="note", severity="HIGH")], "high"
+            )
+            is True
+        )
+        assert (
+            has_finding_at_min_severity(
+                [_result(level="error", severity="LOW")], "high"
+            )
+            is False
+        )
 
 
 class TestParityWithComputeExitCode:
@@ -731,13 +764,13 @@ class TestCompletenessParityWithComputeExitCode:
         assert mine == []
 
     def test_an_excluded_scanner_is_clean_to_both_derivations(self, tmp_path):
-        """The case that separates delegating from mirroring.
+        """The case that separates reading the metrics from reading raw statuses.
 
         Excluded AND its tool absent, which is ``--exclude-scanners cfn-nag`` on a
         host without cfn-nag, and also every shard of a sharded scan. Both
-        derivations must read SKIPPED, which they do only because this function
-        delegates to ``incomplete_scanners`` -- a copy reading
-        ``scanner_results[*].status`` directly would see MISSING.
+        derivations must read SKIPPED, which they do only because both go through
+        ``scan_incompleteness`` -- a read of ``scanner_results[*].status``
+        directly would see MISSING.
         """
         statuses = {
             "bandit": ("PASSED", False, True),
@@ -749,14 +782,109 @@ class TestCompletenessParityWithComputeExitCode:
         assert standalone == 0
         assert mine == []
 
-    def test_neither_derivation_reads_a_none_model_as_incomplete(self):
-        """``None`` is "the scan crashed", which is already exit 1 on its own.
+    def test_a_none_model_is_read_as_no_coverage_facts(self):
+        """``scan_incompleteness(None)`` answers an empty ``ScanIncompleteness``.
 
-        Answering "every scanner is incomplete" here would be a second, weaker
-        claim about the same event.
+        ``_coverage_fields`` has no guard of its own for ``None``; it relies on this.
+        Pinned so that the day ``scan_incompleteness`` raises on ``None``, this fails.
+        ``_scan_one_project`` does not reach the coverage fields with a ``None``
+        model (a crashed scan is FAILED before that point), so the answer matters
+        only as the contract ``_coverage_fields`` is written against.
         """
-        assert incomplete_scanners_for_project(None) == []
-        assert no_scanner_ran_for_project(None) is False
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        facts = scan_incompleteness(None, gate=True)
+
+        assert not facts
+        assert facts.no_scanner_ran is False
+        assert facts.scanners == ()
+        assert _coverage_fields(None) == {
+            "incomplete_scanners": [],
+            "incomplete_scanner_details": {},
+            "partial_coverage_scanners": [],
+            "no_scanner_ran": False,
+        }
+
+    @pytest.mark.parametrize(
+        ("statuses", "roster", "exit_code"),
+        [
+            # Per-scanner arm only: a MISSING scanner beside one that ran.
+            (
+                {
+                    "bandit": ("PASSED", False, True),
+                    "cfn-nag": ("MISSING", False, False),
+                },
+                [],
+                1,
+            ),
+            # Set-level arm only: every entry SKIPPED.
+            ({"bandit": ("SKIPPED", True, True)}, [], 1),
+            # Set-level arm through the roster: nothing recorded, a roster says
+            # the scan phase ran.
+            ({}, ["bandit"], 1),
+            # Controls: a narrowed run that measured something, and a clean one.
+            (
+                {"bandit": ("PASSED", False, True), "cfn-nag": ("SKIPPED", True, True)},
+                [],
+                0,
+            ),
+            ({"bandit": ("PASSED", False, True)}, [], 0),
+        ],
+    )
+    def test_the_fields_the_scan_writes_agree_with_the_exit_code(
+        self, tmp_path, statuses, roster, exit_code
+    ):
+        """``_coverage_fields`` is what ``_scan_one_project`` writes into the outcome.
+
+        Called from here and from production with only the results, so the helper
+        owns the ``gate=`` it reads under and a change to it (a field dropped, a
+        different ``gate=``, a filter on the details) moves this test. The expected
+        side is ``_compute_exit_code`` on a second model built the same way, run with
+        the completeness gate ON: the verdict a workspace project has to match. With
+        the helper reading under ``gate=False`` the per-scanner and roster cells come
+        back empty while the exit code is still 1, which is what fails here.
+        """
+        from automated_security_helper.models.workspace import WorkspaceProjectResult
+
+        model = self._model(statuses)
+        model.metadata.expected_scanners = list(roster)
+        standalone_model = self._model(statuses)
+        standalone_model.metadata.expected_scanners = list(roster)
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        standalone = _compute_exit_code(
+            standalone_model,
+            ScanOptions(
+                source_dir=tmp_path,
+                output_dir=tmp_path,
+                fail_on_incomplete_scanners=True,
+            ),
+            None,
+        )
+        fields = _coverage_fields(model)
+
+        assert standalone == exit_code
+        assert set(fields) <= set(WorkspaceProjectResult.model_fields)
+        assert set(fields) == {
+            "incomplete_scanners",
+            "incomplete_scanner_details",
+            "partial_coverage_scanners",
+            "no_scanner_ran",
+        }
+        assert (standalone == 1) == bool(
+            fields["incomplete_scanners"] or fields["no_scanner_ran"]
+        )
+        # The per-scanner half against the test module's own reader, which asks
+        # scan_incompleteness under gate=True itself.
+        assert fields["incomplete_scanners"] == incomplete_scanners_for_project(model)
+        assert (
+            list(fields["incomplete_scanner_details"]) == fields["incomplete_scanners"]
+        )
 
     def test_a_project_whose_every_scanner_was_skipped_is_seen_by_both(self, tmp_path):
         """The set-level half, which the per-entry helper structurally cannot see.
@@ -764,8 +892,8 @@ class TestCompletenessParityWithComputeExitCode:
         ``incomplete_scanners`` tolerates SKIPPED one entry at a time, because that
         is how an exclusion and another shard's ownership are recorded. So a project
         in which *every* entry is SKIPPED clears that pass having measured nothing,
-        and before ``no_scanner_ran_for_project`` existed the workspace layer had no
-        second question to ask: the project reported zero findings and COMPLETED
+        and before ``_coverage_fields`` carried ``no_scanner_ran`` the workspace layer
+        had no second question to ask: the project reported zero findings and COMPLETED
         while ``ash --source-dir P`` on the same project exited 1.
 
         Asserted through the same agreement the rest of this class uses, so a
@@ -777,7 +905,7 @@ class TestCompletenessParityWithComputeExitCode:
 
         assert standalone == 1
         assert incomplete_scanners_for_project(model) == []
-        assert no_scanner_ran_for_project(model) is True
+        assert _coverage_fields(model)["no_scanner_ran"] is True
 
     def test_a_project_with_one_scanner_that_ran_is_clean_to_both(self, tmp_path):
         """The control for the case above, at the boundary that decides it.
@@ -796,7 +924,7 @@ class TestCompletenessParityWithComputeExitCode:
 
         assert standalone == 0
         assert incomplete_scanners_for_project(model) == []
-        assert no_scanner_ran_for_project(model) is False
+        assert _coverage_fields(model)["no_scanner_ran"] is False
 
     def test_an_empty_scanner_set_with_no_roster_is_not_read_as_nothing_having_run(
         self, tmp_path
@@ -818,7 +946,7 @@ class TestCompletenessParityWithComputeExitCode:
             "reading depends on"
         )
 
-        assert no_scanner_ran_for_project(model) is False
+        assert _coverage_fields(model)["no_scanner_ran"] is False
 
     def test_an_empty_scanner_set_with_a_roster_is_seen_by_both(self, tmp_path):
         """The state an empty set alone cannot distinguish.
@@ -829,10 +957,10 @@ class TestCompletenessParityWithComputeExitCode:
         the silent zero. ``metadata.expected_scanners`` separates them, because
         ``ScanPhase`` is what records it -- a roster means the phase ran.
 
-        The workspace helper called the delegate with one argument, so it answered
-        the benign reading for both states while ``ash --source-dir P`` on the same
-        project answered 1. That is the same divergence this class was opened for,
-        reappearing through a caller left on the older signature.
+        The workspace helper once called ``no_scanner_ran`` with one argument, so it
+        answered the benign reading for both states while ``ash --source-dir P`` on
+        the same project answered 1. It now reads ``ScanIncompleteness``, which
+        passes the roster.
         """
         statuses: dict = {}
         model = self._model(statuses)
@@ -856,7 +984,7 @@ class TestCompletenessParityWithComputeExitCode:
         )
 
         assert standalone == 1
-        assert no_scanner_ran_for_project(model) is True
+        assert _coverage_fields(model)["no_scanner_ran"] is True
 
 
 class TestAggregatorOutput:

@@ -9,7 +9,6 @@ from typing import Annotated, Literal, Optional, TYPE_CHECKING, Tuple
 
 import boto3
 from pydantic import Field, model_validator
-import yaml
 
 from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
@@ -19,7 +18,9 @@ from automated_security_helper.base.reporter_plugin import (
     write_report_file,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.report_yaml import report_yaml
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
     MAX_RETRIES,
     MAX_RETRY_DELAY_SECONDS,
@@ -222,8 +223,11 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
 
             self.dependencies_satisfied = "Account" in caller_id
         except Exception as e:
+            # error_text with the config's environment values: botocore's
+            # exceptions name the profile, bucket or region they were given.
             self._plugin_log(
-                f"Error when validating S3 access: {e}",
+                "Error when validating S3 access: "
+                f"{error_text(e, self._environment_values())}",
                 level=logging.WARNING,
                 target_type="source",
                 append_to_stream="stderr",
@@ -258,7 +262,9 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             output_content = json.dumps(output_dict, default=str, indent=2)
         else:
             output_dict = model.to_simple_dict()
-            output_content = yaml.dump(output_dict, default_flow_style=False)
+            # utils/report_yaml.py: no line of it is a CI workflow command, whatever
+            # a refused input's name or a finding's text holds.
+            output_content = report_yaml(output_dict, default_flow_style=False)
 
         # Create a session with the specified profile and region
         session = boto3.Session(
@@ -282,7 +288,14 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             )
 
             s3_url = f"s3://{self.config.options.bucket_name}/{s3_key}"
-            ASH_LOGGER.info(f"Successfully uploaded report to {s3_url}")
+            # Redacted: the bucket and key prefix are configured, a configured
+            # option can come from the environment, and ash.log keeps this line.
+            ASH_LOGGER.info(
+                text_without_values(
+                    f"Successfully uploaded report to {s3_url}",
+                    self._environment_values(),
+                )
+            )
 
             # The documented local copy of the uploaded content.
             reports_dir = Path(self.context.output_dir) / "reports"
@@ -304,7 +317,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 indent=2,
             )
         except Exception as e:
-            error_msg = f"Error uploading to S3 after retries: {str(e)}"
+            error_msg = (
+                "Error uploading to S3 after retries: "
+                f"{error_text(e, self._environment_values())}"
+            )
             self._plugin_log(
                 error_msg,
                 level=logging.ERROR,

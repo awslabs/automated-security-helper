@@ -82,16 +82,16 @@ class TestMarkdownCompactMode:
     def test_compact_false_includes_metadata_section(
         self, model_with_scanners, test_plugin_context
     ):
-        """Default (non-compact) output contains the Scan Metadata section."""
+        """Default (non-compact) output contains the Scan metadata section."""
         output = self._render(model_with_scanners, test_plugin_context, compact=False)
-        assert "## Scan Metadata" in output
+        assert "## Scan metadata" in output
 
     def test_compact_true_omits_metadata_section(
         self, model_with_scanners, test_plugin_context
     ):
-        """Compact output omits the Scan Metadata section."""
+        """Compact output omits the Scan metadata section."""
         output = self._render(model_with_scanners, test_plugin_context, compact=True)
-        assert "## Scan Metadata" not in output
+        assert "## Scan metadata" not in output
 
     def test_compact_true_omits_footer(self, model_with_scanners, test_plugin_context):
         """Compact output omits the ASH footer link."""
@@ -176,9 +176,9 @@ class TestMarkdownCompactMode:
     ):
         """Compact mode still emits the report header and the summary table."""
         output = self._render(model_with_scanners, test_plugin_context, compact=True)
-        assert "# ASH Security Scan Report" in output
+        assert "# ASH security scan report" in output
         assert "## Summary" in output
-        assert "### Scanner Results" in output
+        assert "### Scanner results" in output
 
     @patch(
         "automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter.get_unified_scanner_metrics"
@@ -193,7 +193,7 @@ class TestMarkdownCompactMode:
         ]
 
         output = self._render(model_with_scanners, test_plugin_context, compact=True)
-        assert "### Scanner Results" in output
+        assert "### Scanner results" in output
         assert "bandit" not in output
         assert "checkov" not in output
 

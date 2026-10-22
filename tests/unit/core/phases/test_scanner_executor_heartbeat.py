@@ -164,9 +164,25 @@ class TestTimeoutIsNamedForOverridingScanners:
 
         assert container.status == ScannerStatus.ERROR
         first = container.raw_results["errors"][0]
-        assert first.startswith("slowpoke timed out after 1.0s on source"), first
+        assert first.startswith("slowpoke timed out after '1' s on source"), first
         # The original error is kept after it, not replaced.
         assert "No such file or directory" in first
+
+    def test_a_scan_that_returns_after_its_tool_timed_out_is_an_error(self, tmp_path):
+        """scan() returns its results as if the run were whole, after its tool was
+        stopped at the timeout. What the tool wrote by then is not the whole scan,
+        so the scan is ERROR, and its reason names the timeout."""
+        context = _context(tmp_path)
+        scanner = _scanner(context, sleep_for=30, tool_timeout=1, fail_after=False)
+
+        started = time.monotonic()
+        (container,) = _run(context, scanner)
+        assert time.monotonic() - started < 20, "the tool was not killed at its timeout"
+
+        assert scanner.scan_timed_out_after == 1.0, "the tool did not time out"
+        assert container.status == ScannerStatus.ERROR, container.status
+        first = container.raw_results["errors"][0]
+        assert "timed out after '1' s" in first, first
 
     def test_a_timeout_on_one_target_is_not_charged_to_the_next(self, tmp_path):
         context = _context(tmp_path)

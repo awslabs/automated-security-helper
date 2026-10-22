@@ -25,8 +25,7 @@ Installing dependencies for scanner plugin: bandit
 Running command: uv tool install bandit[sarif,toml]>=1.7.0,<2.0.0
 Command failed with exit code: 1
 Installing dependencies for scanner plugin: cdk-nag
-Running command: python3 -m pip install aws-cdk-lib<3.0.0,>=2.273.0 cdk-nag<4.0.0,>=3.0
-constructs<11.0.0,>=10.8
+Running command: python3 -m pip install aws-cdk-lib<3.0.0,>=2.273.0 cdk-nag<4.0.0,>=3.0 constructs<11.0.0,>=10.8
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: cfn-guard
 Running command: python3 -c import sys; from pathlib import Path; from
@@ -58,10 +57,7 @@ Installing dependencies for scanner plugin: semgrep
 Running command: uv tool install semgrep>=1.125.0,<2.0.0
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: syft
-Running command: python3 -c import sys; from pathlib import Path; from
-automated_security_helper.utils.download_utils import install_pinned_tool;
-install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) syft windows arm64
-<WORKSPACE>/bin
+Running command: python3 -c import sys; from pathlib import Path; from automated_security_helper.utils.download_utils import install_pinned_tool; install_pinned_tool(sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4])) syft windows arm64 <WORKSPACE>/bin
 Command succeeded with exit code: 0
 Installing dependencies for scanner plugin: trivy
 Installing dependencies for scanner plugin: zizmor
@@ -110,7 +106,8 @@ Installing dependencies for reporter plugin: yaml
 │ detect-secrets, gitleaks, jupyter, opengrep, semgrep, syft, trivy, zizmor                        │
 │ No install path on this platform: cfn-nag, detect-secrets, grype, npm-audit, opengrep, trivy     │
 │ Install ran but tool not found on PATH: bandit                                                   │
+│ Not available on this platform: semgrep (semgrep publishes no Windows build)                     │
 │                                                                                                  │
-│ 1 install command(s) failed                                                                      │
+│ 1 install command(s) failed; needed tool(s) still absent after install: bandit, grype, npm-audit │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 1]

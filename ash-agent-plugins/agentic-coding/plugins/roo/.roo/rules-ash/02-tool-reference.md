@@ -14,7 +14,7 @@ Starts a scan asynchronously. Returns a `scan_id` immediately — the scan conti
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `source_dir` | string \| null | current dir | Absolute path to scan |
-| `severity_threshold` | string | `"MEDIUM"` | Findings below this are filtered out at scan time |
+| `severity_threshold` | string \| null | the config's | Least severe finding that counts as actionable, any case; it can make the config's `global_settings.severity_threshold` stricter for this scan, never looser |
 | `config_path` | string \| null | `null` | Custom config path. When not set: the profile this session bound with `select_profile`, else the config ASH discovers in the source directory, else the file `ASH_CONFIG` names in the server's environment, else the built-in defaults |
 | `clean_output` | boolean | `true` | Wipe stale reports before starting |
 
@@ -38,7 +38,7 @@ Returns:
 
 The `directory_path` field tells you the resolved absolute path the server is scanning — derive `output_dir` for `get_scan_results` from this value (`<directory_path>/.ash/ash_output`) rather than constructing it independently.
 
-**Heads-up:** the server's own docstring and the `important.next_steps` array suggest polling `progress['is_complete']`. This is incomplete advice — `is_complete` stays `False` for cancelled scans. Always check `status` independently. (See `get_scan_progress` below.)
+Poll `get_scan_progress` until `is_complete` is `true`, then read `status`. `is_complete` is `true` for every ending, including `failed` and `cancelled`. (See `get_scan_progress` below.)
 
 **A refused config keeps its own `error_type`.** The scan does not start, and the response is `success: false` with one of these `error_type` values and the reason in `error`:
 
@@ -67,21 +67,25 @@ Returns:
   "start_time": "<iso8601>",
   "end_time": "<iso8601 | null>",
   "status": "pending | running | completed | incomplete | failed | cancelled",
-  "severity_threshold": "MEDIUM",
+  "severity_threshold": "<the threshold the scan was judged by; null until it finishes when none was named>",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
+  "results_available": bool,
+  "output_holds_previous_results": bool,
   "coverage_complete": "bool | null",
   "incomplete_scanners": [
     { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
   ],
   "no_scanner_ran": bool,
-  "incomplete_converters": [{ "converter": "...", "reason": "..." }],
+  "incomplete_converters": [{ "converter": "...", "reason": "...", "failed_input_kinds": ["..."] }],
   "unevaluated_rules": ["..."],
   "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
+  "finished_scanners": int,
   "total_scanners": int,
+  "scanner_status_counts": { "passed": int, "failed": int, "skipped": int, "running": int, "pending": int },
   "total_findings": int,
   "severity_counts": { "critical": int, "high": int, "medium": int, "low": int, "info": int, "suppressed": int },
   "scanners": {
@@ -92,13 +96,15 @@ Returns:
 }
 ```
 
-There is no overall percentage field. To compute progress, use `completed_scanners / total_scanners` — but **guard against `total_scanners == 0`** during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
+There is no overall percentage field. To compute progress, use `finished_scanners / total_scanners`, which counts every scanner that ended; `completed_scanners` counts those that PASSED only — but **guard against `total_scanners == 0`** during the pre-flight phase (before any scanner has registered). Show "initializing" or 0% when `total_scanners` is zero.
 
 There is no top-level `duration` field — derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
-**`is_complete` does not flip to `True` for cancelled scans** — it returns `True` for `completed` and `incomplete`, and for `failed` once a results file exists. Always check `status` independently: stop polling when `status` is `completed`, `incomplete`, `failed`, or `cancelled`. Polling on `is_complete` alone will loop forever on a cancelled scan.
+**`is_complete` is `true` once the scan has ended**, whatever the ending: `completed`, `incomplete`, `failed` or `cancelled`. It is decided by the scan's state alone, never by a results file on disk, which can be a previous scan's. `results_available` is `true` for `completed` and `incomplete`, the scans whose results `get_scan_results` can read.
 
-**`incomplete` is terminal, with partial coverage.** The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed or left no readable results. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
+**A failed or cancelled scan leaves the previous scan's results in place.** ASH puts them back in `output_directory`, and `output_holds_previous_results` is then `true` and the scanner fields are empty, because those files are not this scan's. `get_scan_results` on that directory reads the previous scan's results.
+
+**`incomplete` is terminal, with partial coverage.** The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run or could not convert some of its inputs, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed or left no readable results. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
 
 **Status enum:** the documented values are `pending | running | completed | incomplete | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
 
@@ -112,7 +118,7 @@ Fetch finalized results with filtering. Run only after `get_scan_progress` repor
 | `filter_level` | string | `"full"` | `full`, `summary`, `minimal` |
 | `scanners` | string | all | Comma-separated subset |
 | `severities` | string | all | `critical,high,medium,low,info` |
-| `actionable_only` | boolean | `false` | Drop suppressed findings |
+| `actionable_only` | boolean | `false` | Keep only the actionable findings, the ones behind exit code 2: unsuppressed and at or above the severity threshold the scan was judged by (a scanner's own where its config sets one). Drop the rest and add `findings`, a flat list of them that honors `scanners` and `severities` (`full` level only) |
 
 Returns full or filtered findings depending on `filter_level`.
 
@@ -146,19 +152,21 @@ No parameters. Returns a list of scan summaries.
 
 ## cancel_scan
 
-Stop a running scan and free resources.
+Stop a running scan. The scanner running at the time is stopped, no further scanner starts, and no reports or results file are written after the cancel.
 
 | Param | Type | Notes |
 |-------|------|-------|
 | `scan_id` | string | The scan to stop |
 
-Returns confirmation.
+Returns `success: true` and `status: cancelled`. A scan that already finished cannot be cancelled: `success` is `false` and `status` is the status it finished with.
+
+The status is `cancelled` at once, while the scan takes up to about 10 seconds to stop and put the previous results back. Until then a new `run_ash_scan` of the same directory is refused as still stopping; retry after a few seconds.
 
 ## check_installation
 
-Verify ASH is installed and the MCP server can spawn it. Run before the first scan in a session if you're unsure of the install state.
+Report whether ASH can scan: its version, and for each built-in scanner whether its tool is available. Run before the first scan in a session if you're unsure of the install state. Each scanner's check may run its tool, so the call takes seconds.
 
-No parameters. Returns version string and feature flags.
+No parameters. Returns `installed` (at least one enabled scanner can run), `ready` (all of them can), `version`, `scanners` (name, enabled, `dependencies_satisfied`, version) and the enabled scanners in `missing_dependencies` and `undetermined_dependencies`.
 
 ## clear_source
 
@@ -181,7 +189,7 @@ Return structured details for a single finding by ID.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
+| `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-880359fd90e1"). |
 | `results_path` | string \| null | `null` | Optional path to the output directory containing ash_aggregated_results.json. Defaults to <cwd>/.ash/ash_output. |
 
 ## get_config
@@ -191,7 +199,8 @@ Get the resolved ASH config (defaults + user overrides merged).
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `config_path` | string \| null | `null` | Optional explicit path to config file. If None, auto-discovers. |
-| `raw` | boolean | `false` | If True, returns the user file contents without merging defaults. |
+| `raw` | boolean | `false` | If True, returns the file's contents as written, without merging defaults or reading the environment. A value the config's loader would read from the environment (an `!ENV` value, or an unquoted `${VAR:default}`) comes back as `!ENV ` and the reference, never as its value; a quoted string that only looks like a reference comes back as written. |
+| `search_dir` | string \| null | `null` | The directory the caller's scan will target (scan_directory's directory_path). With config_path None it is where the config is discovered; with a named config_path it is the target the file is judged for, so the answer refuses exactly what a scan of that target refuses -- an entry such a scan drops with a warning never refuses the answer. Without it, a named file is judged for this session's delivered source, or else the server's working directory. |
 
 A config this session may not read, or one a client delivered that the server refuses, returns `success: false` with `error_type` `config_input_not_permitted`, `config_field_denied`, `config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` does for the same file.
 
@@ -199,7 +208,7 @@ A config this session may not read, or one a client delivered that the server re
 
 List the config profiles the operator registered at server startup.
 
-No parameters. Returns the config profiles registered at server startup with `ash mcp --profile NAME=path`. Without `--profile` the list is empty.
+No parameters. Returns the config profiles the operator registered at server startup, each with `ash mcp --profile NAME=path/to/ash.yaml` (repeatable). A client cannot register one; an empty list means the operator registered none.
 
 ## list_scanners
 
@@ -233,7 +242,7 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `scanners` | array \| null | `null` | Restrict every project to these scanner names. |
 | `excluded_scanners` | array \| null | `null` | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
-| `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
+| `clean_output` | boolean | `true` | Hide each project's previous results once the scan has its directory. Either way they are put back for a project whose scan does not finish. A scan refused because a project already has a scan touches nothing in any project's output. |
 | `profile` | string \| null | `null` | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. The fields the profile sets are final for every project, and a project's own config fills the rest. |
 
 ## select_profile
@@ -259,6 +268,8 @@ Clone a repository into this session's workspace and make it the scan target.
 
 Refused while a scan of this session is running, because the clone would replace the tree and config files that scan is reading. The response is `success: false`, `error_type: source_delivery_busy`, and `error` set to `a scan of this session is running; change the delivered source after it finishes`. Deliver the source again once `get_scan_progress` reports a terminal status.
 
+A refusal or a git failure returns `success: false` with an `error_type`: `clone_url_not_permitted` (a url beginning with `-` or using the `ext::` transport), `clone_ref_not_permitted` (a ref beginning with `-`), `invalid_clone_depth`, `invalid_session_id`, `scan_target_not_permitted` (a local path or `file://` url outside the scan roots), `git_clone_failed` or `git_checkout_failed` (git's own message is in `error`), or `session_workspace_unavailable` (the session's workspace directory could not be created).
+
 ## set_source_zip_chunk
 
 Upload one base64 chunk of a zipped source tree.
@@ -271,6 +282,8 @@ Upload one base64 chunk of a zipped source tree.
 | `last` | boolean | `true` on the final chunk |
 
 Pair with `set_source_zip_finalize`, which verifies the reassembled archive against `expected_sha256` before extracting it. A chunked upload that is never finalized is not a scan target.
+
+When the session's workspace directory cannot be created, both upload tools return `success: false` with `error_type` `session_workspace_unavailable`.
 
 ## set_source_zip_finalize
 
@@ -319,4 +332,4 @@ Read these via the standard MCP resource read mechanism for context-free help.
 
 `CRITICAL` > `HIGH` > `MEDIUM` > `LOW` > `INFO` > `SUPPRESSED`
 
-`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks).
+`actionable_only=True` drops `SUPPRESSED` findings (false positives, accepted risks) and findings below the scan's severity threshold, which are reported but do not fail the scan.

@@ -136,6 +136,16 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             # fact the counts in the row cannot convey.
             unconverted = "conversion incomplete: " + ", ".join(converters)
             detail = f"{detail}; {unconverted}" if detail else unconverted
+        stale = [
+            str(record.get("name"))
+            for record in (project.stale_content_databases or [])
+            if isinstance(record, dict) and record.get("name")
+        ]
+        if stale:
+            # Its own note, as in a single scan: the scanner ran, against a
+            # database past its bound, and is not among those that did not complete.
+            dated = "stale content database: " + ", ".join(stale)
+            detail = f"{detail}; {dated}" if detail else dated
 
         rows.append(
             {

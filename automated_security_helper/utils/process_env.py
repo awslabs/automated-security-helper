@@ -57,6 +57,36 @@ def snapshot_environ() -> Dict[str, str]:
         return dict(os.environ)
 
 
+#: The variables that set how a child lays text out and colors it for a terminal.
+#: uv wraps its messages at the caller's COLUMNS and colors them under FORCE_COLOR
+#: or CLICOLOR_FORCE even into a pipe (measured with uv 0.13), so text ASH parses
+#: came back split across lines or wrapped in escape codes.
+DISPLAY_VARIABLES = (
+    "COLUMNS",
+    "LINES",
+    "FORCE_COLOR",
+    "CLICOLOR_FORCE",
+    "TTY_COMPATIBLE",
+    "TTY_INTERACTIVE",
+)
+
+
+def environ_for_parsed_output(
+    env: Optional[Mapping[str, str]] = None,
+) -> Dict[str, str]:
+    """The environment for a child whose output ASH parses: ``env``, or a snapshot
+    of the environment when it is None, without ``DISPLAY_VARIABLES`` and with
+    ``NO_COLOR=1``, which stops uv's color even alongside FORCE_COLOR.
+
+    A new dict; ``env`` is left as it was.
+    """
+    parsed = dict(env) if env is not None else snapshot_environ()
+    for name in DISPLAY_VARIABLES:
+        parsed.pop(name, None)
+    parsed["NO_COLOR"] = "1"
+    return parsed
+
+
 def apply_environ_overrides(
     overrides: Mapping[str, Optional[str]],
 ) -> Dict[str, Optional[str]]:

@@ -34,7 +34,7 @@
 # ---
 # name: test_malformed_base_oci_layout
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'runner_calls': list([
     ]),
     'stderr': '''
@@ -49,14 +49,26 @@
 # ---
 # name: test_no_runner_found
   dict({
-    'exit_code': 1,
+    'exit_code': 3,
     'runner_calls': list([
     ]),
-    'stderr': '',
-    'stdout': '''
-      Unable to resolve an OCI_RUNNER -- exiting
+    'stderr': '''
+      ERROR: Unable to resolve an OCI_RUNNER: none of finch, docker, nerdctl or podman is on PATH. Install one, or set OCI_RUNNER or pass --oci-runner.
   
     ''',
+    'stdout': '',
+  })
+# ---
+# name: test_option_without_its_value
+  dict({
+    'exit_code': 3,
+    'runner_calls': list([
+    ]),
+    'stderr': '''
+      ERROR: --oci-runner needs a value.
+  
+    ''',
+    'stdout': '',
   })
 # ---
 # name: test_run_status_is_the_wrapper_status[0]
@@ -102,5 +114,17 @@
       (container output)
   
     ''',
+  })
+# ---
+# name: test_source_dir_that_does_not_exist
+  dict({
+    'exit_code': 5,
+    'runner_calls': list([
+    ]),
+    'stderr': '''
+      ERROR: Source directory does not exist: does-not-exist
+  
+    ''',
+    'stdout': '',
   })
 # ---

@@ -210,12 +210,15 @@ class TestReportEntryPoint:
 
         assert isinstance(reporter.config, BedrockSummaryReporterConfig)
         assert reporter.config.options.model_id == PRIMARY_MODEL
-        assert result == "No actionable findings available in the SARIF report."
+        assert "No scanners completed" in result
+        assert "No findings matched the analysis filters" in result
 
     def test_a_configured_profile_reaches_the_runtime_session(
         self, context, monkeypatch
     ):
-        reporter = make_reporter(context, aws_profile="a-named-profile")
+        reporter = make_reporter(
+            context, aws_profile="a-named-profile", output_markdown=False
+        )
         captured = {}
 
         def _session(**kwargs):
@@ -223,8 +226,13 @@ class TestReportEntryPoint:
             return _SessionOf(RuntimeDouble())
 
         monkeypatch.setattr(f"{MODULE}.boto3.Session", _session)
+        monkeypatch.setattr(
+            BedrockSummaryReporter,
+            "_run_structured_report",
+            lambda *args: "Fixture analysis",
+        )
 
-        reporter.report(sarif_model([]))
+        reporter.report(sarif_model([finding()]))
 
         assert captured == {
             "profile_name": "a-named-profile",
@@ -238,9 +246,9 @@ class TestReportEntryPoint:
         runtime = RuntimeDouble()
         monkeypatch.setattr(f"{MODULE}.boto3.Session", lambda **kw: _SessionOf(runtime))
 
-        assert reporter.report(sarif_model([])) == (
-            "No actionable findings available in the SARIF report."
-        )
+        report = reporter.report(sarif_model([]))
+        assert "No scanners completed" in report
+        assert "No findings matched the analysis filters" in report
         assert runtime.calls == [], "the model must not be invoked for zero findings"
 
 
@@ -252,6 +260,33 @@ class _SessionOf:
 
     def client(self, service, **kwargs):
         return self._client
+
+
+class _ControlPlaneSessions:
+    """A boto3.Session stand-in that records what each session was built with
+    and each control-plane ("bedrock") client built from one. Any other
+    service gets ``runtime``."""
+
+    def __init__(self, runtime=None):
+        self.runtime = runtime
+        self.sessions: list = []
+        self.control_clients: list = []
+
+    def __call__(self, **kwargs):
+        self.sessions.append(kwargs)
+        return _RecordedSession(self)
+
+
+class _RecordedSession:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def client(self, service, **kwargs):
+        if service == "bedrock":
+            control = object()
+            self._owner.control_clients.append(control)
+            return control
+        return self._owner.runtime
 
 
 class TestExtractFindings:
@@ -318,6 +353,7 @@ class TestIndexedFinding:
             "index": 1,
             "rule_id": "R1",
             "level": "warning",
+            "severity": "MEDIUM",
             "message": "a message",
             "locations": [{"file": "src/ok.py", "startLine": 3, "endLine": 4}],
         }
@@ -327,10 +363,13 @@ class TestIndexedFinding:
 
         entry = reporter._make_indexed_finding(9, {})
 
+        # severity: a finding without a level grades MEDIUM, the landed
+        # level-less contract (ea4b6c5c63), not an INFO placeholder.
         assert entry == {
             "index": 9,
             "rule_id": "Unknown",
             "level": "none",
+            "severity": "MEDIUM",
             "message": "No description available",
             "locations": [],
         }
@@ -393,9 +432,9 @@ class TestTableOfContents:
             compliance_frameworks=["a-framework"],
         )
 
-        assert "Compliance Impact" not in without._build_toc([])
+        assert "Compliance impact" not in without._build_toc([])
         assert (
-            "1. [Compliance Impact](#compliance-impact)"
+            "1. [Compliance impact](#compliance-impact)"
             in with_frameworks._build_toc([])
         )
 
@@ -406,9 +445,9 @@ class TestTableOfContents:
 
         toc = reporter._build_toc([{"level": "error"}, {"level": "note"}])
 
-        assert "[Error Level Findings](#error-level-findings)" in toc
-        assert "[Note Level Findings](#note-level-findings)" in toc
-        assert "warning-level-findings" not in toc
+        assert "[Critical findings](#critical-findings)" in toc
+        assert "[Low findings](#low-findings)" in toc
+        assert "medium-findings" not in toc
 
     def test_detailed_findings_is_listed_unless_excluded(self, context):
         included = make_reporter(context, include_sections=[])
@@ -416,8 +455,8 @@ class TestTableOfContents:
             context, include_sections=[], exclude_sections=["detailed_findings"]
         )
 
-        assert "[Finding Details](#finding-details)" in included._build_toc([])
-        assert "Finding Details" not in excluded._build_toc([])
+        assert "[Finding details](#finding-details)" in included._build_toc([])
+        assert "Finding details" not in excluded._build_toc([])
 
 
 class TestFindingDetails:
@@ -433,7 +472,7 @@ class TestFindingDetails:
 
         # Only the index table truncates; the expandable details below carry the
         # message in full, so the check has to be scoped to the table.
-        index_table, marker, details = report.partition("### Full Finding Details")
+        index_table, marker, details = report.partition("### Evidence")
         assert marker, "the report must have a full-details section"
         assert "L" * 47 + "..." in index_table
         assert "L" * 48 + "..." not in index_table, (
@@ -473,11 +512,11 @@ class TestFindingDetails:
         # The Raw JSON block always embeds the original finding, snippet and
         # all, so the marker -- not the snippet text -- is what distinguishes the
         # two configurations.
-        assert "**Code Snippet**:" not in without._render_finding_details(
+        assert "Code snippet:" not in without._render_finding_details(
             [raw], [], indexed
         )
         rendered = with_snippets._render_finding_details([raw], [], indexed)
-        assert "**Code Snippet**:" in rendered
+        assert "Code snippet:" in rendered
         assert "```\nSNIPPET-LINE-FROM-SCANNER\n```" in rendered, (
             "the snippet is rendered as a fenced block, not just dumped in JSON"
         )
@@ -499,8 +538,8 @@ class TestFindingDetails:
             ],
         )
 
-        assert "| 1 | R1 | Error | src/app.py | 4-6 | m |" in report
-        assert "**Location**: src/app.py (lines 4-6)" in report
+        assert "| 1 | R1 | CRITICAL | src/app.py | 4-6 | m |" in report
+        assert "Location: src/app.py (lines 4-6)" in report
 
     def test_a_single_line_finding_shows_one_number(self, context):
         reporter = make_reporter(context)
@@ -563,8 +602,10 @@ class TestStructuredReportSections:
         )
 
         assert seen["count"] == 2, "the raw findings are handed to the summarizer"
-        assert "## Executive Summary" in report
-        assert "<executive_summary>" in report
+        assert "## Executive summary" in report
+        # The stubbed answer, with its "<" written as text as every model
+        # answer's is.
+        assert "&lt;executive_summary>" in report
 
     def test_flat_rendering_is_used_when_grouping_is_off(self, context, stub_sections):
         reporter = make_reporter(
@@ -582,8 +623,8 @@ class TestStructuredReportSections:
         assert stub_sections == ["findings_flat"], (
             "flat mode makes one call, not one per severity"
         )
-        assert "## Findings by Severity" in report
-        assert "### Error Level Findings" not in report
+        assert "## Findings by severity" in report
+        assert "### Critical findings" not in report
 
     def test_grouped_rendering_makes_one_call_per_present_severity(
         self, context, stub_sections
@@ -604,11 +645,11 @@ class TestStructuredReportSections:
             [],
         )
 
-        assert stub_sections == ["severity_error", "severity_note"], (
+        assert stub_sections == ["severity_critical", "severity_low"], (
             "severities are emitted in fixed order, and only those present"
         )
-        assert "### Error Level Findings" in report
-        assert "### Note Level Findings" in report
+        assert "### Critical findings" in report
+        assert "### Low findings" in report
 
     def test_compliance_impact_section_requires_frameworks(
         self, context, stub_sections
@@ -625,7 +666,7 @@ class TestStructuredReportSections:
             RuntimeDouble(), sarif_model([]), [{"level": "error"}], [], []
         )
 
-        assert "## Compliance Impact" in report
+        assert "## Compliance impact" in report
         assert stub_sections == ["compliance_impact"]
 
     def test_compliance_impact_is_omitted_without_frameworks(
@@ -643,7 +684,7 @@ class TestStructuredReportSections:
             RuntimeDouble(), sarif_model([]), [{"level": "error"}], [], []
         )
 
-        assert "## Compliance Impact" not in report
+        assert "## Compliance impact" not in report
         assert stub_sections == []
 
 
@@ -710,7 +751,9 @@ class TestFlatFindingRendering:
             reporter.config.options,
         )
 
-        assert out == "<findings_flat>"
+        # The stubbed answer, with its "<" written as text as every model
+        # answer's is.
+        assert out == "&lt;findings_flat>"
 
 
 class TestFallbackModels:
@@ -718,16 +761,23 @@ class TestFallbackModels:
         self, context, monkeypatch
     ):
         reporter = make_reporter(context, enable_fallback_models=True)
-        monkeypatch.setattr(f"{MODULE}.boto3.client", lambda *a, **k: object())
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, label=None: (False, "not enabled"),
         )
         captured = {}
 
-        def _fallback(self, runtime, client, failed, messages, system, inference):
+        def _fallback(
+            self, runtime, client, failed, messages, system, inference, **walk
+        ):
             captured.update(
-                failed=failed, messages=messages, system=system, inference=inference
+                failed=failed,
+                messages=messages,
+                system=system,
+                inference=inference,
+                walk=walk,
             )
             return "fallback answer"
 
@@ -745,12 +795,18 @@ class TestFallbackModels:
             "maxTokens": reporter.config.options.max_tokens,
             "topP": reporter.config.options.top_p,
         }
+        # The walk is told the configured model was never called, and why.
+        assert captured["walk"] == {
+            "primary_error": "not enabled",
+            "primary_called": False,
+        }
 
     def test_an_invalid_primary_without_fallback_returns_an_error_string(
         self, context, monkeypatch
     ):
         reporter = make_reporter(context, enable_fallback_models=False)
-        monkeypatch.setattr(f"{MODULE}.boto3.client", lambda *a, **k: object())
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
             lambda client, model, label=None: (False, "not enabled"),
@@ -773,7 +829,7 @@ class TestFallbackModels:
         monkeypatch.setattr(f"{MODULE}.get_fallback_model", lambda m: chain.get(m))
         monkeypatch.setattr(
             f"{MODULE}.validate_bedrock_model",
-            lambda client, model: (model == FALLBACK_TWO, "unavailable"),
+            lambda client, model, values=(): (model == FALLBACK_TWO, "unavailable"),
         )
         tried = []
 
@@ -797,7 +853,8 @@ class TestFallbackModels:
         chain = {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: None}
         monkeypatch.setattr(f"{MODULE}.get_fallback_model", lambda m: chain.get(m))
         monkeypatch.setattr(
-            f"{MODULE}.validate_bedrock_model", lambda client, model: (True, None)
+            f"{MODULE}.validate_bedrock_model",
+            lambda client, model, values=(): (True, None),
         )
         monkeypatch.setattr(
             BedrockSummaryReporter,
@@ -809,8 +866,71 @@ class TestFallbackModels:
             RuntimeDouble(), object(), PRIMARY_MODEL, [], [], {}
         )
 
-        assert out == f"*Error: No suitable fallback model found for {FALLBACK_ONE}*", (
-            "a failing fallback recurses, and exhaustion is reported, not retried forever"
+        assert out == (
+            "*Error: No suitable fallback model found for "
+            f"{PRIMARY_MODEL} (called: {PRIMARY_MODEL}, {FALLBACK_ONE})*"
+        ), (
+            "a failing fallback walks on, exhaustion is reported, not retried "
+            "forever -- and the message names the model the operator "
+            "configured plus the walk, not the last chain member visited"
+        )
+
+    def test_the_real_chain_exhausts_instead_of_recursing(self, context, monkeypatch):
+        """The real get_fallback_model falls through to its default model for a
+        chain's last member, and the default's own chain walks back around
+        (micro -> default -> lite -> micro). With no model available the walk
+        has to end in the no-fallback error, not recurse until the interpreter
+        gives out. The validated models are recorded, so the cell cannot pass
+        without the walk: if get_fallback_model ever answers None for an
+        unknown id, the one-member record fails here instead of the cell
+        passing on the first step."""
+        reporter = make_reporter(context)
+        validated = []
+
+        def _validate(client, model, values=()):
+            validated.append(model)
+            return (False, "unavailable")
+
+        monkeypatch.setattr(f"{MODULE}.validate_bedrock_model", _validate)
+
+        out = reporter._try_fallback_models(
+            RuntimeDouble(), object(), reporter.config.options.model_id, [], [], {}
+        )
+
+        assert out.startswith("*Error: No suitable fallback model found")
+        assert len(set(validated)) >= 3, validated
+        assert len(validated) == len(set(validated)), (
+            "the walk visited a model twice instead of stopping on the repeat",
+            validated,
+        )
+
+    def test_the_real_chain_exhausts_when_every_call_fails(self, context, monkeypatch):
+        """The call-failed branch walks the same chain. With the real chain,
+        every model valid and every call failing, the walk has to end in the
+        no-fallback error through the same tried-set, not cycle. The called
+        models are recorded for the same reason as the cell above."""
+        reporter = make_reporter(context)
+        monkeypatch.setattr(
+            f"{MODULE}.validate_bedrock_model",
+            lambda client, model, values=(): (True, None),
+        )
+        called = []
+
+        def _call(self, runtime, model_id, messages, system, inference):
+            called.append(model_id)
+            return "*Error: throttled*"
+
+        monkeypatch.setattr(BedrockSummaryReporter, "_try_model_call", _call)
+
+        out = reporter._try_fallback_models(
+            RuntimeDouble(), object(), reporter.config.options.model_id, [], [], {}
+        )
+
+        assert out.startswith("*Error: No suitable fallback model found")
+        assert len(set(called)) >= 3, called
+        assert len(called) == len(set(called)), (
+            "the walk called a model twice instead of stopping on the repeat",
+            called,
         )
 
     def test_no_fallback_for_the_failed_model_is_reported_immediately(
@@ -823,7 +943,10 @@ class TestFallbackModels:
             RuntimeDouble(), object(), PRIMARY_MODEL, [], [], {}
         )
 
-        assert out == f"*Error: No suitable fallback model found for {PRIMARY_MODEL}*"
+        assert out == (
+            "*Error: No suitable fallback model found for "
+            f"{PRIMARY_MODEL} (called: {PRIMARY_MODEL})*"
+        )
 
     def test_a_fallback_equal_to_the_failed_model_is_not_retried(
         self, context, monkeypatch
@@ -836,7 +959,628 @@ class TestFallbackModels:
             RuntimeDouble(), object(), PRIMARY_MODEL, [], [], {}
         )
 
-        assert out == f"*Error: No suitable fallback model found for {PRIMARY_MODEL}*"
+        assert out == (
+            "*Error: No suitable fallback model found for "
+            f"{PRIMARY_MODEL} (called: {PRIMARY_MODEL})*"
+        )
+
+
+class _RoutingRuntime:
+    """converse() that errors for the primary model and answers for any other.
+
+    Throttling is a terminal error for try_call (no parameter to drop), so the
+    primary's call comes back as one "*Error ...*" string, the shape a report
+    would otherwise write into its sections.
+    """
+
+    def __init__(self, failing_model: str, answer: str = "fallback content"):
+        self.failing_model = failing_model
+        self.answer = answer
+        self.models: list = []
+
+    def converse(self, **kwargs):
+        self.models.append(kwargs["modelId"])
+        if kwargs["modelId"] == self.failing_model:
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ThrottlingException", "Message": "slow down"}},
+                "Converse",
+            )
+        return {
+            "output": {
+                "message": {"role": "assistant", "content": [{"text": self.answer}]}
+            }
+        }
+
+
+class TestRealPathFallback:
+    """The report path itself falls back, not only the shims.
+
+    validate_plugin_dependencies answers True for a run whose configured model
+    is invalid but whose fallback is available, so the run that follows has to
+    keep that promise: a report call whose configured model errors walks the
+    fallback chain and returns the fallback's content, instead of writing the
+    primary's "*Error ...*" string into every section.
+    """
+
+    def test_a_simple_report_falls_back_when_the_primary_errors(
+        self, context, monkeypatch
+    ):
+        reporter = make_reporter(context)
+        chain = {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: None}
+        monkeypatch.setattr(f"{MODULE}.get_fallback_model", lambda m: chain.get(m))
+        monkeypatch.setattr(
+            f"{MODULE}.validate_bedrock_model",
+            lambda client, model, values=(): (True, None),
+        )
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == "fallback content", out
+        assert runtime.models[0] == PRIMARY_MODEL, runtime.models
+        assert FALLBACK_ONE in runtime.models, runtime.models
+
+    def test_with_fallback_disabled_the_error_string_stays(self, context, monkeypatch):
+        """The control: without enable_fallback_models nothing walks, and the
+        primary's error string is the report content, as before."""
+        reporter = make_reporter(context, enable_fallback_models=False)
+        chain = {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: None}
+        monkeypatch.setattr(f"{MODULE}.get_fallback_model", lambda m: chain.get(m))
+        monkeypatch.setattr(
+            f"{MODULE}.validate_bedrock_model",
+            lambda client, model, values=(): (True, None),
+        )
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out.startswith("*Error"), out
+        assert runtime.models == [PRIMARY_MODEL], runtime.models
+
+    # Each case drives one report runner and names the call sites it reaches
+    # (the nine model calls on the report path), with the number of model
+    # calls those sites make. Together the cases reach every site.
+    _SITES = [
+        pytest.param(
+            {},
+            lambda r, rt: r._run_simple_report(rt, sarif_model([]), [], []),
+            1,
+            id="simple-summary",
+        ),
+        pytest.param(
+            {
+                "include_sections": ["executive_summary"],
+                "add_table_of_contents": False,
+                "exclude_sections": ["detailed_findings"],
+            },
+            lambda r, rt: r._run_structured_report(
+                rt, sarif_model([]), [{"level": "error"}], [], []
+            ),
+            1,
+            id="structured-section",
+        ),
+        pytest.param(
+            {
+                "include_sections": ["technical_analysis"],
+                "group_by_severity": True,
+                "add_table_of_contents": False,
+                "exclude_sections": ["detailed_findings"],
+            },
+            lambda r, rt: r._run_structured_report(
+                rt, sarif_model([]), [{"level": "error"}], [], []
+            ),
+            1,
+            id="by-severity",
+        ),
+        pytest.param(
+            {
+                "include_sections": ["technical_analysis"],
+                "group_by_severity": False,
+                "add_table_of_contents": False,
+                "exclude_sections": ["detailed_findings"],
+            },
+            lambda r, rt: r._run_structured_report(
+                rt, sarif_model([]), [{"level": "error"}], [], []
+            ),
+            1,
+            id="flat-findings",
+        ),
+        pytest.param(
+            {"include_sections": ["executive_summary", "technical_analysis"]},
+            lambda r, rt: r._write_markdown_files(
+                rt, sarif_model([]), [], [], "summary body"
+            ),
+            2,
+            id="markdown-executive-and-technical",
+        ),
+        pytest.param(
+            {"batch_processing": False},
+            lambda r, rt: r._process_findings_by_batch(
+                rt, sarif_model([]), [{"level": "error"}]
+            ),
+            1,
+            id="batch-unbatched",
+        ),
+        pytest.param(
+            {"batch_processing": True, "max_findings_to_analyze": 1},
+            lambda r, rt: r._process_findings_by_batch(
+                rt, sarif_model([]), [{"level": "error"}, {"level": "warning"}]
+            ),
+            3,
+            id="batch-each-batch-and-synthesis",
+        ),
+    ]
+
+    @pytest.mark.parametrize(("options", "run", "calls"), _SITES)
+    def test_every_report_call_site_falls_back(
+        self, context, monkeypatch, options, run, calls
+    ):
+        """Every model call on the report path goes through the fallback walk
+        when the configured model errors, not just one of them. The first call
+        walks: the configured model, then the fallback. The fallback that
+        answered is then the run's model, so each of the other ``calls - 1``
+        calls goes to it at once. A site that calls the model without the walk
+        calls the configured model again, which the list then shows."""
+        reporter = make_reporter(context, **options)
+        chain = {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: None}
+        monkeypatch.setattr(f"{MODULE}.get_fallback_model", lambda m: chain.get(m))
+        monkeypatch.setattr(
+            f"{MODULE}.validate_bedrock_model",
+            lambda client, model, values=(): (True, None),
+        )
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+
+        run(reporter, runtime)
+
+        assert runtime.models == [PRIMARY_MODEL, FALLBACK_ONE] + [FALLBACK_ONE] * (
+            calls - 1
+        ), runtime.models
+
+
+class _FailingPrimary:
+    """converse() that raises ``error`` for the configured model and answers
+    ``answer`` for any other."""
+
+    def __init__(self, error, answer="fallback content"):
+        self.error = error
+        self.answer = answer
+        self.models: list = []
+
+    def converse(self, **kwargs):
+        self.models.append(kwargs["modelId"])
+        if kwargs["modelId"] == PRIMARY_MODEL:
+            raise self.error
+        return {
+            "output": {
+                "message": {"role": "assistant", "content": [{"text": self.answer}]}
+            }
+        }
+
+
+def _client_error(code, message="it failed"):
+    return botocore.exceptions.ClientError(
+        {"Error": {"Code": code, "Message": message}}, "Converse"
+    )
+
+
+def _default_session_client(*args, **kwargs):
+    raise AssertionError(
+        "a client from boto3's default session ignores the configured aws_profile"
+    )
+
+
+class TestTheFallbackWalkContract:
+    """What the report path's walk does, beyond reaching the fallback."""
+
+    def _chain(self, monkeypatch, chain, valid):
+        monkeypatch.setattr(f"{MODULE}.get_fallback_model", lambda m: chain.get(m))
+        validated = []
+
+        def _validate(client, model, values=()):
+            validated.append((client, model))
+            return (model in valid, "unavailable")
+
+        monkeypatch.setattr(f"{MODULE}.validate_bedrock_model", _validate)
+        return validated
+
+    def test_the_walk_checks_models_with_the_configured_profile(
+        self, context, monkeypatch
+    ):
+        """The control-plane client the walk validates candidates with is
+        built from the same session as the runtime, the configured profile's,
+        never boto3's default session."""
+        reporter = make_reporter(context, aws_profile="a-named-profile")
+        validated = self._chain(
+            monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE}
+        )
+        sessions = _ControlPlaneSessions()
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == "fallback content", out
+        assert [client for client, _model in validated] == sessions.control_clients
+        assert sessions.sessions and all(
+            kwargs.get("profile_name") == "a-named-profile"
+            for kwargs in sessions.sessions
+        ), sessions.sessions
+
+    def test_the_control_plane_client_is_built_once_for_the_run(
+        self, context, monkeypatch
+    ):
+        """Three calls whose walks all find nothing build one control-plane
+        client between them, not one per call."""
+        reporter = make_reporter(
+            context, batch_processing=True, max_findings_to_analyze=1
+        )
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, set())
+        sessions = _ControlPlaneSessions()
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
+        default_clients = []
+        monkeypatch.setattr(
+            f"{MODULE}.boto3.client",
+            lambda *a, **k: default_clients.append(a) or object(),
+        )
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+
+        reporter._process_findings_by_batch(
+            runtime, sarif_model([]), [{"level": "error"}, {"level": "warning"}]
+        )
+
+        # The control: each of the three calls reached the configured model.
+        assert runtime.models.count(PRIMARY_MODEL) == 3, runtime.models
+        assert len(sessions.control_clients) + len(default_clients) == 1
+
+    def test_the_fallback_that_answered_is_the_runs_model(self, context, monkeypatch):
+        """After a fallback answers, the run's later calls go to it first; the
+        configured model, which failed, is not called again for each one."""
+        reporter = make_reporter(
+            context, batch_processing=True, max_findings_to_analyze=1
+        )
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+
+        reporter._process_findings_by_batch(
+            runtime, sarif_model([]), [{"level": "error"}, {"level": "warning"}]
+        )
+
+        assert runtime.models == [
+            PRIMARY_MODEL,
+            FALLBACK_ONE,
+            FALLBACK_ONE,
+            FALLBACK_ONE,
+        ]
+
+    def test_a_new_report_starts_from_the_configured_model(self, context, monkeypatch):
+        """The model a fallback found is the run's, not the reporter's: the
+        next report() begins with the configured model again. (Without the
+        cache, which would answer the second report from the first.)"""
+        reporter = make_reporter(context, enable_caching=False)
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        runtime = _RoutingRuntime(PRIMARY_MODEL)
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions(runtime))
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        model = sarif_model([finding()])
+
+        reporter.report(model)
+        first = list(runtime.models)
+        runtime.models.clear()
+        reporter.report(model)
+
+        assert first[:2] == [PRIMARY_MODEL, FALLBACK_ONE], first
+        assert runtime.models[:2] == [PRIMARY_MODEL, FALLBACK_ONE], runtime.models
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(_client_error("ExpiredTokenException"), id="expired-token"),
+            pytest.param(_client_error("UnrecognizedClientException"), id="bad-key"),
+            pytest.param(_client_error("InternalServerException"), id="internal"),
+            pytest.param(
+                _client_error("ServiceUnavailableException"), id="service-unavailable"
+            ),
+            pytest.param(
+                botocore.exceptions.EndpointConnectionError(
+                    endpoint_url="https://bedrock-runtime.invalid"
+                ),
+                id="no-connection",
+            ),
+            pytest.param(botocore.exceptions.NoCredentialsError(), id="no-credentials"),
+        ],
+    )
+    def test_an_error_no_model_can_fix_is_not_walked(self, context, monkeypatch, error):
+        """A failure of the credentials, the connection or the service is
+        returned as it is: another model would fail the same way, and the walk
+        would end in a "No suitable fallback model found" that hides it."""
+        reporter = make_reporter(context)
+        validated = self._chain(
+            monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE}
+        )
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = _FailingPrimary(error)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out.startswith("*Error"), out
+        assert "No suitable fallback model" not in out, out
+        assert runtime.models == [PRIMARY_MODEL], runtime.models
+        assert validated == [], validated
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                botocore.exceptions.ReadTimeoutError(
+                    endpoint_url="https://bedrock-runtime.invalid"
+                ),
+                id="read-timeout",
+            ),
+            pytest.param(
+                botocore.exceptions.ConnectionClosedError(
+                    endpoint_url="https://bedrock-runtime.invalid"
+                ),
+                id="connection-closed",
+            ),
+        ],
+    )
+    def test_a_call_that_failed_after_connecting_is_walked(
+        self, context, monkeypatch, error
+    ):
+        """A read that timed out, or a connection closed before the answer
+        came, failed after the request reached the service (botocore's
+        HTTPClientError, where no connection at all is its ConnectionError):
+        a slow model's failure, like ModelTimeoutException, so another model
+        is tried."""
+        reporter = make_reporter(context)
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = _FailingPrimary(error)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == "fallback content", out
+        assert runtime.models == [PRIMARY_MODEL, FALLBACK_ONE], runtime.models
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "AccessDeniedException",
+            "ResourceNotFoundException",
+            "ThrottlingException",
+            "ValidationException",
+            "ModelErrorException",
+            "ModelNotReadyException",
+            "ModelTimeoutException",
+        ],
+    )
+    def test_an_error_another_model_can_answer_is_walked(
+        self, context, monkeypatch, code
+    ):
+        """The control: a failure of the model itself walks on to the
+        fallback (the Converse errors that name the model, its access, its
+        quota or its limits)."""
+        reporter = make_reporter(context)
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = _FailingPrimary(_client_error(code, "Input is too long."))
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == "fallback content", out
+        assert runtime.models == [PRIMARY_MODEL, FALLBACK_ONE], runtime.models
+
+    def test_an_answer_that_starts_like_an_error_is_kept(self, context, monkeypatch):
+        """The model's own text is its answer whatever it starts with: an
+        answer opening in italics with "Error" is not a failed call."""
+        answer = "*Error handling in src/app.py swallows every exception.*"
+        reporter = make_reporter(context)
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = RuntimeDouble(text=answer)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == answer, out
+        assert [call["modelId"] for call in runtime.calls] == [PRIMARY_MODEL]
+
+    def test_a_fallbacks_answer_that_starts_like_an_error_is_kept(
+        self, context, monkeypatch
+    ):
+        answer = "*Error handling in src/app.py swallows every exception.*"
+        reporter = make_reporter(context)
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+        runtime = _FailingPrimary(_client_error("ThrottlingException"), answer)
+
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == answer, out
+
+    def test_exhaustion_keeps_the_configured_models_error_and_says_what_ran(
+        self, context, monkeypatch
+    ):
+        """When nothing answers, the message keeps why the configured model
+        failed, and separates the models that were called and failed from the
+        ones that were not available to call."""
+        reporter = make_reporter(context)
+        self._chain(
+            monkeypatch,
+            {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO},
+            {FALLBACK_TWO},
+        )
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+
+        class _Runtime:
+            models: list = []
+
+            def converse(self, **kwargs):
+                self.models.append(kwargs["modelId"])
+                code = (
+                    "AccessDeniedException"
+                    if kwargs["modelId"] == PRIMARY_MODEL
+                    else "ThrottlingException"
+                )
+                raise _client_error(code)
+
+        out = reporter._run_simple_report(_Runtime(), sarif_model([]), [], [])
+
+        assert out == (
+            "*Error: No suitable fallback model found for "
+            f"{PRIMARY_MODEL} (called: {PRIMARY_MODEL}, {FALLBACK_TWO}; "
+            f"unavailable: {FALLBACK_ONE}). The configured model's error: "
+            f"Access denied to model {PRIMARY_MODEL}. Check IAM permissions.*"
+        ), out
+
+    def test_the_walk_takes_no_visited_set_from_its_caller(self):
+        """Nothing hands the walk models it has already tried: the parameters
+        that once did are gone, so no unordered set can reorder the message."""
+        import inspect
+
+        assert (
+            "already_tried"
+            not in inspect.signature(BedrockSummaryReporter._walk_fallbacks).parameters
+        )
+        assert (
+            "tried"
+            not in inspect.signature(
+                BedrockSummaryReporter._try_fallback_models
+            ).parameters
+        )
+
+    def _run_model_then_fails(self, monkeypatch, second_fallback_answers: bool):
+        """A run whose configured model is denied, whose first fallback answers
+        once and is throttled after that, and whose second fallback answers
+        or is throttled too. Returns the reporter and the runtime."""
+        self._chain(
+            monkeypatch,
+            {PRIMARY_MODEL: FALLBACK_ONE, FALLBACK_ONE: FALLBACK_TWO},
+            {FALLBACK_ONE, FALLBACK_TWO},
+        )
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+
+        class _Runtime:
+            def __init__(self):
+                self.models: list = []
+
+            def converse(self, **kwargs):
+                model = kwargs["modelId"]
+                self.models.append(model)
+                if model == PRIMARY_MODEL:
+                    raise _client_error("AccessDeniedException", "primary denied")
+                if model == FALLBACK_ONE and self.models.count(FALLBACK_ONE) > 1:
+                    raise _client_error("ThrottlingException", "first fallback slowed")
+                if model == FALLBACK_TWO and not second_fallback_answers:
+                    raise _client_error("ThrottlingException", "second fallback slowed")
+                return {
+                    "output": {
+                        "message": {"role": "assistant", "content": [{"text": "ok"}]}
+                    }
+                }
+
+        return _Runtime()
+
+    def test_a_failing_run_model_resumes_the_walk_after_it(self, context, monkeypatch):
+        """The run's model stands for the run: when it fails in turn, the walk
+        goes on from the next model after it, and does not call the configured
+        model again, which already failed this run."""
+        reporter = make_reporter(context, enable_caching=False)
+        runtime = self._run_model_then_fails(monkeypatch, second_fallback_answers=True)
+
+        first = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+        called_first = list(runtime.models)
+        second = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert (first, second) == ("ok", "ok")
+        assert called_first == [PRIMARY_MODEL, FALLBACK_ONE], called_first
+        assert runtime.models[len(called_first) :] == [FALLBACK_ONE, FALLBACK_TWO]
+        assert reporter._run_model == FALLBACK_TWO
+
+    def test_exhaustion_after_the_run_model_keeps_both_errors(
+        self, context, monkeypatch
+    ):
+        """When the walk resumed after the run's model ends with nothing that
+        answers, the message keeps the configured model's error and the run
+        model's own, and counts both as called."""
+        reporter = make_reporter(context, enable_caching=False)
+        runtime = self._run_model_then_fails(monkeypatch, second_fallback_answers=False)
+
+        reporter._run_simple_report(runtime, sarif_model([]), [], [])
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out.startswith(
+            "*Error: No suitable fallback model found for "
+            f"{PRIMARY_MODEL} (called: {PRIMARY_MODEL}, {FALLBACK_ONE}, {FALLBACK_TWO})"
+        ), out
+        # Each error as the model client words it: the configured model's
+        # denial, then the run model's throttling, one sentence each.
+        assert (
+            f"The configured model's error: Access denied to model {PRIMARY_MODEL}. "
+            "Check IAM permissions. The run's fallback model "
+            f"{FALLBACK_ONE} then failed: Rate limit exceeded for model "
+            f"{FALLBACK_ONE}. Try again later.*"
+        ) in out, out
+
+    def test_a_shim_s_fallback_is_not_the_report_run_s_model(
+        self, context, monkeypatch
+    ):
+        """The run's model is the report run's (``report()`` resets it). A
+        fallback the backward-compatible shim's walk reached answers that call
+        only: a report path call after it starts from the configured model."""
+        reporter = make_reporter(context, enable_caching=False)
+        self._chain(monkeypatch, {PRIMARY_MODEL: FALLBACK_ONE}, {FALLBACK_ONE})
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", _ControlPlaneSessions())
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+
+        # The configured model is unavailable, so the shim walks to the fallback.
+        shimmed = reporter._call_bedrock(RuntimeDouble("shim answer"), "m", "s")
+        assert shimmed == "shim answer", shimmed
+
+        runtime = RuntimeDouble("report answer")
+        out = reporter._run_simple_report(runtime, sarif_model([]), [], [])
+
+        assert out == "report answer", out
+        assert reporter._run_model is None, reporter._run_model
+        assert [call["modelId"] for call in runtime.calls] == [PRIMARY_MODEL]
+
+    def test_each_shim_call_builds_its_control_plane_client_from_the_options(
+        self, context, monkeypatch
+    ):
+        """The shim keeps no control-plane client across calls: each one is
+        built from the profile and region the options hold then, and the
+        report run's cached client is not set by it."""
+        reporter = make_reporter(context, aws_profile="first-profile")
+        self._chain(monkeypatch, {}, {PRIMARY_MODEL})
+        sessions = _ControlPlaneSessions()
+        monkeypatch.setattr(f"{MODULE}.boto3.Session", sessions)
+        monkeypatch.setattr(f"{MODULE}.boto3.client", _default_session_client)
+
+        reporter._call_bedrock(RuntimeDouble(), "m", "s")
+        reporter.config.options.aws_profile = "second-profile"
+        reporter._call_bedrock(RuntimeDouble(), "m", "s")
+
+        assert [s.get("profile_name") for s in sessions.sessions] == [
+            "first-profile",
+            "second-profile",
+        ], sessions.sessions
+        assert len(sessions.control_clients) == 2, sessions.control_clients
+        assert reporter._control_client is None
 
 
 class TestModelInvocation:

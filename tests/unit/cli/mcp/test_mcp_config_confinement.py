@@ -27,6 +27,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,6 +36,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from automated_security_helper.cli.mcp import sandbox
+from tests.utils.scan_task_stubs import end_the_scans_scope_as_its_task_would
 from automated_security_helper.cli.mcp.sandbox import (
     ASH_MCP_ALLOWED_CONFIG_ROOTS_ENV,
     ASH_MCP_ALLOWED_ROOTS_ENV,
@@ -402,6 +405,13 @@ class TestRunAshScanConfinesTheChain:
         assert callable(gate)
         assert gate(layout.sibling.resolve()) is False
         assert gate(layout.in_grant_base.resolve()) is True
+        # The only caller that hands run_ash_scan a gate scans one directory in
+        # local mode, the one shape run_ash_scan accepts a gate for (it refuses
+        # a gate with a container or nix mode or a workspace plan).
+        from automated_security_helper.core.enums import RunMode
+
+        assert captured.get("mode") == RunMode.local
+        assert captured.get("workspace_plan") is None
 
     def test_every_config_read_in_a_scan_honors_the_gate(self, layout):
         """The orchestrator and the exit-code/workspace readers all pass it on."""
@@ -430,12 +440,261 @@ class TestRunAshScanConfinesTheChain:
             orchestrator.initialize()
 
 
+#: A config a scan of the target discovers, as a link to a file outside every
+#: root: where the link is, and what the outside file holds. Two of them stop
+#: parsing on the marker's line, whose position a refusal must not give.
+_LINKED_OUT = {
+    "ash-yaml-in-dot-ash": (
+        ".ash/.ash.yaml",
+        f"project_name: {_OUTSIDE_MARKER}\n",
+    ),
+    "ashrc-toml-that-does-not-parse": (
+        ".ashrc.toml",
+        f'project_name = "demo"\n{_OUTSIDE_MARKER} = = 1\n',
+    ),
+    "pyproject-that-does-not-parse": (
+        "pyproject.toml",
+        f'[tool.ash]\nproject_name = "{_OUTSIDE_MARKER}\n',
+    ),
+}
+
+
+@pytest.fixture
+def scans_started(monkeypatch) -> list:
+    """The scans scan_directory starts, none of which runs.
+
+    The runner is a stand-in that only gives back what a scan holds of its
+    session (``scan_claim``), as the real one does when it ends. Closed unrun,
+    the claim stayed taken, and a later test in the same worker that changed
+    this session's source was refused as if a scan were running.
+    """
+    from automated_security_helper.cli import mcp_tools
+
+    started: list = []
+
+    async def runner(**kwargs) -> None:
+        claim = kwargs.get("scan_claim")
+        if claim is not None:
+            claim.release_scan()
+
+    def record(scan_id, coroutine) -> None:
+        # The stand-in never awaits, so one step runs it to the end.
+        with pytest.raises(StopIteration):
+            coroutine.send(None)
+        started.append(scan_id)
+        # The real start holds the scan's log scope until its task is done;
+        # this stand-in's "task" is already done.
+        end_the_scans_scope_as_its_task_would()
+
+    monkeypatch.setattr(mcp_tools, "_run_scan_async", runner)
+    monkeypatch.setattr(mcp_tools, "_start_scan_task", record)
+    return started
+
+
+class TestScanDirectoryConfinesTheDiscoveredConfig:
+    """A config the scan discovers in its target is checked as a named one is.
+
+    For a remote caller, one linked out of the permitted roots must not be read all the
+    same: an outside file that parses would configure the scan, and one that does
+    not would fail the scan on it (were only an ``extends`` base checked). It is refused before it is read, as a
+    named config outside the roots is, with neither its path nor its contents.
+    """
+
+    @pytest.mark.parametrize("cell", _LINKED_OUT)
+    def test_a_discovered_config_linked_out_of_the_roots_is_refused(
+        self, layout, scans_started, cell
+    ):
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        relative, text = _LINKED_OUT[cell]
+        outside = layout.elsewhere / Path(relative).name
+        outside.write_text(text, encoding="utf-8")
+        link = layout.scan / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+
+        result = _run(
+            mcp_scan_directory(directory_path=str(layout.scan), session_id=_SESSION)
+        )
+
+        assert result["success"] is False, result
+        assert result["error_type"] == _CONFIG_REFUSED, result
+        assert scans_started == [], "the scan started with the outside config"
+        _assert_carries_nothing_from(result)
+        assert str(layout.elsewhere) not in json.dumps(result, default=str), result
+
+    @pytest.mark.parametrize("extends", ["absolute", "dot-dot", "link"])
+    def test_a_discovered_config_extending_out_of_the_roots_is_refused(
+        self, layout, scans_started, extends
+    ):
+        """The discovered file is in the roots and its ``extends`` base is not.
+
+        The chain is checked, not only the file: with a check of the file
+        alone these cells start the scan.
+        """
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        if extends == "absolute":
+            base = str(layout.far)
+        elif extends == "dot-dot":
+            base = os.path.relpath(layout.far, layout.scan / ".ash")
+        else:
+            link = layout.scan / "base.yaml"
+            link.symlink_to(layout.far)
+            base = "../base.yaml"
+        config = layout.scan / ".ash" / ".ash.yaml"
+        config.parent.mkdir()
+        config.write_text(f"extends: {json.dumps(base)}\n", encoding="utf-8")
+
+        result = _run(
+            mcp_scan_directory(directory_path=str(layout.scan), session_id=_SESSION)
+        )
+
+        assert result["success"] is False, result
+        assert result["error_type"] == _CONFIG_REFUSED, result
+        assert scans_started == [], "the scan started with the outside base"
+        _assert_carries_nothing_from(result)
+
+    @pytest.mark.parametrize("cell", _LINKED_OUT)
+    def test_a_link_out_to_a_missing_file_is_refused_like_one_to_a_present_file(
+        self, layout, scans_started, cell
+    ):
+        """Only candidates whose target was a file were checked, so a link to a
+        missing outside path started the scan where a link to a present one was
+        refused: the answer told whether that path exists on the server."""
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        relative, _text = _LINKED_OUT[cell]
+        link = layout.scan / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(layout.elsewhere / "not-there" / Path(relative).name)
+
+        result = _run(
+            mcp_scan_directory(directory_path=str(layout.scan), session_id=_SESSION)
+        )
+
+        assert result["success"] is False, result
+        assert result["error_type"] == _CONFIG_REFUSED, result
+        assert scans_started == [], "the scan started"
+        assert str(layout.elsewhere) not in json.dumps(result, default=str), result
+
+    def test_control_a_discovered_config_linked_inside_the_roots_starts_the_scan(
+        self, layout, scans_started
+    ):
+        from automated_security_helper.cli.mcp_tools import mcp_scan_directory
+
+        inside = layout.scan / "configs" / "ash.yaml"
+        inside.parent.mkdir()
+        inside.write_text("project_name: demo\n", encoding="utf-8")
+        link = layout.scan / ".ash" / ".ash.yaml"
+        link.parent.mkdir()
+        link.symlink_to(inside)
+
+        result = _run(
+            mcp_scan_directory(directory_path=str(layout.scan), session_id=_SESSION)
+        )
+
+        assert result["success"] is True, result
+        assert scans_started == [result["scan_id"]], result
+
+
 # ---------------------------------------------------------------------------
 # 3. get_config and validate_config
 # ---------------------------------------------------------------------------
 
 
+#: A pyproject.toml linked out of the roots, one that discovery parses and one it
+#: cannot; the second's parse error would quote its line and column.
+_LINKED_OUT_PYPROJECT = {
+    "parses": f'[tool.ash]\nproject_name = "{_OUTSIDE_MARKER}"\n',
+    "does-not-parse": f'[tool.ash]\nproject_name = "{_OUTSIDE_MARKER}\n',
+}
+
+#: The position a TOML parse error names, "(at line 2, column 15)".
+_PARSE_POSITION = re.compile(r"line \d+, column \d+")
+
+#: The resolved paths whose opens ``_record_opens`` records, and what it recorded.
+_WATCHED_OPENS: list = []
+_RECORDED_OPENS: list = []
+
+
+def _record_opens(event: str, args: Any) -> None:
+    if event != "open" or not _WATCHED_OPENS:
+        return
+    path = args[0]
+    if isinstance(path, (str, bytes, os.PathLike)):
+        try:
+            resolved = os.path.realpath(os.fsdecode(path))
+        except (OSError, ValueError):
+            return
+        if resolved in _WATCHED_OPENS:
+            _RECORDED_OPENS.append(resolved)
+
+
+sys.addaudithook(_record_opens)
+
+
+@pytest.fixture
+def opens_of():
+    """``opens_of(path)`` starts recording every open of ``path``; yields the record."""
+
+    def watch(path: Path) -> list:
+        _RECORDED_OPENS.clear()
+        _WATCHED_OPENS.append(os.path.realpath(path))
+        return _RECORDED_OPENS
+
+    yield watch
+    _WATCHED_OPENS.clear()
+    _RECORDED_OPENS.clear()
+
+
 class TestGetConfigIsConfined:
+    @pytest.mark.parametrize("raw", [True, False])
+    @pytest.mark.parametrize("cell", sorted(_LINKED_OUT_PYPROJECT))
+    def test_a_discovered_pyproject_linked_out_is_refused_before_it_is_read(
+        self, layout, opens_of, cell, raw
+    ):
+        """Discovery reads a pyproject.toml to learn whether it configures ASH.
+
+        get_config discovered first and checked the file it found after, so a
+        pyproject.toml linked out of the roots was read by discovery itself: one
+        that parsed was then refused, and one that did not was reported with the
+        outside file's line and column.
+        """
+        from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+        outside = layout.elsewhere / "pyproject.toml"
+        outside.write_text(_LINKED_OUT_PYPROJECT[cell], encoding="utf-8")
+        (layout.scan / "pyproject.toml").symlink_to(outside)
+        opened = opens_of(outside)
+
+        result = mcp_get_config(
+            search_dir=str(layout.scan), raw=raw, session_id=_SESSION
+        )
+
+        assert opened == [], "the outside pyproject.toml was read"
+        assert result.get("success") is False, result
+        assert result["error_type"] == _CONFIG_REFUSED, result
+        _assert_carries_nothing_from(result)
+        text = json.dumps(result, default=str)
+        # The outside file's parse position, as a TOML error names it. Not the bare
+        # word: the refusal quotes the test's own paths, which may hold "column".
+        assert _PARSE_POSITION.search(text) is None, result
+        assert str(layout.elsewhere) not in text, result
+
+    def test_a_discovered_link_to_a_missing_outside_file_is_refused(self, layout):
+        from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+        link = layout.scan / ".ash" / ".ash.yaml"
+        link.parent.mkdir()
+        link.symlink_to(layout.elsewhere / "not-there.yaml")
+
+        result = mcp_get_config(search_dir=str(layout.scan), session_id=_SESSION)
+
+        assert result.get("success") is False, result
+        assert result["error_type"] == _CONFIG_REFUSED, result
+        assert str(layout.elsewhere) not in json.dumps(result, default=str), result
+
     @pytest.mark.parametrize("raw", [True, False])
     def test_a_path_outside_the_roots_is_refused(self, layout, raw):
         from automated_security_helper.cli import mcp_server
@@ -650,6 +909,10 @@ def _call_get_config(srv, lay):
     return srv.get_config(_ctx(), config_path=str(lay.far))
 
 
+def _call_get_config_search(srv, lay):
+    return srv.get_config(_ctx(), search_dir=str(lay.elsewhere))
+
+
 def _call_validate_config(srv, lay):
     return srv.validate_config(_ctx(), config_path=str(lay.far))
 
@@ -702,6 +965,7 @@ _AUDITED: Dict[Tuple[str, str], _Call] = {
     ("get_scan_result_paths", "output_dir"): _call_get_scan_result_paths,
     ("explain_finding", "results_path"): _call_explain_finding,
     ("get_config", "config_path"): _call_get_config,
+    ("get_config", "search_dir"): _call_get_config_search,
     ("validate_config", "config_path"): _call_validate_config,
     ("diff_scan_results", "before_path"): _call_diff_before,
     ("diff_scan_results", "after_path"): _call_diff_after,
@@ -761,6 +1025,216 @@ class TestEveryPathParameterIsAudited:
         scan.assert_not_called()
         _assert_carries_nothing_from(result)
         assert not (layout.elsewhere / "out").exists()
+
+
+class TestANamedFilesSearchDirCrossesTheRootGateToo:
+    """The named-file branch has its own search_dir gate, audited here.
+
+    ``_AUDITED`` holds one call per (tool, parameter), and its
+    ``("get_config", "search_dir")`` entry passes no ``config_path``, so it
+    exercises only the discovery branch's gate. The named-file branch checks
+    the same parameter through its own gate (after ``config_path``'s own
+    checks pass), and removing that gate alone left every cell here green
+    until these were added.
+    """
+
+    def _named(self, layout) -> str:
+        return str(layout.write_config("base.yaml"))
+
+    def test_a_named_file_with_a_search_dir_outside_the_roots_is_refused(self, layout):
+        from automated_security_helper.cli import mcp_server
+
+        with (
+            patch("automated_security_helper.cli.mcp.source_delivery._run_git") as git,
+            patch("automated_security_helper.cli.mcp_tools._run_scan_async") as scan,
+        ):
+            result = _run(
+                mcp_server.get_config(
+                    _ctx(),
+                    config_path=self._named(layout),
+                    search_dir=str(layout.elsewhere),
+                )
+            )
+
+        assert _refused(result), result
+        git.assert_not_called()
+        scan.assert_not_called()
+        _assert_carries_nothing_from(result)
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "abs_exists",
+            "abs_missing",
+            "link_in_roots_to_outside",
+            "dotdot",
+            "trailing_slash",
+            "relative",
+        ],
+    )
+    def test_every_spelling_of_an_outside_search_dir_is_refused(
+        self, layout, monkeypatch, tmp_path, spelling
+    ):
+        from automated_security_helper.cli import mcp_tools
+
+        if spelling == "link_in_roots_to_outside":
+            link = layout.scan / "way-out"
+            try:
+                link.symlink_to(layout.elsewhere)
+            except (OSError, NotImplementedError):
+                pytest.skip("symlinks are not available on this platform")
+            search = str(link)
+        elif spelling == "relative":
+            monkeypatch.chdir(tmp_path)
+            search = "elsewhere"
+        else:
+            search = {
+                "abs_exists": str(layout.elsewhere),
+                "abs_missing": str(layout.elsewhere / "no-such-dir"),
+                "dotdot": str(layout.scan / ".." / "elsewhere"),
+                "trailing_slash": str(layout.elsewhere) + os.sep,
+            }[spelling]
+
+        answer = mcp_tools.mcp_get_config(
+            config_path=self._named(layout), search_dir=search, session_id=_SESSION
+        )
+
+        assert answer.get("success") is False, answer
+        # The scan tool's own refusal of the same target: the gate is the
+        # scan root policy, not the config-input roots.
+        assert answer.get("error_type") == "scan_target_not_permitted", answer
+        assert answer.get("exit_code") == 4, answer
+        _assert_carries_nothing_from(answer)
+
+    def test_the_refusal_reads_the_same_whether_or_not_the_directory_exists(
+        self, layout
+    ):
+        """A gate that fires only for a directory that exists would answer
+        whether a path outside the roots exists. Byte-identical with the
+        path replaced, as the chain refusal's equality cell pins it."""
+        from automated_security_helper.cli import mcp_tools
+
+        present = str(layout.elsewhere)
+        absent = str(layout.elsewhere / "no-such-dir")
+
+        config = self._named(layout)
+        with_present = mcp_tools.mcp_get_config(
+            config_path=config, search_dir=present, session_id=_SESSION
+        )
+        with_absent = mcp_tools.mcp_get_config(
+            config_path=config, search_dir=absent, session_id=_SESSION
+        )
+
+        a = json.dumps(with_present, default=str).replace(present, "<outside>")
+        b = json.dumps(with_absent, default=str).replace(absent, "<outside>")
+        assert a == b, (a, b)
+
+    @pytest.mark.parametrize("named", [True, False], ids=["named-file", "discovery"])
+    def test_a_directory_under_the_config_roots_is_refused_as_a_scan_refuses_it(
+        self, layout, named
+    ):
+        """A directory the caller may read config from is still no scan
+        target: the config roots grant reads of config files, not scans. The
+        gate is the scan tool's own root policy, so the refusal is the one a
+        scan of the same directory answers."""
+        from automated_security_helper.cli import mcp_tools
+
+        in_config_roots = str(layout.grant)
+
+        answer = mcp_tools.mcp_get_config(
+            config_path=self._named(layout) if named else None,
+            search_dir=in_config_roots,
+            session_id=_SESSION,
+        )
+
+        assert answer.get("success") is False, answer
+        assert answer.get("error_type") == "scan_target_not_permitted", answer
+        assert answer.get("exit_code") == 4, answer
+        _assert_carries_nothing_from(answer)
+
+    def test_the_config_roots_refusal_reads_the_same_whether_the_dir_exists(
+        self, layout
+    ):
+        """The same no-existence-read property for the new gate's reach: a
+        present config-roots directory and a missing one under it answer
+        byte-identically with the path replaced."""
+        from automated_security_helper.cli import mcp_tools
+
+        present = str(layout.grant)
+        absent = str(layout.grant / "no-such-dir")
+
+        config = self._named(layout)
+        with_present = mcp_tools.mcp_get_config(
+            config_path=config, search_dir=present, session_id=_SESSION
+        )
+        with_absent = mcp_tools.mcp_get_config(
+            config_path=config, search_dir=absent, session_id=_SESSION
+        )
+
+        a = json.dumps(with_present, default=str).replace(present, "<target>")
+        b = json.dumps(with_absent, default=str).replace(absent, "<target>")
+        assert a == b, (a, b)
+
+    def test_the_refused_directory_is_never_opened(self, layout, monkeypatch):
+        """The gate answers from the root policy alone: nothing under the
+        refused directory -- the named config file inside it included -- is
+        opened or listed on the way to the refusal. The instrument records
+        every open/scandir/listdir under the directory, and its own planted
+        open at the end proves it sees one."""
+        import builtins
+
+        from automated_security_helper.cli import mcp_tools
+
+        config = self._named(layout)
+        refused_prefix = str(layout.grant)
+        touched: list = []
+
+        def _recording(original):
+            def wrapper(path, *args, **kwargs):
+                try:
+                    text = os.fspath(path)
+                except TypeError:
+                    text = str(path)
+                if isinstance(text, bytes):
+                    text = text.decode(errors="replace")
+                if isinstance(text, str) and text.startswith(refused_prefix):
+                    touched.append(text)
+                return original(path, *args, **kwargs)
+
+            return wrapper
+
+        monkeypatch.setattr(builtins, "open", _recording(builtins.open))
+        monkeypatch.setattr(os, "open", _recording(os.open))
+        monkeypatch.setattr(os, "scandir", _recording(os.scandir))
+        monkeypatch.setattr(os, "listdir", _recording(os.listdir))
+
+        answer = mcp_tools.mcp_get_config(
+            config_path=config,
+            search_dir=str(layout.grant),
+            session_id=_SESSION,
+        )
+
+        assert answer.get("error_type") == "scan_target_not_permitted", answer
+        assert touched == [], touched
+
+        # Must-flag control: the instrument sees an open under the prefix.
+        with open(config, encoding="utf-8"):
+            pass
+        assert touched, "the instrument recorded no opens at all"
+
+    def test_a_directory_inside_the_scan_roots_still_answers(self, layout):
+        """Control: the scan root policy, not a narrower one -- a directory
+        inside the allowed scan roots keeps the answer."""
+        from automated_security_helper.cli import mcp_tools
+
+        answer = mcp_tools.mcp_get_config(
+            config_path=self._named(layout),
+            search_dir=str(layout.scan),
+            session_id=_SESSION,
+        )
+
+        assert answer.get("success") is not False, answer
+        assert "error_type" not in answer, answer
 
 
 class TestInsideTheRootsStillWorks:

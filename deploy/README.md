@@ -92,7 +92,7 @@ one structural one, both of which will cost you a failed plan if you guess:
 | --- | --- | --- |
 | `AshOfflineMode` | all | Bake scanner databases and rulesets into the image at build time, so ASH does not fetch them per scan. Trades image size and rebuild frequency for a scan that does not fail on a ruleset or database download. It is not a network control: the CDK Fargate tasks keep TCP 443 egress through a NAT gateway, AgentCore runs in `PUBLIC` network mode, the CodeBuild projects have no VPC, and the Terraform Fargate module allows all egress. Confining what a scan can reach is VPC placement: the gate's `VpcId`, `VpcSubnetIds` and `ScanEgressCidr`, or the subnets and security groups you give the Terraform modules. |
 | `AshBaseConfigYaml` | image build | The contents of the `.ash.yaml` the deployment scans with, as a string, so the deployed configuration is part of the stack rather than something baked into the image. ASH uses one config, never a merge of two. When this is set, the CodeCommit gate and the pipeline shards scan with it and never read the repository's own `.ash.yaml`. The gate never reads the repository's ASH config at all: with this empty it scans with `{}` (ASH's defaults). This is ASH's config only; ASH still passes some scanners a config file committed in the scanned tree, such as an in-tree `bandit.yaml`. An MCP scan of a directory with its own `.ash.yaml` uses that file instead. |
-| `AshVersion` | image build | The ASH version the image is built from: a tag, a branch, or a full commit SHA. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. The build passes it to `git fetch` after `--`, so git always reads it as a ref, never as an option. |
+| `AshVersion` | image build | The ASH version the image is built from: a tag, a branch, or a full commit SHA. Pin it, so a rebuild reproduces the same scanner set rather than silently moving to whatever is newest. The build passes it to `git fetch` after `--`, so git always reads it as a ref, never as an option. The default is the ASH release these files belong to, because the targets pass that release's options; see [Which `AshVersion` to use](#which-ashversion-to-use). |
 | `RebuildSchedule` | image build | How often the image is rebuilt. An image built once and never rebuilt ages, and the scanners inside it age with it — the tradeoff called out in the trust note below. Offline deployments need this most, because their vulnerability databases are only as fresh as the last build. |
 | `McpStatelessHttp` | MCP-serving targets | Whether the MCP server runs stateless. Defaults to true on AgentCore, and that default is not cosmetic — see [Why `McpStatelessHttp` defaults to true on AgentCore](#why-mcpstatelesshttp-defaults-to-true-on-agentcore). |
 | `McpAuthHeaderName` | MCP-serving targets | The header the MCP server requires on every request. Names the header only; the value is separate so the two can be rotated independently. |
@@ -101,6 +101,19 @@ one structural one, both of which will cost you a failed plan if you guess:
 | `McpAllowedHost` | MCP-serving targets | The `Host` value the server accepts, which is what stops a request that arrives with someone else's `Host` header from being served. |
 | `ShardCount` | CodePipeline distributed executor | How many parallel shards one logical scan is split into. Higher is faster up to the point where per-shard startup dominates; a shard still pays image pull and scanner initialization before it scans anything. |
 | `CodeCommitRepositoryArn` | Lambda CodeCommit gate | The repository the gate watches. |
+
+## Which `AshVersion` to use
+
+Leave it at its default, or pin the release you took these files from. The targets
+call ASH with options that older releases do not have (`ash mcp --stateless-http`,
+the shard options of `ash scan`, `ash merge`), so an older `AshVersion` can fail to
+start or, for `ash scan`, quietly ignore an option. The CDK default and the
+Terraform examples name the release this tree belongs to, and every release moves
+them to itself, so a target taken from release tag `vX.Y.Z` builds ASH `vX.Y.Z`.
+
+A checkout of `main` between releases still names the previous release while its
+targets may already use options added since. Deploying from `main`, set
+`AshVersion` (`ash_version` in Terraform) to the full commit SHA you checked out.
 
 ## Where the Terraform surface differs
 

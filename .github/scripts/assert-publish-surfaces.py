@@ -800,26 +800,6 @@ ALLOWLIST: tuple[Entry, ...] = (
         reason=_UV_SPLIT_CACHE_REASON,
     ),
     Entry(
-        file=".github/workflows/ash-cdk-extra-drift.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/restore",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
-        file=".github/workflows/ash-cdk-extra-drift.yml",
-        kind=KIND_CACHE,
-        action="actions/cache/save",
-        publishes=(
-            "path=~/.cache/uv "
-            "key=uv-cdk-extra-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}"
-        ),
-        reason=_UV_SPLIT_CACHE_REASON,
-    ),
-    Entry(
         file=".github/workflows/ash-repo-docs.yml",
         kind=KIND_CACHE,
         action="actions/cache/restore",

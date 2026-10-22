@@ -5,13 +5,17 @@
 
 Pins the two things the move has to preserve: the worker reports the same
 collection the in-process scan built (same keys, same secrets), and the scanner
-asks the sandbox for a network only when its settings verify secrets online.
+asks the sandbox for a network only when its settings verify secrets online. Also
+pins that the column the worker adds is taken from the line detect-secrets
+numbered, counting lines as detect-secrets counts them.
 """
 
 import json
 import os
 import subprocess
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,7 +27,11 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
     DetectSecretsScanSettingsFiltersUsed,
 )
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS
+from automated_security_helper.utils.detect_secrets_worker import (
+    START_COLUMN_KEY,
+    _start_column,
+)
+from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, checkout_env
 from tests.utils.refusing_proxy import (
     RecordingProxy,
     route_through,
@@ -47,19 +55,13 @@ def _in_process(root, paths, settings):
     }
 
 
-def test_worker_reports_the_collection_the_in_process_scan_builds(tmp_path):
-    src = tmp_path / "src"
-    (src / "a").mkdir(parents=True)
-    (src / "a" / "one.py").write_text(f'key = "{AWS_KEY}"\n', encoding="utf-8")
-    (src / "two.py").write_text(f'\n\nother = "{AWS_KEY}"\n', encoding="utf-8")
-    paths = [str(p) for p in sorted(src.rglob("*.py"))]
-    settings = {"plugins_used": [{"name": "AWSKeyDetector"}]}
-
+def _run_worker(tmp_path, root, paths, settings):
+    """The worker's OUTPUT for one scan, started as the scanner starts it."""
     request = tmp_path / "request.json"
     output = tmp_path / "output.json"
     request.write_text(
         json.dumps(
-            {"root": str(src), "baseline": None, "settings": settings, "paths": paths}
+            {"root": str(root), "baseline": None, "settings": settings, "paths": paths}
         ),
         encoding="utf-8",
     )
@@ -74,15 +76,104 @@ def test_worker_reports_the_collection_the_in_process_scan_builds(tmp_path):
         check=True,
         cwd=tmp_path,
         timeout=CHILD_TIMEOUT_SECONDS,
+        env=checkout_env(),
     )
+    return json.loads(output.read_text(encoding="utf-8"))
+
+
+def test_worker_reports_the_collection_the_in_process_scan_builds(tmp_path):
+    src = tmp_path / "src"
+    (src / "a").mkdir(parents=True)
+    (src / "a" / "one.py").write_text(f'key = "{AWS_KEY}"\n', encoding="utf-8")
+    (src / "two.py").write_text(f'\n\nother = "{AWS_KEY}"\n', encoding="utf-8")
+    paths = [str(p) for p in sorted(src.rglob("*.py"))]
+    settings = {"plugins_used": [{"name": "AWSKeyDetector"}]}
+
+    written = _run_worker(tmp_path, src, paths, settings)
+    # The worker adds the column each secret starts at, which detect-secrets does
+    # not report; everything else is the in-process collection's.
+    columns = {
+        (key, secret["line_number"]): secret.pop(START_COLUMN_KEY, None)
+        for key, secrets in written
+        for secret in secrets
+    }
     from_worker = {
         key: sorted(json.dumps(s, sort_keys=True) for s in secrets)
-        for key, secrets in json.loads(output.read_text(encoding="utf-8"))
+        for key, secrets in written
     }
 
     expected = _in_process(src, paths, settings)
     assert expected, "the fixture should contain findings"
     assert from_worker == expected
+    assert sorted(columns.values()) == [
+        len('key = "') + 1,
+        len('other = "') + 1,
+    ], columns
+
+
+#: Characters ``str.splitlines`` ends a line at and detect-secrets does not.
+#: detect-secrets reads a file with universal newlines, which end a line only at
+#: ``\n``, ``\r`` and ``\r\n``.
+NOT_LINE_BREAKS = {
+    "vertical-tab": "\v",
+    "form-feed": "\f",
+    "file-separator": "\x1c",
+    "group-separator": "\x1d",
+    "record-separator": "\x1e",
+    "next-line": "\N{NEXT LINE}",
+    "line-separator": "\N{LINE SEPARATOR}",
+    "paragraph-separator": "\N{PARAGRAPH SEPARATOR}",
+}
+#: The line ends of universal newlines other than ``\n``.
+LINE_BREAKS = {"carriage-return": "\r", "crlf": "\r\n"}
+
+
+def test_a_separator_above_the_key_keeps_its_line_and_column(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    for name, separator in {**NOT_LINE_BREAKS, **LINE_BREAKS}.items():
+        text = f'a = 1{separator}b = 2\nkey = "{AWS_KEY}"\n'
+        (src / f"{name}.py").write_bytes(text.encode("utf-8"))
+    paths = [str(p) for p in sorted(src.glob("*.py"))]
+    settings = {"plugins_used": [{"name": "AWSKeyDetector"}]}
+
+    written = _run_worker(tmp_path, src, paths, settings)
+
+    found = {
+        Path(secret["filename"]).stem: (
+            secret["line_number"],
+            secret.get(START_COLUMN_KEY),
+        )
+        for _, secrets in written
+        for secret in secrets
+    }
+    column = len('key = "') + 1
+    assert found == {
+        **dict.fromkeys(NOT_LINE_BREAKS, (2, column)),
+        **dict.fromkeys(LINE_BREAKS, (3, column)),
+    }
+
+
+def test_a_file_is_read_only_as_far_as_the_line_asked_for(tmp_path):
+    source = tmp_path / "long.py"
+    source.write_text(
+        f'key = "{AWS_KEY}"\n' + "x = 1\n" * 1000 + f'other = "{AWS_KEY}"\n',
+        encoding="utf-8",
+    )
+    cache = {}
+
+    def column(line_number):
+        secret = SimpleNamespace(
+            secret_value=AWS_KEY, line_number=line_number, filename=str(source)
+        )
+        return _start_column(secret, cache)
+
+    assert column(1) == len('key = "') + 1
+    assert len(cache[str(source)]) == 1
+    assert column(1002) == len('other = "') + 1
+    assert len(cache[str(source)]) == 1002
+    assert column(1) == len('key = "') + 1
+    assert len(cache[str(source)]) == 1002
 
 
 def _scanner(tmp_path):

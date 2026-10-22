@@ -51,6 +51,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from automated_security_helper.core.constants import ASH_DOCS_URL
 from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.undecodable_text import undecodable_of_text
 
 #: The optional-dependency extra that provides tree-sitter and its grammars.
 SYMBOLS_EXTRA = "symbols"
@@ -512,7 +513,10 @@ class SymbolResolver:
         )
 
     def _resolve(self, file_path: str) -> Optional[Path]:
-        candidate = Path(file_path.replace("\\", "/"))
+        # Opened by the name the file has on disk: a finding holds a file name that
+        # is not UTF-8 in its record form (\udcNN, utils/undecodable_text.py), read
+        # back first, so the escape's backslash is not taken for a separator.
+        candidate = Path(undecodable_of_text(file_path).replace("\\", "/"))
         if not candidate.is_absolute():
             candidate = self._source_dir / candidate
         try:
