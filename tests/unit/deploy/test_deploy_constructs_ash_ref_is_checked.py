@@ -52,7 +52,7 @@ ACCEPTED = [
     "v3.7.0",
     "main",
     "feature/x",
-    "eddfeecf9adb672023ab7998688d54199b0a0441",
+    "eddfeecf9adb672023ab7998688d54199b0a0441",  # pragma: allowlist secret
 ]
 
 REFUSED = [

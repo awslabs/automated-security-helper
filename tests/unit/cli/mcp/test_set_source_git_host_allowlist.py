@@ -54,6 +54,7 @@ def git(monkeypatch) -> List[Dict[str, Any]]:
     [
         ("https://Git.Example.com/team/repo.git", "git.example.com"),
         ("https://git.example.com./team/repo.git", "git.example.com"),
+        # pragma: allowlist nextline secret
         ("https://user:pw@git.example.com:8443/r.git", "git.example.com"),
         ("https://git.example.com@other.example.net/r.git", "other.example.net"),
         ("ssh://git@git.example.com:2222/team/repo.git", "git.example.com"),

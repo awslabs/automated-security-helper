@@ -231,7 +231,7 @@ def _source(root: Path, name: str) -> Path:
     tree = root / name
     tree.mkdir(parents=True)
     (tree / "app.py").write_text(
-        'import os\npassword = "hunter2"\nos.system("echo " + input())\n',
+        'import os\npassword = "hunter2"\nos.system("echo " + input())\n',  # pragma: allowlist secret
         encoding="utf-8",
     )
     return tree

@@ -31,7 +31,7 @@ from typing import Any, Iterable, Optional, Set
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
 
 TOOL_TYPE_TAG_PREFIX = "tool_type::"
-SECRETS_TOOL_TYPE = "SECRETS"
+SECRETS_TOOL_TYPE = "SECRETS"  # pragma: allowlist secret
 UNKNOWN_TOOL_TYPE = "UNKNOWN"
 
 _ENUM_PREFIX = "SCANNERTOOLTYPE."

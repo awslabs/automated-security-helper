@@ -337,7 +337,7 @@ class TestTheAshRefIsResolvedOnce:
 
     def test_a_full_commit_id_is_used_without_contacting_the_repository(self, tmp_path):
         repo = AshRepository(tmp_path / "ash")
-        commit = "0123456789abcdef0123456789abcdef01234567"
+        commit = "0123456789abcdef0123456789abcdef01234567"  # pragma: allowlist secret
         sandbox, run = _run_pin(
             tmp_path, repo, _context(commit), origin=tmp_path / "no-such-repository"
         )
@@ -353,6 +353,7 @@ class TestARefThatDoesNotNameOneCommitIsRefused:
             pytest.param("no-such-ref", id="matches nothing"),
             pytest.param("--upload-pack=touch", id="starts with a dash"),
             pytest.param("0123abc", id="abbreviated commit id, shortest"),
+            # pragma: allowlist nextline secret
             pytest.param("0123456789abcdef0123456789abcdef0123456", id="39 hex digits"),
         ],
     )
