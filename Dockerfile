@@ -63,7 +63,7 @@ RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u1 \
+    ca-certificates=20250419~deb12u2 \
     python3-venv=3.11.2-1+b1 \
     git=1:2.39.5-0+deb12u3 \
     tree=2.1.0-1 \
@@ -281,7 +281,7 @@ RUN echo "Upgrading OS packages for BUILD_DATE_EPOCH=${BUILD_DATE_EPOCH}" && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u1 \
+    ca-certificates=20250419~deb12u2 \
     curl=7.88.1-10+deb12u15 \
     git=1:2.39.5-0+deb12u3 \
     gnupg=2.2.40-1.1+deb12u2 \
