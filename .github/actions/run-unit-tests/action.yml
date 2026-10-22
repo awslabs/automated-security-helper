@@ -74,10 +74,23 @@ runs:
 
     # ASH_REQUIRE_SYMBOLS_EXTRA turns the symbol tests' skip-when-absent into a hard
     # failure, so a leg that stops installing the extra cannot pass by skipping them.
+    #
+    # PYTEST_DEBUG_TEMPROOT moves pytest's basetemp (tmp_path and friends) off the
+    # runner's shared /tmp. The sandbox backends deliberately treat anything under
+    # /tmp as already covered by --private-tmp and the fresh `--tmpfs /tmp` mount
+    # (automated_security_helper/utils/sandbox/backends.py, _TMP_ROOT), so a fake
+    # home a test builds under tmp_path gets no --blacklist args when basetemp is
+    # /tmp/pytest-of-runner, and a passwd home under /tmp reads the `--tmpfs /tmp`
+    # value as an ancestor grant: 29 sandbox-policy tests fail on the hosted Linux
+    # runners and pass wherever basetemp lives off /tmp. runner.temp is
+    # /home/runner/work/_temp on the Linux images, so the tests measure the
+    # intended scenario, a home that is NOT inside the sandbox's private tmp.
+    # tests/conftest.py sets this knob with setdefault, so the value here wins.
     - name: Run PyTest
       shell: bash
       env:
         ASH_REQUIRE_SYMBOLS_EXTRA: "1"
+        PYTEST_DEBUG_TEMPROOT: ${{ runner.temp }}
       run: uv run pytest
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does
