@@ -32,7 +32,7 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 def commands(monkeypatch, tmp_path) -> List[List[str]]:
     seen: List[List[str]] = []
 
-    def record(cmd_list, check=True, debug=False, shell=False):
+    def record(cmd_list, check=True, debug=False, shell=False, env=None):
         cmd = [str(item) for item in cmd_list if item is not None]
         seen.append(cmd)
         return create_completed_process(args=cmd, returncode=0, stdout="", stderr="")

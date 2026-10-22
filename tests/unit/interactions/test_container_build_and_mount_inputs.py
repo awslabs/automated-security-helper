@@ -92,7 +92,7 @@ def commands(monkeypatch) -> List[List[str]]:
     """Record every runner command instead of starting it; each one exits 0."""
     seen: List[List[str]] = []
 
-    def record(cmd_list, check=True, debug=False, shell=False):
+    def record(cmd_list, check=True, debug=False, shell=False, env=None):
         cmd = [str(item) for item in cmd_list if item is not None]
         seen.append(cmd)
         return create_completed_process(args=cmd, returncode=0, stdout="", stderr="")
@@ -313,7 +313,7 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
             "from automated_security_helper.utils import subprocess_utils\n"
             "assert Path(rac.__file__).resolve().is_relative_to(Path(site).resolve())\n"
             "seen = []\n"
-            "def record(cmd_list, check=True, debug=False, shell=False):\n"
+            "def record(cmd_list, check=True, debug=False, shell=False, env=None):\n"
             "    cmd = [str(c) for c in cmd_list if c is not None]\n"
             "    seen.append(cmd)\n"
             "    return subprocess_utils.create_completed_process(args=cmd, returncode=0)\n"

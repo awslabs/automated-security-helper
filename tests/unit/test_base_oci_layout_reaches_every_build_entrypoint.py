@@ -85,7 +85,7 @@ def test_the_context_name_is_the_one_every_entrypoint_uses():
 def recorded_commands(monkeypatch):
     calls: List[List[str]] = []
 
-    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False):
+    def fake_run_cmd_direct(cmd_list, check=True, debug=False, shell=False, env=None):
         recorded = [str(item) for item in cmd_list if item is not None]
         calls.append(recorded)
 

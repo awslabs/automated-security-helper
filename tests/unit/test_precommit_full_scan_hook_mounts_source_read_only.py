@@ -51,7 +51,7 @@ def test_the_hook_runs_the_cli_entry_point():
 def commands(monkeypatch, tmp_path) -> List[List[str]]:
     seen: List[List[str]] = []
 
-    def record(cmd_list, check=True, debug=False, shell=False):
+    def record(cmd_list, check=True, debug=False, shell=False, env=None):
         cmd = [str(item) for item in cmd_list if item is not None]
         seen.append(cmd)
         return create_completed_process(args=cmd, returncode=0, stdout="", stderr="")
