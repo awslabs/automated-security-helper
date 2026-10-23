@@ -6,7 +6,9 @@
 A list that is not one of ASH's defaults adds to the current defaults, so an
 operator who denies one more field does not lift the others. With
 ``replace_default_denied_paths`` the list is used as written, and the default
-entries it leaves out are named in a warning. Every entry, and every
+entries it leaves out are named in a warning. Either way the entries ASH always
+denies are added to the list, and only the entries the operator wrote decide
+which fields the list names. Every entry, and every
 ``denied_value_patterns`` key, is a JSON pointer starting with ``/``: one that
 is not would match nothing, so it is refused when the config is read.
 """
@@ -21,6 +23,7 @@ from pydantic import ValidationError
 
 from automated_security_helper.config import client_config_policy as ccp
 from automated_security_helper.config.ash_config import (
+    ALWAYS_DENIED_PATHS,
     AshConfig,
     RuntimeOverridesConfig,
 )
@@ -77,7 +80,8 @@ def test_an_edited_list_adds_to_the_defaults() -> None:
 def test_replace_uses_the_list_as_written_and_names_what_it_drops(ash_log) -> None:
     policy = _policy(denied_paths=["/project_name"], replace_default_denied_paths=True)
 
-    assert policy.denied_paths == ["/project_name"]
+    # Used as written, plus the entries ASH always denies, which it adds to any list.
+    assert policy.denied_paths == ["/project_name", *ALWAYS_DENIED_PATHS]
     (warning,) = [
         r.getMessage() for r in ash_log if "replace_default" in r.getMessage()
     ]
