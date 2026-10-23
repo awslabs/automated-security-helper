@@ -1278,9 +1278,14 @@ async def _execute(
 ) -> WorkspaceRunResult:
     """Run the workspace off the event loop, with a progress monitor beside it.
 
-    Under the session's scan lock, taken on the worker thread as the single-target
-    scan takes it, so a delivery into this session is refused while the scans
-    read the tree (``source_delivery._no_scan_running``).
+    A scan that holds its session's tree (``claim.claimed``) runs under the
+    session's scan lock, taken on the worker thread as the single-target scan
+    takes it, so a delivery into this session is refused while the scans read
+    the tree (``source_delivery._no_scan_running``). A scan that holds none (the
+    session delivered nothing, or the caller has no session) takes neither the
+    lock nor the session's presence: the lock is what refuses a delivery, and
+    there is no tree of the session for that scan to protect. A caller with no
+    session has no ``MCPSession`` to lock either.
 
     ``execute_workspace`` is synchronous and blocks for as long as the scans take,
     which for N repositories is minutes. Awaiting it inline would stall every
@@ -1318,14 +1323,16 @@ async def _execute(
     call site.
     """
 
+    # The session whose tree this scan holds, or None. The scan lock and the
+    # presence are the hold, so a scan that holds nothing takes neither.
+    held_session = session_id if claim is not None and claim.claimed else None
+
     def run() -> WorkspaceRunResult:
         if claim is not None and not claim.worker_starts():
             raise RuntimeError("the workspace scan was cancelled before it started")
         try:
-            with ScanPresence(
-                session_id if claim is not None and claim.claimed else None
-            ):
-                return _under_session_lock(session_id, plan, settings)
+            with ScanPresence(held_session):
+                return _under_session_lock(held_session, plan, settings)
         finally:
             if claim is not None:
                 claim.worker_returns()
