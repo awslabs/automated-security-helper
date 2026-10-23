@@ -106,8 +106,10 @@ HONOR_DELIVERED_SUPPRESSIONS: bool = True
 DENIED_FIELD_HANDLING: Literal["refuse", "drop"] = "refuse"
 
 #: Bounded for a client-delivered file by ``sandbox_grants`` and
-#: ``plugin_module_trust``; see the module docstring. Exempt from the default
-#: ``denied_paths`` only.
+#: ``plugin_module_trust``; see the module docstring. Not checked against
+#: ``denied_paths`` (``exempt_paths``), except where the operator's own list
+#: names the pointer, an entry above it, or one inside it: that list then
+#: decides the whole field.
 RESTRICT_ONLY_PATHS: Tuple[str, ...] = (
     "/sandbox",
     "/sandbox/**",
