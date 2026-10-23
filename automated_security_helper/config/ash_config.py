@@ -1024,6 +1024,12 @@ class RuntimeOverridesConfig(BaseModel):
     #: ``denied_paths`` is already the list that applies.
     _listed_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
     _effective: bool = PrivateAttr(default=False)
+    #: ``denied_paths`` as it was written, recorded by
+    #: ``_keep_the_always_denied_paths`` before it adds the ``ALWAYS_DENIED_PATHS``
+    #: entries the list leaves out. ``client_config_policy`` reads it to tell the
+    #: entries an operator listed from the ones ASH added. None on a model built
+    #: without validation.
+    _written_denied_paths: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
 
     replace_default_denied_paths: Annotated[
         bool,
@@ -1066,8 +1072,11 @@ class RuntimeOverridesConfig(BaseModel):
         """Add each ALWAYS_DENIED_PATHS entry the list leaves out, at its end.
 
         Assigned only when one is missing, so a default policy (which holds them all)
-        is the shipped list unchanged and keeps its serialized shape.
+        is the shipped list unchanged and keeps its serialized shape. The list as
+        written is kept first (``_written_denied_paths``): the added entries are
+        denied, but the operator did not list them.
         """
+        self._written_denied_paths = tuple(self.denied_paths)
         missing = [
             entry for entry in ALWAYS_DENIED_PATHS if entry not in self.denied_paths
         ]

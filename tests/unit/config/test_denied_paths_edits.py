@@ -307,6 +307,33 @@ def test_a_list_of_extra_entries_only_is_not_warned_about(ash_log) -> None:
     assert not [r for r in ash_log if "leaves out" in r.getMessage()]
 
 
+def test_the_entries_added_to_a_list_are_denied_but_not_listed() -> None:
+    """The always-denied entries stay in the policy; the operator's list is what it wrote."""
+    policy = _policy(denied_paths=["/project_name"])
+
+    assert set(ALWAYS_DENIED_PATHS) <= set(policy.denied_paths)
+    assert policy._listed_denied_paths == ("/project_name",)
+
+
+def test_an_always_denied_entry_the_operator_lists_counts_as_listed() -> None:
+    """Writing ``/sandbox`` decides the sandbox there, and only the sandbox."""
+    exempt = ccp.exempt_paths(_policy(denied_paths=["/sandbox"]))
+
+    assert "/sandbox" not in exempt and "/sandbox/**" not in exempt
+    assert "/ash_plugin_modules" in exempt
+
+
+def test_a_list_assigned_after_validation_is_read_whole() -> None:
+    """A record that does not fit the list is not trusted: it names more, never less."""
+    policy = RuntimeOverridesConfig(denied_paths=["/project_name"])
+    policy.denied_paths = [*policy.denied_paths, "/sandbox/mode"]
+
+    exempt = ccp.exempt_paths(policy)
+
+    assert "/sandbox" not in exempt
+    assert "/ash_plugin_modules" not in exempt
+
+
 @pytest.mark.parametrize(
     "entry,field,other",
     [

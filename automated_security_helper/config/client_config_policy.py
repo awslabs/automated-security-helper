@@ -347,6 +347,25 @@ def policy_of(config: AshConfig) -> RuntimeOverridesConfig:
 _WARNED_REPLACEMENTS: Set[Tuple[bool, FrozenSet[str]]] = set()
 
 
+def _as_written(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
+    """The ``denied_paths`` entries the operator listed.
+
+    ``RuntimeOverridesConfig`` records its list before it adds the entries of
+    ``ALWAYS_DENIED_PATHS`` that the list leaves out. Those are denied, but the
+    operator did not list them, so they neither name a field for ``exempt_paths``
+    nor count as default entries the list holds. An entry the operator wrote
+    itself, such as ``/sandbox``, stays in. With no record that fits the list (a
+    model built without validation, or a list assigned afterwards), the whole list
+    is read as written, which only ever names more fields.
+    """
+    written = policy._written_denied_paths
+    if written is not None:
+        added = [entry for entry in ALWAYS_DENIED_PATHS if entry not in written]
+        if list(policy.denied_paths) == [*written, *added]:
+            return written
+    return tuple(policy.denied_paths)
+
+
 def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
     """``policy`` with the ``denied_paths`` list that applies.
 
@@ -359,23 +378,25 @@ def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
       entries and leaves others out reads as an edited copy of the defaults, so
       the ones it leaves out, which still apply, are named in a warning, once
       per list.
-    * With ``replace_default_denied_paths``, the list is used as written, and
-      each default entry it leaves out is named in a warning, once per list.
+    * With ``replace_default_denied_paths``, the list is used as written, with
+      the entries ASH always denies added as for any list, and each other
+      default entry it leaves out is named in a warning, once per list.
 
     The operator's own list is kept on the copy (``_listed_denied_paths``),
-    since ``exempt_paths`` decides from what the operator wrote rather than from
-    the merged list. Applying this to its own result changes nothing.
+    without the always-denied entries the model added to it: ``exempt_paths``
+    and the "leaves out" warning decide from what the operator wrote rather than
+    from the merged list. Applying this to its own result changes nothing.
     """
     if policy._effective:
         return policy
     current = list(RuntimeOverridesConfig().denied_paths)
     listed: Optional[Tuple[str, ...]] = (
-        None if policy_is_default(policy) else tuple(policy.denied_paths)
+        None if policy_is_default(policy) else _as_written(policy)
     )
     if listed is None:
         effective = current
     elif policy.replace_default_denied_paths:
-        effective = list(listed)
+        effective = list(policy.denied_paths)
         removed = [entry for entry in current if entry not in set(effective)]
         if removed and (True, frozenset(effective)) not in _WARNED_REPLACEMENTS:
             _WARNED_REPLACEMENTS.add((True, frozenset(effective)))
@@ -384,7 +405,9 @@ def effective_policy(policy: RuntimeOverridesConfig) -> RuntimeOverridesConfig:
                 f"default denied_paths entries do not apply: {', '.join(removed)}"
             )
     else:
-        effective = current + [entry for entry in listed if entry not in set(current)]
+        effective = current + [
+            entry for entry in policy.denied_paths if entry not in set(current)
+        ]
         left_out = [entry for entry in current if entry not in set(listed)]
         if (
             left_out
@@ -495,7 +518,7 @@ def exempt_paths(policy: RuntimeOverridesConfig) -> Tuple[str, ...]:
     if policy_is_default(policy):
         return candidates
     listed = (
-        policy._listed_denied_paths if policy._effective else tuple(policy.denied_paths)
+        policy._listed_denied_paths if policy._effective else _as_written(policy)
     ) or ()
     return tuple(
         candidate
