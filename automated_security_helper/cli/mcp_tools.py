@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union, cast
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -591,7 +591,8 @@ async def mcp_scan_directory(
     if claimed_session is not None:
         if not claimed_session.try_start_scan(limit):
             claimed_session.release_scan()
-            return session_scan_limit_refusal("scan_directory", limit)
+            # try_start_scan turns a scan away only when a limit is reached.
+            return session_scan_limit_refusal("scan_directory", cast(int, limit))
         counted = claimed_session
     elif limit is not None:
         shared = sessionless_scan_count()
