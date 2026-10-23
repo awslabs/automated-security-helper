@@ -241,7 +241,9 @@ def read_config_document(
 
 
 def _warnings_when_discovered(
-    config_path: Path, source_dir: Path, permit_base=None
+    config_path: Path,
+    source_dir: Path,
+    permit_base: Optional[Callable[[Path], bool]] = None,
 ) -> List[str]:
     """Discovery's warnings for ``source_dir`` when ``config_path`` is the source it selects.
 

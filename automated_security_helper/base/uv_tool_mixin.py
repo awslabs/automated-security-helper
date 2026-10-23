@@ -21,7 +21,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -123,7 +123,10 @@ class UVToolMixin:
             return None
         if _DEFER_VERSION_PROBES.get():
             # Kept for resolve_deferred_tool_version; see deferred_tool_version_probes.
-            self._deferred_tool_version_probe = (tool_name, package_name)
+            self._deferred_tool_version_probe: Optional[Tuple[str, Optional[str]]] = (
+                tool_name,
+                package_name,
+            )
             return None
 
         try:

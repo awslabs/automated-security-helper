@@ -120,7 +120,7 @@ def same_baseline(
     return resolved[0] == resolved[1]
 
 
-def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> list:
+def _detect_secrets_overrides(config_overrides: Optional[Sequence[str]]) -> List[str]:
     """The ``--config-overrides`` entries that can change detect-secrets' settings."""
     selected = []
     for override in config_overrides or []:

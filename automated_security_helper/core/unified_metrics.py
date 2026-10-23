@@ -32,7 +32,7 @@ Example usage:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import computed_field
 
 from automated_security_helper.models.asharp_model import (
@@ -568,7 +568,7 @@ def _populate_summary_stats_from_unified_metrics(
 _PER_TARGET_ROW_FIELDS = frozenset({"source", "converted"})
 
 
-def _row_fields(row: object) -> dict:
+def _row_fields(row: object) -> Dict[str, Any]:
     """The fields a scanner_results row was given, extras included.
 
     Only the fields that were set, so a field the row never had keeps its default and
