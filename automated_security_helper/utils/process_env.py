@@ -40,7 +40,7 @@ changed, copies ``os.environ`` and passes ``env=`` itself.
 import os
 import threading
 from contextlib import contextmanager
-from typing import Dict, Iterator, Mapping, Optional
+from typing import Any, Dict, Iterator, List, Mapping, Optional
 
 #: Re-entrant so a helper here can call another helper here without deadlocking.
 ENVIRON_LOCK = threading.RLock()
@@ -104,7 +104,7 @@ def environ_overrides(
 
 
 #: Variables held by hold_environ: key -> [value, holders, value before the first hold].
-_HELD: Dict[str, list] = {}
+_HELD: Dict[str, List[Any]] = {}
 
 
 def hold_environ(key: str, value: str) -> None:

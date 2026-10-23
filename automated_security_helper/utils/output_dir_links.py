@@ -85,7 +85,7 @@ class OutputDirLinkRefused(ValueError):
         self.remedy = remedy
         super().__init__(f"{found[0].upper()}{found[1:]}. {remedy}")
 
-    def __reduce__(self):
+    def __reduce__(self) -> Tuple[type, Tuple[object, ...]]:
         # Rebuilt from its own arguments, not from the formatted message.
         return (type(self), (self.found, self.remedy))
 
