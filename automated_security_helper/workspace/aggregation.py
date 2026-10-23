@@ -735,24 +735,26 @@ def workspace_ignore_file_exclusions(
     built a scan set.
     """
     recorded = [
-        outcome for outcome in outcomes if outcome.ignore_file_exclusions is not None
+        (outcome.relative_path, outcome.ignore_file_exclusions)
+        for outcome in outcomes
+        if outcome.ignore_file_exclusions is not None
     ]
     if not recorded:
         return None
     by_ignore_file: Dict[str, int] = {}
-    for outcome in recorded:
-        prefix = PurePosixPath(outcome.relative_path)
-        for path, count in outcome.ignore_file_exclusions.by_ignore_file.items():
+    for relative_path, exclusions in recorded:
+        prefix = PurePosixPath(relative_path)
+        for path, count in exclusions.by_ignore_file.items():
             key = path if str(prefix) == "." else (prefix / path).as_posix()
             by_ignore_file[key] = by_ignore_file.get(key, 0) + count
     return {
-        "honored": all(outcome.ignore_file_exclusions.honored for outcome in recorded),
+        "honored": all(exclusions.honored for _, exclusions in recorded),
         "excluded_file_count": sum(
-            outcome.ignore_file_exclusions.excluded_file_count for outcome in recorded
+            exclusions.excluded_file_count for _, exclusions in recorded
         ),
         "by_ignore_file": by_ignore_file,
         "output_dir_file_count": sum(
-            outcome.ignore_file_exclusions.output_dir_file_count for outcome in recorded
+            exclusions.output_dir_file_count for _, exclusions in recorded
         ),
     }
 

@@ -45,7 +45,7 @@ from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.models.workspace import workspace_of
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -284,8 +284,9 @@ def inputs_not_scanned(
                 path, reason = item.get("path"), item.get("reason")
                 if isinstance(path, str) and isinstance(reason, str):
                     entries.append((scanner_name, path, reason))
-    if is_workspace_scan(asharp_model):
-        for project in asharp_model.workspace.projects:
+    workspace = workspace_of(asharp_model)
+    if workspace is not None:
+        for project in workspace.projects:
             for item in project.inputs_not_scanned:
                 entries.append((item.scanner, item.path, item.reason))
     return entries
