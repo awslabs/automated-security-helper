@@ -1000,6 +1000,35 @@ def _widenings(
                         False,
                     )
                 )
+        listed, scanners = _walk(section, ["read_path_scanners"])
+        if listed and isinstance(scanners, list):
+            extra = [
+                str(name) for name in scanners if name not in trusted.read_path_scanners
+            ]
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.read_path_scanners",
+                        "/sandbox/read_path_scanners",
+                        f"lets {', '.join(extra)} read the host paths their own "
+                        "options ask for, which the server's sandbox settings do not",
+                        False,
+                    )
+                )
+        listed, scanners = _walk(section, ["env_scanners"])
+        if listed and isinstance(scanners, list):
+            extra = [str(name) for name in scanners if name not in trusted.env_scanners]
+            if extra:
+                found.append(
+                    DocumentDenial(
+                        "sandbox.env_scanners",
+                        "/sandbox/env_scanners",
+                        f"passes {', '.join(extra)} the environment variables "
+                        "their own options ask for, which the server's sandbox "
+                        "settings do not",
+                        False,
+                    )
+                )
         listed, mode = _walk(section, ["mode"])
         if listed and trusted.mode != "off" and mode != trusted.mode:
             found.append(
