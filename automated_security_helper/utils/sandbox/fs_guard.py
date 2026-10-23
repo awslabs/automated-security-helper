@@ -88,8 +88,10 @@ class OutputLinkRefused(OSError, OutputDirLinkRefused):
     ) -> None:
         found = f"{Path(link).as_posix()} is a symlink"
         # OSError's own __init__: OutputDirLinkRefused's is not called, and its
-        # attribute is set below.
-        super().__init__(
+        # attribute is set below. Named, not reached through super(): the type
+        # stubs give OSError no __init__, so super() reads as OutputDirLinkRefused's.
+        OSError.__init__(
+            self,
             errno.ELOOP,
             f"{Path(path).as_posix()} was not written: {found}, and ASH does not "
             f"write through a symlink {where}",
@@ -116,7 +118,8 @@ class OutputHardLinkRefused(OSError, OutputDirLinkRefused):
 
     def __init__(self, path: Union[str, Path], links: int) -> None:
         found = f"{links} names refer to {Path(path).as_posix()}"
-        super().__init__(
+        OSError.__init__(
+            self,
             errno.EMLINK,
             f"{Path(path).as_posix()} was not written: {links} names refer to it, and "
             "ASH does not write to a file below its output directory that another "
