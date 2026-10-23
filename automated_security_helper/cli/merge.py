@@ -181,7 +181,7 @@ import json
 import logging
 import shlex
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import typer
 import yaml
@@ -2083,9 +2083,10 @@ def merge_command(
 
     # ReportPhase writes reports/ash.<extension> for every enabled reporter, and
     # its progress display is used unconditionally, so a display is supplied with
-    # output turned off rather than None.
+    # output turned off rather than None. It is given the reporter classes it builds,
+    # though EnginePhase annotates its plugins as instances.
     report_phase = ReportPhase(
-        plugins=local_reporters,
+        plugins=cast(Any, local_reporters),
         plugin_context=plugin_context,
         progress_display=LiveProgressDisplay(show_progress=False),
         asharp_model=merged,
@@ -2100,7 +2101,9 @@ def merge_command(
         # The off-host reporters run with the operator's configuration, so their
         # destinations are the operator's too. No --output-formats value names one,
         # so, as in a scan, they run only when no format is requested.
-        if off_host_reporters and not parsed_formats:
+        # An off-host reporter is in the list only when the operator's config enabled
+        # it, so there is an operator config whenever the list is not empty.
+        if off_host_reporters and operator_config is not None and not parsed_formats:
             off_host_context = PluginContext(
                 source_dir=Path.cwd(),
                 output_dir=output_dir_path,
@@ -2109,7 +2112,7 @@ def merge_command(
                 ignore_suppressions=ignore_suppressions,
             )
             merged = ReportPhase(
-                plugins=off_host_reporters,
+                plugins=cast(Any, off_host_reporters),
                 plugin_context=off_host_context,
                 progress_display=LiveProgressDisplay(show_progress=False),
                 asharp_model=merged,
