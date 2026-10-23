@@ -886,7 +886,13 @@ def _overlapping_values(result: Any, index: _SecretIndex) -> Set[str]:
             for secret_uri, start, end, values in index.local_values:
                 if not _same_file(secret_uri, uri):
                     continue
-                if first is None or start is None or (first <= end and start <= last):
+                if (
+                    first is None
+                    or last is None
+                    or start is None
+                    or end is None
+                    or (first <= end and start <= last)
+                ):
                     found |= values
     return found
 
