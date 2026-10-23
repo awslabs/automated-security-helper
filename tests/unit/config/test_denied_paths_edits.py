@@ -240,6 +240,41 @@ def test_narrowing_the_network_scanners_to_one_that_has_a_network_is_accepted(
     ) == ["sandbox.network_scanners"]
 
 
+@pytest.mark.parametrize("field", ["read_path_scanners", "env_scanners"])
+def test_a_delivered_scanner_grant_list_is_held_to_the_trusted_one(
+    tmp_path, field: str
+) -> None:
+    """``read_path_scanners`` and ``env_scanners`` grant access, as ``extra_read_paths`` does.
+
+    Under a default ``denied_paths`` the whole ``sandbox`` section is exempt from
+    it, so the restrict-only check is the only one that sees these two lists.
+    """
+    rules = ccp.rules_from(AshConfig())
+    assert "/sandbox/**" in ccp.exempt_paths(rules.policy)
+    assert getattr(rules.base.sandbox, field) == []
+    assert _denials({"sandbox": {field: ["bandit"]}}, rules, tmp_path) == [
+        f"sandbox.{field}"
+    ]
+    # Controls: nothing listed, and a list that asks for no more than the server's.
+    assert _denials({"sandbox": {field: []}}, rules, tmp_path) == []
+    granting = ccp.rules_from(
+        AshConfig.model_validate({"sandbox": {field: ["bandit"]}})
+    )
+    assert _denials({"sandbox": {field: ["bandit"]}}, granting, tmp_path) == []
+    assert _denials({"sandbox": {field: []}}, granting, tmp_path) == []
+    found = ccp.client_file_denials(
+        {tmp_path / "delivered.yaml": {"sandbox": {field: ["bandit", "checkov"]}}},
+        granting,
+        scanned_root=tmp_path,
+        all_delivered=True,
+    )
+    assert [denial.key for _, denials in found for denial in denials] == [
+        f"sandbox.{field}"
+    ]
+    reason = found[0][1][0].reason
+    assert "checkov" in reason and "bandit" not in reason
+
+
 @pytest.mark.parametrize("scanner", ["opengrep", "semgrep"])
 def test_a_delivered_metrics_off_is_accepted_and_on_is_refused(
     tmp_path, scanner: str
@@ -266,6 +301,14 @@ def test_a_delivered_metrics_off_is_accepted_and_on_is_refused(
         (
             {"op": "add", "path": "/sandbox/network-scanners", "value": ["checkov"]},
             "sandbox.network_scanners",
+        ),
+        (
+            {"op": "add", "path": "/sandbox/read_path_scanners", "value": ["checkov"]},
+            "sandbox.read_path_scanners",
+        ),
+        (
+            {"op": "add", "path": "/sandbox/env_scanners/-", "value": "checkov"},
+            "sandbox.env_scanners",
         ),
         (
             {"op": "add", "path": "/ash_plugin_modules/-", "value": "no_such_mod_9q"},
