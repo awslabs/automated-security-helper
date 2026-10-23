@@ -18,6 +18,7 @@ import pytest
 
 from automated_security_helper.config import client_config_policy as ccp
 from automated_security_helper.config.ash_config import (
+    ALWAYS_DENIED_PATHS,
     AshConfig,
     RuntimeOverridesConfig,
 )
@@ -166,6 +167,12 @@ def test_an_edited_list_is_the_operators_own() -> None:
     policy = RuntimeOverridesConfig(denied_paths=edited)
     assert not ccp.policy_is_default(policy)
     assert ccp.exempt_paths(policy) == ()
+
+
+def test_the_entries_added_to_every_list_do_not_make_an_empty_one_a_default() -> None:
+    policy = RuntimeOverridesConfig(denied_paths=[])
+    assert set(policy.denied_paths) == set(ALWAYS_DENIED_PATHS)
+    assert not ccp.policy_is_default(policy)
 
 
 def test_value_patterns_still_apply_on_exempt_paths() -> None:

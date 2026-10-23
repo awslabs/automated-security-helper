@@ -82,6 +82,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict
 
 from automated_security_helper.config.ash_config import (
+    ALWAYS_DENIED_PATHS,
     AshConfig,
     RuntimeOverridesConfig,
 )
@@ -436,17 +437,31 @@ def rules_from(config: AshConfig) -> ClientConfigRules:
     return ClientConfigRules(policy=policy_of(config), base=config)
 
 
+#: ``SHIPPED_DEFAULT_DENIED_PATHS`` without ``ALWAYS_DENIED_PATHS``, the entries
+#: ``RuntimeOverridesConfig`` adds to every list it validates. A shipped list
+#: written out by an earlier ``ash config init`` leaves some of them out, so the
+#: model holds it with them added, and only what is left once they are removed from
+#: both sides says whether the operator wrote a default.
+_ALWAYS_DENIED: FrozenSet[str] = frozenset(ALWAYS_DENIED_PATHS)
+_SHIPPED_WITHOUT_THE_ALWAYS_DENIED: FrozenSet[FrozenSet[str]] = frozenset(
+    shipped - _ALWAYS_DENIED for shipped in SHIPPED_DEFAULT_DENIED_PATHS
+)
+
+
 def policy_is_default(policy: RuntimeOverridesConfig) -> bool:
     """Whether ``policy``'s ``denied_paths`` is a default rather than the operator's own.
 
-    Unset, or equal (as a set) to a list in ``SHIPPED_DEFAULT_DENIED_PATHS``.
-    For a policy ``effective_policy`` returned, whether the operator's list was.
+    Unset, or equal (as a set) to a list in ``SHIPPED_DEFAULT_DENIED_PATHS``, apart
+    from the entries ``RuntimeOverridesConfig`` adds to every list
+    (``ALWAYS_DENIED_PATHS``). For a policy ``effective_policy`` returned, whether
+    the operator's list was.
     """
     if policy._effective:
         return policy._listed_denied_paths is None
     if "denied_paths" not in policy.model_fields_set:
         return True
-    return frozenset(policy.denied_paths) in SHIPPED_DEFAULT_DENIED_PATHS
+    listed = frozenset(policy.denied_paths) - _ALWAYS_DENIED
+    return listed in _SHIPPED_WITHOUT_THE_ALWAYS_DENIED
 
 
 def _names(entry: str, pointer: str) -> bool:
