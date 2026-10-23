@@ -60,6 +60,7 @@ import re
 import shutil
 import signal
 import subprocess  # nosec B404 - git is invoked as a subprocess; see _validate_clone_url
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
@@ -374,7 +375,7 @@ class GitTimeoutError(RuntimeError):
 def _stop_process_group(process: "subprocess.Popen[str]") -> None:
     """Kill ``process`` and every process in the group it leads."""
 
-    if os.name == "nt":
+    if sys.platform == "win32":
         with contextlib.suppress(OSError, ValueError):
             process.send_signal(signal.CTRL_BREAK_EVENT)
         with contextlib.suppress(OSError):
@@ -396,11 +397,11 @@ def _run_git(
         GitTimeoutError: when the command runs past the timeout.
     """
 
-    group: Dict[str, Any] = (
-        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-        if os.name == "nt"
-        else {"start_new_session": True}
-    )
+    group: Dict[str, Any]
+    if sys.platform == "win32":
+        group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        group = {"start_new_session": True}
     process = subprocess.Popen(  # nosec B603 - list-form argv, git from _GIT_ARGV, url and ref validated before any call; see set_source_git
         cmd,
         stdin=subprocess.DEVNULL,
