@@ -269,7 +269,15 @@ def test_the_default_policy_accepts_ashs_own_repository_config() -> None:
     ``fail_on_findings: true`` is the default, plugin modules are left to
     plugin_module_trust, and a delivered repository's own suppressions and ignore
     paths are honored (decision point 1), so nothing in it is refused.
+
+    The one exception is Windows. There opengrep and semgrep are off by default
+    (``enabled`` is ``platform.system().lower() != "windows"``), the file turns
+    both on, and the default ``denied_paths`` holds their sections whole because
+    they send usage metrics off the host. A write that differs from the trusted
+    value is refused, so those two are, and nothing else.
     """
+    import platform
+
     from automated_security_helper.config.config_sources import read_config_file
 
     own = Path(__file__).resolve().parents[3] / ".ash" / ".ash.yaml"
@@ -281,7 +289,9 @@ def test_the_default_policy_accepts_ashs_own_repository_config() -> None:
         exempt=ccp.exempt_paths(policy),
         inert=ccp.INERT_PATHS,
     )
-    assert denials == []
+    off_by_default = ["scanners.opengrep.enabled", "scanners.semgrep.enabled"]
+    expected = off_by_default if platform.system().lower() == "windows" else []
+    assert sorted(denial.key for denial in denials) == expected
 
 
 # ---------------------------------------------------------------------------
