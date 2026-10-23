@@ -31,6 +31,13 @@ GRANTS_AND_OFF = (
     "  extra_read_paths: ['/']\n"
 )
 
+SCANNER_GRANTS = (
+    "project_name: uploaded\n"
+    "sandbox:\n"
+    "  read_path_scanners: [bandit]\n"
+    "  env_scanners: [bandit]\n"
+)
+
 
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +92,23 @@ def test_uploaded_grants_refuse_the_config(
         "sandbox.extra_read_paths",
         "sandbox.mode",
     ):
+        assert field in str(refused.value)
+
+
+def test_uploaded_scanner_grants_refuse_the_config(
+    layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lists that let scanners read paths and environment variables are held too."""
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    scanned, upload = layout
+    operator = _write(tmp_path / "operator" / "ash.yaml", "sandbox:\n  mode: bwrap\n")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    uploaded = _write(upload / "ash.yaml", SCANNER_GRANTS)
+
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(config_path=uploaded, source_dir=scanned, untrusted_config=True)
+    for field in ("sandbox.read_path_scanners", "sandbox.env_scanners"):
         assert field in str(refused.value)
 
 
@@ -196,3 +220,18 @@ def test_positive_control_a_trusted_config_outside_the_tree_still_grants(
     assert config.sandbox.network_scanners == ["checkov"]
     assert config.sandbox.extra_read_paths == ["/"]
     assert config.sandbox.network_limit is None
+
+
+def test_positive_control_a_trusted_config_outside_the_tree_keeps_scanner_grants(
+    layout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scanner-grant file of the refusal test, not marked untrusted, resolves."""
+    scanned, upload = layout
+    operator = _write(tmp_path / "operator" / "ash.yaml", "sandbox:\n  mode: bwrap\n")
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    config_file = _write(upload / "ash.yaml", SCANNER_GRANTS)
+
+    config = resolve_config(config_path=config_file, source_dir=scanned)
+
+    assert config.sandbox.read_path_scanners == ["bandit"]
+    assert config.sandbox.env_scanners == ["bandit"]
