@@ -366,7 +366,8 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
         """
         if "misconfig" not in (self.config.options.scanners or []):
             return final_args
-        binary = find_executable(self.command) or self.command
+        command = self.command or "trivy"
+        binary = find_executable(command) or command
         defaults = trivy_default_misconfig_scanners(binary, list(self.subcommands))
         kept = [name for name in defaults or [] if name != _TERRAFORM_MISCONFIG_SCANNER]
         args = list(final_args)
@@ -376,7 +377,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 "module sources a .tf file names, and has no setting that stops it. "
                 "checkov still checks Terraform."
             )
-            head = [self.command, *self.subcommands]
+            head = [command, *self.subcommands]
             insert_at = len(head) if args[: len(head)] == head else len(args)
             args[insert_at:insert_at] = [f"--misconfig-scanners={','.join(kept)}"]
         else:

@@ -252,7 +252,11 @@ def _namespace_package_refusal(module_path: str) -> Optional[str]:
             return None
         if spec is None:
             return None
-    if spec.submodule_search_locations is not None and spec.origin is None:
+    if (
+        spec is not None
+        and spec.submodule_search_locations is not None
+        and spec.origin is None
+    ):
         return (
             "a namespace package, with no __init__.py: it declares no plugins and a "
             "scan selects none of the packages it holds, so name those packages"

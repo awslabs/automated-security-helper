@@ -249,7 +249,8 @@ class AshPluginManager(BaseModel):
             key = plugin_module_name
             existing = registrations.get(key) if registrations is not None else None
             if (
-                existing is not None
+                registrations is not None
+                and existing is not None
                 and existing.plugin_module_path != plugin_module_path
             ):
                 key = f"{plugin_module_path}:{plugin_module_name}"
