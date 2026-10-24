@@ -849,15 +849,16 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         tries, so a filter or plugin that verifies under another name cannot
         either (see ``utils/detect_secrets_worker.py``).
 
-        Returns None when the worker was killed at ``scan_timeout``. The caller then
-        keeps the collection it already holds (the parsed baseline, or empty). This
-        differs from the in-process scan, which kept whatever it had found before
-        the cutoff: a killed worker's partial results are not recoverable. The scan
-        is reported as timed out either way, so a partial result was never a
-        complete one.
+        A worker killed at ``scan_timeout`` fails the scan: the timeout is recorded
+        on the scanner (``scan_timed_out_after``) and ScannerError is raised, as the
+        template scan does for a tool it killed. The in-process scan kept whatever
+        it had found before the cutoff, but a killed worker's partial results are
+        not recoverable, and a report built from the baseline alone would be graded
+        as a clean scan.
 
         Raises:
-            ScannerError: the worker failed, or exited 0 without writing results.
+            ScannerError: the worker was killed at ``scan_timeout``, failed, or
+                exited 0 without writing results.
         """
         from detect_secrets.core.potential_secret import PotentialSecret
 
@@ -913,12 +914,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     timeout=scan_timeout,
                 )
             if response.get("timed_out"):
-                self._plugin_log(
-                    f"detect-secrets scan timed out after {scan_timeout}s",
-                    level=logging.WARNING,
-                    append_to_stream="stderr",
+                # The two steps the template scan takes for a tool it killed. The
+                # timeout is recorded on the scanner so the executor names it
+                # (_run_subprocess does this for the template; this worker is started
+                # directly, so it is done here), and the scan raises
+                # (ScannerPluginBase.scan). A killed worker wrote no results, and
+                # returning the collection already held would be graded PASSED.
+                self._record_timeout(response, scan_timeout)
+                raise ScannerError(
+                    f"{self.__class__.__name__} timed out after "
+                    f"{scan_timeout}s and was killed, so it produced no "
+                    f"results file. Raise scanners.{getattr(self.config, 'name', '<scanner>')}"
+                    ".options.scan_timeout if this target legitimately needs "
+                    "longer, or set it to null to leave this scanner unbounded."
                 )
-                return None
             if response.get("returncode") != 0 or not output_file.exists():
                 detail = (response.get("stderr") or response.get("error") or "").strip()
                 raise ScannerError(
@@ -1038,9 +1047,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
             # The baseline is read here and handed to the worker as data rather than
             # as a path: the worker may run in a sandbox that cannot see a baseline
-            # outside the source tree. It is also loaded here, which only parses it,
-            # so that a scan killed at its timeout still reports the baseline's
-            # entries, as the in-process scan did.
+            # outside the source tree. It is also loaded here, which only parses it.
+            # A scan killed at its timeout does not fall back to these entries: it
+            # raises.
             baseline_document = None
             if (
                 target_type == "source"
