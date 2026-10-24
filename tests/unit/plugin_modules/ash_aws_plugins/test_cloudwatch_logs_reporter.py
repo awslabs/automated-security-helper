@@ -60,7 +60,8 @@ def test_cloudwatch_logs_reporter_config_defaults():
     config = CloudWatchLogsReporterConfig()
     assert config.name == "cloudwatch-logs"
     assert config.extension == "cwlog.json"
-    assert config.enabled is True
+    # Off by default: it sends findings to AWS, so only the operator turns it on.
+    assert config.enabled is False
     assert isinstance(config.options, CloudWatchLogsReporterConfigOptions)
 
 

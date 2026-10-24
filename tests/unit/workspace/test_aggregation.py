@@ -16,6 +16,7 @@ The three properties these tests exist to hold:
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,7 @@ from automated_security_helper.workspace.aggregation import (
     rebase_run_for_project,
     to_workspace_uri,
 )
+from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 
 
@@ -869,6 +871,92 @@ class TestAggregatorOutput:
             **kwargs,
         )
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_the_unified_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        victim = tmp_path / "victim.json"
+        (output / "ash_aggregated_results.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_file_is_not_written_through_a_link(self, tmp_path):
+        plan = _plan(tmp_path, "api")
+        spool = tmp_path / "out" / ".workspace-spool"
+        spool.mkdir(parents=True)
+        victim = tmp_path / "victim.json"
+        (spool / "api.run.json").symlink_to(victim)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / "out")
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert not victim.exists()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="creating symlinks needs privileges on Windows"
+    )
+    def test_a_spool_directory_that_is_a_link_is_not_written_through(self, tmp_path):
+        """No PluginContext registered the workspace output; the spool is guarded."""
+        plan = _plan(tmp_path, "api")
+        output = tmp_path / "out"
+        output.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (output / ".workspace-spool").symlink_to(elsewhere, target_is_directory=True)
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+
+        with pytest.raises(OutputDirLinkRefused):
+            aggregator.add(self._outcome("api"), _run(_result()), plan.projects[0])
+
+        assert list(elsewhere.iterdir()) == []
+
+    def test_a_reader_sees_the_previous_unified_file_while_it_is_written(
+        self, tmp_path, monkeypatch
+    ):
+        """The MCP progress reader parses the file while a workspace scan rewrites it."""
+        import shutil
+
+        from automated_security_helper.workspace import aggregation
+
+        plan = _plan(tmp_path, "api", "web")
+        output = tmp_path / "out"
+        output.mkdir()
+        target = output / "ash_aggregated_results.json"
+        previous = '{"previous": "complete"}\n'
+        target.write_text(previous, encoding="utf-8")
+        aggregator = WorkspaceAggregator(plan=plan, output_dir=output)
+        for index, key in enumerate(("api", "web")):
+            aggregator.add(self._outcome(key), _run(_result()), plan.projects[index])
+        seen = []
+        copy = shutil.copyfileobj
+
+        def read_then_copy(source, destination, *args, **kwargs):
+            destination.flush()
+            seen.append(target.read_text(encoding="utf-8"))
+            return copy(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(aggregation.shutil, "copyfileobj", read_then_copy)
+
+        path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
+
+        assert seen == [previous, previous]
+        assert len(json.loads(path.read_text(encoding="utf-8"))["sarif"]["runs"]) == 2
+        assert sorted(p.name for p in output.iterdir() if p.is_file()) == [
+            target.name
+        ], "a staging file was left behind"
+
     def test_the_unified_file_parses_as_json(self, tmp_path):
         """The writer streams rather than dumping one object, so this is not free."""
         plan = _plan(tmp_path, "api", "web")
@@ -1123,3 +1211,144 @@ class TestAggregatorOutput:
         path = aggregator.write(exit_code=0, wall_clock_seconds=1.0)
         parsed = json.loads(path.read_text(encoding="utf-8"))
         assert parsed["scanner_results"]["bandit"]["status"] == "ERROR"
+
+
+class TestStampingARunRecord:
+    """A record goes into the written file without loading it whole.
+
+    The inner run of a container scan stamps its completion marker after the
+    report step, and its refusal when the report step refuses; see
+    utils/inner_run_outcome.py.
+    """
+
+    RECORD = {"type": "run_completed", "metadata": {"run_id": "1" * 32}}
+
+    def _written(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import (
+            WorkspaceAggregator,
+        )
+
+        return WorkspaceAggregator(
+            plan=_plan(tmp_path), output_dir=tmp_path / "out"
+        ).write(exit_code=0, wall_clock_seconds=0.1)
+
+    def test_the_record_is_stamped_and_the_rest_is_unchanged(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        before = json.loads(path.read_text(encoding="utf-8"))
+
+        assert stamp_run_record(path, self.RECORD)
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert after.pop("validation_checkpoints") == [self.RECORD]
+        before.pop("validation_checkpoints")
+        assert after == before
+
+    def test_the_file_is_replaced_rather_than_rewritten_in_place(self, tmp_path):
+        """A reader that opened the file before the stamp keeps reading it whole."""
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = self._written(tmp_path)
+        before = path.read_bytes()
+        inode = path.stat().st_ino
+
+        with open(path, "rb") as reader:
+            assert stamp_run_record(path, self.RECORD)
+            assert reader.read() == before
+
+        assert path.stat().st_ino != inode
+
+    def test_a_header_line_longer_than_one_read_is_copied_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """The file is read in bounded pieces; a long line is copied in several."""
+        from automated_security_helper.workspace import aggregation
+
+        path = self._written(tmp_path)
+        before = json.loads(path.read_text(encoding="utf-8"))
+        # Only just long enough for the checkpoints line, which must be read whole;
+        # the workspace and scanner_results lines take several reads.
+        monkeypatch.setattr(
+            aggregation,
+            "_STAMP_READ_LIMIT",
+            len(aggregation._EMPTY_CHECKPOINTS_LINE) + 1,
+        )
+
+        assert aggregation.stamp_run_record(path, self.RECORD)
+
+        after = json.loads(path.read_text(encoding="utf-8"))
+        assert after.pop("validation_checkpoints") == [self.RECORD]
+        before.pop("validation_checkpoints")
+        assert after == before
+
+    def test_a_file_without_the_checkpoints_line_is_not_read_whole(
+        self, tmp_path, monkeypatch
+    ):
+        """Given up on at the SARIF line, after one bounded read of it."""
+        import builtins
+
+        from automated_security_helper.workspace import aggregation
+
+        path = tmp_path / "ash_aggregated_results.json"
+        sarif_line = '"sarif": {"runs": ["' + "x" * 100_000 + '"]}\n'
+        path.write_text('{\n"name": "n",\n' + sarif_line + "}\n", encoding="utf-8")
+        reads = []
+
+        class _Recording:
+            def __init__(self, handle):
+                self._handle = handle
+
+            def readline(self, size=-1):
+                line = self._handle.readline(size)
+                reads.append((size, len(line)))
+                return line
+
+            def __getattr__(self, name):
+                return getattr(self._handle, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self._handle.__exit__(*exc)
+
+        def recording_open(file, mode="r", *args, **kwargs):
+            handle = builtins.open(file, mode, *args, **kwargs)
+            return _Recording(handle) if mode == "r" else handle
+
+        monkeypatch.setattr(aggregation, "open", recording_open, raising=False)
+        monkeypatch.setattr(aggregation, "_STAMP_READ_LIMIT", 4096)
+
+        assert not aggregation.stamp_run_record(path, self.RECORD)
+
+        assert reads, "the file was not read in bounded pieces"
+        assert all(0 < size <= 4096 for size, _ in reads), reads
+        assert sum(length for _, length in reads) < 4096 + 64, reads
+
+    def test_a_file_the_aggregator_did_not_write_is_left_unchanged(self, tmp_path):
+        from automated_security_helper.workspace.aggregation import stamp_run_record
+
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(json.dumps({"validation_checkpoints": []}), encoding="utf-8")
+        before = path.read_bytes()
+
+        assert not stamp_run_record(path, self.RECORD)
+        assert path.read_bytes() == before
+
+    def test_a_failed_rewrite_leaves_the_file_and_no_staging_file(
+        self, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.workspace import aggregation
+
+        path = self._written(tmp_path)
+        before = path.read_bytes()
+
+        def no_replace(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr(aggregation.os, "replace", no_replace)
+
+        assert not aggregation.stamp_run_record(path, self.RECORD)
+        assert path.read_bytes() == before
+        assert sorted(p.name for p in path.parent.iterdir()) == [path.name]

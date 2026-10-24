@@ -1,8 +1,35 @@
 """Helper functions for ASH tests."""
 
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
+
+#: Set in the CI job that installs every scanner (sandbox-scanner-parity in
+#: ash-unified-ci.yml), so the tests that run a real scanner fail there when the
+#: tool is missing instead of skipping, as ASH_REQUIRE_SYMBOLS_EXTRA does for the
+#: symbol tests. Elsewhere a missing tool skips them.
+REQUIRE_REAL_SCANNERS = "ASH_REQUIRE_REAL_SCANNER_TESTS"
+
+
+def require_scanner_binary(name: str) -> str:
+    """The path of the scanner ``name`` on PATH; skip without it, or fail when required."""
+    import pytest
+
+    found = shutil.which(name)
+    if found:
+        return found
+    if os.environ.get(REQUIRE_REAL_SCANNERS, "").strip().upper() in (
+        "1",
+        "YES",
+        "TRUE",
+    ):
+        pytest.fail(
+            f"{REQUIRE_REAL_SCANNERS} is set but {name} is not on PATH. This test "
+            "must run in that CI job, not skip."
+        )
+    pytest.skip(f"needs a {name} binary on PATH")
+
 
 #: Root of the tests' own scratch area, inside the repository and gitignored.
 #:
@@ -14,6 +41,104 @@ from pathlib import Path
 #: and the ``ash_temp_path`` fixture deletes a subtree of this directory on
 #: teardown while other xdist workers are mid-sweep.
 ASH_TEST_TEMP_ROOT = Path(__file__).parent.parent / "pytest-temp"
+
+#: The checkout these tests belong to.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def importing_this_checkout(driver: str) -> str:
+    """``driver``, preceded by code that has it import ASH from this checkout.
+
+    For a child started with ``python -I``. ``-I`` leaves the current directory and
+    ``PYTHONPATH`` off ``sys.path``, so such a child imports ASH from wherever the
+    interpreter's installed copy points, which is not necessarily the checkout under
+    test: an editable install points at the tree it was installed from. This puts the
+    checkout first on ``sys.path``, and the child exits 86 before running ``driver``
+    if ``automated_security_helper`` still comes from somewhere else.
+    """
+    root = str(REPO_ROOT)
+    return (
+        "import sys\n"
+        f"sys.path.insert(0, {root!r})\n"
+        "import automated_security_helper as _ash\n"
+        "from pathlib import Path as _Path\n"
+        f"if not _Path(_ash.__file__).resolve().is_relative_to({root!r}):\n"
+        "    sys.stderr.write(\n"
+        f"        'imported ASH from ' + _ash.__file__ + ', not from ' + {root!r}\n"
+        "    )\n"
+        "    raise SystemExit(86)\n"
+        "del _ash, _Path\n"
+    ) + driver
+
+
+def mark_inner_run_completed(results_file: Path, run_id: str) -> bool:
+    """Add the completion marker an inner run writes to ``results_file``, as it would.
+
+    For tests that stand in for the inner run of a container or nix scan (see
+    utils/inner_run_outcome.py). False, with the file unchanged, when it is not JSON.
+    """
+    import json
+
+    from automated_security_helper.utils.inner_run_outcome import completion_marker
+
+    try:
+        document = json.loads(Path(results_file).read_text(encoding="utf-8"))
+    except ValueError:
+        return False
+    document.setdefault("validation_checkpoints", []).append(completion_marker(run_id))
+    Path(results_file).write_text(json.dumps(document), encoding="utf-8")
+    return True
+
+
+def builtin_reporter_classes() -> list:
+    """Every built-in reporter class, from the reporters package itself.
+
+    Not ``ash_builtin.ASH_REPORTERS``, which is empty in a process whose first ASH
+    import was ``interactions.run_ash_scan``: that import reaches the built-in
+    plugin package through ``config.ash_config`` while
+    ``core.scanner_statistics_calculator`` is still initializing, and the reporter
+    group fails to load.
+    """
+    from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+    from automated_security_helper.plugin_modules.ash_builtin import reporters
+
+    return [
+        value
+        for value in vars(reporters).values()
+        if isinstance(value, type)
+        and issubclass(value, ReporterPluginBase)
+        and value is not ReporterPluginBase
+    ]
+
+
+def results_of_a_scan():
+    """Results that hold a scan: one scanner's entry, as a scan phase records it.
+
+    For tests that hand ``--use-existing`` a results file. ``AshAggregatedResults()``
+    on its own holds no scanner results and no findings, which ``--use-existing``
+    refuses.
+    """
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    return AshAggregatedResults.model_validate(
+        {"scanner_results": {"bandit": {"source": {"scanner_name": "bandit"}}}}
+    )
+
+
+def sarif_report_written(results, name: str = "ash.sarif"):
+    """Record in ``results`` that the run's SARIF reporter wrote ``reports/<name>``.
+
+    As the report phase records it, for tests that hand ``_run_local_mode`` or
+    ``_compute_exit_code`` results without running the report phase: only a file
+    so recorded is counted or rewritten as the run's SARIF report. Returns
+    ``results``.
+    """
+    from automated_security_helper.utils.inner_run_outcome import (
+        record_reports_written,
+    )
+
+    record_reports_written(results, [(name, "sarif")])
+    return results
 
 
 def is_under_test_scratch(path: Path) -> bool:
@@ -77,12 +202,12 @@ def iter_repo_files(
         rglob listed the directory, another worker's ash_temp_path teardown
         removed it, and rglob then tried to descend into it.
 
-        Observed on py3.11 and not on the other legs of the same run. Whether that
-        is a pathlib version difference or just which worker lost the race is NOT
-        established -- an attempt to reproduce the raise synthetically on 3.11 and
-        3.13 failed to hit the window on either, so treat the leg it appeared on as
-        a sample rather than as the affected set, and do not assume a newer
-        interpreter is immune.
+        Observed on py3.11 and not on the other legs of the same run. Measured
+        since, deterministically, by removing the directory at the moment rglob
+        lists it through an audit hook on os.scandir: 3.10 and 3.11 raise
+        FileNotFoundError, and 3.12, 3.13 and 3.14 skip the directory without an
+        error. A newer interpreter still descends into the scratch tree and
+        returns whatever is there, so it is not immune to the race, only quieter.
 
     ``os.walk`` can be pruned, which removes the race rather than tolerating it:
     mutating ``dirnames`` in place stops the descent from ever happening.

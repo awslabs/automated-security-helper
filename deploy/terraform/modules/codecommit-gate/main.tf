@@ -135,10 +135,27 @@ data "aws_iam_policy_document" "build" {
     resources = ["*"]
   }
 
-  # Pull covers the shared base image, push covers the gate repository. Scoped to
-  # this account's repositories because the base image ARN is not known here.
+  # Pull covers the shared base image. Scoped to this account's repositories
+  # because the base image ARN is not known here, which is why it is read-only:
+  # the build runs privileged Docker, and push stays on this module's repository.
   statement {
-    sid    = "PullBaseAndPushGate"
+    sid    = "PullBaseImage"
+    effect = "Allow"
+
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+    ]
+
+    resources = [
+      "arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/*",
+    ]
+  }
+
+  # Push only to the gate's own repository.
+  statement {
+    sid    = "PushGateImage"
     effect = "Allow"
 
     actions = [
@@ -151,10 +168,7 @@ data "aws_iam_policy_document" "build" {
       "ecr:UploadLayerPart",
     ]
 
-    resources = [
-      aws_ecr_repository.gate.arn,
-      "arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/*",
-    ]
+    resources = [aws_ecr_repository.gate.arn]
   }
 }
 
@@ -172,9 +186,9 @@ resource "aws_codebuild_project" "gate_image" {
   #
   # Escalation is bounded the same way: source.type is NO_SOURCE with the
   # buildspec rendered from this module, so nothing fetched from a repository
-  # decides what runs as root, and the service role reaches only this module's
+  # decides what runs as root, and the service role can push only to this module's
   # ECR repository.
-  #checkov:skip=CKV_AWS_316:Required to run docker build; CodeBuild has no rootless mode. Escalation is bounded by NO_SOURCE with a module-rendered buildspec, and the service role is scoped to this module's ECR repository. See the comment above this line.
+  #checkov:skip=CKV_AWS_316:Required to run docker build; CodeBuild has no rootless mode. Escalation is bounded by NO_SOURCE with a module-rendered buildspec, and the service role can push only to this module's ECR repository. See the comment above this line.
   name          = "${var.name_prefix}-image-build"
   description   = "Adds a Lambda runtime interface client and the gate handler to the ASH image."
   service_role  = aws_iam_role.build.arn

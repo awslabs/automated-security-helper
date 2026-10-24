@@ -182,10 +182,12 @@ ash config validate --config-overrides 'scanners.bandit.options.confidence_level
 ### Custom Plugins
 
 You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list.
-The top-level package must be inside ASH's plugin namespace: either under
-`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`
-(`my_ash_plugins`, `acme_ash_plugins`). A module outside that namespace is skipped with
-a warning rather than imported, so a name like `my_plugins` silently registers nothing.
+Each entry must be a dotted path of Python identifiers inside ASH's plugin namespace:
+under `automated_security_helper.` or `ash_plugins`, or a top-level package named
+`ash_plugins` or ending in `_ash_plugins` (`my_ash_plugins`, `acme_ash_plugins`). A
+name outside that namespace, such as `my_plugins`, ASH's plugin root
+`automated_security_helper.plugin_modules`, or a namespace package (a directory with no
+`__init__.py`) refuses the scan with exit code 3 before any module is imported.
 
 ```yaml
 ash_plugin_modules:
@@ -224,3 +226,9 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
   A reference with no default, `${VAR_NAME}`, has never resolved and still does
   not; write `${VAR_NAME:default_value}`. A reference must also be the whole
   value, not part of a longer string.
+
+  Under the MCP server, a configuration file an MCP client delivered may not use
+  `!ENV` at all, whatever the name, and for a remote client neither may any other
+  file outside `ASH_MCP_ALLOWED_CONFIG_ROOTS` and the session's own `config/`
+  directory, a scan target's own config included; see
+  [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source).

@@ -36,6 +36,16 @@ from automated_security_helper.utils.sandbox.policy import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _home_is_the_passwd_home(monkeypatch):
+    """HOME is the passwd entry's home here, as on most hosts.
+
+    Every test sets HOME to a directory of its own; the case where the two differ
+    is TestFirejailHidesBothHomes, which overrides this.
+    """
+    monkeypatch.setattr(backends_module, "_passwd_home", Path.home, raising=False)
+
+
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -46,6 +56,10 @@ def layout(tmp_path, monkeypatch):
     # Path.home() reads USERPROFILE on Windows, where these tests run too: the
     # policy builder is path logic, independent of the platform it runs on.
     monkeypatch.setenv("USERPROFILE", str(home))
+    # uv's directories follow these before $HOME, so a value from the environment
+    # running the tests would move them away from the ones planted under home.
+    for variable in ("XDG_DATA_HOME", "UV_TOOL_DIR", "UV_PYTHON_INSTALL_DIR"):
+        monkeypatch.delenv(variable, raising=False)
     source = tmp_path / "src"
     source.mkdir()
     output = source / ".ash" / "ash_output"
@@ -218,6 +232,15 @@ class TestEnvironment:
             "HTTPS_PROXY",
         ):
             assert dropped not in env, dropped
+
+    def test_the_outer_run_id_is_dropped_even_when_named(self, layout):
+        """A scanner never gets the ID its run writes into the results file."""
+        policy = _policy(layout, SandboxRequirements(env_names=("ASH_OUTER_RUN_ID",)))
+        env = policy.filter_env(
+            {"ASH_OUTER_RUN_ID": "0" * 32, "ASH_OFFLINE": "YES", "PATH": "/usr/bin"}
+        )
+        assert "ASH_OUTER_RUN_ID" not in env
+        assert env["ASH_OFFLINE"] == "YES"
 
     def test_proxy_settings_pass_only_with_a_network(self, layout):
         online = _policy(layout, SandboxRequirements(network=True))
@@ -415,7 +438,7 @@ class TestHostCachesAreNotWrittenInPlace:
     def test_bundled_scanners_that_write_a_cache_declare_where(self):
         """Measured under Landlock with the caches read-only: these failed or lost
         findings until redirected (semgrep and opengrep cannot open their log under
-        ~/.semgrep or ~/.opengrep; npm-audit lost the vulnerable ranges it reads
+        ~/.semgrep or ~/.opengrep; npm-audit lost the advisory ranges it reads
         from registry metadata it caches). grype's and trivy's databases are only
         read, so they are not redirected."""
         declared = {
@@ -622,21 +645,21 @@ class TestScope:
         assert "shell" in result.stderr
 
 
-class TestReviewFindings:
-    """Regressions for the gaps the policy review found."""
+class TestPolicyEdges:
+    """Symlinked results directories, tool prefixes under home, and the env filter."""
 
     def test_a_symlinked_results_directory_is_refused(self, layout, tmp_path):
-        victim = tmp_path / "victim"
-        victim.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
         (layout.output / "scanners").mkdir(parents=True)
-        layout.results.symlink_to(victim, target_is_directory=True)
+        layout.results.symlink_to(elsewhere, target_is_directory=True)
         with pytest.raises(SandboxUnavailable, match="symlink"):
             _policy(layout)
 
     def test_a_symlink_above_the_results_directory_is_refused(self, layout, tmp_path):
-        victim = tmp_path / "victim"
-        (victim / "grype").mkdir(parents=True)
-        (layout.output / "scanners").symlink_to(victim, target_is_directory=True)
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "grype").mkdir(parents=True)
+        (layout.output / "scanners").symlink_to(elsewhere, target_is_directory=True)
         with pytest.raises(SandboxUnavailable, match="symlink"):
             _policy(layout)
 
@@ -777,7 +800,7 @@ class TestSymlinkedOutputDirectory:
         refuse_symlinked_output_dir(source, link / "out")
 
     @pytest.mark.parametrize("mode", ["off", "landlock"])
-    def test_a_sandboxed_scan_stops_before_writing_through_it(self, tree, mode):
+    def test_a_scan_stops_before_writing_through_it_in_every_mode(self, tree, mode):
         # The orchestrator checks before ensure_directories, which would create
         # and clear subdirectories under the link's target.
         from automated_security_helper.core.exceptions import ASHValidationError
@@ -788,11 +811,9 @@ class TestSymlinkedOutputDirectory:
             source_dir=tree.source, output_dir=tree.source / "build" / "ash"
         )
         orchestrator.config = AshConfig(sandbox=SandboxConfig(mode=mode))
-        if mode == "off":
-            orchestrator._refuse_symlinked_output_dir()
-        else:
-            with pytest.raises(ASHValidationError, match="build is a symlink"):
-                orchestrator._refuse_symlinked_output_dir()
+        # Whatever the mode: the check is not the sandbox's alone.
+        with pytest.raises(ASHValidationError, match="build is a symlink"):
+            orchestrator._refuse_linked_output_dir()
         assert sorted(p.name for p in tree.target.iterdir()) == ["deep"]
 
     def test_every_spawn_policy_refuses_it(self, layout, tmp_path):
@@ -805,6 +826,9 @@ class TestSymlinkedOutputDirectory:
                 output_dir=layout.source / "build" / "ash",
                 results_dir=layout.source / "build" / "ash" / "scanners" / "grype",
             )
+
+
+_BUILTIN = "automated_security_helper.plugin_modules.ash_builtin"
 
 
 class TestProbeScope:
@@ -836,6 +860,123 @@ class TestProbeScope:
             assert active_scope() is None
         finally:
             clear_backend_cache()
+
+    @pytest.mark.parametrize(
+        "plugin_path, own_name",
+        [
+            (f"{_BUILTIN}.scanners.bandit_scanner.BanditScanner", "bandit"),
+            (f"{_BUILTIN}.converters.jupyter_converter.JupyterConverter", "jupyter"),
+        ],
+        ids=["scanner", "converter"],
+    )
+    def test_a_plugin_class_gets_a_sandbox_for_its_construction_probes(
+        self, tmp_path, monkeypatch, plugin_path, own_name
+    ):
+        """Before an instance exists, the probes run under the plugin's own name.
+
+        The class is what the scan and convert phases pass while constructing a
+        plugin, whose model_post_init runs ``uv tool run <tool> --version``. It has
+        no config instance, so it must not be judged a plugin a config file renamed.
+        """
+        import importlib
+
+        from automated_security_helper.utils.sandbox.scope import (
+            SandboxScope,
+            active_scope,
+            plugin_probe_scope,
+        )
+
+        module_name, _, attribute = plugin_path.rpartition(".")
+        plugin_class = getattr(importlib.import_module(module_name), attribute)
+
+        class Recorder:
+            name = "recorder"
+
+            def probe(self):
+                return None
+
+        clear_backend_cache()
+        monkeypatch.setitem(scope_module.BACKENDS, "bwrap", Recorder)
+        try:
+            with plugin_probe_scope(plugin_class, _context(tmp_path)):
+                active = active_scope()
+                assert isinstance(active, SandboxScope), (
+                    f"the construction probes of {own_name} were refused: "
+                    f"{getattr(active, 'reason', active)!r}"
+                )
+                assert active.scanner_name == own_name
+        finally:
+            clear_backend_cache()
+
+
+class TestFirejailHidesBothHomes:
+    """firejail hides the passwd entry's home; HOME's directory needs its own blacklist.
+
+    firejail is setuid and takes the home it makes private, and the one a whitelist
+    inside $HOME applies to, from getpwuid() (init_cfg in firejail's main.c), never
+    from HOME. The plan decided ``--private`` and its whitelists against HOME's
+    directory, so with HOME elsewhere it hid the passwd home by luck (``--private``)
+    or not at all (a whitelist under HOME), and HOME's own directory, where the
+    scanner is told its home is, stayed readable unless it was under /tmp.
+    """
+
+    @pytest.fixture
+    def fake_tmp(self, tmp_path, monkeypatch):
+        """Stand in for /tmp, so no test writes to the real one."""
+        root = tmp_path / "fake-tmp"
+        root.mkdir()
+        monkeypatch.setattr(backends_module, "_TMP_ROOT", root, raising=False)
+        return root
+
+    def _argv(self, layout):
+        backend = FirejailBackend()
+        backend._executable = "/fj"
+        return backend.plan(["/usr/bin/true"], {}, _policy(layout)).argv
+
+    def test_home_is_the_passwd_home(self, layout, fake_tmp):
+        """Unchanged: --private hides the one home, and nothing is blacklisted."""
+        argv = self._argv(layout)
+        assert "--private" in argv
+        assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
+
+    def test_home_elsewhere_with_nothing_in_the_passwd_home(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        passwd_home = tmp_path / "passwd-home"
+        passwd_home.mkdir()
+        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        argv = self._argv(layout)
+        assert "--private" in argv
+        assert f"--blacklist={_as_argv(layout.home)}" in argv
+
+    def test_home_elsewhere_with_a_tool_in_the_passwd_home(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        """The whitelist applies to the passwd home, so it is decided against that."""
+        passwd_home = tmp_path / "passwd-home"
+        venv_bin = passwd_home / "work" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        monkeypatch.setenv("PATH", str(venv_bin))
+        argv = self._argv(layout)
+        assert f"--whitelist={_as_argv(venv_bin)}" in argv
+        assert "--private" not in argv
+        assert f"--blacklist={_as_argv(layout.home)}" in argv
+
+    def test_home_elsewhere_under_tmp_needs_no_blacklist(
+        self, layout, fake_tmp, tmp_path, monkeypatch
+    ):
+        """/tmp is already hidden by --private-tmp or by its own whitelists."""
+        home = fake_tmp / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        passwd_home = tmp_path / "passwd-home"
+        passwd_home.mkdir()
+        monkeypatch.setattr(backends_module, "_passwd_home", lambda: passwd_home)
+        argv = self._argv(layout)
+        assert not [a for a in argv if a.startswith("--blacklist=") and "home" in a]
+        assert "--private" in argv
 
 
 class TestWritableWinsOverReadOnly:
@@ -1179,6 +1320,24 @@ class TestSandboxExecProfile:
         finally:
             plan.run_cleanup()
 
+    def test_a_root_cwd_is_not_scan_data_and_the_tree_stays_exec_denied(
+        self, layout, tmp_path
+    ):
+        # checkov and ferret-scan run from the filesystem root so that they read no
+        # config file from the scanned tree. The root is not the scan's data: the
+        # read list already leaves it out, and the exec deny must too, or it holds
+        # every tool path only because each one is given back after it.
+        root = Path(os.path.abspath(os.sep))
+        lines = _sbpl(layout, tmp_path, cwd=root)
+        ((_, deny),) = _indexed(lines, "(deny process-exec ")
+        assert _as_argv(root) not in _subpaths(deny), deny
+        for still_denied in (layout.source, layout.output, layout.results):
+            assert _as_argv(still_denied) in _subpaths(deny), still_denied
+        policy = _policy(layout, cwd=root)
+        assert Path(os.path.realpath(root)) not in _resolved(policy.scan_data)
+        for data in (layout.source, layout.output):
+            assert Path(os.path.realpath(data)) in _resolved(policy.scan_data)
+
     def test_the_scan_data_is_not_executable_inside_a_tool_path(self, layout, tmp_path):
         # A tool path that holds the scanned tree, as /opt holds a repository
         # checked out under it.
@@ -1303,41 +1462,81 @@ class TestSystemTrustRoots:
         ] * 2
 
 
-def _builtin_requirements():
-    from automated_security_helper.plugin_modules.ash_builtin import ASH_SCANNERS
+def _scanner_requirements():
+    """Every scanner plugin ASH ships, by class name: each plugin module's
+    ASH_SCANNERS, so trivy-repo, snyk-code and ferret-scan are held to the same
+    guards as the builtin scanners, and a new plugin module is too."""
+    import importlib
+    import pkgutil
+
+    import automated_security_helper.plugin_modules as plugin_modules
 
     found = {}
-    for scanner in ASH_SCANNERS:
-        requirements = getattr(scanner, "sandbox_requirements", None)
-        if isinstance(requirements, SandboxRequirements):
-            found[scanner.__name__] = requirements
+    for module in pkgutil.iter_modules(plugin_modules.__path__):
+        package = importlib.import_module(f"{plugin_modules.__name__}.{module.name}")
+        for scanner in getattr(package, "ASH_SCANNERS", []):
+            requirements = getattr(scanner, "sandbox_requirements", None)
+            if isinstance(requirements, SandboxRequirements):
+                found[scanner.__name__] = requirements
     return found
 
 
+def test_the_guards_see_every_shipped_scanner_plugin():
+    found = set(_scanner_requirements())
+    assert {
+        "GrypeScanner",
+        "OpengrepScanner",
+        "TrivyRepoScanner",
+        "SnykCodeScanner",
+        "FerretScanScanner",
+    } <= found
+
+
+def _content_db_scanners():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+        GrypeScanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+    )
+
+    return {"grype": GrypeScanner, "trivy": TrivyRepoScanner}
+
+
 class TestMacosScannerDeclarations:
-    """What each builtin scanner is granted for macOS, and how narrowly."""
+    """What each shipped scanner is granted for macOS, and how narrowly."""
 
-    def test_grype_reads_its_macos_database_read_only(self):
-        from automated_security_helper.plugin_modules.ash_builtin.scanners import (
-            grype_scanner,
-        )
-
-        requirements = grype_scanner.GrypeScanner.sandbox_requirements
-        assert "~/Library/Caches/grype" in requirements.read_paths
-        assert "~/Library/Caches/grype" not in requirements.cache_paths
+    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    def test_the_macos_database_is_a_cache_not_a_read_path(self, tool):
+        """sandbox-exec runs programs from read paths, and never from a cache, which
+        it mounts read-only like every backend but bwrap's throwaway overlay."""
+        requirements = _content_db_scanners()[tool].sandbox_requirements
+        assert f"~/Library/Caches/{tool}" in requirements.cache_paths
+        assert f"~/Library/Caches/{tool}" not in requirements.read_paths
         # Not updated inside the sandbox: content_db_refresh updates the database
-        # outside it before an online scan and sets GRYPE_DB_AUTO_UPDATE=false.
+        # outside it before an online scan.
         assert dict(requirements.sandbox_exec_env) == {}
 
-    def test_trivy_repo_reads_its_macos_database_read_only(self):
-        from automated_security_helper.plugin_modules.ash_trivy_plugins import (
-            trivy_repo_scanner,
-        )
-
-        requirements = trivy_repo_scanner.TrivyRepoScanner.sandbox_requirements
-        # Where content_db_refresh.default_cache_dir updates it on macOS.
-        assert "~/Library/Caches/trivy" in requirements.read_paths
-        assert "~/Library/Caches/trivy" not in requirements.cache_paths
+    @pytest.mark.parametrize("tool", ["grype", "trivy"])
+    def test_sandbox_exec_runs_nothing_from_the_database_directory(self, layout, tool):
+        database = layout.home / "Library" / "Caches" / tool
+        database.mkdir(parents=True)
+        requirements = _content_db_scanners()[tool].sandbox_requirements
+        policy = _policy(layout, requirements)
+        assert _resolved([database]) <= _resolved(policy.cache)
+        assert not _resolved([database]) & _resolved(policy.executable)
+        plan = SandboxExecBackend().plan(["/usr/bin/true"], {}, policy)
+        try:
+            profile = plan.argv[plan.argv.index("-p") + 1].splitlines()
+            allowed = set().union(
+                *(
+                    _subpaths(rule)
+                    for _, rule in _indexed(profile, "(allow process-exec ")
+                )
+            )
+            assert _as_argv(database) not in allowed
+        finally:
+            plan.run_cleanup()
 
     def test_cdk_nag_does_not_use_the_shared_jsii_cache(self):
         from automated_security_helper.plugin_modules.ash_builtin.scanners import (
@@ -1353,13 +1552,13 @@ class TestMacosScannerDeclarations:
     def test_only_opengrep_unpacks_itself(self):
         declared = {
             name: requirements.unpack_dir_env
-            for name, requirements in _builtin_requirements().items()
+            for name, requirements in _scanner_requirements().items()
             if requirements.unpack_dir_env
         }
         assert declared == {"OpengrepScanner": "XDG_CACHE_HOME"}
 
     def test_no_grant_covers_the_whole_library_caches_directory(self):
-        for name, requirements in _builtin_requirements().items():
+        for name, requirements in _scanner_requirements().items():
             for path in requirements.read_paths + requirements.cache_paths:
                 parts = Path(path).parts
                 assert parts[-2:] != ("Library", "Caches"), (name, path)
@@ -1475,9 +1674,9 @@ class TestUvToolLock:
     ):
         tools = tmp_path / "uv-tools"
         tools.mkdir()
-        victim = tmp_path / "victim"
-        victim.write_text("")
-        (tools / ".lock").symlink_to(victim)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.write_text("")
+        (tools / ".lock").symlink_to(elsewhere)
         monkeypatch.setenv("UV_TOOL_DIR", str(tools))
         assert _policy(layout).uv_tool_locks == ()
 
@@ -1518,9 +1717,11 @@ class TestScriptInterpreter:
 
     def test_a_binary_is_not_read_as_a_script(self, layout, tmp_path):
         binary = tmp_path / "tool"
-        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/evil/bin/x")
+        binary.write_bytes(b"\xcf\xfa\xed\xfe#!/opt/unlisted-prefix/bin/x")
         policy = _policy(layout, argv0=str(binary))
-        assert not any("evil" in p.as_posix() for p in _resolved(policy.read_only))
+        assert not any(
+            "unlisted-prefix" in p.as_posix() for p in _resolved(policy.read_only)
+        )
 
 
 class TestSandboxExecWorkingDirectory:
@@ -1544,3 +1745,165 @@ class TestSandboxExecWorkingDirectory:
             assert self._chdir_arg(plan) == ""
         finally:
             plan.run_cleanup()
+
+
+class TestAToolGivenAStagedCopy:
+    """A tool handed a staged copy of its input reads that copy, not the scan's tree.
+
+    nbconvert converts one notebook ASH copied to a private directory, so the source
+    and output directories are left out of what it may read
+    (``SandboxRequirements.staged_input_only``). The policy names them, and the
+    backends that can hide a directory inside one they show do: bwrap mounts an
+    empty directory over each, and sandbox-exec denies reading them after the reads
+    it allows. Both give back what the policy lists inside them, the results
+    directory first. A scanner, the control, still reads both.
+    """
+
+    STAGED = SandboxRequirements(staged_input_only=True)
+
+    @pytest.fixture
+    def staging(self, tmp_path):
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "analysis.ipynb").write_text("{}")
+        return staging
+
+    @pytest.fixture
+    def under_a_tool_path(self, tmp_path, monkeypatch):
+        """A tree checked out inside a directory every tool reads, as under /opt."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        opt = tmp_path / "opt"
+        source = opt / "repo"
+        output = source / ".ash" / "ash_output"
+        output.mkdir(parents=True)
+        (opt / "tool").mkdir()
+        return SimpleNamespace(
+            home=home,
+            opt=opt,
+            source=source,
+            output=output,
+            results=output / "converted" / "jupyter",
+        )
+
+    def _staged(self, layout, staging, **overrides):
+        kwargs = {"scan_target": staging, "cwd": staging, **overrides}
+        return _policy(layout, self.STAGED, **kwargs)
+
+    @staticmethod
+    def _reaches(paths, target) -> bool:
+        real = Path(os.path.realpath(target))
+        return any(p == real or p in real.parents or real in p.parents for p in paths)
+
+    def test_the_source_and_output_directories_are_not_readable(self, layout, staging):
+        policy = self._staged(layout, staging)
+
+        readable = _resolved([*policy.read_only, *policy.cache])
+        for withheld in (layout.source, layout.output):
+            assert not self._reaches(readable, withheld), (
+                f"a tool given a staged copy may read {withheld}: {sorted(readable)}"
+            )
+
+    def test_the_staged_copy_is_readable_and_the_results_directory_writable(
+        self, layout, staging
+    ):
+        policy = self._staged(layout, staging)
+
+        assert Path(os.path.realpath(staging)) in _resolved(policy.read_only)
+        assert _resolved(policy.writable) == _resolved([layout.results])
+
+    def test_the_policy_names_the_withheld_directories(self, layout, staging):
+        assert _resolved(self._staged(layout, staging).unread) == _resolved(
+            [layout.source, layout.output]
+        )
+
+    def test_a_scanner_still_reads_the_source_and_output_directories(
+        self, layout, staging
+    ):
+        policy = _policy(layout, scan_target=staging, cwd=staging)
+
+        readable = _resolved(policy.read_only)
+        for scanned in (layout.source, layout.output):
+            assert Path(os.path.realpath(scanned)) in readable
+        assert policy.unread == ()
+
+    def test_bwrap_hides_a_withheld_directory_inside_a_mounted_one(
+        self, under_a_tool_path, staging
+    ):
+        layout = under_a_tool_path
+        policy = self._staged(layout, staging, extra_read_paths=[str(layout.opt)])
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+
+        argv = backend.plan(["/usr/bin/true"], {}, policy).argv
+
+        def mount(flag, path):
+            spelled = _as_argv(path)
+            found = [
+                i for i, a in enumerate(argv) if a == flag and argv[i + 1] == spelled
+            ]
+            assert found, f"no {flag} {spelled} in {argv}"
+            return found[0]
+
+        opt = mount("--ro-bind", layout.opt)
+        hidden = mount("--tmpfs", layout.source)
+        results = mount("--bind", layout.results)
+        assert opt < hidden < results, (
+            "the empty directory has to cover the tree after the mount that shows "
+            "it, and before the results directory inside it is mounted"
+        )
+
+    def test_bwrap_mounts_no_empty_directory_for_a_scanner(self, under_a_tool_path):
+        layout = under_a_tool_path
+        policy = _policy(layout, extra_read_paths=[str(layout.opt)])
+        backend = BwrapBackend()
+        backend._executable = "/usr/bin/bwrap"
+
+        argv = backend.plan(["/usr/bin/true"], {}, policy).argv
+
+        tmpfs = {argv[i + 1] for i, a in enumerate(argv) if a == "--tmpfs"}
+        assert _as_argv(layout.source) not in tmpfs
+        assert _as_argv(layout.output) not in tmpfs
+
+    def test_sandbox_exec_denies_the_withheld_directories_after_its_reads(
+        self, under_a_tool_path, staging, tmp_path
+    ):
+        layout = under_a_tool_path
+        tool_inside = layout.source / ".venv"
+        tool_inside.mkdir()
+        policy = self._staged(
+            layout, staging, extra_read_paths=[str(layout.opt), str(tool_inside)]
+        )
+
+        lines = SandboxExecBackend().profile(policy, tmp_path / "private-tmp")
+        lines = lines.splitlines()
+
+        def last(prefix, path):
+            spelled = _as_argv(path)
+            found = [
+                i for i, line in _indexed(lines, prefix) if spelled in _subpaths(line)
+            ]
+            assert found, f"no {prefix} rule names {spelled}"
+            return found[-1]
+
+        shown = last("(allow file-read* (subpath", layout.opt)
+        denied = last("(deny file-read*", layout.source)
+        assert last("(deny file-read*", layout.output) == denied
+        given_back = last("(allow file-read* (subpath", tool_inside)
+        written = last("(allow file-read* file-write*", layout.results)
+        assert shown < denied < given_back, (
+            "the tree has to be denied after the read that shows it, and a tool "
+            "path inside it given back after that"
+        )
+        assert denied < written
+
+    def test_sandbox_exec_denies_nothing_more_for_a_scanner(self, layout, tmp_path):
+        lines = _sbpl(layout, tmp_path)
+
+        denied = set()
+        for _, line in _indexed(lines, "(deny file-read*"):
+            denied |= _subpaths(line)
+        assert _as_argv(layout.source) not in denied
+        assert _as_argv(layout.output) not in denied

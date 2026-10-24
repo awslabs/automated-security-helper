@@ -46,8 +46,8 @@ tree and no scan is run.
 import logging
 import re as _re
 import tempfile
-import time as _time
 from pathlib import Path
+from time import monotonic as _monotonic
 from typing import Any, Callable, Dict, List, Optional
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -99,24 +99,17 @@ def _loaded_scanner_classes() -> list:
 
     Why this does not call ``ash_plugin_manager.plugin_modules("scanner")``
     ---------------------------------------------------------------------
-    That method memoises its resolved class list into ``_resolved_plugins`` and
-    never invalidates it, so the first resolve in a process decides the answer for
-    every later one. Registration is not what breaks: measured here, the registry
-    held all 13 scanners while the memo, built before the vendored packages were
-    loaded, kept serving the 10 it was created with. Any earlier resolve is
-    enough -- a CLI command, another test, an in-flight scan -- which is how a
-    caller asking an ASH server which scanners it has got an answer three short,
-    with nothing logged and no error raised.
-
-    Two alternatives were rejected. Clearing the memo breaks callers that depend
-    on it holding still: ``workspace.execution.prewarm_plugin_registry`` exists so
-    the resolved set is frozen once, up front, for a whole workspace run, and
-    clearing it from an MCP tool can resize the registry under a scan thread that
-    is mid-iteration -- the ``dictionary changed size during iteration`` failure
-    prewarming was added to close. Reading ``plugin_library`` directly instead
+    That method answers "what is registered in this process", which depends on
+    what the process imported before the call, not "what this build contains".
+    Reading ``plugin_library`` directly instead
     fails the sweep in ``tests/unit/workspace/test_project_isolation.py``, which
     forbids reaching into the manager's registry from outside the class that owns
     it, because that is the shape the original defect arrived in.
+
+    Loading the vendored packages registers their scanners in the process-wide
+    registry. That does not make them part of a scan: a scan selects the built-in
+    scanners plus those of the modules its own ``ash_plugin_modules`` names
+    (``plugins.loader.scan_plugin_filter``).
 
     What is left is the loaders' own return values. Both
     ``load_internal_plugins`` and ``load_additional_plugin_modules`` return the
@@ -136,6 +129,8 @@ def _loaded_scanner_classes() -> list:
     # ferret, snyk and trivy out of the answer. Loading both is safe because
     # import_module is cached and register_plugin_module skips names already
     # registered, so the result does not depend on the order either.
+    from automated_security_helper.plugins import ash_plugin_manager
+
     package_paths = _discover_external_scanner_plugin_packages()
     package_paths.extend(_VENDORED_SCANNER_PLUGIN_PACKAGES)
 
@@ -143,10 +138,21 @@ def _loaded_scanner_classes() -> list:
     # load_additional_plugin_modules logs a warning when a package fails to
     # import, which the bare `except ImportError: pass` this replaces did not: a
     # scanner missing because its package is broken now leaves a trace.
-    external = load_additional_plugin_modules(package_paths)
+    #
+    # Each inside untrusted_import: a client's request loads these packages, not
+    # the operator. Their scanners register for the rest of the process, and
+    # trivy-repo and ferret-scan are enabled by default, so without it a later
+    # scan in the server would select and run them although neither it nor the
+    # operator loads their package.
+    external: list = []
+    for package_path in package_paths:
+        with ash_plugin_manager.untrusted_import(package_path):
+            external.extend(
+                load_additional_plugin_modules([package_path]).get("scanners", [])
+            )
 
     scanner_classes: list = []
-    for cls in list(internal.get("scanners", [])) + list(external.get("scanners", [])):
+    for cls in list(internal.get("scanners", [])) + external:
         if cls not in scanner_classes:
             scanner_classes.append(cls)
 
@@ -391,9 +397,11 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
     if not resolved:
         return None
 
-    deadline = _time.monotonic() + _VERSION_PROBE_TOTAL_BUDGET_SECONDS
+    # The module's own reference to the clock, so a test can replace it here
+    # without stopping time.monotonic() for the rest of the process.
+    deadline = _monotonic() + _VERSION_PROBE_TOTAL_BUDGET_SECONDS
     for arg_form in _VERSION_PROBE_ARG_FORMS:
-        remaining = deadline - _time.monotonic()
+        remaining = deadline - _monotonic()
         if remaining < _VERSION_PROBE_MIN_ATTEMPT_SECONDS:
             # The prior form nearly spent the shared budget; do not start another
             # probe with a slice too small to give the tool a fair chance.

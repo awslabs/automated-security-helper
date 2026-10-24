@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
+import threading
 from typing import Dict, List, Tuple
 
 from automated_security_helper.plugins.events import AshEventType
@@ -181,3 +182,66 @@ ASH_EVENT_HANDLERS = _loaded[3]
 #: finding to ERROR and passes it to its callers, because a plugin group silently
 #: missing from the set is the failure the completeness gate exists to catch.
 ASH_PLUGIN_LOAD_ERRORS: Dict[str, str] = _loaded[4]
+
+
+#: Serializes retry_failed_plugin_groups. load_internal_plugins runs once per
+#: ScanExecutionEngine, and workspace mode builds those on several threads at once.
+_retry_lock = threading.Lock()
+
+
+def retry_failed_plugin_groups() -> Dict[str, str]:
+    """Import each plugin group that failed to import again, and keep what loads now.
+
+    Returns the load errors that remain, which is empty when every group loaded.
+
+    WHY A GROUP CAN FAIL ONLY BECAUSE OF WHAT WAS IMPORTED FIRST. This package is
+    loaded as a side effect of importing ``models.asharp_model``: its
+    ``_resolve_forward_refs()`` imports ``config.ash_config``, which imports
+    built-in plugin modules for their config classes, which runs this package's
+    module body. The plugin modules import core modules back -- the reporters import
+    ``core.unified_metrics`` and ``core.scanner_statistics_calculator``, the other
+    groups ``utils.sarif_utils`` and ``utils.suppression_matcher``. When one of those
+    core modules is the first ASH module a process imports, it is still empty when
+    its plugins import it, so the group raises ImportError and is recorded above.
+    Measured by importing each of the package's 211 modules first in a fresh
+    interpreter: seven lost at least one group, ``interactions.run_ash_scan`` (the
+    programmatic entry point) lost all 15 reporters, and
+    ``utils.suppression_matcher`` lost every group.
+
+    WHY RETRYING IS THE FIX, AND NOT A WORKAROUND FOR ONE ORDER. The cycle exists
+    only while that first import is running. ``load_internal_plugins`` runs after
+    it has finished, when the same import succeeds, so trying again there recovers
+    every order without naming any of them. A group that fails for any other
+    reason -- an optional dependency that is absent -- fails again and stays in
+    ``ASH_PLUGIN_LOAD_ERRORS``, so nothing a completeness gate should see is
+    hidden. ``models.asharp_model`` recovers its own half of the same cycle the same
+    way, by resolving its forward reference again on first use.
+
+    Rejected: breaking the cycle where it forms, at ``_resolve_forward_refs()``
+    running at import time. Dropping that call would make every ``AshAggregatedResults``
+    instance built through ``model_construct`` unserializable in a process that has
+    not yet built one any other way (see the comment above ``_resolve_forward_refs``),
+    and the core modules on the cycle would still form it again through any other
+    import of the config.
+
+    Importing a group again registers nothing twice. Its submodules that imported
+    the first time are still in ``sys.modules`` and are not run again; only the
+    modules that raised, which Python removed, run again, and none of them got as
+    far as a plugin decorator before raising.
+
+    The module attributes are rebound rather than mutated, so a reader that reads
+    ``ASH_REPORTERS`` from this module after the call sees the recovered list.
+    """
+    global ASH_CONVERTERS, ASH_SCANNERS, ASH_REPORTERS, ASH_EVENT_HANDLERS
+    global ASH_PLUGIN_LOAD_ERRORS
+    if not ASH_PLUGIN_LOAD_ERRORS:
+        return {}
+    with _retry_lock:
+        if ASH_PLUGIN_LOAD_ERRORS:
+            loaded = _load_builtin_plugins()
+            ASH_CONVERTERS = loaded[0]
+            ASH_SCANNERS = loaded[1]
+            ASH_REPORTERS = loaded[2]
+            ASH_EVENT_HANDLERS = loaded[3]
+            ASH_PLUGIN_LOAD_ERRORS = loaded[4]
+        return dict(ASH_PLUGIN_LOAD_ERRORS)

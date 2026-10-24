@@ -1,0 +1,315 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A relative path the operator sets is taken from where it was set, not the source directory.
+
+Why this exists
+---------------
+Some options name a file or directory on the host: a scanner's own config file, a
+baseline, a rules directory, a file detect-secrets loads a plugin or filter from,
+a path the sandbox may read. The scanners joined a relative value to the source
+directory, the tree being scanned. So an operator's config kept outside the tree
+that named ``bandit.yaml``, meaning the file next to it, had bandit read a
+``bandit.yaml`` the repository put at its root instead.
+
+What happens now
+----------------
+``resolve_config`` reads every config file with ``the_operators_files`` as the
+judge: each operator file's own relative values for the options below are made
+absolute against that file's directory before the files are merged, so a value in
+an ``extends`` base is taken from the base's directory, and one a ``patch``
+operation sets from the directory of the file that holds the operation. The file
+``ASH_CONFIG`` names is read the same way. ``--config-overrides``, and the CLI
+flags that become overrides, are taken from the working directory ASH runs in
+(``anchor_override_paths``), and so are ``TRIVY_IGNOREFILE`` and
+``TRIVY_SECRET_CONFIG``, which trivy-repo reads in place of its two options. A
+value that is already absolute, starts with ``~`` (the scanner expands it), holds
+``$`` (the sandbox expands it) or is a URL is left as written.
+
+The options (``SCANNER_PATH_OPTIONS``, ``SCANNER_RULES_OPTIONS``):
+
+* ``config_file`` of bandit, checkov, ferret-scan, grype and syft;
+* detect-secrets' ``baseline_file``, and the ``file://`` entries of its
+  ``scan_settings.plugins_used`` and ``filters_used``;
+* trivy-repo's ``ignore_file`` and ``secret_config_file``;
+* opengrep's and semgrep's ``config``, only when a file or directory is there:
+  otherwise it is a registry entry such as ``p/ci``, which the tool resolves;
+* ``sandbox.extra_read_paths``.
+
+A file inside the scanned tree, or one an MCP client delivered, is left as
+written. Each of these options is replaced by the operator's value when it comes
+from such a file (``tool_config_trust``, ``sandbox_grants``), and the comparison
+is with the operator's anchored value, so a repository file that names a
+same-named file of its own no longer matches the operator's.
+
+Rejected: resolving against the source directory at the point of use, as before,
+which is the tree; and keeping each value relative and recording which file set
+it, which the merged document does not keep (``config_sources.deep_merge``).
+
+Known limitations
+-----------------
+* An MCP client's ``config_overrides`` are not anchored: they are the client's,
+  and under the MCP server none of these options is the client's to set.
+* ``ash config update`` and the config wizard read a file without anchoring, so
+  they write back what the file holds.
+* Reporter options that name a report file (the Bedrock reporter's
+  ``output_file`` and the others) are a file name in the reports directory, not
+  a path, so they are not listed here. ``global_settings.ignore_paths`` and the
+  scanners' exclusion lists name paths in the scanned tree on purpose.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+
+#: Scanner options whose value names a file the scanner's tool reads, by scanner.
+SCANNER_PATH_OPTIONS: Dict[str, Tuple[str, ...]] = {
+    "bandit": ("config_file",),
+    "checkov": ("config_file",),
+    "detect-secrets": ("baseline_file",),
+    "ferret-scan": ("config_file",),
+    "grype": ("config_file",),
+    "syft": ("config_file",),
+    "trivy-repo": ("ignore_file", "secret_config_file"),
+}
+
+#: Scanner options that are a path when a file or directory is there, and a
+#: registry entry or a URL the tool resolves otherwise.
+SCANNER_RULES_OPTIONS: Dict[str, Tuple[str, ...]] = {
+    "opengrep": ("config",),
+    "semgrep": ("config",),
+}
+
+#: detect-secrets ``scan_settings`` lists whose entries may name a file the worker
+#: loads code from, as ``file://<path>`` or ``file://<path>::<function>``.
+_DETECT_SECRETS_FILE_LISTS: Tuple[str, ...] = ("plugins_used", "filters_used")
+_FILE_SCHEME = "file://"
+
+
+def not_delivered_by_a_client(path: Path) -> bool:
+    """Accepts a config file no MCP client delivered: the judge for ``ASH_CONFIG``."""
+    from automated_security_helper.config.config_sources import (
+        config_is_client_delivered,
+    )
+
+    return not config_is_client_delivered(path)
+
+
+def the_operators_files(trees: Sequence[Path]) -> Callable[[Path], bool]:
+    """Accepts a config file outside every scanned tree that no MCP client delivered.
+
+    The judge ``resolve_config`` reads its files with. A file inside a tree, or
+    reached through a link inside one, is the repository's; its values for these
+    options are replaced by the operator's anyway, and ``client_scanner_exclusions``
+    reads a delivered file's exclusion files from the source directory, as the
+    client wrote them.
+    """
+    from automated_security_helper.config.sandbox_grants import files_inside
+
+    known = list(trees)
+
+    def judge(path: Path) -> bool:
+        return not files_inside([path], known) and not_delivered_by_a_client(path)
+
+    return judge
+
+
+def _spellings(container: Dict[str, Any], name: str) -> List[str]:
+    """The keys ``container`` holds ``name`` under, spelled with ``-`` or ``_``."""
+    wanted = name.replace("-", "_")
+    return [
+        key
+        for key in container
+        if isinstance(key, str) and key.replace("-", "_") == wanted
+    ]
+
+
+def anchored_path(value: Any, base_dir: Path, *, only_if_there: bool = False) -> Any:
+    """``value`` made absolute against ``base_dir``, when it is a relative path.
+
+    Anything else (not a string, empty, absolute, starting with ``~``, holding
+    ``$`` or ``://``) is returned as it is. With ``only_if_there``, a relative
+    value that names nothing under ``base_dir`` is returned as it is too.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return value
+    if value.startswith("~") or "$" in value or "://" in value or "\x00" in value:
+        return value
+    if os.path.isabs(value):
+        return value
+    candidate = os.path.normpath(os.path.join(os.fspath(base_dir), value))
+    if only_if_there and not os.path.exists(candidate):
+        return value
+    return candidate
+
+
+def _anchored_file_entry(value: Any, base_dir: Path) -> Any:
+    """A ``file://<path>[::<function>]`` entry with a relative path made absolute."""
+    if not isinstance(value, str) or not value.startswith(_FILE_SCHEME):
+        return value
+    file_part, separator, function = value[len(_FILE_SCHEME) :].partition("::")
+    anchored = anchored_path(file_part, base_dir)
+    if anchored == file_part:
+        return value
+    return f"{_FILE_SCHEME}{anchored}{separator}{function}"
+
+
+def _scanner_matches(key: str, scanner: str) -> bool:
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+
+    return key == scanner or reduced_plugin_name(scanner) in plugin_key_lookup_names(
+        key
+    )
+
+
+def _anchor_options(key: str, options: Dict[str, Any], base_dir: Path) -> None:
+    for scanner, names in SCANNER_PATH_OPTIONS.items():
+        if _scanner_matches(key, scanner):
+            for name in names:
+                for spelling in _spellings(options, name):
+                    options[spelling] = anchored_path(options[spelling], base_dir)
+    for scanner, names in SCANNER_RULES_OPTIONS.items():
+        if _scanner_matches(key, scanner):
+            for name in names:
+                for spelling in _spellings(options, name):
+                    options[spelling] = anchored_path(
+                        options[spelling], base_dir, only_if_there=True
+                    )
+    if not _scanner_matches(key, "detect-secrets"):
+        return
+    for settings_key in _spellings(options, "scan_settings"):
+        settings = options[settings_key]
+        if not isinstance(settings, dict):
+            continue
+        for list_name in _DETECT_SECRETS_FILE_LISTS:
+            for list_key in _spellings(settings, list_name):
+                entries = settings[list_key]
+                if not isinstance(entries, list):
+                    continue
+                for entry in entries:
+                    if isinstance(entry, dict) and "path" in entry:
+                        entry["path"] = _anchored_file_entry(entry["path"], base_dir)
+
+
+def anchor_relative_paths(document: Any, base_dir: Union[str, Path]) -> Any:
+    """A copy of one config file's document with its relative operator paths anchored.
+
+    Args:
+        document: The file's parsed document, before its ``extends`` and
+            ``patch`` are applied. Anything but a mapping is returned as it is.
+        base_dir: The directory the file is in.
+    """
+    if not isinstance(document, dict):
+        return document
+    import copy
+
+    base = Path(base_dir)
+    anchored = copy.deepcopy(document)
+    for scanners_key in _spellings(anchored, "scanners"):
+        scanners = anchored[scanners_key]
+        if not isinstance(scanners, dict):
+            continue
+        for key, section in scanners.items():
+            if not isinstance(key, str) or not isinstance(section, dict):
+                continue
+            for options_key in _spellings(section, "options"):
+                if isinstance(section[options_key], dict):
+                    _anchor_options(key, section[options_key], base)
+    for sandbox_key in _spellings(anchored, "sandbox"):
+        sandbox = anchored[sandbox_key]
+        if not isinstance(sandbox, dict):
+            continue
+        for paths_key in _spellings(sandbox, "extra_read_paths"):
+            paths = sandbox[paths_key]
+            if isinstance(paths, list):
+                sandbox[paths_key] = [anchored_path(path, base) for path in paths]
+    return anchored
+
+
+def _is_index(segment: str) -> bool:
+    return segment == "-" or (segment.isascii() and segment.isdigit())
+
+
+def _anchored_at(segments: Sequence[str], value: Any, base_dir: Path) -> Any:
+    """``value``, set at the config path ``segments``, with its operator paths anchored.
+
+    The value is placed in a document of its own at that path, anchored there by
+    ``anchor_relative_paths``, and read back, so an override or a patch operation
+    is anchored by exactly the rule a file is. A segment that is a list index
+    (``0``, or ``-`` for an append) stands for an entry of a list.
+    """
+    document: Any = value
+    for segment in reversed(segments):
+        document = [document] if _is_index(segment) else {segment: document}
+    anchored = anchor_relative_paths(document, base_dir)
+    for segment in segments:
+        anchored = anchored[0] if _is_index(segment) else anchored[segment]
+    return anchored
+
+
+def anchor_patch_operations(ops: Any, base_dir: Union[str, Path]) -> Any:
+    """``patch`` operations of one file with the values they set anchored like its own.
+
+    Only the ``value`` of an operation is changed; an operation that is not a
+    mapping with a JSON pointer ``path`` is returned as it is, for
+    ``config_sources._apply_patch`` to refuse.
+    """
+    if not isinstance(ops, list):
+        return ops
+    from automated_security_helper.config.config_sources import _unescape
+
+    base = Path(base_dir)
+    anchored_ops = []
+    for op in ops:
+        pointer = op.get("path") if isinstance(op, dict) else None
+        if (
+            not isinstance(pointer, str)
+            or not pointer.startswith("/")
+            or "value" not in op
+        ):
+            anchored_ops.append(op)
+            continue
+        segments = [_unescape(segment) for segment in pointer[1:].split("/")]
+        anchored_ops.append(dict(op, value=_anchored_at(segments, op["value"], base)))
+    return anchored_ops
+
+
+def anchor_override_paths(
+    overrides: Optional[Sequence[str]], base_dir: Union[str, Path]
+) -> List[str]:
+    """``--config-overrides`` with each relative operator path anchored at ``base_dir``.
+
+    ``base_dir`` is the working directory the operator ran ASH from. An override
+    whose value holds no such path is returned exactly as given; one that does is
+    rewritten with the anchored value, a list or mapping as JSON, which
+    ``resolve_config.apply_config_overrides`` reads back as the same value.
+    """
+    from automated_security_helper.config.resolve_config import _parse_config_value
+
+    base = Path(base_dir)
+    rewritten: List[str] = []
+    for override in overrides or []:
+        key_path, separator, raw = str(override).partition("=")
+        if not separator or not key_path.strip():
+            rewritten.append(override)
+            continue
+        append = key_path.endswith("+")
+        segments = key_path.removesuffix("+").strip().split(".")
+        value = _parse_config_value(raw)
+        if append and not isinstance(value, list):
+            anchored = _anchored_at([*segments, "-"], value, base)
+        else:
+            anchored = _anchored_at(segments, value, base)
+        if anchored == value:
+            rewritten.append(override)
+        elif isinstance(anchored, (list, dict)):
+            rewritten.append(f"{key_path}={json.dumps(anchored)}")
+        else:
+            rewritten.append(f"{key_path}={anchored}")
+    return rewritten

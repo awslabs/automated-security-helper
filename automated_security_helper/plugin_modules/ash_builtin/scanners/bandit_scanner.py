@@ -1,10 +1,11 @@
 """Module containing the Bandit security scanner implementation."""
 
 import logging
+import os
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, ClassVar, List, Literal, Optional
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.base.options import (
     ScannerOptionsBase,
@@ -12,6 +13,7 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -28,8 +30,10 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
+from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import mask_secrets_in_sarif
+from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
 
@@ -37,7 +41,8 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to Bandit configuration file, relative to current source directory. Defaults to searching for `.bandit` (ini format), `bandit.yaml`, and `bandit.toml` in the root of the source directory if this is left empty.",
+            description="Path to Bandit configuration file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory."
+            " Used only when the operator sets it, in a config file outside the scanned tree or with --config-overrides: a config file inside the scanned tree, or one an MCP client delivered, does not choose it, and ASH does not look for one by name. A file named exactly `.bandit` is passed with `bandit --ini`, and any other file with `bandit --configfile`. Unless config_file names a `.bandit` file that exists, ASH passes bandit an empty config file with `bandit --ini`, so bandit does not read a `.bandit` file from the scanned tree. A path that is not a file is logged as a warning and ignored.",
         ),
     ] = None
     confidence_level: Annotated[
@@ -108,6 +113,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    # The operator's .bandit file, when config_file names one; see
+    # _process_config_options.
+    _ini_file: Optional[Path] = PrivateAttr(default=None)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -254,67 +263,32 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         return get_uv_tool_command(self.command) is not None
 
     def _process_config_options(self):
-        # Bandit config path
-        possible_config_paths = {
-            f"{self.context.source_dir}/.bandit": [
-                ToolExtraArg(key="--ini", value=f"{self.context.source_dir}/.bandit")
-            ],
-            f"{self.context.source_dir}/.ash/.bandit": [
-                ToolExtraArg(
-                    key="--ini", value=f"{self.context.source_dir}/.ash/.bandit"
-                )
-            ],
-            f"{self.context.source_dir}/bandit.yaml": [
-                ToolExtraArg(
-                    key="--configfile", value=f"{self.context.source_dir}/bandit.yaml"
-                )
-            ],
-            f"{self.context.source_dir}/.ash/bandit.yaml": [
-                ToolExtraArg(
-                    key="--configfile",
-                    value=f"{self.context.source_dir}/.ash/bandit.yaml",
-                )
-            ],
-            f"{self.context.source_dir}/bandit.toml": [
-                ToolExtraArg(
-                    key="--configfile", value=f"{self.context.source_dir}/bandit.toml"
-                )
-            ],
-            f"{self.context.source_dir}/.ash/bandit.toml": [
-                ToolExtraArg(
-                    key="--configfile",
-                    value=f"{self.context.source_dir}/.ash/bandit.toml",
-                )
-            ],
-        }
-
+        # The operator's config file, if there is one. A config file inside the
+        # scanned tree does not choose it (config/tool_config_trust.py), and ASH no
+        # longer looks for .bandit, bandit.yaml or bandit.toml by name: their skips
+        # and exclude_dirs would let the repository decide what its scan reports.
+        ini_file: Path | None = None
         if self.config.options.config_file is not None:
             config_file_path = Path(self.config.options.config_file)
-            if not config_file_path.exists():
+            if not config_file_path.is_absolute():
+                config_file_path = Path(self.context.source_dir) / config_file_path
+            if not config_file_path.is_file():
                 ASH_LOGGER.warning(
-                    f"Configured bandit config file does not exist: {config_file_path}. "
-                    "Bandit will run without a config file."
+                    "Configured bandit config file does not exist or is not a file: "
+                    f"{config_file_path}. It is ignored, and bandit runs with an empty "
+                    "config file."
                 )
             elif config_file_path.name == ".bandit":
-                self.args.extra_args.append(
-                    ToolExtraArg(key="--ini", value=config_file_path.as_posix())
-                )
+                ini_file = config_file_path
             else:
                 self.args.extra_args.append(
                     ToolExtraArg(key="--configfile", value=config_file_path.as_posix())
                 )
-        else:
-            for conf_path, extra_arg_list in possible_config_paths.items():
-                conf_path_obj = Path(conf_path)
-                if conf_path_obj.exists() and conf_path_obj.is_file():
-                    ASH_LOGGER.info(f"Using bandit config file: {conf_path}")
-                    self.args.extra_args.extend(extra_arg_list)
-                    break
-            else:
-                # No config file found - this is normal, bandit will use defaults
-                ASH_LOGGER.debug(
-                    "No bandit config file found, using default configuration"
-                )
+        # bandit reads a .bandit file it finds under the scan target on its own
+        # unless --ini names one, so a scan always passes one: the operator's, or
+        # an empty one written outside the scanned tree when the scan runs
+        # (_execute_scan), not here, where constructing the scanner would write it.
+        self._ini_file = ini_file
 
         self.args.extra_args.append(
             ToolExtraArg(
@@ -371,14 +345,79 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         self.config.options.excluded_paths = list(original_excluded_paths) + list(
             global_ignore_paths
         )
+        # Added to the --exclude value for this resolution only, like the paths
+        # above: the entries depend on the target, and extra_args persists across
+        # scan() calls.
+        original_extra_args = list(self.args.extra_args)
+        link_excludes = self._link_excludes(target)
+        if link_excludes:
+            self.args.extra_args = [
+                ToolExtraArg(
+                    key=f"{arg.key},{','.join(link_excludes)}", value=arg.value
+                )
+                if arg.key.startswith("--exclude=")
+                else arg
+                for arg in self.args.extra_args
+            ]
+        ini_file = self._ini_file or empty_tool_config(
+            "bandit-empty.ini", "[bandit]\n", context=self.context
+        )
+        self.args.extra_args.append(
+            ToolExtraArg(key="--ini", value=ini_file.as_posix())
+        )
         try:
             final_args = self._resolve_arguments(
                 target=target, results_file=results_file
             )
         finally:
             self.config.options.excluded_paths = original_excluded_paths
+            self.args.extra_args = original_extra_args
 
         return final_args, results_file, None
+
+    def _link_excludes(self, target: Path) -> List[str]:
+        """``--exclude`` entries for each link to a file whose target leaves ``target``.
+
+        bandit reads a link to a file wherever it points: its walk lists the link
+        among the files and opens it by name. The links come from
+        ``file_links_leaving_tree``, which walks as bandit does (``os.walk``, which
+        does not descend links to directories) and ignores ignore files, as bandit
+        does.
+
+        bandit 1.9.4 (``bandit/core/manager.py``) splits ``--exclude`` on commas and
+        leaves out a walked file when an entry matches its path with ``fnmatch`` or
+        is a substring of it. So each entry is the link's path as bandit's walk
+        spells it, ``<target>/<path below it>``, and it is used only when it leaves
+        out that file alone: it holds no comma and no ``*``, ``?`` or ``[``, and no
+        other file's path under ``target`` contains it.
+
+        Raises:
+            ScannerError: Naming the first link that cannot be left out that way,
+                or the first link at all when walked paths are not joined with
+                ``/`` (Windows). bandit is then not run on ``target``, rather than
+                read the file the link points at.
+        """
+        all_files: List[str] = []
+        links = file_links_leaving_tree(target, all_files=all_files)
+        if not links:
+            return []
+        root = Path(target).as_posix()
+        walked = [f"{root}/{relative}" for relative in all_files]
+        entries = []
+        for relative in links:
+            entry = f"{root}/{relative}"
+            if (
+                os.sep != "/"
+                or any(character in entry for character in ",*?[")
+                or any(entry in other for other in walked if other != entry)
+            ):
+                raise ScannerError(
+                    f"Not running bandit on {root}: {relative!r}: "
+                    f"{REASON_LINK_LEAVES_TREE}, and bandit's --exclude cannot leave "
+                    "out that file alone, so bandit would read the file it points at."
+                )
+            entries.append(entry)
+        return entries
 
     def _post_process_sarif(
         self,

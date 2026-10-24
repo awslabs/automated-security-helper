@@ -1,5 +1,6 @@
 """ScannerExecutor — owns scanner task lifecycle for ScanPhase."""
 
+import contextvars
 import threading
 import time
 import traceback
@@ -16,9 +17,15 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
 )
-from automated_security_helper.models.scan_results_container import ScanResultsContainer
+from automated_security_helper.models.scan_results_container import (
+    InputNotScanned,
+    ScanResultsContainer,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
-from automated_security_helper.utils.sandbox.fs_guard import sweep_writable
+from automated_security_helper.utils.sandbox.fs_guard import (
+    refuse_links_below,
+    sweep_writable,
+)
 from automated_security_helper.utils.sandbox.scope import (
     SandboxUnavailable,
     sandbox_scope,
@@ -26,8 +33,10 @@ from automated_security_helper.utils.sandbox.scope import (
 )
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
+    exclude_output_dir_results,
     sanitize_sarif_paths,
 )
+from automated_security_helper.utils.tool_config_dir import tool_config_scope
 
 _ResultsFn = Callable[
     [ScanResultsContainer, AshAggregatedResults], AshAggregatedResults
@@ -64,6 +73,23 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
         ScannerStatus.MISSING,
     }
 )
+
+# The ``status`` values of a returned dict that say its tool completed, compared
+# case-insensitively. Any other status means it did not: ``failed`` is the one the
+# template and the scan phase write, and a dict graded on its zero findings would
+# read as a clean scan.
+_COMPLETED_RESULT_STATUSES = frozenset({"passed", "completed", "success", "ok"})
+
+
+def _refuse_to_grade(container: ScanResultsContainer, reason: str) -> None:
+    """Make the row ERROR with ``reason``, in its errors and in the log."""
+    container.status = ScannerStatus.ERROR
+    ASH_LOGGER.error(reason)
+    container.add_error(reason)
+
+
+def _completed_result_status(status: Any) -> bool:
+    return isinstance(status, str) and status.lower() in _COMPLETED_RESULT_STATUSES
 
 
 # How often a running scanner announces that it is still running. Long enough that
@@ -192,6 +218,25 @@ def _target_count_attr(obj: Any, name: str) -> int | None:
     return None
 
 
+def _inputs_not_scanned(obj: Any) -> List[InputNotScanned]:
+    """The inputs a scanner plugin reported it did not scan, as ``{path, reason}``.
+
+    Coerced at the boundary like ``_target_count_attr``: the plugin is an arbitrary
+    object, so only a list of mappings with string ``path`` and ``reason`` counts.
+    """
+    value = getattr(obj, "inputs_not_scanned", None)
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        path, reason = item.get("path"), item.get("reason")
+        if isinstance(path, str) and path and isinstance(reason, str) and reason:
+            entries.append(InputNotScanned(path=path, reason=reason))
+    return entries
+
+
 def _non_negative_int_attr(obj: Any, name: str) -> int:
     """``_target_count_attr`` for a counter whose absence is indistinguishable from zero.
 
@@ -263,13 +308,15 @@ class ScannerExecutor:
         """Forward to the injected process function, or no-op if not wired."""
         return self._process_fn(results, aggregated_results)
 
-    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> None:
+    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> list:
         """Hold the scanner's content databases to their declared age bounds.
 
         Here, at the one place every scanner's result passes through, rather than in each
         scanner's ``scan()``: trivy overrides ``scan()`` entirely, and a check that lived in
         the base template would silently skip it. Only a SARIF result is assessed; see
         ``utils/content_db_staleness.py`` for what is measured and where it is recorded.
+
+        Returns the records, so the caller can tell a database that does not exist.
         """
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
         from automated_security_helper.utils.content_db_staleness import (
@@ -279,9 +326,9 @@ class ScannerExecutor:
         )
 
         if not isinstance(raw_results, SarifReport):
-            return
+            return []
         config = getattr(self.plugin_context, "config", None)
-        assess_scanner(
+        return assess_scanner(
             scanner_plugin,
             raw_results,
             resolve_policy(config),
@@ -326,6 +373,13 @@ class ScannerExecutor:
                 )
 
                 raw_results: Any = None
+                # Set when the scanner's tool reports that a content database it
+                # matches against does not exist; see below.
+                databases_absent: List[str] = []
+                # Whether scan() was called on this target. The plugin's exit_code
+                # belongs to the last target it scanned, so a target it never
+                # scanned (disabled, or refused by the sandbox) keeps the row's 0.
+                scan_called = False
                 scanner_config_name: str = (
                     str(scanner_config.name)
                     if scanner_config
@@ -394,9 +448,21 @@ class ScannerExecutor:
                                     f"Scanner sandbox: {scanner_config_name} on "
                                     f"{target_type} runs under {sandbox.backend.name}"
                                 )
+                                # A link already there is refused as ASH's writes
+                                # refuse one; the sweep after each spawn would
+                                # remove it without a word.
+                                refuse_links_below(sandbox.results_dir)
                             heartbeat.start()
-                            with sandbox_scope(sandbox):
+                            # The config files ASH writes for this run's tool live
+                            # in a directory of the run's own, outside the scanned
+                            # tree, which the sandbox lets the scanner read and
+                            # which is removed when the run ends.
+                            with (
+                                sandbox_scope(sandbox),
+                                tool_config_scope(self.plugin_context),
+                            ):
                                 try:
+                                    scan_called = True
                                     raw_results = scanner_plugin.scan(
                                         target=scan_target,
                                         config=scanner_config,
@@ -419,9 +485,14 @@ class ScannerExecutor:
                                 # Inside the scope: this runs the scanner's own
                                 # binary (`grype db status`), which is that
                                 # scanner's code like any other spawn of it.
-                                self._assess_content_databases(
+                                records = self._assess_content_databases(
                                     scanner_plugin, raw_results
                                 )
+                                databases_absent = [
+                                    record.message()
+                                    for record in records or []
+                                    if getattr(record, "absent", False)
+                                ]
                             if sandbox is not None:
                                 # Again after the scan, for anything a process that
                                 # outlived its spawn left behind, before the results
@@ -454,6 +525,9 @@ class ScannerExecutor:
                             f"{target_type} ({spawn_failure}): {e}"
                         )
                     ASH_LOGGER.error(err_str)
+                    # On the row as well as in raw_results: the row is what says why
+                    # it is ERROR (a rejected exit code, a timeout, a missing file).
+                    container.add_error(err_str)
                     raw_results = {
                         "errors": [err_str, *scanner_plugin.errors],
                         "output": scanner_plugin.output,
@@ -489,6 +563,11 @@ class ScannerExecutor:
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
                     )
                     if raw_results is None:
+                        no_result = (
+                            f"{scanner_config_name} returned no result on {target_type}"
+                        )
+                        ASH_LOGGER.error(no_result)
+                        container.add_error(no_result)
                         raw_results = {
                             "errors": scanner_plugin.errors or [],
                             "output": scanner_plugin.output or [],
@@ -526,16 +605,37 @@ class ScannerExecutor:
                         )
                     container.raw_results = raw_results
 
+                    from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+                        CycloneDXReport,
+                    )
                     from automated_security_helper.schemas.sarif_schema_model import (
                         SarifReport,
                     )
 
                     if isinstance(raw_results, SarifReport):
+                        if not raw_results.runs:
+                            # Every field of a SARIF log is optional, so `{}`
+                            # validates. The template refuses it before grading; a
+                            # scan() override can return it as it is, and zero
+                            # findings from no run reads as a clean scan.
+                            _refuse_to_grade(
+                                container,
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that holds no SARIF run, so there is "
+                                "nothing to grade",
+                            )
                         raw_results = sanitize_sarif_paths(
                             raw_results, self.plugin_context.source_dir
                         )
                         if not self.plugin_context.ignore_suppressions:
                             raw_results = apply_suppressions_to_sarif(
+                                sarif_report=raw_results,
+                                plugin_context=self.plugin_context,
+                            )
+                        else:
+                            # The flag lifts suppressions and ignore paths, not
+                            # the exclusion of ASH's own output directory.
+                            raw_results = exclude_output_dir_results(
                                 sarif_report=raw_results,
                                 plugin_context=self.plugin_context,
                             )
@@ -545,11 +645,35 @@ class ScannerExecutor:
                         container.severity_counts = severity_counts
                         container.finding_count = finding_count
                     elif isinstance(raw_results, dict):
-                        if (
-                            "status" in raw_results
-                            and raw_results["status"] == "failed"
+                        if "status" in raw_results and not _completed_result_status(
+                            raw_results["status"]
                         ):
                             container.status = ScannerStatus.ERROR
+                            # "failed" dicts carry their own errors: the template's
+                            # and the scan phase's failure responses.
+                            if raw_results["status"] != "failed":
+                                _refuse_to_grade(
+                                    container,
+                                    f"{scanner_config_name} returned a result on "
+                                    f"{target_type} with status "
+                                    f"{raw_results['status']!r}, which does not say "
+                                    "its tool completed, so it was not graded",
+                                )
+                        elif not (
+                            "status" in raw_results
+                            or "severity_counts" in raw_results
+                            or isinstance(raw_results.get("findings"), list)
+                        ):
+                            # Nothing here to grade: a tool's own JSON that a scanner
+                            # returned because it did not parse. Graded on its zero
+                            # findings it read as a clean scan.
+                            _refuse_to_grade(
+                                container,
+                                f"{scanner_config_name} returned a result on "
+                                f"{target_type} that could not be graded: it is not "
+                                "SARIF and carries no status, severity_counts or "
+                                "findings",
+                            )
                         else:
                             if "severity_counts" in raw_results:
                                 raw_counts = raw_results["severity_counts"]
@@ -580,8 +704,22 @@ class ScannerExecutor:
                                         except ValueError:
                                             container.severity_counts.increment("info")
                                 container.finding_count = len(raw_results["findings"])
+                    elif raw_results and not (
+                        raw_results is True or isinstance(raw_results, CycloneDXReport)
+                    ):
+                        # Nothing the executor reads: a scan() override's own list,
+                        # string or number. Graded on its zero findings it read as a
+                        # clean scan. A falsy result is MISSING, above.
+                        _refuse_to_grade(
+                            container,
+                            f"{scanner_config_name} returned a result on "
+                            f"{target_type} that could not be graded: a "
+                            f"{type(raw_results).__name__}, not SARIF, CycloneDX or "
+                            "a dict",
+                        )
 
-                    container.exit_code = getattr(scanner_plugin, "exit_code", 0)
+                    if scan_called:
+                        container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 
                     # Carried across the same way exit_code is, so the field is closed for
                     # every container rather than only for the falsy-return branch above. A
@@ -626,6 +764,22 @@ class ScannerExecutor:
                     container.targets_failed = _non_negative_int_attr(
                         scanner_plugin, "targets_failed"
                     )
+                    # Assigned only when there is something to record, so every other
+                    # scanner's serialized report keeps its exact shape (the dump
+                    # excludes unset fields).
+                    not_scanned = _inputs_not_scanned(scanner_plugin)
+                    if not_scanned:
+                        container.inputs_not_scanned = not_scanned
+
+                    # A scan with no database had nothing to match against, so its
+                    # zero findings are not a result. ERROR whatever the staleness
+                    # policy: content_db_staleness relaxes the age bound of a database
+                    # that exists. The SARIF and its records are kept, so the stale
+                    # database is reported as well.
+                    if databases_absent:
+                        container.status = ScannerStatus.ERROR
+                        for message in databases_absent:
+                            container.add_error(message)
 
                     if container.status not in _TERMINAL_SCANNER_STATUSES:
                         container.status = container.determine_status(
@@ -926,7 +1080,10 @@ class ScannerExecutor:
                     description=f"[blue]({scanner_name}) Queued scan...",
                 )
                 ASH_LOGGER.debug(f"Submitting {scanner_name} to thread pool")
+                # With a copy of this context, which carries the scanned-tree scope
+                # (utils/subprocess_utils.scanning_tree) into the scanner's thread.
                 future = executor.submit(
+                    contextvars.copy_context().run,
                     self._safe_execute_scanner,
                     scanner_name,
                     scanner_plugin,

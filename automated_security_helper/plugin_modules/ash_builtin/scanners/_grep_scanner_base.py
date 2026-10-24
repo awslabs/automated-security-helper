@@ -16,6 +16,7 @@ patterns mode, version-gated `--metrics`). Everything else lives here.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import ClassVar, Generic, List, Literal, Optional, Tuple, TypeVar, final
@@ -30,10 +31,33 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
     ToolExtraArg,
 )
+from automated_security_helper.utils.link_exclusions import grep_excludes
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 
 C = TypeVar("C", bound=ScannerPluginConfigBase)
+
+
+#: The paths semgrep and opengrep skip by default when no .semgrepignore is
+#: read. Passed as --exclude with --x-ignore-semgrepignore-files, so that a
+#: repository's own .semgrepignore is not honored and the default coverage stays
+#: the same. Measured: each entry here was skipped by both tools' defaults, and
+#: .semgrep and .semgrep_logs, which semgrep's documentation also lists, were not.
+SEMGREP_DEFAULT_IGNORES: tuple[str, ...] = (
+    "node_modules/",
+    "build/",
+    "dist/",
+    "vendor/",
+    ".env/",
+    ".venv/",
+    ".tox/",
+    "*.min.js",
+    ".npm/",
+    ".yarn/",
+    "test/",
+    "tests/",
+    "*_test.go",
+)
 
 
 class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
@@ -173,6 +197,25 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         else:
             self._configure_online_mode()
 
+        # A .semgrepignore in the scanned tree is the repository's own choice of
+        # what to leave out, and both tools honor one on their own: semgrep from
+        # the scan root or any directory up to the repository root, opengrep from
+        # its working directory, which is the source directory. Neither is read.
+        # Ignoring the files also drops each tool's built-in list of paths it
+        # skips, so that list is passed back as --exclude patterns, keeping what
+        # a scan covers unchanged (measured against semgrep 1.180 and opengrep
+        # 1.15.1 and 1.30.0: the same files are reported as with no
+        # .semgrepignore at all).
+        self.args.extra_args = [
+            a for a in self.args.extra_args if a.key != "--x-ignore-semgrepignore-files"
+        ]
+        self.args.extra_args.append(
+            ToolExtraArg(key="--x-ignore-semgrepignore-files", value=None)
+        )
+        for pattern in SEMGREP_DEFAULT_IGNORES:
+            self.args.extra_args.append(ToolExtraArg(key="--exclude", value=pattern))
+        self._note_unhonored_semgrepignore()
+
         # Exclude patterns / rules / severity filters — verbatim across both
         # scanners.
         for pattern in getattr(opts, "exclude", []) or []:
@@ -188,6 +231,57 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         self.args.extra_args.append(ToolExtraArg(key="--sarif", value=""))
 
         return super()._process_config_options()
+
+    def _note_unhonored_semgrepignore(self) -> None:
+        """Say in the results that a ``.semgrepignore`` the tool would have read was not.
+
+        Looked for where either tool would read one: the source directory and
+        each directory above it up to the repository root (the first one holding
+        ``.git``). Only its presence is checked; the file is not read. The note
+        is a config warning, which the orchestrator records in the results as a
+        ``config_warning`` validation checkpoint, once per file. A file an MCP
+        client delivered (``cli/mcp/sandbox.config_is_client_supplied``, judged by
+        its path, each symlink on the way and the file it resolves to) is named
+        as client-supplied.
+        """
+        # Imported here, as config/path_trust.py does: importing cli.mcp runs its
+        # __init__, which imports the config modules.
+        from automated_security_helper.cli.mcp.sandbox import config_is_client_supplied
+
+        source = getattr(self.context, "source_dir", None)
+        if source is None:
+            return
+        found = []
+        directory = Path(os.path.abspath(source))
+        for candidate in (directory, *directory.parents):
+            ignore_file = candidate / ".semgrepignore"
+            if os.path.lexists(ignore_file):
+                found.append(ignore_file)
+            if os.path.lexists(candidate / ".git"):
+                break
+        config = getattr(self.context, "config", None)
+        warnings = getattr(config, "_resolution_warnings", None)
+        for ignore_file in found:
+            if config_is_client_supplied(ignore_file):
+                message = (
+                    f"{ignore_file.as_posix()} is client-supplied (an MCP client "
+                    "delivered it) and was not honored: ASH runs semgrep and opengrep "
+                    "with --x-ignore-semgrepignore-files and their default "
+                    "exclusions, so it does not leave files out. List them in "
+                    "global_settings.ignore_paths instead, where a client's entries "
+                    "apply marked client_supplied."
+                )
+            else:
+                message = (
+                    f"{ignore_file.as_posix()} was not honored: ASH runs semgrep and "
+                    "opengrep with --x-ignore-semgrepignore-files and their default "
+                    "exclusions, so a .semgrepignore in the scanned tree does not "
+                    "leave files out. List them in global_settings.ignore_paths "
+                    "instead."
+                )
+            if isinstance(warnings, list) and message not in warnings:
+                warnings.append(message)
+                self._plugin_log(message, level=logging.WARNING)
 
     def _configure_offline_mode(self) -> None:
         """Set --metrics off (when supported), validate cache dir, append cache --config."""
@@ -322,7 +416,19 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         target_results_dir.mkdir(exist_ok=True, parents=True)
 
-        final_args = self._resolve_arguments(target=target, results_file=results_file)
+        # The uniquely named links leaving the target, for this resolution only
+        # (extra_args persists across scan() calls). Both tools follow no link;
+        # see utils/link_exclusions.py for why only unique names are passed.
+        original_extra_args = list(self.args.extra_args)
+        self.args.extra_args.extend(
+            ToolExtraArg(key="--exclude", value=name) for name in grep_excludes(target)
+        )
+        try:
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
+        finally:
+            self.args.extra_args = original_extra_args
 
         env_vars = self.extra_subprocess_env()
         subprocess_env = {**snapshot_environ(), **env_vars} if env_vars else None

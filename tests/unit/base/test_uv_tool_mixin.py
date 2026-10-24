@@ -72,6 +72,31 @@ class TestGetUvToolVersion:
             version = plugin._get_uv_tool_version("bandit")
             assert version is None
 
+    def test_a_refused_check_is_logged_as_the_sandbox_refusing_uv(self):
+        """Not as uv being absent, which sends the operator to install uv."""
+        from automated_security_helper.utils.sandbox.scope import (
+            RefusingScope,
+            sandbox_scope,
+        )
+        from automated_security_helper.utils.uv_tool_runner import UVToolRunner
+
+        plugin = FakePlugin(use_uv_tool=True)
+        runner = UVToolRunner()
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                return_value=runner,
+            ),
+            sandbox_scope(RefusingScope("jupyter", "firejail is not installed")),  # type: ignore[arg-type]
+        ):
+            assert plugin._get_uv_tool_version("jupyter-nbconvert") is None
+
+        (message,) = [args[0] for args in plugin._log_messages]
+        assert "scanner sandbox refused to run uv" in message
+        assert "firejail is not installed" in message
+        assert "jupyter-nbconvert version detection" in message
+        assert "UV is not available" not in message
+
     def test_returns_none_on_import_error(self):
         plugin = FakePlugin(use_uv_tool=True)
 

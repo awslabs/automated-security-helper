@@ -14,6 +14,7 @@ from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
+from automated_security_helper.utils.report_path_links import ensure_reports_dir
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.core.phases.inspect_phase import InspectPhase
 from automated_security_helper.core.progress import (
@@ -27,6 +28,13 @@ from automated_security_helper.models.core import IgnorePathWithReason
 # Define valid execution phases
 from automated_security_helper.config.ash_config import (
     AshConfig,
+)
+from automated_security_helper.config.plugin_module_trust import (
+    drop_untrusted_off_host_plugins,
+    plugin_modules_by_trust,
+)
+from automated_security_helper.config.reporter_trust import (
+    confine_declared_reporter_destinations,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -178,23 +186,19 @@ class ScanExecutionEngine:
 
         load_internal_plugins()
 
-        # Combine plugin modules from config and CLI parameters
-        config_plugin_modules = (
-            getattr(self._context.config, "ash_plugin_modules", [])
-            if self._context.config
-            and hasattr(self._context.config, "ash_plugin_modules")
-            else []
+        # Combine plugin modules from config and CLI parameters, entries split on
+        # commas. The operator's (the CLI's, and the config entries its trusted
+        # list names) are imported first, and the rest -- what a config inside
+        # the scanned tree or one an MCP client delivered added -- each inside
+        # untrusted_import, so that a later scan in this process that does not
+        # load one of them is not offered the classes its import registered.
+        operator_plugin_modules, untrusted_plugin_modules = plugin_modules_by_trust(
+            self._context.config, ash_plugin_modules
         )
-
-        # CLI parameters take precedence over config
-        # evaluate ash_plugin_modules, split any entries with commas into separate items and trim surrounding whitespace
-        config_plugin_modules = [
-            subitem.strip()
-            for item in config_plugin_modules
-            if item is not None
-            for subitem in item.split(",")
-        ]
-        combined_plugin_modules = list(set(ash_plugin_modules + config_plugin_modules))
+        # Both lists are split on commas, stripped and de-duplicated in order
+        # (plugin_module_trust.split_plugin_modules), so the refusal, the imports
+        # and the scan filter all see the same names whatever source gave them.
+        combined_plugin_modules = operator_plugin_modules + untrusted_plugin_modules
 
         if len(combined_plugin_modules) > 0:
             ASH_LOGGER.info(f"Loading plugin modules: {combined_plugin_modules}")
@@ -202,12 +206,27 @@ class ScanExecutionEngine:
             # Import additional plugin modules
             from automated_security_helper.plugins.loader import (
                 load_additional_plugin_modules,
+                refuse_plugin_modules_outside_namespace,
             )
 
-            load_additional_plugin_modules(combined_plugin_modules)
-
-            # Discover plugins from specified modules
-            discover_plugins(plugin_modules=combined_plugin_modules)
+            # Before importing any of them: a name outside the plugin namespace
+            # refuses the scan with exit 3, and nothing is imported. A named
+            # module that then fails to import refuses it with exit 3 too, before
+            # any scanner runs.
+            refuse_plugin_modules_outside_namespace(combined_plugin_modules)
+            if operator_plugin_modules:
+                load_additional_plugin_modules(
+                    operator_plugin_modules, fail_on_import_error=True
+                )
+                # Discover plugins from specified modules
+                discover_plugins(plugin_modules=operator_plugin_modules)
+            for module_name in untrusted_plugin_modules:
+                with ash_plugin_manager.untrusted_import(module_name):
+                    load_additional_plugin_modules(
+                        [module_name], fail_on_import_error=True
+                    )
+                    discover_plugins(plugin_modules=[module_name])
+        ash_plugin_manager.trust_plugin_modules(operator_plugin_modules)
         # Config can override environment
         if self._context.config:
             if (
@@ -267,14 +286,78 @@ class ScanExecutionEngine:
         self._registered_scanners = {}
         self._initialized = False
 
-        # Get all scanner plugins
+        # This scan's plugins: ASH's built-in ones plus those of the modules this
+        # scan names. The registry is process-wide and holds every module any scan
+        # or `list_scanners` in this process imported; the filter selects this
+        # scan's share of it. The handler filter decides which event handlers it
+        # notifies: those of the same plugins, plus handlers the program running
+        # the scan subscribed from outside the plugin namespace.
+        from automated_security_helper.plugins.loader import (
+            scan_handler_filter,
+            scan_plugin_filter,
+        )
+
+        self._plugin_filter = scan_plugin_filter(combined_plugin_modules)
+        self._handler_filter = scan_handler_filter(combined_plugin_modules)
         self.plugins = {
-            "converter": ash_plugin_manager.plugin_modules("converter"),
-            "scanner": ash_plugin_manager.plugin_modules("scanner"),
-            "reporter": ash_plugin_manager.plugin_modules("reporter"),
+            "converter": ash_plugin_manager.plugin_modules(
+                "converter", self._plugin_filter
+            ),
+            "scanner": ash_plugin_manager.plugin_modules(
+                "scanner", self._plugin_filter
+            ),
+            "reporter": ash_plugin_manager.plugin_modules(
+                "reporter", self._plugin_filter
+            ),
         }
         for k, v in self.plugins.items():
             ASH_LOGGER.verbose(f"Discovered {len(v)} {k} plugins at runtime")
+        # Logged, because a plugin left out here otherwise leaves no trace: no row,
+        # no MISSING. The usual case is a module another scan in this process named;
+        # the one to notice is a plugin a named package registers from another
+        # package or a subpackage without importing or listing it. The count goes
+        # to INFO and the names to DEBUG: ash.log records INFO, and in a process
+        # running several scans (an MCP server) the names are what other scans
+        # named.
+        left_out = [
+            f"{kind} {plugin.__name__} ({plugin.__module__})"
+            for kind in ("converter", "scanner", "reporter")
+            for plugin in ash_plugin_manager.plugin_modules(kind)
+            if plugin not in self.plugins[kind]
+        ]
+        if left_out:
+            ASH_LOGGER.info(
+                f"{len(left_out)} registered plugin(s) not used by this scan, "
+                "because no module in its ash_plugin_modules defines, imports or "
+                "lists them. Run with --debug to see which."
+            )
+            ASH_LOGGER.debug(
+                "Registered plugins not used by this scan: " + ", ".join(left_out)
+            )
+
+        # The registry is the process's, so it also holds what an earlier scan's
+        # untrusted config loaded, in the MCP server and across a workspace's
+        # projects. This scan takes only the classes its own modules, or the
+        # operator's, bring in; the cached list stays whole for the next scan.
+        self.plugins = ash_plugin_manager.plugins_loaded_by(
+            self.plugins, combined_plugin_modules
+        )
+
+        # A class from an off-host plugin package is selected only when this
+        # scan's trusted modules load it: not when only an in-tree or delivered
+        # config's module brought it in, nor when an earlier scan in this process
+        # did. Without a config the defaults name no module.
+        self.plugins = drop_untrusted_off_host_plugins(
+            self._context.config, self.plugins, ash_plugin_modules
+        )
+
+        # The plugin modules are loaded, so every reporter's declared destination
+        # options are known: those a config file in the scanned tree set are
+        # replaced by the trusted base's before the report phase builds any reporter.
+        if self._context.config is not None:
+            confine_declared_reporter_destinations(
+                self._context.config, self.plugins["reporter"]
+            )
 
         self.ensure_initialized(self._context.config)
 
@@ -438,9 +521,8 @@ class ScanExecutionEngine:
             if self._context.work_dir:
                 self._context.work_dir.mkdir(parents=True, exist_ok=True)
 
-        # Always ensure reports directory exists
-        reports_dir = self._context.output_dir.joinpath("reports")
-        reports_dir.mkdir(parents=True, exist_ok=True)
+        # Always ensure reports directory exists, refusing a link there first.
+        ensure_reports_dir(self._context.output_dir.joinpath("reports"))
 
         self.progress_display.start()
 
@@ -451,6 +533,7 @@ class ScanExecutionEngine:
 
             ash_plugin_manager.notify(
                 AshEventType.EXECUTION_START,
+                handler_filter=self._handler_filter,
                 phases=ordered_phases,
                 plugin_context=self._context,
                 source_dir=self._context.source_dir,
@@ -477,6 +560,7 @@ class ScanExecutionEngine:
                         # Create and execute the Convert phase
                         convert_phase = ConvertPhase(
                             plugins=self.plugins["converter"],
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -490,6 +574,7 @@ class ScanExecutionEngine:
                         # Create and execute the Scan phase
                         scan_phase = ScanPhase(
                             plugins=self.plugins["scanner"],
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -536,22 +621,27 @@ class ScanExecutionEngine:
                         # Final suppression pass on the merged SARIF before reporters read it.
                         # Per-scanner suppression passes may miss findings whose paths only
                         # become matchable after merge/normalization in the aggregated context.
-                        if (
-                            not self._context.ignore_suppressions
-                            and self._results
-                            and self._results.sarif
-                        ):
+                        if self._results and self._results.sarif:
                             from automated_security_helper.utils.sarif_utils import (
                                 apply_suppressions_to_sarif,
+                                exclude_output_dir_results,
                             )
 
-                            self._results.sarif = apply_suppressions_to_sarif(
-                                sarif_report=self._results.sarif,
-                                plugin_context=self._context,
-                                used_suppressions=getattr(
-                                    self._results, "used_suppressions", None
-                                ),
-                            )
+                            if not self._context.ignore_suppressions:
+                                self._results.sarif = apply_suppressions_to_sarif(
+                                    sarif_report=self._results.sarif,
+                                    plugin_context=self._context,
+                                    used_suppressions=getattr(
+                                        self._results, "used_suppressions", None
+                                    ),
+                                )
+                            else:
+                                # The flag lifts suppressions and ignore paths,
+                                # not the exclusion of ASH's own output directory.
+                                self._results.sarif = exclude_output_dir_results(
+                                    sarif_report=self._results.sarif,
+                                    plugin_context=self._context,
+                                )
 
                         # Refresh metrics after final suppression pass so exit code
                         # reflects the post-suppression state.
@@ -563,6 +653,7 @@ class ScanExecutionEngine:
                         # Create and execute the Report phase
                         report_phase = ReportPhase(
                             plugins=self.plugins["reporter"],
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._results,
@@ -579,6 +670,7 @@ class ScanExecutionEngine:
                         # Create and execute the Inspect phase
                         inspect_phase = InspectPhase(
                             plugins=[],  # No plugin support for the Inspect phase at this time.
+                            plugin_filter=self._handler_filter,
                             plugin_context=self._context,
                             progress_display=self.progress_display,
                             asharp_model=self._asharp_model,
@@ -600,6 +692,7 @@ class ScanExecutionEngine:
 
                 ash_plugin_manager.notify(
                     AshEventType.ERROR,
+                    handler_filter=self._handler_filter,
                     phase="execution",
                     error=str(e),
                     exception=e,
@@ -628,6 +721,7 @@ class ScanExecutionEngine:
 
                 ash_plugin_manager.notify(
                     AshEventType.EXECUTION_COMPLETE,
+                    handler_filter=self._handler_filter,
                     phases=ordered_phases,
                     results=self._results,
                     duration=scan_duration,

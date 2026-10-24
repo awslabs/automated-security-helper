@@ -98,8 +98,9 @@ scanners:
 trivy-repo always passes `--ignorefile` and `--secret-config`, so a `.trivyignore` or
 `trivy-secret.yaml` committed to the scanned repository is not read. Without the
 options (or `TRIVY_IGNOREFILE` / `TRIVY_SECRET_CONFIG`), trivy gets files that set
-nothing. Under `--sandbox`, an operator file outside the system paths also has to be
-in `sandbox.extra_read_paths`.
+nothing, which ASH writes in a directory outside the scanned tree and removes when
+the scan ends. Under `--sandbox`, an operator file outside the system paths also has
+to be in `sandbox.extra_read_paths`.
 
 ## Usage Examples
 
@@ -179,8 +180,18 @@ trivy image --download-db-only
 ```
 
 **Permission errors**:
+
+trivy-repo keeps its scan cache in memory (`--cache-backend=memory`), so an
+offline or sandboxed scan, which does not update the database itself, works from a
+cache directory it may only read, such as one shared between jobs or baked into an
+image. Downloading or updating the database, which an unsandboxed online scan does
+when it is due, needs the cache directory to be writable. That directory is
+`TRIVY_CACHE_DIR` when set, else
+`$XDG_CACHE_HOME/trivy` or `~/.cache/trivy` on Linux, `~/Library/Caches/trivy`
+on macOS, and `%LocalAppData%\trivy` on Windows.
+
 ```bash
-# Ensure Trivy cache directory is writable
+# Ensure the cache directory is writable before updating the database
 ls -la ~/.cache/trivy/
 ```
 

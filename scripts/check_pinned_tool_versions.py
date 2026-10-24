@@ -76,7 +76,8 @@ Known limitations
   has not been shown to be current, and reporting it as current would be the
   failure this script exists to prevent. Unauthenticated GitHub API calls are
   limited to 60 an hour per address; set ``GITHUB_TOKEN`` (or ``GH_TOKEN``) to
-  lift that.
+  lift that. A GitHub lookup that gets 403 with the token is retried once without
+  it, and logs GitHub's error message to stderr; see ``_get_github_json``.
 * Pre-release suffixes compare as text after the numeric part, so ``1.2.0rc10``
   sorts before ``1.2.0rc9``. The upstream APIs above return final releases, so
   the case does not arise in practice.
@@ -104,11 +105,13 @@ import lzma
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from http.client import HTTPMessage
+from typing import IO, Any, Callable, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "automated_security_helper"
@@ -137,7 +140,8 @@ _TIMEOUT_SECONDS = 30
 # and NodeSource archives the Dockerfile's apt pins are looked up in. Every URL is built
 # from a fixed https prefix today; this check makes that a property of the function
 # rather than of its callers, so a later caller cannot point it at a file:// path, a
-# plain-http mirror or an arbitrary host.
+# plain-http mirror or an arbitrary host. A redirect cannot either: _CheckedRedirects
+# applies the same check to every hop before it is followed.
 _ALLOWED_HOSTS = frozenset(
     {
         "api.github.com",
@@ -359,14 +363,69 @@ def _checked_url(url: str) -> str:
     return url
 
 
+def _origin(url: str) -> tuple[str, str | None, int]:
+    parts = urllib.parse.urlsplit(url)
+    return (
+        parts.scheme,
+        parts.hostname,
+        parts.port or (443 if parts.scheme == "https" else 80),
+    )
+
+
+class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
+    """Applies ``_checked_url`` to every redirect hop urllib would follow, before it does.
+
+    urllib follows a 3xx to any http, https or ftp URL on its own, so without this
+    the allowlist held for the first request only. A hop to one of those that fails
+    the check raises ValueError. urllib refuses every other scheme (file:, data:)
+    itself, with an HTTPError, before this runs, and a Location it cannot encode
+    fails with UnicodeEncodeError. Each of these is a lookup error.
+
+    The token goes with a hop only when the hop stays on the origin the token was
+    sent to: the same scheme, host and port. GitHub's redirect for a renamed
+    repository, to api.github.com/repositories/<id>/..., is one, and keeping the
+    token there keeps its rate limit; dropping it made the anonymous limit answer
+    403 on a hop the token was never sent to. Any other hop goes without it, as
+    requests' ``should_strip_auth`` does.
+    """
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        try:
+            _checked_url(newurl)
+        except ValueError:
+            fp.close()
+            raise
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        token = req.unredirected_hdrs.get("Authorization")
+        if new is not None and token and _origin(req.full_url) == _origin(newurl):
+            new.add_unredirected_header("Authorization", token)
+        return new
+
+
+_OPENER = urllib.request.build_opener(_CheckedRedirects)
+
+
 def _get_bytes(url: str, headers: dict[str, str] | None = None) -> bytes:
     request = urllib.request.Request(
         _checked_url(url), headers={"User-Agent": "ash-pin-check"}
     )
     for name, value in (headers or {}).items():
-        request.add_header(name, value)
-    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:  # nosec B310 - _checked_url above allows only https to _ALLOWED_HOSTS
+        if name.lower() == "authorization":
+            # urllib copies a request's ordinary headers to the next hop of a
+            # redirect and leaves the unredirected ones behind. _CheckedRedirects
+            # puts the token back on a hop to the same origin, and only there.
+            request.add_unredirected_header(name, value)
+        else:
+            request.add_header(name, value)
+    with _OPENER.open(request, timeout=_TIMEOUT_SECONDS) as response:
         return response.read()
 
 
@@ -374,16 +433,78 @@ def _get_json(url: str, headers: dict[str, str] | None = None) -> Any:
     return json.loads(_get_bytes(url, headers))
 
 
-def latest_github_release(project: str) -> str:
+# How much of GitHub's error message a refused request logs. Enough for any message
+# GitHub sends; a bound so that an unexpected body cannot flood the job log.
+_GITHUB_MESSAGE_LIMIT = 300
+
+
+def _github_error_message(error: urllib.error.HTTPError, token: str) -> str:
+    """The ``message`` of GitHub's JSON error body, quoted and safe to print.
+
+    Quoted with ``repr``, so a newline in it cannot start a line of its own, which in
+    a GitHub Actions log is where a workflow command would begin. The token is cut out
+    before anything else, in case a body ever echoes it, and the result is truncated.
+    """
+    # Diagnostic only, so any failure to read the body is reported in its place
+    # rather than raised: it must not decide whether the retry happens.
+    try:
+        body = json.loads(error.read(64 * 1024) or b"null")
+    except Exception as exc:
+        return f"(error body unreadable: {type(exc).__name__})"
+    message = body.get("message") if isinstance(body, dict) else None
+    if not isinstance(message, str):
+        return "(error body has no message)"
+    message = message.replace(token, "<token>")
+    if len(message) > _GITHUB_MESSAGE_LIMIT:
+        return repr(message[:_GITHUB_MESSAGE_LIMIT]) + " (truncated)"
+    return repr(message)
+
+
+def _get_github_json(path: str) -> Any:
+    """``https://api.github.com/<path>``, with the token when one is set.
+
+    Every endpoint this script reads is public: the token is sent only to lift the
+    anonymous rate limit. So a 403 to the request that carries it is retried once
+    without it, and the lookup fails only if that fails too. In the weekly job GitHub
+    has repeatedly answered 403 to the token-carrying request for one repository
+    while the same token worked for every other. Why is not established; the retry
+    logs GitHub's own message so the next run shows it. Any other status, any network
+    error, and a 403 with no token configured fail on the first try, as before.
+    """
+    url = f"https://api.github.com/{path}"
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    data = _get_json(f"https://api.github.com/repos/{project}/releases/latest", headers)
-    return str(data["tag_name"])
+    if not token:
+        return _get_json(url, headers)
+    try:
+        return _get_json(url, {**headers, "Authorization": f"Bearer {token}"})
+    except urllib.error.HTTPError as exc:
+        if exc.code != 403:
+            raise
+        message = _github_error_message(exc, token)
+        answered = getattr(exc, "url", None) or url
+    # Outside the except block, so a failed retry is reported as itself rather than
+    # chained to the 403 before it. Never the headers: one of them is the token.
+    if answered == url:
+        what = f"GitHub answered 403 to the authenticated request for {path}"
+    else:
+        what = (
+            f"GitHub answered 403 to {answered!r}, which the request for {path} "
+            f"was redirected to"
+        )
+    print(
+        f"warning: {what}; GitHub's message: {message}. "
+        f"Retrying once without the token.",
+        file=sys.stderr,
+    )
+    return _get_json(url, headers)
+
+
+def latest_github_release(project: str) -> str:
+    return str(_get_github_json(f"repos/{project}/releases/latest")["tag_name"])
 
 
 def latest_pypi_release(distribution: str) -> str:

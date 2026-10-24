@@ -49,12 +49,15 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--allow-stale-content-db` | bool |  |  | Let the scan pass when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) is older than its declared bound -- for grype, 120h after the database was built. Without it such a scan exits 1. With it the scan proceeds and the warning is recorded in the log and in the reports. --no-allow-stale-content-db forces the default failure. Defaults to unset, which prefers the `content_db_staleness` config value and then 'fail'; either form of the flag takes precedence over the config. |
 | `--simple` | bool | False |  | Simplified output mode with minimal logging |
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report all findings regardless of suppression status. |
+| `--honor-ignore-files` | bool |  |  | Whether the .gitignore and .ignore files in the scanned tree decide which files are left out of ASH's scan set (the files detect-secrets, cfn-nag, cdk-nag, npm-audit and the converters read). --no-honor-ignore-files scans the files they match too; ASH's own exclusions such as .git still apply. Defaults to unset, which prefers the operator's `honor_ignore_files` config value and then honoring them. Either form takes precedence over the config. A config file inside the scanned tree cannot set it. The results and summaries record whether the ignore files were honored and how many files they excluded. |
 | `--min-severity` | str | `low` |  | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code. |
 | `--compact-report` | bool | False |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
 | `--changed-files-only` | bool | False | ASH_CHANGED_FILES_ONLY | Limit the scan to files changed between the base branch and HEAD. Useful in CI to scan only PR changes. Falls back to a full scan when git is unavailable. |
 | `--base-ref` | str | `origin/main` | ASH_BASE_REF | Git ref to diff against when --changed-files-only is set. |
+| `--allow-in-tree-tools` | bool | False |  | Let ASH start scanners and other tools found inside the scanned directory, such as an activated in-repo .venv/bin or node_modules/.bin. Off by default: a tool inside the scanned directory is treated as missing. Only this flag (also the allow_in_tree_tools key of --cli-json-input) and the ASH_ALLOW_IN_TREE_TOOLS environment variable (1, true, yes or on) turn it on, never a config file, and `ash mcp` never does. |
 | `--shard-index` | int |  | ASH_SHARD_INDEX | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'. |
 | `--shard-count` | int |  | ASH_SHARD_COUNT | Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner. |
+| `--config-from-scanned-repository` | bool | False |  | Apply the limits ASH puts on a repository-written config file to the --config file and every file it extends, wherever they are. Container mode passes this to the scan inside the container when the config, or a file it extends, is inside a git checkout (the scanned one or another) but outside --source-dir, where that scan cannot see it. |
 | `--workspace` | str |  | ASH_WORKSPACE | Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. |
 | `--workspace-config` | str |  | ASH_WORKSPACE_CONFIG | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
 | `--allow-missing-projects` | bool | False |  | In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan. |
@@ -63,7 +66,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--run/--no-run`, `-r/-R` | bool | True |  | Whether to run the ASH container image |
 | `--force` | bool | False |  | Force rebuild of the ASH container image |
 | `--oci-runner`, `--oci`, `--runner`, `-o` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools |
-| `--build-target` | enum(non-root, ci) |  |  | Specify the target stage of the ASH image to build |
+| `--build-target` | enum(non-root, ci) |  |  | The ASH image stage to build and run: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it; --custom-containerfile builds on 'ci'. |
 | `--container-uid`, `-u` | str |  |  | UID to use for the container user |
 | `--container-gid`, `-g` | str |  |  | GID to use for the container user |
 | `--ash-revision-to-install` | str |  |  | ASH branch or tag to install in the container image for usage during containerized scans |
@@ -83,7 +86,7 @@ Builds the ASH container image then runs a scan with it.
 | `--force`, `-f` | bool | False |  | Force rebuild of the ASH container image |
 | `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
 | `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
-| `--build-target` | enum(non-root, ci) | `non-root` |  | Specify the target stage of the ASH image to build |
+| `--build-target` | enum(non-root, ci) |  |  | The ASH image stage to build: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it. |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | `--container-uid`, `-u` | str |  |  | UID to use for the container user |
 | `--container-gid`, `-g` | str |  |  | GID to use for the container user |
@@ -127,6 +130,8 @@ Merges the results of a sharded scan into one unified report.
 | `--results` | List[str] | *required* |  | A shard's ash_aggregated_results.json, or a directory containing one. Repeat once per shard. |
 | `--output-dir` | str | *required* | ASH_OUTPUT_DIR | Directory to write the merged results and reports to. |
 | `--output-formats` | List[str] |  |  | Comma-separated report formats to generate. Defaults to the formats the scan's own configuration asks for. |
+| `--config`, `-c` | str |  | ASH_CONFIG | The operator's config file. Its values replace the shards' for the settings a shard's recorded config cannot choose, such as where reporters send findings and which off-host reporters run. It adds no plugin module or reporter the shards did not record; use --config-overrides for that. |
+| `--config-overrides` | List[str] |  |  | Configuration overrides as key-value pairs (e.g., 'reporters.s3.enabled=true'), applied over the shards' recorded config. |
 | `--min-severity` | str | `low` |  | Minimum severity that counts as actionable for the exit code. |
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ash scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |
 | `--fail-on-findings/--no-fail-on-findings` | bool |  |  | Exit non-zero when the merged report has actionable findings. Defaults to the scan configuration's value, then to true. |
@@ -154,9 +159,15 @@ Start the ASH MCP server (Model Context Protocol).
 | `--port` | int | 8000 |  | Port to bind for HTTP transports. |
 | `--mount-path` | str | `/mcp` |  | HTTP path the transport listens on (default: /mcp for streamable-http, /sse for sse). |
 | `--auth-header-name` | str |  |  | Required HTTP header name for single-tenant auth (HTTP transports only). |
-| `--auth-header-value` | str |  |  | Expected value of --auth-header-name. |
+| `--auth-header-value` | str |  |  | Expected value of --auth-header-name. Visible to other local users on the command line; prefer --auth-header-value-file or --auth-header-value-fd. |
+| `--auth-header-value-file` | Path |  |  | Read the expected value of --auth-header-name from this file, once at startup: a regular file, not a symlink, readable by its owner only. One trailing newline is dropped. |
+| `--auth-header-value-fd` | int |  |  | Read the expected value of --auth-header-name from this inherited file descriptor (3 or above), once at startup, then close it. |
 | `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
-| `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Without this, protection is enabled only when --host is loopback, matching the MCP SDK's own default. |
+| `--trust-upstream-session-id` | bool | False |  | Stateless streamable-HTTP only. Declare that a platform in front of ASH issues and authenticates the Mcp-Session-Id header, so it can name the caller's session. Without it a stateless server identifies no session, and tools that need one (source delivery, profiles, the scan registry) refuse. |
+| `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Required with a non-loopback --host unless --trust-upstream-host-check is given. |
+| `--session-workspace-ttl` | int |  |  | HTTP transports only. Seconds a session workspace (delivered source, uploads, bound profile) may go unused before it is removed. Covers sessions whose end the server cannot see, such as every stateless one. Default: 86400 (24 hours). |
+| `--trust-upstream-host-check` | bool | False |  | HTTP transports only. Declare that a proxy or platform in front of ASH checks the Host and Origin headers, so ASH serves any. Without it, a non-loopback --host needs --allowed-host or the server refuses to start. Cannot be combined with --allowed-host. |
+| `--profile` | List[str] |  |  | Register a named config profile as NAME=path/to/ash.yaml, repeatable. Clients list them with the list_profiles tool and bind one to their session with select_profile; a bound profile supplies the config for every later call in that session that names none. Each file is loaded and schema-validated now, so a typo fails startup rather than a scan. |
 
 ### `ash get-genai-guide`
 
@@ -190,6 +201,7 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file to get, as for `ash scan --config`. The same as the positional path; when both name a file on the command line they must name the same one. The positional path wins over ASH_CONFIG. |
 | `--config-overrides` | List[str] | [] |  | Configuration overrides specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW') |
 | `--verbose` | bool | False |  | Enable verbose logging |
 | `--debug` | bool | False |  | Enable debug logging |
@@ -370,7 +382,7 @@ Get a lightweight summary of scan results without detailed findings.
 
 ### `list_active_scans`
 
-List all active and recent scans with their current status.
+List this session's active and recent scans with their current status.
 
 ### `list_profiles`
 
@@ -436,10 +448,10 @@ Clone a repository into this session's workspace and make it the scan target.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `url` | str | *required* | Remote URL to clone (https or ssh). Rejected if it begins with '-' |
+| `url` | str | *required* | Remote URL to clone: https://, ssh:// or user@host:path. Refused if |
 | `ref` | str |  | Optional branch, tag, or commit. Defaults to the remote's default branch. |
-| `ssh_key_id` | str |  | Opaque identifier for a key the operator registered on the |
-| `depth` | int | 1 | Shallow-clone depth. Defaults to 1. |
+| `ssh_key_id` | str |  | Must be omitted. The server registers no ssh keys, so any id |
+| `depth` | int | 1 | Shallow-clone depth, a positive whole number. Defaults to 1. |
 
 ### `set_source_zip_chunk`
 

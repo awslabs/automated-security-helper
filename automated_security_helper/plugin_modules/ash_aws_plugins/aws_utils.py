@@ -12,6 +12,26 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Type variable for the return type of the function
 T = TypeVar("T")
 
+#: The most retries an AWS reporter's options allow, and the longest delay in
+#: seconds between two attempts, so no config makes a reporter keep calling an
+#: API that refuses it for longer than that.
+MAX_RETRIES = 10
+MAX_RETRY_DELAY_SECONDS = 60
+
+
+def check_retry_delays(options: Any) -> Any:
+    """``options``, refused when its ``base_delay`` exceeds its ``max_delay``.
+
+    For an AWS reporter's options model validator. A model without
+    ``max_delay`` is held to ``MAX_RETRY_DELAY_SECONDS``.
+    """
+    base = getattr(options, "base_delay", None)
+    maximum = getattr(options, "max_delay", MAX_RETRY_DELAY_SECONDS)
+    if base is not None and base > maximum:
+        raise ValueError(f"base_delay ({base}) must not exceed max_delay ({maximum})")
+    return options
+
+
 # List of retryable exceptions
 RETRYABLE_EXCEPTIONS = [
     "ThrottlingException",

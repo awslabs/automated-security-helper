@@ -33,6 +33,11 @@ def filter_summary(results: Dict[str, Any]) -> Dict[str, Any]:
         "generated_at": metadata.get("generated_at"),
         "ash_version": metadata.get("tool_version"),
         "scan_duration_seconds": metadata.get("summary_stats", {}).get("duration"),
+        # Whether the repository's ignore files shrank the scan set, and by how
+        # much. A summary that leaves it out reads the same for a scan that skipped
+        # files as for one that read them all. None for results that carry no
+        # record (no scan set was built, or an older ASH wrote them).
+        "ignore_file_exclusions": metadata.get("ignore_file_exclusions"),
     }
 
     summary_stats = results.get("summary_stats") or {}

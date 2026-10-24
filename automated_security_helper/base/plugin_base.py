@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Callable, Dict, List, Literal
+from typing import Annotated, Any, Callable, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
@@ -17,6 +17,9 @@ from automated_security_helper.core.exceptions import (
     ToolNotProvisionableError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.offline_tool_env import (
+    with_offline_tool_environment,
+)
 
 
 class PluginDependency(BaseModel):
@@ -213,6 +216,10 @@ class PluginBase(UVToolMixin, BaseModel):
     # scan_spawn_failure.
     _scan_spawn_failure: str | None = PrivateAttr(default=None)
 
+    # A version probe construction deferred, as (tool, --from spec), or None. See
+    # uv_tool_mixin.deferred_tool_version_probes.
+    _deferred_tool_version_probe: tuple | None = PrivateAttr(default=None)
+
     # Installation-related properties
     dependencies: Annotated[
         Dict[str, Dict[str, List[PluginDependency]]],
@@ -322,13 +329,13 @@ class PluginBase(UVToolMixin, BaseModel):
         if response.get("stderr"):
             self.errors.extend(response["stderr"].splitlines())
 
-        # Accumulate worst exit code across multiple subprocess calls.
-        # Use abs() so negative codes (e.g. -1 for timeout) aren't
-        # silently swallowed by max(0, -1).
+        # Accumulate worst exit code across multiple subprocess calls. A negative
+        # code (a signal, or -1 for a timeout) is recorded as 128 + N, so it is
+        # neither swallowed by max(0, -1) nor read as a small accepted code.
+        from automated_security_helper.utils.subprocess_utils import exit_status
+
         new_code = response.get("returncode", 1)
-        self.exit_code = max(
-            self.exit_code, abs(new_code) if new_code < 0 else new_code
-        )
+        self.exit_code = max(self.exit_code, exit_status(new_code))
 
     @property
     def scan_timed_out_after(self) -> float | None:
@@ -401,7 +408,7 @@ class PluginBase(UVToolMixin, BaseModel):
         cwd: Path | str | None = None,
         env: Dict[str, str] | None = None,
         timeout: float | None = None,
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Any]:
         """Run a subprocess with the given command.
 
         This method supports both direct command execution and UV tool execution
@@ -432,6 +439,25 @@ class PluginBase(UVToolMixin, BaseModel):
         try:
             # Use provided cwd or fall back to context.source_dir
             working_dir = cwd if cwd is not None else Path(self.context.source_dir)
+
+            # Offline, the tool's own update, version and telemetry checks are
+            # turned off in the environment it gets (utils/offline_tool_env.py).
+            # Asked of the scanner, so a scanner whose own `offline` option is set
+            # gets them while the rest of the run is online.
+            scanner_offline = getattr(self, "_scanner_offline", None)
+            env = with_offline_tool_environment(
+                env, scanner_offline() if callable(scanner_offline) else None
+            )
+
+            # A uv command started in the scanned tree (`uv pip ...`, `uv run ...`)
+            # runs the tree's .venv python and builds its project unless told not
+            # to; see utils/python_child.uv_child_overrides.
+            from automated_security_helper.utils import python_child
+            from automated_security_helper.utils.process_env import snapshot_environ
+
+            uv_overrides = python_child.uv_child_overrides(command)
+            if uv_overrides:
+                env = {**(snapshot_environ() if env is None else env), **uv_overrides}
 
             # Attempt UV tool execution if enabled
             if self.use_uv_tool and self.command and len(command) > 0:
@@ -492,8 +518,16 @@ class PluginBase(UVToolMixin, BaseModel):
             ASH_LOGGER.debug(
                 f"({self.config.name}) Full error details: {e}", exc_info=True
             )
-            self.exit_code = 1
-            return {"error": str(e)}
+            # ASH's own failure, not the tool's code: 1 is accepted by most
+            # scanners, so a results file already in place would have been graded.
+            # In the response too, so a scanner judging each target by its own
+            # run sees it.
+            from automated_security_helper.utils.subprocess_utils import (
+                SPAWN_FAILURE_RETURNCODE,
+            )
+
+            self.exit_code = SPAWN_FAILURE_RETURNCODE
+            return {"error": str(e), "returncode": SPAWN_FAILURE_RETURNCODE}
 
     def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
         """Generate installation commands for the specified platform/architecture as arrays of arguments"""

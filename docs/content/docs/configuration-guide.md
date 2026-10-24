@@ -40,7 +40,11 @@ one without that table is not a config source. The lists come from
 `automated_security_helper/core/constants.py`.
 
 Sources are never merged. If more than one exists, ASH logs which one it used
-and logs a warning naming each one it ignored. The names in items 1-12 are
+and logs a warning naming each one it ignored, once. The scan repeats each of
+those warnings under "CONFIGURATION WARNING" in its summary and records it in the
+results as a `config_warning` entry of `validation_checkpoints`, because the
+settings in an ignored source are not applied; `ash merge` keeps one copy of a
+warning every shard recorded. The names in items 1-12 are
 deprecated in favor of an `ashrc` file or `[tool.ash]`, and the warning says so
 when one of them shadows a newer source. They still take precedence, so adding a
 `[tool.ash]` table to a repository that already has `.ash/.ash.yaml` does not
@@ -53,6 +57,59 @@ You can also specify a custom configuration file path using the `--config` optio
 ```bash
 ash --config /path/to/my-config.yaml
 ```
+
+In a single-directory scan, that file replaces discovery, so the repository's own
+config is not read. In workspace mode (`ash --workspace`) it is layered over each
+project's own config instead: every field it sets is final for every project, and
+a project's config fills only the fields it leaves unset. See
+[The operator's config](cli-reference.md#the-operators-config).
+
+### A config file that cannot be loaded stops the scan
+
+ASH uses its built-in default configuration only when there is no config file at
+all: none named and none found in the source directory. A config file that is
+named or found and cannot be loaded stops the scan with exit code 3 before any
+scanner runs, and the message names the file. That covers:
+
+- a file named by `--config`, `ASH_CONFIG`, the `config` argument of
+  `run_ash_scan()` or an MCP tool's `config_path` that does not exist, and an
+  empty `--config ""`. An empty `ASH_CONFIG` counts as unset;
+- a named or discovered file that is not valid YAML, JSON or TOML, is not UTF-8,
+  cannot be read, is larger than 1 MiB, uses a YAML alias (`*name`), or is a
+  directory, FIFO, device or other non-regular file. A syntax error, and an
+  alias, names its line. A file that is not a regular file is refused without
+  being read, so a FIFO or `/dev/zero` at a config name does not stall the scan.
+  A leading UTF-8 byte order mark is accepted in YAML, JSON and TOML alike.
+  Aliases are refused in every YAML ASH reads as configuration (config files,
+  `extends` bases, workspace policy files, MCP profiles and a client's
+  `override_yaml`), because a few hundred bytes of nested aliases expand to
+  gigabytes when the config is written into the results; an anchor (`&name`)
+  that nothing refers to is accepted;
+- a dangling symbolic link at one of the names above, for example
+  `.ash/.ash.yaml` linked to a shared file that is not checked out. It is not
+  treated as "no config";
+- a `pyproject.toml` that cannot be read at all, when it would be the source ASH
+  uses: ASH cannot tell whether it holds a `[tool.ash]` table;
+- a config name ASH cannot look for, such as one inside an `.ash/` directory
+  that cannot be searched: ASH cannot tell whether the file is there.
+
+Scanning with the defaults instead would run without the file's suppressions,
+ignore paths, thresholds and sandbox settings, and report the scan as completed.
+The same applies to `ash report`, `ash plugin list`, `ash dependencies install`,
+`ash config get` and `ash config wizard` (each exits 3; the wizard leaves the
+file as it was rather than rewriting it from the defaults), to workspace mode (see
+[Workspace mode](cli-reference.md#workspace-mode)), and to the MCP server:
+`scan_directory` refuses such a file, and an empty `config_path`, before it
+starts a scan, a workspace scan's session profile that does not load is reported
+as an invalid configuration (exit code 3), and `get_config` (with or without `raw`)
+returns an error instead of the default configuration, with `error_category` `file_not_found` for a file
+that does not exist and `invalid_format` for one that does not load. A config
+file outside the session's allowed config roots is refused as outside them
+before anything reads it, so the response says nothing about its contents. That
+includes a config source found in the scanned directory: a `pyproject.toml`, a
+config file or an `.ash/` directory that is a symbolic link out of the roots is
+refused before discovery opens it, with the same response whether its target is
+missing, unreadable or readable.
 
 ### Configuring ASH in pyproject.toml
 
@@ -88,7 +145,9 @@ than rewrite it; edit `[tool.ash]` by hand.
 
 A `pyproject.toml` that is not valid TOML is skipped, unless its text declares a
 `[tool.ash]` table, in which case the scan fails instead of running with the
-default configuration.
+default configuration. One that cannot be read at all (a dangling link, no
+permission) fails the scan when it would be the source ASH uses; behind a
+higher-precedence file it is only logged.
 
 ## Creating a Configuration File
 
@@ -134,8 +193,31 @@ all-clear is not. A host that genuinely cannot provide a scanner's tool says so 
 with the key below or `--no-fail-on-incomplete-scanners`, and keeps its old exit codes.
 
 It selects on status, so it covers a failure only once that failure has reached the
-status. A tool that exits non-zero but writes an empty report is graded `PASSED` from
-its zero findings, and this key does not change that in any position.
+status. A tool's own failure does reach it: a scanner whose tool exits with a code
+outside the codes that scanner accepts for a completed run is `ERROR`, whatever its
+results file holds, and the row records the exit code and the tool's stderr. A failed
+tool can still leave a results file behind (semgrep writes SARIF holding only error
+notifications when it cannot read its rules, grype a zero-byte report when it cannot
+load its database), and "found nothing" and "never scanned" look the same in it, so
+that file is not read. The accepted codes per scanner are in
+[Scanner exit codes](troubleshooting.md#a-scanner-is-error-with-an-exit-code-it-does-not-accept).
+A results file ASH cannot read as SARIF is `ERROR` too, whatever the exit code, as is
+an empty results file, SARIF with no run, and a scanner result that carries nothing
+to grade (a dict with no `status`, `severity_counts` or `findings`, a dict whose
+`status` does not say its tool completed, or a list or string from a scanner's own
+`scan()`); none of them can show that the target is clean. The scanners ASH ships
+write SARIF with one run even when there is nothing for them to scan. So is a scanner whose tool reports that its content database does not exist;
+see [Failing on a stale content database](#failing-on-a-stale-content-database).
+
+With the key off, an `ERROR` scanner no longer fails the scan: the exit code comes from
+the findings alone, so a scan whose only problem is a failed scanner exits 0, the same
+code as a clean scan. That is what turning the gate off means, and the summary table
+still shows the `ERROR` row.
+
+It covers converters too: a converter that crashed, one that could not convert some of
+its inputs (`converter_results.<name>.failed_inputs`), and one whose tool is missing
+while it had inputs make the scan exit 1, as an incomplete scanner does, in `ash merge`
+and per project in workspace mode as well.
 
 `SKIPPED` scanners are ones you did not select and never trip it, which is what
 keeps a sharded scan working: each shard excludes the scanners its siblings own,
@@ -172,12 +254,18 @@ how to refresh it. This happens in online and offline mode alike.
 | Database | Scanner | Bound | Where the bound comes from | Age read from |
 | --- | --- | --- | --- | --- |
 | `grype-db` | grype | 120h (5 days) | grype's own default, `db.max-allowed-built-age` | `built` in `grype db status -o json` |
-| `trivy-db` | trivy-repo | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
+| `trivy-db` | trivy-repo, unless its `scanners` list leaves out `vuln` | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
 | `semgrep-offline-rules` | semgrep (offline only) | 720h (30 days) | ASH's own choice; semgrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$SEMGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 | `opengrep-offline-rules` | opengrep (offline only) | 720h (30 days) | ASH's own choice; opengrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$OPENGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
 
 A database whose build time cannot be read is treated as stale, because an
 unmeasurable database is not evidence of a fresh one.
+
+A database the tool reports does not exist at all (grype's `database does not
+exist`, no `VulnerabilityDB` from trivy, no rules files in the offline rules
+directory) also makes that scanner `ERROR`, under `fail` and `warn` alike: the scan had
+nothing to match against, so its zero findings are not a result. `warn` relaxes the
+age bound for a database that exists.
 
 To let one scan run against a stale database, pass `--allow-stale-content-db`, or
 set:
@@ -220,10 +308,167 @@ says `warn`, and either form of the flag also clears
 `content_db_staleness_overrides` for that scan. Like `fail_on_incomplete_scanners`,
 neither key can be changed by an MCP runtime patch.
 
+Relaxing the check is the operator's choice. Set `warn`, or an entry with
+`policy: warn`, with the flag, `--config-overrides` or a config file outside the
+scanned tree. From a config file inside the tree (a repository's
+`.ash/.ash.yaml`, or a workspace project's own config) they are ignored with a
+warning naming the key, unless they equal the operator's value. `fail`, and an
+entry with `policy: fail`, only make the check stricter, so they apply from any
+config. See [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
+
 This gate is independent of `fail_on_incomplete_scanners` and does not need it
 turned on. When the scan also has actionable findings, the exit code is 1 rather
 than 2: clearing the reported findings would not make a scan against a stale
 database trustworthy.
+
+### Ignore files and the scan set
+
+Before the scanners run, ASH builds a scan set: the list of files in the source
+directory that detect-secrets, cfn-nag, cdk-nag, npm-audit and the archive and
+Jupyter converters read. By default every file a `.gitignore` or `.ignore` in the
+scanned tree matches is left out of it, as git would leave it out. A nested ignore
+file applies to the directory it sits in, a later negation (`!keep.log`) puts a file
+back, and a directory the root `.gitignore` excludes is not entered at all, so the
+ignore files inside it are not read. ASH also leaves out files on its own: `.git`,
+CDK assets under `cdk.out/asset.*`, its bundled aws-cdk tree, and its own output
+directory when that is inside the source directory. A CloudFormation
+template (`*.template.json`) an ignore file matches is kept, unless it sits in a
+directory the root `.gitignore` excludes. bandit, semgrep, opengrep, checkov, grype
+and syft walk the source directory themselves, with their own ignore rules, so this
+setting does not change what they read: in a git checkout, semgrep and opengrep
+still skip the files git ignores. snyk-code passes the source directory to the Snyk
+CLI as it is.
+
+A link to a file is in the scan set only when its target, with every link on the way
+resolved, is inside the source directory. A link that leaves the tree (to an absolute
+path elsewhere, up through `..`, or through a link to a directory outside) is not
+scanned: a warning names it, as `Not scanning 'vendor/config.py': link leaves the
+scanned tree`, and names only the link, not where it points. Each one is also listed
+as an input not scanned, under `ASH`: in `ash_aggregated_results.json` under
+`metadata.inputs_not_scanned` (`path` and `reason`), in the console summary, and in
+the "Inputs not scanned" section of `ash.summary.md` and `ash.summary.txt`; in a
+workspace scan, in that project's `inputs_not_scanned` entry. A link to a file inside
+the tree stays in the scan set, and a source directory that is itself reached through
+a link is scanned as given. This applies to the readers of the scan set listed above.
+
+The scanners that walk the directory they scan themselves do not read the scan set.
+So ASH tells each of them to skip every link to a file whose target leaves that
+directory, or does not run it on that directory:
+
+- bandit reads a link to a file wherever it points (measured with bandit 1.9.4). ASH
+  adds each such link to bandit's `--exclude`, as the link's own path.
+- checkov reads a link to a file wherever it points, whether the target is relative
+  or absolute, and does not enter a link to a directory (measured with checkov
+  3.3.26). ASH passes one `--skip-path` for each such link, escaped and anchored so
+  that it matches that path and no other: skipping `a/main.tf` does not skip
+  `a/main.tf.json`. These values are ASH's own; the `skip_path` values in your
+  config are passed as they are.
+- ferret-scan is given each such link in its `--exclude`, relative to the directory
+  it scans. How ferret-scan treats links has not been measured.
+- grype and syft follow neither a link to a file nor a link to a directory whose
+  target leaves the directory they scan (measured with grype 0.120.1 and syft
+  1.54.1). Each such link is still passed in their `--exclude`, as `./` and its
+  path with the glob characters escaped, which leaves out that path and no other.
+- trivy (the `trivy-repo` scanner) skips every link, inside the tree or not
+  (measured with trivy 0.75.0). Each such link is still passed in `--skip-files`,
+  glob characters escaped, unless its path holds a comma, a double quote or a line
+  break, which trivy's option cannot carry.
+- semgrep and opengrep skip every link, inside the tree or not (measured with
+  semgrep 1.180.0 and opengrep 1.30.2). Their `--exclude` cannot name one path: a
+  pattern with a `/` is anchored at semgrep's project root, the git checkout's root
+  when the scanned directory is inside one, and opengrep matches a top-level name at
+  every depth. So a link's own name is passed only when no other file or directory
+  in the tree has that name, and the name holds only letters, digits and
+  `. _ + @ = ~ -`.
+- snyk-code uploads the files it reads to Snyk, `snyk code test` has no option that
+  leaves out one path, and how it treats links has not been measured. So ASH does
+  not run it on a directory holding such a link.
+
+ASH finds these links the way the tools walk: it does not read ignore files, so a
+link in a directory a `.gitignore` excludes is skipped too, and it does not enter a
+link to a directory. When bandit, checkov or ferret-scan cannot be given a link's
+path, ASH does not run that tool on that directory, rather than let it read the file
+the link points at; the same goes for snyk-code and any such link. The scanner's
+status is `ERROR`, and the error names the link, as `Not running bandit on /src:
+'a,b.py': link leaves the scanned tree, and bandit's --exclude cannot leave out that
+file alone, ...`. bandit cannot be given a path with a comma or one of `*`, `?` and
+`[`, or a path that another file's path contains, because it also leaves out every
+path an entry is part of. ferret-scan cannot be given a path with a comma or any of
+`*?[]{}\`. checkov cannot be given any on Windows, where it joins the paths it walks
+with `\`. For the scanners that follow no such link, a path their option cannot
+carry is only left out of it, and on Windows none is passed.
+
+`honor_ignore_files` is a top-level key, and it defaults to `true`. To scan the files
+the repository's ignore files match as well, set it to `false` in a config file
+outside the scanned tree, or for one scan:
+
+```bash
+ash --source-dir . --no-honor-ignore-files
+ash --source-dir . --config-overrides 'honor_ignore_files=false'
+```
+
+ASH's own exclusions still apply then. `--honor-ignore-files` sets it back to `true`
+for one scan. Either form of the flag takes precedence over the config value, and
+in container mode the flag reaches the scan inside the container. In workspace mode
+it applies to every project.
+
+Whether the repository's ignore files hide its own files is the operator's decision,
+so a config file inside the scanned tree cannot set this key in either direction;
+see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
+An MCP client cannot set it either: a client's config file is treated the same way,
+and `/honor_ignore_files` is in the default `runtime_overrides.denied_paths`.
+
+Every scan records the outcome in `ash_aggregated_results.json`, under
+`metadata.ignore_file_exclusions`:
+
+```json
+"ignore_file_exclusions": {
+  "honored": true,
+  "excluded_file_count": 7,
+  "by_ignore_file": {
+    ".gitignore": 3,
+    ".ignore": 1,
+    "vendor/.gitignore": 2,
+    "sub/.ignore": 1,
+    "sub/deep/.gitignore": 0
+  },
+  "output_dir_file_count": 0
+}
+```
+
+`excluded_file_count` is the number of files the ignore files removed, counted from
+the scan set itself: every file the walk found that is not in it, less the ones ASH
+leaves out on its own. `by_ignore_file` says which ignore file removed each one. Each
+ignore file is listed by its path relative to the source directory, with 0 when it
+removed nothing. A line that starts with `#` is a comment, as in git, and is not
+copied into `ash-ignore-report.txt`. The files under a
+directory the root `.gitignore` excludes count for the root `.gitignore`. A symlink
+(or junction) to a directory is never followed, so the files behind it are in no scan
+set and are not counted. With `honor_ignore_files: false` the record reads
+`"honored": false` with a count of 0.
+
+ASH's own output directory is left out whatever `honor_ignore_files` says. It is
+recognized as the same directory however its path is spelled (through a link in the
+source path, or as `/src/.ash/ash_output` and `/out` in container mode), not by its
+name; on a file system that reports no inode numbers, its absolute path decides
+instead. Files that are already in it when the scan set is built, this run's
+`ash.log` and `ash.log.jsonl` aside, are counted in `output_dir_file_count`, also when
+it sits under a directory the root `.gitignore` excludes, and the summaries say
+they were left out, and a warning names the directory. They are an earlier run's
+output, or repository files that sit where ASH writes; to scan repository files
+there, write ASH's output outside the scanned tree with `--output-dir`.
+
+`ash.summary.txt` and `ash.summary.md` print the total in their scan metadata, for
+example `Ignore files: the scanned repository's .gitignore and .ignore files
+excluded 7 files from ASH's scan set`, or say that the ignore files were not
+honored.
+`ash report --format text` and `--format markdown` print the same line from the
+stored results. The MCP `get_scan_summary` tool returns the record under
+`metadata.ignore_file_exclusions`. In a workspace scan, each project's record is in
+`workspace.projects[].ignore_file_exclusions`, and the merged results and summaries
+carry the workspace total, with each ignore file keyed by its path relative to the
+workspace root. The log names every ignore file and its count at INFO level, and
+`ash-ignore-report.txt` in the output directory holds the rules that were applied.
 
 ### Global Settings
 
@@ -251,6 +496,12 @@ global_settings:
       reason: 'False positive due to test mock'  # Reason for suppression
       expiration: '2025-12-31'  # Optional expiration date (YYYY-MM-DD)
 ```
+
+An ignore path is a suppression. ASH does not convert a file under one or include
+it in the file lists it hands scanners, and leaves a finding any scanner reports
+there out of the results. `--ignore-suppressions` lifts ignore paths along with
+suppressions: every scanner reads those files and their findings are reported. See
+[Temporarily Disabling Suppressions](suppressions.md#temporarily-disabling-suppressions).
 
 Omitting `line_end` does **not** suppress only `line_start`. A suppression with
 `line_start` and no `line_end` matches every finding from that line to the end of
@@ -289,8 +540,16 @@ converters:
       tool_version: null      # Version constraint for the conversion tool
       install_timeout: 300    # Seconds allowed for tool installation
   archive:
-    enabled: true             # The archive converter exposes no options
+    enabled: true
+    options:                  # Extraction limits; a config in the scanned tree can only lower them
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
 ```
+
+The archive converter's options bound what extracting one archive may write; see
+[Extraction limits](plugins/builtin/converters.md#extraction-limits).
 
 ### Scanners Configuration
 
@@ -315,7 +574,7 @@ scanners:
   detect-secrets:
     enabled: true
     options:
-      baseline_file: null   # Path to a detect-secrets baseline, relative to the source directory
+      baseline_file: null   # Path to a detect-secrets baseline, relative to the config file that sets it
 
   checkov:
     enabled: true
@@ -350,7 +609,7 @@ scanners:
   syft:
     enabled: true
     options:
-      exclude: []           # Paths to skip, matched as regular expressions
+      exclude: []           # Paths to skip, as globs starting ./, */ or **/
 ```
 
 Two conventions differ between fields, and both are enforced: `severity_threshold`
@@ -434,48 +693,256 @@ ash_plugin_modules:
   - another_ash_plugins
 ```
 
-The top-level package must be inside ASH's plugin namespace: either under
-`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`.
-A module outside that namespace is skipped with a warning rather than imported, so a
-name like `another_plugin_module` silently registers nothing. When the list comes from
+Each entry must be a dotted path of Python identifiers inside ASH's plugin namespace:
+under `automated_security_helper.` or `ash_plugins`, or a top-level package named
+`ash_plugins` or ending in `_ash_plugins` (`my_ash_plugins`, but not `myash_plugins`).
+ASH's plugin root `automated_security_helper.plugin_modules` holds every plugin package
+ASH ships and names none of them, so name the package below it (for example
+`automated_security_helper.plugin_modules.ash_trivy_plugins`). A namespace package (a
+directory with no `__init__.py`, which can gather packages from several distributions)
+declares no plugins either, so name the packages it holds. One entry may name several
+modules separated by commas, and spaces around each name are ignored, whether the entry
+comes from a config file, `--config-overrides`, `--ash-plugin-modules` or
+`ASH_PLUGIN_MODULES`. Any other entry, such as `another_plugin_module`, the plugin root,
+a namespace package, or a name with a space inside it, refuses the scan with exit code 3
+(invalid configuration) before any module is imported, from any of those sources. The
+same name refuses `ash plugin list`, `ash dependencies install`, `ash report` and `ash
+merge` with exit code 3. A module that is named correctly but does not import, because
+it is not installed or its import raises an error, refuses a scan with exit code 3 too,
+before any scanner runs, and refuses `ash plugin list`, `ash dependencies install` and
+`ash report` the same way; the message names the module and the error. `ash config
+validate` and the MCP `validate_config` tool report a name a scan refuses as a
+validation error; they import nothing, so they do not check whether an accepted name
+imports. When the list comes from
 a config file inside the scanned tree, only installed modules are imported; see
 [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
+
+A scan uses ASH's built-in plugins (those defined in
+`automated_security_helper.plugin_modules.ash_builtin`) plus the converters, scanners,
+reporters and event handlers of the modules its own `ash_plugin_modules` (from its config and
+`--ash-plugin-modules`) names. A module's plugins are those it defines itself, imports
+into its namespace, or lists in its `ASH_*` declarations; naming a package does not
+select a plugin that only one of its subpackages defines, so name that subpackage. This holds when one process runs several scans, as the
+MCP server does: a module that an earlier scan named, or that the MCP `list_scanners`
+tool loaded to describe the community scanners, takes no part in a scan that does not
+name it, and a module that only a later scan names takes part in that scan. An event
+handler defined outside ASH's plugin namespace, such as one a program that calls
+`run_ash_scan` subscribes with `ash_plugin_manager.subscribe`, is notified in every
+scan that program runs.
 
 ## Settings a repository's config cannot choose
 
 ASH reads its configuration from the repository it scans unless `--config` names a
-file elsewhere. When any file the configuration was built from is inside the scanned
-tree (a discovered `.ash/.ash.yaml`, a `--config` path inside the tree, an `extends`
-base, or the file `ASH_CONFIG` names), a few settings are limited, because they decide
-what ASH installs, imports or hands a scanner as its own configuration. The scanned
-tree is the outermost git checkout around the source directory, or the source
-directory itself outside a checkout.
+file elsewhere. A few settings decide what ASH installs, imports or hands a scanner
+as its own configuration, so they are limited when someone other than the operator
+could have written them. Two terms are used below:
 
-Under the MCP server, a config file a client delivered (an upload or a file in a
-delivered tree, named as `config_path`) is limited the same way, wherever it is. A
-file any MCP client delivered also counts as inside the scanned tree for the path
-and module checks below: everything under the MCP workspace root
-(`$ASH_MCP_WORKSPACE_ROOT`, by default `~/.cache/ash-mcp/`) except each session's
-`config/` directory, which only the server writes.
+- **Repository-written**: inside any git checkout, or inside the source directory
+  when that is outside every checkout. A checkout is something other people can push
+  to, so this includes a checkout of your own, such as an ops or dotfiles
+  repository. Under the MCP server, a file any MCP client delivered counts too:
+  everything under the MCP workspace root (`$ASH_MCP_WORKSPACE_ROOT`, by default
+  `~/.cache/ash-mcp/`) except the profile files the server writes in each session's
+  `config/` directory: `ash.yaml`, the profile `select_profile` binds, and a workspace
+  tool's per-call profile, one file per profile named `call-profile-` followed by 16
+  lowercase hex digits and `.yaml` (or `call-profile.yaml`). Only a file directly in
+  `config/` with one of those names is the server's. Any other file there is the
+  client's, and neither `config/` nor `client-config/` may be a scan target or an
+  output directory. A profile a client patched with `select_profile` is written to
+  the session's `client-config/` directory instead, so it counts as the client's.
+- **The scanned tree**: the source directory, or the outermost git checkout holding
+  it.
 
-| Setting | From a config file inside the scanned tree |
+A file is judged by the path as written, relative to the source directory, by the
+file it resolves to, and by every symlink resolving it follows, so a symlink the
+scanned repository planted counts where it sits and where it points, and so does a
+path of your own that leads through one.
+
+A config is limited when any file it was built from is repository-written: a
+discovered `.ash/.ash.yaml`, a `--config` path, an `extends` base, or the file
+`ASH_CONFIG` names. Under the MCP server, a config file a client delivered (an upload
+or a file in a delivered tree, named as `config_path`) is limited the same way,
+wherever it is. Pass `ash_plugin_modules` and the sandbox settings with
+`--ash-plugin-modules` or `--config-overrides` instead, or keep the config file
+outside every checkout.
+
+A file that one of the path settings below names is judged by who named it:
+
+- **Named by the operator**, with `--config-overrides`, in a config file outside the
+  scanned tree, or through an environment variable such as `TRIVY_IGNOREFILE`: it is
+  passed to the tool unless it is inside the scanned tree or an MCP client delivered
+  it. A tool config or ignore file kept in an ops repository works.
+- **Named by a config inside the scanned tree or one an MCP client delivered**, or
+  found by name in the source directory: it is passed only when the file is not
+  repository-written, so the repository cannot point a tool at a file in someone's
+  checkout.
+
+When the operator's config file extends one inside the scanned tree, only the paths
+the operator's file writes itself count as the operator's. An MCP client's
+`config_overrides`, and a session profile its `select_profile` `patch_ops` or
+`override_yaml` changed, count as the client's.
+
+| Setting | Limit |
 |---|---|
-| `scanners.<name>.options.tool_version`, `converters.jupyter.options.tool_version` | Must be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`. This applies from every source, including `--config-overrides`. Any other value is replaced by the scanner's default constraint. |
+| `scanners.<name>.options.tool_version`, `converters.<name>.options.tool_version` | Taken from the defaults, `--config-overrides` or a config file outside the tree, for every scanner and converter, including those a plugin module adds. It chooses which release of the tool ASH installs and which one already on `PATH` it accepts. A value equal to the operator's applies; any other is ignored with a warning, and the operator's value or the tool's default constraint applies. From every source, including `--config-overrides`, it must also be a PEP 440 version specifier set such as `>=1.2,<2` or `==1.4.1`; any other value is replaced by the default constraint. |
 | `scanners.opengrep.options.version` | Must be a release tag such as `v1.15.1`, from every source. Any other value is replaced by the pinned version. |
-| `ash_plugin_modules` | An entry is imported only if it names an installed module that Python finds outside the scanned tree. An entry that is not importable, or that would be imported from a file in the tree, is skipped. |
-| `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool only when the file is outside the scanned tree. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
-| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept only when the file is outside the scanned tree. This includes entries read from a baseline file. detect-secrets' built-in plugins and filters are unaffected. |
-| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed only when it is outside the scanned tree, and a file that sets nothing is passed otherwise. |
-| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.mode` | See [Scanner sandbox](scanner-sandbox.md). |
+| `content_db_staleness`, `content_db_staleness_overrides` | `warn`, and an overrides entry with `policy: warn`, are taken from the defaults, `--allow-stale-content-db`, `--config-overrides` or a config file outside the tree. From the tree's config such a value is ignored with a warning unless it equals the operator's, and the scan fails on a stale database as by default. `fail`, and an entry with `policy: fail`, apply from every config. See [Failing on a stale content database](#failing-on-a-stale-content-database). |
+| `ash_plugin_modules` | From a repository-written config, an entry is imported only if it names an installed module that Python finds in a location that is not repository-written. An entry in the plugin namespace that is not importable, or that would be imported from such a location, is skipped. A virtualenv inside a git checkout counts as inside it, so a module installed there is skipped too; the warning gives the module's location and the checkout. So are `automated_security_helper.plugin_modules.ash_aws_plugins` and `automated_security_helper.plugin_modules.ash_snyk_plugins`, and any module inside either: the AWS reporters send findings to AWS with the operator's credentials, and the Snyk Code scanner sends the scanned source to Snyk with the operator's Snyk token, so only `--ash-plugin-modules` (or `ASH_PLUGIN_MODULES`), `--config-overrides` or a config file that is not repository-written can add them. The same holds for their classes when another package a repository-written config loads lists or imports them: a scanner or reporter defined in either package is selected only when one of those operator sources loads that package, a module inside it, or the package that lists the class, and each one dropped is named in a warning. Where one process runs several scans, under the MCP server and in a workspace run, a later scan that does not load the module itself is not offered the classes such an entry's import registered; a module an operator source names stays loaded for every later scan in the process. An entry outside the namespace refuses the scan with exit code 3, as it does from any config source (see [Custom Plugin Modules](#custom-plugin-modules)). |
+| `scanners.checkov.options.config_file`, `scanners.ferret-scan.options.config_file` | Passed to the tool by the rule above. The same applies to the `.checkov.yaml` and `ferret.yaml` files these scanners look for by name. ferret-scan then uses its bundled config. checkov and ferret-scan also read such a file from their working directory on their own, so ASH runs both from the filesystem root and always passes ferret-scan a `--config`; finding paths are unchanged. |
+| `scanners.detect-secrets.options.scan_settings` plugins and filters | An entry that names a file (`file://...`) is kept by the rule above. Entries read from a baseline file count as named inside the scanned tree. detect-secrets' built-in plugins and filters are unaffected. |
+| `scanners.detect-secrets.options.baseline_file` | Taken from the defaults, `--config-overrides` or a config file that is not repository-written. A baseline an MCP client delivered is not read. Under a sandbox, a baseline outside the source tree is read only when `sandbox.read_path_scanners` names detect-secrets and the file is inside a `sandbox.extra_read_paths` entry. |
+| trivy-repo's ignore file and secret config | trivy-repo always gets `--ignorefile` and `--secret-config`, so trivy does not read a `.trivyignore` or `trivy-secret.yaml` from the scanned repository. `scanners.trivy-repo.options.ignore_file` and `secret_config_file`, or `TRIVY_IGNOREFILE` and `TRIVY_SECRET_CONFIG`, name the files to use; each is passed by the rule above, and otherwise trivy gets a file that sets nothing, which ASH writes outside the scanned tree. |
+| `sandbox.network_scanners`, `sandbox.extra_read_paths`, `sandbox.read_path_scanners`, `sandbox.env_scanners` | Not used from a repository-written config: these grant sandbox access. A `network_scanners` list still removes network from the scanners it does not name. See [Scanner sandbox](scanner-sandbox.md). |
+| `sandbox.mode` | From a repository-written config, applies only when nothing the operator set turns the sandbox on. When `--sandbox`, `ASH_CONFIG` or the operator's config file turns it on, this cannot turn it off or switch backends. |
+| `honor_ignore_files` | Not honored in either direction. The value comes from a config file that is not repository-written, `--config-overrides`, `--no-honor-ignore-files` / `--honor-ignore-files`, or the default `true`. See [Ignore files and the scan set](#ignore-files-and-the-scan-set). |
+| `scanners.bandit.options.config_file`, `scanners.grype.options.config_file`, `scanners.syft.options.config_file` | Taken from the defaults, `--config-overrides` or a config file outside the tree; a file named that way is used even inside the tree. ASH does not look for `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.grype/config.yaml`, `.syft.yaml` or their `.ash/` copies by name, and otherwise passes each tool an empty config (`--ini` for bandit, `--config` for grype and syft), so the tool does not read one from the tree on its own. ASH writes that file, and the empty ones it passes ferret-scan and trivy-repo, in a new directory outside the scanned tree, one per scanner run, and removes the directory when the run ends. When neither the temporary directory nor the output directory is outside the tree (a scan of a whole filesystem), the directory is made inside it and a warning says so. It does not use a `TMPDIR` that another account owns or that other accounts can write without the sticky bit; the output directory is used instead, and if it is no better the scanner fails and says to set `TMPDIR` to a directory only you can write. An ASH process killed by SIGTERM or SIGKILL leaves its `ash-tool-config-*` directory in the temporary directory; it is readable only by you and holds only those empty files. |
+| `scanners.opengrep.options.config`, `scanners.semgrep.options.config`, `scanners.opengrep.options.patterns`, `scanners.opengrep.options.metrics`, `scanners.semgrep.options.metrics` | Taken from the defaults (`p/ci`, no patterns and `auto`), `--config-overrides` or a config file outside the tree. `config` chooses the rules, from the registry, a URL the tool fetches or a path it reads; opengrep's `patterns` runs the patterns in place of every rule config; and `metrics` chooses whether the tool sends usage data. `metrics: off`, which only stops it sending any, applies from every config. To run a repository's own rules, name them with `--config-overrides`. |
+| A `.semgrepignore` in the scanned tree | Not honored by semgrep or opengrep: ASH passes `--x-ignore-semgrepignore-files` with the tools' default exclusions, so the same paths are scanned as with no `.semgrepignore`, and the file is named in the results as a `config_warning` validation checkpoint. In a tree an MCP client delivered, the checkpoint names the file as client-supplied. List the files to leave out in `global_settings.ignore_paths`. |
+| `scanners.ferret-scan.options.profile`, `scanners.ferret-scan.options.use_default_config` | Taken from the defaults, `--config-overrides` or a config file outside the tree. A profile chooses which checks ferret-scan runs and the lowest confidence it reports, and the bundled `redaction` and `secure-redaction` profiles also have it write redacted copies of the files it scans. `use_default_config: false` replaces the bundled config with an empty one, which drops the bundled validators' patterns. ferret-scan's other options, `checks` and `confidence_levels` among them, still apply. |
+| `scanners.snyk-code.options.honor_tree_exclusions` | Taken from the defaults, `--config-overrides` or a config file outside the tree. `snyk code test` leaves out the files that the `.snyk` and `.dcignore` files in the tree it tests exclude, and has no option to stop it, so while this is `false` (the default) snyk-code does not run on a tree that has one, and its error names the files. See [Exclusion files in the scanned tree](plugins/community/snyk-plugin.md#exclusion-files-in-the-scanned-tree). |
+| `reporters.<name>.extension` | Must be a filename suffix such as `json`, from every source, including `--config-overrides`: the report is written to `ash.<extension>` in the reports directory. A value containing `/`, `\`, `..` or NUL is replaced by the reporter's default. ASH also writes a report, and the files some reporters write beside it, only when the resolved file is directly inside the reports directory. When the reports directory, or a file an enabled reporter writes there, is already a symlink or a directory junction, the run exits 1 before any reporter writes, and the error names the link. |
+| Reporter destinations and credentials: `aws_region` and `aws_profile` of `aws-security-hub`, `bedrock-summary-reporter` and `s3`; `aws-security-hub`'s `account_id`, and its `findings_scope` and `archive_resolved_findings`, which choose which findings it imports and whether it archives the ones that are resolved; `bedrock-summary-reporter`'s `model_id`, `output_file`, `output_executive_file` and `output_technical_file`, and its `include_code_snippets`, `custom_prompt`, `industry_context`, `compliance_frameworks`, `custom_context`, `exclude_scanner_types`, `actionable_only`, `max_findings_to_analyze`, `max_findings_per_severity`, `summarize_findings`, `batch_processing`, `enable_fallback_models`, `add_section_headers`, `output_markdown`, `include_sections`, `exclude_sections` and `group_by_severity`, which choose what is sent to the model with the findings, which findings and how many, whether another model may receive them, and which of the reporter's calls are made; `max_retries`, `base_delay` and `max_delay` of `bedrock-summary-reporter`, `cloudwatch-logs` and `s3`, which choose how long each keeps calling its service when it is refused (capped at 10 retries and 60 seconds from every source); `s3`'s `bucket_name` and `key_prefix`; `cloudwatch-logs`' `aws_region`, `log_group_name` and `log_stream_name` (all under `reporters.<name>.options`) | Taken from the defaults, `--config-overrides` or a config file outside the tree, whichever spelling of the reporter's section the file uses (`BedrockSummary` is read as `bedrock-summary-reporter`, for example) and of the option (`-` or `_`). A value equal to the trusted one is no change. These options choose where findings are sent or written and which credentials send them. The same holds for the options a reporter from a plugin module declares in `destination_options`, once the scan has imported the module; see [Declaring destination options](plugins/reporter-plugins.md#declaring-destination-options). The reporters' other options still apply. |
+| `reporters.<name>.enabled` of `aws-security-hub`, `bedrock-summary-reporter`, `cloudwatch-logs` and `s3`, and of a reporter from a plugin module that declares `destination_options` | Taken from the defaults, `--config-overrides` or a config file outside the tree, in both directions: the tree's config neither turns one of these reporters on nor turns one off. Its `enabled: true` or `enabled: false` is ignored with a warning where the operator's value differs, and leaving the section out, which would return the reporter to its own default, leaves it as the operator has it. Each of these reporters sends findings off the host when it runs, and which destinations get them is the operator's choice. To turn one off for a scan, use `--config-overrides`, such as `--config-overrides reporters.s3.enabled=false`. |
 
-Each setting that is not honored is logged once, as a warning that names it.
+Each setting that is not honored is named in a warning when the config is
+resolved.
+
+A repository's config may still choose opengrep's `version`, within the limits
+above: a tag of opengrep's own releases, whose binary ASH installs only when it
+matches its SHA-256 digest. It does not choose a scanner's `tool_version`, so a
+workspace project does not pin a scanner version either; the operator's value
+applies to every project.
 
 To set any of these for a repository you trust, use `--config-overrides`,
-`--ash-plugin-modules`, or a config file outside the scanned tree. A file path set
-that way still has to point outside the tree. Under `--sandbox`, a file outside the
-system paths the sandbox already reads also has to be listed in
+`--ash-plugin-modules`, or a config file outside every checkout and the scanned
+directory. A tool config path set that way follows the operator's rule above: it
+may be in a checkout of your own, but not inside the scanned tree, except a bandit,
+grype or syft config file. Under `--sandbox`,
+a file outside the system paths the sandbox already reads also has to be listed in
 `sandbox.extra_read_paths`, or the tool cannot open it and the scanner reports an
 error.
+
+`ash merge` holds the configuration each shard recorded in its results to every
+row of the table above except `content_db_staleness` and its overrides, which it
+takes from the shards with the other settings its verdict reads, against the
+operator's defaults, `--config` and `--config-overrides` at merge time, `enabled`
+of the reporters in the `enabled` row included. It imports only the
+`ash_plugin_modules` entries the operator's configuration names; see
+[Settings a shard's recorded configuration cannot choose](cli-reference.md#settings-a-shards-recorded-configuration-cannot-choose).
+
+### Configs an MCP client delivered
+
+ASH's configuration can come from three places, and how far it is trusted depends
+on which:
+
+- **The operator**: ASH's defaults, a config file outside the scanned tree (named
+  by `--config` or `ASH_CONFIG`), `--config-overrides`, `--ash-plugin-modules`, and, under the MCP
+  server, the profiles the server registers. Everything applies.
+- **The repository being scanned**: a config file inside the scanned tree, or a
+  file a symlink inside the tree reaches, wherever that file is. The table above
+  applies.
+- **An MCP client**: a file the client delivered, such as an upload named as
+  `config_path`, a delivered tree's own `.ash/.ash.yaml`, or a project config in
+  a delivered workspace. So is any other config path a client names, unless it
+  is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or is a profile file the
+  server writes in the session's own `config/` directory: a config in another checkout the server may scan is that
+  checkout's, not the operator's. A path is judged where it sits, at each
+  symlink on the way, and by the file it reaches, so a link a client delivered is
+  the client's wherever it points, and so is a file reached through a linked
+  directory such as `.ash`. A file under the MCP workspace root is a client's whoever names it: a
+  `--config` or `ASH_CONFIG` naming one, on the CLI as well, gets the limits of a
+  config inside the scanned tree, and the server's runtime-override policy is
+  never read from it (the built-in defaults apply instead). A profile after the
+  client's `select_profile` `patch_ops` or `override_yaml` is the client's too,
+  held to the registered profile as its trusted base, and so are the MCP
+  workspace tools' `config_overrides`, even for keys the runtime-override
+  allowlist lets the client change. The table above applies, and so does the
+  session's runtime-override policy, `global_settings.mcp.runtime_overrides`:
+
+  - The file may not change a field that `denied_paths` or
+    `denied_value_patterns` denies. Entries match either `-` or `_`, every
+    spelling of a plugin's section, and globs such as
+    `/scanners/trivy-*/options/ignore_file`. A value equal to the server's is
+    accepted, so a file `ash config init` wrote scans. A file that changes a
+    denied field is refused with `error_type: config_field_denied`, naming each
+    field. When the policy cannot be established, a scan that reads such a file is
+    refused with `error_type: config_policy_unreadable`.
+  - It may restrict the server's `sandbox` and `ash_plugin_modules` settings but
+    not ask for more than they give: a `network_scanners` entry for a scanner the
+    server's config gives no network, an `extra_read_paths` entry the server's
+    config does not grant, a `mode` other than the server's when the server sets
+    one, or a module the server's config does not load that is inside the scanned
+    tree or sends findings off the host. A file that does is refused the same
+    way, naming the setting; an equal or tighter value scans.
+  - What chooses a scanner's own config, which version of a tool ASH installs, or
+    where findings go is in the default `denied_paths` too, so a file that sets
+    one is refused rather than scanned without it: each scanner's own config file
+    (`config_file` for bandit, checkov, ferret-scan, grype and syft, and
+    trivy-repo's `secret_config_file`), snyk-code's
+    `honor_tree_exclusions`, every scanner's and the jupyter converter's
+    `tool_version`, opengrep's `version` and `sha256`, opengrep's and semgrep's
+    `metrics` (their `config` is in the table below), the AWS reporters'
+    destinations and credentials listed in the table above, whether
+    `aws-security-hub`, `s3`, `cloudwatch-logs` and `bedrock-summary-reporter` run
+    (`enabled`; `false` is not refused, here or in a client's runtime overrides,
+    but it takes no effect: the server's `enabled` applies, as in the `enabled`
+    row above, and a warning names the client's value. A `patch` op that writes
+    `enabled` is refused whatever its value, as is any `patch` op on a denied
+    path. A reporter that writes only local files is not covered), every other
+    `aws-security-hub`, `s3` and
+    `bedrock-summary-reporter`
+    setting (each section is a whole-section entry, as `cloudwatch-logs` is),
+    and the GitLab SAST reporter's
+    `exclude_suppressed`, which would leave the findings a client's
+    suppressions are marked on out of that report. The options a reporter from a
+    plugin module declares in `destination_options` are not default entries,
+    because the file is checked before the module is imported: a file that sets
+    one is scanned with the server's value, as a config inside the scanned tree
+    is.
+  - Its own `global_settings.suppressions` and `global_settings.ignore_paths`
+    apply. Each entry the operator did not supply is marked `client_supplied: true`,
+    the files under a client-supplied ignore path are still scanned, and a finding
+    either one hides is reported suppressed and marked rather than dropped. See
+    [Suppressions an MCP client's config supplied](suppressions.md#suppressions-an-mcp-clients-config-supplied).
+  - An exclusion it adds to one of the scanner options below is not passed to
+    the scanner. Each finding of that scanner the entry would have left out is
+    reported suppressed and marked in the same way. The operator's own entries
+    apply as before.
+
+    | Option | Matched as |
+    |---|---|
+    | `scanners.bandit.options.excluded_paths` | The `**/<path>/**` glob ASH passes bandit, against the file's absolute path |
+    | `scanners.checkov.options.skip_path` | As checkov's own filter reads it: a regular expression found in, or a substring of, the absolute path of the file or of a directory above it |
+    | `scanners.opengrep.options.exclude`, `scanners.semgrep.options.exclude`, `scanners.ferret-scan.options.exclude_patterns` | A glob matching the file's path or any directory in it |
+    | `scanners.syft.options.exclude` | The same glob; each SBOM component it would have dropped carries an `ash:clientSuppliedExclusion` property |
+    | `scanners.trivy-repo.options.ignore_file` | Each unexpired ID in the file, against the trivy finding's rule ID, when the file is a regular file inside the scanned tree (not a link); any other file is not read |
+
+  - The scanner options below drop findings by rule ID, by a baseline, or by a
+    whole category (a framework, a severity, a rule set, a detector, a confidence
+    level, a cap on how many are reported) rather than by path. They are in the
+    default `denied_paths`, so a delivered file that changes one is refused, and
+    one that leaves it at its default scans. All are under `scanners.<name>.options`:
+
+    | Scanner | Options |
+    |---|---|
+    | bandit | `confidence_level` |
+    | cdk-nag | `nag_packs.AwsSolutionsChecks` (turning on another pack reports more, and is allowed) |
+    | checkov | `frameworks`, `skip_frameworks` |
+    | detect-secrets | `baseline_file`, `scan_settings` |
+    | ferret-scan | `checks`, `confidence_levels`, `disable_ip_types`, `enable_preprocessors`, `finding_limit`, `max_live_bytes` (which bounds how much extracted content it holds), `profile`, `recursive`, `respect_gitignore`, `use_default_config`, `validator_budget` |
+    | opengrep | `config`, `exclude_rule`, `patterns`, `severity` |
+    | semgrep | `config`, `exclude_rule`, `severity` |
+    | trivy-repo | `license_full`, `scanners` |
+    | every scanner | `offline`: a scanner set offline runs on cached data, and npm audit offline reports no advisories at all |
+
+    Options that only tune output or performance, or whose default already
+    reports the least they can (trivy-repo's `ignore_unfixed`, bandit's
+    `ignore_nosec`, detect-secrets' `skip_generated_lockfiles`), are not listed.
+    `scan_timeout` and `install_timeout` are not either: a scanner that runs out
+    of time or cannot be installed is reported as not completing.
+
+See [Config files in delivered source](mcp/streamable-http.md#config-files-in-delivered-source)
+for the details, including which profile the policy comes from.
 
 ## Validating Configuration
 
@@ -520,6 +987,29 @@ ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
+## Relative paths in the operator's settings
+
+A relative path in one of the operator's settings is taken from where it was set,
+not from the source directory being scanned:
+
+- in a config file outside the tree (`--config`, `ASH_CONFIG`, a workspace's
+  `--config`, an MCP profile), from that file's directory; in an `extends` base,
+  from the base's directory; and in a `patch` operation, from the directory of the
+  file that holds it;
+- in `--config-overrides`, in a CLI flag, and in `TRIVY_IGNOREFILE` or
+  `TRIVY_SECRET_CONFIG`, from the working directory ASH runs in.
+
+This covers `config_file` of bandit, checkov, ferret-scan, grype and syft,
+detect-secrets' `baseline_file` and the `file://` entries of its `scan_settings`,
+trivy-repo's `ignore_file` and `secret_config_file`, opengrep's and semgrep's
+`config` when a file or directory is there (otherwise it is a registry entry such
+as `p/ci`), and `sandbox.extra_read_paths`. A path that starts with `~`, or is
+absolute, is used as written. A config file inside the scanned tree does not set
+these options (see
+[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)).
+To name a file in the scanned repository, give its absolute path, or a path
+relative to where you run ASH with `--config-overrides`.
+
 ## Extending another configuration
 
 A config can build on one or more base configs with `extends`, and adjust the
@@ -562,8 +1052,17 @@ Merge rules:
   `global_settings.suppressions` replaces the base's list. To keep the base's
   entries and add more, use `patch` with `op: add` and a path ending in `/-`.
 - To delete something a base set, use `patch` with `op: remove`.
-- A key spelled with `-` and the same key spelled with `_` (`cdk-nag` and
-  `cdk_nag`) are one key, in merges and in `patch` paths.
+- A setting is merged as ASH reads it. Where ASH reads one setting under two
+  spellings (`cdk-nag` and `cdk_nag`), both are the one setting: the child's
+  value wins over the base's whichever spelling either file uses, and the
+  result is kept under one spelling. A spelling ASH does not read
+  (`global-settings` for `global_settings`) in a base is left alone, so it
+  cannot keep a child's value from applying; one in a child still reaches the
+  base's spelling of the setting, unless the child also uses a spelling ASH
+  reads, which wins. Two spellings of a plugin's section that ASH reads for the
+  same plugin (`BedrockSummary` and `bedrock-summary-reporter`) are one
+  section, under the child's spelling. In `patch` paths, a key spelled with `-`
+  and the same key spelled with `_` are one key.
 - `patch` accepts `add`, `remove`, `replace` and `test`. `move` and `copy` are
   refused. A failing operation, including a failing `test`, fails the load.
 
@@ -607,17 +1106,26 @@ scanners:
       severity_threshold: MEDIUM  # ALL | LOW | MEDIUM | HIGH | CRITICAL -- uppercase only
       ignore_nosec: false         # true scans lines carrying a '# nosec' comment anyway
       excluded_paths: []          # Paths to exclude, each with a reason
-      config_file: null           # Explicit .bandit file, relative to the source directory
+      config_file: null           # The operator's bandit config file; see below
       scan_timeout: 1800          # Seconds before the bandit invocation is killed
       # Bandit is installed via UV tool management with the constraint
       # '>=1.7.0,<2.0.0' for SARIF support.
 ```
 
 Selecting individual bandit tests is done in a bandit configuration file rather than
-through ASH options: point `config_file` at one, or rely on the discovery described
-below.
-
-If you have been using Bandit separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.bandit```, ```.bandit.toml```, or ```.bandit.yaml```, and will use the settings found in the file if it is detected. For more details on using a Bandit configuration file, refer to the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
+through ASH options. ASH does not look for one by name in the scanned tree. Name it
+with `config_file`, set with `--config-overrides` or in a config file outside the
+tree; a config file inside the tree does not set it (see
+[Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). A relative
+path is taken from where it was set, as for the operator's other paths
+([Relative paths in the operator's settings](#relative-paths-in-the-operators-settings)).
+A file named exactly `.bandit` is passed with `bandit --ini`,
+and any other file with `bandit --configfile`. Unless `config_file` names a `.bandit`
+file that exists, ASH passes bandit an empty config file with `bandit --ini`, so
+bandit does not read a `.bandit` file from the tree either. A path that is not a file
+is logged as a warning and ignored.
+For the file's format, refer to
+the Bandit [documentation](https://bandit.readthedocs.io/en/latest/config.html).
 
 ### Semgrep
 
@@ -626,11 +1134,11 @@ scanners:
   semgrep:
     enabled: true
     options:
-      config: 'p/ci'        # Ruleset, directory of YAML rules, or URL, passed to --config
+      config: 'p/ci'        # Ruleset, directory of YAML rules, or URL, passed to --config (operator only)
       exclude: ['*-converted.py', '*_report_result.txt']  # Paths to skip
       exclude_rule: []      # Rule IDs to skip (singular; 'exclude_rules' is not a field)
       severity: []          # Report only findings from rules of these severities
-      metrics: 'auto'       # How usage metrics are sent to the Semgrep server
+      metrics: 'auto'       # How usage metrics are sent to the Semgrep server ('off' from any config)
       offline: false        # Use locally cached rules only
       scan_timeout: 1800    # Seconds before the semgrep invocation is killed
       tool_version: null    # Version constraint (e.g., '>=1.125.0')
@@ -644,7 +1152,7 @@ scanners:
   detect-secrets:
     enabled: true
     options:
-      baseline_file: null   # Explicit .secrets.baseline path, relative to the source directory
+      baseline_file: null   # Explicit .secrets.baseline path, relative to the config file that sets it
       scan_timeout: 1800    # Seconds before the detect-secrets invocation is killed
 ```
 
@@ -653,7 +1161,75 @@ detect-secrets baseline rather than in ASH options. Point `baseline_file` at one
 rely on the discovery described below. The `scan_settings` option takes the same
 structure as a baseline's own settings block if you would rather inline it.
 
-If you have been using detect-secrets separately and have an existing baseline file you would like to use with ASH, ASH can automatically use it. ASH automatically searches your current directory and the ```.ash``` directory for a ```.secrets.baseline``` file. For more details on baseline files, refer to the detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+If you have been using detect-secrets separately and have an existing baseline file
+you would like to use with ASH, ASH can use it automatically. It looks for
+`.ash/.secrets.baseline`, then `.secrets.baseline`, in the source directory
+(`--source-dir`), wherever ASH is run from, and takes a relative `baseline_file` from
+the source directory too. A baseline in the directory ASH runs from does not apply to
+a scan of another directory. For more details on baseline files, refer to the
+detect-secrets [documentation](https://github.com/Yelp/detect-secrets/tree/master).
+
+#### Secret verification
+
+detect-secrets can verify a candidate secret by sending it to the service that issued
+it, and drop the candidates the service rejects. The filter that does this is
+`detect_secrets.filters.common.is_ignored_due_to_verification_policies`, and
+`detect-secrets scan` writes it into every baseline it generates. For an AWS access
+key the request goes to `sts.amazonaws.com`, signed with the key pair found in the
+scanned file, so verification makes the host running ASH contact the issuer with
+credentials taken from the scanned tree. ASH therefore verifies only when the operator
+asks for it, and never in offline mode:
+
+- The filter counts when the operator's own configuration names it: a config file
+  outside the scanned directory and every git checkout (`--config` or `ASH_CONFIG`),
+  `--config-overrides`, or for the MCP server the profile the session is bound to. An
+  MCP client's runtime overrides cannot set these detect-secrets settings: they are
+  always in `runtime_overrides.denied_paths`, whatever `allowed_paths` says. A profile
+  that sets its own `denied_paths` adds to them and cannot remove them, as for the
+  scanner sandbox, `ash_plugin_modules` and the archive extraction limits. It
+  can be in `scan_settings.filters_used`, or in a `baseline_file` the operator names
+  that is outside the scanned tree and outside the git checkout holding it, including
+  through `--config-overrides` beside a repository's own config. A baseline in another
+  checkout counts: scanning `repo/service` with a baseline from a separate
+  `shared-baselines` checkout verifies, while one in `repo/ops` does not.
+- When `scan_settings` sets `plugins_used` or `version`, it replaces the baseline's
+  plugins and filters. Otherwise the baseline's are used, and a verification filter
+  the operator's `scan_settings.filters_used` names is kept beside them.
+- A `.secrets.baseline` inside the scanned tree or its checkout, a config file the scanned repository
+  holds (`.ash/.ash.yaml` and the other discovered names, including a workspace
+  project's own config), and a config an MCP client supplied cannot turn verification
+  on, whatever baseline they name. ASH removes the filter, keeps the rest of the
+  settings, and logs a warning that names the source.
+- Under `--offline` (or `ASH_OFFLINE`) nothing turns it on.
+
+To verify, name the filter with its `min_level` in your own config. detect-secrets reads
+`min_level` for this filter, and without it the scan fails:
+
+```yaml
+scanners:
+  detect-secrets:
+    options:
+      scan_settings:
+        filters_used:
+          - path: detect_secrets.filters.common.is_ignored_due_to_verification_policies
+            min_level: 2
+```
+
+The same sources decide which plugin and filter files detect-secrets may import. A
+`plugins_used` or `filters_used` entry named by `file://` path is a Python file the
+detect-secrets worker loads, so only the operator's own configuration, or a baseline
+outside the scanned tree and its checkout that the operator names, may name one. The
+file itself must also be outside the scanned tree and every git checkout. A `file://` entry in a
+repository's config or `.secrets.baseline`, or in a baseline such a config names, is
+removed with a warning, wherever the file is; the built-in detectors it lists by name
+still run.
+
+When verification is off, candidates the filter would have dropped are reported, so a
+repository whose own baseline used to verify can show more findings. The
+detect-secrets worker also refuses every HTTP request in that case, so a filter or
+plugin that verifies under another name sends nothing either. Under `--sandbox`,
+verification also needs `sandbox.network_scanners` to name detect-secrets; see
+[Scanner sandbox](scanner-sandbox.md).
 
 ### Checkov
 
@@ -674,7 +1250,13 @@ scanners:
       # with version constraint >=3.2.0,<4.0.0 for enhanced stability
 ```
 
-If you have been using Checkov separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory and the ```.ash``` directory for a file named ```.checkov.yml``` or ```.checkov.yaml```, and will use the settings found in the file if it is detected. For more details on using a bandit configuration file, refer to the Checkov [documentation](https://github.com/bridgecrewio/checkov?tab=readme-ov-file#configuration-using-a-config-file).
+A Checkov configuration file is passed to checkov only when it is outside the
+scanned tree: name it with `config_file`, set with `--config-overrides` or in a
+config file outside the tree (see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)).
+A `.checkov.yaml` or `.checkov.yml` in the scanned tree, or in its `.ash`
+directory, is not used, and checkov runs from outside the tree so it does not
+read one on its own. For the file's format, refer to the Checkov
+[documentation](https://github.com/bridgecrewio/checkov?tab=readme-ov-file#configuration-using-a-config-file).
 
 ### Grype
 
@@ -683,12 +1265,19 @@ scanners:
   grype:
     enabled: true
     options:
-      config_file: .grype.yaml # Specific path to grype configuration file
+      config_file: null # The operator's grype config file; see below
       severity_threshold: MEDIUM # Options: ALL, LOW, MEDIUM, HIGH, CRITICAL
       offline: false # Run in offline mode
 ```
 
-If you have been using Grype separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory, the ```.ash``` directory, and the ```.grype``` directory for a file named ```.grype.yaml```. The current directory will also be searched for a ```grype.yaml``` file. If any of these files are found, ASH will use the settings found in the file. For more details on using a Grype configuration file, refer to the Grype [documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
+ASH does not look for a Grype configuration file by name in the scanned tree. Name
+one with `config_file`, set with `--config-overrides` or in a config file outside
+the tree (see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). Without
+one, grype gets an empty config, so it does not read a `.grype.yaml` from the tree
+either. For the file's format, refer to the Grype
+[documentation](https://github.com/anchore/grype?tab=readme-ov-file#configuration).
+
+One setting is not used: `db.cache-dir`. ASH reads grype's database from the directory grype uses by default (`$XDG_CACHE_HOME/grype/db` when `XDG_CACHE_HOME` is an absolute path, else `~/.cache/grype/db` on Linux, `~/Library/Caches/grype/db` on macOS and `%LOCALAPPDATA%\cache\grype\db` on Windows), passed to the scan as `GRYPE_DB_CACHE_DIR`, so that the scan, the database update and ASH's check of the database's age all read the same one. To keep the database somewhere else, set `GRYPE_DB_CACHE_DIR`; ASH logs a warning naming the file when a grype config sets `db.cache-dir`.
 
 ### Syft
 
@@ -697,7 +1286,7 @@ scanners:
   syft:
     enabled: true
     options:
-      config_file: .syft.yaml # Specific path to the Syft configuration file
+      config_file: null # The operator's syft config file; see below
       exclude:                # Each entry needs a path and a reason
         - path: 'tests'
           reason: 'Test fixtures are not shipped'
@@ -706,7 +1295,12 @@ scanners:
       # "spdx-tag-value", "syft-json", "syft-table", "syft-text"
 ```
 
-If you have been using Syft separately and have an existing configuration file you would like to use with ASH, ASH can automatically discover and use it. ASH will automatically search your current directory for a file named ```.syft.yaml``` or ```.syft.yml```. If either of these files are found, ASH will use the settings found in the file. For more details on using a Syft configuration file, refer to the Syft [documentation](https://github.com/anchore/syft/wiki/Configuration).
+ASH does not look for a Syft configuration file by name in the scanned tree. Name
+one with `config_file`, set with `--config-overrides` or in a config file outside
+the tree (see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose)). Without
+one, syft gets an empty config, so it does not read a `.syft.yaml` from the tree
+either. For the file's format, refer to the Syft
+[documentation](https://github.com/anchore/syft/wiki/Configuration).
 
 ## UV Tool Management
 
@@ -784,7 +1378,7 @@ Each UV-managed scanner can specify version constraints in two ways:
 1. **Default Constraints**: Built-in version constraints ensure compatibility and stability
 2. **Custom Constraints**: Override defaults via configuration options (where supported)
 
-For scanners that support custom version constraints (like Semgrep and Checkov), you can specify them in your configuration:
+For scanners that support custom version constraints (like Semgrep and Checkov), you can specify them in a config file outside the scanned tree, or with `--config-overrides`. A repository's own config does not choose them; see [Settings a repository's config cannot choose](#settings-a-repositorys-config-cannot-choose).
 
 ```yaml
 scanners:

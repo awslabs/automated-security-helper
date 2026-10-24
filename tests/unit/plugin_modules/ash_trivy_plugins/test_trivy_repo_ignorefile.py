@@ -89,6 +89,28 @@ def test_trivy_ignorefile_from_the_environment_is_passed(tmp_path, monkeypatch):
     assert _ignorefile(_argv(tmp_path, source)) == operator.resolve()
 
 
+@pytest.mark.parametrize(
+    ("env", "flag"),
+    [
+        ("TRIVY_IGNOREFILE", "--ignorefile="),
+        ("TRIVY_SECRET_CONFIG", "--secret-config="),
+    ],
+)
+def test_a_relative_path_in_the_environment_is_taken_from_the_working_directory(
+    tmp_path, monkeypatch, env, flag
+):
+    """The variable is the operator's, set where ASH runs, not in the scanned tree."""
+    source = _tree(tmp_path)
+    (source / "operator-file").write_text("github-pat\n")
+    workdir = tmp_path / "ci"
+    workdir.mkdir()
+    (workdir / "operator-file").write_text("github-pat\n")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv(env, "operator-file")
+    values = [a.split("=", 1)[1] for a in _argv(tmp_path, source) if a.startswith(flag)]
+    assert [Path(v) for v in values] == [(workdir / "operator-file").resolve()]
+
+
 @pytest.mark.parametrize("value", [".trivyignore", "sub/ignore"])
 def test_an_ignore_file_inside_the_tree_is_not_passed(tmp_path, value):
     source = _tree(tmp_path)
@@ -153,9 +175,15 @@ def test_the_flags_follow_the_subcommand_however_the_target_is_spelled(tmp_path)
         scanner.scan(target=source, target_type="source")
     argv = run.call_args.kwargs["command"]
     assert argv[:2] == ["trivy", "repository"]
-    assert argv[2].startswith("--ignorefile=")
-    assert argv[3].startswith("--secret-config=")
-    assert argv[4:] == resolved[2:]
+    # The scan cache in memory, in every run: the cache may be read-only.
+    assert argv[2] == "--cache-backend=memory"
+    assert argv[3].startswith("--ignorefile=")
+    assert argv[4].startswith("--secret-config=")
+    # The cache the scan, the refresh and the staleness check all read.
+    assert argv[5].startswith("--cache-dir=")
+    # A config file ASH chose, so trivy reads no trivy.yaml from the scanned tree.
+    assert argv[6].startswith("--config=")
+    assert argv[7:] == resolved[2:]
 
 
 def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_update(
@@ -195,5 +223,6 @@ def test_the_trees_trivyignore_stays_unused_while_the_sandbox_skips_the_db_updat
     subcommand_at = argv.index("repository")
     target_at = max(i for i, a in enumerate(argv) if Path(a) == source)
     ignore_at = next(i for i, a in enumerate(argv) if a.startswith("--ignorefile="))
-    for at in [*(argv.index(flag) for flag in flags), ignore_at]:
+    cache_at = next(i for i, a in enumerate(argv) if a.startswith("--cache-dir="))
+    for at in [*(argv.index(flag) for flag in flags), ignore_at, cache_at]:
         assert subcommand_at < at < target_at, argv

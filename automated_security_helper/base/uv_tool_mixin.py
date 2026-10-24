@@ -14,17 +14,58 @@ which are defined on PluginBase.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
 if TYPE_CHECKING:
     pass
+
+
+#: Set while the scan phase constructs every registered scanner (see
+#: deferred_tool_version_probes).
+_DEFER_VERSION_PROBES: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "ash_defer_uv_tool_version_probes", default=False
+)
+
+
+@contextmanager
+def deferred_tool_version_probes() -> Iterator[None]:
+    """Within the block, ``_get_uv_tool_version`` records its probe and spawns nothing.
+
+    The scan phase constructs every registered scanner, because a scanner's
+    selectable name is only known on an instance, and bandit, checkov and semgrep
+    probe their version while constructed, with ``uv tool run --from <spec> <tool>
+    --version``. uv resolves that spec against the package index when the
+    environment is not cached, so a scan of one scanner reached the index for
+    scanners it would never run. Constructed inside this block, a scanner keeps
+    its probe for ``resolve_deferred_tool_version``, which the scan phase calls
+    only for a scanner that was selected. A scanner constructed anywhere else
+    (``ash dependencies``, the MCP server, a test) probes at once, as before.
+    """
+    token = _DEFER_VERSION_PROBES.set(True)
+    try:
+        yield
+    finally:
+        _DEFER_VERSION_PROBES.reset(token)
+
+
+def _uv_unavailable(runner: Any) -> str:
+    """Why ``runner``'s last availability check failed: absent uv, or a refusal.
+
+    A sandbox scope that refuses the check says nothing about uv; logging that as
+    "UV is not available" sends the operator to install a uv they already have.
+    """
+    reason = getattr(runner, "unavailable_reason", None)
+    text = reason() if callable(reason) else None
+    return text if isinstance(text, str) else "UV is not available"
 
 
 class UVToolMixin:
@@ -80,6 +121,13 @@ class UVToolMixin:
                 level=logging.DEBUG,
             )
             return None
+        if _DEFER_VERSION_PROBES.get():
+            # Kept for resolve_deferred_tool_version; see deferred_tool_version_probes.
+            self._deferred_tool_version_probe: Optional[Tuple[str, Optional[str]]] = (
+                tool_name,
+                package_name,
+            )
+            return None
 
         try:
             from automated_security_helper.utils.uv_tool_runner import (
@@ -91,7 +139,7 @@ class UVToolMixin:
 
             if not runner.is_uv_available():
                 self._plugin_log(
-                    f"UV is not available for {tool_name} version detection",
+                    f"{_uv_unavailable(runner)} for {tool_name} version detection",
                     level=logging.WARNING,
                 )
                 return None
@@ -127,6 +175,21 @@ class UVToolMixin:
                 level=logging.WARNING,
             )
             return None
+
+    def resolve_deferred_tool_version(self) -> None:
+        """Run the version probe construction deferred, and record its answer.
+
+        For a scanner the scan phase selected; see deferred_tool_version_probes.
+        The scanners that probe at construction assign the probe's answer to
+        ``tool_version``, so this does the same. Nothing to do when nothing was
+        deferred.
+        """
+        deferred = self._deferred_tool_version_probe
+        if deferred is None:
+            return
+        self._deferred_tool_version_probe = None
+        tool_name, package_name = deferred
+        self.tool_version = self._get_uv_tool_version(tool_name, package_name)
 
     # ------------------------------------------------------------------
     # Execution
@@ -167,7 +230,8 @@ class UVToolMixin:
 
             if not uv_runner.is_uv_available():
                 self._plugin_log(
-                    f"UV is not available, falling back to direct execution for {self.command}",
+                    f"{_uv_unavailable(uv_runner)}, falling back to direct execution "
+                    f"for {self.command}",
                     level=logging.WARNING,
                 )
                 return None
@@ -303,7 +367,8 @@ class UVToolMixin:
 
             if not is_available:
                 self._plugin_log(
-                    f"UV tool execution is required but UV is not available for {self.command}",
+                    f"UV tool execution is required for {self.command}, but: "
+                    f"{_uv_unavailable(runner)}",
                     level=logging.WARNING,
                 )
                 return False
@@ -684,7 +749,8 @@ class UVToolMixin:
 
             if not uv_available:
                 self._plugin_log(
-                    "[INSTALLATION_FAILED] UV is not available for tool installation",
+                    f"[INSTALLATION_FAILED] {_uv_unavailable(runner)} for tool "
+                    "installation",
                     f"UV availability check took {uv_check_time:.3f}s",
                     "Fallback strategy: Scanner will attempt direct tool execution",
                     level=logging.WARNING,

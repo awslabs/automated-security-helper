@@ -1,7 +1,7 @@
 """Unit tests for the S3 reporter plugin."""
 
 import json
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 import os
 from pathlib import Path
 
@@ -68,7 +68,8 @@ def test_s3_reporter_config_defaults(ash_temp_path):
     config = S3ReporterConfig()
     assert config.name == "s3"
     assert config.extension == "s3.json"
-    assert config.enabled is True
+    # Off by default: it sends findings to AWS, so only the operator turns it on.
+    assert config.enabled is False
     assert isinstance(config.options, S3ReporterConfigOptions)
 
 
@@ -244,27 +245,21 @@ def test_s3_reporter_report_json_format(mock_boto3, ash_temp_path):
     model.metadata.generated_at = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock file operations
-    with (
-        patch("builtins.open", mock_open()) as mock_file,
-        patch.object(Path, "mkdir") as mock_mkdir,
-    ):
-        # Call report
-        result = reporter.report(model)
+    result = reporter.report(model)
 
-        # Verify S3 upload
-        mock_s3_client.put_object.assert_called_once()
-        call_args = mock_s3_client.put_object.call_args[1]
-        assert call_args["Bucket"] == "test-bucket"
-        assert call_args["Key"].startswith("ash-reports/ash-report-20250606-120000")
-        assert call_args["ContentType"] == "application/json"
+    # Verify S3 upload
+    mock_s3_client.put_object.assert_called_once()
+    call_args = mock_s3_client.put_object.call_args[1]
+    assert call_args["Bucket"] == "test-bucket"
+    assert call_args["Key"].startswith("ash-reports/ash-report-20250606-120000")
+    assert call_args["ContentType"] == "application/json"
 
-        # Verify local file operations
-        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
-        mock_file.assert_called_once()
+    # The local copy holds what was uploaded
+    local_copy = Path(f"{ash_temp_path}/output") / "reports" / "s3-report.json"
+    assert local_copy.read_text(encoding="utf-8") == call_args["Body"]
 
-        # Verify result is a JSON receipt naming the S3 URL
-        assert json.loads(result)["url"].startswith("s3://test-bucket/ash-reports/")
+    # Verify result is a JSON receipt naming the S3 URL
+    assert json.loads(result)["url"].startswith("s3://test-bucket/ash-reports/")
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")
@@ -301,30 +296,24 @@ def test_s3_reporter_report_yaml_format(mock_yaml, mock_boto3, ash_temp_path):
     model.metadata.generated_at = "20250606-120000"
     model.to_simple_dict.return_value = {"test": "data"}
 
-    # Mock file operations
-    with (
-        patch("builtins.open", mock_open()) as mock_file,
-        patch.object(Path, "mkdir") as mock_mkdir,
-    ):
-        # Call report
-        result = reporter.report(model)
+    result = reporter.report(model)
 
-        # Verify YAML was used
-        mock_yaml.dump.assert_called_once()
+    # Verify YAML was used
+    mock_yaml.dump.assert_called_once()
 
-        # Verify S3 upload
-        mock_s3_client.put_object.assert_called_once()
-        call_args = mock_s3_client.put_object.call_args[1]
-        assert call_args["Bucket"] == "test-bucket"
-        assert call_args["Key"].endswith(".yaml")
-        assert call_args["ContentType"] == "application/yaml"
+    # Verify S3 upload
+    mock_s3_client.put_object.assert_called_once()
+    call_args = mock_s3_client.put_object.call_args[1]
+    assert call_args["Bucket"] == "test-bucket"
+    assert call_args["Key"].endswith(".yaml")
+    assert call_args["ContentType"] == "application/yaml"
 
-        # Verify local file operations
-        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
-        mock_file.assert_called_once()
+    # The local copy holds what was uploaded
+    local_copy = Path(f"{ash_temp_path}/output") / "reports" / "s3-report.yaml"
+    assert local_copy.read_text(encoding="utf-8") == "yaml content"
 
-        # Verify result is a JSON receipt naming the S3 URL
-        assert json.loads(result)["url"].startswith("s3://test-bucket/ash-reports/")
+    # Verify result is a JSON receipt naming the S3 URL
+    assert json.loads(result)["url"].startswith("s3://test-bucket/ash-reports/")
 
 
 @patch("automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter.boto3")

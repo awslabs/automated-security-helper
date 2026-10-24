@@ -4,7 +4,7 @@
     'exit_code': 2,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
       
@@ -41,7 +41,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
                    ERROR    Container execution failed with code 125
@@ -65,7 +65,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
                    ERROR    Container execution failed with code 137
@@ -89,7 +89,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
                    ERROR    Container execution failed with code 3
@@ -113,7 +113,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
                    ERROR    Container execution failed with code 4
@@ -129,12 +129,39 @@
     ''',
   })
 # ---
+# name: test_results_the_container_did_not_mark_completed[0]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Running ASH scan using built image...
+                   ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
+  
+    ''',
+  })
+# ---
+# name: test_results_the_container_did_not_mark_completed[2]
+  dict({
+    'exit_code': 1,
+    'stderr': '',
+    'stdout': '''
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
+                   INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
+      Running ASH scan using built image...
+                   ERROR    Container execution failed with code 2
+                   ERROR    The container run did not complete, so its results are not read back: <TMP>/out/ash_aggregated_results.json holds no record that the run completed. The run's own output above says what stopped it. An ASH older than this one does not write that record: rebuild the image from this ASH (run without --no-build, with --force if the image is cached). Without --ash-revision-to-install, the build installs this ASH's own source tree.
+  
+    ''',
+  })
+# ---
 # name: test_success_status_without_results
   dict({
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
       container wrote nothing
@@ -148,12 +175,10 @@
     'exit_code': 1,
     'stderr': '',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
-                   ERROR    Failed to parse results file: 1 validation error for AshAggregatedResults
-                              Invalid JSON: key must be a string at line 1 column 2
-                                For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
+                   ERROR    Failed to parse results file <TMP>/out/ash_aggregated_results.json: Invalid JSON: key must be a string at line 1 column 2
   
     ''',
   })
@@ -166,7 +191,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
       
@@ -202,7 +227,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
                    ERROR    Container execution failed with code 1
@@ -239,7 +264,7 @@
   
     ''',
     'stdout': '''
-      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /usr/bin/docker
+      [<LOG_TIME>] INFO     Resolved OCI_RUNNER to: /nonexistent/ash-test/docker
                    INFO     ASH installation appears to be alongide the repository contents, building with LOCAL source
       Running ASH scan using built image...
                    ERROR    Container execution failed with code 2

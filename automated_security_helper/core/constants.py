@@ -22,9 +22,13 @@ ASH_REPO_LATEST_REVISION = (
 )
 
 ASH_WORK_DIR_NAME = "converted"
+#: Absolute, so a relative ASH_BIN_PATH names the same directory for a child that
+#: starts somewhere else (a scanner in the scanned tree, a Python child in a
+#: directory of its own). An empty value counts as unset; ``Path("")`` was the
+#: current directory.
 ASH_BIN_PATH = (
-    Path(os.environ["ASH_BIN_PATH"])
-    if os.environ.get("ASH_BIN_PATH", None) is not None
+    Path(os.environ["ASH_BIN_PATH"]).absolute()
+    if os.environ.get("ASH_BIN_PATH")
     else Path.home().joinpath(".ash", "bin")
 )
 #: Used when ``ASH_DEFAULT_SEVERITY_LEVEL`` is unset or names no threshold. MEDIUM
@@ -135,6 +139,15 @@ ASH_CONFIG_SOURCES_DESCRIPTION = (
 ASH_CONFIG_EXTENDS_MAX_DEPTH = 10
 ASH_CONFIG_EXTENDS_MAX_FILES = 50
 
+# The most ASH reads from one config file: 1 MiB. A config is text a person edits;
+# ASH's own .ash/.ash.yaml is about 160 KiB, so this is six times that. The bound
+# stops a file, or a device at a config name, from being read into memory without
+# limit, and it bounds what parsing one costs: a flat 15 MiB YAML list took about
+# 230 s and 4.3 GiB to resolve, where 1 MiB takes a fraction of that. It does not
+# bound YAML aliases, which expand after parsing; the config loaders refuse those
+# (see load_config_yaml in config/ash_config.py).
+ASH_CONFIG_MAX_FILE_BYTES = 1024 * 1024
+
 # The environment variable names an ASH config file may interpolate.
 #
 # Why there is a bound at all
@@ -184,6 +197,10 @@ ASH_CONFIG_EXTENDS_MAX_FILES = 50
 # ``tests/unit/config/test_config_env_interpolation.py`` asserts that, so an
 # entry ending in KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL fails the suite.
 # An operator needing another name renames it with the ``ASH_`` prefix.
+#
+# A config file an MCP client delivered is outside this bound altogether: it may
+# not use ``!ENV`` at all, and is refused if it does. See "Environment
+# variables" in ``config/config_sources.py``.
 ASH_CONFIG_ENV_VAR_PREFIX = "ASH_"
 
 ASH_CONFIG_ENV_VAR_ALLOWLIST = [

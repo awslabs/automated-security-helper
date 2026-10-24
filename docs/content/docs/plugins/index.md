@@ -83,11 +83,30 @@ ash_plugin_modules:
   - my_ash_plugins
 ```
 
+A repository's `.ash/.ash.yaml` may name only modules installed outside the scanned
+tree, and not ASH's `ash_aws_plugins` and `ash_snyk_plugins` packages, which send
+findings or source off the host. A class from either package that your package
+lists or imports is selected only when the operator loads your package, or theirs,
+with `--ash-plugin-modules` or a config outside the tree. See
+[Settings a repository's config cannot choose](../configuration-guide.md#settings-a-repositorys-config-cannot-choose).
+
 Or specify it on the command line:
 
 ```bash
 ash --ash-plugin-modules my_ash_plugins
 ```
+
+The module must be inside ASH's plugin namespace: under `automated_security_helper.`
+or `ash_plugins`, or a top-level package named `ash_plugins` or ending in
+`_ash_plugins`, as `my_ash_plugins` does, and must be a regular package or module:
+one with an `__init__.py`, not a namespace package. Any other name, and ASH's plugin
+root `automated_security_helper.plugin_modules` itself, refuses the scan with exit
+code 3 before anything is imported.
+
+A scan uses ASH's built-in plugins (those defined in `ash_builtin`) plus the plugins and
+event handlers of the modules it names this way: those a named module defines, imports,
+or lists in its `ASH_*` declarations, but not those only a subpackage of it defines. When one process runs several scans (the MCP server, or a program
+calling `run_ash_scan` more than once), a module only another scan named takes no part.
 
 ## Real-World Examples
 

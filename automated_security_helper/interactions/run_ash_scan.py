@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
 import json
 import logging
 import os
@@ -12,9 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Dict,
     List,
+    NoReturn,
     Optional,
     Sequence,
     Set,
@@ -23,7 +26,7 @@ from typing import (
 )
 
 import typer
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
@@ -47,6 +50,8 @@ from automated_security_helper.core.enums import (
     ScannerStatus,
 )
 from automated_security_helper.core.exceptions import (
+    ASHConfigFieldDeniedError,
+    ASHConfigPolicyUnreadableError,
     ASHConfigValidationError,
     ScannerSelectionError,
     WorkspaceDefinitionError,
@@ -60,6 +65,10 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import (
+    CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
+    container_build_refusal,
+    container_input_refusal,
+    container_output_dir_refusal,
     container_was_started,
     run_ash_container,
 )
@@ -74,10 +83,40 @@ from automated_security_helper.utils.content_db_staleness import (
     ContentDbAgeRecord,
     stale_content_databases,
 )
+from automated_security_helper.utils.converter_refusals import inert_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.output_dir_links import (
+    OUTPUT_RESULT_FILES,
+    OUTPUT_WORKING_DIRS,
+)
 from automated_security_helper.utils.process_env import (
-    apply_environ_overrides,
-    restore_environ,
+    hold_environ,
+    release_environ,
+)
+from automated_security_helper.utils.report_path_links import (
+    REMEDY,
+    ReportPathLinkRefused,
+    ReportPathRefused,
+    linked_report_path,
+    refuse_a_linked_reports_dir,
+    refuse_linked_report_paths,
+)
+from automated_security_helper.utils.inner_run_outcome import (
+    INNER_RUN_OUTCOME_FILE,
+    ExistingResultsRefused,
+    as_seen_from_the_host,
+    completion_marker,
+    mark_run_completed,
+    new_outer_run_id,
+    not_a_regular_file,
+    take_outer_run_id,
+    read_back_outcome,
+    read_refusal_outcome,
+    record_refusal_outcome,
+    record_reports_written,
+    records_reports_written,
+    release_records_completion,
+    report_file_written_as,
 )
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
@@ -91,6 +130,9 @@ if TYPE_CHECKING:
     # Imported for annotations only. A runtime import here would pull the
     # workspace executor -- and through it core.orchestrator -- into every
     # single-directory scan's import graph.
+    from automated_security_helper.config.client_config_policy import (
+        ClientConfigRules,
+    )
     from automated_security_helper.workspace.execution import (
         ProjectScanSettings,
         WorkspaceRunResult,
@@ -131,6 +173,22 @@ class ScanOptions(BaseModel):
     # grants come from instead. Both go to resolve_config, in local mode only.
     untrusted_config: bool = False
     trusted_config_path: Optional[str] = None
+    # config_overrides came from an MCP client (a workspace tool's), so a tool
+    # config path they name is not the operator's (config/path_trust.py).
+    client_overrides: bool = False
+    # --workspace-config as given, before links are followed; the plan holds the
+    # resolved path. Container mode checks the policy by this name.
+    workspace_config_as_named: Optional[str] = None
+    # The scan was started by a remote MCP client (cli/mcp/sandbox.caller_is_remote),
+    # so every config file the operator did not set aside resolves no !ENV; see
+    # "Environment variables" in config/config_sources.py. Applied by every config
+    # read below, and carried to each project in workspace mode.
+    remote_client: bool = False
+    # The session's ClientConfigRules, which a config file an MCP client
+    # delivered is checked against. Goes to
+    # resolve_config, in local mode only. Typed Any to keep config imports out of
+    # this module's import time, as the other config inputs here are.
+    client_config_policy: Optional[Any] = Field(default=None, exclude=True)
     offline: bool = False
     strategy: ExecutionStrategy = ExecutionStrategy.PARALLEL
     scanners: Optional[List[str]] = Field(default_factory=list)
@@ -599,6 +657,45 @@ def incomplete_scanners(
     return listed
 
 
+def _failed_inputs_reason(failed_inputs: Sequence[Any], shown: int = 5) -> str:
+    """``could not convert 2 inputs: a.ipynb, b.ipynb``, naming at most ``shown``.
+
+    The names are the scanned tree's, and this reason is printed and logged, so
+    each is shown as inert text.
+    """
+    paths = [
+        inert_text(
+            str(
+                getattr(item, "path", None)
+                or (item.get("path") if isinstance(item, dict) else None)
+                or "?"
+            )
+        )
+        for item in failed_inputs
+    ]
+    named = ", ".join(paths[:shown])
+    if len(paths) > shown:
+        named += f" and {len(paths) - shown} more"
+    noun = "input" if len(paths) == 1 else "inputs"
+    return f"could not convert {len(paths)} {noun}: {named}"
+
+
+def _limit_refusals_reason(refused_inputs: Sequence[Any], shown: int = 5) -> str:
+    """``refused 1 input over an extraction limit: a.zip (max_total_bytes)``.
+
+    Each archive's name is shown as inert text, as in _failed_inputs_reason.
+    """
+    named = [
+        f"{inert_text(str(getattr(item, 'path', '?')))} ({getattr(item, 'limit', '?')})"
+        for item in refused_inputs
+    ]
+    listed = ", ".join(named[:shown])
+    if len(named) > shown:
+        listed += f" and {len(named) - shown} more"
+    noun = "input" if len(named) == 1 else "inputs"
+    return f"refused {len(named)} {noun} over an extraction limit: {listed}"
+
+
 def incomplete_converters(
     results: Optional[AshAggregatedResults],
 ) -> List[tuple[str, str]]:
@@ -610,22 +707,32 @@ def incomplete_converters(
     any verdict -- the scanners that ran reported PASSED on the targets they were
     handed, and nothing asked whether the targets that should have existed did.
 
-    Two conditions, read off the recorded row rather than re-derived:
+    Four conditions, read off the recorded row rather than re-derived:
 
     1. ``failure`` is set -- the converter raised, or was dropped by the plugin
        filter for a reason its own dependency check did not explain. ConvertPhase
        records both.
-    2. ``dependencies_satisfied`` is False -- its external tool was not available.
+    2. ``failed_inputs`` is not empty -- the converter ran, and some of its inputs
+       could not be converted: nbconvert exited non-zero on a notebook, or an
+       archive could not be extracted. Each one is a file the scanners never saw in
+       converted form, which is the same loss as condition 1 at a smaller scale.
+    3. A ``refused_inputs`` entry names a ``limit`` -- an archive over one of the
+       archive converter's extraction limits, refused whole, so none of its
+       contents reached the scanners. A refusal without one (a symlinked input, a
+       link or ``..`` member, a nested archive, a Git LFS pointer) does not count:
+       those refuse one input or member that is not to be read at all, and the
+       scan reports them without failing on them.
+    4. ``dependencies_satisfied`` is False -- its external tool was not available.
 
-    ``excluded`` is checked first and wins over both. It is the converter-side
+    ``excluded`` is checked first and wins over all of them. It is the converter-side
     counterpart of a SKIPPED scanner: work the run was never meant to do, which is
     what a config-disabled converter and one dropped by
     ``--python-based-plugins-only`` are. A gate that failed on those would fail every
     run that turns conversion off, which is a supported configuration.
 
     Read with ``getattr`` because a results file written by an older version carries
-    rows without ``failure``, and ``ash merge`` reads shard results from whatever
-    ASH produced each one.
+    rows without ``failure`` or ``failed_inputs``, and ``ash merge`` reads shard
+    results from whatever ASH produced each one.
 
     Args:
         results: The aggregated results, or None when the scan produced none.
@@ -643,8 +750,27 @@ def incomplete_converters(
         if getattr(row, "excluded", False):
             continue
         failure = getattr(row, "failure", None)
+        failed_inputs = list(getattr(row, "failed_inputs", None) or [])
+        over_limit = [
+            item
+            for item in getattr(row, "refused_inputs", None) or []
+            if getattr(item, "limit", None)
+        ]
+        lost = [
+            reason
+            for reason in (
+                _failed_inputs_reason(failed_inputs) if failed_inputs else "",
+                _limit_refusals_reason(over_limit) if over_limit else "",
+            )
+            if reason
+        ]
+        # Both reasons reach the terminal, the log and the MCP payload, and both
+        # can quote the scanned tree's file names: an exception's text as well as
+        # the failed and refused inputs. So each is shown as inert text.
         if failure:
-            listed.append((name, str(failure)))
+            listed.append((name, inert_text(str(failure))))
+        elif lost:
+            listed.append((name, inert_text("; ".join(lost))))
         elif getattr(row, "dependencies_satisfied", True) is False:
             # An unavailable converter costs coverage only if it had inputs. The count
             # is established without its tool, which is what makes it answerable for a
@@ -721,7 +847,7 @@ def print_incompleteness_message(
             "everything they were given[/bold red]"
         )
         for _name, _status in incomplete_scanner_rows:
-            print(f"  [red]{_name}: {_status}[/red]")
+            print(f"  [red]{escape_markup(_name)}: {escape_markup(_status)}[/red]")
         print(
             "[yellow]ERROR means the scanner ran and failed; MISSING means its "
             "dependencies were unavailable; a target count means the scanner ran "
@@ -730,6 +856,7 @@ def print_incompleteness_message(
             "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
             "accept a partial scan.[/yellow]"
         )
+        _print_in_tree_refusals()
     elif incomplete_converter_rows:
         # Names the converter, because that is the actionable part -- the fix is to
         # install that converter's tool or accept the partial scan, and neither is
@@ -740,16 +867,47 @@ def print_incompleteness_message(
             "files they were given[/bold red]"
         )
         for _name, _reason in incomplete_converter_rows:
-            print(f"  [red]{_name}: {_reason}[/red]")
+            # Escaped: the reason names files, and rich reads "[x]" in a name such as
+            # "[x].ipynb" as markup and drops it.
+            print(f"  [red]{escape_markup(_name)}: {escape_markup(_reason)}[/red]")
         print(
-            "[yellow]A converter that did not run leaves its inputs unscanned, so "
-            "the scanners saw fewer files than this repository holds. Install the "
-            "converter's tool, disable the converter if its inputs are not wanted, "
-            "or drop --fail-on-incomplete-scanners to accept a partial scan. A "
-            "converter with nothing to convert never reports here.[/yellow]"
+            "[yellow]A converter that did not run, or could not convert some files, "
+            "leaves those inputs unscanned, so the scanners saw fewer files than "
+            "this repository holds. Install the converter's tool if it is missing, "
+            "fix the files it could not convert or exclude them with ignore_paths, "
+            "disable the converter if its inputs are not wanted, or drop "
+            "--fail-on-incomplete-scanners to accept a partial scan. A converter "
+            "with nothing to convert never reports here. An archive over an "
+            "extraction limit is extracted once the limit named is raised, with "
+            "--config-overrides converters.archive.options.<limit>=<value> or a "
+            "config file outside every git checkout.[/yellow]"
         )
     elif not stale_database_records:
         print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
+
+
+def _print_in_tree_refusals() -> None:
+    """Name the tools this scan found only inside its tree, which are MISSING rows.
+
+    "Install the missing tools" is the wrong advice for one that is installed, in
+    the repository's own .venv/bin or node_modules/.bin.
+    """
+    from automated_security_helper.utils.subprocess_utils import (
+        in_tree_refusals,
+        in_tree_remedy,
+    )
+
+    refused = in_tree_refusals()
+    if not refused:
+        return
+    named = ", ".join(
+        f"{command} ({path})" for command, path in sorted(refused.items())
+    )
+    message = (
+        f"Found only inside the scanned tree, so not run: {named}. To use them, "
+        f"{in_tree_remedy()}."
+    )
+    print(f"[yellow]{escape_markup(message)}[/yellow]")
 
 
 def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
@@ -914,15 +1072,14 @@ def _resolve_fail_on_incomplete_scanners(
     and keeps its old exit codes; what it no longer gets is that outcome by saying
     nothing.
 
-    What the default does NOT reach, because this gate selects on status: a tool
-    that failed hard without that failure reaching its status. ``scanner_plugin``'s
-    empty-results branch returns a successful empty report for a tool that exited
-    non-zero and wrote nothing, so ``determine_status`` grades it PASSED from its
-    zero findings and there is no ERROR or MISSING here to find. Pinned by
-    ``TestTheGateCannotSeeAHardFailureGradedPassed`` in
-    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``, which asserts
-    that this flag returns the same exit code in all three positions for that case.
-    Turning the default on does not fix it and is not a reason to think it fixed.
+    This gate selects on status, so it sees a tool's hard failure only because the
+    failure reaches the status: a tool that exits with a code outside its scanner's
+    ``success_exit_codes`` is recorded ERROR whatever its results file holds
+    (``ScannerPluginBase._refuse_rejected_exit_code``). With the gate off, that ERROR
+    row still leaves the exit code to the findings, so a scan whose only problem is a
+    failed scanner exits 0. Pinned by ``TestAHardFailureReachesTheGate`` in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``, in all three
+    positions of this flag.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
@@ -1128,6 +1285,219 @@ class ScanIncompleteExit(SystemExit):
         self.results = results
 
 
+class ReportPathRefusedExit(SystemExit):
+    """``sys.exit(1)`` for a run whose reports were refused, with the reason.
+
+    Raised when a report path is a link, when a file name a reporter would write is
+    not a file in the reports directory, and in container and nix mode when the
+    inner run recorded either refusal in its results file. A ``SystemExit`` with
+    code 1, so the CLI's exit code is that of any other error. ``reason`` is the
+    message printed to the console, which names the link or the file name; an
+    in-process caller (the MCP scan runner) reports it rather than a bare "exited
+    with code 1". See utils/report_path_links.py.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(1)
+        self.reason = reason
+
+
+def _refuse_report_path_link(refusal: ReportPathRefused) -> NoReturn:
+    print(f"[bold red]ERROR (1) {escape_markup(str(refusal))}[/bold red]")
+    raise ReportPathRefusedExit(str(refusal)) from refusal
+
+
+def _record_inner_refusal(
+    opts: ScanOptions, refusal: ReportPathRefused, run_id: Optional[str], logger
+) -> None:
+    """As the inner run of a container or nix scan, record ``refusal`` for the outer process.
+
+    Beside the results file (``record_refusal_outcome``), whether or not the run
+    wrote one: a local or workspace run refused before it wrote results has none,
+    and a results file that held only the refusal would read as a scan to a later
+    ``--use-existing``. The results file, when there is one, is left as written.
+    """
+    if run_id is None:
+        return
+    if not record_refusal_outcome(opts.output_dir, str(refusal), run_id):
+        logger.warning(
+            f"Could not record the refusal in {opts.output_dir / INNER_RUN_OUTCOME_FILE}; "
+            "the outer process will report that this run did not complete."
+        )
+
+
+def _refuse_an_inner_file_that_is_not_regular(path: Path, what: str) -> None:
+    """Exit 1, without reading it, when a file the inner run left is not a regular file.
+
+    The inner run, a container's included, can leave a link at a path this
+    process reads, naming any file on the host. ``what`` names the file's content
+    in the message.
+    """
+    problem = not_a_regular_file(path)
+    if problem is None:
+        return
+    reason = (
+        f"{path.as_posix()} {problem}, so {what} is not read. ASH writes that file "
+        "as a regular file; remove it and run ASH again."
+    )
+    print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
+    raise ReportPathRefusedExit(reason)
+
+
+def _read_back_inner_results(
+    output_file: Path, logger
+) -> Optional[AshAggregatedResults]:
+    """The inner run's results file, parsed; None when there is none.
+
+    Exits 1 when it is not a regular file, or does not parse. The parse error
+    names each field that failed, without the values the file held there.
+    """
+    _refuse_an_inner_file_that_is_not_regular(output_file, "the inner run's results")
+    if not output_file.exists():
+        return None
+    with open(output_file, mode="r", encoding="utf-8") as f:
+        content = f.read()
+    try:
+        return AshAggregatedResults.model_validate_json(content)
+    except ValidationError as e:
+        problems = "; ".join(
+            (
+                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                if error["loc"]
+                else error["msg"]
+            )
+            for error in e.errors(include_input=False, include_url=False)[:10]
+        )
+        logger.error(f"Failed to parse results file {output_file}: {problems}")
+    except ValueError as e:
+        logger.error(f"Failed to parse results file {output_file}: {type(e).__name__}")
+    sys.exit(1)
+
+
+def _refuse_an_inner_run_that_was_refused(opts: ScanOptions, run_id: str) -> None:
+    """Exit 1 with the refusal the inner run recorded, given as this process sees the paths.
+
+    Read before the results file, which a run refused before its scan phase never
+    wrote. A record that is a link, or not a regular file, refuses the read-back
+    without being read; one with another run's ID is ignored.
+    """
+    _refuse_an_inner_file_that_is_not_regular(
+        opts.output_dir / INNER_RUN_OUTCOME_FILE, "the inner run's outcome"
+    )
+    refusal = read_refusal_outcome(opts.output_dir, run_id)
+    if refusal is not None:
+        reason = as_seen_from_the_host(
+            refusal.message, refusal.inner_output_dir, opts.output_dir.as_posix()
+        )
+        print(f"[bold red]ERROR (1) {escape_markup(reason)}[/bold red]")
+        raise ReportPathRefusedExit(reason)
+
+
+def _image_rebuild_hint() -> str:
+    """How to replace a container image whose ASH records no completion.
+
+    A rebuild from this ASH always works, so it comes first. A release is offered
+    by version only when that release records completion (v3.7.1 and earlier do
+    not, so naming one would build an image that fails the same way); otherwise
+    the hint names the revision a rebuild installs.
+    """
+    from automated_security_helper.interactions.run_ash_container import (
+        get_ash_revision,
+    )
+    from automated_security_helper.utils.get_ash_version import get_ash_version
+
+    rebuild = (
+        "rebuild the image from this ASH (run without --no-build, with --force if "
+        "the image is cached)"
+    )
+    version = get_ash_version()
+    if release_records_completion(version):
+        return (
+            f"{rebuild}, or pass --ash-revision-to-install v{version} to install "
+            f"ASH {version} in it."
+        )
+    revision = get_ash_revision(quiet=True)
+    if revision == "LOCAL":
+        source = "this ASH's own source tree"
+    elif revision:
+        source = f"ASH revision {revision}"
+    else:
+        source = "the revision this ASH was installed from"
+    return f"{rebuild}. Without --ash-revision-to-install, the build installs {source}."
+
+
+def _refuse_an_inner_run_that_did_not_complete(
+    results: AshAggregatedResults,
+    opts: ScanOptions,
+    run_id: str,
+    mode: str,
+    output_file: Path,
+    logger,
+) -> None:
+    """Refuse the read-back of an inner run that did not record its completion.
+
+    The inner run's status is a verdict this process re-derives, and 1 is also what
+    a refused or failed inner run exits with, so the results file has to say that
+    the run with this ID completed (utils/inner_run_outcome.py). A refusal the inner
+    run recorded was reported before this, by
+    ``_refuse_an_inner_run_that_was_refused``.
+    """
+    outcome = read_back_outcome(results, run_id)
+    if outcome.completed:
+        return
+    if outcome.written_by_an_older_ash:
+        found = (
+            "holds a record without a run ID, which an ASH older than this one "
+            "writes, and no record that this run completed"
+        )
+    elif outcome.marked_by_another_run:
+        found = "holds only records an earlier run wrote"
+    else:
+        found = "holds no record that the run completed"
+    # In container mode the inner ASH is the image's, which can be older than this
+    # one. In nix mode it is started with this ASH's own interpreter
+    # (run_ash_nix.inner_ash_command), so the message names that instead.
+    if mode == "container":
+        older = (
+            " An ASH older than this one does not write that record: "
+            f"{_image_rebuild_hint()}"
+        )
+    else:
+        older = (
+            f" The inner run was started with this ASH's interpreter, {sys.executable}."
+        )
+    logger.error(
+        f"The {mode} run did not complete, so its results are not read back: "
+        f"{output_file} {found}. The run's own output above says what stopped it."
+        f"{older}"
+    )
+    sys.exit(1)
+
+
+def _refuse_links_left_in_reports(opts: ScanOptions) -> None:
+    """Refuse the read-back of a container or nix run when ``reports/`` holds a link.
+
+    The inner run's report phase refuses a link at a file its reporters write, and
+    exits 1. That status alone does not reach the operator: 1 is a verdict this
+    process re-derives from the results file. This process does not know the inner
+    run's reporters (an image can carry plugins this host lacks), but no reporter
+    creates a link, and _discard_prior_run_artifacts removed ``reports/`` unless
+    ``--use-existing`` kept it. So a link directly in ``reports/`` after the inner
+    run is one the inner run refused or one no reporter wrote, and either way the
+    run is refused here rather than answered from the files beside it.
+    """
+    reports = opts.output_dir / "reports"
+    try:
+        listed = [entry.name for entry in reports.iterdir()]
+    except OSError:
+        listed = []
+    # ash.sarif always, since _compute_exit_code reads it back. That also has the
+    # directory itself examined when it lists nothing, as a dangling link does.
+    found = linked_report_path(reports, ["ash.sarif", *listed])
+    if found is not None:
+        _refuse_report_path_link(ReportPathLinkRefused(found))
+
+
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     """Return True when *result* meets the minimum severity threshold.
 
@@ -1158,7 +1528,9 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 
 
 def _discovered_config_path(
-    source_dir: Path, log_selection: bool = False
+    source_dir: Path,
+    log_selection: bool = False,
+    permit: Optional[Callable[[Path], bool]] = None,
 ) -> Optional[str]:
     """The config source a scan of *source_dir* uses, by the one discovery rule.
 
@@ -1166,37 +1538,83 @@ def _discovered_config_path(
     ``config_sources.discover_config_source``, so the exit-code fields, the
     workspace knobs and the orchestrator all read the same file -- including a
     pyproject.toml [tool.ash] table or an ashrc file. Discovery errors are left
-    to the caller.
+    to the caller, and so is the refusal of a file that resolves to one
+    ``permit`` does not permit (``config_sources.check_discovered_source``), so
+    that no reader here opens it.
+
+    Nothing is logged here, ``log_selection`` or not: the caller logs the file it
+    uses, and the sources discovery ignored become resolution warnings when the
+    orchestrator resolves this file, which logs each one once and records it with
+    the results. Logging them here as well printed each one twice.
+
+    ``permit`` is the scan's ``config_base_gate``: every source discovery finds
+    is checked against it before anything opens it. Every caller passes it, so
+    no reader here opens a source the scan's resolution would refuse.
     """
     from automated_security_helper.config.config_sources import (
+        check_discovered_source,
         discover_config_source,
-        log_config_discovery,
     )
 
-    discovery = discover_config_source(source_dir)
-    if log_selection:
-        log_config_discovery(discovery, announce_selected=False)
+    discovery = discover_config_source(source_dir, permit=permit)
     if discovery.selected is None:
         return None
+    check_discovered_source(discovery.selected.path, permit)
     return discovery.selected.path.as_posix()
 
 
+def _ash_config_fallback(
+    source_dir: Path, permit: Optional[Callable[[Path], bool]] = None
+) -> Optional[str]:
+    """``ASH_CONFIG``, when a local scan of *source_dir* with no config named uses it.
+
+    A local scan falls back to ``ASH_CONFIG``'s file when it finds no config in the
+    source directory (config/default_config.py). The scan inside a container sees
+    neither the host's environment nor that file, so container mode names it
+    explicitly, in that same case and no other. A discovery error is left to the
+    scan, which reports it. ``permit`` is the scan's ``config_base_gate``, so
+    discovery here checks each source against it as the scan's own discovery does.
+    """
+    env_config = os.environ.get("ASH_CONFIG")
+    if not env_config:
+        return None
+    try:
+        if _discovered_config_path(source_dir, permit=permit) is not None:
+            return None
+    except Exception:
+        return None
+    return env_config
+
+
 def _load_with_confinement(
-    ash_config_cls,
     config_path_str: str,
     source_dir: Path,
     permit_base: Optional[Callable[[Path], bool]] = None,
+    log_failure: bool = True,
+    remote_client: bool = False,
+    session_id: Optional[str] = None,
 ):
-    """Load a config file with its `extends` bases confined as a scan would."""
+    """Load a config file with its `extends` bases confined as a scan would.
+
+    A file that is missing or does not load raises ``ASHConfigValidationError``,
+    as it does when the scan resolves it; see ``resolve_config.load_config_file``.
+    ``session_id`` is the MCP session the scan runs for
+    (``ClientConfigRules.session_id``), whose ``config/`` directory holds the
+    files set aside for a remote caller.
+    """
     from automated_security_helper.config.config_sources import (
         default_confinement_root,
+        env_refused_for,
     )
+    from automated_security_helper.config.resolve_config import load_config_file
 
     config_path = Path(config_path_str)
-    return ash_config_cls.from_file(
+    return load_config_file(
         config_path,
         confine_to=default_confinement_root(config_path, source_dir),
         permit_base=permit_base,
+        log_failure=log_failure,
+        refuse_env=env_refused_for(remote_client, session_id),
     )
 
 
@@ -1207,16 +1625,19 @@ def _load_config_file(opts: ScanOptions):
     candidate search was the alternative, and it would let the two fields be read
     from different files the moment the search changed in one copy.
 
-    Returns None when no config file is found or when it cannot be parsed --
-    parsing failures surface later through the orchestrator's own validation with
-    a message that names the problem, so swallowing them here loses nothing.
+    Returns None when no config file is found, and also when the file cannot be
+    loaded. That is not a fallback: resolution refuses the same file with exit 3
+    before any scanner runs -- the orchestrator's resolve_config in local mode,
+    and the inner ASH in container and nix mode, which is handed the same path
+    or discovers the same file -- so the value read here is never used for a
+    scan. Refusing here as well would only duplicate that message.
     """
-    from automated_security_helper.config.ash_config import AshConfig
-
     config_path_str = opts.config
     if config_path_str is None:
         try:
-            config_path_str = _discovered_config_path(opts.source_dir)
+            config_path_str = _discovered_config_path(
+                opts.source_dir, permit=opts.config_base_gate
+            )
         except Exception:
             # Surfaces again, with its message, when the orchestrator resolves.
             return None
@@ -1225,8 +1646,14 @@ def _load_config_file(opts: ScanOptions):
         return None
 
     try:
+        # Not logged: the resolution that refuses the file logs it once.
         return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
+            config_path_str,
+            opts.source_dir,
+            opts.config_base_gate,
+            log_failure=False,
+            remote_client=opts.remote_client,
+            session_id=getattr(opts.client_config_policy, "session_id", None),
         )
     except Exception:
         return None
@@ -1345,49 +1772,83 @@ def _live_progress_enabled(opts: ScanOptions) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
-    """Exit before a sandboxed scan writes through a symlinked output directory.
+def _scan_config_path(opts: ScanOptions, log_selection: bool = False) -> Optional[str]:
+    """The config file a single-directory scan resolves: ``--config``, else the
+    one discovery finds in the source directory under the scan's
+    ``config_base_gate``, else None (the defaults)."""
+    if opts.config is not None:
+        return opts.config
+    return _discovered_config_path(
+        opts.source_dir, log_selection=log_selection, permit=opts.config_base_gate
+    )
 
-    The logger opens ash.log in the output directory and the orchestrator clears
-    its subdirectories, both unsandboxed, so this has to run before either: the
-    per-scanner check in utils/sandbox/policy.py would only mark each scanner
-    MISSING after ASH had already written through the link. The check is cheap
-    and runs first; the config is resolved only for an output directory it
-    refuses, to learn whether the sandbox is on. With the sandbox off the output
-    goes where the operator sent it, as before. A config that does not resolve
-    counts as on, since that scan fails anyway. Container mode is left alone: the
-    container is the boundary there and runs its inner scan unsandboxed.
+
+#: The exit code for an output directory ASH will not use because it, or something
+#: ASH writes below it, is reached through a link: 3, as for container mode's other
+#: unusable inputs, and the same whichever check refuses it (container mode's own
+#: rule, the general check, or the log file's open).
+OUTPUT_DIR_REFUSED_EXIT_CODE = 3
+
+
+class OutputDirRefusedExit(SystemExit):
+    """``sys.exit(3)`` for an output directory ASH will not use, with the reason.
+
+    A ``SystemExit`` with OUTPUT_DIR_REFUSED_EXIT_CODE. ``found`` names the link and
+    ``reason`` adds the command-line remedy; an in-process caller (the MCP scan
+    runner) reports ``found`` with a remedy of its own instead of a bare "exited
+    with code 3".
+    """
+
+    def __init__(self, found: str, reason: str):
+        super().__init__(OUTPUT_DIR_REFUSED_EXIT_CODE)
+        self.found = found
+        self.reason = reason
+
+
+def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
+    """Exit before ASH writes, clears or mounts its output through a link.
+
+    The logger opens ash.log in the output directory, the orchestrator and the
+    container and nix modes clear its working directories, and a sandbox mounts it,
+    so this runs before any of them, in every run mode and whatever the sandbox
+    mode. Refused, with the link named and --output-dir as the remedy: a component
+    below the scanned directory on the way to the output directory, the output
+    directory itself, each of ``analysis``, ``reports``, ``scanners`` and
+    ``converted`` under it, and the files ASH writes there by a fixed name. See
+    utils/output_dir_links.py, and
+    ASHScanOrchestrator._refuse_linked_output_dir, which makes the same refusal for
+    callers that do not come through here. A workspace project's own output tree is
+    checked by workspace/execution.py before it is created; here a workspace run's
+    ``projects`` and spool directories are checked with the rest.
+
+    Container mode first applies its own link rule: the output directory is mounted
+    read-write at ``/out``, so the scan inside the container would write wherever a
+    link leads (``container_output_dir_refusal``). The general check then runs as
+    in every other mode, for the paths that rule does not name. Either refusal
+    exits OUTPUT_DIR_REFUSED_EXIT_CODE (3).
     """
     if opts.mode == RunMode.container:
-        return
-    from automated_security_helper.config.resolve_config import resolve_config
-    from automated_security_helper.core.enums import SandboxMode
-    from automated_security_helper.utils.sandbox.policy import (
-        SandboxUnavailable,
-        refuse_symlinked_output_dir,
+        refusal = container_output_dir_refusal(opts.source_dir, opts.output_dir)
+        if refusal is not None:
+            typer.secho(str(refusal), fg=typer.colors.RED)
+            raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
+    from automated_security_helper.utils.output_dir_links import (
+        OutputDirLinkRefused,
+        refuse_linked_output_dir,
     )
 
     try:
-        refuse_symlinked_output_dir(opts.source_dir, opts.output_dir)
-        return
-    except SandboxUnavailable as refusal:
-        reason = str(refusal)
-    try:
-        config = resolve_config(
-            config_path=opts.config or _discovered_config_path(opts.source_dir),
-            source_dir=opts.source_dir,
-            config_overrides=list(opts.config_overrides or []),
-            permit_base=opts.config_base_gate,
+        refuse_linked_output_dir(
+            opts.source_dir,
+            opts.output_dir,
+            workspace=opts.workspace_plan is not None,
         )
-        if SandboxMode(config.sandbox.mode) == SandboxMode.off:
-            return
-    except Exception:  # noqa: BLE001 - an unresolvable config is reported by the scan
-        pass
-    print(
-        f"[bold red]ERROR (1) The scanner sandbox is on, and {escape_markup(reason)}. "
-        "Choose an output directory that is not reached through a symlink.[/bold red]"
-    )
-    sys.exit(1)
+    except OutputDirLinkRefused as refusal:
+        print(
+            f"[bold red]ERROR ({OUTPUT_DIR_REFUSED_EXIT_CODE}) "
+            f"{escape_markup(str(refusal))}[/bold red]"
+        )
+        raise OutputDirRefusedExit(refusal.found, str(refusal)) from refusal
 
 
 # ---------------------------------------------------------------------------
@@ -1396,20 +1857,39 @@ def _refuse_symlinked_output_dir(opts: ScanOptions) -> None:
 
 
 def _setup_logger(opts: ScanOptions):
+    """Configure ASH's logger, with ``ash.log`` in the output directory.
+
+    The log file is opened as ASH's other writes below the output directory are,
+    so a symlink at ``ash.log``, or a file another name refers to, stops the scan
+    here with exit 3 (OutputDirRefusedExit) rather than being written through.
+    """
     from automated_security_helper.utils.log import get_logger
+    from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
 
     final_log_level = _resolve_log_level(opts)
     final_logging_level = logging._nameToLevel.get(final_log_level.value, logging.INFO)
     simple_logging = opts.simple or opts.log_level == AshLogLevel.SIMPLE
 
-    return get_logger(
-        level=final_logging_level,
-        output_dir=opts.output_dir,
-        show_progress=_live_progress_enabled(opts),
-        use_color=opts.color,
-        simple_format=simple_logging,
-        truncate_log=opts.existing_results is None,
-    )
+    try:
+        return get_logger(
+            level=final_logging_level,
+            output_dir=opts.output_dir,
+            show_progress=_live_progress_enabled(opts),
+            use_color=opts.color,
+            simple_format=simple_logging,
+            truncate_log=opts.existing_results is None,
+        )
+    except OutputDirLinkRefused as refused:
+        # The family's base: a symlink or a file another name refers to.
+        reason = (
+            f"{refused}. Remove it, or choose an output directory outside the "
+            "scanned tree."
+        )
+        print(
+            f"[bold red]ERROR ({OUTPUT_DIR_REFUSED_EXIT_CODE}) "
+            f"{escape_markup(reason)}[/bold red]"
+        )
+        raise OutputDirRefusedExit(refused.found, reason) from refused
 
 
 # ---------------------------------------------------------------------------
@@ -1436,20 +1916,14 @@ def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
     )
 
 
-# The output-directory entries a local scan clears before it starts, copied from the two
-# places the orchestrator clears them: ``ensure_directories`` rmtrees these four working
-# directories (core/orchestrator.py:418-425) and ``initialize`` unlinks these three files
-# (core/orchestrator.py:280-293). Both are gated there on ``existing_results_path is
-# None``, which is the exemption in ``_discard_prior_run_artifacts`` below.
-#
-# Named here rather than inlined because the point of the list is that it matches that
-# other list; a reader checking the claim needs to see the whole of both.
-_PRIOR_RUN_OUTPUT_DIRECTORIES = ("analysis", "reports", "scanners", "converted")
-_PRIOR_RUN_OUTPUT_FILES = (
-    "ash_aggregated_results.json",
-    "ash-ignore-report.txt",
-    "ash-scan-set-files-list.txt",
-)
+# The output-directory entries a local scan clears before it starts: the orchestrator's
+# ``ensure_directories`` rmtrees the working directories and its ``initialize`` unlinks
+# the result files, both gated on ``existing_results_path is None``, which is the
+# exemption in ``_discard_prior_run_artifacts`` below. One list for both, in
+# utils/output_dir_links.py, which also refuses a link at any of them; the orchestrator
+# also unlinks an earlier inner run's refusal (utils/inner_run_outcome.py).
+_PRIOR_RUN_OUTPUT_DIRECTORIES = OUTPUT_WORKING_DIRS
+_PRIOR_RUN_OUTPUT_FILES = (*OUTPUT_RESULT_FILES, INNER_RUN_OUTCOME_FILE)
 
 
 def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
@@ -1485,7 +1959,25 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
       single-project tree per project under ``projects/<key>/`` and only the unified
       top-level files are rewritten by the outer run, so a workspace scan that removed
       ``projects/`` would delete the per-project reports it is about to summarize.
+
+    The output directory is checked for links first, here beside the removals it
+    protects, although run_ash_scan has already checked it: an rmtree through a
+    linked ``reports`` deletes inside wherever it points. A ``reports/`` that is
+    itself a link, to a directory or dangling, refuses the run first, as a local
+    scan refuses it: rmtree fails on a link to a directory, and removing a dangling
+    one would hide that the operator put a link there.
     """
+    _refuse_symlinked_output_dir(opts)
+    try:
+        refuse_a_linked_reports_dir(opts.output_dir / "reports")
+    except ReportPathRefused as refusal:
+        _refuse_report_path_link(refusal)
+    # Never an input, so removed even when --use-existing keeps the rest: the inner
+    # run this process starts records its own refusal there, if any.
+    try:
+        (opts.output_dir / INNER_RUN_OUTCOME_FILE).unlink(missing_ok=True)
+    except OSError as error:
+        logger.debug(f"Could not remove {INNER_RUN_OUTCOME_FILE}: {error}")
     if opts.existing_results:
         # The one shape that legitimately consumes a file from before this invocation.
         # --use-existing resolves to a path in this directory and the inner scan is asked
@@ -1542,6 +2034,10 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
 # ASH_EXIT_CODES -- see the guard in _run_container_mode for which two are excluded and why.
 _CONTAINER_VERDICT_EXIT_CODES = frozenset({0, 1, 2})
 
+# The inner ASH's refusals, which it returns before writing a results file: an invalid
+# config (3) and a workspace definition or policy error (4). Nix mode passes them through.
+_NIX_REFUSAL_EXIT_CODES = frozenset({3, 4})
+
 
 def _run_container_mode(
     opts: ScanOptions,
@@ -1575,24 +2071,111 @@ def _run_container_mode(
     # Use the CLI-supplied value when present; fall back to the value already read from
     # the config file on the host.  Passing the resolved value avoids a race where the
     # user mutates the config file between the host read and the container's own read.
+    #
+    # Not in workspace mode. The in-container run layers the operator's --config over
+    # each project's own config and judges each project itself; a value the host read
+    # here (from --config, or from a config at the workspace root, which the workspace
+    # wrote) would reach it as a command-line flag and beat every project's own value.
+    # Only what the operator gave on the command line is forwarded there.
+    in_workspace = opts.workspace_plan is not None
+    if opts.workspace_plan is not None and opts.config:
+        # The in-container run is given the operator's file at
+        # /ash-operator-config, outside /src, so it cannot tell where the file
+        # sat on the host. Judged here, against the workspace root on the host,
+        # as workspace resolution judged it (resolve_workspace), so a plan built
+        # without that check is refused the same way before a container starts.
+        from automated_security_helper.config.resolve_config import (
+            check_operator_config,
+        )
+
+        try:
+            check_operator_config(opts.config, opts.workspace_plan.workspace_root)
+        except ASHConfigValidationError as exc:
+            print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+            sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
     effective_fail_on_findings = (
         opts.fail_on_findings
-        if opts.fail_on_findings is not None
+        if opts.fail_on_findings is not None or in_workspace
         else resolved_fail_on_findings
     )
     effective_fail_on_incomplete_scanners = (
         opts.fail_on_incomplete_scanners
-        if opts.fail_on_incomplete_scanners is not None
+        if opts.fail_on_incomplete_scanners is not None or in_workspace
         else resolved_fail_on_incomplete_scanners
     )
 
+    # The policy the host resolved for the plan. The container resolves the workspace
+    # again, and on its own it would find only a policy inside the root, so one named
+    # with --workspace-config elsewhere would not apply. It is handed over by the
+    # name it was given or found under, not the resolved path the plan holds, so a
+    # policy named inside the workspace's tree that links out of it is refused as an
+    # in-tree --config that links out is; the mount itself is of the real file.
+    workspace_config = None
+    plan = opts.workspace_plan
+    if plan is not None and plan.workspace_config_source is not None:
+        from automated_security_helper.workspace.policy import (
+            named_workspace_policy_path,
+        )
+
+        named = named_workspace_policy_path(
+            plan.workspace_root, opts.workspace_config_as_named
+        )
+        workspace_config = (
+            named.as_posix() if named is not None else plan.workspace_config_source
+        )
+
     if opts.run:
+        # The inputs before the previous run's output: a scan refused for its config
+        # or for a path the runner cannot mount never starts, so it must not delete
+        # the reports of one that did. Exit 3, as run_ash_container would.
+        refusal = container_input_refusal(
+            opts.source_dir,
+            opts.output_dir,
+            opts.config,
+            workspace_config,
+            _workspace_relative_file(opts),
+        )
+        if refusal is not None:
+            typer.secho(refusal, fg=typer.colors.RED)
+            sys.exit(3)
+        # The build inputs too: IDs that are not numbers, a revision the build cannot
+        # take, and a non-root build as UID or GID 0, which is the default outcome on
+        # a root host that does not pass --build-target ci. With the host IDs
+        # unreadable, run_ash_container reports that itself.
+        from automated_security_helper.utils import subprocess_utils
+
+        try:
+            host_ids = (
+                subprocess_utils.get_host_uid(),
+                subprocess_utils.get_host_gid(),
+            )
+        except Exception:
+            host_ids = None
+        if host_ids is not None:
+            build_refusal = container_build_refusal(
+                build=opts.build,
+                build_target=opts.build_target,
+                custom_containerfile=opts.custom_containerfile,
+                container_uid=opts.container_uid,
+                container_gid=opts.container_gid,
+                ash_revision_to_install=opts.ash_revision_to_install,
+                host_uid=host_ids[0],
+                host_gid=host_ids[1],
+            )
+            if build_refusal is not None:
+                typer.secho(build_refusal[1], fg=typer.colors.RED)
+                sys.exit(build_refusal[0])
         # Only when a scan is actually being asked for. --no-run builds an image and
         # stops; it never claims to have scanned anything, so it has no business
         # discarding a report from a run that did.
         _discard_prior_run_artifacts(opts, logger)
 
+    # Written into the results file by the in-container run when it completes, so a
+    # file it did not finish is not read back as a verdict. See
+    # utils/inner_run_outcome.py.
+    outer_run_id = new_outer_run_id()
     container_result = run_ash_container(
+        outer_run_id=outer_run_id,
         source_dir=opts.source_dir,
         output_dir=opts.output_dir,
         offline=opts.offline,
@@ -1625,6 +2208,7 @@ def _run_container_mode(
         inspect=opts.inspect,
         existing_results=opts.existing_results,
         python_based_plugins_only=opts.python_based_plugins_only,
+        ignore_suppressions=opts.ignore_suppressions,
         fail_on_findings=effective_fail_on_findings,
         fail_on_incomplete_scanners=effective_fail_on_incomplete_scanners,
         ash_revision_to_install=opts.ash_revision_to_install,
@@ -1636,6 +2220,7 @@ def _run_container_mode(
         allow_missing_projects=opts.allow_missing_projects,
         shard_index=opts.shard_index,
         shard_count=opts.shard_count,
+        workspace_config=workspace_config,
     )
 
     if opts.debug:
@@ -1700,8 +2285,9 @@ def _run_container_mode(
     # NOT "any non-zero status", and the difference matters: the container entrypoint is
     # this same CLI, so 0, 1 and 2 are verdicts that _compute_exit_code reached from a
     # results file, and the host deliberately recomputes them, because it applies
-    # --min-severity and --ignore-suppressions, neither of which is forwarded inward.
-    # Exiting on 2 here would report findings the operator asked to filter out.
+    # --min-severity, which is not forwarded inward. Exiting on 2 here would report
+    # findings the operator asked to filter out. (--ignore-suppressions is forwarded:
+    # suppressions are applied by the scan inside, and reach the host in its ash.sarif.)
     #
     # NOT ASH_EXIT_CODES either, which is the wider table of every status the CLI can
     # return and includes two that assert the opposite of a verdict. 3 is an invalid
@@ -1745,15 +2331,35 @@ def _run_container_mode(
             )
         sys.exit(container_returncode)
 
+    _refuse_links_left_in_reports(opts)
+    _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
+
     output_file = opts.output_dir / "ash_aggregated_results.json"
-    if output_file.exists():
-        with open(output_file, mode="r", encoding="utf-8") as f:
-            content = f.read()
-        try:
-            return AshAggregatedResults.model_validate_json(content)
-        except Exception as e:
-            logger.error(f"Failed to parse results file: {e}")
-            sys.exit(1)
+    if container_returncode == 2 and not output_file.exists():
+        # The scan inside exits 2 for findings only after writing the results file,
+        # and for a usage error without one: an image built from an older ASH
+        # rejects an option this ASH passes it, such as the repository mark.
+        passed = [str(arg) for arg in (getattr(container_result, "args", None) or [])]
+        cause = (
+            f"the image was built from an older ASH that does not accept "
+            f"{CONFIG_FROM_SCANNED_REPOSITORY_FLAG}, which this ASH passes it"
+            if CONFIG_FROM_SCANNED_REPOSITORY_FLAG in passed
+            else "the image may be from an older ASH that does not accept an option "
+            "this ASH passes it"
+        )
+        logger.error(
+            "The scan inside the container exited 2 without writing a results file, "
+            f"which is how the ASH command line rejects its arguments: {cause}. "
+            "Rebuild the image from this ASH (run without --no-build, or rebuild the "
+            "image ASH_IMAGE_NAME names)."
+        )
+        sys.exit(3)
+    results = _read_back_inner_results(output_file, logger)
+    if results is not None:
+        _refuse_an_inner_run_that_did_not_complete(
+            results, opts, outer_run_id, "container", output_file, logger
+        )
+        return results
     else:
         logger.error(f"Results file not found at {output_file}")
         sys.exit(1)
@@ -1778,8 +2384,11 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     # that exists on PATH and fails is otherwise indistinguishable from a scan that ran.
     _discard_prior_run_artifacts(opts, logger)
 
+    # Written into the results file by the inner run when it completes, so a file it
+    # did not finish is not read back as a verdict. See utils/inner_run_outcome.py.
+    outer_run_id = new_outer_run_id()
     try:
-        nix_result = run_ash_nix(debug=opts.debug)
+        nix_result = run_ash_nix(debug=opts.debug, outer_run_id=outer_run_id)
     except NixModeRefused as e:
         # `nix` missing, or the recursion guard. A refusal, so a message and exit 1 like
         # the CLI's other refused invocations (cli/scan.py:_fail_usage), not a traceback.
@@ -1799,21 +2408,32 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
         # ash.log.
         logger.warning(f"Nix shell exited with code {nix_result.returncode}")
 
+    _refuse_links_left_in_reports(opts)
+    _refuse_an_inner_run_that_was_refused(opts, outer_run_id)
+
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
     output_file = opts.output_dir / "ash_aggregated_results.json"
-    if output_file.exists():
-        with open(output_file, mode="r", encoding="utf-8") as f:
-            content = f.read()
-        try:
-            return AshAggregatedResults.model_validate_json(content)
-        except Exception as e:
-            logger.error(f"Failed to parse results file: {e}")
-            sys.exit(1)
+    results = _read_back_inner_results(output_file, logger)
+    if results is not None:
+        _refuse_an_inner_run_that_did_not_complete(
+            results, opts, outer_run_id, "nix", output_file, logger
+        )
+        return results
     else:
         # No results file means the inner scan never got far enough to write one, so the
         # shell's own exit code is the only diagnostic available. Reporting it here is the
         # difference between an actionable error and a bare "file not found".
+        if nix_result.returncode in _NIX_REFUSAL_EXIT_CODES:
+            # The inner ASH refused before scanning: 3 for a config that does not load,
+            # 4 for a workspace definition or policy error. Kept, as container mode keeps
+            # them, so the caller can still tell which; exit 1 would say a scan failed.
+            logger.error(
+                f"The Nix shell exited with {nix_result.returncode} "
+                f"({ASH_EXIT_CODES[nix_result.returncode]}), which means nothing was "
+                f"scanned, so there is no results file at {output_file}."
+            )
+            sys.exit(nix_result.returncode)
         logger.error(
             f"Results file not found at {output_file}. The Nix shell exited with "
             f"code {nix_result.returncode}."
@@ -1831,14 +2451,21 @@ def _run_local_mode(
 ) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
+    # Before this run starts any process, so none of them inherits it. See
+    # utils/inner_run_outcome.py.
+    outer_run_id = take_outer_run_id()
+
     # Through utils/process_env.py rather than os.environ directly: an MCP server
     # runs this in an executor thread while other scans may be spawning, and the
-    # helper's lock is what keeps their environment copies consistent. The
-    # previous value is restored rather than popped, so an ASH_OFFLINE=YES the
-    # process started with survives the scan.
-    _offline_previous = None
+    # helper's lock is what keeps their environment copies consistent. Held rather
+    # than set and restored: with two offline scans overlapping in one process, the
+    # first to end would put back "unset" while the other still runs, and the last
+    # would put back the first one's "YES". The last release restores what the
+    # process started with, so an ASH_OFFLINE=YES it was started with survives.
+    _offline_held = False
     if opts.offline:
-        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
+        hold_environ("ASH_OFFLINE", "YES")
+        _offline_held = True
 
     _changed_file_set = None
     if opts.changed_files_only:
@@ -1897,9 +2524,8 @@ def _run_local_mode(
             logger.verbose(f"Scanners specified: {opts.scanners}")
             logger.verbose(f"Scanners excluded: {opts.excluded_scanners}")
 
-        config = opts.config
-        if config is None:
-            config = _discovered_config_path(opts.source_dir, log_selection=True)
+        config = _scan_config_path(opts, log_selection=True)
+        if opts.config is None:
             if config is not None:
                 logger.info(f"Using config file found at: {config}")
         else:
@@ -1933,7 +2559,10 @@ def _run_local_mode(
             config_overrides=opts.config_overrides or [],
             config_base_gate=opts.config_base_gate,
             untrusted_config=opts.untrusted_config,
+            remote_client=opts.remote_client,
             trusted_config_path=opts.trusted_config_path,
+            client_overrides=opts.client_overrides,
+            client_config_policy=opts.client_config_policy,
             verbose=opts.verbose or opts.debug,
             debug=opts.debug,
             strategy=(
@@ -2001,8 +2630,34 @@ def _run_local_mode(
             results = _filter_results_to_changed_files(
                 results, _changed_file_set, opts.source_dir
             )
-            sarif_path = opts.output_dir / "reports" / "ash.sarif"
-            if sarif_path.exists() and results.sarif:
+            # Written like any report: not through a link, which is refused (the
+            # report phase does not examine this name when no selected reporter
+            # writes it), and only as a file directly inside the reports directory.
+            from automated_security_helper.base.reporter_plugin import (
+                confined_report_path,
+            )
+
+            # The SARIF report this run's SARIF reporter wrote, under the name its
+            # extension gave it: not an earlier run's report, which --use-existing
+            # keeps in reports/, nor another reporter's file at ash.sarif.
+            reports_dir = opts.output_dir / "reports"
+            sarif_name = report_file_written_as(results, "sarif") or "ash.sarif"
+            refuse_linked_report_paths(reports_dir, ["ash.sarif", sarif_name])
+            sarif_path = confined_report_path(reports_dir, sarif_name)
+            if sarif_path is None:
+                # Only when reports/ or the file became a link after the check above.
+                # Skipping the rewrite would leave the unfiltered report in place.
+                raise ReportPathRefused(
+                    f"{(reports_dir / sarif_name).as_posix()} is not a file in "
+                    f"{reports_dir.as_posix()}, so the --changed-files-only rewrite "
+                    "cannot replace it",
+                    REMEDY,
+                )
+            if (
+                sarif_path.exists()
+                and results.sarif
+                and report_file_written_as(results, "sarif") is not None
+            ):
                 # Replaced atomically for the same reason as the aggregated file
                 # below: ash.sarif already exists, so a reader waiting on it would
                 # otherwise open it mid-rewrite.
@@ -2011,6 +2666,15 @@ def _run_local_mode(
                     results.sarif.model_dump_json(indent=2, by_alias=True),
                 )
 
+        # A run whose report phase did not run (--phases without report) wrote no
+        # report file, and says so: a reports/ash.sarif something else wrote is not
+        # its report.
+        if isinstance(results, BaseModel) and not records_reports_written(results):
+            record_reports_written(results, [])
+        # The run completed: as the inner run of a container or nix scan, say so for
+        # the outer process, replacing any record an earlier run left in a results
+        # file read back with --use-existing. See utils/inner_run_outcome.py.
+        mark_run_completed(results, outer_run_id)
         if isinstance(results, BaseModel):
             content = results.model_dump_json(indent=2, by_alias=True)
         else:
@@ -2024,6 +2688,14 @@ def _run_local_mode(
 
         return results, _config_fail_on_findings
 
+    except (ASHConfigFieldDeniedError, ASHConfigPolicyUnreadableError) as e:
+        # An MCP caller passed the rules, and it records the error it is handed
+        # as the scan's; an exit code would leave the client with "exited with
+        # code 3" and the fields named only in the server log.
+        if opts.client_config_policy is not None:
+            raise
+        print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
+        sys.exit(3)
     except ASHConfigValidationError as e:
         print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
         sys.exit(3)
@@ -2035,6 +2707,22 @@ def _run_local_mode(
         # operator's config is fine.
         print(f"[bold red]ERROR (1) {e}[/bold red]")
         sys.exit(1)
+    except ExistingResultsRefused as e:
+        # --use-existing named results that hold no scan: reported on, they would
+        # read as a clean one. The operator's input, not a fault, so no traceback.
+        print(f"[bold red]ERROR (1) {escape_markup(str(e))}[/bold red]")
+        sys.exit(1)
+    except ReportPathRefused as e:
+        # A report path was refused: by the report phase before any reporter wrote
+        # (a link at the reports directory or at a report file, a report file name
+        # that is not a file in the reports directory, or two reporters writing one
+        # file), or by the --changed-files-only rewrite of the SARIF report after
+        # the reporters wrote (a link there). Not a fault, so no traceback. As the
+        # inner run of a container or nix scan, recorded beside the results file
+        # for the outer process; if that fails, the outer process finds no record
+        # of this run's completion and exits 1 all the same.
+        _record_inner_refusal(opts, e, outer_run_id, logger)
+        _refuse_report_path_link(e)
     except Exception as e:
         logger.exception(e)
         print(
@@ -2042,8 +2730,8 @@ def _run_local_mode(
         )
         sys.exit(1)
     finally:
-        if _offline_previous is not None:
-            restore_environ(_offline_previous)
+        if _offline_held:
+            release_environ("ASH_OFFLINE")
 
 
 # ---------------------------------------------------------------------------
@@ -2056,39 +2744,52 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     The workspace root's config, not a project's: how many projects run at once
     is not a project's decision, and a project that set it would be overriding a
-    sibling. Falls back to the defaults when there is no config file or it cannot
-    be read -- these are scheduling knobs, so refusing to scan over an unreadable
-    one would be a poor trade.
+    sibling. The defaults apply when there is no config file. A config file that
+    is named (``--config``, an MCP profile) or discovered and cannot be loaded
+    raises ``ASHConfigValidationError`` (exit 3), the way the same file refuses a
+    single-directory scan: the file was meant to configure this run, and running
+    without it is not the run the operator asked for.
     """
-    from automated_security_helper.config.ash_config import (
-        AshConfig,
-        WorkspaceExecutionConfig,
+    return resolve_workspace_execution_config(
+        opts.source_dir,
+        opts.config,
+        opts.config_base_gate,
+        remote_client=opts.remote_client,
+        session_id=getattr(opts.client_config_policy, "session_id", None),
     )
 
-    config_path_str = opts.config
+
+def resolve_workspace_execution_config(
+    workspace_root: Path,
+    config: Optional[str] = None,
+    permit: Optional[Callable[[Path], bool]] = None,
+    remote_client: bool = False,
+    session_id: Optional[str] = None,
+):
+    """``_resolve_workspace_execution_config`` from its inputs.
+
+    Public so workspace planning (``ash scan --workspace ... --dry-run`` and MCP
+    ``resolve_workspace``) refuses the workspace root's config exactly as the
+    run does: a plan reported as fine for a config the run refuses with exit 3
+    would answer the question a dry run exists to ask the wrong way.
+    ``remote_client`` and ``session_id`` are as for ``_load_with_confinement``.
+    """
+    from automated_security_helper.config.ash_config import WorkspaceExecutionConfig
+
+    config_path_str = config
     if config_path_str is None:
-        try:
-            config_path_str = _discovered_config_path(opts.source_dir)
-        except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
-            logging.getLogger(__name__).warning(
-                f"Could not locate the workspace config ({exc}); using the default "
-                "workspace execution settings."
-            )
-            return WorkspaceExecutionConfig()
+        config_path_str = _discovered_config_path(workspace_root, permit=permit)
 
     if config_path_str is None:
         return WorkspaceExecutionConfig()
 
-    try:
-        return _load_with_confinement(
-            AshConfig, config_path_str, opts.source_dir, opts.config_base_gate
-        ).workspace
-    except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
-        logging.getLogger(__name__).warning(
-            f"Could not read workspace execution settings from "
-            f"'{config_path_str}' ({exc}); using defaults."
-        )
-        return WorkspaceExecutionConfig()
+    return _load_with_confinement(
+        config_path_str,
+        workspace_root,
+        permit,
+        remote_client=remote_client,
+        session_id=session_id,
+    ).workspace
 
 
 def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
@@ -2125,11 +2826,12 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
 
     Failure modes
     -------------
-    An unreadable ASH config at the workspace root does not raise here.
-    ``_resolve_workspace_execution_config`` warns and falls back to the defaults,
-    because these are scheduling knobs -- refusing the whole scan over a typo in
-    one would be a poor trade, and on the MCP path it would surface as an
-    internal error for what is really an operator's config file.
+    An ASH config at the workspace root (or named by ``opts.config``) that cannot
+    be loaded raises ``ASHConfigValidationError`` from
+    ``_resolve_workspace_execution_config``, as the same file does for a
+    single-directory scan. ``_run_workspace_mode`` exits 3 on it, and the MCP
+    path maps it to exit code 3 (``cli/mcp/workspace._EXIT_CODE_BY_EXCEPTION``),
+    so it is reported as an invalid configuration, not an internal error.
     """
     from automated_security_helper.workspace.execution import ProjectScanSettings
 
@@ -2176,6 +2878,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
             getattr(fmt, "value", str(fmt)) for fmt in (opts.output_formats or [])
         ),
         config_overrides=tuple(opts.config_overrides or []),
+        client_overrides=opts.client_overrides,
         ash_plugin_modules=tuple(opts.ash_plugin_modules or []),
         strategy=getattr(opts.strategy, "value", str(opts.strategy)),
         offline=opts.offline,
@@ -2186,6 +2889,8 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         fail_on_incomplete_scanners=opts.fail_on_incomplete_scanners,
         changed_files_only=opts.changed_files_only,
         base_ref=opts.base_ref,
+        # The MCP session's gate, the same one the plan was resolved with.
+        config_base_gate=opts.config_base_gate,
         precommit=opts.mode == RunMode.precommit,
         cleanup=opts.cleanup,
         verbose=opts.verbose,
@@ -2201,10 +2906,11 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,
-        # ``opts.config`` in workspace mode is the fallback for a project that
-        # declares no config of its own, not a config for the workspace: each
-        # project's own ``.ash.yaml`` still wins, which is what makes one
-        # workspace scannable across differently-configured repositories.
+        # ``opts.config`` in workspace mode is the operator's config: a project
+        # with no config of its own uses it, and the plan records it as the
+        # ``operator_config`` layered over a project's own ``.ash.yaml``, whose
+        # fields it does not set stay the project's (resolver
+        # ``_resolve_project_config``).
         #
         # The caller has to pass the same value as ``resolve_workspace``'s
         # ``default_config``, because the plan's reported threshold comes from
@@ -2213,6 +2919,14 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         # threaded through two layers, and silently ignored, which is the same
         # shape of defect as the ``ASH_OFFLINE`` one recorded in cli/mcp/workspace.
         default_config_path=opts.config,
+        # The registered profile ``opts.config`` is resolved against when an MCP
+        # client patched the session's copy; None takes ``opts.config``.
+        trusted_config_path=opts.trusted_config_path,
+        # The rules a project config an MCP client delivered is checked against.
+        # The same value the plan was resolved with, for the reason above.
+        client_config_rules=opts.client_config_policy,
+        # Which project configs resolve no !ENV. Also the plan's, for that reason.
+        remote_client=opts.remote_client,
     )
 
 
@@ -2239,18 +2953,43 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
             "opts.workspace_plan is None"
         )
 
+    # Before this run starts any process, so none of them inherits it. See
+    # utils/inner_run_outcome.py.
+    outer_run_id = take_outer_run_id()
+
     # Built before ASH_OFFLINE is set, preserving the order the inline
     # construction had: the builder reads a config file off disk, and doing that
     # with the offline flag already in the environment is a different read.
-    settings = build_project_scan_settings(opts)
+    try:
+        settings = build_project_scan_settings(opts)
+    except ASHConfigValidationError as exc:
+        print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
+        sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
 
-    # Set and restored through utils/process_env.py; see _run_local_mode.
-    _offline_previous = None
+    # Held and released through utils/process_env.py; see _run_local_mode.
+    _offline_held = False
     if opts.offline:
-        _offline_previous = apply_environ_overrides({"ASH_OFFLINE": "YES"})
+        hold_environ("ASH_OFFLINE", "YES")
+        _offline_held = True
 
     try:
-        return execute_workspace(opts.workspace_plan, settings)
+        result = execute_workspace(opts.workspace_plan, settings)
+        if outer_run_id is not None:
+            # The inner run of a container scan: say it completed, for the outer
+            # process, after the report step. Stamped into the file the aggregator
+            # streamed rather than by loading it. See utils/inner_run_outcome.py.
+            from automated_security_helper.workspace.aggregation import (
+                stamp_run_record,
+            )
+
+            if not stamp_run_record(
+                result.results_path, completion_marker(outer_run_id)
+            ):
+                logger.warning(
+                    f"Could not record in {result.results_path} that this run "
+                    "completed; the outer process will report that it did not."
+                )
+        return result
     except WorkspaceDefinitionError as exc:
         # A refusal, not a project failure: nothing was scanned, so there is no
         # results file and the exit-2 collision is unambiguous. See
@@ -2260,6 +2999,12 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     except ASHConfigValidationError as exc:
         print(f"[bold red]ERROR (3) Invalid configuration: {exc}[/bold red]")
         sys.exit(int(WorkspaceExitCode.INVALID_PROJECT_CONFIG))
+    except ReportPathRefused as exc:
+        # Exit 1, as in a single-directory scan: a link at a report path, or a file
+        # name outside the reports directory, is not a workspace definition error.
+        # Recorded beside the unified results, which keep what the projects wrote.
+        _record_inner_refusal(opts, exc, outer_run_id, logger)
+        _refuse_report_path_link(exc)
     except Exception as exc:
         logger.exception(exc)
         print(
@@ -2268,8 +3013,8 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         )
         sys.exit(int(WorkspaceExitCode.INTERNAL_ERROR))
     finally:
-        if _offline_previous is not None:
-            restore_environ(_offline_previous)
+        if _offline_held:
+            release_environ("ASH_OFFLINE")
 
 
 def _print_workspace_summary(
@@ -2300,15 +3045,39 @@ def _print_workspace_summary(
                 f"  [bold red]failed[/bold red]   {entry.display_label}: {entry.error}"
             )
             continue
-        colour = "bold red" if entry.exceeds_threshold else "green"
-        verdict = "FAIL" if entry.exceeds_threshold else "pass"
+        # An incomplete project fails like one over its threshold: it exits 1, and
+        # "pass" beside it contradicted the run's own status.
+        failing = entry.exceeds_threshold or entry.scan_incomplete
+        colour = "bold red" if failing else "green"
+        verdict = "FAIL" if failing else "pass"
+        incomplete = ""
+        if entry.incomplete_scanners:
+            incomplete = "; incomplete: " + escape_markup(
+                ", ".join(entry.incomplete_scanners)
+            )
+        elif entry.scan_incomplete:
+            incomplete = "; incomplete"
         print(
             f"  [{colour}]{verdict}[/{colour}]     {entry.display_label} -- "
             f"{entry.actionable_finding_count} actionable of "
             f"{entry.finding_count} at threshold "
             f"{entry.severity_threshold or 'none'} "
-            f"({entry.duration_seconds:.1f}s)"
+            f"({entry.duration_seconds:.1f}s){incomplete}"
         )
+
+    # Each project's inputs a scanner did not scan, as a single-directory scan lists
+    # its own beside the table (metrics_table.print_inputs_not_scanned).
+    not_scanned = [
+        item for entry in result.payload.projects for item in entry.inputs_not_scanned
+    ]
+    if not_scanned:
+        # Imported here: metrics_table loads ash_config, which importing this
+        # module must not (test_forward_ref_resolves_in_any_import_order.py).
+        from automated_security_helper.core.metrics_table import not_scanned_line
+
+        print("")
+        for item in not_scanned:
+            print(f"  {not_scanned_line(item.scanner, item.path, item.reason)}")
 
     print("")
     print(f"  Aggregated results: {result.results_path.as_posix()}")
@@ -2613,6 +3382,24 @@ def _compute_exit_code(
     else:
         final_fail_on_findings = True
 
+    # The SARIF report this run's SARIF reporter wrote, under the name its extension
+    # gave it. Not reports/ash.sarif as such: --use-existing keeps reports/, so with
+    # no SARIF reporter selected the file there is an earlier run's, and another
+    # reporter's extension can name it. Without such a report the model's own
+    # findings are counted. See utils/inner_run_outcome.py.
+    reports_dir = Path(opts.output_dir).joinpath("reports")
+    sarif_name = report_file_written_as(results, "sarif")
+
+    # Not read through a link, which would let the file it points to decide the exit
+    # code. The report phase refuses one where the SARIF reporter writes; this covers
+    # a run in which that reporter did not write it. Ahead of the fail_on_findings
+    # return below, so a link left in reports/ refuses the run either way.
+    found = linked_report_path(
+        reports_dir, ["ash.sarif", *([sarif_name] if sarif_name else [])]
+    )
+    if found is not None:
+        _refuse_report_path_link(ReportPathLinkRefused(found))
+
     if not final_fail_on_findings:
         return 0
 
@@ -2641,8 +3428,13 @@ def _compute_exit_code(
     # input too. No validated config route produces one -- global_settings is a
     # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
     # means "defer to global" -- so this is parity rather than a new behaviour.
-    sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
-    if sarif_file.exists():
+    # Only the SARIF report this run's SARIF reporter wrote (sarif_name above), and
+    # only as a file in reports/: the name comes from the results file, which in
+    # container and nix mode another process wrote.
+    from automated_security_helper.base.reporter_plugin import confined_report_path
+
+    sarif_file = confined_report_path(reports_dir, sarif_name) if sarif_name else None
+    if sarif_file is not None and sarif_file.exists():
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
@@ -2868,6 +3660,33 @@ def _filter_results_to_changed_files(
 # ---------------------------------------------------------------------------
 
 
+def _in_scanned_tree_from_arguments(run):
+    """Run ``run_ash_scan`` with its target registered as the scanned tree.
+
+    Before mode dispatch, so container mode's runtime lookup, nix mode's ``nix``
+    and workspace mode's projects are covered too: the source directory, or the
+    workspace root when a workspace plan is given.
+    """
+
+    @functools.wraps(run)
+    def wrapper(*args, **kwargs):
+        from automated_security_helper.utils.subprocess_utils import scanning_tree
+
+        plan = kwargs.get("workspace_plan")
+        source_dir = kwargs.get("source_dir")
+        if plan is not None:
+            root = Path(plan.workspace_root)
+        elif source_dir is not None:
+            root = Path(source_dir)
+        else:
+            root = Path.cwd()
+        with scanning_tree(root):
+            return run(*args, **kwargs)
+
+    return wrapper
+
+
+@_in_scanned_tree_from_arguments
 def run_ash_scan(
     source_dir: str | Path | None = None,
     output_dir: str | Path | None = None,
@@ -2919,6 +3738,9 @@ def run_ash_scan(
     config_base_gate: Optional[Callable[[Path], bool]] = None,
     untrusted_config: bool = False,
     trusted_config_path: Optional[str] = None,
+    workspace_config_as_named: Optional[str] = None,
+    client_config_policy: "Optional[ClientConfigRules]" = None,
+    remote_client: bool = False,
     *args,
     **kwargs,
 ):
@@ -2990,23 +3812,80 @@ def run_ash_scan(
         config_base_gate=config_base_gate,
         untrusted_config=untrusted_config,
         trusted_config_path=trusted_config_path,
+        workspace_config_as_named=workspace_config_as_named,
+        client_config_policy=client_config_policy,
+        remote_client=remote_client,
     )
 
     # Only the local orchestrator resolves with these. Container and nix mode run
     # a separate ASH that is handed the config path alone, and workspace mode
     # resolves each project's own config, so in any of them the restriction would
     # be dropped without a word.
-    if opts.untrusted_config and (
-        opts.mode in (RunMode.container, RunMode.nix) or opts.workspace_plan is not None
+    if opts.config_base_gate is not None and opts.mode in (
+        RunMode.container,
+        RunMode.nix,
     ):
         raise ValueError(
-            "untrusted_config is applied only to a single-directory scan in local "
-            f"mode, not to mode={opts.mode.value!r}"
-            + (" with a workspace plan" if opts.workspace_plan is not None else "")
+            "config_base_gate is applied only to a scan in local mode, not to "
+            f"mode={opts.mode.value!r}: the ASH that mode runs reads the config "
+            "without it"
+        )
+    for name, value, workspace_ok in (
+        ("untrusted_config", opts.untrusted_config, False),
+        # Workspace mode carries these to every project through the settings
+        # builder.
+        ("client_config_policy", opts.client_config_policy, True),
+        ("remote_client", opts.remote_client, True),
+    ):
+        if value and (
+            opts.mode in (RunMode.container, RunMode.nix)
+            or (opts.workspace_plan is not None and not workspace_ok)
+        ):
+            raise ValueError(
+                f"{name} is applied only to a single-directory scan in local "
+                f"mode, not to mode={opts.mode.value!r}"
+                + (" with a workspace plan" if opts.workspace_plan is not None else "")
+            )
+
+    if opts.changed_files_only:
+        # Refused here, before logging is set up and before any git process
+        # starts, in every mode: the base ref goes to `git diff`, and a value git
+        # reads as an option changes what git does. Unchecked without
+        # --changed-files-only, because then no diff runs.
+        from automated_security_helper.utils.get_scan_set import validate_base_ref
+
+        validate_base_ref(opts.base_ref)
+
+    if opts.mode == RunMode.container and opts.config is None:
+        # Before anything reads the config, so the host's own reads (the exit-code
+        # fields below) use the file the container is handed. A workspace scan gets
+        # ASH_CONFIG as the CLI hands it over, where it is --config's environment
+        # variable: the scan inside sees neither the host's environment nor the file.
+        opts.config = (
+            _ash_config_fallback(opts.source_dir, permit=opts.config_base_gate)
+            if opts.workspace_plan is None
+            else os.environ.get("ASH_CONFIG") or None
         )
 
     _apply_log_level_env(opts)
     _refuse_symlinked_output_dir(opts)
+    # Every write this run makes below the output directory, from ash.log on, is
+    # guarded (fs_guard). The registration is this run's and is released when it
+    # ends, so a process that runs many scans, as the MCP server does, does not
+    # keep guarding every output directory it ever wrote. run_roots releases the
+    # roots this run's PluginContexts and sandbox scopes registered at the same
+    # time, rather than whenever the collector reaches them.
+    from automated_security_helper.utils.sandbox.fs_guard import (
+        run_roots,
+        writable_root,
+    )
+
+    with writable_root(opts.output_dir), run_roots():
+        return _run_with_options(opts, scan_start_time)
+
+
+def _run_with_options(opts: ScanOptions, scan_start_time: float):
+    """The rest of ``run_ash_scan``, from the logger on, with its root registered."""
     logger = _setup_logger(opts)
 
     if opts.workspace_plan is not None and opts.mode != RunMode.container:
@@ -3022,8 +3901,14 @@ def run_ash_scan(
         return workspace_result
 
     config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(opts)
+    # Read from the file before the scan only where the verdict cannot wait for the
+    # orchestrator's resolution. A local scan's results carry the config it
+    # actually resolved, which a client-delivered file is checked in; a pre-read
+    # here would be an unchecked second read of the same file.
     config_fail_on_incomplete_scanners: Optional[bool] = (
         _resolve_config_fail_on_incomplete_scanners(opts)
+        if opts.mode != RunMode.local
+        else None
     )
     results: Optional[AshAggregatedResults]
     if opts.mode == RunMode.container:

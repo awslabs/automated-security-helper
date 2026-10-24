@@ -126,8 +126,12 @@ TOOL_NOTES: dict[str, dict] = {
                 "notes": "Findings below this are filtered out at scan time"
             },
             "config_path": {
-                "default": "`<source>/.ash/.ash.yaml`",
-                "notes": "Custom config path",
+                "notes": (
+                    "Custom config path. When not set: the profile this session bound "
+                    "with `select_profile`, else the config ASH discovers in the source "
+                    "directory, else the file `ASH_CONFIG` names in the server's "
+                    "environment, else the built-in defaults"
+                ),
             },
             "clean_output": {"notes": "Wipe stale reports before starting"},
         },
@@ -159,6 +163,41 @@ TOOL_NOTES: dict[str, dict] = {
                 "suggest polling `progress['is_complete']`. This is incomplete advice — "
                 "`is_complete` stays `False` for cancelled scans. Always check `status` "
                 "independently. (See `get_scan_progress` below.)"
+            ),
+            (
+                "**A refused config keeps its own `error_type`.** The scan does not start, "
+                "and the response is `success: false` with one of these `error_type` values "
+                "and the reason in `error`:"
+            ),
+            (
+                "- `config_input_not_permitted`: `config_path`, or a base its `extends` "
+                "chain names, is outside the directories this session may read a config from.\n"
+                "- `config_field_denied`: a config file an MCP client delivered or named "
+                "sets a field the session's runtime-override policy denies. `error` names "
+                "each field and why.\n"
+                "- `config_policy_unreadable`: that policy cannot be established, for "
+                "example because the profile the session bound is no longer registered. "
+                "`error` starts with `A config an MCP client delivered cannot be checked:`.\n"
+                "- `config_env_not_resolved`: a file of the config uses an `!ENV` tag, or a "
+                "plain value that starts with a `${VAR}` or `${VAR:default}` reference, "
+                "where none is resolved. For a remote caller that is any file the "
+                "operator did not set aside (outside the directories "
+                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, other than the profile files "
+                "the server writes in the calling session's `config/` directory), the "
+                "scan target's own config included, and every base "
+                "such a file extends; for a stdio caller, a file a client delivered. The "
+                "server's own config, the file `ASH_CONFIG` names outside the MCP "
+                "workspace root and each registered profile, is not refused. `error` "
+                "names the file and the line or key."
+            ),
+            (
+                "The target and source checks have their own `error_type` values too "
+                "(`scan_target_not_permitted`, `output_dir_not_permitted`, "
+                "`no_source_delivered`, `session_source_mismatch`, "
+                "`delivered_source_missing`, `invalid_session_id`). Any other reason the "
+                "scan could not be started returns `error_type: scan_start_failure`, and an "
+                "unexpected error returns the exception's class name. Branch on "
+                "`error_type`, not on the text of `error`."
             ),
         ],
     },
@@ -320,14 +359,78 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "set_source_git": {
         "params": {
-            "url": {"notes": "Repository URL"},
+            "url": {
+                "notes": (
+                    "Repository URL: `https://`, `ssh://` or `user@host:path`, on a "
+                    "host the operator listed in `ASH_MCP_GIT_ALLOWED_HOSTS`"
+                )
+            },
             "ref": {"default": "default branch", "notes": "Branch, tag, or commit"},
             "ssh_key_id": {
                 "default": "none",
-                "notes": "Operator-registered key id for private repos",
+                "notes": "Must be omitted: the server registers no ssh keys",
             },
             "depth": {"notes": "Clone depth; `0` for a full clone"},
         },
+        "caveats": [
+            (
+                "Refused while a scan of this session is running, because the clone "
+                "would replace the tree and config files that scan is reading. The "
+                "response is `success: false`, `error_type: SourceDeliveryBusyError`, "
+                "and `error` set to `a scan of this session is running; deliver the "
+                "source after it finishes`. Deliver the source again once "
+                "`get_scan_progress` reports a terminal status."
+            ),
+        ],
+    },
+    "set_source_zip_finalize": {
+        "caveats": [
+            (
+                "Refused while a scan of this session is running, for the same reason as "
+                "`set_source_git`: `success: false`, `error_type: SourceDeliveryBusyError`, "
+                "and `error` set to `Error finalizing source upload: a scan of this session "
+                "is running; deliver the source after it finishes`. "
+                "`set_source_zip_chunk` is not refused, so the chunks can be sent while the "
+                "scan runs and the upload finalized after it ends."
+            ),
+        ],
+    },
+    "get_config": {
+        "caveats": [
+            (
+                "A config this session may not read, or one a client delivered that the "
+                "server refuses, returns `success: false` with `error_type` "
+                "`config_input_not_permitted`, `config_field_denied`, "
+                "`config_policy_unreadable` or `config_env_not_resolved`, as `run_ash_scan` "
+                "does for the same file."
+            ),
+        ],
+    },
+    "validate_config": {
+        "caveats": [
+            (
+                "Each error is `{field, message, type}`. A remote caller's "
+                "`config_content` counts as the client's config, and so does a "
+                "`config_path` that a client delivered or that is outside the directories "
+                "`ASH_MCP_ALLOWED_CONFIG_ROOTS` names, unless it is a profile file the "
+                "server wrote in the calling session's `config/` directory. "
+                "On stdio, `config_content` is the caller's own, because the caller "
+                "started the server. Besides schema and parse errors, `type` can be "
+                "`config_input_not_permitted` (a `config_path` this session may not "
+                "read), `config_policy_unreadable` (the session's runtime-override policy "
+                "cannot be established for the client's config), "
+                "`denied_by_runtime_policy` (a field of the client's config that policy "
+                "denies, named in `field`, with the message `<field> may not be set by a "
+                "config an MCP client delivers: <reason>`), or `config_env_not_resolved`. "
+                "A `${VAR}` or `${VAR:default}` reference at the start of a plain value, "
+                "or an `!ENV` tag, is an error of type `config_env_not_resolved` "
+                "anywhere in a remote caller's client config, and for a stdio caller "
+                "only in a file a client delivered. A policy check that cannot finish on "
+                "the client's config makes it invalid, with an error of type "
+                "`validation_error` that starts `The config could not be checked against "
+                "this session's runtime-override policy`."
+            ),
+        ],
     },
     "list_scanners": {
         "no_params_sentence": (
@@ -337,8 +440,8 @@ TOOL_NOTES: dict[str, dict] = {
     },
     "list_profiles": {
         "no_params_sentence": (
-            "No parameters. Returns the config profiles the operator registered at server "
-            "startup."
+            "No parameters. Returns the config profiles registered at server startup "
+            "with `ash mcp --profile NAME=path`. Without `--profile` the list is empty."
         ),
     },
     "clear_source": {

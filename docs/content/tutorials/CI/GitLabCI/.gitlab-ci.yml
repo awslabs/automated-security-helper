@@ -27,7 +27,10 @@ Run ASH Scan:
       ash \
         --source-dir "$(pwd)" \
         --output-dir "$(pwd)/ash_output"
+  # reports/ and the aggregated results only. scanners/ and converted/ hold each
+  # tool's raw output, which is not masked.
   artifacts:
     paths:
-      - ash_output
+      - ash_output/reports
+      - ash_output/ash_aggregated_results.json
     when: always

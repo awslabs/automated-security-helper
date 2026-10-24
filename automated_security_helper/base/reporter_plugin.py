@@ -35,17 +35,44 @@ unprepared reporter a shape it has never seen and trusts it. ``UNSUPPORTED`` was
 rejected because it would fail an entire workspace run for any external plugin.
 """
 
+import threading
 from abc import abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, ClassVar, Generic, Iterable, TypeVar
+from pathlib import Path
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Generic,
+    Iterable,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    cast,
+)
 from typing_extensions import Self
 
-from pydantic import Field, model_validator
+from pydantic import (
+    Field,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticUseDefault
 
-from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.base.options import ReporterOptionsBase, _warn_once
 from automated_security_helper.base.plugin_base import PluginBase
-from automated_security_helper.base.plugin_config import PluginConfigBase
+from automated_security_helper.base.plugin_config import (
+    PluginConfigBase,
+    config_validated_by_declared_model,
+    plugin_config_key,
+)
+from automated_security_helper.base.plugin_config import (
+    declared_config_model as plugin_declared_config_model,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -102,8 +129,103 @@ class ReporterPluginConfigBase(PluginConfigBase):
     )
     extension: str | None = None
 
+    @field_validator("extension", mode="wrap")
+    @classmethod
+    def _extension_is_a_filename_suffix(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> Any:
+        """The report is written to ``ash.<extension>`` in the reports directory.
+
+        So the value is a filename suffix, from every source: one with a path
+        separator, ``..`` or NUL is replaced by the reporter's default, with one
+        warning naming the key. Declared here so it covers every reporter's
+        ``extension``, including those that redeclare the field.
+        """
+        value = handler(value)
+        if value is None or is_filename_suffix(value):
+            return value
+        name = (info.data or {}).get("name") or cls.__name__
+        key = f"reporters.{name}.extension"
+        _warn_once(
+            key,
+            str(value),
+            f"Ignoring {key}: {value!r} is not a filename suffix such as 'json'. "
+            "The report is written to ash.<extension> in the reports directory, so "
+            "it cannot contain '/', '\\', '..' or NUL. Using the default instead.",
+        )
+        raise PydanticUseDefault from None
+
+
+def is_filename_suffix(value: object) -> bool:
+    """Whether ``value`` can follow ``ash.`` in a file name without leaving its directory."""
+    return isinstance(value, str) and not any(
+        part in value for part in ("/", "\\", "..", "\x00")
+    )
+
+
+def confined_report_path(report_dir: Path, filename: str) -> Optional[Path]:
+    """``report_dir / filename``, or None when that is not a file in ``report_dir``.
+
+    Checked on the resolved path, so a ``..`` or a symlink that leads out of the
+    directory is refused, whatever produced the name. So is any name while
+    ``report_dir`` itself is a symlink or a directory junction, which it can
+    become after the run's own check (utils/report_path_links.py), so each write
+    checks it again.
+    """
+    from automated_security_helper.utils.report_path_links import link_kind
+
+    if link_kind(Path(report_dir)) is not None:
+        return None
+    target = Path(report_dir) / filename
+    try:
+        if target.resolve().parent != Path(report_dir).resolve():
+            return None
+    except (OSError, RuntimeError):
+        return None
+    return target
+
+
+def write_report_file(report_dir: Path, filename: str, content: str) -> Optional[Path]:
+    """Write a reporter's own file in ``report_dir``, or log why not and return None.
+
+    For the files a reporter writes beside the one ``ReportPhase`` writes. The name
+    has to pass ``confined_report_path``, and the write replaces the file rather
+    than writing through it, so a symlink at that name is not followed. A reporter
+    that calls this declares the names in ``companion_file_names``, so that a link
+    already at one of them, or a name that is not a file in ``report_dir``, refuses
+    the run before any reporter writes.
+    """
+    from automated_security_helper.utils.atomic_write import write_text_atomically
+
+    target = confined_report_path(report_dir, filename)
+    if target is None:
+        ASH_LOGGER.warning(
+            f"Not writing {filename!r}: it is not a file in {report_dir}."
+        )
+        return None
+    try:
+        write_text_atomically(target, content)
+    except OSError as error:
+        ASH_LOGGER.warning(f"Could not write {target}: {error}")
+        return None
+    return target
+
 
 T = TypeVar("T", bound=ReporterPluginConfigBase)
+
+
+def declared_config_model(
+    reporter_class: type,
+) -> Optional[type[ReporterPluginConfigBase]]:
+    """The config model a reporter declares with ``ReporterPluginBase[XConfig]``.
+
+    None for a reporter that declares no model, or declares
+    ``ReporterPluginConfigBase`` itself. See ``plugin_config.declared_config_model``.
+    """
+    return cast(
+        Optional[type[ReporterPluginConfigBase]],
+        plugin_declared_config_model(reporter_class, ReporterPluginConfigBase),
+    )
 
 
 def reporter_format_name(instance: "ReporterPluginBase") -> str | None:
@@ -125,6 +247,38 @@ def reporter_format_name(instance: "ReporterPluginBase") -> str | None:
     never emitted on the strength of a format the operator asked for by name.
     """
     return getattr(getattr(instance, "config", None), "name", None)
+
+
+def reporter_file_name(instance: object) -> str:
+    """The file in the reports directory that ``ReportPhase`` writes this reporter's report to.
+
+    ``ash.<extension>``, or ``ash.txt`` for a reporter without an extension. The
+    workspace report step names a workspace-level report the same way.
+    """
+    extension = getattr(getattr(instance, "config", None), "extension", None)
+    return f"ash.{extension}" if extension else "ash.txt"
+
+
+def reporter_companion_file_names(instance: object) -> Tuple[str, ...]:
+    """The files this reporter writes itself in the reports directory, from its declaration.
+
+    See ``ReporterPluginBase.companion_file_names``. Only strings are kept.
+    """
+    declared = getattr(instance, "companion_file_names", None)
+    if not callable(declared):
+        return ()
+    return tuple(name for name in declared() if isinstance(name, str))
+
+
+def reporter_file_names(instance: object) -> Tuple[str, ...]:
+    """Every file this reporter's run writes in the reports directory.
+
+    Its report's file, then the files it writes itself, without repeats. This is
+    what ``ReportPhase`` and the workspace report step check for links before any
+    reporter runs (utils/report_path_links.py).
+    """
+    names = (reporter_file_name(instance), *reporter_companion_file_names(instance))
+    return tuple(dict.fromkeys(names))
 
 
 def reporter_matches_requested_formats(
@@ -174,6 +328,78 @@ def reporter_matches_requested_formats(
     return name is not None and str(name) in requested
 
 
+def off_host_reporter_refused(reporter_class: type, plugin_config: object) -> bool:
+    """Whether a reporter that sends findings off the host is not enabled to run.
+
+    A reporter class that sets ``sends_off_host`` sends findings to a remote
+    service with the host's credentials, so it runs only when its section of the
+    config says ``enabled: true``. Its own default does not count: a reporter from
+    any package that declares itself off-host and ships enabled still needs the
+    operator to turn it on. ``ash report``, the report phase and the workspace
+    report step all ask this. ``plugin_config`` is what
+    ``AshConfig.get_plugin_config`` returns, a dict or None.
+    """
+    if getattr(reporter_class, "sends_off_host", False) is not True:
+        return False
+    return not (
+        isinstance(plugin_config, dict) and plugin_config.get("enabled") is True
+    )
+
+
+#: Config keys of the off-host reporters already named by
+#: :func:`warn_off_host_section_without_enabled` in this process. A run reads a
+#: reporter's section more than once (each workspace project's report phase reads
+#: the same one), and one section should produce one warning.
+_UNENABLED_SECTIONS_WARNED: Set[str] = set()
+_UNENABLED_SECTIONS_LOCK = threading.Lock()
+
+
+def reset_unenabled_off_host_section_warnings() -> None:
+    """Forget which reporters were already named (tests)."""
+    with _UNENABLED_SECTIONS_LOCK:
+        _UNENABLED_SECTIONS_WARNED.clear()
+
+
+def _sets_something(value: object) -> bool:
+    return value not in (None, "", {}, [])
+
+
+def warn_off_host_section_without_enabled(
+    reporter_class: type, plugin_config: object
+) -> None:
+    """Warn, once per process, that an off-host reporter's section leaves it off.
+
+    The AWS reporters ship ``enabled: false``. A config written for a release in
+    which they shipped on sets their options and no ``enabled``, so it now uploads
+    nothing; this names the reporter and the key that turns it on. It changes
+    nothing: the reporter still does not run, so a section in the scanned
+    repository's own config gains nothing from it. Only the reporter's config
+    key is logged, never an option value (a bucket name, an account id).
+
+    Call it where an off-host reporter that the run would otherwise use is left
+    out because :func:`off_host_reporter_refused` says so. ``plugin_config`` is
+    what ``AshConfig.get_plugin_config`` returns: a section with ``enabled`` in
+    it (true or false), or with nothing set, is not named.
+    """
+    if getattr(reporter_class, "sends_off_host", False) is not True:
+        return
+    if not isinstance(plugin_config, dict) or "enabled" in plugin_config:
+        return
+    if not any(_sets_something(value) for value in plugin_config.values()):
+        return
+    key = plugin_config_key(reporter_class)
+    with _UNENABLED_SECTIONS_LOCK:
+        if key in _UNENABLED_SECTIONS_WARNED:
+            return
+        _UNENABLED_SECTIONS_WARNED.add(key)
+    ASH_LOGGER.warning(
+        f"Reporter '{key}' sends findings off the host and is disabled by default. "
+        "Its config section sets options but not 'enabled', so it does not run. "
+        f"To run it, set reporters.{key}.enabled: true in the operator's config, or "
+        f"pass --config-overrides reporters.{key}.enabled=true."
+    )
+
+
 class ReporterPluginBase(PluginBase, Generic[T]):
     """Base reporter plugin with some methods of the IReporter abstract class
     implemented for convenience.
@@ -196,6 +422,42 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         ReporterWorkspaceBehaviour.PER_PROJECT
     )
 
+    #: Whether this reporter sends findings off the host (to a remote service,
+    #: with the host's credentials). Such a reporter runs only when its config
+    #: section sets ``enabled: true``; see :func:`off_host_reporter_refused`. A
+    #: class attribute, so it is known before the reporter is built and does not
+    #: depend on which package the reporter comes from.
+    sends_off_host: ClassVar[bool] = False
+
+    #: Options that choose where findings are sent or written, or which
+    #: credentials send them: a region, an account, a bucket, an endpoint, a
+    #: profile, an output path. Also any other option that is the operator's for
+    #: the same reason: what is sent along with the findings, or how long the
+    #: reporter keeps calling its service. Named as the options model's fields;
+    #: an alias of one is covered too. When the config was built from a file inside the
+    #: scanned tree, or from one an MCP client delivered, these options come from
+    #: the trusted base instead: the defaults, an operator config outside the
+    #: tree, and ``--config-overrides`` (config/reporter_trust.py). A ``ClassVar``
+    #: for the same reason as ``workspace_behaviour``: it is read from the class,
+    #: after the plugin modules are imported and before any reporter is built.
+    destination_options: ClassVar[Tuple[str, ...]] = ()
+
+    @field_validator("config", mode="wrap")
+    @classmethod
+    def _config_is_validated_by_the_declared_model(
+        cls, value: Any, handler: ValidatorFunctionWrapHandler
+    ) -> Any:
+        """A reporter that declares a config model is configured by that model.
+
+        A section it refuses, such as an AWS reporter's ``max_delay`` over its
+        60-second cap, is a ValidationError: ``ReportPhase`` and the workspace
+        report step log it, with the option and the limit, and go on without this
+        reporter. See ``plugin_config.config_validated_by_declared_model``.
+        """
+        return config_validated_by_declared_model(
+            cls, ReporterPluginConfigBase, value, handler
+        )
+
     @model_validator(mode="after")
     def setup_paths(self) -> Self:
         """Set up default paths and initialize plugin configuration."""
@@ -212,6 +474,16 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         """Configure the reporter with provided configuration."""
         if config:
             self.config = config
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The files this reporter writes itself in the reports directory, beside its report.
+
+        Empty by default. A reporter that writes files with ``write_report_file``
+        returns the names it would write with its current options. ``ReportPhase``
+        and the workspace report step refuse the run, before any reporter writes,
+        when one of them is already a link.
+        """
+        return ()
 
     def _pre_report(self) -> None:
         self.start_time = datetime.now(timezone.utc)

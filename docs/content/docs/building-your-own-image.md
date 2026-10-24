@@ -45,6 +45,43 @@ Two build targets exist:
 | `non-root` | An unprivileged user | The default. Prefer it. |
 | `ci` | Root | The runner's UID/GID mapping makes an unprivileged user impractical |
 
+`non-root` is the default everywhere except Windows. On Windows, container mode
+(`ash --mode container`, `Invoke-ASH`) and `ash build-image` default to the `ci` stage,
+because the output directory is bind-mounted and the runtime there does not map write
+permissions onto that mount, so the non-root user could not write its reports and logs.
+Pass `--build-target non-root` (`-BuildTarget non-root`) to build the unprivileged image
+on Windows anyway. Running in CI does not change the default: `CI`, `IsCI`, `ISCI` and
+`CODEBUILD_BUILD_ID` play no part, and an explicit `--build-target` always wins. The
+stage name is read in any case, as the build reads it: `NON-ROOT` is `non-root`, and is
+built, tagged and checked as `non-root`. `--custom-containerfile` builds on
+`ci`; with it, `--build-target non-root` names the custom file's own `non-root` stage
+(see [Extending the image](#extending-the-image)).
+
+The `non-root` stage creates its user with the UID and GID of the account running ASH,
+or with `--container-uid` and `--container-gid`. A UID of 0 is root and cannot be that
+user, and a GID of 0 is root's group, so a `non-root` build with UID 0 or GID 0 is refused
+before anything is built, and so is a UID or GID that is not a number. That is the
+case when ASH itself runs as root, as many CI jobs do (AWS CodeBuild, container-based
+GitLab and Jenkins jobs): pass `--build-target ci` there. Another `--container-uid` and
+`--container-gid` work only when the output directory is writable by that UID, since the
+container runs as that user and writes its reports there; on a root host ASH creates the
+output directory as root. `./ash` refuses it the same way, and so does `Invoke-ASH`, run as root
+or given `-ContainerUID 0` or `-ContainerGID 0`; its opt-in is `-BuildTarget ci`.
+On Linux and macOS, `Invoke-ASH` gives the non-root user the caller's own UID and GID
+(`id -u`, `id -g`) unless `-ContainerUID` or `-ContainerGID` names another, as `./ash`
+and `ash --mode container` do, and checks both the same way; on Windows the
+Dockerfile's defaults apply.
+
+The opt-in for a job that runs as root, such as an AWS CodeBuild build:
+
+```bash
+ash --mode container --build-target ci        # or: ./ash --build-target ci
+```
+
+```powershell
+Invoke-ASH -BuildTarget ci
+```
+
 Point ASH at your published image with `ASH_IMAGE_NAME`:
 
 ```bash
@@ -56,11 +93,73 @@ Tag with the ASH version you built rather than only `latest`, so a scan result c
 traced back to a specific image. A moving `latest` makes two scans that disagree
 impossible to explain.
 
+The image's ASH must be the same version as the ASH that runs the scan, or later.
+Container mode reads the scan's results back only when the ASH in the image records
+that its run completed, which ASH v3.7.1 and earlier do not do. With an image built
+from an older ASH, every container scan exits 1 with an error saying the inner run
+did not complete. Rebuild and republish the image when you upgrade the ASH that
+runs your scans.
+
+## Who can write to the image's directories
+
+Who owns each of the image's directories, and who else may write it:
+
+| Directory | Owner | Why |
+|---|---|---|
+| `/deps`, `/deps/.semgrep`, `/deps/.opengrep` (offline rules), `/ash`, `/.ash/bin` (bundled tools, first on `PATH`) | root, not writable by others | Nothing writes there at scan time |
+| `/deps/.grype` (grype's database) | the user the image runs as: root in `ci`, the unprivileged user in `non-root`; root in an offline image | grype's database update writes it at scan time; an offline image never updates it |
+| `/src`, `/out` | writable by every user, with the sticky bit (`ci`); the unprivileged user (`non-root`) | A run mounts the source and the output here; without those mounts, these two stay writable when the `ci` image is started under another UID (the grype database does not, see below) |
+
+Outside `/src`, `/out` and the sticky scratch directories (`/tmp`, `/var/tmp`,
+`/run/lock`), nothing in the image is writable by every user. Each stage ends by
+clearing group and other write on anything an installer left that way, such as the
+lock files uv creates mode 666 in its cache and tool directories and the files some
+gems ship mode 777 under `/var/lib/gems`.
+
+An image you extend with `--custom-containerfile` keeps these modes unless your
+Dockerfile changes them.
+
+Because only its own user may write the grype database cache, an image started under a
+different UID than the one that owns that cache cannot update the database: grype then
+reports ERROR and the scan fails, rather than scanning against a database it could not
+refresh. In a `non-root` image that owner is the UID it was built with
+(`--container-uid`, or the host's); in `ci` it is root, so a `ci` image has to run as
+root, which is how ASH's own runner starts it. Build a `non-root` image with the UID it
+will run as, or use `ci` and run it as root. A platform that starts every container
+under a UID of its own needs an image built for that UID.
+
+## Which Dockerfile ASH builds
+
+`ash build-image` and `ash --mode container` build ASH's own Dockerfile. They never
+build a `Dockerfile` found in the directory you run them from or in a directory above
+it: that file belongs to the project being scanned. Which of ASH's Dockerfiles is
+used depends on how ASH was installed:
+
+- **Installed from a git URL or a package index.** The Dockerfile packaged with ASH,
+  which installs the same ASH revision from git inside the image
+  (`--ash-revision-to-install` picks another one).
+- **Installed from its source tree** (an editable install, or `pip install <dir>` or
+  `uvx --from <dir>`; the revision is `LOCAL`). The `Dockerfile` at the root of that
+  source tree, with the tree as the build context. ASH finds the tree from where the
+  running package is installed, so `ash` run from a subdirectory of the checkout, or
+  from another project, builds the same image. A package an installer put in a
+  `site-packages` directory, with its dist-info beside it, is never taken for a clone,
+  whatever other files sit next to it.
+
+A `LOCAL` revision for an installation with no source tree beside it or recorded for
+it (for example, ASH installed from a wheel file) is refused before anything is
+built. Pass `--ash-revision-to-install <tag>`, reinstall ASH from its source
+directory, or run an image you already have with `--no-build`.
+
 ## Keeping it current
 
 ASH orchestrates external scanners, and their versions are not all pinned. A rebuild
 can therefore change which findings you get, in both directions — a scanner release
-can add checks or drop them. That is an argument for rebuilding on a schedule you
+can add checks or drop them. cfn-nag is one that is pinned: the image installs it and
+every gem it depends on from the committed
+`automated_security_helper/assets/Gemfile.lock`, with Bundler frozen, so each build of
+one ASH version installs the same gems. A build whose Gemfile and Gemfile.lock disagree
+fails at that step instead of resolving new versions. That is an argument for rebuilding on a schedule you
 choose and reviewing the delta, not for rebuilding as rarely as possible.
 
 A workable cadence:
@@ -106,7 +205,7 @@ say which database was stale and how old it was. See
 `--mode local` runs ASH as a Python process with no image involved:
 
 ```bash
-uvx automated-security-helper --mode local --source-dir .
+uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 --mode local --source-dir .
 ```
 
 This avoids the image question entirely, at a cost: a few of the tools ASH
@@ -135,9 +234,14 @@ passed in as the `ASH_BASE_IMAGE` build argument:
 ash build-image --build-target ci --custom-containerfile ./Dockerfile.internal
 ```
 
-Supplying a custom containerfile forces the `ci` build target, so the run-as-non-root
-configuration is not applied. Securing the final image is then yours to do — set a
-non-root `USER` in your own Dockerfile if you need one.
+Supplying a custom containerfile builds ASH's image at the `ci` target, so the
+run-as-non-root configuration is not applied. Securing the final image is then yours to
+do — set a non-root `USER` in your own Dockerfile if you need one. To build that, give
+your Dockerfile a stage named `non-root` (`FROM ${ASH_BASE_IMAGE} AS non-root`, followed
+by the `USER` it should run as) and pass `--build-target non-root`: ASH builds its own
+image at `ci` and your file at its `non-root` stage. `--build-target non-root` with a
+custom Dockerfile that has no such stage is refused with exit 3 before anything is
+built, since the image would otherwise run as root without a word.
 
 ## Third-party license files in the image
 

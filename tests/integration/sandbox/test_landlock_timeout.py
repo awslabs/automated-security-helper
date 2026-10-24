@@ -4,9 +4,9 @@
 """A timed-out scanner under Landlock leaves no process behind.
 
 Landlock does not end a process's descendants with it, so its wrapper is a child
-subreaper that kills what its scanner leaves. A timeout used to SIGKILL the wrapper,
-which can do nothing after that; ASH now sends SIGTERM first and the wrapper ends the
-whole tree. Measured here by a detached process that would write a file after the
+subreaper that kills what its scanner leaves. On a timeout ASH sends the wrapper
+SIGTERM first, and the wrapper ends the whole tree; a SIGKILL would leave it no way
+to. Measured here by a detached process that would write a file after the
 timeout: the file must never appear.
 """
 
@@ -94,16 +94,36 @@ def _plan(backend, tmp_path, argv):
     return backend.plan(argv, {"PATH": "/usr/bin:/bin"}, policy)
 
 
+def _no_core_dump() -> None:
+    """Run in each child before it execs: a SIGSEGV here must not write a core file.
+
+    With an unlimited core size and a bare ``core`` core_pattern, both the Landlock
+    wrapper, which re-raises its scanner's signal on itself, and the unwrapped
+    shell dump core into their working directory, which was the checkout pytest
+    ran from. The limit is inherited across the wrapper's exec of the scanner.
+    """
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
 def test_a_scanner_killed_by_a_signal_reports_it_as_unwrapped(tmp_path):
     import subprocess  # nosec B404 - runs the sandboxed command under test
 
     backend = _landlock()
     argv = ["/bin/sh", "-c", "kill -SEGV $$"]
     plan = _plan(backend, tmp_path, argv)
-    wrapped = subprocess.run(plan.argv, env=plan.env, check=False)  # nosec B603 - backend-built argv
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    wrapped = subprocess.run(  # nosec B603 - backend-built argv
+        plan.argv, env=plan.env, cwd=cwd, preexec_fn=_no_core_dump, check=False
+    )
     plan.run_cleanup()
-    unwrapped = subprocess.run(argv, check=False)  # nosec B603 - fixed argv
+    unwrapped = subprocess.run(  # nosec B603 - fixed argv
+        argv, cwd=cwd, preexec_fn=_no_core_dump, check=False
+    )
     assert wrapped.returncode == unwrapped.returncode < 0
+    assert not [path.name for path in cwd.iterdir() if path.name.startswith("core")]
 
 
 def test_a_process_left_after_a_normal_exit_is_reaped(tmp_path):
@@ -123,6 +143,48 @@ def test_a_process_left_after_a_normal_exit_is_reaped(tmp_path):
     assert elapsed < 2, elapsed
     time.sleep(3)
     assert not late.exists()
+
+
+def test_a_stopped_scanner_and_what_it_detached_end_inside_half_a_second(tmp_path):
+    """SIGTERM to the wrapper, as ASH stops a sandboxed spawn, then the grace.
+
+    Half a second is the shortest grace ASH gives a stopping process before it
+    SIGKILLs it. The wrapper must have ended the scanner and the process it
+    detached by then; the detached process would write a file two seconds later.
+    """
+    import signal
+    import subprocess  # nosec B404 - runs the sandboxed command under test
+
+    backend = _landlock()
+    results = tmp_path / "out" / "scanners" / "probe"
+    results.mkdir(parents=True)
+    ready = results / "ready.txt"
+    late = results / "late.txt"
+    script = (
+        f"(setsid sh -c 'sleep 2; echo late > {late}' &) ; "
+        f"echo ready > {ready} && echo ready ; sleep 60"
+    )
+    argv = ["/bin/sh", "-c", script]
+    plan = _plan(backend, tmp_path, argv)
+    process = subprocess.Popen(plan.argv, env=plan.env, stdout=subprocess.PIPE)  # nosec B603 - backend-built argv
+    try:
+        assert process.stdout.readline() == b"ready\n"
+        started = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=30)
+        elapsed = time.monotonic() - started
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stdout.close()
+        plan.run_cleanup()
+
+    assert elapsed < 0.5, elapsed
+    # The scanner could write there, so the missing file below is the reap's doing.
+    assert ready.exists()
+    time.sleep(3)
+    assert not late.exists(), "a process the stopped scanner detached outlived it"
 
 
 def test_a_scanner_cannot_kill_its_wrapper_to_escape_reaping(tmp_path):

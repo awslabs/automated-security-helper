@@ -86,7 +86,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
 from automated_security_helper.utils.process_env import snapshot_environ
 
-from automated_security_helper.utils.subprocess_utils import spawn_run
+from automated_security_helper.utils.subprocess_utils import find_executable, spawn_run
 
 Status = Literal["satisfied", "unsatisfied", "unverifiable"]
 
@@ -224,7 +224,7 @@ def find_tool_interpreter(executable: str) -> Optional[str]:
         return None
     interpreter = parts[0]
     if Path(interpreter).name == "env" and len(parts) > 1:
-        interpreter = shutil.which(parts[1]) or ""
+        interpreter = find_executable(parts[1]) or ""
     if "python" not in Path(interpreter).name.lower():
         return None
     return interpreter if Path(interpreter).is_file() else None
@@ -304,6 +304,16 @@ def _stage_nix_metadata(site_dirs: Sequence[str], target: Path) -> int:
 def _run(
     command: List[str], timeout: int
 ) -> Optional[subprocess.CompletedProcess[str]]:
+    """Run one probe; None when it could not run.
+
+    Raises:
+        SandboxUnavailable: The active scanner sandbox scope refused the spawn. The
+            probe never ran, which says nothing about the tool, so it is raised to
+            ``verify_pre_installed_tool`` rather than read as a tool that does not
+            run.
+    """
+    from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
     try:
         return spawn_run(  # nosec B603 - list args; executable resolved from PATH by the caller
             command,
@@ -315,6 +325,8 @@ def _run(
             errors="replace",
             env=snapshot_environ(),
         )
+    except SandboxUnavailable:
+        raise
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -379,8 +391,12 @@ def verify_pre_installed_tool(
 
     Memoized per (resolved path, file mtime, requirement): scanners call their
     dependency check several times per run, and the ``--version`` probe of a
-    large tool takes seconds.
+    large tool takes seconds. A check the scanner sandbox refused is
+    ``unverifiable`` with the refusal as its detail, and is not memoized: it
+    never ran, and a later check in another scope may.
     """
+    from automated_security_helper.utils.sandbox.policy import SandboxUnavailable
+
     try:
         validate_version_constraint(version_constraint)
     except ValueError as error:
@@ -401,14 +417,22 @@ def verify_pre_installed_tool(
         if key in _verdict_cache:
             return _verdict_cache[key]
 
-    verdict = _verify(
-        executable,
-        package,
-        list(extras or []),
-        version_constraint,
-        requirement,
-        uv_executable,
-    )
+    try:
+        verdict = _verify(
+            executable,
+            package,
+            list(extras or []),
+            version_constraint,
+            requirement,
+            uv_executable,
+        )
+    except SandboxUnavailable as refusal:
+        return PreInstalledToolVerdict(
+            "unverifiable",
+            executable,
+            requirement,
+            f"the scanner sandbox refused the check: {refusal}",
+        )
 
     with _verdict_cache_lock:
         _verdict_cache[key] = verdict
@@ -437,7 +461,7 @@ def _verify(
             f"`{executable} --version` exited {probe.returncode}: {excerpt}",
         )
 
-    uv = uv_executable or shutil.which("uv")
+    uv = uv_executable or find_executable("uv")
 
     nix_environment = find_nix_python_environment(executable)
     if nix_environment is not None:

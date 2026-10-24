@@ -14,21 +14,90 @@ global_settings:
       - /fail_on_incomplete_scanners
       - /content_db_staleness
       - /content_db_staleness_overrides
+      - /honor_ignore_files
       - /sandbox
       - /sandbox/**
       - /ash_plugin_modules
       - /ash_plugin_modules/**
+      - /scanners/detect-secrets/options/scan_settings/filters_used
+      - /scanners/detect-secrets/options/scan_settings/filters_used/**
+      - /scanners/detect-secrets/options/scan_settings/plugins_used
+      - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+      - /scanners/detect-secrets/options/baseline_file
       - /global_settings/ignore_paths
       - /global_settings/suppressions
+      - /global_settings/mcp
+      - /global_settings/mcp/**
+      - /scanners/opengrep/options/exclude_rule
+      - /scanners/semgrep/options/exclude_rule
+      - /scanners/bandit/options/confidence_level
+      - /scanners/checkov/options/frameworks
+      - /scanners/checkov/options/skip_frameworks
+      - /scanners/opengrep/options/config
+      - /scanners/opengrep/options/patterns
+      - /scanners/opengrep/options/severity
+      - /scanners/semgrep/options/config
+      - /scanners/semgrep/options/severity
+      - /scanners/detect-secrets/options/scan_settings
+      - /scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks
+      - /scanners/ferret-scan/options/checks
+      - /scanners/ferret-scan/options/confidence_levels
+      - /scanners/ferret-scan/options/disable_ip_types
+      - /scanners/ferret-scan/options/enable_preprocessors
+      - /scanners/ferret-scan/options/finding_limit
+      - /scanners/ferret-scan/options/profile
+      - /scanners/ferret-scan/options/recursive
+      - /scanners/ferret-scan/options/respect_gitignore
+      - /scanners/ferret-scan/options/use_default_config
+      - /scanners/ferret-scan/options/validator_budget
+      - /scanners/trivy-repo/options/license_full
+      - /scanners/trivy-repo/options/scanners
+      - /scanners/*/options/offline
+      - /scanners/ferret-scan/options/max_live_bytes
+      - /scanners/bandit/options/config_file
+      - /scanners/checkov/options/config_file
+      - /scanners/ferret-scan/options/config_file
+      - /scanners/grype/options/config_file
+      - /scanners/syft/options/config_file
+      - /scanners/trivy-repo/options/secret_config_file
+      - /scanners/snyk-code/options/honor_tree_exclusions
+      - /scanners/*/options/tool_version
+      - /converters/jupyter/options/tool_version
+      - /scanners/opengrep/options/version
+      - /scanners/opengrep/options/sha256
+      - /scanners/opengrep/options/metrics
+      - /scanners/semgrep/options/metrics
       - /reporters/bedrock-summary-reporter/options/aws_*
       - /reporters/cloudwatch-logs/**
+      - /reporters/aws-security-hub/**
+      - /reporters/bedrock-summary-reporter/options/model_id
+      - /reporters/bedrock-summary-reporter/options/output_file
+      - /reporters/bedrock-summary-reporter/options/output_executive_file
+      - /reporters/bedrock-summary-reporter/options/output_technical_file
+      - /reporters/s3/**
+      - /reporters/bedrock-summary-reporter/**
+      - /reporters/gitlab-sast/options/exclude_suppressed
+      - /scanners/detect-secrets/**
+      - /scanners/npm-audit/**
+      - /scanners/opengrep/**
+      - /scanners/semgrep/**
+      - /scanners/snyk-code/**
+      - /scanners/trivy-repo/**
+      - /converters/archive/options/max_members
+      - /converters/archive/options/max_member_bytes
+      - /converters/archive/options/max_total_bytes
+      - /converters/archive/options/max_compression_ratio
       denied_value_patterns: {}
+      replace_default_denied_paths: false
 fail_on_findings: true
 fail_on_incomplete_scanners: true
+honor_ignore_files: true
 sandbox:
   mode: 'off'
   network_scanners: null
   extra_read_paths: []
+  read_path_scanners: []
+  env_scanners: []
 content_db_staleness: fail
 content_db_staleness_overrides: []
 ash_plugin_modules:
@@ -37,7 +106,11 @@ external_reports_to_include: []
 converters:
   archive:
     enabled: true
-    options: {}
+    options:
+      max_members: 100000
+      max_member_bytes: 268435456
+      max_total_bytes: 1073741824
+      max_compression_ratio: 100
   jupyter:
     enabled: true
     options:

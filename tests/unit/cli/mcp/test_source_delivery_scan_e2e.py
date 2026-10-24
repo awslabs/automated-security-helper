@@ -181,6 +181,10 @@ def delivered_source_server(tmp_path_factory) -> Iterator[Dict[str, Any]]:
                 port=port,
                 mount_path=mount_path,
                 stateless_http=True,
+                # AgentCore issues and authenticates Mcp-Session-Id, which is
+                # what this flag declares; without it a stateless server
+                # identifies no session and source delivery is refused.
+                trust_upstream_session_id=True,
                 quiet=True,
             )
         except SystemExit:

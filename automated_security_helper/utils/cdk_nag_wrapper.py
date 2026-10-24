@@ -42,6 +42,10 @@ from automated_security_helper.utils.process_env import (
     apply_environ_overrides,
     restore_environ,
 )
+from automated_security_helper.utils.subprocess_utils import (
+    lookup_for_scan,
+    started_from_working_directory,
+)
 
 
 class CdkNagWrapperResponse:
@@ -722,7 +726,30 @@ def run_cdk_nag_against_cfn_template(
             "JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION",
             "JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION",
         )
-        _original_jsii_env = apply_environ_overrides(dict.fromkeys(_jsii_env_keys, "1"))
+        jsii_env = dict.fromkeys(_jsii_env_keys, "1")
+        # jsii starts JSII_NODE, or "node" by name, which on Windows is looked for
+        # in the working directory first; this process runs in ASH's, usually the
+        # repository being scanned. So it is given the node ASH resolved, as an
+        # absolute path. With none, it is left to start "node" itself unless that
+        # would find one through the working directory. An explicit JSII_NODE is
+        # the operator's choice and is kept.
+        if not os.environ.get("JSII_NODE"):
+            node, refusal = lookup_for_scan(
+                "node", scan_root if scan_root is not None else Path.cwd()
+            )
+            if node is not None:
+                jsii_env["JSII_NODE"] = node
+            elif refusal is not None:
+                # Left unset, jsii would start "node" by name and find that copy.
+                raise RuntimeError(refusal)
+            else:
+                local = started_from_working_directory("node")
+                if local is not None:
+                    raise RuntimeError(
+                        "node is not on PATH, and the copy found through the "
+                        f"working directory, {local}, is not run"
+                    )
+        _original_jsii_env = apply_environ_overrides(jsii_env)
 
         # Suppress JSII stack traces by redirecting stderr for entire function
         import sys
@@ -949,19 +976,15 @@ def run_cdk_nag_against_cfn_template(
                     f".ash-cfn-include{Path(template_path).suffix}"
                 )
                 # Created fresh and never through a link: anything already at the
-                # name is removed, and O_EXCL|O_NOFOLLOW refuses whatever appears in
-                # its place before the open.
-                include_file.unlink(missing_ok=True)
-                include_fd = os.open(
-                    include_file,
-                    os.O_WRONLY
-                    | os.O_CREAT
-                    | os.O_EXCL
-                    | getattr(os, "O_NOFOLLOW", 0)
-                    | getattr(os, "O_BINARY", 0),
-                    0o600,
+                # name is removed, and open_for_write refuses a link that appears in
+                # its place, or at any directory on the way to it below the output
+                # directory.
+                from automated_security_helper.utils.sandbox.fs_guard import (
+                    open_for_write,
                 )
-                with os.fdopen(include_fd, "w", encoding="utf-8") as include:
+
+                include_file.unlink(missing_ok=True)
+                with open_for_write(include_file, mode=0o600) as include:
                     include.write(template_text)
                 try:
                     stack = WrapperStack(

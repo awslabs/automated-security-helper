@@ -16,6 +16,9 @@ from typing import Any, Dict, List, Optional
 
 import botocore.exceptions
 
+from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    retry_with_backoff,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 # Bedrock reports a rejected inference parameter by name, e.g.
@@ -86,7 +89,13 @@ class ReportSection:
 
 
 class BedrockModelClient:
-    """Wraps boto3 bedrock-runtime. Single point of contact with AWS."""
+    """Wraps boto3 bedrock-runtime. Single point of contact with AWS.
+
+    A throttled call is retried ``max_retries`` times, with ``retry_with_backoff``
+    and the reporter's ``base_delay`` and ``max_delay``, as the CloudWatch Logs
+    and S3 reporters retry theirs. None by default, so only a caller that passes
+    the reporter's options retries.
+    """
 
     def __init__(
         self,
@@ -95,12 +104,18 @@ class BedrockModelClient:
         temperature: float,
         max_tokens: int,
         top_p: float,
+        max_retries: int = 0,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
     ) -> None:
         self._runtime = bedrock_runtime
         self._model_id = model_id
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._top_p = top_p
+        self._max_retries = max_retries
+        self._base_delay = base_delay
+        self._max_delay = max_delay
 
     def try_call(self, prompt: str, system_prompt: str) -> str:
         """Invoke the model. Returns response text or an *Error: … string."""
@@ -131,10 +146,20 @@ class BedrockModelClient:
             + len(converse_args.get("additionalModelRequestFields") or {})
         )
 
+        # Reads converse_args when called, so a retry after a dropped parameter
+        # sends the request without it.
+        @retry_with_backoff(
+            max_retries=self._max_retries,
+            base_delay=self._base_delay,
+            max_delay=self._max_delay,
+        )
+        def converse() -> Any:
+            return self._runtime.converse(**converse_args)
+
         for _ in range(max_attempts):
             try:
                 ASH_LOGGER.debug(f"Invoking Bedrock model {self._model_id}")
-                response = self._runtime.converse(**converse_args)
+                response = converse()
 
                 if (
                     response

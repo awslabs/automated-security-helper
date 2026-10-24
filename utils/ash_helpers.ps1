@@ -61,7 +61,8 @@ function Invoke-ASH {
     .PARAMETER BuildTarget
     The target stage to build in the Dockerfile.
 
-    Defaults to 'non-root'.
+    Defaults to 'non-root', and to 'ci' on Windows. CI environment variables do not
+    change it.
 
     .PARAMETER Offline
     If $true, runs ASH in offline mode.
@@ -76,11 +77,27 @@ function Invoke-ASH {
 
     .EXAMPLE
     Get-Help Invoke-ASH
+
+    .EXAMPLE
+    try { Invoke-ASH -SourceDir . } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }
+
+    As a CI step that needs the refusal's code: writes the error record once and
+    exits with the code, or with 1 for an error raised before Invoke-ASH sets one.
+    On GitHub Actions run it with `shell: pwsh -File {0}`: the built-in `shell: pwsh`
+    runs the script as `pwsh -command ". '<script>'"`, which reports every non-zero
+    exit as 1.
+
+    .NOTES
+    A refusal throws, with $LASTEXITCODE set to its code: 3 for an input Invoke-ASH
+    refuses, 1 when it finds no OCI runner. It never calls `exit`, so a script that
+    dot-sources these helpers can catch it and go on. Any other error Invoke-ASH
+    raises leaves $LASTEXITCODE non-zero too. Uncaught, `pwsh -File` and
+    `pwsh -Command` exit 1, as PowerShell does for any uncaught error.
     #>
     [CmdletBinding()]
     param(
         [parameter(Position = 0)]
-        [ValidateScript({ Test-Path $_ })]
+        [ValidateScript({ Test-Path -LiteralPath $_ })]
         [string]
         $SourceDir = (Get-Location).Path,
         [parameter()]
@@ -124,10 +141,13 @@ function Invoke-ASH {
         [parameter()]
         [string]
         $OutputFormat = "text",
+        # 'ci' on Windows (Windows PowerShell 5 runs only there), where the bind-mounted
+        # output directory is not writable by the non-root user; 'non-root' everywhere
+        # else. CI variables do not choose the stage: pass -BuildTarget ci to ask for it.
         [parameter()]
         [ValidateSet("ci", "non-root")]
         [string]
-        $BuildTarget = $(if($env:CI -or $env:IsCI -or $env:CODEBUILD_BUILD_ID -or $PSVersionTable.PSVersion.Major -le 5 -or $IsWindows){"ci"}else{"non-root"}),
+        $BuildTarget = $(if($PSVersionTable.PSVersion.Major -le 5 -or $IsWindows){"ci"}else{"non-root"}),
         [parameter()]
         [switch]
         $Offline,
@@ -148,6 +168,25 @@ function Invoke-ASH {
         $AshArgs = $null
     )
     begin {
+        # A refusal (Stop-AshRefusal) sets $LASTEXITCODE before it throws. Any other
+        # error raised here, such as an output directory that cannot be created under
+        # Stop, leaves it at 1 when it is 0, so a CI step's catch block, which exits
+        # with $LASTEXITCODE (see .EXAMPLE), never exits 0 after a failure. `break`
+        # rethrows the error unchanged.
+        trap { if (-not $global:LASTEXITCODE) { $global:LASTEXITCODE = 1 }; break }
+        # Invoke-ASH scans one directory: it hands the scan inside --source-dir /src,
+        # which that scan refuses next to --workspace, after the container has
+        # started. It also cannot tell the scan inside that a workspace's config was
+        # written by the repository (a workspace scan refuses
+        # --config-from-scanned-repository), so a config in the checkout but outside
+        # the workspace would be read there as the operator's. A --workspace passed
+        # through is refused before anything is built or mounted.
+        if ("$AshArgs" -match '(^|\s)--workspace(\s|=|$)') {
+            Stop-AshRefusal 3 "Invoke-ASH scans one directory and cannot run a workspace scan: the scan inside the container is given --source-dir /src, which it refuses next to --workspace, and it could not be told which workspace config the repository wrote. Run ash --mode container --workspace <file> instead."
+        }
+        # ValidateSet and -eq ignore case, and so does the build: -BuildTarget NON-ROOT
+        # is non-root. Lower-cased once, so the --target value and the image tag are too.
+        $BuildTarget = $BuildTarget.ToLowerInvariant()
         $ashRoot = (Get-Item $PSScriptRoot).Parent.FullName
         $buildArgs = [System.Collections.Generic.List[string]]::new()
         $runArgs = [System.Collections.Generic.List[string]]::new()
@@ -191,20 +230,21 @@ function Invoke-ASH {
         if ($Offline) {
             $ashCmdArgs.Add('--offline')
         }
-        if ($PSBoundParameters.ContainsKey('Config')) {
-            $ashCmdArgs.Add("--config")
-            $ashCmdArgs.Add($Config)
-        }
+        # The commands below run through Invoke-Expression, which parses its string as
+        # PowerShell. Every value that comes from the operator or the file system is
+        # therefore written into it by name (`$Scanners[0]`, "$sourceDirFull"), which
+        # Invoke-Expression expands as a value without parsing it, so a directory
+        # named `a$(...)` is passed as that name.
         if ($PSBoundParameters.ContainsKey('Scanners')) {
-            foreach ($scanner in $Scanners) {
+            for ($i = 0; $i -lt $Scanners.Count; $i++) {
                 $ashCmdArgs.Add("--scanners")
-                $ashCmdArgs.Add($scanner)
+                $ashCmdArgs.Add("`$Scanners[$i]")
             }
         }
         if ($PSBoundParameters.ContainsKey('ExcludeScanners')) {
-            foreach ($scanner in $ExcludeScanners) {
+            for ($i = 0; $i -lt $ExcludeScanners.Count; $i++) {
                 $ashCmdArgs.Add("--exclude-scanners")
-                $ashCmdArgs.Add($scanner)
+                $ashCmdArgs.Add("`$ExcludeScanners[$i]")
             }
         }
         if ($IgnoreSuppressions) {
@@ -222,16 +262,258 @@ function Invoke-ASH {
             @('docker', 'finch', 'nerdctl', 'podman')
         }
 
-        # Resolve source and output directories
-        $sourceDirFull = Get-Item $SourceDir | Select-Object -ExpandProperty FullName
+        # Resolve source and output directories. -LiteralPath: -Path reads '[', ']',
+        # '*' and '?' as wildcards, so 'src[1]' would name 'src1'. New-Item has no
+        # -LiteralPath and reads its -Path as written.
+        $sourceDirFull = Get-Item -LiteralPath $SourceDir | Select-Object -ExpandProperty FullName
         Write-Verbose "Resolved SourceDir to: $sourceDirFull"
 
-        # Create the output directory if it doesn't exist
-        if (-not (Test-Path $OutputDir)) {
-            Write-Verbose "Creating OutputDir: $OutputDir"
-            New-Item $OutputDir -ItemType Directory -Force | Out-Null
+        # The path with every link on the way followed, which is what the runner
+        # mounts. Component by component, so a link to a directory higher up is
+        # followed too; bounded, so a cycle of links ends.
+        function Get-AshRealPath([string]$Path, [int]$Depth = 0) {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            if ($Depth -gt 40) { return $full }
+            $root = [System.IO.Path]::GetPathRoot($full)
+            $current = $root
+            foreach ($part in $full.Substring($root.Length).Split([char[]]@('/', '\'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $current = Join-Path $current $part
+                $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+                if ($item -and $item.LinkType -and $item.Target) {
+                    $target = [string]@($item.Target)[0]
+                    if (-not [System.IO.Path]::IsPathRooted($target)) {
+                        $target = Join-Path (Split-Path -Parent $current) $target
+                    }
+                    $current = Get-AshRealPath $target ($Depth + 1)
+                }
+            }
+            return $current
         }
-        $outputDirFull = Get-Item $OutputDir | Select-Object -ExpandProperty FullName
+        $separators = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $pathComparison = if ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+        function Test-AshUnder([string]$Path, [string]$Root) {
+            $Root = $Root.TrimEnd($separators)
+            return $Path.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, $pathComparison)
+        }
+        $sourceReal = Get-AshRealPath $sourceDirFull
+
+        # /out is mounted read-write and /src read-only: an output directory that is
+        # the source directory or above it would hold the source tree, writable, at
+        # /out. A directory that is itself a link is compared by its target. One that
+        # does not exist yet cannot hold the source, so this runs before it is created.
+        if (-not $NoRun -and (Test-Path -LiteralPath $OutputDir -PathType Container)) {
+            $existingOutput = (Get-Item -LiteralPath $OutputDir).FullName
+            $directories = foreach ($path in @($sourceDirFull, $existingOutput)) {
+                $item = Get-Item -LiteralPath $path
+                $real = if ($item.LinkType -and $item.ResolvedTarget) { [string]$item.ResolvedTarget } else { $item.FullName }
+                $real.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+            }
+            if ($directories[0].StartsWith($directories[1], $pathComparison)) {
+                Stop-AshRefusal 3 "The output directory '$existingOutput' is the source directory '$sourceDirFull' or a directory above it. Container mode mounts the output read-write at /out and the source read-only at /src, so the source would be writable through /out. Use an output directory inside the source (the default .ash/ash_output) or outside it, not above it."
+            }
+        }
+
+        # The same /out mount is why a linked output directory is refused: the scan
+        # inside would write wherever the link leads, and a repository that commits
+        # `.ash -> /some/host/dir` would choose that directory. Refused with exit 3:
+        # the output directory when it is a symbolic link or junction, wherever it is,
+        # and any link from below SourceDir down to it, with SourceDir taken under its
+        # name and its real path. Links at or above SourceDir are the operator's own
+        # spelling. The path is walked as written, '..' included, and before the
+        # directory is created, because creating it through a linked .ash already
+        # writes where the link points; so -NoRun, which creates it too, is refused as
+        # well. ./ash and `ash --mode container` apply the same rule.
+        function Test-AshLink([string]$Path) {
+            $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            return [bool]($item -and $item.LinkType -in @('SymbolicLink', 'Junction'))
+        }
+        # Whether the directory, or one above it, holds a .git entry: is it in a
+        # git checkout.
+        function Test-AshInCheckout([string]$Directory) {
+            $dir = Get-Item -LiteralPath $Directory -Force -ErrorAction SilentlyContinue
+            while ($null -ne $dir) {
+                if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) { return $true }
+                $dir = $dir.Parent
+            }
+            return $false
+        }
+        # Whether a link the path follows sits inside one of $Trees or any git
+        # checkout. The path is resolved one component at a time, as Get-AshRealPath
+        # resolves it, so a link reached only through another link counts too:
+        # whoever writes the directory a link sits in chooses where it leads
+        # (config/sandbox_grants.links_followed). At most 40 links are followed, so
+        # a cycle of links ends.
+        function Test-AshFollowsLinkInCheckout([string]$Path, [string[]]$Trees) {
+            $full = [System.IO.Path]::GetFullPath($Path)
+            $root = [System.IO.Path]::GetPathRoot($full)
+            $walked = $root
+            $rest = [System.Collections.Generic.List[string]]::new()
+            foreach ($part in $full.Substring($root.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $rest.Add($part)
+            }
+            $hops = 0
+            while ($rest.Count -gt 0) {
+                $part = $rest[0]
+                $rest.RemoveAt(0)
+                if ($part -eq '.') { continue }
+                if ($part -eq '..') {
+                    $parent = Split-Path -Parent $walked
+                    $walked = if ($parent) { $parent } else { $root }
+                    continue
+                }
+                $candidate = Join-Path $walked $part
+                $item = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+                if (-not ($item -and $item.LinkType -in @('SymbolicLink', 'Junction') -and $item.Target)) {
+                    $walked = $candidate
+                    continue
+                }
+                $hops++
+                if ($hops -gt 40) { return $false }
+                $linkDir = $walked.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar
+                if (@($Trees | Where-Object { Test-AshUnder $linkDir $_ }).Count -gt 0) { return $true }
+                if (Test-AshInCheckout $walked) { return $true }
+                $target = [string]@($item.Target)[0]
+                if ([System.IO.Path]::IsPathRooted($target)) {
+                    $walked = [System.IO.Path]::GetPathRoot($target)
+                    $target = $target.Substring($walked.Length)
+                }
+                $rest.InsertRange(0, [string[]]@($target.Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)))
+            }
+            return $false
+        }
+        $spelledOutput = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path (Get-Location).Path $OutputDir }
+        $outputRoot = [System.IO.Path]::GetPathRoot($spelledOutput)
+        $walked = [System.Collections.Generic.List[string]]::new()
+        $current = $null
+        $linkOnTheWay = $null
+        foreach ($part in $spelledOutput.Substring($outputRoot.Length).Split($separators, [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            if ($part -eq '.') { continue }
+            if ($part -eq '..') {
+                if ($walked.Count -gt 0) { $walked.RemoveAt($walked.Count - 1) }
+                continue
+            }
+            $walked.Add($part)
+            $current = $outputRoot.TrimEnd($separators) + [System.IO.Path]::DirectorySeparatorChar + ($walked -join [System.IO.Path]::DirectorySeparatorChar)
+            if (((Test-AshUnder $current $sourceDirFull) -or (Test-AshUnder $current $sourceReal)) -and (Test-AshLink $current)) {
+                $linkOnTheWay = $current
+                break
+            }
+        }
+        if (-not $linkOnTheWay -and $walked.Count -gt 0 -and (Test-AshLink $current)) {
+            $linkOnTheWay = $current
+        }
+        if ($linkOnTheWay) {
+            Stop-AshRefusal 3 "Refusing the output directory '$OutputDir': the output directory path '$linkOnTheWay' is a symlink. Container mode mounts the output directory read-write at /out, so the scan inside the container would write through the link. Use a directory that is not a symlink and is not reached through one below the source directory."
+        }
+
+        # Create the output directory if it doesn't exist
+        if (-not (Test-Path -LiteralPath $OutputDir)) {
+            Write-Verbose "Creating OutputDir: $OutputDir"
+            New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
+        }
+        $outputDirFull = Get-Item -LiteralPath $OutputDir | Select-Object -ExpandProperty FullName
+
+        # --mount reads its value as comma-separated fields, so a comma in a host path
+        # starts a field of its own (a,b), a double quote starts CSV
+        # quoting, and a line break ends the argument. A path holding one is refused
+        # before anything is built or run, with exit 3.
+        function Assert-Mountable([string]$Label, [string]$Path) {
+            if ($Path -match '[,"\r\n]') {
+                Stop-AshRefusal 3 "The $Label '$Path' cannot be handed to the container runner: --mount reads its value as comma-separated fields, so a path holding a comma, a double quote or a line break would be read as something else. Rename it, or choose another path."
+            }
+        }
+        if (-not $NoRun) {
+            Assert-Mountable 'source directory' $sourceDirFull
+            Assert-Mountable 'output directory' $outputDirFull
+        }
+
+        # The config file, -Config or else ASH_CONFIG, is read by the scan inside the
+        # container, which sees the host only through its mounts: the host path names
+        # nothing there. A config inside SourceDir is read through the read-only /src
+        # mount, with every extends base it can name; one outside it is mounted
+        # read-only on its own at /ash-config. Refused with exit 3, as any unusable
+        # config is, when it is not an existing file. -NoRun scans nothing, so it
+        # does not need one.
+        $configMountArg = $null
+        $configFromRepository = $false
+        $configInCheckout = $false
+        if (-not $NoRun -and ($PSBoundParameters.ContainsKey('Config') -or -not [string]::IsNullOrEmpty($Config))) {
+            if ([string]::IsNullOrEmpty($Config) -or -not (Test-Path -LiteralPath $Config -PathType Leaf)) {
+                Stop-AshRefusal 3 "Config file not found: $Config. -Config (or ASH_CONFIG) has to name an existing file: it is mounted read-only for the scan inside the container."
+            }
+            # The runner mounts with its own rights, which can be wider than this user's.
+            try {
+                [System.IO.File]::OpenRead((Get-Item -LiteralPath $Config).FullName).Close()
+            }
+            catch {
+                Stop-AshRefusal 3 "Config file cannot be read: $Config. ASH does not hand the container runner a file it cannot read itself."
+            }
+            # The config as named, and the real file the runner would mount
+            # (Get-AshRealPath, above, with $sourceReal).
+            $configNamed = (Get-Item -LiteralPath $Config).FullName
+            $configFull = Get-AshRealPath $configNamed
+            Assert-Mountable 'config file' $configFull
+            # The scanned tree, as a local scan defines it: the outermost directory at
+            # or above SourceDir holding a .git entry, found from SourceDir's name and
+            # from its real path, each under both names.
+            $trees = @()
+            foreach ($start in @($sourceDirFull, $sourceReal)) {
+                $checkout = $start
+                $dir = Get-Item -LiteralPath $start
+                while ($null -ne $dir) {
+                    if (Test-Path -LiteralPath (Join-Path $dir.FullName '.git')) {
+                        $checkout = $dir.FullName
+                    }
+                    $dir = $dir.Parent
+                }
+                $trees += $checkout
+                $trees += (Get-AshRealPath $checkout)
+            }
+            $namedInTree = @($trees | Where-Object { Test-AshUnder $configNamed $_ }).Count -gt 0
+            $realInTree = @($trees | Where-Object { Test-AshUnder $configFull $_ }).Count -gt 0
+            # A config named inside the scanned tree is used only when its real path,
+            # every link on the way followed, is inside the tree too, wherever in the
+            # tree it is named: otherwise the repository being scanned would choose
+            # which host file is read. A link that stays inside the tree is followed.
+            if ($namedInTree -and -not $realInTree) {
+                Stop-AshRefusal 3 "The config file '$Config' is inside the scanned tree but is a link, or is reached through one, to '$configFull', which is outside it. ASH does not mount a file the repository being scanned points it at."
+            }
+            if (Test-AshUnder $configFull $sourceReal) {
+                $configInner = "/src/" + $configFull.Substring($sourceReal.TrimEnd($separators).Length + 1).Replace('\', '/')
+            }
+            else {
+                # Mounted on its own, without the files it extends, so a config with an
+                # extends entry would not resolve inside the container. Refused, as is
+                # every chain ash --mode container cannot mount whole. Not parsed here,
+                # so this errs toward refusing: the key followed by ':' or '=' anywhere
+                # in the text with line breaks read as spaces (a JSON key and its ':'
+                # on two lines, TOML's '=', YAML's '? extends' key), and any quoted key
+                # holding a backslash, which may spell the name with an escape.
+                # Case-sensitive, as ASH reads the key.
+                $configText = [string](Get-Content -LiteralPath $configFull -Raw)
+                $configFlat = $configText -replace "[`r`n]", ' '
+                if (($configFlat -cmatch '(^|[\s{,])["'']?extends["'']?\s*[:=]') -or ($configText -cmatch '(?m)"[^"\r\n]*\\[^"\r\n]*"\s*:')) {
+                    Stop-AshRefusal 3 "The config file '$Config' is outside the source directory and has an extends entry. Invoke-ASH mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
+                }
+                $configInner = "/ash-config/" + (Split-Path -Leaf $configFull)
+                $configMountArg = '--mount "type=bind,source=$configFull,destination=$configInner,readonly"'
+                # A config elsewhere in the scanned tree was written by the repository
+                # being scanned. The scan inside sees it only at /ash-config, outside its
+                # own tree, so it is told.
+                $configFromRepository = $realInTree
+                # A config inside any other git checkout, or reached through a link
+                # that sits in the scanned tree or any checkout, is one a local scan
+                # counts as repository-written too
+                # (config/sandbox_grants.repository_written), so it is marked; the
+                # refusal above stays with the scanned tree.
+                $configInCheckout = (Test-AshInCheckout (Split-Path -Parent $configFull)) -or (Test-AshFollowsLinkInCheckout $configNamed $trees)
+            }
+            $ashCmdArgs.Add("--config")
+            $ashCmdArgs.Add('"$configInner"')
+            if ($configFromRepository -or $configInCheckout) {
+                $ashCmdArgs.Add('--config-from-scanned-repository')
+            }
+        }
 
         # Set image name with target stage
         if ($AshImageName -notmatch ":") {
@@ -257,16 +539,19 @@ function Invoke-ASH {
     }
     process {
         try {
+            # A runner given as a path runs that file: its resolved path is kept, not
+            # its name, which would run whichever file of that name comes first on
+            # PATH. A bare name resolves on PATH, as before. ./ash and
+            # `ash --mode container` do the same.
             $RESOLVED_OCI_RUNNER = $null
             foreach ($runner in $runners) {
                 if ($FOUND = Get-Command $runner -ErrorAction SilentlyContinue) {
-                    $RESOLVED_OCI_RUNNER = $FOUND.Name
+                    $RESOLVED_OCI_RUNNER = if ($runner.IndexOfAny([char[]]@('/', '\')) -ge 0) { $FOUND.Source } else { $FOUND.Name }
                     break
                 }
             }
             if ($null -eq $RESOLVED_OCI_RUNNER) {
-                Write-Error "Unable to resolve an OCI_RUNNER -- exiting"
-                exit 1
+                Stop-AshRefusal 1 "Unable to resolve an OCI_RUNNER -- exiting"
             }
             else {
                 Write-Verbose "Resolved OCI_RUNNER to: $RESOLVED_OCI_RUNNER"
@@ -276,30 +561,63 @@ function Invoke-ASH {
 
                 # Build the container if not skipped
                 if (-not $NoBuild) {
+                    # On Linux and macOS the non-root user gets the caller's own UID and
+                    # GID (id -u, id -g) unless -ContainerUID or -ContainerGID names
+                    # another, as ./ash and `ash --mode container` give it, so it owns
+                    # what the caller created; both are then checked the same way. On
+                    # Windows there is no such ID and the Dockerfile's defaults apply.
+                    if (-not ($IsWindows -or $PSVersionTable.PSVersion.Major -le 5) -and (Get-Command id -ErrorAction SilentlyContinue)) {
+                        if (-not $ContainerUID) { $ContainerUID = "$(& id -u)".Trim() }
+                        if (-not $ContainerGID) { $ContainerGID = "$(& id -g)".Trim() }
+                    }
+                    # -ContainerUID and -ContainerGID become build arguments, read as
+                    # numbers.
+                    foreach ($id in @(@('UID', $ContainerUID), @('GID', $ContainerGID))) {
+                        # \A and \z: .NET's ^ and $ also match around a final line feed.
+                        if ($id[1] -and $id[1] -notmatch '\A[0-9]+\z') {
+                            Stop-AshRefusal 3 "Container $($id[0]) must be a numeric value: '$($id[1])'."
+                        }
+                    }
+                    # The non-root stage creates its user with `adduser --uid <UID>
+                    # --gid <GID>`. UID 0 is root, which already exists, and GID 0 is
+                    # root's group. A non-root build with either is refused before
+                    # building, as ./ash and `ash --mode container` refuse it: given as
+                    # -ContainerUID or -ContainerGID 0 (any spelling of zero), or taken
+                    # from a caller running as root. -BuildTarget ci is the opt-in for
+                    # the image that runs as root.
+                    if ($BuildTarget -eq 'non-root') {
+                        if ($ContainerUID -match '\A0+\z') {
+                            Stop-AshRefusal 3 "The non-root image stage creates a user with UID 0, which is root: Invoke-ASH is running as root, or -ContainerUID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerUID and -ContainerGID work only when the output directory is writable by that UID: the container runs as that user and writes its reports there."
+                        }
+                        if ($ContainerGID -match '\A0+\z') {
+                            Stop-AshRefusal 3 "The non-root image stage gives its user GID 0, which is root's group: Invoke-ASH is running with GID 0, or -ContainerGID 0 was given. Pass -BuildTarget ci to build the image that runs as root. Another -ContainerGID works only when the output directory is writable by the container's user, which writes its reports there."
+                        }
+                    }
                     Write-Host "Building image $AshImageName -- this may take a few minutes during the first build..."
 
+                    # The runner is written in by name, like every path: it can be one
+                    # the operator gave, with spaces or `$(...)` in it. `&` invokes it
+                    # when nothing wraps it; a wrapper takes it as its first argument.
                     $buildCmd = @()
-                    if ($OCI_WRAPPER) { $buildCmd += $OCI_WRAPPER }
-                    $buildCmd += @(
-                        $RESOLVED_OCI_RUNNER
-                        'build'
-                    )
+                    if ($OCI_WRAPPER) { $buildCmd += $OCI_WRAPPER; $buildCmd += '"$RESOLVED_OCI_RUNNER"' }
+                    else { $buildCmd += '& "$RESOLVED_OCI_RUNNER"' }
+                    $buildCmd += 'build'
 
                     # Add UID/GID build args
                     if ($ContainerUID) {
-                        $buildCmd += "--build-arg", "UID=$ContainerUID"
+                        $buildCmd += "--build-arg", '"UID=$ContainerUID"'
                     }
                     if ($ContainerGID) {
-                        $buildCmd += "--build-arg", "GID=$ContainerGID"
+                        $buildCmd += "--build-arg", '"GID=$ContainerGID"'
                     }
                     $dockerfilePath = Resolve-Path $(Join-Path $ashRoot "Dockerfile")
                     # Add other build args
                     $buildCmd += @(
-                        "--tag", $AshImageName
+                        "--tag", '"$AshImageName"'
                         "--target", $BuildTarget
-                        "--file", "`"$dockerfilePath`""
+                        "--file", '"$dockerfilePath"'
                         "--build-arg", "OFFLINE=$(if ($Offline) {'YES'} else {'NO'})"
-                        "--build-arg", "OFFLINE_SEMGREP_RULESETS=`"$OfflineSemgrepRulesets`""
+                        "--build-arg", '"OFFLINE_SEMGREP_RULESETS=$OfflineSemgrepRulesets"'
                         "--build-arg", "BUILD_DATE=$(Get-Date -UFormat %s)"
                     )
 
@@ -333,7 +651,7 @@ function Invoke-ASH {
                         $baseLayoutDir = $Matches['dir']
                         if ($ociRunnerName -in @('nerdctl', 'finch')) {
                             Write-Host "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call."
-                            $buildCmd += "--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""
+                            $buildCmd += "--build-context", '"ash-base-image=oci-layout://$baseLayoutDir"'
                             $buildCmd += "--build-arg", "BASE_IMAGE=ash-base-image"
                             $buildCmd += "--pull=false"
                         }
@@ -343,7 +661,7 @@ function Invoke-ASH {
                     }
                     elseif ($env:ASH_BASE_IMAGE_OVERRIDE) {
                         Write-Host "Base image redirected to $($env:ASH_BASE_IMAGE_OVERRIDE) by ASH_BASE_IMAGE_OVERRIDE."
-                        $buildCmd += "--build-arg", "BASE_IMAGE=$($env:ASH_BASE_IMAGE_OVERRIDE)"
+                        $buildCmd += "--build-arg", '"BASE_IMAGE=$env:ASH_BASE_IMAGE_OVERRIDE"'
                     }
 
                     # Add any extra build args
@@ -352,7 +670,7 @@ function Invoke-ASH {
                     }
 
                     # Add the build context
-                    $buildCmd += "`"$ashRoot`""
+                    $buildCmd += '"$ashRoot"'
 
                     # Execute the build command
                     $buildCmdStr = $buildCmd -join ' '
@@ -373,30 +691,31 @@ function Invoke-ASH {
                 if (-not $NoRun) {
                     Write-Host "Running ASH scan using built image..."
                     $ashDebug = "$(if($PSBoundParameters.ContainsKey('Debug')){"YES"}else{"NO"})".Trim()
+                    # The runner by name, as for the build above.
                     $runCmd = @()
-                    if ($OCI_WRAPPER) { $runCmd += $OCI_WRAPPER }
+                    if ($OCI_WRAPPER) { $runCmd += $OCI_WRAPPER; $runCmd += '"$RESOLVED_OCI_RUNNER"' }
+                    else { $runCmd += '& "$RESOLVED_OCI_RUNNER"' }
                     $runCmd += @(
-                        $RESOLVED_OCI_RUNNER
                         'run'
                         '--rm'
-                        "-e", "ASH_ACTUAL_SOURCE_DIR=`"$sourceDirFull`""
-                        "-e", "ASH_ACTUAL_OUTPUT_DIR=`"$outputDirFull`""
+                        "-e", '"ASH_ACTUAL_SOURCE_DIR=$sourceDirFull"'
+                        "-e", '"ASH_ACTUAL_OUTPUT_DIR=$outputDirFull"'
                         "-e", "ASH_DEBUG=`"$ashDebug`""
-                        "-e", "ASH_OUTPUT_FORMAT=`"$OutputFormat`""
+                        "-e", '"ASH_OUTPUT_FORMAT=$OutputFormat"'
                     )
 
-                    # Add source directory mount
-                    $mountSourceDir = "--mount `"type=bind,source=$sourceDirFull,destination=/src"
-
-                    # Make source dir readonly if output dir is not a subdirectory
-                    if ($outputDirFull -notmatch [regex]::Escape($sourceDirFull)) {
-                        $mountSourceDir += ",readonly"
-                    }
-                    $mountSourceDir += '"'
-                    $runCmd += $mountSourceDir
+                    # Add source directory mount, read-only wherever the output
+                    # directory is: the output has its own mount at /out and the scan
+                    # inside writes there, also when OutputDir is inside SourceDir.
+                    $runCmd += '--mount "type=bind,source=$sourceDirFull,destination=/src,readonly"'
 
                     # Add output directory mount
-                    $runCmd += "--mount `"type=bind,source=$outputDirFull,destination=/out`""
+                    $runCmd += '--mount "type=bind,source=$outputDirFull,destination=/out"'
+
+                    # Add the config file mount, when the config is outside SourceDir
+                    if ($configMountArg) {
+                        $runCmd += $configMountArg
+                    }
 
                     # Add any extra run args
                     if ($runArgs.Count -gt 0) {
@@ -405,7 +724,7 @@ function Invoke-ASH {
 
                     # Add image name and ASH command
                     $runCmd += @(
-                        $AshImageName
+                        '"$AshImageName"'
                         'ash'
                         '--source-dir /src'
                         '--output-dir /out'
@@ -431,10 +750,31 @@ function Invoke-ASH {
             }
         }
         catch {
-            Write-Error $_
-            throw $_
+            # As in begin: whatever raised, $LASTEXITCODE is not left at 0. Rethrown
+            # as it is: writing it as an error record first showed it twice.
+            if (-not $global:LASTEXITCODE) { $global:LASTEXITCODE = 1 }
+            throw
         }
     }
+}
+
+function Stop-AshRefusal {
+    <#
+    .SYNOPSIS
+    End an Invoke-ASH run that is refused: set $LASTEXITCODE to its code and throw.
+
+    .DESCRIPTION
+    It never calls `exit`. In a function a script dot-sources, `exit` ends that whole
+    script, so its caller could neither handle the refusal nor go on. The thrown
+    error carries the message; a caller that catches it reads the code from
+    $LASTEXITCODE, and a CI step that needs the code exits with it:
+    `try { Invoke-ASH ... } catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }`,
+    under `shell: pwsh -File {0}` on GitHub Actions. Uncaught, `pwsh -File` and `pwsh -Command` exit 1, as PowerShell does for any
+    uncaught error. The code is set first, before anything else can raise.
+    #>
+    param([int]$ExitCode, [string]$Message)
+    $global:LASTEXITCODE = $ExitCode
+    throw "ERROR: $Message"
 }
 
 Register-ArgumentCompleter -CommandName Invoke-ASH -ParameterName 'OCIRunner' -ScriptBlock {

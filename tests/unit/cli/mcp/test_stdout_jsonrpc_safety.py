@@ -191,4 +191,4 @@ class TestNothingIsWrittenToStdout:
         assert captured.out == ""
         assert "MCP dependencies are not available" in captured.err
         # The remediation guidance has to be readable, just not on stdout.
-        assert "force-reinstall" in captured.err
+        assert "--reinstall-package automated-security-helper" in captured.err

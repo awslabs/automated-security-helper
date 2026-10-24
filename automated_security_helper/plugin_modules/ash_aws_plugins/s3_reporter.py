@@ -5,10 +5,10 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal, Optional, TYPE_CHECKING
+from typing import Annotated, Literal, Optional, TYPE_CHECKING, Tuple
 
 import boto3
-from pydantic import Field
+from pydantic import Field, model_validator
 import yaml
 
 from automated_security_helper.base.options import ReporterOptionsBase
@@ -16,10 +16,14 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
+    write_report_file,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
+    MAX_RETRIES,
+    MAX_RETRY_DELAY_SECONDS,
+    check_retry_delays,
     retry_with_backoff,
 )
 
@@ -28,30 +32,23 @@ if TYPE_CHECKING:
 
 
 class S3ReporterConfigOptions(ReporterOptionsBase):
-    aws_region: Annotated[
-        Optional[str],
-        Field(
-            default_factory=lambda: os.environ.get(
-                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
-            ),
-            pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
-            description="AWS region to use for S3 operations",
+    # Assigned rather than Annotated, so the type checker sees that these three
+    # have defaults and that S3ReporterConfigOptions() needs no arguments.
+    aws_region: Optional[str] = Field(
+        default_factory=lambda: os.environ.get(
+            "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
         ),
-    ]
-    aws_profile: Annotated[
-        Optional[str],
-        Field(
-            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
-            description="AWS profile to use for authentication",
-        ),
-    ]
-    bucket_name: Annotated[
-        Optional[str],
-        Field(
-            default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None),
-            description="Name of the S3 bucket to store reports",
-        ),
-    ]
+        pattern=r"(af|il|ap|ca|eu|me|sa|us|cn|us-gov|us-iso|us-isob)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\d{1}",
+        description="AWS region to use for S3 operations",
+    )
+    aws_profile: Optional[str] = Field(
+        default_factory=lambda: os.environ.get("AWS_PROFILE", None),
+        description="AWS profile to use for authentication",
+    )
+    bucket_name: Optional[str] = Field(
+        default_factory=lambda: os.environ.get("ASH_S3_BUCKET_NAME", None),
+        description="Name of the S3 bucket to store reports",
+    )
     key_prefix: Annotated[
         str,
         Field(
@@ -68,28 +65,38 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     max_retries: Annotated[
         int,
         Field(
+            le=MAX_RETRIES,
             description="Maximum number of retry attempts for S3 operations",
         ),
     ] = 3
     base_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Base delay in seconds between retry attempts",
         ),
     ] = 1.0
     max_delay: Annotated[
         float,
         Field(
+            le=MAX_RETRY_DELAY_SECONDS,
             description="Maximum delay in seconds between retry attempts",
         ),
     ] = 60.0
+
+    @model_validator(mode="after")
+    def _retry_delays_are_bounded(self):
+        return check_retry_delays(self)
 
 
 class S3ReporterConfig(ReporterPluginConfigBase):
     name: Literal["s3"] = "s3"
     extension: str = "s3.json"
-    enabled: bool = True
-    options: S3ReporterConfigOptions = S3ReporterConfigOptions()
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
+    enabled: bool = False
+    # A factory, so the environment defaults are read when the config is built.
+    options: S3ReporterConfigOptions = Field(default_factory=S3ReporterConfigOptions)
 
 
 @ash_reporter_plugin
@@ -146,11 +153,34 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
+    destination_options = (
+        "aws_region",
+        "aws_profile",
+        "bucket_name",
+        "key_prefix",
+        # How long it keeps calling S3 with the operator's credentials.
+        "max_retries",
+        "base_delay",
+        "max_delay",
+    )
 
     def model_post_init(self, context):
         if self.config is None:
             self.config = S3ReporterConfig()
         return super().model_post_init(context)
+
+    def companion_file_names(self) -> Tuple[str, ...]:
+        """The local copy of the uploaded content, ``s3-report.<json|yaml>``."""
+        return (self._local_copy_name(),)
+
+    def _local_copy_name(self) -> str:
+        config = self.config
+        if isinstance(config, dict):
+            config = S3ReporterConfig.model_validate(config)
+        file_extension = "json" if config.options.file_format == "json" else "yaml"
+        return f"s3-report.{file_extension}"
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
@@ -237,15 +267,11 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             ASH_LOGGER.info(f"Successfully uploaded report to {s3_url}")
 
             # The documented local copy of the uploaded content.
-            output_path = (
-                Path(self.context.output_dir)
-                / "reports"
-                / f"s3-report.{file_extension}"
+            reports_dir = Path(self.context.output_dir) / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            local_copy = write_report_file(
+                reports_dir, self._local_copy_name(), output_content
             )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(output_content)
 
             # What ReportPhase writes to reports/ash.s3.json: a receipt for the
             # upload, as JSON so the file matches its extension.
@@ -255,7 +281,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                     "bucket": self.config.options.bucket_name,
                     "key": s3_key,
                     "file_format": self.config.options.file_format,
-                    "local_copy": output_path.as_posix(),
+                    "local_copy": local_copy.as_posix() if local_copy else None,
                 },
                 indent=2,
             )

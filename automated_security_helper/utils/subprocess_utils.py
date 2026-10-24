@@ -1,24 +1,45 @@
 """Centralized subprocess execution utilities for ASH."""
 
+import contextvars
+import errno
 import logging
 import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
+import sys
 import weakref
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union, Any, Literal
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.offline_tool_env import offline_tool_environment
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
+from automated_security_helper.utils.scanned_tree import is_inside_tree
 
 if TYPE_CHECKING:
     from automated_security_helper.utils.sandbox.backends import SpawnPlan
 
 
-_find_executable_cache: dict[str, str | None] = {}
+# (command, sandbox, tree scope key) -> (path or None, refused in-tree file or None)
+_find_executable_cache: Dict[
+    Tuple[str, bool, Tuple[Tuple[str, ...], bool]], Tuple[Optional[str], Optional[str]]
+] = {}
 
 
 def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -32,8 +53,43 @@ def _spawn_env(env: Optional[Dict[str, str]]) -> Dict[str, str]:
     ``[Errno 14] Bad address``. A copy is built into a fresh ``envp`` that no other
     thread can touch, and the child sees the same variables. See
     ``utils/process_env.py``.
+
+    In offline mode the variables that turn off each tool's own update, version
+    and telemetry checks are set over it (``utils/offline_tool_env.py``), so a
+    version probe or any other spawn of a tool stays off the network as its scan
+    does.
+
+    PATH keeps its anchored entries only (see :func:`_is_anchored`). A child looks
+    programs up by name itself, through a ``#!/usr/bin/env node`` line, a binstub or
+    a scanner starting git, and a relative or empty entry would let that search
+    answer from the child's working directory.
     """
-    return env if env is not None else snapshot_environ()
+    env = env if env is not None else snapshot_environ()
+    offline = offline_tool_environment()
+    if offline:
+        env = {**env, **offline}
+    scope = _TREE_SCOPE.get()
+    if scope is not None:
+        env = _without_in_tree_path_entries(env, scope)
+    return _with_anchored_path_entries(env)
+
+
+def _with_anchored_path_entries(env: Dict[str, str]) -> Dict[str, str]:
+    """``env`` with PATH's entries that are not anchored taken off.
+
+    Returned unchanged when there are none. When no entry is left, PATH is
+    ``os.defpath``: an empty PATH is read as the working directory.
+    """
+    path_value = env.get("PATH")
+    if not path_value:
+        return env
+    entries = path_value.split(os.pathsep)
+    kept = [entry for entry in entries if entry and _is_anchored(entry)]
+    if len(kept) == len(entries):
+        return env
+    env = dict(env)
+    env["PATH"] = os.pathsep.join(kept) if kept else os.defpath
+    return env
 
 
 # Exit code reported for a command killed at its timeout, matching coreutils
@@ -65,7 +121,23 @@ class TimedOutProcess(subprocess.CompletedProcess):
 # It used to be 1, the generic failure code. bandit and semgrep both accept 1, so
 # a uv binary that failed to exec with [Errno 14] Bad address let the scan carry
 # on, and the only error anyone saw was the SARIF file the tool never wrote.
+#
+# The runners' own failures (an exception that is not an OSError, from building
+# the spawn or from reading the tool's output) report it too, for the same
+# reason: ASH did not get a run it can vouch for, and 1 would read as one.
 SPAWN_FAILURE_RETURNCODE = 127
+
+
+def exit_status(returncode: int) -> int:
+    """A process's exit code as a shell reports it: ``128 + N`` when signal N ended it.
+
+    ``subprocess`` reports a child a signal ended as ``-N``. Its absolute value is a
+    small number that success sets contain: a tool killed by SIGHUP would read as
+    exit 1, "findings found", for a scanner that accepts ``{0, 1}``. ``128 + N`` is
+    what bwrap and ``uv tool run`` already return for the same child, and no scanner
+    accepts it.
+    """
+    return 128 - returncode if returncode < 0 else returncode
 
 
 class SpawnFailedProcess(subprocess.CompletedProcess):
@@ -107,9 +179,12 @@ def _bin_path() -> Path:
 
     The module-level constant remains the fallback, so tests that patch
     ``subprocess_utils.ASH_BIN_PATH`` keep working.
+
+    Absolute: a tool found here is run by scanners whose working directory is the
+    scanned tree, where a relative ``bin/grype`` would name the repository's file.
     """
     from_env = os.environ.get("ASH_BIN_PATH")
-    return Path(from_env) if from_env else ASH_BIN_PATH
+    return Path(from_env).absolute() if from_env else ASH_BIN_PATH
 
 
 def path_independent_dirs() -> List[Path]:
@@ -182,8 +257,371 @@ def _executable_candidate_names(command: str) -> List[str]:
     return [f"{command}{suffix}" for suffix in suffixes] + [command]
 
 
+def _is_anchored(path: str, pathmod: Any = os.path) -> bool:
+    """Whether ``path`` names a location without reference to the cwd.
+
+    ``isabs`` alone is not enough on Windows: before Python 3.13 ``\\tools`` counts
+    as absolute there, but it is rooted on whichever drive is current. A drive
+    letter or UNC share is required as well.
+    """
+    if not pathmod.isabs(path):
+        return False
+    if pathmod.__name__ == "ntpath":
+        return bool(pathmod.splitdrive(path)[0])
+    return True
+
+
+def _absolute_path_entries() -> List[str]:
+    """The PATH entries that name a directory without reference to the cwd."""
+    return [
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and _is_anchored(entry)
+    ]
+
+
+def _which_outside_working_directory(cmd: str) -> Optional[str]:
+    """``shutil.which(cmd)``, except that nothing is found through the cwd.
+
+    ``shutil.which`` on Windows looks in the working directory before PATH, and on
+    every platform a relative PATH entry (``.``, an empty entry, ``bin``) names a
+    directory under it. ASH usually runs from the repository it scans, so a file
+    found that way is part of the repository. Both kinds of hit come back as a path
+    that is not anchored; when ``which`` returns one for a bare name, the search is
+    made again over the anchored PATH entries alone. A ``cmd`` with a directory
+    part is answered only when it is anchored itself: ``./tool`` is a path into
+    the working directory.
+    """
+    if os.path.dirname(cmd):
+        return shutil.which(cmd) if _is_anchored(cmd) else None
+    found = shutil.which(cmd)
+    if found is None or _is_anchored(found):
+        return found
+    for entry in _absolute_path_entries():
+        found = shutil.which(os.path.join(entry, cmd))
+        if found:
+            return found
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Tools inside the scanned tree
+#
+# A program on PATH can be part of the repository being scanned: an activated
+# in-repo virtual environment (`uv run` puts .venv/bin first on PATH), npm's
+# node_modules/.bin under `npm run`, or a committed bin directory someone added to
+# PATH. Starting one of those runs repository content. While a scan is in progress
+# (scanning_tree), every lookup refuses a candidate inside a scanned tree, by its
+# path as found, its parent's real path, its own real path, or the device and inode
+# of an ancestor, and goes on to the next candidate; children are started with the
+# tree's directories taken off PATH. The operator can allow in-tree tools with
+# ASH_ALLOW_IN_TREE_TOOLS=1 or --allow-in-tree-tools. A repository's config cannot,
+# and `ash mcp` never honors the opt-in.
+#
+# The state is per scan, in a context variable, so concurrent scans in one process
+# (an MCP server, a workspace's project pool) do not see each other's trees. Scanner
+# threads are started with a copy of the scan's context.
+# ---------------------------------------------------------------------------
+
+#: The environment variable that lets ASH start a tool from inside the scanned tree.
+#: Read from the process environment only, which belongs to the operator.
+ALLOW_IN_TREE_TOOLS_ENV = "ASH_ALLOW_IN_TREE_TOOLS"
+ALLOW_IN_TREE_TOOLS_FLAG = "--allow-in-tree-tools"
+
+#: Decision point: whether this process honors the operator's opt-in at all.
+#: ``ash mcp`` turns it off (see cli/mcp_server.py, MCP_HONORS_IN_TREE_OPT_IN): an
+#: MCP client's scans never run a tool from a scanned or delivered tree, even with
+#: ASH_ALLOW_IN_TREE_TOOLS set in the server's environment.
+_opt_in_honored = True
+
+#: Decision point: whether the opt-in also covers the scanner sandbox's own
+#: programs (bwrap, firejail, readlink, true). It does; with it off they are refused
+#: like any other in-tree tool.
+SANDBOX_PROGRAMS_FOLLOW_OPT_IN = True
+
+
+def parse_allow_in_tree_tools(value: Optional[str]) -> bool:
+    """The one reading of ASH_ALLOW_IN_TREE_TOOLS: ``1``, ``true``, ``yes`` or ``on``."""
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def honor_in_tree_opt_in(honored: bool) -> None:
+    """Set whether this process honors the opt-in. ``ash mcp`` calls it with False."""
+    global _opt_in_honored
+    _opt_in_honored = honored
+
+
+def in_tree_tools_allowed() -> bool:
+    """Whether a scan starting now may run tools from inside its tree.
+
+    The active scan's answer if there is one, so a scan keeps the decision it
+    started with; otherwise the operator's environment, if this process honors it.
+    """
+    scope = _TREE_SCOPE.get()
+    if scope is not None:
+        return scope.allow
+    return _opt_in_honored and parse_allow_in_tree_tools(
+        os.environ.get(ALLOW_IN_TREE_TOOLS_ENV)
+    )
+
+
+@dataclass
+class _TreeScope:
+    roots: Tuple[str, ...]
+    allow: bool
+    # command -> the in-tree file a lookup refused, when that lookup found nothing
+    # else. Shared by the scan's threads; read for MISSING reasons and spawn refusals.
+    refusals: Dict[str, str] = field(default_factory=dict)
+    # Every refused lookup in order, cache hits included, so a caller can tell
+    # which refusals happened while it was looking (recording_in_tree_refusals).
+    events: List[str] = field(default_factory=list)
+    warned: set = field(default_factory=set)
+
+    @property
+    def key(self) -> Tuple[Tuple[str, ...], bool]:
+        return (self.roots, self.allow)
+
+
+_TREE_SCOPE: contextvars.ContextVar[Optional[_TreeScope]] = contextvars.ContextVar(
+    "ash_scanned_tree_scope", default=None
+)
+
+
+@contextmanager
+def scanning_tree(root: "str | os.PathLike[str]") -> Iterator[_TreeScope]:
+    """Treat ``root`` as a scanned tree for every tool lookup in this context.
+
+    Nested scopes add their root to the enclosing scope's, keep its decision on the
+    opt-in, and record refusals in the enclosing scope's records: the orchestrator
+    opens its own scope inside run_ash_scan's, and the incomplete-scan message,
+    printed after the orchestrator's has closed, names the tools refused in it.
+    Threads see the scope only when started with a copy of this context
+    (``contextvars.copy_context().run``), as the scan phase starts them.
+    """
+    parent = _TREE_SCOPE.get()
+    key = os.path.abspath(os.fspath(root))
+    roots = parent.roots if parent is not None else ()
+    if key not in roots:
+        roots = (*roots, key)
+    if parent is None:
+        scope = _TreeScope(roots=roots, allow=in_tree_tools_allowed())
+    else:
+        scope = _TreeScope(
+            roots=roots,
+            allow=parent.allow,
+            refusals=parent.refusals,
+            events=parent.events,
+            warned=parent.warned,
+        )
+    token = _TREE_SCOPE.set(scope)
+    try:
+        yield scope
+    finally:
+        _TREE_SCOPE.reset(token)
+
+
+def scanned_trees() -> List[str]:
+    """The roots of the active scan, or none."""
+    scope = _TREE_SCOPE.get()
+    return list(scope.roots) if scope is not None else []
+
+
+def tree_scope_key() -> Tuple[Tuple[str, ...], bool]:
+    """What a lookup's answer depends on, for caches keyed by it."""
+    scope = _TREE_SCOPE.get()
+    return scope.key if scope is not None else ((), False)
+
+
+def in_tree_refusal(command: str) -> Optional[str]:
+    """Why ``command`` was not found in this scan, when the reason is the tree.
+
+    For the MISSING reason a scanner records and for refusing a spawn; None when no
+    lookup of ``command`` in the active scan refused an in-tree copy and found
+    nothing else.
+    """
+    scope = _TREE_SCOPE.get()
+    path = scope.refusals.get(command) if scope is not None else None
+    if path is None:
+        return None
+    return _refusal_text(command, path, sandbox=False)
+
+
+def _remedy(sandbox: bool) -> str:
+    """What the operator can do, saying the opt-in only where it would work."""
+    if _opt_in_honored and (not sandbox or SANDBOX_PROGRAMS_FOLLOW_OPT_IN):
+        return (
+            f"install it outside the scanned tree, or set {ALLOW_IN_TREE_TOOLS_ENV}=1 "
+            f"or pass {ALLOW_IN_TREE_TOOLS_FLAG} to allow tools from the tree"
+        )
+    return "install it outside the scanned tree"
+
+
+def _refusal_text(command: str, path: str, sandbox: bool) -> str:
+    return (
+        f"{command} was found only inside the scanned tree, at {path}, and ASH does "
+        f"not run tools from the tree: {_remedy(sandbox)}"
+    )
+
+
+def _is_running_interpreter(candidate: str) -> bool:
+    """The Python running ASH: already started, so refusing it protects nothing."""
+    try:
+        return os.path.samefile(candidate, sys.executable)
+    except OSError:
+        return False
+
+
+def _containing_tree(candidate: str, roots: Sequence[str]) -> Optional[str]:
+    for root in roots:
+        if is_inside_tree(candidate, root):
+            return root
+    return None
+
+
+def _first_usable(
+    command: str,
+    candidates: Iterator[str],
+    scope: Optional[_TreeScope],
+    sandbox: bool = False,
+) -> Tuple[Optional[str], Optional[str]]:
+    """The first candidate outside the scan's trees, or inside one when allowed.
+
+    Returns the chosen path, or None, and the in-tree file refused on the way when
+    nothing was chosen. A refusal followed by a usable candidate is logged once
+    but not recorded: the tool is not missing.
+    """
+    if scope is None:
+        first = next(candidates, None)
+        return first, None
+    allowed = scope.allow and (not sandbox or SANDBOX_PROGRAMS_FOLLOW_OPT_IN)
+    refused: Optional[str] = None
+    for candidate in candidates:
+        root = _containing_tree(candidate, scope.roots)
+        if root is None or _is_running_interpreter(candidate):
+            return candidate, None
+        if allowed:
+            _warn_once(
+                scope,
+                ("allowed", command, candidate),
+                f"Running {command} from inside the scanned tree {root}: {candidate}. "
+                f"In-tree tools are allowed by {ALLOW_IN_TREE_TOOLS_ENV} or "
+                f"{ALLOW_IN_TREE_TOOLS_FLAG}.",
+            )
+            return candidate, None
+        _warn_once(
+            scope,
+            ("refused", command, candidate),
+            f"Not running {command} from inside the scanned tree {root}: {candidate}. "
+            f"To use it, {_remedy(sandbox)}.",
+        )
+        if refused is None:
+            refused = candidate
+    return None, refused
+
+
+def _warn_once(scope: _TreeScope, key: tuple, message: str) -> None:
+    if key in scope.warned:
+        return
+    scope.warned.add(key)
+    ASH_LOGGER.warning(message, extra=NO_MARKUP)
+
+
+def _executable_candidates(command: str) -> Iterator[str]:
+    """Every file ``find_executable`` may answer for ``command``, in its order.
+
+    The first is the answer ``find_executable`` has always given; the rest are
+    reached only when an earlier one is refused for being inside the scanned tree.
+    Nothing is found through the working directory.
+    """
+    for name in _executable_candidate_names(command):
+        if os.path.dirname(name):
+            found = _which_outside_working_directory(name)
+            if found:
+                yield found
+            continue
+        # shutil.which first, as find_executable always has. When it finds nothing
+        # no PATH entry holds the name, so the entries are searched one by one
+        # only after a hit: one through the working directory, which is skipped,
+        # or one that may be refused for being inside the scanned tree.
+        first = shutil.which(name)
+        if first is not None:
+            if _is_anchored(first):
+                yield first
+            for entry in _absolute_path_entries():
+                found = shutil.which(os.path.join(entry, name))
+                if found and found != first:
+                    yield found
+        # Anchored only: a relative ASH_BIN_PATH would be read against the cwd.
+        for directory in path_independent_dirs():
+            if not _is_anchored(str(directory)):
+                continue
+            poss = directory.joinpath(name)
+            ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
+            if poss.exists():
+                yield poss.as_posix()
+
+
+def _lookup(command: str, sandbox: bool = False) -> Optional[str]:
+    """find_executable's search under the active scan, cached by what it depends on."""
+    scope = _TREE_SCOPE.get()
+    key = (command, sandbox, tree_scope_key())
+    cached = _find_executable_cache.get(key)
+    if cached is None:
+        try:
+            cached = _first_usable(
+                command, _executable_candidates(command), scope, sandbox
+            )
+        except Exception as e:
+            ASH_LOGGER.error(e, extra=NO_MARKUP)
+            cached = (None, None)
+        _find_executable_cache[key] = cached
+    found, refused = cached
+    if refused is not None and scope is not None:
+        # Recorded on this scan even when the answer came from the cache, so a
+        # later scan of the same tree sees why the tool is missing.
+        scope.refusals.setdefault(command, refused)
+        scope.events.append(command)
+    return found
+
+
+def in_tree_refusals() -> Dict[str, str]:
+    """The active scan's refused tools: command -> the in-tree file not run."""
+    scope = _TREE_SCOPE.get()
+    return dict(scope.refusals) if scope is not None else {}
+
+
+def in_tree_remedy() -> str:
+    """What to do about a refused tool, naming the opt-in only where it applies."""
+    return _remedy(sandbox=False)
+
+
+@contextmanager
+def recording_in_tree_refusals() -> Iterator[List[str]]:
+    """Collect the refusal reasons of lookups made while the block runs.
+
+    For a caller that wants the reason a check failed, such as the scan phase
+    recording why a scanner is MISSING, whatever lookups the check made.
+    """
+    scope = _TREE_SCOPE.get()
+    start = len(scope.events) if scope is not None else 0
+    recorded: List[str] = []
+    try:
+        yield recorded
+    finally:
+        if scope is not None:
+            for command in dict.fromkeys(scope.events[start:]):
+                reason = in_tree_refusal(command)
+                if reason is not None:
+                    recorded.append(reason)
+
+
 def find_executable(command: str) -> Optional[str]:
     """Find the full path to an executable.
+
+    Nothing is found through the working directory, which is usually the
+    repository being scanned (see :func:`_which_outside_working_directory`), and
+    while a scan is in progress a copy inside the scanned tree is refused unless
+    the operator allowed it (see the section comment above).
 
     Args:
         command: The command to find
@@ -191,29 +629,197 @@ def find_executable(command: str) -> Optional[str]:
     Returns:
         The full path to the executable, or None if not found
     """
-    if command in _find_executable_cache:
-        return _find_executable_cache[command]
+    return _lookup(command)
 
-    for cmd in _executable_candidate_names(command):
-        try:
-            found = shutil.which(cmd)
-            if found:
-                _find_executable_cache[command] = found
-                return found
-            possibles = [
-                directory.joinpath(cmd) for directory in path_independent_dirs()
-            ]
-            for poss in possibles:
-                ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
-                if poss.exists():
-                    result = poss.as_posix()
-                    _find_executable_cache[command] = result
-                    return result
-        except Exception as e:
-            ASH_LOGGER.error(e, extra=NO_MARKUP)
 
-    _find_executable_cache[command] = None
+def lookup_for_scan(
+    command: str, root: "str | os.PathLike[str]"
+) -> Tuple[Optional[str], Optional[str]]:
+    """``find_executable`` with ``root`` treated as a scanned tree, and the reason.
+
+    For callers that know their tree, such as a converter run on its own or the
+    cdk-nag worker process. Returns the path, or None, and when None because an
+    in-tree copy was refused, the text that says so.
+    """
+    with scanning_tree(root):
+        found = find_executable(command)
+        return found, (None if found else in_tree_refusal(command))
+
+
+def find_executable_for_scan(
+    command: str, root: "str | os.PathLike[str]"
+) -> Optional[str]:
+    """:func:`lookup_for_scan` without the reason.
+
+    Returns:
+        An absolute path, or None. A caller given None treats the tool as
+        unavailable and starts nothing.
+    """
+    return lookup_for_scan(command, root)[0]
+
+
+def find_trusted_executable(command: str) -> Optional[str]:
+    """Find a program the scanner sandbox itself runs: bwrap, firejail, readlink.
+
+    :func:`find_executable`, with the opt-in applying only if
+    :data:`SANDBOX_PROGRAMS_FOLLOW_OPT_IN` says so.
+    """
+    return _lookup(command, sandbox=True)
+
+
+def _without_in_tree_path_entries(
+    env: Dict[str, str], scope: _TreeScope
+) -> Dict[str, str]:
+    """``env`` with the scan's trees, and entries not anchored, taken off PATH.
+
+    A child looks programs up by name itself: a ``#!/usr/bin/env node`` shebang, a
+    binstub, a scanner starting git, jsii starting node. Without this it would find
+    the tree's copies that ASH's own lookup refused. Also carries the scan's
+    decision on the opt-in, so a child ASH (the cdk-nag worker, a container, a nix
+    shell) makes the same one.
+    """
+    env = dict(env)
+    if scope.allow:
+        env[ALLOW_IN_TREE_TOOLS_ENV] = "1"
+        return env
+    env.pop(ALLOW_IN_TREE_TOOLS_ENV, None)
+    path_value = env.get("PATH")
+    if path_value:
+        kept = [
+            entry
+            for entry in path_value.split(os.pathsep)
+            if entry
+            and _is_anchored(entry)
+            and _containing_tree(entry, scope.roots) is None
+        ]
+        env["PATH"] = os.pathsep.join(kept)
+    return env
+
+
+def child_environ(env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """The environment to start a child with: see :func:`_spawn_env`."""
+    return _spawn_env(env)
+
+
+def started_from_working_directory(
+    name: str,
+    cwd: "str | os.PathLike[str] | None" = None,
+    env: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """The file the OS would start for the bare ``name`` through a working directory.
+
+    Two searches look there. Windows ``CreateProcess`` tries ASH's working directory
+    before PATH. And on every platform a PATH entry that is not anchored (an empty
+    entry, ``.``, ``bin``) names a directory under one: ASH's on Windows, and on
+    POSIX the child's, ``cwd``, because the search runs after the child changes
+    directory. ASH usually runs from the repository it scans, and a scanner's
+    ``cwd`` is often the tree itself.
+
+    Returns:
+        The file, or None when neither search would find one.
+    """
+    if os.path.dirname(name):
+        return None
+    windows = platform.system().lower() == "windows"
+    path_value = (
+        env.get("PATH", os.defpath)
+        if env is not None
+        else os.environ.get("PATH", os.defpath)
+    )
+    directories = [
+        entry for entry in path_value.split(os.pathsep) if not _is_anchored(entry)
+    ]
+    if windows:
+        directories.insert(0, os.curdir)
+    base = os.getcwd() if windows or cwd is None else os.fspath(cwd)
+    names = _executable_candidate_names(name)
+    if windows:
+        names.append(f"{name}.com")
+    for directory in directories:
+        for candidate in names:
+            path = os.path.join(base, directory, candidate)
+            if os.path.isfile(path):
+                return path
     return None
+
+
+def _resolve_for_spawn(
+    args: List[str],
+    cwd: "str | os.PathLike[str] | None" = None,
+    env: Optional[Dict[str, str]] = None,
+) -> Optional[FileNotFoundError]:
+    """Point ``args[0]`` at the file :func:`find_executable` finds for it.
+
+    Returned, for the caller to raise where it reports a command that could not
+    start, as the ``FileNotFoundError`` ``subprocess`` raises for a missing
+    program, when the program would otherwise come from the working directory or
+    the scanned tree:
+
+    * a path with a directory part that is not anchored, such as ``./tool``;
+    * any name, bare or a full path, whose lookup refused an in-tree copy and found
+      nothing else, because the operating system would start that copy;
+    * a bare name it did not find that the operating system would start from a
+      working directory (:func:`started_from_working_directory`);
+    * on Windows, any bare name it did not find: ``CreateProcess`` has search
+      locations of its own that ASH's lookup does not check.
+
+    Any other name it does not find is passed on as it was, for ``subprocess`` to
+    start or fail on.
+    """
+    name = args[0]
+    if os.path.dirname(name) and not _is_anchored(name):
+        return FileNotFoundError(
+            errno.ENOENT,
+            f"{name} is a path relative to the working directory, which is not run",
+            name,
+        )
+    found = find_executable(name)
+    if found:
+        args[0] = found
+        return None
+    refusal = in_tree_refusal(name)
+    if refusal is not None:
+        return FileNotFoundError(errno.ENOENT, refusal, name)
+    if os.path.dirname(name):
+        return None
+    local = started_from_working_directory(name, cwd, env)
+    if local is not None:
+        return FileNotFoundError(
+            errno.ENOENT,
+            f"{name} is not on PATH, and the copy found through the working "
+            f"directory, {local}, is not run",
+            name,
+        )
+    if platform.system().lower() == "windows" and _refuse_unresolved_on_windows:
+        return FileNotFoundError(errno.ENOENT, f"{name} was not found on PATH", name)
+    return None
+
+
+#: Whether a bare name ASH's lookup cannot resolve is refused on Windows instead of
+#: handed to CreateProcess, whose own search includes directories ASH does not check.
+_refuse_unresolved_on_windows = True
+
+
+def resolve_command(
+    args: List[str],
+    cwd: "str | os.PathLike[str] | None" = None,
+    env: Optional[Dict[str, str]] = None,
+) -> List[str]:
+    """A copy of ``args`` with its program resolved as the spawn helpers resolve it.
+
+    For a caller that starts the process itself.
+
+    Raises:
+        FileNotFoundError: the program would come from the working directory (see
+            :func:`_resolve_for_spawn`), the error ``subprocess`` raises for a
+            program that is not installed.
+    """
+    resolved = list(args)
+    if resolved:
+        refused = _resolve_for_spawn(resolved, cwd, env)
+        if refused is not None:
+            raise refused
+    return resolved
 
 
 def _prepare_spawn(
@@ -263,6 +869,13 @@ def _run_stoppable(args: List[str], **kwargs: Any) -> subprocess.CompletedProces
     timeout = kwargs.pop("timeout", None)
     check = kwargs.pop("check", False)
     input_data = kwargs.pop("input", None)
+    if input_data is not None:
+        # As subprocess.run does: input is written to a pipe the child reads.
+        if "stdin" in kwargs:
+            raise ValueError("stdin and input arguments may not both be used.")
+        kwargs["stdin"] = subprocess.PIPE
+    else:
+        kwargs.setdefault("stdin", subprocess.DEVNULL)
     if kwargs.pop("capture_output", False):
         if "stdout" in kwargs or "stderr" in kwargs:
             raise ValueError(
@@ -309,7 +922,20 @@ def spawn_run(args: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     Same arguments, same return value, same exceptions as ``subprocess.run``, for the
     call sites that rely on its exact semantics (``check=True`` raising,
     ``TimeoutExpired`` propagating) and so cannot move to :func:`run_command`.
+    The program is resolved first, and refused where :func:`_resolve_for_spawn`
+    refuses it, raising the ``FileNotFoundError`` ``subprocess.run`` would.
+
+    Standard input is ``subprocess.DEVNULL`` unless the caller passes ``input`` or
+    ``stdin``: ASH's own standard input is the MCP client's channel under
+    ``ash mcp``, and a terminal under the CLI, and neither belongs to the tool.
     """
+    if kwargs.get("input") is None:
+        kwargs.setdefault("stdin", subprocess.DEVNULL)
+    if args and not kwargs.get("shell", False):
+        args = list(args)
+        refused = _resolve_for_spawn(args, kwargs.get("cwd"), kwargs.get("env"))
+        if refused is not None:
+            raise refused
     plan = _prepare_spawn(
         args, kwargs.get("env"), kwargs.get("cwd"), bool(kwargs.get("shell", False))
     )
@@ -359,11 +985,9 @@ def run_command(
     # Copy args to avoid mutating the caller's list
     args = list(args)
 
-    # Resolve the full path to the executable if possible
-    if args and not shell:
-        binary_full_path = find_executable(args[0])
-        if binary_full_path:
-            args[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the try below, so it is reported as a command that could not start.
+    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
@@ -375,6 +999,8 @@ def run_command(
 
     sandbox_plan = None
     try:
+        if refused is not None:
+            raise refused
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env
@@ -384,6 +1010,8 @@ def run_command(
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
+            # Not ASH's own standard input; see spawn_run.
+            stdin=subprocess.DEVNULL,
             capture_output=capture_output,
             text=text,
             check=check,
@@ -448,10 +1076,10 @@ def run_command(
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
         if check:
             raise
-        # Create a CompletedProcess-like object with error info
+        # Not 1, which most scanners accept: see SPAWN_FAILURE_RETURNCODE.
         return subprocess.CompletedProcess(
             args=args,
-            returncode=1,
+            returncode=SPAWN_FAILURE_RETURNCODE,
             stdout="",
             stderr=f"Error: {str(e)}",
         )
@@ -470,13 +1098,25 @@ def _write_stream_log(
     """Write one captured stream to ``<results_dir>/<class_name>.<stream>.log``."""
     if results_dir is None or preference not in ["write", "both"]:
         return
+    from automated_security_helper.utils.sandbox.scope import active_scope
+
     results_dir_path = Path(results_dir)
     results_dir_path.mkdir(parents=True, exist_ok=True)
     filename = f"{class_name}.{stream_name}.log" if class_name else f"{stream_name}.log"
+    path = results_dir_path.joinpath(filename)
     # Not a plain open(): a sandboxed scanner can leave a symlink at this name, and
-    # ASH is not sandboxed. See utils/sandbox/fs_guard.py.
+    # ASH is not sandboxed. See utils/sandbox/fs_guard.py. Under a sandbox the
+    # scope's results directory is named as the root: the spawn released its own
+    # registrations in its cleanup, before this write, and a process the scanner
+    # left running can make a link after the cleanup's sweep.
+    scope_results = getattr(active_scope(), "results_dir", None)
+    root = None
+    if scope_results is not None:
+        scope_root = Path(os.path.abspath(scope_results))
+        if scope_root in Path(os.path.abspath(path)).parents:
+            root = scope_root
     with open_for_write(
-        results_dir_path.joinpath(filename), encoding="utf-8", errors="replace"
+        path, encoding="utf-8", errors="replace", root=root
     ) as log_file:
         log_file.write(text)
 
@@ -545,11 +1185,9 @@ def run_command_with_output_handling(
         A command the OS could not start returns returncode 127 and
         ``spawn_failed: True``, with the reason as its stderr.
     """
-    # Resolve the full path to the executable if possible
-    if command and not shell:
-        binary_full_path = find_executable(command[0])
-        if binary_full_path:
-            command[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the spawn's try below, so it is reported as a command that could not start.
+    refused = _resolve_for_spawn(command, cwd, env) if command and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(command) if isinstance(command, list) else command
@@ -565,6 +1203,9 @@ def run_command_with_output_handling(
             # Inside the spawn's own try: a sandbox that cannot be provided raises
             # SandboxUnavailable, an OSError, which is reported like any command
             # that could not start, and never falls through to an unsandboxed run.
+            # A program refused by _resolve_for_spawn is reported the same way.
+            if refused is not None:
+                raise refused
             spawn_command, spawn_env = command, env
             sandbox_plan = _prepare_spawn(command, env, cwd, shell)
             if sandbox_plan is not None:
@@ -574,6 +1215,8 @@ def run_command_with_output_handling(
             runner = _run_stoppable if sandbox_plan is not None else subprocess.run
             result = runner(  # nosec - Commands are required to be arrays and user input at runtime for the invocation command is not allowed.
                 spawn_command,
+                # Not ASH's own standard input; see spawn_run.
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 shell=shell,
@@ -656,7 +1299,12 @@ def run_command_with_output_handling(
     except Exception as e:
         error_msg = f"Error running {cmd_str}: {e}"
         ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
-        return {"error": str(e), "returncode": 1, "stderr": error_msg}
+        # Not 1, which most scanners accept: see SPAWN_FAILURE_RETURNCODE.
+        return {
+            "error": str(e),
+            "returncode": SPAWN_FAILURE_RETURNCODE,
+            "stderr": error_msg,
+        }
     finally:
         if sandbox_plan is not None:
             sandbox_plan.run_cleanup()
@@ -716,11 +1364,9 @@ def run_command_stream_output(
     Returns:
         The exit code of the command
     """
-    # Resolve the full path to the executable if possible
-    if args and not shell:
-        binary_full_path = find_executable(args[0])
-        if binary_full_path:
-            args[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the try below, so it is reported as a command that could not start.
+    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
@@ -732,6 +1378,8 @@ def run_command_stream_output(
 
     sandbox_plan = None
     try:
+        if refused is not None:
+            raise refused
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env
@@ -739,6 +1387,8 @@ def run_command_stream_output(
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
+            # Not ASH's own standard input; see spawn_run.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -756,8 +1406,10 @@ def run_command_stream_output(
             process.wait()
             return process.returncode
         except Exception as e:
+            # The tool is stopped below; what it did is unknown. Not 1, which most
+            # scanners accept: see SPAWN_FAILURE_RETURNCODE.
             ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
-            return 1
+            return SPAWN_FAILURE_RETURNCODE
         finally:
             if process.poll() is None:
                 process.kill()
@@ -768,7 +1420,7 @@ def run_command_stream_output(
         return SPAWN_FAILURE_RETURNCODE
     except Exception as e:
         ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
-        return 1
+        return SPAWN_FAILURE_RETURNCODE
     finally:
         if sandbox_plan is not None:
             sandbox_plan.run_cleanup()
@@ -869,11 +1521,9 @@ def create_process_with_pipes(
     Returns:
         A Popen object with pipes for stdout and stderr
     """
-    # Resolve the full path to the executable if possible
-    if args and not shell:
-        binary_full_path = find_executable(args[0])
-        if binary_full_path:
-            args[0] = binary_full_path
+    # Resolve the full path to the executable if possible. A refusal is raised in
+    # the try below, which logs and re-raises it as it does a failed Popen.
+    refused = _resolve_for_spawn(args, cwd, env) if args and not shell else None
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
@@ -886,6 +1536,8 @@ def create_process_with_pipes(
         encoding = "utf-8"
 
     try:
+        if refused is not None:
+            raise refused
         sandbox_plan = _prepare_spawn(args, env, cwd, shell)
         if sandbox_plan is not None:
             args, env = sandbox_plan.argv, sandbox_plan.env
@@ -893,6 +1545,9 @@ def create_process_with_pipes(
             args,
             cwd=cwd.as_posix() if isinstance(cwd, Path) else cwd,
             env=_spawn_env(env),
+            # Not ASH's own standard input; see spawn_run. The caller gets no
+            # stdin pipe to write to.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=stderr,
             text=text,

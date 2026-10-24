@@ -54,11 +54,34 @@ Hooks such as `_process_config_options()`, `_resolve_arguments()`, `_pre_scan()`
 `_post_scan()` and `_post_process_sarif()` let you adjust individual steps
 without replacing the template.
 
+### Exit codes
+
+`success_exit_codes` names the exit codes your tool uses for a run that completed:
+0, plus the code it uses for "completed, findings found" if it has one. The default
+is `{0, 1}`; grype, for example, declares `{0, 2}`, and a tool with no findings code
+declares `{0}`. When the tool exits with any other code, the template does not read
+the results file and raises `ScannerError`, so the scanner is recorded `ERROR` with
+the code and the tool's stderr. A failed tool can leave a file that holds no
+findings, and reading it would grade the run `PASSED`. With an accepted code, an
+empty results file and SARIF with no run are `ERROR` too, because they record no
+scan. The run check reads the report as the tool wrote it, before
+`_post_process_sarif()` or any other hook changes it. A tool that writes an empty
+file for a clean scan overrides `_handle_empty_results()` to return a report. Cite the tool's own
+documentation or source for each code you add: a set that is too wide records a
+failed tool as a clean scan, and one that is too narrow turns ordinary scans into
+errors.
+
 ### Overriding scan() directly
 
 A scanner whose workflow does not fit the template — one that calls a Python API
 instead of a subprocess, for example — overrides `scan()` and returns a
-`SarifReport`. Because `_execute_scan()` is abstract, such a plugin still has to
+`SarifReport`. The executor also grades a dict that has `severity_counts`, a
+`findings` list, or a `status` that says its tool completed (`passed`, `completed`,
+`success` or `ok`, in any case); a `CycloneDXReport` (an SBOM, which has no
+findings); and `True`. A falsy result is `MISSING`. A dict whose `status` is
+`failed`, `error` or any other value is `ERROR`, and so is anything else (a list, a
+string, a dict with none of those keys), because it has nothing the executor can
+grade. Because `_execute_scan()` is abstract, such a plugin still has to
 declare it, so give it a stub that says why it is unreachable:
 
 ```python
@@ -75,6 +98,26 @@ class ApiScanner(ScannerPluginBase[ApiScannerConfig]):
 Omitting the stub makes the class abstract, and it fails at instantiation rather
 than at scan time. `examples/ash_plugins_example/my_ash_plugins/scanner.py`
 follows this pattern.
+
+An override that runs one tool per target applies the same exit-code rule itself,
+after the run and before it reads the results file:
+
+```python
+        response = self._run_subprocess(command=argv, results_dir=results_dir)
+        self._record_target_exit_code(response)
+        self._refuse_rejected_exit_code(results_file)
+```
+
+`_record_target_exit_code` makes `exit_code` this run's code (the plugin otherwise
+keeps the largest code any of its runs returned), and `_refuse_rejected_exit_code`
+raises `ScannerError` naming the code, the accepted set and the tool's stderr when
+the code is not in `success_exit_codes`.
+
+The executor scans the source tree and then the converted tree with one plugin
+instance, and records `exit_code` on each target's row. Start an override with
+`self.exit_code = 0`, as the template does, so a target it returns from before its
+tool runs (an empty tree, missing dependencies) does not report the previous
+target's code.
 
 ## Scanner Plugin Configuration
 
@@ -278,8 +321,8 @@ The following built-in scanners use UV tool integration:
 
 1. **Generate SARIF Reports**: SARIF is the standard format for security findings
 2. **Handle Errors Gracefully**: Use try/except blocks to handle errors
-3. **Respect Global Ignore Paths**: Skip files that are in the global ignore paths
-4. **Use Subprocess Utilities**: Use the provided `_run_subprocess` method for running external commands
+3. **Respect Global Ignore Paths**: Skip the files under the `global_ignore_paths` your `scan` method is passed, rather than reading `global_settings.ignore_paths` from the config. Under `--ignore-suppressions` ASH passes an empty list, so a scanner that uses the list it is given scans those files as the built-in scanners do
+4. **Use Subprocess Utilities**: Use the provided `_run_subprocess` method for running external commands. It looks the program up through the absolute PATH entries only, and gives the tool an empty standard input (`subprocess.DEVNULL`), so a tool that asks a question reads end-of-file instead of waiting. Pass the tool its input as a file or an argument. `spawn_run` in `automated_security_helper.utils.subprocess_utils` accepts `input=` for a tool that must read standard input.
 5. **Add Metadata**: Add useful metadata to the results container
 6. **UV Tool Integration**: For CLI tools that can be managed via UV, set `use_uv_tool = True` in your `model_post_init` method to enable automatic tool isolation and management
 

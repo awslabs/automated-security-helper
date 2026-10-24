@@ -21,6 +21,107 @@ AWS plugins provide:
 | **[CloudWatch Logs Reporter](cloudwatch-logs-reporter.md)** | Real-time logging            | Structured logging, metric filters, alarms                    | Real-time monitoring, automated alerting              |
 | **[S3 Reporter](s3-reporter.md)**                           | Cloud storage for reports    | Multiple formats, lifecycle management, analytics integration | Long-term archival, data analytics                    |
 
+## Loading the plugins
+
+ASH loads only its built-in plugins by default. The four AWS reporters are in the
+`automated_security_helper.plugin_modules.ash_aws_plugins` package, and once it is
+loaded each one that is enabled (see [Enabling the AWS reporters](#enabling-the-aws-reporters))
+sends findings to AWS with the credentials of whoever runs ASH. So only the operator
+running ASH can load it, in one of these ways:
+
+- `--ash-plugin-modules automated_security_helper.plugin_modules.ash_aws_plugins`
+- the `ASH_PLUGIN_MODULES` environment variable, set to the same module name
+- `--config-overrides 'ash_plugin_modules+=["automated_security_helper.plugin_modules.ash_aws_plugins"]'`
+- `ash_plugin_modules` in a config file outside the scanned tree, passed with
+  `--config`
+
+A repository's own config cannot load it. An `ash_plugin_modules` entry that names
+the package, or a module inside it, in a config file inside the scanned tree (such as
+the repository's `.ash/.ash.yaml`) is ignored with a warning naming the entry. Nor
+can it select the reporters through another installed package that lists or imports
+them: a reporter defined in this package is selected only when one of the ways above
+loads the package, the reporter's module, or the package that lists it. Each one
+that is not is named in a warning.
+
+Under the MCP server, list the package in `ash_plugin_modules` of a profile registered
+with `ash mcp --profile NAME=path/to/ash.yaml`; scans in a session bound to that
+profile with `select_profile` load it. A config an MCP client delivered cannot add it.
+
+## Enabling the AWS reporters
+
+All four AWS reporters are **disabled by default**. Each sends findings to an AWS
+service with the credentials of the host running ASH, so it runs only when your
+configuration turns it on: `enabled: true` in its section of a config file you pass
+with `--config` or `ASH_CONFIG`, or `--config-overrides
+reporters.<name>.enabled=true`.
+
+- An enabled AWS reporter runs in a scan that passes no `--output-formats`.
+  `--output-formats` (`-f`) takes only the formats `ash scan --help` lists, and
+  none of them is an AWS reporter, so a scan that passes it neither checks nor
+  runs any AWS reporter. A reporter's dependency check (STS, Security Hub's
+  `DescribeHub`, Bedrock's model list) runs only for a reporter the scan will run.
+- A section that sets a reporter's options but not `enabled`, as a config written
+  when these reporters were on by default does, leaves the reporter off. A scan
+  or `ash merge` that would otherwise run it logs one warning naming the reporter
+  and the key to set; the warning names no option value and changes nothing.
+- `ash report --format <name>` refuses an AWS reporter that is not enabled, and
+  exits 1 with the setting to change.
+- `ash merge` runs an AWS reporter only when the operator's own `--config`
+  enables it, whatever the shards' recorded config says, in either direction.
+- A reporter plugin that sends findings off the host declares
+  `sends_off_host = True` on its class. ASH then runs it only when its section of
+  the config sets `enabled: true`, whatever its own default is.
+
+## Settings only the operator can set
+
+These reporter options choose where findings are sent or written, which
+credentials send them, which findings Security Hub imports and archives, what the
+Bedrock reporter sends to the model (which findings, how many, the text added to the
+prompts, which model may receive them, and which of its calls are made), and how
+long a reporter keeps calling its service when it is refused:
+
+| Reporter section           | Options                                                                                                 |
+|----------------------------|---------------------------------------------------------------------------------------------------------|
+| `aws-security-hub`         | `aws_region`, `aws_profile`, `account_id`, `findings_scope`, `archive_resolved_findings`                |
+| `bedrock-summary-reporter` | `aws_region`, `aws_profile`, `model_id`, `output_file`, `output_executive_file`, `output_technical_file`, `include_code_snippets`, `custom_prompt`, `exclude_scanner_types`, `actionable_only`, `max_findings_to_analyze`, `max_findings_per_severity`, `summarize_findings`, `batch_processing`, `industry_context`, `compliance_frameworks`, `custom_context`, `enable_fallback_models`, `add_section_headers`, `output_markdown`, `include_sections`, `exclude_sections`, `group_by_severity`, `max_retries`, `base_delay`, `max_delay` |
+| `cloudwatch-logs`          | `aws_region`, `log_group_name`, `log_stream_name`, `max_retries`, `base_delay`, `max_delay`             |
+| `s3`                       | `aws_region`, `aws_profile`, `bucket_name`, `key_prefix`, `max_retries`, `base_delay`, `max_delay`      |
+
+They take effect only from the defaults (including the environment variables each
+reporter's page lists), `--config-overrides`, or a config file outside the scanned
+tree. A config file inside the scanned tree cannot set them: each one it sets is
+ignored, with one warning naming them, and the operator's value applies; one that
+repeats the operator's value is no change. This holds for every spelling of the
+section ASH reads as that reporter's, such as `s3-reporter` or `BedrockSummary`, and
+of the option, with `-` or `_`. Each reporter's options model also caps its
+retries, from every source: `max_retries` at most 10, `max_delay` at most 60 seconds,
+and `base_delay` at most `max_delay`. A larger value is a validation error naming the
+option and its limit, and the reporter is not built.
+
+Whether each reporter runs is the operator's too, in both directions. A config file
+inside the scanned tree neither turns a reporter on nor turns one off: where its
+`enabled: true` or `enabled: false` differs from the operator's settings, or from the
+reporter's own default where those set none, it is ignored with a warning, and a tree
+config that leaves the section out, which would return the reporter to its own
+default, leaves it as the operator has it. To run or skip a reporter for one scan, set
+it with `--config-overrides`, such as `--config-overrides reporters.s3.enabled=true`
+or `reporters.s3.enabled=false`, or in a config file outside the tree. The reporters'
+other options still apply from the tree.
+
+Under the MCP server the whole section of each of these reporters is a default
+`denied_paths` entry, `enabled` included: `/reporters/s3/**`,
+`/reporters/aws-security-hub/**`, `/reporters/cloudwatch-logs/**` and
+`/reporters/bedrock-summary-reporter/**`. So the settings the table leaves to a
+repository's config, such as S3's `file_format` or the Bedrock reporter's model
+parameters, are the operator's there too. A config an MCP client delivered, or a
+client's runtime override, that changes one is refused with
+`error_type: config_field_denied`; one that leaves them at the server's values
+scans. One that sets `enabled: false` scans too, but the server's `enabled` applies
+and a warning names the client's value. `enabled` of a reporter that writes only local files,
+such as `sarif` or `html`, is not a default entry: a client's config may turn one on
+or off.
+See [Configs an MCP client delivered](../../configuration-guide.md#configs-an-mcp-client-delivered).
+
 ## Quick Start
 
 ### Basic Setup
@@ -31,9 +132,14 @@ AWS plugins provide:
    # or use IAM roles (recommended)
    ```
 
-2. **Enable desired plugins**:
+2. **Write a config file outside the scanned tree** that loads the plugins and sets
+   their destinations (see [Loading the plugins](#loading-the-plugins) and
+   [Settings only the operator can set](#settings-only-the-operator-can-set)):
    ```yaml
-   # ash-config.yml
+   # /etc/ash/aws-reporters.yml
+   ash_plugin_modules:
+     - automated_security_helper.plugin_modules.ash_aws_plugins
+
    reporters:
      aws-security-hub:
        enabled: true
@@ -47,14 +153,16 @@ AWS plugins provide:
          aws_region: "us-east-1"
    ```
 
-3. **Run scan with AWS reporters**:
+3. **Run a scan with that config** (no `--output-formats`, so every enabled
+   reporter runs):
    ```bash
-   ash /path/to/code --reporters aws-security-hub,s3-reporter
+   ash scan --source-dir /path/to/code --config /etc/ash/aws-reporters.yml
    ```
 
 ### Enterprise Setup
 
-For enterprise deployments, combine multiple AWS plugins:
+For enterprise deployments, combine multiple AWS plugins. As above, this goes in a
+config file outside the scanned tree:
 
 ```yaml
 # Enterprise configuration

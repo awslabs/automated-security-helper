@@ -65,15 +65,40 @@ snyk code test --help
 
 ### Basic Configuration
 
-Snyk code plugin is not included by default with ASH since it requires authentication.
-Include Snyk plugin module in your `.ash/.ash.yaml` configuration file
+The Snyk Code plugin is not loaded by default. Its scanner sends the scanned source
+to Snyk with your Snyk token, so only the operator running ASH can load it. A config
+file inside the scanned tree, such as the repository's own `.ash/.ash.yaml`, cannot:
+an `ash_plugin_modules` entry there that names the package, or a module inside it,
+is ignored with a warning naming the entry.
+
+Load it with `--ash-plugin-modules`:
+
+```bash
+uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+```
+
+or with the `ASH_PLUGIN_MODULES` environment variable, which the commands on the
+rest of this page assume is set:
+
+```bash
+export ASH_PLUGIN_MODULES=automated_security_helper.plugin_modules.ash_snyk_plugins
+```
+
+A repository's own config cannot load the package, or select the scanner through
+another installed package that lists or imports it: the scanner is selected only
+when `--ash-plugin-modules`, `ASH_PLUGIN_MODULES`, `--config-overrides` or a config
+file outside the scanned tree loads this package or the package that lists it.
+
+A config file outside the scanned tree, passed with `--config`, can list it too:
 
 ```yaml
 ash_plugin_modules:
   - automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
-Add to your `.ash/.ash.yaml`:
+The scanner's settings, except `honor_tree_exclusions` (see
+[Exclusion files in the scanned tree](#exclusion-files-in-the-scanned-tree)),
+can stay in the repository's `.ash/.ash.yaml`:
 
 ```yaml
 scanners:
@@ -119,6 +144,38 @@ scanners:
     severity_threshold: "HIGH"  # Options: LOW, MEDIUM, HIGH, CRITICAL
 ```
 
+### Exclusion files in the scanned tree
+
+`snyk code test` reads exclusions from files in the directory it tests, at any
+depth, and leaves the files they name out of its analysis: the `exclude.code` and
+`exclude.global` entries of a `.snyk` file, and the rules of a `.dcignore` file.
+Its legacy implementation also reads any file whose name ends in `.snyk`,
+`.dcignore` or `.gitignore`. It has no option that turns this off, and
+`snyk code test` takes no `--policy-path`. So when the tree has such a file,
+snyk-code does not run, and its error names the files. A `.snyk` file with only
+open source `ignore` entries or other `exclude` sections does not count, and
+neither does `.gitignore`, which ASH's own scan set honors too.
+
+To accept a repository's exclusions, set `honor_tree_exclusions` with
+`--config-overrides`:
+
+```bash
+uv run ash --scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
+```
+
+or in a config file outside the scanned tree, passed with `--config`:
+
+```yaml
+scanners:
+  snyk-code:
+    enabled: true
+    options:
+      honor_tree_exclusions: true
+```
+
+A config file inside the scanned tree, such as the repository's own
+`.ash/.ash.yaml`, or one an MCP client delivered, does not set it.
+
 ### Advanced Options
 
 ```yaml
@@ -161,7 +218,7 @@ uv run ash --scanners snyk-code,bandit,semgrep
 
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners snyk-code
+uv run ash --mode container --scanners snyk-code --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ## Output Integration
@@ -179,6 +236,8 @@ Snyk Code results are integrated into ASH's unified reporting system:
 - **Network Dependency**: Requires internet connection for cloud-based analysis
 - **Large Codebases**: Scanning time scales with codebase size
 - **Rate Limits**: Snyk may apply rate limits based on your subscription tier
+- **Offline Mode**: Snyk Code needs Snyk's service, so offline it does not run and is reported MISSING (see [Offline Mode](#offline-mode))
+- **Links leaving the tree**: `snyk code test` uploads the files it reads and has no option that leaves out one path, so ASH does not run it on a directory holding a link to a file whose target is outside that directory. snyk-code is then `ERROR`, and the error names the link. Remove the link, or exclude snyk-code for that scan.
 
 ## Troubleshooting
 
@@ -211,6 +270,12 @@ snyk test --dry-run
 **Empty directory warnings**:
 The plugin will skip scanning if the target directory is empty or doesn't exist, logging an appropriate warning message.
 
+**No supported files (exit code 3)**:
+`snyk code test` exits 3 when the target holds no file Snyk Code supports, for example
+a tree of only Terraform or YAML. snyk-code then evaluated nothing and is reported
+SKIPPED, not ERROR, so it does not fail the completeness gate. Exit code 2 is a Snyk
+failure and is reported ERROR.
+
 ### Debug Mode
 
 Enable verbose logging to troubleshoot issues:
@@ -221,11 +286,18 @@ uv run ash --scanners snyk-code --log-level DEBUG
 
 ### Offline Mode
 
-**Note**: Snyk Code requires internet connectivity and will be automatically disabled in offline mode:
+Snyk Code analyzes code on Snyk's service, so it cannot run offline. In offline mode
+snyk-code does not run and is reported MISSING, which fails the scan under the default
+completeness gate (`fail_on_incomplete_scanners`, exit code 1). To scan offline
+without it, leave it out. Both commands assume the plugin is enabled in your
+configuration, as shown above:
 
 ```bash
-# Snyk Code will be skipped in offline mode
+# snyk-code is MISSING here, and the scan exits 1
 uv run ash --offline --scanners snyk-code
+
+# An offline scan that does not ask for snyk-code
+uv run ash --offline --exclude-scanners snyk-code
 ```
 
 ## Integration Examples
@@ -239,7 +311,7 @@ repos:
     hooks:
       - id: ash-snyk-code
         name: ASH Snyk Code Security Scan
-        entry: uv run ash --scanners snyk-code --mode precommit
+        entry: uv run ash --scanners snyk-code --mode precommit --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         language: system
         pass_filenames: false
 ```
@@ -261,9 +333,13 @@ jobs:
       - name: Run ASH with Snyk Code
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
         run: |
           uv run ash --scanners snyk-code --output-format sarif
       - name: Upload SARIF results
+        # Also when ASH exits non-zero on findings: without a status function
+        # GitHub skips this step after any failed step.
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: .ash/ash_output/reports/ash.sarif
@@ -282,6 +358,7 @@ snyk-security-scan:
     - uv run ash --scanners snyk-code
   variables:
     SNYK_TOKEN: $SNYK_TOKEN
+    ASH_PLUGIN_MODULES: automated_security_helper.plugin_modules.ash_snyk_plugins
   artifacts:
     reports:
       sast: .ash/ash_output/reports/ash.sarif

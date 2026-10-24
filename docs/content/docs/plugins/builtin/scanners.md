@@ -99,6 +99,12 @@ scanners:
 
 **Dependencies**: `cfn-nag` Ruby gem
 
+**Template copy**: cfn-nag is given a copy of each template, staged in its results
+directory as `template.json`, `template.yaml` or `template.yml` by the template's
+extension, and as `template.yaml` for any other extension. The `cfn_nag_scan` command
+line is therefore the same whatever the template is called, including on Windows,
+where `cfn_nag_scan` is a batch file. Findings name the original template.
+
 ---
 
 ### Checkov
@@ -156,6 +162,17 @@ scanners:
 - Database connection strings
 - API keys and tokens
 
+**Baseline**: ASH reads a detect-secrets baseline for the plugins, filters and accepted
+findings to use. It takes `baseline_file` when set, else `.ash/.secrets.baseline`, else
+`.secrets.baseline`, each relative to the source directory, so the same tree gives the
+same result whichever directory ASH runs from. See
+[Detect-Secrets](../../configuration-guide.md#detect-secrets) in the configuration guide.
+
+**Secret verification**: detect-secrets can send a candidate secret to the service that
+issued it. ASH does that only when the operator's own configuration turns it on, never
+from a baseline or config file the scanned repository holds, and never offline. See
+[Secret verification](../../configuration-guide.md#secret-verification).
+
 **Dependencies**: `detect-secrets` Python package
 
 ---
@@ -172,7 +189,7 @@ scanners:
     options:
       severity_threshold: "MEDIUM"   # ALL, LOW, MEDIUM, HIGH, CRITICAL
       offline: false                 # Skip database updates
-      config_file: null              # Explicit grype config, relative to the source directory
+      config_file: null              # Explicit grype config, relative to the config file that sets it
 ```
 
 **Key Checks**:
@@ -204,6 +221,38 @@ scanners:
 - Dependency tree analysis
 - Severity-based filtering
 - Fix recommendations
+
+In offline mode npm-audit runs no audit, since npm, pnpm and yarn audit only against
+the registry's advisory service. Each lockfile is listed as not scanned in the results
+and the summaries, and with a lockfile to audit npm-audit is MISSING, so the scan fails
+under the default completeness gate. `--exclude-scanners npm-audit` leaves it out of an
+offline scan. See
+[What offline mode turns off](../../advanced-usage.md#what-offline-mode-turns-off).
+
+npm-audit runs npm, pnpm and yarn without the scanned repository's settings files:
+its `.npmrc`, the settings in `pnpm-workspace.yaml`, `.yarnrc` and `.yarnrc.yml`,
+including a `yarn-path` or `yarnPath`, which would run a file from the repository.
+Your own settings still apply: `~/.npmrc`, the global npmrc, `~/.yarnrc` and
+`~/.yarnrc.yml`, so a private registry and its credentials work as before. npm and
+pnpm run from a private copy of each package's `package.json` and lockfile; yarn
+runs from a copy, outside the scanned tree, of its lockfile and every
+`package.json` below it, with `YARN_IGNORE_PATH=1`. Under `--sandbox` the tool's home
+is private, so only environment variables reach it, and yarn runs in the package
+directory reading no settings file (`--no-default-rc`, or `YARN_RC_FILENAME` for
+yarn 2 and later).
+
+A `pnpm.auditConfig` in the repository's `package.json` (`ignoreCves`,
+`ignoreGhsas`) hides those advisories, as a suppression in the repository's ASH
+configuration would; `--ignore-suppressions` removes it from the copy pnpm audits.
+
+npm, pnpm and yarn follow links. So every file npm-audit hands one of them (the
+package's `package.json`, the lockfiles it reads, `npm-shrinkwrap.json` included,
+and for yarn every workspace `package.json` below the package) has to resolve inside
+the scanned tree and be a regular file. A package with a file that is a link out of
+the tree, or that sits in a linked directory pointing out of it, is not audited: the
+file is listed as not scanned, with the reason "link leaves the scanned tree", and
+the scan fails, as for any lockfile left unaudited. A link to a file elsewhere in the
+scanned tree (another project of the workspace, in workspace mode) is followed.
 
 **Dependencies**: Node.js, npm
 
@@ -280,9 +329,13 @@ scanners:
     enabled: true
     options:
       additional_outputs: ["syft-table"]   # Extra output formats beyond CycloneDX
-      exclude: []                          # Paths to skip, matched as regular expressions
+      exclude: []                          # Paths to skip, as globs starting ./, */ or **/
       offline: false                       # Skip update checks
 ```
+
+syft runs from outside the scanned tree and is not given a `.syft.yaml` or
+`config_file` from it, online or offline, because such a file can turn on remote
+license and package lookups. A `config_file` outside the tree is still used.
 
 **Key Features**:
 - Package discovery across multiple ecosystems

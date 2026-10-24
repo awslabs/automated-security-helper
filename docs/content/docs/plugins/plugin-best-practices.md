@@ -16,7 +16,7 @@ This guide provides best practices for developing ASH plugins.
 ## Scanner Plugin Best Practices
 
 1. **Generate SARIF Reports**: SARIF is the standard format for security findings
-2. **Handle Ignore Paths**: Skip files that are in the global ignore paths
+2. **Handle Ignore Paths**: Skip the files under the `global_ignore_paths` passed to `scan`, which is empty under `--ignore-suppressions`
 3. **Use Subprocess Utilities**: Use the provided `_run_subprocess` method for running external commands
 4. **Add Metadata**: Add useful metadata to the results container
 5. **Support Both File and Directory Scanning**: Handle both individual files and directories

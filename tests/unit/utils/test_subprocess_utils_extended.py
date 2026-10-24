@@ -17,6 +17,7 @@ from automated_security_helper.utils.subprocess_utils import (
     create_completed_process,
     raise_called_process_error,
     create_process_with_pipes,
+    SPAWN_FAILURE_RETURNCODE,
 )
 
 
@@ -102,13 +103,13 @@ def test_run_command_failure(mock_find_executable, mock_run):
 @patch("subprocess.run")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_exception(mock_find_executable, mock_run):
-    """Test handling exceptions when running a command."""
+    """The runner's own failure is not exit 1, which most scanners accept."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
     mock_run.side_effect = Exception("Test exception")
 
     result = run_command(["test_cmd", "arg1"])
 
-    assert result.returncode == 1
+    assert result.returncode == SPAWN_FAILURE_RETURNCODE
     assert "Test exception" in result.stderr
     mock_run.assert_called_once()
 
@@ -214,13 +215,13 @@ def test_run_command_with_output_handling_write(mock_open, mock_mkdir, ash_temp_
 @patch("subprocess.run")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_with_output_handling_exception(mock_find_executable, mock_run):
-    """Test handling exceptions in run_command_with_output_handling."""
+    """The runner's own failure is not exit 1, which most scanners accept."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
     mock_run.side_effect = Exception("Test exception")
 
     result = run_command_with_output_handling(["test_cmd", "arg1"])
 
-    assert result["returncode"] == 1
+    assert result["returncode"] == SPAWN_FAILURE_RETURNCODE
     assert "error" in result
     assert "Test exception" in result["error"]
     mock_run.assert_called_once()
@@ -263,14 +264,37 @@ def test_run_command_stream_output(mock_find_executable, mock_popen):
 @patch("subprocess.Popen")
 @patch("automated_security_helper.utils.subprocess_utils.find_executable")
 def test_run_command_stream_output_exception(mock_find_executable, mock_popen):
-    """Test handling exceptions in run_command_stream_output."""
+    """The runner's own failure is not exit 1, which most scanners accept."""
     mock_find_executable.return_value = "/usr/bin/test_cmd"
     mock_popen.side_effect = Exception("Test exception")
 
     returncode = run_command_stream_output(["test_cmd", "arg1"])
 
-    assert returncode == 1
+    assert returncode == SPAWN_FAILURE_RETURNCODE
     mock_popen.assert_called_once()
+
+
+@patch("subprocess.Popen")
+@patch("automated_security_helper.utils.subprocess_utils.find_executable")
+def test_run_command_stream_output_failing_to_read_is_not_exit_1(
+    mock_find_executable, mock_popen
+):
+    """ASH failing while it reads the tool's output stops the tool; not exit 1."""
+
+    def unreadable():
+        yield "line1\n"
+        raise ValueError("cannot decode the output")
+
+    mock_find_executable.return_value = "/usr/bin/test_cmd"
+    mock_process = MagicMock()
+    mock_process.stdout = unreadable()
+    mock_process.poll.return_value = None
+    mock_popen.return_value = mock_process
+
+    returncode = run_command_stream_output(["test_cmd", "arg1"])
+
+    assert returncode == SPAWN_FAILURE_RETURNCODE
+    mock_process.kill.assert_called_once()
 
 
 @patch("automated_security_helper.utils.subprocess_utils.run_command")

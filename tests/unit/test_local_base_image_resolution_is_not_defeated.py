@@ -74,6 +74,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from tests.utils.host_ids import with_fixed_ids
 from automated_security_helper.interactions import run_ash_container as rac
 from automated_security_helper.interactions.run_ash_container import _build_image
 
@@ -340,11 +341,16 @@ class TestTheBashEntrypoint:
         source_dir.mkdir(exist_ok=True)
         argv_log = tmp_path / "argv"
 
-        env = {
-            **os.environ,
-            "OCI_RUNNER": str(runner),
-            "ARGV_LOG": str(argv_log),
-        }
+        # An unprivileged `id`, so the default non-root build reaches the runner when
+        # the suite itself runs as root.
+        env = with_fixed_ids(
+            {
+                **os.environ,
+                "OCI_RUNNER": str(runner),
+                "ARGV_LOG": str(argv_log),
+            },
+            tmp_path / "fixed-id-bin",
+        )
         env.pop("ASH_BASE_IMAGE_OVERRIDE", None)
         env.pop("ASH_BASE_OCI_LAYOUT", None)
         # A developer with this exported would otherwise have their own flags asserted.

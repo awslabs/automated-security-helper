@@ -6,7 +6,7 @@ Textual rendering internals are not tested.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -887,8 +887,10 @@ class TestFindingsCommand:
         findings_command(output_dir=tmp_path, report_file="report.json")
 
         mock_app_cls.assert_called_once_with(
-            mock_extract.return_value, config_path=config_path
+            mock_extract.return_value, config_path=config_path, mask_source=ANY
         )
+        # The masker is built from the results the command shows.
+        assert callable(mock_app_cls.call_args.kwargs["mask_source"])
         mock_app_cls.return_value.run.assert_called_once_with()
 
     @patch(
@@ -988,6 +990,121 @@ class TestFindingsCommand:
 # ---------------------------------------------------------------------------
 # Code snippet extraction in action_view_selected
 # ---------------------------------------------------------------------------
+
+
+class TestSnippetsReadFromSourceAreMasked:
+    """A finding with no snippet shows lines read from disk, masked like the results.
+
+    The browser opens the finding's file and shows five lines either side of it.
+    Those lines are not from the masked results, so a secret on a neighboring
+    line was shown in clear.
+    """
+
+    def _model_and_app(self, tmp_path):
+        import hashlib
+        import string
+
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            extract_findings,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils.secret_masking import (
+            source_snippet_masker,
+        )
+
+        alphabet = string.ascii_lowercase + string.digits
+        digest = hashlib.sha256(b"inspect-source-value").digest()
+        value = "".join(alphabet[byte % len(alphabet)] for byte in digest)[:14]
+        source = tmp_path / "code.py"
+        source.write_text(
+            "import os\n"
+            "def run():\n"
+            '    token = "' + value + '"\n'
+            "    return os.system(token)\n",
+            encoding="utf-8",
+        )
+        uri = str(source)
+        model = AshAggregatedResults()
+        model.sarif = SarifReport.model_validate(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "test"}},
+                        "results": [
+                            {
+                                "ruleId": "SECRET-KEYWORD",
+                                "level": "error",
+                                "message": {
+                                    "text": "Secret of type 'Keyword' detected"
+                                },
+                                "properties": {"tags": ["secret"]},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": uri},
+                                            "region": {"startLine": 3, "endLine": 3},
+                                        }
+                                    }
+                                ],
+                            },
+                            {
+                                "ruleId": "B605",
+                                "level": "warning",
+                                "message": {"text": "Starting a process with a shell"},
+                                "properties": {"tags": ["bandit"]},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": uri},
+                                            "region": {"startLine": 4},
+                                        }
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+        app = FindingsExplorerApp(
+            extract_findings(model), mask_source=source_snippet_masker(model)
+        )
+        return app, value
+
+    def test_a_neighboring_secret_line_is_masked(self, tmp_path):
+        from automated_security_helper.utils.secret_masking import MASKED_LINE
+
+        app, value = self._model_and_app(tmp_path)
+        finding = next(f for f in app.findings if f["rule_id"] == "B605")
+        app.filtered_findings = [finding]
+        mock_table = MagicMock()
+        mock_table.row_count = 1
+        mock_table.cursor_row = 0
+        app.query_one = MagicMock(return_value=mock_table)
+        app.push_screen = MagicMock()
+
+        app.action_view_selected()
+
+        snippet = finding["code_snippet"]
+        assert value not in snippet
+        assert MASKED_LINE in snippet
+        # Control: the finding's own line is shown, with its number and marker.
+        assert "→ 4:     return os.system(token)" in snippet
+
+    def test_the_row_selected_path_masks_too(self, tmp_path):
+        app, value = self._model_and_app(tmp_path)
+        finding = next(f for f in app.findings if f["rule_id"] == "B605")
+        app.filtered_findings = [finding]
+        app.push_screen = MagicMock()
+        event = MagicMock()
+        event.row_key.value = 0
+
+        app.on_data_table_row_selected(event)
+
+        assert value not in finding["code_snippet"]
+        assert "return os.system(token)" in finding["code_snippet"]
 
 
 class TestCodeSnippetExtraction:

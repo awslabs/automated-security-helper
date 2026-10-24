@@ -11,6 +11,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.converter_refusals import refusal_invocations
 
 
 class SARIFReporterConfigOptions(ReporterOptionsBase):
@@ -50,8 +51,21 @@ class SarifReporter(ReporterPluginBase[SARIFReporterConfig]):
         return super().model_post_init(context)
 
     def report(self, model: "AshAggregatedResults") -> str:
-        """Format ASH model in SARIF."""
-        return model.sarif.model_dump_json(
+        """Format ASH model in SARIF.
+
+        An input a converter did not read is added to the document as an
+        invocation of its own, one execution notification per input, so a SARIF
+        reader learns which parts of the tree were not scanned
+        (``utils/converter_refusals.py``). Added to a copy: the scan's own SARIF,
+        which the exit-code gates read, is left as it is.
+        """
+        sarif = model.sarif
+        invocations = refusal_invocations(model)
+        if invocations and sarif is not None and sarif.runs:
+            sarif = sarif.model_copy(deep=True)
+            run = sarif.runs[0]
+            run.invocations = list(run.invocations or []) + invocations
+        return sarif.model_dump_json(
             by_alias=True,
             exclude_none=True,
             exclude_unset=True,

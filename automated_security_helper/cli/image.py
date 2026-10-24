@@ -3,7 +3,6 @@
 
 from typing import Annotated, Optional, List
 import typer
-import platform
 
 # Import subprocess utilities
 from automated_security_helper.core.constants import ASH_CONFIG_SOURCES_DESCRIPTION
@@ -61,13 +60,13 @@ def build_ash_image_cli_command(
         ),
     ] = "bridge",
     build_target: Annotated[
-        BuildTarget,
+        Optional[BuildTarget],
         typer.Option(
             "--build-target",
-            help="Specify the target stage of the ASH image to build",
+            help="The ASH image stage to build: 'non-root' (an unprivileged user, the default) or 'ci' (root, the default on Windows). CI environment variables do not change it.",
             case_sensitive=False,
         ),
-    ] = BuildTarget.NON_ROOT,
+    ] = None,
     offline_semgrep_rulesets: Annotated[
         str,
         typer.Option(
@@ -165,10 +164,9 @@ def build_ash_image_cli_command(
         force=force,
         oci_runner=oci_runner,
         container_network=container_network,
-        # TODO - Windows cannot map write permissions to the bind-mounted output directory, so reports and logs fail to emit successfully.
-        build_target=BuildTarget.CI
-        if platform.system().lower().startswith("win")
-        else build_target,
+        # None picks the host's default: 'ci' on Windows, where the non-root user
+        # cannot write the bind-mounted output directory, 'non-root' elsewhere.
+        build_target=build_target,
         offline_semgrep_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
         container_gid=container_gid,

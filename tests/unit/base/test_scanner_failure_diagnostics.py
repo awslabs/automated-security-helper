@@ -50,6 +50,10 @@ import pytest
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.exceptions import ScannerError
 
+#: What a tool writes for a clean scan: SARIF with one run and no results. A log with
+#: no run records no scan, and the template reports it as nothing to grade.
+ONE_RUN_SARIF = '{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "fake"}}, "results": []}]}'
+
 
 def _make_scanner(
     tmp_path,
@@ -253,7 +257,7 @@ def test_a_successful_scan_still_works(tmp_path):
     scanner = _make_scanner(
         tmp_path,
         exit_code=0,
-        writes_results='{"version": "2.1.0", "runs": []}',
+        writes_results=ONE_RUN_SARIF,
     )
 
     report = _run(scanner, tmp_path)
@@ -271,7 +275,7 @@ def test_an_accepted_nonzero_exit_with_results_still_succeeds(tmp_path):
     scanner = _make_scanner(
         tmp_path,
         exit_code=1,
-        writes_results='{"version": "2.1.0", "runs": []}',
+        writes_results=ONE_RUN_SARIF,
     )
 
     report = _run(scanner, tmp_path)

@@ -20,6 +20,7 @@ from typing import Any, Iterator, List, Literal, Optional, Sequence
 
 from typing_extensions import Self
 
+from tests.utils import real_home_guard
 from tests.utils.helpers import get_ash_temp_path
 
 # Add the project root to the Python path
@@ -316,6 +317,136 @@ def _enter_session_tmpdir() -> Path:
     return path
 
 
+# The session HOME.
+#
+# Install receipts live under Path.home()/.ash/install-receipts (download_utils
+# .receipt_root), and the default ASH_BIN_PATH, ~/.ash/bin, is computed when
+# core.constants is imported. Twenty-one tests in tests/unit/utils install a fixture
+# grype, opengrep or renamed_file with no HOME of their own, so every run from a shell
+# whose HOME was the user's real home wrote 16 grype.json, 4 opengrep.json and a
+# renamed_file.json into the real receipt store -- thousands of directories on one
+# host. tests/utils/isolated_tool_env.py assumed the harness points HOME at a temp
+# directory; nothing did, locally or in CI. So the session does it, as it does for
+# TMPDIR: the controller makes one private HOME (and USERPROFILE, which Windows
+# reads) before xdist starts workers and before collection imports core.constants,
+# workers inherit it through ASH_TEST_SESSION_HOME, and the creating process restores
+# the original values and removes it at the end.
+#
+# HOME alone does not move what tools keep under XDG_CONFIG_HOME, XDG_DATA_HOME and
+# XDG_STATE_HOME when a contributor has set them: uv's tool environments and Python
+# installs, gem and pnpm data, and semgrep's settings would still be written into the
+# contributor's own directories. Measured with the three set: a unit run wrote
+# semgrep's settings and log under XDG_CONFIG_HOME, and uv's tool directory, gem's
+# spec cache and pnpm's store under XDG_DATA_HOME, all from child processes the
+# audit-hook guard cannot see; nothing under XDG_STATE_HOME. The session points those
+# three at their default places inside the private home too. XDG_CACHE_HOME and
+# UV_CACHE_DIR stay as the caller set them, so a cache the operator chose is still the
+# one used and nothing is downloaded again.
+#
+# It sits beside the session temp directory, not inside it, so a test that looks at
+# what was left in TMPDIR does not count the home's contents, and HOME and TMPDIR stay
+# two separate directories as they are on a real host.
+_SESSION_HOME_ENV = "ASH_TEST_SESSION_HOME"
+_PRE_SESSION_HOME_ENV = "ASH_TEST_PRE_SESSION_HOME"
+_HOME_VARS = ("HOME", "USERPROFILE")
+#: Each XDG directory the session moves, and its default place under a home.
+_PRIVATE_XDG_DIRS = {
+    "XDG_CONFIG_HOME": (".config",),
+    "XDG_DATA_HOME": (".local", "share"),
+    "XDG_STATE_HOME": (".local", "state"),
+}
+_RECORDED_VARS = _HOME_VARS + tuple(_PRIVATE_XDG_DIRS)
+#: Shared on purpose; writes under them are not the guard's business.
+_SHARED_CACHE_VARS = ("XDG_CACHE_HOME", "UV_CACHE_DIR")
+_created_session_home: Optional[Path] = None
+
+
+def _pre_session_home_env() -> dict:
+    """HOME, USERPROFILE and the moved XDG variables as they were before the session.
+
+    Unset ones are absent.
+    """
+    recorded = os.environ.get(_PRE_SESSION_HOME_ENV)
+    if recorded:
+        return json.loads(recorded)
+    return {var: os.environ[var] for var in _RECORDED_VARS if os.environ.get(var)}
+
+
+def _real_home_guard_roots(previous: dict) -> List[str]:
+    """What the guard watches, given the variables as they were before the session.
+
+    ``~/.ash`` of the passwd home and of the original HOME/USERPROFILE, and each XDG
+    directory the session moved: the caller's value, or its default place under the
+    original HOME when the caller left it unset.
+    """
+    homes = [real_home_guard.passwd_home()]
+    homes += [Path(previous[var]) for var in _HOME_VARS if previous.get(var)]
+    roots = set(real_home_guard.guarded_roots(homes))
+    original_home = previous.get("HOME")
+    for var, parts in _PRIVATE_XDG_DIRS.items():
+        if previous.get(var):
+            roots.update(real_home_guard.both_spellings(Path(previous[var])))
+        elif original_home:
+            roots.update(
+                real_home_guard.both_spellings(Path(original_home).joinpath(*parts))
+            )
+    return sorted(roots)
+
+
+def _real_home_guard_exclusions(rootdir: Path) -> List[str]:
+    """Paths under a guarded root that tests may write to.
+
+    The interpreter's own installation (uv installs Python under XDG_DATA_HOME, and
+    importing a module can write its bytecode there), the shared caches, and the
+    checkout under test.
+    """
+    paths = {sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix}
+    paths.update(os.environ[var] for var in _SHARED_CACHE_VARS if os.environ.get(var))
+    paths.add(str(rootdir))
+    excluded = set()
+    for path in paths:
+        excluded.update(real_home_guard.both_spellings(Path(path)))
+    return sorted(excluded)
+
+
+def _enter_session_home(session_tmpdir: Path) -> Path:
+    """Point this process's HOME at the session's private one. Returns it."""
+    global _created_session_home
+    inherited = (os.environ.get(_SESSION_HOME_ENV) or "").strip()
+    if inherited and Path(inherited).is_dir():
+        home = Path(inherited)
+    else:
+        os.environ[_PRE_SESSION_HOME_ENV] = json.dumps(_pre_session_home_env())
+        home = Path(
+            tempfile.mkdtemp(prefix="ash-pytest-home-", dir=str(session_tmpdir.parent))
+        )
+        os.environ[_SESSION_HOME_ENV] = str(home)
+        _created_session_home = home
+    for var in _HOME_VARS:
+        os.environ[var] = str(home)
+    for var, parts in _PRIVATE_XDG_DIRS.items():
+        private = home.joinpath(*parts)
+        private.mkdir(parents=True, exist_ok=True)
+        os.environ[var] = str(private)
+    return home
+
+
+def _leave_session_home() -> None:
+    """Restore the moved variables and remove the session home, in the creating process."""
+    global _created_session_home
+    home = _created_session_home
+    if home is None:
+        return
+    _created_session_home = None
+    previous = _pre_session_home_env()
+    for var in _RECORDED_VARS:
+        if var in previous:
+            os.environ[var] = previous[var]
+        else:
+            os.environ.pop(var, None)
+    shutil.rmtree(home, ignore_errors=True)
+
+
 def _make_writable_and_retry(func: Any, path: str, _exc: BaseException) -> None:
     """rmtree error hook: read-only files (git objects on Windows) block removal."""
     try:
@@ -344,6 +475,9 @@ def pytest_unconfigure(config):
     remove the session temp directory."""
     if hasattr(config, "workerinput"):
         return
+    # HOME first, so an ASH_JSII_CACHE_DIR spelled with ~ names the same root here as
+    # it did when the session configured it.
+    _leave_session_home()
     root = _jsii_package_cache_root()
     if root.is_dir():
         with _exclusive_file_lock(root / _JSII_LOAD_LOCK_NAME):
@@ -356,8 +490,15 @@ def pytest_configure(config):
     # Must happen before anything imports a jsii-backed package. pytest_configure is
     # the earliest per-worker hook, and collection -- which imports test modules --
     # runs after it.
-    _enter_session_tmpdir()
+    session_tmpdir = _enter_session_tmpdir()
     _configure_jsii_package_cache()
+    # After the jsii root is resolved (an ASH_JSII_CACHE_DIR of ~/... keeps meaning
+    # the operator's home) and before collection imports core.constants.
+    _enter_session_home(session_tmpdir)
+    real_home_guard.install(
+        _real_home_guard_roots(_pre_session_home_env()),
+        exclude=_real_home_guard_exclusions(Path(config.rootpath)),
+    )
 
     # Register custom markers
     config.addinivalue_line(
@@ -384,6 +525,31 @@ def pytest_configure(config):
             f"{marker}: snapshot of output that needs a real runtime; deselected "
             f"unless {flag} is given",
         )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Fail a test that wrote under the real ~/.ash or an XDG directory the session moved.
+
+    See tests/utils/real_home_guard.py.
+
+    Checked on the teardown report, after every fixture has finished, so a write from
+    a fixture's teardown is charged to the test that used it. Writes recorded before
+    the first test (collection, session fixtures) are charged to that first test.
+    """
+    outcome = yield
+    if call.when != "teardown":
+        return
+    writes = real_home_guard.drain()
+    if not writes:
+        return
+    report = outcome.get_result()
+    report.outcome = "failed"
+    report.longrepr = (
+        "wrote under the real user's ~/.ash or XDG directories, which the "
+        "session's private HOME exists to keep tests out of:\n"
+        + "\n".join(f"  {event}: {path}" for event, path in writes)
+    )
 
 
 def pytest_addoption(parser):
@@ -558,6 +724,26 @@ class _AshLoggerSwitches:
 
 
 @pytest.fixture(autouse=True)
+def _no_scanned_tree_scope_outlives_its_test():
+    """A test that leaves a scanned-tree scope active fails, rather than its neighbors.
+
+    The scope (utils/subprocess_utils.scanning_tree) makes every later lookup in the
+    context refuse tools inside its tree, so one left behind changes what an
+    unrelated test finds. ``ash mcp`` also turns off the operator's opt-in for the
+    whole process, and a module-scoped fixture that starts the server would leave
+    it off for every later test on the worker, so each test starts and ends with
+    the process default, on.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    subprocess_utils._opt_in_honored = True
+    yield
+    leaked = subprocess_utils._TREE_SCOPE.get()
+    subprocess_utils._opt_in_honored = True
+    assert leaked is None, f"a scanned-tree scope was left active: {leaked.roots}"
+
+
+@pytest.fixture(autouse=True)
 def _restore_ash_logger_switches():
     """Stop one test's logging side effects from blinding another's ``caplog``.
 
@@ -604,6 +790,352 @@ def _restore_ash_logger_switches():
     """
     with _AshLoggerSwitches():
         yield
+
+
+_UV_TOOL_RUNNER_MODULE = "automated_security_helper.utils.uv_tool_runner"
+_PLUGINS_MODULE = "automated_security_helper.plugins"
+_PLUGIN_REGISTRIES = ("converters", "scanners", "reporters")
+
+#: Module-level memos of an answer about the host: whether uv runs, where an
+#: executable is, what version a tool reports, which sandbox backend works. Each
+#: is computed once per process and then served to every caller, so a test that
+#: reaches the probe through a stand-in leaves the stand-in's answer for every
+#: later test on the same xdist worker. Each entry is a dict or list.
+_PROCESS_WIDE_PROBE_MEMOS = (
+    (_UV_TOOL_RUNNER_MODULE, "_uv_tool_version_cache"),
+    (_UV_TOOL_RUNNER_MODULE, "_uv_command_cache"),
+    (_UV_TOOL_RUNNER_MODULE, "_uv_executable_cache"),
+    (_UV_TOOL_RUNNER_MODULE, "_executable_cache"),
+    ("automated_security_helper.utils.subprocess_utils", "_find_executable_cache"),
+    ("automated_security_helper.utils.pre_installed_tool", "_verdict_cache"),
+    ("automated_security_helper.utils.sandbox.scope", "_resolved"),
+    ("automated_security_helper.utils.sandbox.backends", "_trust_roots_cache"),
+    (
+        "automated_security_helper.interactions.run_ash_container",
+        "_BUILDX_SUPPORT_CACHE",
+    ),
+)
+
+#: The memos whose answers each cost a ``uv tool run <tool> --version``. A
+#: successful answer that the code under test wrote into one of them outlives the
+#: test; see "Cost" in ``_restore_process_wide_tool_state`` for why.
+_UV_TOOL_RUN_MEMOS = frozenset(
+    {
+        (_UV_TOOL_RUNNER_MODULE, "_uv_tool_version_cache"),
+        (_UV_TOOL_RUNNER_MODULE, "_uv_command_cache"),
+    }
+)
+
+
+class _ProcessWideToolState:
+    """Snapshot and restore the uv tool runner, the probe memos, and the plugin manager.
+
+    On exit, puts back what was there on entry:
+
+    * the ``get_uv_tool_runner()`` singleton: which object it is, and that object's
+      attributes, including its memoized ``_uv_available_cache``;
+    * every memo in ``_PROCESS_WIDE_PROBE_MEMOS``, except that a new *successful*
+      answer in one of the ``_UV_TOOL_RUN_MEMOS`` is kept. Only an answer in the
+      module's own memo object counts; a test that rebinds a memo to a dict of its
+      own made up everything in it;
+    * ``ash_plugin_manager``'s resolved-plugin memo, event handlers and plugin
+      registrations, and the modules it has recorded the operator naming
+      (``trust_plugin_modules``). Which registrations an untrusted import made
+      is not rolled back: such a registration is kept or dropped by the rule
+      below, and the record is ignored once its registration is gone.
+
+    A module first imported during the test has no snapshot, so what its import
+    built is the baseline: an empty memo, a fresh runner from
+    ``reset_uv_tool_runner()``, and a plugin manager with nothing resolved.
+
+    Plugin registrations and event handlers are not simply rolled back. The
+    ``ash_*_plugin`` decorators register a plugin when its module is imported, and
+    an import runs once per process. So one added during the test is kept when its
+    module was first imported during the test, because nothing would ever add it
+    again, and dropped otherwise, because then the test added it by hand
+    (``register_plugin_module("converter", "test-plugin", ...)``) or declared the
+    plugin inside the test. ``tests/snapshot/conftest.py``'s
+    ``_merge_new_registrations`` applies the same rule.
+
+    The manager's ``context`` is left alone. Nothing reads it, and
+    ``tests/unit/workspace/test_project_isolation.py`` fails if anything starts to,
+    so a context a test leaves behind cannot reach another test. That file's
+    registry sweep also lists this one as allowed to reach the manager's state; the
+    resolved-plugin memo is reached through ``getattr`` because its prose check
+    requires the dotted spelling to appear nowhere in the repository.
+    """
+
+    def __enter__(self) -> "Self":
+        self._modules_before = frozenset(sys.modules)
+        self._memos = {}
+        for module_name, attribute in _PROCESS_WIDE_PROBE_MEMOS:
+            module = sys.modules.get(module_name)
+            if module is not None:
+                memo = getattr(module, attribute)
+                self._memos[module_name, attribute] = (memo, type(memo)(memo))
+        self._runner = None
+        runner_module = sys.modules.get(_UV_TOOL_RUNNER_MODULE)
+        if runner_module is not None:
+            runner = runner_module._uv_tool_runner
+            self._runner = (runner, dict(vars(runner)))
+        self._plugins = None
+        plugins = sys.modules.get(_PLUGINS_MODULE)
+        if plugins is not None:
+            ash_plugin_manager = plugins.ash_plugin_manager
+            library = ash_plugin_manager.plugin_library
+            self._plugins = {
+                "manager": ash_plugin_manager,
+                "library": library,
+                "resolved": dict(getattr(ash_plugin_manager, "_resolved_plugins")),
+                "operator_modules": set(
+                    getattr(ash_plugin_manager, "_operator_modules")
+                ),
+                "event_handlers": (
+                    library.event_handlers,
+                    {
+                        event: (callbacks, list(callbacks))
+                        for event, callbacks in library.event_handlers.items()
+                    },
+                ),
+                "registries": {
+                    kind: (getattr(library, kind), dict(getattr(library, kind)))
+                    for kind in _PLUGIN_REGISTRIES
+                },
+            }
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._restore_probe_memos()
+        self._restore_uv_tool_runner()
+        self._restore_plugin_manager()
+
+    def _imported_during_the_test(self, module_name: str) -> bool:
+        return module_name in sys.modules and module_name not in self._modules_before
+
+    def _restore_probe_memos(self) -> None:
+        for key in _PROCESS_WIDE_PROBE_MEMOS:
+            module_name, attribute = key
+            module = sys.modules.get(module_name)
+            if module is None:
+                continue
+            current = getattr(module, attribute)
+            memo, contents = self._memos.get(key, (current, type(current)()))
+            successes = {}
+            if key in _UV_TOOL_RUN_MEMOS:
+                # Read from the module's own memo object. If the test rebound the
+                # name to a dict of its own, nothing in that dict is kept.
+                successes = {
+                    name: answer
+                    for name, answer in memo.items()
+                    if name not in contents and answer is not None
+                }
+            setattr(module, attribute, memo)
+            memo.clear()
+            if isinstance(memo, dict):
+                memo.update(contents)
+                memo.update(successes)
+            else:
+                memo.extend(contents)
+
+    def _restore_uv_tool_runner(self) -> None:
+        if _UV_TOOL_RUNNER_MODULE not in sys.modules:
+            return
+        # Imported by name, not reached through sys.modules, so that a type checker
+        # sees the real module and checks the name assigned below. The test above
+        # keeps this from importing the module when the test did not.
+        from automated_security_helper.utils import uv_tool_runner
+
+        if self._runner is None:
+            uv_tool_runner.reset_uv_tool_runner()
+            return
+        runner, attributes = self._runner
+        uv_tool_runner._uv_tool_runner = runner
+        vars(runner).clear()
+        vars(runner).update(attributes)
+
+    def _restore_plugin_manager(self) -> None:
+        if _PLUGINS_MODULE not in sys.modules:
+            return
+        # By name for the same reason as in _restore_uv_tool_runner.
+        from automated_security_helper import plugins
+
+        saved = self._plugins
+        if saved is None:
+            ash_plugin_manager = plugins.ash_plugin_manager
+            library = ash_plugin_manager.plugin_library
+            saved = {
+                "manager": ash_plugin_manager,
+                "library": library,
+                "resolved": {},
+                "operator_modules": set(),
+                "event_handlers": (library.event_handlers, {}),
+                "registries": {
+                    kind: (getattr(library, kind), {}) for kind in _PLUGIN_REGISTRIES
+                },
+            }
+
+        ash_plugin_manager = saved["manager"]
+        library = ash_plugin_manager.plugin_library
+        # Read what the imports added before anything is put back: the dicts and
+        # lists being restored may be the very objects the test added to.
+        subscribed_by_an_import = [
+            (event, callback)
+            for event, callbacks in library.event_handlers.items()
+            for callback in callbacks
+            if self._imported_during_the_test(getattr(callback, "__module__", "") or "")
+        ]
+        registered_by_an_import = {
+            kind: {
+                name: registration
+                for name, registration in getattr(library, kind).items()
+                if name not in registrations
+                and self._imported_during_the_test(registration.plugin_module_path)
+            }
+            for kind, (_, registrations) in saved["registries"].items()
+        }
+
+        plugins.ash_plugin_manager = ash_plugin_manager
+        library = saved["library"]
+        ash_plugin_manager.plugin_library = library
+        resolved = getattr(ash_plugin_manager, "_resolved_plugins")
+        resolved.clear()
+        resolved.update(saved["resolved"])
+        operator_modules = getattr(ash_plugin_manager, "_operator_modules")
+        operator_modules.clear()
+        operator_modules.update(saved["operator_modules"])
+
+        handlers_by_event, saved_handlers = saved["event_handlers"]
+        library.event_handlers = handlers_by_event
+        handlers_by_event.clear()
+        for event, (callbacks, subscribed) in saved_handlers.items():
+            callbacks[:] = subscribed
+            handlers_by_event[event] = callbacks
+        for event, callback in subscribed_by_an_import:
+            callbacks = handlers_by_event.setdefault(event, [])
+            if callback not in callbacks:
+                callbacks.append(callback)
+
+        for kind, (registry, registrations) in saved["registries"].items():
+            setattr(library, kind, registry)
+            registry.clear()
+            registry.update(registrations)
+            registry.update(registered_by_an_import[kind])
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_wide_tool_state() -> Iterator[None]:
+    """Stop one test's tool probes and plugin registrations from leaking into the next.
+
+    Why this exists. ``get_uv_tool_runner()`` returns one ``UVToolRunner`` per
+    process, and its ``is_uv_available()`` memoizes the first answer forever. The
+    ``TestHowNbconvertIsRun`` tests in
+    ``test_jupyter_conversion_runs_outside_tree.py`` patched
+    ``jupyter_converter.subprocess.run``, which is the standard library's
+    ``subprocess.run`` and so every caller's, and then built a ``JupyterConverter``.
+    Construction probes uv (``model_post_init`` asks for the tool version). The
+    probe reached the stand-in, which raised ``IndexError`` on ``cmd[6]`` for
+    ``["uv", "--version"]``, and ``is_uv_available`` caught it and memoized False.
+    Every later test on that xdist worker that used the process-wide runner was
+    told "UV is not available".
+    ``test_subprocess_timeout.py::...::test_run_tool_forwards_the_timeout_on_the_results_dir_branch``
+    failed that way on Windows py3.11 and py3.14 and passed everywhere else. Two
+    per-file fixtures (``test_nix_provided_scanner_selection.py``,
+    ``test_pre_installed_tool_offline.py``) reset the runner around their own tests,
+    which cleared the poisoned answer whenever one ran between the two tests on the
+    same worker. Both files are skipped on Windows, so there nothing cleared it.
+
+    How the poisoners were found. A probe plugin recorded this state before and
+    after every test of a full ``-n 8`` run, once as the suite runs and once with
+    the runner reset before each test, so that a test is seen poisoning even when
+    an earlier test on its worker had already warmed the memo. What it found:
+
+    * ``is_uv_available`` memoized False: the four ``TestHowNbconvertIsRun`` tests
+      above, and nothing else.
+    * ``get_tool_version`` memoized None: ``test_converters.py``'s
+      ``test_jupyter_converter_convert`` (the same stdlib patch, made before
+      construction, whose stand-in exits 0 for ``uv --version`` too), and
+      ``test_tool_version_is_a_version_specifier.py``'s
+      ``test_the_refused_value_never_reaches_a_uv_argv``, which has to send the
+      probe through its recorder to see the argv.
+    * ``find_executable`` memoized stand-in answers (``test_cmd``, ``somecmd``, and
+      None for an installed ``opengrep``).
+    * ``ash_plugin_manager`` left with a ``test-plugin`` converter registration and
+      with event handlers cleared or added.
+
+    Each of those is a value one test made up and every later test on the worker
+    is served. Fixing a poisoner in its own file, by building the object before
+    patching and patching the module's own name rather than the standard
+    library's, removes that one poisoner. This fixture is what keeps the next one
+    from becoming an order-dependent failure on whichever platform's worker packing
+    happens to run it before a victim.
+
+    Cost, and the one exception it buys. Rolling every memo back makes each test
+    that builds a uv-run scanner probe its tool again. The version probes are not
+    cheap: measured locally, ``uv tool run --from checkov ... --version`` takes
+    4.2 s and semgrep 2.5 s, and the comment on ``_pinned_uv_tool_probe`` in
+    tests/snapshot/conftest.py records a semgrep probe on a Windows runner that
+    took 25 s against a 15 s timeout. Rolled back in full, the suite at ``-n 8``
+    took 307 s against 259 s without this fixture, run side by side, and every
+    extra probe is another chance to time out on a loaded runner. So a successful
+    answer the code wrote into ``_uv_tool_version_cache`` or ``_uv_command_cache``
+    is kept, as it was before this fixture. With that exception, a second
+    side-by-side pair of runs took 101 s against 100 s. Every poisoned value the
+    probe plugin found is a failure (False or None) or lives in a memo that is
+    cheap to recompute, and every successful answer it saw in those two memos,
+    across the whole suite, was the real tool's version.
+
+    Known limitation. A test that makes up a *successful* version answer by
+    patching the subprocess layer under ``get_tool_version`` would still leak it.
+    None does today. Patch ``UVToolRunner.get_tool_version`` itself, as
+    ``_pinned_uv_tool_probe`` does, which never reaches the memo.
+
+    What it deliberately does not cover. The MCP scan registry and the warn-once
+    sets (``path_trust._WARNED``, ``options._REFUSED_TOOL_VERSIONS``) also outlive a
+    test, but they record what happened rather than memoize an answer about the
+    host, no test is known to read a stale entry, and an MCP scan's background
+    thread can still be updating its registry entry after the test returns.
+    """
+    with _ProcessWideToolState():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _no_ash_config_from_the_shell(monkeypatch):
+    """Unset ``ASH_CONFIG`` for every test; a test that needs it sets it itself.
+
+    ``ASH_CONFIG`` names the config file ASH uses when none is named, and a file
+    it names that does not exist refuses resolution (exit 3) rather than being
+    replaced by the defaults. So a value left in the developer's shell, or in a
+    CI job's environment, reaches every test that resolves a config: with
+    ``ASH_CONFIG`` naming a missing file, 41 tests in six config, MCP and
+    orchestrator test files failed, none of them about ``ASH_CONFIG``. Tests that
+    exercise the variable set it with ``monkeypatch.setenv``, which runs after
+    this fixture.
+    """
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_writable_roots():
+    """Give each test the guarded output roots it started with (``fs_guard``).
+
+    The registry is process-global. A test that registers a root and does not
+    release it, or makes a PluginContext the garbage collector has not reclaimed
+    yet, would otherwise leave every later test on the same xdist worker writing
+    below a root it never registered: those writes refuse links where the test
+    expects open(). A finalizer that fires after the restore releases a root that
+    is no longer there, which changes nothing.
+    """
+    from automated_security_helper.utils.sandbox import fs_guard
+
+    with fs_guard._roots_lock:
+        fs_guard._apply_pending_releases()
+        saved = dict(fs_guard._writable_roots)
+    yield
+    with fs_guard._roots_lock:
+        fs_guard._pending_releases.clear()
+        fs_guard._writable_roots.clear()
+        fs_guard._writable_roots.update(saved)
 
 
 @pytest.fixture
@@ -675,33 +1207,6 @@ def temp_project_dir(ash_temp_path):
     (project_dir / ".ash").mkdir()
 
     return project_dir
-
-
-@pytest.fixture
-def temp_env_vars():
-    """Create a fixture for temporarily setting environment variables.
-
-    Returns:
-        Function that sets environment variables for the duration of a test
-    """
-    original_env = {}
-
-    def _set_env_vars(**kwargs):
-        for key, value in kwargs.items():
-            if key in os.environ:
-                original_env[key] = os.environ[key]
-            os.environ[key] = str(value)
-
-    yield _set_env_vars
-
-    # Restore original environment variables
-    for key in original_env:
-        os.environ[key] = original_env[key]
-
-    # Remove environment variables that were not originally set
-    for key in os.environ.keys() - original_env.keys():
-        if key in os.environ:
-            del os.environ[key]
 
 
 @pytest.fixture
@@ -1062,3 +1567,65 @@ def no_cdk_kernel(monkeypatch):
     )
     ns.newly_imported_cdk = newly_imported_cdk
     return ns
+
+
+@pytest.fixture(autouse=True)
+def _mcp_workspace_root_outside_home(monkeypatch, tmp_path_factory):
+    """Keep MCP session workspaces out of the developer's own cache directory.
+
+    An MCP HTTP app removes a session's workspace when the session ends, and
+    sweeps workspaces nobody used for a day, under ``ASH_MCP_WORKSPACE_ROOT``,
+    which otherwise resolves to ``$XDG_CACHE_HOME/ash-mcp`` or
+    ``~/.cache/ash-mcp``. A test that builds an app without naming a root would
+    act on that real directory. Set whatever the environment says, so a developer
+    who exports their own root never runs the tests against it; a test that needs
+    a particular root sets its own.
+    """
+    monkeypatch.setenv(
+        "ASH_MCP_WORKSPACE_ROOT",
+        str(tmp_path_factory.getbasetemp() / "mcp-workspace-root"),
+    )
+
+
+def _drop_mcp_session_state() -> None:
+    # Looked up rather than imported: a worker that never imported the module
+    # has no session state, and importing it here would load ASH's config models
+    # on every worker before its first test.
+    sessions = sys.modules.get("automated_security_helper.cli.mcp.sessions")
+    if sessions is None:
+        return
+    sessions.reset_default_registry_for_tests()
+    sessions._ended_while_scanning.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_mcp_session_state_outlives_its_test():
+    """Start and end every test with no MCP session state in the process.
+
+    The session registry (``cli/mcp/sessions.get_default_registry``) is
+    process-wide. For each session id it holds the scan claim
+    (``MCPSession.try_claim_scan``) that makes set_source_git, set_source_zip_*
+    and clear_source refuse with ``source_delivery_busy`` while a scan runs, and
+    the scan's place in the per-session limit. A scan's task gives both back when
+    it returns. A test that stands in for ``_run_scan_async``, or whose
+    ``asyncio.run`` returns before the task it started has run at all, never
+    gives them back, so its session id stays busy for every later test on the
+    same worker.
+
+    That is how this was found.
+    ``test_mcp_config_confinement.py::TestInsideTheRootsStillWorks::test_set_source_git_with_a_remote_url_reaches_git``
+    failed once with ``source_delivery_busy`` in a ``tests/unit -n 8`` run and
+    passed alone. Earlier on the same worker,
+    ``test_discovered_config_outside_the_grant.py``'s
+    ``test_control_a_tree_whose_config_is_inside_the_grant_starts_the_scan`` had
+    started a scan with ``_run_scan_async`` patched out, for the same session id,
+    ``client-one``. With ``-n 0`` and that order it fails every time. Which tests
+    share a worker depends on ``-n`` and on how xdist hands out work, so the
+    failure came and went.
+
+    Sessions whose removal waits for a scan (``_ended_while_scanning``) are
+    process-wide too, and are cleared with the registry.
+    """
+    _drop_mcp_session_state()
+    yield
+    _drop_mcp_session_state()

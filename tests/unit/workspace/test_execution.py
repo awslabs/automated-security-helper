@@ -14,7 +14,6 @@ because a fake orchestrator could not prove anything about it.
 from __future__ import annotations
 
 import json
-import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
 import sys
 import threading
 import time
@@ -35,6 +34,7 @@ from automated_security_helper.workspace.execution import (
     execute_workspace,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from tests.utils.git_fixture import run_git
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,7 @@ class FakeOrchestrator:
     def execute_scan(self, phases=None):
         from automated_security_helper.models.asharp_model import (
             AshAggregatedResults,
+            ConverterStatusInfo,
             ScannerTargetStatusInfo,
         )
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -136,6 +137,10 @@ class FakeOrchestrator:
         # The explicit spec wins, so a test can say a scanner did not complete.
         for name, info in (spec.get("scanner_results") or {}).items():
             model.scanner_results[name] = ScannerTargetStatusInfo(**info)
+        # Converter rows as ConvertPhase records them, for the converter half of
+        # the completeness verdict.
+        for name, row in (spec.get("converter_results") or {}).items():
+            model.converter_results[name] = ConverterStatusInfo.model_validate(row)
         return model
 
 
@@ -595,12 +600,10 @@ class TestScannerCompleteness:
     for the same reason a finding-count verdict cannot tell "nothing was wrong"
     from "nothing was checked".
 
-    Workspace mode keeps its own contract rather than borrowing single-project
-    precedence. An incomplete project is an unknown, so it lands on
-    ``INTERNAL_ERROR`` (1) -- which in workspace mode sits BELOW
-    ``ACTIONABLE_FINDINGS`` (2), the reverse of single-project mode, because an
-    unknown must not suppress a certainty. ``WORKSPACE_ERROR`` (4) is untouched:
-    it means nothing was attempted, and these projects were.
+    An incomplete project is an unknown, so it lands on ``INTERNAL_ERROR`` (1),
+    which ranks ABOVE ``ACTIONABLE_FINDINGS`` (2), as in single-project mode.
+    ``WORKSPACE_ERROR`` (4) is untouched: it means nothing was attempted, and these
+    projects were.
     """
 
     def test_a_missing_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
@@ -732,13 +735,13 @@ class TestScannerCompleteness:
         assert entry.scan_incomplete is False
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
-    def test_findings_still_outrank_an_incomplete_project(self, tmp_path):
-        """Workspace precedence is preserved, not replaced by single-project's.
+    def test_an_incomplete_project_outranks_another_project_s_findings(self, tmp_path):
+        """Workspace precedence is single-project's: 1 ahead of 2.
 
-        Single-project mode answers 1 when both hold. Workspace mode answers 2,
-        and that difference is deliberate -- see the ordering rationale in
-        models/workspace.py. Collapsing the two models here would make a CI gate
-        that retries 1 stop blocking on real findings.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by ruling:
+        `ash --source-dir P` answers 1 when a scanner did not complete, so P inside
+        a workspace must too, whatever another project found. The findings stay in
+        the payload; see the ordering rationale in models/workspace.py.
         """
         _, plan = _make_workspace(tmp_path, ("api", "LOW"), ("web", "MEDIUM"))
         FakeOrchestrator.behaviour["api"] = {
@@ -752,10 +755,12 @@ class TestScannerCompleteness:
         outcome = _run(tmp_path, plan)
         verdicts = {p.project: p.scan_incomplete for p in outcome.payload.projects}
 
-        # Control: the incomplete project really is flagged, so 2 is precedence
-        # winning rather than the completeness pass never having fired.
+        # Control: both facts really are present, so 1 is precedence and not the
+        # findings having gone missing.
         assert verdicts == {"api": False, "web": True}
-        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        thresholds = {p.project: p.exceeds_threshold for p in outcome.payload.projects}
+        assert thresholds == {"api": True, "web": False}
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
     def test_a_complete_clean_project_still_reports_success(self, tmp_path):
         """Load-bearing: the gate must not fail every workspace it looks at."""
@@ -951,6 +956,98 @@ class TestScannerCompleteness:
 PROJECT_TIMEOUT = 3.0
 
 
+class TestConverterCompleteness:
+    """A project whose converter lost coverage is incomplete, as ``ash --source-dir P`` is.
+
+    ``_compute_exit_code`` asks ``incomplete_converters`` alongside the scanner
+    questions: a notebook that could not be converted, a converter that crashed, or
+    one whose tool was absent with inputs to convert. The workspace verdict asked
+    only the scanner questions, so the same project passed inside a workspace.
+    """
+
+    @staticmethod
+    def _project(tmp_path, converter_row):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("PASSED")},
+            "converter_results": {"jupyter": converter_row},
+        }
+        return plan
+
+    def test_a_failed_conversion_makes_the_project_incomplete(self, tmp_path):
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "nbconvert timed out"}]},
+        )
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: every scanner completed and nothing was found.
+        assert entry.incomplete_scanners == []
+        assert entry.exceeds_threshold is False
+
+        assert entry.scan_incomplete is True
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+        assert entry.incomplete_converters == {
+            "jupyter": "could not convert 1 input: nb.ipynb"
+        }
+
+    def test_a_crashed_converter_makes_the_project_incomplete(self, tmp_path):
+        plan = self._project(tmp_path, {"failure": "RuntimeError: boom"})
+
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        assert entry.scan_incomplete is True
+        assert entry.incomplete_converters == {"jupyter": "RuntimeError: boom"}
+
+    def test_the_gate_off_still_reports_the_converter(self, tmp_path):
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "timed out"}]},
+        )
+
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        entry = outcome.payload.projects[0]
+
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+        assert list(entry.incomplete_converters) == ["jupyter"]
+
+    def test_an_absent_tool_with_nothing_to_convert_is_complete(self, tmp_path):
+        plan = self._project(
+            tmp_path, {"dependencies_satisfied": False, "candidate_inputs": 0}
+        )
+
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.incomplete_converters == {}
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_the_mcp_coverage_for_the_project_names_the_converter(self, tmp_path):
+        """An MCP client polling the project is told why it is incomplete."""
+        from automated_security_helper.cli.mcp.workspace import _project_coverage
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            coverage_has_gap,
+        )
+
+        plan = self._project(
+            tmp_path,
+            {"failed_inputs": [{"path": "nb.ipynb", "reason": "timed out"}]},
+        )
+        entry = _run(tmp_path, plan).payload.projects[0]
+
+        coverage = _project_coverage(entry)
+
+        assert coverage["incomplete_converters"] == [
+            {"converter": "jupyter", "reason": "could not convert 1 input: nb.ipynb"}
+        ]
+        assert coverage_has_gap(coverage)
+
+
 class TestFailureHandling:
     def test_a_failing_project_does_not_stop_the_others(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("fine", "MEDIUM"))
@@ -967,11 +1064,12 @@ class TestFailureHandling:
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
         assert _run(tmp_path, plan).exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
-    def test_a_failing_project_does_not_mask_another_project_findings(self, tmp_path):
-        """A gate that retries 1 as infrastructure trouble would never block.
+    def test_a_failing_project_outranks_another_project_s_findings(self, tmp_path):
+        """1 ahead of 2, as in a single-directory scan, and the findings still shown.
 
-        The failed project stays disclosed in the payload; what changes is that it
-        no longer decides the exit code when a real finding is present.
+        Reverses this test's earlier expectation (ACTIONABLE_FINDINGS), by ruling.
+        The other project's findings do not decide the exit code any more, so the
+        payload is where they must stay visible.
         """
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"), ("dirty", "LOW"))
         FakeOrchestrator.behaviour["broken"] = {"raise": RuntimeError("boom")}
@@ -979,11 +1077,14 @@ class TestFailureHandling:
 
         outcome = _run(tmp_path, plan)
 
-        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses["broken"] is ProjectRunStatus.FAILED
         errors = {p.project: p.error for p in outcome.payload.projects}
         assert "boom" in (errors["broken"] or "")
+        dirty = next(p for p in outcome.payload.projects if p.project == "dirty")
+        assert dirty.exceeds_threshold is True
+        assert dirty.finding_count == 7
 
     def test_the_failure_message_names_the_project(self, tmp_path):
         _, plan = _make_workspace(tmp_path, ("broken", "MEDIUM"))
@@ -1265,15 +1366,8 @@ class TestConcurrencyBound:
 # ---------------------------------------------------------------------------
 
 
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
+def _git(cwd: Path, *args: str):
+    return run_git(*args, cwd=cwd, timeout=30)
 
 
 def _init_repo(path: Path, *, commit_extra: bool = False) -> None:
@@ -1292,10 +1386,7 @@ def _init_repo(path: Path, *, commit_extra: bool = False) -> None:
 
 @pytest.fixture
 def git_available() -> bool:
-    probe = subprocess.run(  # nosec B603 B607 -- probing for git on PATH
-        ["git", "--version"], capture_output=True, text=True, check=False, timeout=30
-    )
-    return probe.returncode == 0
+    return run_git("--version", timeout=30).returncode == 0
 
 
 class TestChangedFilesGate:
@@ -1461,6 +1552,46 @@ class TestChangedFilesGate:
             tmp_path, plan, changed_files_only=True, allow_missing_projects=True
         )
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+
+    def test_an_option_like_base_ref_is_refused_before_any_project_runs(
+        self, tmp_path, git_available
+    ):
+        """git would read "-p" as an option; the workspace is refused, not scanned.
+
+        Before, git refused the option, so the diff had no answer and the project
+        fell back to a full scan.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
+        _init_repo(root / "changed", commit_extra=True)
+
+        with pytest.raises(ValueError, match=r"starts with '-'"):
+            _run(tmp_path, plan, changed_files_only=True, base_ref="-p")
+
+        assert FakeOrchestrator.built == []
+        assert not (tmp_path / "out").exists()
+
+    def test_a_missing_base_ref_scans_in_full_whatever_files_the_project_holds(
+        self, tmp_path, git_available
+    ):
+        """A file named ``origin/main...HEAD`` does not stand in for the diff.
+
+        The project has no ``origin``. Read as a path, the argument named that
+        untracked file, the diff came back empty, and the project was skipped as
+        unchanged. Read as a revision it does not exist, so the project is scanned.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        _init_repo(root / "api", commit_extra=True)
+        (root / "api" / "origin").mkdir()
+        (root / "api" / "origin" / "main...HEAD").write_text("x\n", encoding="utf-8")
+
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="origin/main")
+
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+        assert [o.key for o in FakeOrchestrator.built] == ["api"]
 
 
 # ---------------------------------------------------------------------------
@@ -1702,3 +1833,21 @@ class TestOptionalOrchestratorFactory:
 
         signature = inspect.signature(execute_workspace)
         assert signature.parameters["orchestrator_factory"].default is None
+
+
+class TestProjectThreadsKeepTheWorkspaceScope:
+    def test_each_project_is_built_with_the_workspace_root_registered(self, tmp_path):
+        """Project threads start with a copy of the run's context, which holds it."""
+        from automated_security_helper.utils import subprocess_utils
+
+        root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
+        seen: List[List[str]] = []
+
+        def factory(**kwargs: Any) -> "FakeOrchestrator":
+            seen.append(subprocess_utils.scanned_trees())
+            return FakeOrchestrator.create(**kwargs)
+
+        with subprocess_utils.scanning_tree(root):
+            execute_workspace(plan, _settings(tmp_path), orchestrator_factory=factory)
+
+        assert seen == [[str(root.absolute())], [str(root.absolute())]]

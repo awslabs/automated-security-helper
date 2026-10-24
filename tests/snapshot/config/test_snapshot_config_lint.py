@@ -181,9 +181,11 @@ def test_fixtures_exercise_every_lint_category(project_dir, snapshot):
     "args, stdin, exit_code",
     [
         pytest.param(["config", "lint"], None, 1, id="every-issue"),
-        pytest.param(["config", "lint", "-c", "broken.yaml"], None, 1, id="broken"),
+        # 3, as `ash scan` exits on a config it cannot load: broken and missing
+        # are not configs with problems (1) but files that do not load.
+        pytest.param(["config", "lint", "-c", "broken.yaml"], None, 3, id="broken"),
         pytest.param(["config", "lint", "-c", "clean.yaml"], None, 0, id="clean"),
-        pytest.param(["config", "lint", "-c", "missing.yaml"], None, 1, id="missing"),
+        pytest.param(["config", "lint", "-c", "missing.yaml"], None, 3, id="missing"),
         pytest.param(
             ["config", "lint", "-c", "extends.yaml"], None, 1, id="bad-extends"
         ),

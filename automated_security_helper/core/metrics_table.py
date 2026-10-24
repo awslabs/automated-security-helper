@@ -8,10 +8,12 @@ from rich.text import Text
 from rich.panel import Panel
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.core.unified_metrics import (
     coverage_shortfalls,
     get_unified_scanner_metrics,
     format_duration,
+    inputs_not_scanned,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 import platform
@@ -202,6 +204,31 @@ def print_coverage_shortfalls(
         )
 
 
+def not_scanned_line(scanner_name: str, path: str, reason: str) -> str:
+    """The console line for one input a scanner did not scan, as Rich markup.
+
+    The path is the scanned repository's: its control characters (a terminal escape
+    sequence, a newline) are escaped before its markup is. Shared by the
+    single-directory table and the workspace summary, so both print it one way.
+    """
+    return (
+        f"[bold yellow]Not scanned:[/bold yellow] {escape(scanner_name)} did not "
+        f"scan {escape(escape_controls(path))}: {escape(reason)}"
+    )
+
+
+def print_inputs_not_scanned(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per input a scanner found and did not scan, with the reason.
+
+    Printed beside the table, like the coverage shortfalls: a SKIPPED or PASSED row
+    cannot say which input went unexamined. Nothing is printed when there is none.
+    """
+    for scanner_name, path, reason in inputs_not_scanned(asharp_model):
+        console.print(not_scanned_line(scanner_name, path, reason))
+
+
 def print_stale_content_databases(
     asharp_model: AshAggregatedResults, console: Console
 ) -> None:
@@ -222,6 +249,38 @@ def print_stale_content_databases(
             else "[bold yellow]Stale content database (warning):[/bold yellow]"
         )
         console.print(f"{label} {escape(record.message())}")
+
+
+def print_converter_refusals(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per converter input that was not read, after the table.
+
+    No scanner row can say an input went unscanned when a converter never handed it
+    on. A refusal that left the scan incomplete (an archive over an extraction
+    limit) is printed in red, because the completeness gate counts it; the rest in
+    yellow. See ``utils/converter_refusals.py``.
+    """
+    from automated_security_helper.utils.converter_refusals import (
+        SHOWN_IN_SUMMARY,
+        converter_refusals,
+        inert_text,
+    )
+
+    refusals = converter_refusals(asharp_model)
+    for refusal in refusals[:SHOWN_IN_SUMMARY]:
+        label = (
+            "[bold red]Not scanned (scan incomplete):[/bold red]"
+            if refusal.scan_incomplete
+            else "[bold yellow]Not scanned:[/bold yellow]"
+        )
+        console.print(f"{label} {escape(inert_text(refusal.message()))}")
+    if len(refusals) > SHOWN_IN_SUMMARY:
+        console.print(
+            f"[bold yellow]Not scanned:[/bold yellow] {len(refusals) - SHOWN_IN_SUMMARY} "
+            "more converter input(s), listed under converter_results in "
+            "ash_aggregated_results.json."
+        )
 
 
 def display_metrics_table(
@@ -320,7 +379,9 @@ def display_metrics_table(
             # guarded block because it writes to the same console: a closed stdout has to be
             # handled identically for both, and a shortfall notice is not worth failing a scan.
             print_coverage_shortfalls(asharp_model, console)
+            print_inputs_not_scanned(asharp_model, console)
             print_stale_content_databases(asharp_model, console)
+            print_converter_refusals(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)
             # Log the error but don't fail the scan

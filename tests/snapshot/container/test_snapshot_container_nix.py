@@ -20,6 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.snapshot.container.conftest import completed_by
+
 #: Where the fake says ``nix`` is. Fixed, so the recorded command is the same everywhere.
 FAKE_NIX = "/nix/var/nix/profiles/default/bin/nix"
 
@@ -44,17 +46,27 @@ class FakeNixShell:
     def __init__(self) -> None:
         self.returncode = 0
         self.results_json: str | None = None
+        #: Whether the inner run marks its results completed, as it does when it
+        #: finishes; False leaves them as an ASH older than the host's would.
+        self.marks_completion = True
         self.commands: list[list[str]] = []
         self.environments: list[dict[str, str]] = []
 
-    def run(self, cmd, env=None, check=False, text=True):
+    def run(self, cmd, env=None, check=False, text=True, stdin=None):
+        # The shell gets an empty standard input, never the host process's.
+        assert stdin is subprocess.DEVNULL
         self.commands.append(list(cmd))
         self.environments.append(dict(env or {}))
         if self.results_json is not None:
             out = Path("out")
             out.mkdir(exist_ok=True)
+            results_json = (
+                completed_by(self.results_json, (env or {}).get("ASH_OUTER_RUN_ID"))
+                if self.marks_completion
+                else self.results_json
+            )
             out.joinpath("ash_aggregated_results.json").write_text(
-                self.results_json, encoding="utf-8"
+                results_json, encoding="utf-8"
             )
         return subprocess.CompletedProcess(args=cmd, returncode=self.returncode)
 
@@ -76,7 +88,11 @@ def nix_shell(monkeypatch) -> FakeNixShell:
     monkeypatch.setattr(
         run_ash_nix, "find_executable", lambda name: FAKE_NIX if name == "nix" else None
     )
-    monkeypatch.setattr(run_ash_nix, "subprocess", SimpleNamespace(run=shell.run))
+    monkeypatch.setattr(
+        run_ash_nix,
+        "subprocess",
+        SimpleNamespace(run=shell.run, DEVNULL=subprocess.DEVNULL),
+    )
     return shell
 
 
@@ -95,10 +111,43 @@ def scan(run_cli, monkeypatch):
     return _scan
 
 
+def _normalized(command: list[str]) -> list[str]:
+    """The command with this interpreter's path and its safe-path flags as placeholders.
+
+    The inner scan runs on this interpreter, whose path differs between hosts, and
+    the flags that keep the working directory off sys.path differ between Python
+    versions (``-P`` exists from 3.11). The placeholder stands for exactly this
+    version's flags, so a command that left them out would not match.
+    """
+    from automated_security_helper.utils.python_child import _SAFE_PATH_FLAGS
+
+    out: list[str] = []
+    i = 0
+    while i < len(command):
+        part = command[i]
+        i += 1
+        if part != sys.executable:
+            out.append(part)
+            continue
+        out.append("<PYTHON>")
+        if command[i : i + len(_SAFE_PATH_FLAGS)] == _SAFE_PATH_FLAGS:
+            out.append("<SAFE_PATH_FLAGS>")
+            i += len(_SAFE_PATH_FLAGS)
+    return out
+
+
 def _seen(result, shell: FakeNixShell) -> dict:
+    # The printed output names the interpreter too, whose path is the machine's.
+    printed = {
+        stream: result[stream].replace(sys.executable, "<PYTHON>")
+        for stream in ("stdout", "stderr")
+        if isinstance(result.get(stream), str)
+    }
+    commands = [_normalized(command) for command in shell.commands]
     return {
         **result,
-        "nix_commands": shell.commands,
+        **printed,
+        "nix_commands": commands,
         "ASH_IN_NIX": [env.get("ASH_IN_NIX") for env in shell.environments],
         "ASH_OFFLINE": [env.get("ASH_OFFLINE") for env in shell.environments],
     }
@@ -127,6 +176,19 @@ def test_shell_exit_with_results(scan, snapshot, nix_shell, fixture_model):
     # status as a warning and reaches its own verdict from the results.
     nix_shell.returncode = 2
     nix_shell.results_json = fixture_model.model_dump_json()
+    assert (
+        _seen(scan([*SCAN, "--no-fail-on-incomplete-scanners"]), nix_shell) == snapshot
+    )
+
+
+def test_results_the_inner_run_did_not_mark_completed(
+    scan, snapshot, nix_shell, fixture_model
+):
+    # As an older ASH first on PATH inside the shell leaves them: not read back,
+    # and the host exits 1 naming the file, although the shell exited 2.
+    nix_shell.returncode = 2
+    nix_shell.results_json = fixture_model.model_dump_json()
+    nix_shell.marks_completion = False
     assert (
         _seen(scan([*SCAN, "--no-fail-on-incomplete-scanners"]), nix_shell) == snapshot
     )

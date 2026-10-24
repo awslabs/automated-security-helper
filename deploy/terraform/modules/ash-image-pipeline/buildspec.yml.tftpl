@@ -32,6 +32,9 @@ phases:
       # Fetch the pinned revision. `git fetch <ref>` accepts a tag, a branch, or
       # a full commit SHA; `git clone --branch` rejects a SHA outright, which
       # would make it impossible to pin a deployment to an exact commit.
+      #
+      # `--` ends git's options before the URL and the ref, so git takes them as
+      # the remote URL and the refspec even when one starts with '-'.
       - |
         set -eu
         rm -rf ash-src
@@ -39,8 +42,8 @@ phases:
         (
           cd ash-src
           git init -q
-          git remote add origin "$ASH_REPO_CLONE_URL"
-          git fetch -q --depth 1 origin "$ASH_VERSION"
+          git remote add -- origin "$ASH_REPO_CLONE_URL"
+          git fetch -q --depth 1 -- origin "$ASH_VERSION"
           git checkout -q FETCH_HEAD
           echo "resolved $ASH_VERSION to $(git rev-parse HEAD)"
         )

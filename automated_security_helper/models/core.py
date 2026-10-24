@@ -34,6 +34,17 @@ class IgnorePathWithReason(BaseModel):
     expiration: Annotated[
         str | None, Field(None, description="(Optional) Expiration date (YYYY-MM-DD)")
     ] = None
+    client_supplied: Annotated[
+        bool,
+        Field(
+            description=(
+                "Set by ASH: True when a config or workspace policy file an MCP "
+                "client delivered supplied this entry, so results show which "
+                "suppressions and ignored paths came from the client. A value "
+                "written in a config file is ignored."
+            ),
+        ),
+    ] = False
 
     def matches_path(self, file_path: str) -> bool:
         """Return True if ``file_path`` matches this entry's path pattern.
@@ -42,6 +53,123 @@ class IgnorePathWithReason(BaseModel):
         (``tests/**/*.py``). Matching is case-insensitive for OS portability.
         """
         return _path_pattern_matches(file_path, self.path)
+
+
+class IgnoreFileExclusions(BaseModel):
+    """What the scanned repository's ignore files took out of one scan set.
+
+    ASH leaves out every file a ``.gitignore`` or ``.ignore`` in the scanned tree
+    matches, unless the operator turned that off with ``honor_ignore_files: false``
+    or ``--no-honor-ignore-files``. A scanner that read fewer files cannot say so in
+    its own results, so the scan records it here and the summaries print it.
+    """
+
+    honored: Annotated[
+        bool,
+        Field(
+            description=(
+                "Whether the scanned repository's .gitignore and .ignore files "
+                "decided which files were scanned. False when the operator set "
+                "honor_ignore_files: false or passed --no-honor-ignore-files."
+            )
+        ),
+    ]
+    excluded_file_count: Annotated[
+        int,
+        Field(
+            ge=0,
+            description=(
+                "How many files the ignore files removed from the scan set: the sum "
+                "of by_ignore_file. Files ASH leaves out on its own (.git, CDK "
+                "assets, the bundled aws-cdk tree, its own output directory) are "
+                "not counted. 0 when the ignore files were not honored."
+            ),
+        ),
+    ] = 0
+    by_ignore_file: Annotated[
+        Dict[str, int],
+        Field(
+            default_factory=dict,
+            description=(
+                "Each ignore file whose rules were applied, by its path relative to "
+                "the scan root (relative to the workspace root in a workspace "
+                "scan's merged results), mapped to the number of files it removed. "
+                "An ignore file that removed nothing is listed with 0. Files under "
+                "a directory the root .gitignore excluded count for the root "
+                ".gitignore, and ignore files inside that directory are not read."
+            ),
+        ),
+    ]
+
+    output_dir_file_count: Annotated[
+        int,
+        Field(
+            ge=0,
+            description=(
+                "How many files were already in ASH's own output directory when "
+                "the scan set was built, when that directory is inside the scanned "
+                "tree. ASH leaves its output directory out of the scan set whatever "
+                "honor_ignore_files says, so these files were not scanned either; "
+                "they are files from an earlier run, or repository files that sit "
+                "where ASH writes. This run's own log files are not counted."
+            ),
+        ),
+    ] = 0
+
+    def summary_text(self) -> str:
+        """The sentence the text and markdown summaries print for this record."""
+        files = "file" if self.excluded_file_count == 1 else "files"
+        if self.honored:
+            text = (
+                "the scanned repository's .gitignore and .ignore files excluded "
+                f"{self.excluded_file_count} {files} from ASH's scan set"
+            )
+        else:
+            # "ASH's scan set" and not more: semgrep and opengrep walk the tree
+            # themselves and still skip what git ignores in a checkout.
+            text = (
+                "not honored for this scan (honor_ignore_files: false), so the scanned "
+                "repository's .gitignore and .ignore files excluded no files from "
+                "ASH's scan set"
+            )
+            if self.excluded_file_count:
+                text += (
+                    f"; ignore files named by the caller excluded "
+                    f"{self.excluded_file_count} {files}"
+                )
+        if self.output_dir_file_count:
+            found = self.output_dir_file_count
+            text += (
+                f"; {found} {'file' if found == 1 else 'files'} already in ASH's "
+                f"output directory {'was' if found == 1 else 'were'} left out as well"
+            )
+        return text
+
+
+def ignore_paths_that_skip_scanning(
+    ignore_paths: "List[IgnorePathWithReason] | None",
+    *,
+    ignore_suppressions: bool,
+) -> "List[IgnorePathWithReason]":
+    """The ignore paths that keep a file from being converted or scanned at all.
+
+    Those the operator supplied. A path a delivered tree's own config supplied
+    (``client_supplied``) is left to the SARIF step instead, which keeps a finding
+    under it as a marked, suppressed result, so the results show what the
+    client's config hid. Applying it before the scan as well would mean no
+    finding to keep. The cost is that those files are scanned.
+
+    None under ``--ignore-suppressions``. An ignore path is a suppression, and the
+    flag lifts every suppression for every scanner: the files under one are
+    converted and scanned, and their findings are reported. Without this the
+    flag's effect would depend on the scanner, since a scanner that reads the
+    whole directory reports those findings anyway and one that is handed only the
+    files left after this filter never sees them. The cost is a slower scan.
+    Keyword-only and required, so every caller states the flag.
+    """
+    if ignore_suppressions:
+        return []
+    return [path for path in ignore_paths or [] if path.client_supplied is not True]
 
 
 class ToolArgs(BaseModel):

@@ -21,10 +21,22 @@ from automated_security_helper.cli.mcp import workspace as workspace_module
 
 
 @pytest.fixture(autouse=True)
-def _clear_policy_env(monkeypatch):
+def _clear_policy_env(monkeypatch, tmp_path):
+    from automated_security_helper.cli.mcp.profile_registry import (
+        clear_profile_registry,
+        clear_session_state,
+    )
+
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
-    monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+    # The session configs select_profile writes go under this test's own
+    # directory, not the user's MCP cache, which concurrent runs share.
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    clear_profile_registry()
+    clear_session_state()
+    yield
+    clear_profile_registry()
+    clear_session_state()
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -45,11 +57,20 @@ def _with_profile(monkeypatch, tmp_path: Path, allowed_paths, extra: str = "") -
         "      enabled: true\n"
         f"      allowed_paths: {json.dumps(list(allowed_paths))}\n"
     )
-    monkeypatch.setattr(
-        workspace_module,
-        "_resolve_session_config",
-        lambda session_id, profile_name: str(profile),
+    _register_and_bind(profile)
+
+
+def _register_and_bind(profile: Path) -> None:
+    """Register ``profile`` and bind it, so the gate reads the registered policy."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        register_profiles,
+        set_profile_registry,
     )
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    set_profile_registry(register_profiles([f"op={profile}"]))
+    bound = mcp_select_profile("op")
+    assert bound["success"] is True, bound
 
 
 async def _resolve(tmp_path: Path, overrides):
@@ -293,13 +314,10 @@ async def test_an_operator_denial_holds_for_every_mix_of_separators(
         '      allowed_paths: ["/**"]\n'
         '      denied_paths: ["/scanners/trivy-repo/options/ignore_file"]\n'
     )
-    monkeypatch.setattr(
-        workspace_module,
-        "_resolve_session_config",
-        lambda session_id, profile_name: str(profile),
-    )
+    _register_and_bind(profile)
     result = await _resolve(tmp_path, [override])
     assert result["success"] is False, result
+    assert "denied_paths" in result["error"], result
 
 
 @pytest.mark.asyncio
@@ -322,3 +340,75 @@ async def test_a_policy_beside_a_symlinked_definitions_target_is_refused(
     )
     assert result["success"] is False, result
     assert "delivered by an MCP client" in result["error"]
+
+
+_OFF_HOST_REPORTERS = (
+    "aws-security-hub",
+    "bedrock-summary-reporter",
+    "cloudwatch-logs",
+    "s3",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+async def test_an_override_turning_an_off_host_reporter_off_is_accepted(
+    tmp_path, monkeypatch, reporter
+):
+    """It asks for nothing beyond the session's config, under the default
+    denied_paths. Each project's resolution then takes ``enabled`` from the
+    operator (test_a_clients_workspace_override_does_not_choose_whether_one_runs)."""
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=false"])
+    assert result["success"] is True, result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reporter", _OFF_HOST_REPORTERS)
+async def test_an_override_turning_an_off_host_reporter_on_is_refused(
+    tmp_path, monkeypatch, reporter
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"])
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.enabled=true"])
+    assert result["success"] is False, result
+    assert "denied_paths entry" in json.dumps(result), result
+
+
+def _reporter_settings() -> list:
+    from automated_security_helper.config.reporter_trust import (
+        REPORTER_DESTINATION_OPTIONS,
+    )
+
+    settings = [
+        (reporter, f"options.{name}=other-value")
+        for reporter in _OFF_HOST_REPORTERS
+        for name in REPORTER_DESTINATION_OPTIONS[reporter]
+    ]
+    # Settings the CLI leaves to a repository's config, denied here with the rest
+    # of the section.
+    return settings + [
+        ("aws-security-hub", "extension=other.asff.json"),
+        ("s3", "options.file_format=yaml"),
+        ("bedrock-summary-reporter", "options.temperature=0.1"),
+    ]
+
+
+#: The profile has a section for each reporter, so each override writes one
+#: field of it rather than adding the section.
+_REPORTER_SECTIONS = "reporters:\n" + "".join(
+    f"  {reporter}:\n    enabled: false\n    options: {{}}\n"
+    for reporter in _OFF_HOST_REPORTERS
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reporter,setting", _reporter_settings(), ids=lambda part: part
+)
+async def test_an_override_setting_an_off_host_reporter_option_is_refused(
+    tmp_path, monkeypatch, reporter, setting
+):
+    _with_profile(monkeypatch, tmp_path, ["/**"], extra=_REPORTER_SECTIONS)
+    result = await _resolve(tmp_path, [f"reporters.{reporter}.{setting}"])
+    assert result["success"] is False, result
+    assert f"matches denied_paths entry '/reporters/{reporter}/" in result["error"]

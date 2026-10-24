@@ -160,14 +160,16 @@ class TestDeprecatedToolAliases:
         """Narrowed to scanners, neither spelling of a converter can be selected.
 
         The refusal names the spelling the caller typed, so the message matches
-        the command line rather than a name they never wrote.
+        the command line rather than a name they never wrote, and says the tool is
+        a converter rather than calling a name this ASH has unknown.
         """
         new = self._invoke("--plugin-type", "scanner", "--tool", new_key)
         old = self._invoke("--plugin-type", "scanner", "--tool", old_name)
         assert new.exit_code == old.exit_code == EXIT_BAD_SELECTION
         panels = self.panels.getvalue()
-        assert f"Unknown tool(s): {new_key}" in panels
-        assert f"Unknown tool(s): {old_name}" in panels
+        assert f"{new_key} is a converter plugin" in panels
+        assert f"{old_name} is a converter plugin" in panels
+        assert "Unknown tool(s)" not in panels
         assert self.verdicts == []
 
     @pytest.mark.parametrize(("old_name", "new_key"), ALIASES)

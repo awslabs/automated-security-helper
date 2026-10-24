@@ -135,9 +135,9 @@
 
             # ASH itself is intentionally NOT in this shell. The shell's job is to supply
             # the external scanner binaries; ASH comes from the ambient environment (uv,
-            # pipx or a venv), exactly as it comes from the image in container mode. Since
-            # `nix develop` prepends its packages to the inherited PATH rather than
-            # replacing it, an `ash` on the caller's PATH stays reachable inside.
+            # pipx or a venv), exactly as it comes from the image in container mode. The
+            # inner run is started with the calling ASH's own interpreter
+            # (interactions/run_ash_nix.py:inner_ash_command), so it is the same ASH.
             shellHook = ''
               # Tells ASH's scanners not to install tools this shell already provides.
               # Thirteen scanners prefer `uv tool install` when uv is present, and

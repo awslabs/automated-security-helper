@@ -63,7 +63,7 @@ RUN apt-get clean && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u1 \
+    ca-certificates=20250419~deb12u2 \
     python3-venv=3.11.2-1+b1 \
     git=1:2.39.5-0+deb12u3 \
     tree=2.1.0-1 \
@@ -189,7 +189,7 @@ RUN mkdir -p ${HOME}/.ssh && \
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    ca-certificates=20250419~deb12u1 \
+    ca-certificates=20250419~deb12u2 \
     curl=7.88.1-10+deb12u15 \
     git=1:2.39.5-0+deb12u3 \
     gnupg=2.2.40-1.1+deb12u2 \
@@ -241,8 +241,13 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 # cfn-nag (via Gemfile)
 #
-COPY automated_security_helper/assets/Gemfile /deps/Gemfile
+COPY automated_security_helper/assets/Gemfile automated_security_helper/assets/Gemfile.lock /deps/
 ARG BUNDLER_VERSION="2.4.22"
+# Bundler installs the committed Gemfile.lock and does not resolve again. Frozen,
+# it refuses to run when the lockfile is missing or disagrees with the Gemfile, so
+# every build of one ASH commit installs the same gems. An ARG rather than an ENV:
+# it reaches the RUN below and is not left in the environment the image scans with.
+ARG BUNDLE_FROZEN=true
 # One RUN for install, build and purge. `core` is the base for both `ci` and
 # `non-root`, so a C toolchain left here ships in every published image, which is
 # its own finding in a security scanner. Docker layers are additive, so purging in
@@ -250,11 +255,16 @@ ARG BUNDLER_VERSION="2.4.22"
 # carried it -- keeping all three steps in one layer means it never lands at all.
 #
 # apt-get update runs again because the base layer clears the package lists.
+#
+# Some gems ship files mode 777 (lightly, which cfn-nag pulls in, does), and gem
+# install keeps the modes the gem was packed with. The chmod clears group and other
+# write in the same layer, so those modes never reach the image.
 RUN echo "gem: --no-document" >> /etc/gemrc && \
     apt-get update && \
     apt-get install -y --no-install-recommends build-essential=12.9 ruby-dev=1:3.1 && \
     with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
     with-retry 'bundle install --jobs=4' && \
+    chmod -R go-w /var/lib/gems && \
     apt-get purge -y --auto-remove build-essential ruby-dev && \
     rm -rf /var/lib/apt/lists/*
 
@@ -280,11 +290,16 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 #
 # Grype/Syft/Semgrep - Also sets default location env vars for root user for CI compat
 #
+# Owned by root and writable by root only: a scan reads the database and the rules
+# in these caches, so they have one owner. The offline build below
+# writes them as root. At scan time only grype's database update writes here,
+# which the ci stage runs as root and for which the non-root stage hands
+# GRYPE_DB_CACHE_DIR to its own user.
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
 RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
-    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+    chmod 755 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 #
@@ -385,7 +400,7 @@ RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
     printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
     printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
-    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    chmod -R u=rwX,go=rX ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 # Assert the block above actually provisioned something, so a repeat of the defect
@@ -453,7 +468,14 @@ RUN uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out ${ASH_BIN_PATH}
+# /ash and ASH_BIN_PATH, which is first on PATH, belong to root: nothing writes to
+# them at scan time, and a tool there has to stay the one installed here. /src and
+# /out are where a run mounts the source and the output, so their modes matter only
+# when the image is started without those mounts. They stay writable by every user,
+# because the ci stage is for platforms that start the container under a UID they
+# choose, and they carry the sticky bit so that one user cannot remove or replace
+# another's files there.
+RUN chmod -R 755 /ash ${ASH_BIN_PATH} && chmod 1777 /src /out
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -485,6 +507,21 @@ RUN with-retry 'install-pinned-tool --licenses-only bandit checkov semgrep'
 # ${ASH_THIRD_PARTY_DIR}/index.json, the list of what the image bundles.
 #
 RUN install-pinned-tool --verify-third-party
+
+#
+# Nothing in the image is writable by every user outside the sticky directories.
+# Not every installer honors the umask: uv creates the lock files in its cache and
+# tool directories mode 666. This clears group and other write on whatever an
+# install step left writable by everyone, after the last one in this stage. It stays
+# on the image's own filesystem (-xdev) and skips the sticky scratch directories,
+# whose files belong to whoever wrote them; it changes only the files it finds, so
+# this layer holds only those. The non-root stage repeats it after its own install.
+# tests/snapshot/container/runtime/test_container_image_permissions.py checks the
+# built image with the same find.
+#
+RUN find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
+        -o -path /var/tmp -o -path /run/lock \) -prune -o \
+        ! -type l -perm -0002 ! -perm -1000 -exec chmod go-w {} +
 
 #
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
@@ -544,8 +581,20 @@ RUN adduser --disabled-password --disabled-login \
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
+#
+# GRYPE_DB_CACHE_DIR is handed to this user because grype's database update writes
+# it at scan time (utils/content_db_refresh.py); one owner, not writable by others.
+# Not in an offline image: its database was downloaded at build time and is never
+# updated at scan time, so it stays root's and the scan user can only read it.
+# ASH_BIN_PATH is handed over only for this stage's own `ash dependencies install`
+# below, which puts this user's cfn-nag binstub and its own copy of the pinned tools
+# there, and is given back to root right after it.
 RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
-    chmod 750 -R ${ASHUSER_HOME} /src /out
+    chmod 750 -R ${ASHUSER_HOME} /src /out && \
+    chown -R ${UID}:${GID} ${ASH_BIN_PATH} && \
+    if [ "${OFFLINE}" != "YES" ]; then \
+        chown -R ${UID}:${GID} ${GRYPE_DB_CACHE_DIR}; \
+    fi
 
 USER ${UID}:${GID}
 
@@ -562,6 +611,16 @@ ENV PATH="${ASHUSER_HOME}/.local/bin:$PATH"
 # Python tools are installed again here and would otherwise float.
 RUN pins="$(install-pinned-tool --uv-tool-pins)" && \
     ash dependencies install --bin-path "${ASH_BIN_PATH}" ${pins}
+
+# ASH_BIN_PATH back to root, readable and executable by this user but not writable:
+# nothing writes there at scan time. Then the core stage's sweep again, for the lock
+# files uv left mode 666 under this user's home.
+USER root
+RUN chown -R root:root ${ASH_BIN_PATH} && chmod -R u=rwX,go=rX ${ASH_BIN_PATH} && \
+    find / -xdev \( -path /proc -o -path /sys -o -path /dev -o -path /tmp \
+        -o -path /var/tmp -o -path /run/lock \) -prune -o \
+        ! -type l -perm -0002 ! -perm -1000 -exec chmod go-w {} +
+USER ${UID}:${GID}
 
 HEALTHCHECK --interval=12s --timeout=12s --start-period=30s \
     CMD ["/bin/sh", "-c", "command -v ash || exit 1"]

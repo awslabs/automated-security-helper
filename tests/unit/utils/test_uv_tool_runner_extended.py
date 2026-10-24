@@ -16,6 +16,20 @@ from automated_security_helper.utils.uv_tool_runner import (
 
 
 @pytest.fixture(autouse=True)
+def _unresolved_names_reach_the_mocked_spawn(monkeypatch):
+    """Hand names that resolve nowhere to the mocked spawn on every platform.
+
+    These tests replace the process boundary and pass it programs that are not
+    installed. On Windows ASH refuses such a name before spawning it
+    (subprocess_utils._refuse_unresolved_on_windows); these tests are about what
+    happens after the spawn, so that decision is set aside here.
+    """
+    from automated_security_helper.utils import subprocess_utils as _subprocess_utils
+
+    monkeypatch.setattr(_subprocess_utils, "_refuse_unresolved_on_windows", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_module_caches():
     """Clear the module-level memo caches around every test in this file.
 
@@ -327,7 +341,9 @@ class TestGetToolVersionOffline:
         monkeypatch.delenv("UV_OFFLINE", raising=False)
         version, call = self._probe(runner)
         command = call.args[0]
-        assert command[:4] == ["uv", "tool", "run", "--offline"]
+        # uv by the absolute path ASH resolved for it, never by name.
+        assert Path(command[0]).stem == "uv" and Path(command[0]).is_absolute()
+        assert command[1:4] == ["tool", "run", "--offline"]
         assert command[-2:] == ["semgrep", "--version"]
         assert call.kwargs["env"]["UV_OFFLINE"] == "1"
         assert version == "1.172.0"

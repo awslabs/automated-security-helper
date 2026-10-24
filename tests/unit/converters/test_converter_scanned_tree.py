@@ -26,6 +26,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import types
 import zipfile
 from pathlib import Path
 
@@ -35,10 +36,15 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.archive_con
     ArchiveConverter,
     ArchiveConverterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.converters import (
+    jupyter_converter as jupyter_converter_module,
+)
 from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
     JupyterConverter,
     JupyterConverterConfig,
 )
+from automated_security_helper.utils import subprocess_utils, uv_tool_runner
+from tests.unit.converters.nbconvert_stand_in import run_like_nbconvert
 
 ARCHIVE_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter"
@@ -240,6 +246,65 @@ class TestArchiveInputs:
         assert len(warnings_text(ash_warnings)) == 1
 
 
+class TestAnArchiveThatCannotBeExtracted:
+    """Recorded as a failed input, so the completeness gate sees the lost coverage."""
+
+    def test_a_truncated_tar(self, tree, test_plugin_context, monkeypatch):
+        archive = make_tar(tree / "b.tar", {"inner.py": "x = 1\n" * 400})
+        archive.write_bytes(archive.read_bytes()[:700])
+        converter = archive_converter(test_plugin_context, monkeypatch, [archive])
+
+        assert converter.convert() == []
+
+        ((path, reason),) = [(r.path, r.reason) for r in converter.failed_inputs]
+        assert path == "b.tar"
+        assert reason.startswith("ReadError")
+
+    def test_a_zip_whose_member_fails_its_crc(
+        self, tree, test_plugin_context, monkeypatch
+    ):
+        archive = make_zip(tree / "a.zip", {"inner.py": "x = 1\n"})
+        data = bytearray(archive.read_bytes())
+        data[data.index(b"x = 1")] ^= 0x01  # the stored member's first byte
+        archive.write_bytes(bytes(data))
+        converter = archive_converter(test_plugin_context, monkeypatch, [archive])
+
+        assert converter.convert() == []
+
+        ((path, reason),) = [(r.path, r.reason) for r in converter.failed_inputs]
+        assert path == "a.zip"
+        assert reason.startswith("BadZipFile")
+
+
+class TestFilesNamedLikeArchives:
+    def test_a_plain_gzip_file_is_decompressed_and_scanned_not_failed(
+        self, tree, test_plugin_context, monkeypatch
+    ):
+        """data.json.gz is one compressed file: decompressed to data.json and handed
+        to the scanners, and neither a failed nor a refused input."""
+        import gzip
+
+        data = tree / "data.json.gz"
+        data.write_bytes(gzip.compress(b'{"a": 1}'))
+        converter = archive_converter(test_plugin_context, monkeypatch, [data])
+
+        (extracted,) = converter.convert()
+        assert (extracted / "data.json").read_bytes() == b'{"a": 1}'
+        assert converter.failed_inputs == []
+        assert converter.refused_inputs == []
+
+    @pytest.mark.parametrize("name", ["a.zip", "b.tar", "c.tar.gz", "d.gz"])
+    def test_a_corrupt_archive_is_a_failed_input(
+        self, name, tree, test_plugin_context, monkeypatch
+    ):
+        bad = tree / name
+        bad.write_bytes(b"this is not an archive\n" * 40)
+        converter = archive_converter(test_plugin_context, monkeypatch, [bad])
+
+        assert converter.convert() == []
+        assert [r.path for r in converter.failed_inputs] == [name]
+
+
 class TestArchiveMembers:
     def _zip_with(self, path: Path, *infos: tuple[zipfile.ZipInfo, str]) -> Path:
         with zipfile.ZipFile(path, "w") as archive:
@@ -370,6 +435,15 @@ class TestArchiveMembers:
         monkeypatch.setattr(
             f"{ARCHIVE_MODULE}._TAR_HAS_DATA_FILTER", False, raising=True
         )
+        # Such a Python's tarfile also applies member metadata by default. Python 3.14
+        # made "data" the default, which would hide a fallback that called extractall()
+        # without a filter, so the older default is put back for this test.
+        if hasattr(tarfile.TarFile, "extraction_filter"):
+            monkeypatch.setattr(
+                tarfile.TarFile,
+                "extraction_filter",
+                staticmethod(tarfile.fully_trusted_filter),
+            )
         (host / "secret.py").write_text(f"Z = '{MARKER}'\n")
         setuid = tarfile.TarInfo("pkg/tool.py")
         setuid.mode = 0o4755
@@ -401,32 +475,76 @@ class TestArchiveMembers:
         assert warnings_text(ash_warnings) == []
 
 
-def notebook_double(calls: list):
-    """Stand in for ``subprocess.run`` over ``jupyter nbconvert``.
+def convert_like_nbconvert(cmd: list[str], calls: list) -> subprocess.CompletedProcess:
+    """Do what nbconvert does with the notebook on ``cmd``, and record the call.
 
-    Reads the notebook named on the command line the way nbconvert does and writes
-    its code cells to the output path, so whatever the converter handed it ends up in
-    the converted file.
+    See ``tests/unit/converters/nbconvert_stand_in.py``: the notebook argument is
+    expanded as nbconvert expands it, and its code cells are written where nbconvert
+    would write them, so whatever the converter handed nbconvert ends up in the
+    converted file. Recording only: nothing is asserted here, because convert()
+    catches what a conversion raises.
     """
-
-    def _run(cmd, *args, **kwargs):
-        calls.append(list(cmd))
-        notebook = json.loads(Path(cmd[6]).read_text(encoding="utf-8"))
-        code = "".join("".join(c["source"]) for c in notebook["cells"])
-        Path(cmd[cmd.index("--output") + 1] + ".py").write_text(code, encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
-
-    return _run
+    calls.append(list(cmd))
+    return run_like_nbconvert(list(cmd))
 
 
-@pytest.fixture
-def jupyter(test_plugin_context, monkeypatch):
+@pytest.fixture(params=["uv", "direct"])
+def jupyter(request, test_plugin_context, monkeypatch, tmp_path):
+    """A Jupyter converter, built first, then its route to nbconvert replaced.
+
+    Both routes are covered: ``uv tool run``, the default, through
+    ``get_uv_tool_runner``, and the direct ``jupyter`` fallback through the converter
+    module's own ``subprocess`` and ``spawn_run`` names (it starts nbconvert through
+    ``spawn_run``, so a scanner sandbox can confine it), with a jupyter-nbconvert on
+    PATH outside the tree for it to resolve. The standard library module is never
+    patched.
+    """
     converter = JupyterConverter(
         context=test_plugin_context, config=JupyterConverterConfig()
     )
-    converter.use_uv_tool = False
     calls: list = []
-    monkeypatch.setattr(f"{JUPYTER_MODULE}.subprocess.run", notebook_double(calls))
+    if request.param == "uv":
+        converter.use_uv_tool = True
+
+        class Runner:
+            def is_uv_available(self):
+                return True
+
+            def run_tool(self, **kwargs):
+                return convert_like_nbconvert(
+                    ["jupyter", "nbconvert", *kwargs["args"]], calls
+                )
+
+        monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: Runner())
+    else:
+        converter.use_uv_tool = False
+        bin_dir = tmp_path / "installed" / "bin"
+        bin_dir.mkdir(parents=True)
+        name = "jupyter-nbconvert"
+        installed = bin_dir / (f"{name}.exe" if sys.platform == "win32" else name)
+        installed.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        installed.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bin_dir))
+        monkeypatch.setattr(
+            subprocess_utils, "path_independent_dirs", lambda: [tmp_path / "ash-bin"]
+        )
+        subprocess_utils.clear_find_executable_cache()
+        request.addfinalizer(subprocess_utils.clear_find_executable_cache)
+
+        def run(cmd, *args, **kwargs):
+            return convert_like_nbconvert(cmd, calls)
+
+        monkeypatch.setattr(
+            jupyter_converter_module,
+            "subprocess",
+            types.SimpleNamespace(
+                run=run,
+                CompletedProcess=subprocess.CompletedProcess,
+                CalledProcessError=subprocess.CalledProcessError,
+                TimeoutExpired=subprocess.TimeoutExpired,
+            ),
+        )
+        monkeypatch.setattr(jupyter_converter_module, "spawn_run", run)
     return converter, calls
 
 
@@ -486,3 +604,71 @@ class TestNotebookInputs:
         )
 
         assert converter.candidate_input_count() == 1
+
+
+class TestCopyWithoutTheDataFilter:
+    def test_a_link_already_at_the_destination_is_not_written_through(
+        self, tree, host, tmp_path
+    ):
+        """Each copied member is created without following a link at its name."""
+        from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
+            _copy_tar_members,
+        )
+
+        archive = make_tar(tree / "a.tar", {"pkg/tool.py": "print('member')\n"})
+        (host / "secret.py").write_text(f"Z = '{MARKER}'\n")
+        destination = tmp_path / "dest"
+        (destination / "pkg").mkdir(parents=True)
+        (destination / "pkg" / "tool.py").symlink_to(host / "secret.py")
+
+        with tarfile.open(archive) as tar_ref:
+            with pytest.raises(OSError):
+                _copy_tar_members(tar_ref, tar_ref.getmembers(), destination)
+
+        assert (host / "secret.py").read_text() == f"Z = '{MARKER}'\n"
+
+
+class TestRecordingAFailure:
+    def test_without_a_context_it_records_the_path_as_given(self):
+        from automated_security_helper.base.converter_plugin import (
+            ConverterPluginBase,
+        )
+
+        converter = types.SimpleNamespace(context=None, failed_inputs=[])
+
+        ConverterPluginBase.record_failed_input(
+            converter, "dir/a.zip", "BadZipFile: truncated"
+        )
+
+        assert [(r.path, r.reason) for r in converter.failed_inputs] == [
+            ("dir/a.zip", "BadZipFile: truncated")
+        ]
+
+
+class TestTheResultsRow:
+    """What ConvertPhase writes for a converter's refusals."""
+
+    def test_an_empty_list_leaves_the_field_unset(self):
+        from automated_security_helper.core.phases.convert_phase import (
+            _input_record_fields,
+        )
+        from automated_security_helper.models.asharp_model import (
+            ConverterStatusInfo,
+            RefusedInputInfo,
+        )
+
+        class Converter:
+            refused_inputs: list = []
+
+        assert _input_record_fields(Converter()) == {}
+        row = ConverterStatusInfo(**_input_record_fields(Converter()))
+        assert "refused_inputs" not in row.model_dump(exclude_unset=True)
+
+        Converter.refused_inputs = [
+            RefusedInputInfo(path="a.zip", reason="it is a symbolic link")
+        ]
+        row = ConverterStatusInfo(**_input_record_fields(Converter()))
+        assert "refused_inputs" in row.model_dump(exclude_unset=True)
+        assert [r.model_dump() for r in row.refused_inputs] == [
+            {"path": "a.zip", "member": None, "reason": "it is a symbolic link"}
+        ]

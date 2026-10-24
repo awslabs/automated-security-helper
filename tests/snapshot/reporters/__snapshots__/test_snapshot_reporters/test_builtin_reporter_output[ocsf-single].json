@@ -54,8 +54,8 @@
     "category_uid": 2,
     "class_uid": 2002,
     "finding_info": {
-      "desc": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
-      "title": "B105 in app.py - Possible hardcoded password: 'hunter2-not-a-real-secret'",
+      "desc": "Possible hardcoded password: 'hu**********************t'",
+      "title": "B105 in app.py - Possible hardcoded password: 'hu**********************t'",
       "uid": "<UUID>"
     },
     "metadata": {
@@ -86,10 +86,10 @@
           }
         ],
         "cve": {
-          "desc": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+          "desc": "Possible hardcoded password: 'hu**********************t'",
           "uid": "B105"
         },
-        "desc": "Possible hardcoded password: 'hunter2-not-a-real-secret'",
+        "desc": "Possible hardcoded password: 'hu**********************t'",
         "severity": "NOTE",
         "title": "B105"
       }

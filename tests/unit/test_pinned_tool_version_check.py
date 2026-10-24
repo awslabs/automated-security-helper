@@ -11,8 +11,8 @@ not enumerate is a pin it never reports, and the run stays green. So the tests h
 are built around the enumeration first, and each coverage assertion carries a
 negative control showing that the same assertion goes red when a pin is missed.
 
-No test here touches the network. Every lookup is a stub, and ``urlopen`` is
-replaced with one that fails the test if anything reaches it.
+No test here touches the network. Every lookup is a stub, and the HTTP and HTTPS
+transports are replaced with one that fails the test if anything reaches it.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import re
+import socket
 import sys
 import urllib.request
 from pathlib import Path
@@ -51,7 +52,13 @@ def _no_network(monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError("a unit test reached the network")
 
-    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    # At the transport, which every opener goes through, urlopen's and the script's
+    # own redirect-checking opener alike.
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", refuse)
+    monkeypatch.setattr(urllib.request.HTTPHandler, "http_open", refuse)
+    monkeypatch.setattr(urllib.request.FTPHandler, "ftp_open", refuse)
+    # A backstop beneath every transport, the ones not patched above included.
+    monkeypatch.setattr(socket, "getaddrinfo", refuse)
 
 
 @pytest.fixture(autouse=True)
@@ -474,12 +481,14 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
     )
     def test_a_url_outside_the_allowlist_is_refused_unopened(self, url, monkeypatch):
         opened: list[Any] = []
-        monkeypatch.setattr(
-            urllib.request, "urlopen", lambda *a, **k: opened.append(a) or None
-        )
+        for handler, method in (
+            (urllib.request.HTTPSHandler, "https_open"),
+            (urllib.request.HTTPHandler, "http_open"),
+        ):
+            monkeypatch.setattr(handler, method, lambda *a: opened.append(a) or None)
         with pytest.raises(ValueError, match="refusing to fetch"):
             checker._get_json(url)
-        assert opened == [], f"{url} reached urlopen"
+        assert opened == [], f"{url} reached the transport"
 
     @pytest.mark.parametrize(
         "url",
@@ -490,21 +499,20 @@ class TestOnlyAllowlistedHttpsUrlsAreFetched:
         ],
     )
     def test_positive_control_each_upstream_api_is_opened(self, url, monkeypatch):
+        import email.message
         import io
+        import urllib.response
 
         opened: list[str] = []
 
-        class _Response(io.BytesIO):
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc_info):
-                return False
-
-        def fake_urlopen(request, timeout=None):
+        def fake_https_open(handler, request):
             opened.append(request.full_url)
-            return _Response(b'{"ok": true}')
+            response = urllib.response.addinfourl(
+                io.BytesIO(b'{"ok": true}'), email.message.Message(), url, 200
+            )
+            response.msg = "OK"
+            return response
 
-        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", fake_https_open)
         assert checker._get_json(url) == {"ok": True}
         assert opened == [url]

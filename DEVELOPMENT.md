@@ -86,6 +86,12 @@ This provides a consistent development environment across different platforms an
 
 ## Testing
 
+Run the tests from a git checkout with `git` on `PATH`. Some of them list the
+repository's files with `git ls-files` rather than walking the directory tree (see
+[Do Not Walk the Repository Tree](docs/content/docs/testing/parallel_testing.md)), and so
+do `scripts/verify_docs_freshness.py` and `check-snapshot-trailers.py --orphans`; in a
+copy that is not a git work tree they fail instead of checking nothing.
+
 Run the test suite:
 
 ```bash
@@ -230,7 +236,9 @@ its snapshot file, so `check-snapshot-trailers.py --orphans` (in CI, and in
 directory belongs to a `<test_module>.py` next to that directory, and that no
 `__snapshots__` directory is empty. When you rename a module, move its snapshots with it;
 when you delete one, delete its snapshots. Either change needs a `Snapshot-Update:`
-trailer like any other.
+trailer like any other. The check takes its list from git: tracked snapshots and untracked
+ones that are not ignored, so a snapshot not yet added is checked, and anything under an
+ignored directory, such as `tests/pytest-temp`, is not. It needs a git work tree.
 
 ### Output that differs by operating system
 
@@ -279,6 +287,25 @@ Dependencies are managed in `pyproject.toml`. Key groups:
 - Dev dependencies: defined under `[dependency-groups] dev` (includes ruff, pytest, mypy, mkdocs, etc.)
 
 Scanner tools (Bandit, Checkov, Semgrep) are managed via UV tool isolation at runtime — they're not project dependencies.
+
+### Pinned tool versions
+
+`automated_security_helper/utils/tool_downloads.py` pins every tool ASH provisions
+itself. The weekly ASH - Pinned Tool Versions workflow compares those pins with each
+upstream's latest release; to run the same check locally:
+
+```bash
+uv run python scripts/check_pinned_tool_versions.py
+uv run python scripts/check_pinned_tool_versions.py --fail-on-outdated --markdown
+```
+
+It exits 0 when nothing is behind (or without `--fail-on-outdated`), 1 when a pin is
+behind with `--fail-on-outdated` or a Dockerfile apt pin is no longer installable, and
+2 when a lookup failed or the pins could not be read. GitHub allows 60 anonymous API
+requests an hour per address; set `GITHUB_TOKEN` or `GH_TOKEN` to lift that. A lookup
+GitHub refuses with 403 while the token is set is retried once without it, and GitHub's
+error message goes to stderr. The token is never printed, and it is sent across a
+redirect only to the same scheme, host and port.
 
 ## Troubleshooting
 
@@ -346,6 +373,7 @@ ASH uses [Semantic Versioning](https://semver.org/). The version is defined in `
 - `pyproject.toml` is the single source of truth for the version.
 - Documentation files that reference the version (README, install guides, etc.) have corresponding `.template` files containing `{{VERSION}}` placeholders.
 - The `scripts/version_bump.py` script updates `pyproject.toml` and regenerates all documentation from templates.
+- Text that is only true from a later release on goes in a version block of the template, `{{#after 3.7.1}}` ... `{{else}}` ... `{{/after}}`, each marker on its own line; `generate` keeps the first part when the version is after the one named and the `{{else}}` part (optional) otherwise. The docs publish on every push to `main`, so this is how a page can describe a feature `main` has without telling readers of the current release that it is theirs. A malformed or unclosed block stops `generate`.
 
 ### Commit Messages
 
@@ -360,6 +388,19 @@ feat!: redesign plugin API (breaking change)
 
 A pre-commit hook (`commitizen`) also validates local commit messages.
 
+### The ASH scan of this repository
+
+ASH scans its own repository on every pull request, in two workflows:
+
+- `ash / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan.yml`) is a required check. On a pull request it installs ASH, and the cfn-nag Gemfile it pins, from this repository at the pull request's base commit, for same-repository and fork pull requests alike. In the merge queue it installs from the branch the queue merges into (`merge_group.base_ref`), the default branch here. The job's first step resolves that ref to a commit, and every later step, the config fetch included, uses that commit, so a merge that lands mid-run cannot mix two versions of ASH or pair one version's ASH with another's config. A pull request is therefore never judged by the ASH it changes: a change that makes a scanner stop reporting, or the gate exit 0, has no effect on its own required check. On a pull request and in the merge queue the scan job also restores no cache (no uv cache, grype database or OpenGrep binary): another job running the pull request's code in the same cache scope could have written those entries. Each is downloaded and verified instead, which costs one uncached ASH install and one grype database download per run.
+- `ash (pull request head, informational only -- does not gate) / SAST, SCA, and IaC Scan` (`.github/workflows/ash-repo-scan-pr-head.yml`) runs the pull request's own ASH against the same tree. It is not a required check and must not be added to a ruleset. It posts no PR comment, publishes no JUnit check and uploads no SARIF, and the job that runs the pull request's ASH holds a read-only token, so neither its inputs nor its code can post a result under the required scan's name; its findings are in the job summary and in the run's `ash_output` artifact. (In the reusable workflow the scan job always holds `contents: read` only; the PR comment, the JUnit check and the SARIF upload run in a separate job, `Report ASH results`, which downloads the scan's artifact and runs nothing from it.) When you change ASH itself, this is the run that shows what your change does.
+
+The required check also reads its ASH config from the base commit, not from the pull request: `.ash/.ash.yaml` as of the pull request's base commit (in the merge queue, as of the branch the queue merges into) is fetched outside the checkout and passed as `--config`. Every tool config file that config names by a relative path (`scanners.<name>.options.config_file`, here `.ash/bandit.yaml`, `.ash/.checkov.yaml` and `.ash/.grype.yaml`), and opengrep's or semgrep's `config` when it names a rules file or directory, is read from the same commit, and the scan fails if that commit lacks one. The fetched copies sit outside the checkout, so they apply as operator files: ASH honors them where it refuses a tool config file inside the scanned tree, such as `.ash/.checkov.yaml`. Paths written inside them still resolve in the checkout, so a fetched checkov config whose `external-checks-dir` or `config-file` is relative, which would load code from the pull request's tree, fails the scan; use an absolute path outside the repository. A pull request therefore cannot change `.ash/.ash.yaml`, or the tool config files it names, for the check that gates it. Config edits in a pull request affect the required check only after they are merged; until then the informational check, which scans with the pull request's own config, shows their effect. What still comes from the pull request: its `.gitignore` and `.ignore` files, which shrink the set of files ASH scans; config files a scanner finds by name in the scanned tree when the config names none; and inline suppression markers such as `# nosec` and `# pragma: allowlist secret`. Review changes to those like any other change to the gate. The reusable workflow exposes this as the `config-ref` input, which other callers can set the same way. If the base commit has no file at the configured path, the required check fails rather than scanning with ASH's defaults; a caller whose first config is still in a pull request can set `config-ref-missing: defaults` for that pull request.
+
+Because the required check runs the base commit's ASH, a workflow change that depends on an ASH change in the same pull request can fail its own required check. A new tool does not: `ash-repo-scan.yml` passes `skip-unknown-tools: true`, so the scan job sets `ASH_DEPENDENCIES_UNKNOWN_TOOLS=skip` and the base commit's ASH names and skips a `--tool` it has no plugin for (the base config cannot enable a scanner that ASH lacks), and the pull request's own ASH installs and runs the tool in the informational check. Other callers of `run-ash-security-scan.yml` keep the refusal unless they pass the input too. Anything else the base commit's ASH does not know yet, such as a new `ash` flag the workflow passes, still fails. Land that kind of change in two pull requests, the ASH change first and the workflow change that uses it after. The same split works against you when the ASH on `main` cannot scan this repository at all (it crashes, or a scanner always ends in ERROR): every pull request's required check and every merge-queue run uses that ASH, including the pull request that fixes it. The way out is to merge the fix as the repository role that the "Protect main" ruleset exempts from its required checks, which the note at the top of `ash-unified-ci.yml` describes; the informational check on the fix's pull request shows whether its own ASH scans the repository again.
+
+On `pull_request`, GitHub runs the workflow files from the pull request's merge commit, so a pull request that edits `ash-repo-scan.yml` or `run-ash-security-scan.yml` still changes its own gate. Review changes to `.github/workflows/` with that in mind; nothing inside a workflow file can prevent it. The control for that gap sits outside the workflow files: a repository ruleset's required workflow, which GitHub runs from a ref the ruleset pins rather than from the pull request.
+
 ### Releasing
 
 Releases are cut by maintainers via **Actions > ASH - Create Release > Run workflow**. The workflow:
@@ -373,6 +414,8 @@ After merging the release PR, a second workflow automatically:
 - Creates the git tag (`v{version}`)
 - Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
 - Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
+
+The documentation site is published by the `deploy-docs` job of `.github/workflows/ash-repo-docs.yml`, the only job there with `contents: write`, from every push to `main`. The release PR's merge publishes the release's docs that way. No tag push publishes them, and a hand-pushed release tag no longer republishes the site: the workflow has no tag trigger, and the job's `if:` admits only `refs/heads/main`. That holds for commits that carry the current workflow file. A tag pushed on an older commit runs that commit's copy, which still triggers on every tag, so tag creation and updates should be limited to the release path by a tag ruleset; nothing in a workflow file can cover those commits.
 
 #### Release App setup
 

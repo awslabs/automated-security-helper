@@ -12,6 +12,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
+    exclude_output_dir_results,
     normalize_sarif_result_severities,
     sanitize_sarif_paths,
 )
@@ -102,6 +103,12 @@ class ScanResultProcessor:
                 ASH_LOGGER.debug(
                     "Skipping suppression application due to --ignore-suppressions flag"
                 )
+                # The flag lifts suppressions and ignore paths, not the exclusion
+                # of ASH's own output directory.
+                sanitized_sarif = exclude_output_dir_results(
+                    sarif_report=sanitized_sarif,
+                    plugin_context=self.plugin_context,
+                )
 
             scanner_version = None
             if (
@@ -154,6 +161,18 @@ class ScanResultProcessor:
 
         elif isinstance(results.raw_results, CycloneDXReport):
             ASH_LOGGER.verbose(f"{scanner_name}: Processing as CycloneDX report")
+            # A delivered config's syft exclusions were moved out of syft's options,
+            # so the SBOM lists every component; those they would have dropped are
+            # marked instead (config/client_scanner_exclusions.py).
+            exclusions = getattr(
+                self.plugin_context.config, "_client_scanner_exclusions", None
+            )
+            if exclusions:
+                from automated_security_helper.config.client_scanner_exclusions import (
+                    mark_sbom_components,
+                )
+
+                mark_sbom_components(results.raw_results, exclusions)
             aggregated_results.cyclonedx = results.raw_results
             target_report = aggregated_results.additional_reports[scanner_name][
                 results.target_type

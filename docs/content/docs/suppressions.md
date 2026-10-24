@@ -170,15 +170,49 @@ method of `Deployer`, or at module level, is still reported.
 
 Symbol suppressions parse source files with
 [tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
-extra:
+extra. When the extra is missing, the scan warning and `ash config lint` print a
+command that installs the extra's packages, read from the metadata of the ASH you
+run, so it fits that ASH whatever its version or source. It runs the `uv` that ASH
+depends on through the Python interpreter that runs ASH, and installs into that
+interpreter's environment, so it reaches a virtualenv, a `uv tool install` or
+`pipx install` environment and a checkout's `uv sync` environment alike. The hint
+prints the interpreter's full path where this shows `<python>`:
 
 ```bash
-pip install "automated-security-helper[symbols]"
-# or
-uv tool install "automated-security-helper[symbols]"
+<python> -m uv pip install --python <python> 'tree-sitter>=0.26,<0.27' 'tree-sitter-java>=0.23.5,<0.24' 'tree-sitter-javascript>=0.25,<0.26' 'tree-sitter-python>=0.25,<0.26' 'tree-sitter-typescript>=0.23.2,<0.24'
 ```
 
-The ASH container image includes it. Without it, an entry that sets `symbol`
+A plain `pip install` of those packages does not do the same: environments made by
+uv have no pip, so `pip` runs whichever pip comes next on `PATH`, usually another
+Python's.
+
+You can also reinstall ASH with `[symbols]` added to the source you installed it
+from. For uvx that is the only way that lasts: uvx rebuilds its cached environment
+from its own arguments, so an extra installed into it is dropped.
+
+The `symbols` extra is available from the next release, the first after v3.7.1.
+v3.7.1 and earlier define only `cdk`, and asking one of them for `[symbols]`
+installs it without the extra, with only a warning. Until that release, install
+from the `main` branch:
+
+```bash
+# ASH installed with uv tool install
+uv tool install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+# ASH installed with pipx install
+pipx install --force "automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main"
+# the uvx alias from the installation guide
+alias ash="uvx --from 'automated-security-helper[symbols] @ git+https://github.com/awslabs/automated-security-helper.git@main' ash"
+```
+
+`main` moves, so these commands also replace the ASH you run with the newest code.
+To stay on one version, or to use a checkout, put that source after the first `@`
+instead (`automated-security-helper[symbols] @ git+...@<commit from main>`, or
+`@ file:///path/to/checkout`).
+Keep the `@` and the source. ASH is not published on PyPI, and the PyPI project
+with ASH's name is unrelated and has no `symbols` extra, so asking for the extra by
+the bare name installs that project instead.
+
+The ASH container image includes the extra. Without it, an entry that sets `symbol`
 matches nothing: the findings it names stay visible, the scan logs a warning
 naming the missing extra, the entry shows up in the unused-suppressions report,
 and `ash config lint` warns about it.
@@ -309,6 +343,50 @@ suppressions:
     expiration: '2025-06-30'
 ```
 
+## Suppressions an MCP client's config supplied
+
+Under the MCP server, a config file a client delivered may set its own
+`suppressions` and `ignore_paths`, as a repository's config may on the CLI (see
+[Configs an MCP client delivered](configuration-guide.md#configs-an-mcp-client-delivered)).
+ASH applies them, and marks what came from the client so the results show what
+the client's config hid:
+
+- In the results' config, each suppression and ignore path the operator did not
+  supply has `client_supplied: true`. ASH sets the mark; a `client_supplied`
+  value written in a config file, of any kind, or set with `--config-overrides`
+  is ignored.
+- A workspace policy file a client delivered (under the MCP workspace root) is
+  handled the same way, including when `ash --workspace` reads one: its
+  suppressions and ignore paths are marked, and they and the scanners it adds
+  are checked against the operator's runtime-override policy as a delivered
+  config's are, both as written and as each project gets them.
+- A file under a client-supplied ignore path is still converted and scanned, and a
+  finding there is kept as a suppressed result rather than dropped. An exclusion
+  the client's config added to a scanner's own options is handled the same way.
+- In SARIF, the suppression on such a finding has a `justification` that starts
+  with `(ASH, client-supplied config)` and names the entry, and
+  `properties.clientSupplied: true`. Its `kind` is `inSource` for a suppression
+  entry and `external` for an ignore path or a scanner exclusion:
+
+  ```json
+  "suppressions": [
+    {
+      "kind": "external",
+      "justification": "(ASH, client-supplied config) Ignoring finding under ignore path 'vendor/**' with reason: third-party code",
+      "properties": {"clientSupplied": true}
+    }
+  ]
+  ```
+
+- The flat-json and CSV reports show the finding with `is_suppressed: true` and
+  that justification in `suppression_justification`, and the GitLab SAST report
+  includes it in the finding's solution.
+- Like any suppressed finding, it does not count toward `fail_on_findings`.
+  `--ignore-suppressions` turns it back into an ordinary, unmarked finding, whether
+  a suppression entry, an ignore path or a scanner exclusion hid it: the files under
+  a client-supplied ignore path or exclusion were scanned, and the flag skips the
+  step that suppresses and marks their findings.
+
 ## Temporarily Disabling Suppressions
 
 To temporarily ignore all suppressions and see all findings, use the `--ignore-suppressions` flag:
@@ -323,7 +401,9 @@ This is useful when you want to:
 - Get a complete view of all security findings in your codebase
 - Perform a comprehensive security review
 
-When this flag is used, ASH will process all findings as if no suppressions were defined, but will still respect the `ignore_paths` settings.
+When this flag is used, ASH processes all findings as if no suppressions were defined, and that includes `ignore_paths`. Every scanner reads the files under an ignore path, the converters convert the archives and notebooks there, and their findings are reported as ordinary findings. The same holds for an ignore path or scanner exclusion an MCP client's config supplied (see [Suppressions an MCP client's config supplied](#suppressions-an-mcp-clients-config-supplied)). Expect a slower scan when an ignore path leaves out a large part of the tree. In container mode the flag is passed to the scan inside the container.
+
+ASH's own output directory is not an ignore path. Findings located there, outside its `converted` work directory, are left out of the results with or without the flag.
 
 ## Expiring Suppressions
 

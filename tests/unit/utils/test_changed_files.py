@@ -13,6 +13,7 @@ import pytest
 
 
 from automated_security_helper.utils.get_scan_set import get_changed_files
+from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.interactions.run_ash_scan import (
     _filter_results_to_changed_files,
 )
@@ -30,13 +31,25 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from tests.utils.git_fixture import run_git
+
+
+#: What ``_git_executable`` answers in these tests, so the argv is known exactly.
+GIT = "/opt/git/bin/git"
+
+
+@pytest.fixture(autouse=True)
+def resolved_git(monkeypatch):
+    monkeypatch.setattr(
+        "automated_security_helper.utils.get_scan_set._git_executable", lambda: GIT
+    )
 
 
 class TestGetChangedFiles:
     """Unit tests for the get_changed_files helper."""
 
     def test_returns_paths_on_success(self):
-        fake_output = "src/app.py\nREADME.md\nlib/utils.js\n"
+        fake_output = "src/app.py\0README.md\0lib/utils.js\0"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
@@ -44,10 +57,30 @@ class TestGetChangedFiles:
         ) as mock_run:
             result = get_changed_files("origin/main")
 
+        # git by the absolute path it resolved to, never by name: on Windows a name
+        # is looked for in the working directory, usually the scanned repo, first,
+        # and elsewhere through PATH entries that may be relative to it.
         mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/main...HEAD"],
+            [
+                GIT,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.quotepath=false",
+                "diff",
+                "--name-only",
+                "-z",
+                "origin/main...HEAD",
+                # Revisions only: see test_base_ref.TestAMissingBaseRefIsNeverReadAsAPath.
+                "--",
+            ],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=30,
             cwd=None,
             # An explicit copy, never the live environ: see utils/process_env.py.
@@ -56,7 +89,8 @@ class TestGetChangedFiles:
         assert result == [Path("src/app.py"), Path("README.md"), Path("lib/utils.js")]
 
     def test_returns_empty_list_when_no_changes(self):
-        mock_result = MagicMock(returncode=0, stdout="\n")
+        # What `git diff --name-only -z` prints when nothing changed.
+        mock_result = MagicMock(returncode=0, stdout="")
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
             return_value=mock_result,
@@ -64,6 +98,19 @@ class TestGetChangedFiles:
             result = get_changed_files()
 
         assert result == []
+
+    def test_returns_none_without_running_anything_when_git_is_not_found(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "automated_security_helper.utils.get_scan_set._git_executable",
+            lambda: None,
+        )
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run"
+        ) as mock_run:
+            assert get_changed_files("origin/main") is None
+        mock_run.assert_not_called()
 
     def test_returns_none_when_git_not_found(self):
         with patch(
@@ -94,7 +141,7 @@ class TestGetChangedFiles:
         assert result is None
 
     def test_custom_base_ref(self):
-        mock_result = MagicMock(returncode=0, stdout="file.txt\n")
+        mock_result = MagicMock(returncode=0, stdout="file.txt\0")
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
             return_value=mock_result,
@@ -102,9 +149,25 @@ class TestGetChangedFiles:
             result = get_changed_files("origin/develop")
 
         mock_run.assert_called_once_with(
-            ["git", "diff", "--name-only", "origin/develop...HEAD"],
+            [
+                GIT,
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "core.quotepath=false",
+                "diff",
+                "--name-only",
+                "-z",
+                "origin/develop...HEAD",
+                "--",
+            ],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             timeout=30,
             cwd=None,
             # An explicit copy, never the live environ: see utils/process_env.py.
@@ -112,8 +175,13 @@ class TestGetChangedFiles:
         )
         assert result == [Path("file.txt")]
 
-    def test_strips_blank_lines(self):
-        fake_output = "\n  a.py  \n\nb.py\n\n"
+    def test_keeps_each_name_as_git_printed_it(self):
+        """NUL-separated, so a space or a newline is part of a name, not a separator.
+
+        This used to strip each line, which turned "  a.py  " into a different
+        file. Only the empty entry after the final NUL is dropped.
+        """
+        fake_output = "  a.py  \0b.py\0new\nline.py\0"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
         with patch(
             "automated_security_helper.utils.get_scan_set.subprocess.run",
@@ -121,7 +189,52 @@ class TestGetChangedFiles:
         ):
             result = get_changed_files()
 
-        assert result == [Path("a.py"), Path("b.py")]
+        assert result == [Path("  a.py  "), Path("b.py"), Path("new\nline.py")]
+
+
+def _git(cwd: Path, *args: str) -> None:
+    run_git(*args, cwd=cwd, check=True, timeout=30)
+
+
+class TestNamesFromARealRepository:
+    """What a real ``git diff`` prints for names it would quote."""
+
+    NAMES = ["\u00fcn\u00efcode.py", "dir with space/a b.py", " leading.py", "plain.py"]
+
+    def test_quoted_names_come_back_as_the_files(self, tmp_path, monkeypatch):
+        probe = run_git("--version")
+        if probe.returncode != 0:
+            pytest.skip("git is not available on PATH")
+        # The real git, by ASH's own lookup, in place of the autouse stand-in path.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.get_scan_set._git_executable",
+            lambda: find_executable("git"),
+        )
+        # The host's git configuration must not decide the outcome; a global
+        # core.quotepath=false would hide the quoting this test is about.
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "base.txt").write_text("base\n", encoding="utf-8")
+        _git(repo, "init", "-q", "-b", "main")
+        _git(repo, "config", "user.email", "fixture@example.invalid")
+        _git(repo, "config", "user.name", "Fixture")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "base")
+        _git(repo, "checkout", "-q", "-b", "change")
+        for name in self.NAMES:
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x = 1\n", encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-q", "-m", "change")
+
+        changed = get_changed_files(base_ref="main", cwd=repo)
+
+        assert changed is not None
+        assert sorted(changed) == sorted(Path(name) for name in self.NAMES)
+        assert all((repo / path).is_file() for path in changed)
 
 
 def _make_result(uri: str) -> Result:

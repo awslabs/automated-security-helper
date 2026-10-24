@@ -163,7 +163,11 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
     workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
+        # defuse_stdlib's first call imports defusedxml.cElementTree, which issues a
+        # DeprecationWarning; catch_warnings alone restores filters, it does not
+        # silence anything.
         with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
             defusedxml.defuse_stdlib()
         if self.config is None:
             self.config = JUnitXMLReporterConfig()

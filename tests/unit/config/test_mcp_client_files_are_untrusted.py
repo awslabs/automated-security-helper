@@ -7,8 +7,8 @@ A config an MCP client uploads is resolved with ``untrusted_config=True``. The
 files it can point a scanner or the plugin loader at include everything else a
 client delivered under the MCP workspace root: another session's tree, an upload
 or its staging. Those are outside the tree being scanned, so the tree test alone
-would accept them. ``path_trust.in_scanned_tree`` also refuses them, except for a
-session's ``config/`` directory, which only the server writes.
+would accept them. ``path_trust.in_scanned_tree`` also refuses them, except for the
+profile files the server writes in a session's ``config/`` directory.
 """
 
 import sys
@@ -53,9 +53,17 @@ def test_an_upload_outside_any_session_tree_is_not_passed(workspace):
 
 def test_a_server_written_session_config_file_is_passed(workspace):
     source = workspace / "session-a" / "source"
-    profile = workspace / "session-a" / "config" / "checkov.yaml"
+    profile = workspace / "session-a" / "config" / "ash.yaml"
     profile.write_text("")
     assert honored_path(profile, source_dir=source, key="k") == profile.resolve()
+
+
+def test_another_file_in_a_session_config_directory_is_not_passed(workspace):
+    """The server writes only its profile files there; anything else is a client's."""
+    source = workspace / "session-a" / "source"
+    other = workspace / "session-a" / "config" / "checkov.yaml"
+    other.write_text("")
+    assert honored_path(other, source_dir=source, key="k") is None
 
 
 def test_outside_the_mcp_workspace_nothing_changes(workspace, tmp_path):
@@ -87,15 +95,18 @@ def test_an_uploaded_config_cannot_add_an_uninstalled_module(workspace):
     upload.parent.mkdir()
     upload.write_text(
         "project_name: uploaded\nash_plugin_modules:\n"
-        "  - no_such_module_anywhere\n"
+        "  - no_such_ash_plugins\n"
         "  - automated_security_helper.plugin_modules.ash_trivy_plugins\n"
     )
-    config = resolve_config(
-        config_path=upload,
-        source_dir=source,
-        untrusted_config=True,
-        fallback_to_default=True,
-    )
-    assert config.ash_plugin_modules == [
-        "automated_security_helper.plugin_modules.ash_trivy_plugins"
-    ]
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    # Refused, naming the module, rather than resolved with it left out.
+    with pytest.raises(ASHConfigFieldDeniedError) as refused:
+        resolve_config(
+            config_path=upload,
+            source_dir=source,
+            untrusted_config=True,
+            fallback_to_default=True,
+        )
+    assert "no_such_module_anywhere" in str(refused.value)
+    assert "ash_trivy_plugins" not in str(refused.value)

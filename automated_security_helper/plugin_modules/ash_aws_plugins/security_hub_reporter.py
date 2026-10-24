@@ -22,19 +22,24 @@ if TYPE_CHECKING:
 
 
 class SecurityHubReporterConfigOptions(ReporterOptionsBase):
+    # Read from the environment when the options are built, not when this module
+    # is imported, so a config built later sees the run's environment.
     aws_region: Annotated[
         str | None,
         Field(
+            default_factory=lambda: os.environ.get(
+                "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None)
+            ),
             description="AWS Region for Security Hub integration",
         ),
-    ] = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", None))
+    ]
     aws_profile: Annotated[
         str | None,
         Field(
-            default=None,
+            default_factory=lambda: os.environ.get("AWS_PROFILE", None),
             description="AWS Profile to use for authentication",
         ),
-    ] = os.environ.get("AWS_PROFILE", None)
+    ]
     account_id: Annotated[
         str | None,
         Field(
@@ -53,19 +58,22 @@ class SecurityHubReporterConfig(ReporterPluginConfigBase):
             description="File extension for Security Hub ASFF output",
         ),
     ] = "aws-security-hub.asff.json"
+    # Off by default: this reporter sends findings to an AWS service with the
+    # operator's credentials, so only the operator's config turns it on.
     enabled: Annotated[
         bool,
         Field(
-            default=True,
+            default=False,
             description="Whether the Security Hub reporter is enabled",
         ),
-    ] = True
+    ] = False
     options: Annotated[
         SecurityHubReporterConfigOptions,
         Field(
+            default_factory=SecurityHubReporterConfigOptions,
             description="Configuration options for Security Hub reporter",
         ),
-    ] = SecurityHubReporterConfigOptions()
+    ]
 
 
 @ash_reporter_plugin
@@ -88,6 +96,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
+    # Sends findings to AWS with the host's credentials.
+    sends_off_host = True
+    destination_options = ("aws_region", "aws_profile", "account_id")
 
     def model_post_init(self, context):
         if self.config is None:

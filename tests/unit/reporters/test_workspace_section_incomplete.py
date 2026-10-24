@@ -196,6 +196,28 @@ class TestTheOtherArmsAreUnchanged:
 
         assert _row(model, "svc")["result"] == "FAILED"
 
+    def test_incompleteness_outranks_a_threshold_breach_like_the_exit_code(self):
+        """The row and workspace_exit_code read the project the same way.
+
+        A project both over its threshold and incomplete exits 1, as a
+        single-directory scan of it would, so its row says incomplete; the
+        Actionable column still carries the breach.
+        """
+        project = _project(
+            "svc",
+            finding_count=3,
+            actionable_finding_count=3,
+            exceeds_threshold=True,
+            scan_incomplete=True,
+            incomplete_scanners=["npm-audit"],
+        )
+        row = _row(_model(project), "svc")
+
+        assert int(workspace_exit_code([project])) == 1
+        assert row["result"] == "FAILED (incomplete)"
+        assert row["actionable"] == 3
+        assert "npm-audit" in row["detail"]
+
 
 class TestEveryRendererCarriesTheState:
     """The three renderers share the rows, so none of them may drop the state."""
