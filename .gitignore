@@ -39,6 +39,10 @@ automated_security_helper/assets/Dockerfile
 # them would create a second place a digest could be edited.
 automated_security_helper/assets/tool_downloads.py
 automated_security_helper/assets/exceptions.py
+# Copied from docs/content/docs/genai-steering-guide.md by hatch_build.py for the
+# wheel's `ash get-genai-guide`. Ignored so a stale copy never ships beside the one
+# the build stages.
+automated_security_helper/assets/genai-steering-guide.md
 
 ### macOS ###
 # General
