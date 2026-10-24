@@ -162,8 +162,10 @@
   honors `scanners.cdk-nag.options.scan_timeout` (1800 seconds by default) for the
   whole batch of templates; it had no timeout before, and templates not evaluated by
   the cutoff are reported as failed targets. A detect-secrets scan that times out
-  now keeps only its baseline's entries, where the in-process scan kept whatever it
-  had found before the cutoff; either way the scan is reported as timed out. See
+  now fails with an error naming the scanner and the limit, as every other
+  scanner's does, where the in-process scan kept whatever it had found before the
+  cutoff: a killed worker's partial results are not recoverable, and a report
+  built from the baseline alone would read as a clean scan. See
   `docs/content/docs/scanner-sandbox.md` for the threat model and per-scanner
   policy. Two scanners that ran inside the ASH process now run as worker
   subprocesses so the sandbox can cover them: detect-secrets and cdk-nag. Their
