@@ -14,7 +14,8 @@ says which version to move to.
 
 The indexes here are recorded: trimmed copies of the real bookworm,
 bookworm-updates, bookworm-security and NodeSource node_22.x ``Packages`` files
-for amd64 and arm64, taken 2026-10-07 and cut down to the stanzas of the pinned
+for amd64 and arm64, taken 2026-10-07 (the bookworm-security ca-certificates
+stanza re-recorded 2026-10-25) and cut down to the stanzas of the pinned
 packages, under ``tests/test_data/apt_indices/<host>/<path>``. The Debian ones are
 served xz-compressed, as the archive serves them, so the decompression path runs
 too. No test reaches the network: ``urlopen`` fails the test if anything calls it.
