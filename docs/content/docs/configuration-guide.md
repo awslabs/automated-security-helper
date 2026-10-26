@@ -237,9 +237,9 @@ global_settings:
 
   # Paths to ignore during scanning
   ignore_paths:
-    - path: 'tests/test_data'
+    - path: 'tests/test_data/**'
       reason: 'Test data only'
-    - path: 'node_modules/'
+    - path: 'node_modules/**'
       reason: 'Third-party dependencies'
 
   # Findings to suppress based on rule ID, file path, and line numbers

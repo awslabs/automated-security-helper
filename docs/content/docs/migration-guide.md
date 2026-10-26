@@ -213,7 +213,7 @@ project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
   ignore_paths:
-    - path: 'tests/test_data'
+    - path: 'tests/test_data/**'
       reason: 'Test data only'
 scanners:
   bandit:
