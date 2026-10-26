@@ -202,7 +202,7 @@ class ArchiveConverter(ConverterPluginBase[ArchiveConverterConfig]):
                 )
                 continue
 
-            member_ext = member_name.split(".")[-1]
+            member_ext = member_name.split(".")[-1].lower()
             if member_ext not in KNOWN_SCANNABLE_EXTENSIONS:
                 continue
 
