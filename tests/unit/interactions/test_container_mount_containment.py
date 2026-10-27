@@ -798,7 +798,10 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
         root = workspace["root"]
         (root / "policies").mkdir()
         (root / "policies" / "p.yaml").write_text("workspace: {}\n", encoding="utf-8")
-        (root / "ash-workspace.yaml").symlink_to("policies/p.yaml")
+        # A relative link target is written with the host's separators: Windows does
+        # not resolve "policies/p.yaml" as a link target, so the link would dangle
+        # and the policy would not be discovered.
+        (root / "ash-workspace.yaml").symlink_to(Path("policies") / "p.yaml")
 
         _scan(
             "--mode",
